@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -1116,6 +1117,12 @@ func (suite *JobSuite) TestReleasePartition() {
 	// Test release partial partitions
 	suite.releaseAll()
 	suite.loadAll()
+	for _, collectionID := range suite.collections {
+		// make collection able to get into loaded state
+		suite.updateChannelDist(ctx, collectionID, true)
+		suite.updateSegmentDist(collectionID, 3000, suite.partitions[collectionID]...)
+		waitCurrentTargetUpdated(ctx, suite.targetObserver, collectionID)
+	}
 	for _, collection := range suite.collections {
 		req := &querypb.ReleasePartitionsRequest{
 			CollectionID: collection,
@@ -1133,6 +1140,8 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.proxyManager,
 		)
 		suite.scheduler.Add(job)
+		suite.updateChannelDist(ctx, collection, true)
+		suite.updateSegmentDist(collection, 3000, suite.partitions[collection][:1]...)
 		err := job.Wait()
 		suite.NoError(err)
 		suite.True(suite.meta.Exist(ctx, collection))
@@ -1189,8 +1198,18 @@ func (suite *JobSuite) TestDynamicRelease() {
 	// action: release p0
 	// expect: p0 released, p1, p2 loaded
 	suite.loadAll()
+	for _, collectionID := range suite.collections {
+		// make collection able to get into loaded state
+		suite.updateChannelDist(ctx, collectionID, true)
+		suite.updateSegmentDist(collectionID, 3000, suite.partitions[collectionID]...)
+		waitCurrentTargetUpdated(ctx, suite.targetObserver, collectionID)
+	}
+
 	job := newReleasePartJob(col0, p0)
 	suite.scheduler.Add(job)
+	// update segments
+	suite.updateSegmentDist(col0, 3000, p1, p2)
+	suite.updateChannelDist(ctx, col0, true)
 	err := job.Wait()
 	suite.NoError(err)
 	suite.assertPartitionReleased(col0, p0)
@@ -1201,6 +1220,8 @@ func (suite *JobSuite) TestDynamicRelease() {
 	// expect: p1 released, p2 loaded
 	job = newReleasePartJob(col0, p0, p1)
 	suite.scheduler.Add(job)
+	suite.updateSegmentDist(col0, 3000, p2)
+	suite.updateChannelDist(ctx, col0, true)
 	err = job.Wait()
 	suite.NoError(err)
 	suite.assertPartitionReleased(col0, p0, p1)
@@ -1211,6 +1232,8 @@ func (suite *JobSuite) TestDynamicRelease() {
 	// expect: loadType=col: col loaded, p2 released
 	job = newReleasePartJob(col0, p2)
 	suite.scheduler.Add(job)
+	suite.updateSegmentDist(col0, 3000)
+	suite.updateChannelDist(ctx, col0, false)
 	err = job.Wait()
 	suite.NoError(err)
 	suite.assertPartitionReleased(col0, p0, p1, p2)
@@ -1359,8 +1382,8 @@ func (suite *JobSuite) TestSyncNewCreatedPartition() {
 	suite.loadAll()
 	collectionID := suite.collections[0]
 	// make collection able to get into loaded state
-	suite.updateChannelDist(ctx, collectionID)
-	suite.updateSegmentDist(collectionID, 3000)
+	suite.updateChannelDist(ctx, collectionID, true)
+	suite.updateSegmentDist(collectionID, 3000, suite.partitions[collectionID]...)
 
 	req := &querypb.SyncNewCreatedPartitionRequest{
 		CollectionID: collectionID,
@@ -1551,9 +1574,13 @@ func (suite *JobSuite) assertPartitionReleased(collection int64, partitionIDs ..
 	}
 }
 
-func (suite *JobSuite) updateSegmentDist(collection, node int64) {
+func (suite *JobSuite) updateSegmentDist(collection, node int64, partitions ...int64) {
+	partitionSet := typeutil.NewSet(partitions...)
 	metaSegments := make([]*meta.Segment, 0)
 	for partition, segments := range suite.segments[collection] {
+		if !partitionSet.Contain(partition) {
+			continue
+		}
 		for _, segment := range segments {
 			metaSegments = append(metaSegments,
 				utils.CreateTestSegment(collection, partition, segment, node, 1, "test-channel"))
@@ -1562,32 +1589,39 @@ func (suite *JobSuite) updateSegmentDist(collection, node int64) {
 	suite.dist.SegmentDistManager.Update(node, metaSegments...)
 }
 
-func (suite *JobSuite) updateChannelDist(ctx context.Context, collection int64) {
+func (suite *JobSuite) updateChannelDist(ctx context.Context, collection int64, loaded bool) {
 	channels := suite.channels[collection]
 	segments := lo.Flatten(lo.Values(suite.segments[collection]))
 
 	replicas := suite.meta.ReplicaManager.GetByCollection(ctx, collection)
 	for _, replica := range replicas {
-		i := 0
-		for _, node := range replica.GetNodes() {
-			suite.dist.ChannelDistManager.Update(node, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
-				CollectionID: collection,
-				ChannelName:  channels[i],
-			}))
-			suite.dist.LeaderViewManager.Update(node, &meta.LeaderView{
-				ID:           node,
-				CollectionID: collection,
-				Channel:      channels[i],
-				Segments: lo.SliceToMap(segments, func(segment int64) (int64, *querypb.SegmentDist) {
-					return segment, &querypb.SegmentDist{
-						NodeID:  node,
-						Version: time.Now().Unix(),
-					}
-				}),
-			})
-			i++
-			if i >= len(channels) {
-				break
+		if loaded {
+			i := 0
+			for _, node := range replica.GetNodes() {
+				suite.dist.ChannelDistManager.Update(node, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
+					CollectionID: collection,
+					ChannelName:  channels[i],
+				}))
+				suite.dist.LeaderViewManager.Update(node, &meta.LeaderView{
+					ID:           node,
+					CollectionID: collection,
+					Channel:      channels[i],
+					Segments: lo.SliceToMap(segments, func(segment int64) (int64, *querypb.SegmentDist) {
+						return segment, &querypb.SegmentDist{
+							NodeID:  node,
+							Version: time.Now().Unix(),
+						}
+					}),
+				})
+				i++
+				if i >= len(channels) {
+					break
+				}
+			}
+		} else {
+			for _, node := range replica.GetNodes() {
+				suite.dist.ChannelDistManager.Update(node)
+				suite.dist.LeaderViewManager.Update(node)
 			}
 		}
 	}

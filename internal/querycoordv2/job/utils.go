@@ -17,6 +17,7 @@
 package job
 
 import (
+	"context"
 	"time"
 
 	"github.com/samber/lo"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -59,5 +61,24 @@ func waitCollectionReleased(dist *meta.DistributionManager, checkerController *c
 		// trigger check more frequently
 		checkerController.Check()
 		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+func waitCurrentTargetUpdated(ctx context.Context, targetObserver *observers.TargetObserver, collection int64) error {
+	// manual trigger update next target
+	ready, err := targetObserver.UpdateNextTarget(collection)
+	if err != nil {
+		log.Warn("failed to update next target for sync partition job", zap.Error(err))
+		return err
+	}
+
+	// accelerate check
+	targetObserver.TriggerUpdateCurrentTarget(collection)
+	// wait current target ready
+	select {
+	case <-ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

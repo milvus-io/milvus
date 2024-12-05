@@ -1043,8 +1043,13 @@ func (suite *ServiceSuite) TestReleaseCollection() {
 }
 
 func (suite *ServiceSuite) TestReleasePartition() {
-	suite.loadAll()
 	ctx := context.Background()
+	suite.loadAll()
+	for _, collection := range suite.collections {
+		suite.updateChannelDist(ctx, collection)
+		suite.updateSegmentDist(collection, suite.nodes[0])
+	}
+
 	server := suite.server
 
 	// Test release all partitions
@@ -1053,6 +1058,8 @@ func (suite *ServiceSuite) TestReleasePartition() {
 			CollectionID: collection,
 			PartitionIDs: suite.partitions[collection][0:1],
 		}
+		suite.updateChannelDist(ctx, collection)
+		suite.updateSegmentDist(collection, suite.nodes[0], suite.partitions[collection][1:]...)
 		resp, err := server.ReleasePartitions(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
@@ -1973,9 +1980,13 @@ func (suite *ServiceSuite) getAllSegments(collection int64) []int64 {
 	return allSegments
 }
 
-func (suite *ServiceSuite) updateSegmentDist(collection, node int64) {
+func (suite *ServiceSuite) updateSegmentDist(collection, node int64, partitions ...int64) {
+	partitionSet := typeutil.NewSet(partitions...)
 	metaSegments := make([]*meta.Segment, 0)
 	for partition, segments := range suite.segments[collection] {
+		if partitionSet.Len() > 0 && !partitionSet.Contain(partition) {
+			continue
+		}
 		for _, segment := range segments {
 			metaSegments = append(metaSegments,
 				utils.CreateTestSegment(collection, partition, segment, node, 1, "test-channel"))

@@ -208,6 +208,8 @@ func (job *ReleasePartitionJob) Execute() error {
 			return errors.Wrap(err, msg)
 		}
 		job.targetObserver.ReleasePartition(req.GetCollectionID(), toRelease...)
+		// wait current target updated, so following querys will act as expected
+		waitCurrentTargetUpdated(job.ctx, job.targetObserver, job.req.GetCollectionID())
 		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID(), toRelease...)
 	}
 	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(len(toRelease)))

@@ -467,7 +467,7 @@ func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leade
 	}
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
-	log.Warn("before sync", zap.Any("cluster", ob.cluster), zap.Any("lv", leaderView), zap.Any("req", req))
+
 	resp, err := ob.cluster.SyncDistribution(ctx, leaderView.ID, req)
 	if err != nil {
 		log.Warn("failed to sync distribution", zap.Error(err))
