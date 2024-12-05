@@ -591,6 +591,7 @@ func (m *CollectionManager) UpdateLoadPercent(ctx context.Context, partitionID i
 		newCollection.RecoverTimes = 0
 
 		metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(lo.Values(m.collections))))
+		metrics.QueryCoordNumPartitions.WithLabelValues().Set(float64(len(m.partitions)))
 		elapsed := time.Since(newCollection.CreatedAt)
 		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
 		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Collection %d loaded", newCollection.CollectionID)))
@@ -616,6 +617,8 @@ func (m *CollectionManager) RemoveCollection(ctx context.Context, collectionID t
 		delete(m.collectionPartitions, collectionID)
 	}
 	metrics.CleanQueryCoordMetricsWithCollectionID(collectionID)
+	metrics.QueryCoordNumPartitions.WithLabelValues().Set(float64(len(m.partitions)))
+	metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(lo.Values(m.collections))))
 	return nil
 }
 
@@ -627,7 +630,9 @@ func (m *CollectionManager) RemovePartition(ctx context.Context, collectionID ty
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
-	return m.removePartition(ctx, collectionID, partitionIDs...)
+	err := m.removePartition(ctx, collectionID, partitionIDs...)
+	metrics.QueryCoordNumPartitions.WithLabelValues().Set(float64(len(m.partitions)))
+	return err
 }
 
 func (m *CollectionManager) removePartition(ctx context.Context, collectionID typeutil.UniqueID, partitionIDs ...typeutil.UniqueID) error {
