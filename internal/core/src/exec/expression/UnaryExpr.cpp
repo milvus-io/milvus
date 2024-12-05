@@ -396,8 +396,18 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
                 break;
             }
             case proto::plan::Match: {
-                UnaryElementFuncForArray<ValueType, proto::plan::Match> func;
-                func(data, valid_data, size, val, index, res, valid_res);
+                UnaryElementFuncForArray<ValueType,
+                                         proto::plan::Match,
+                                         filter_type>
+                    func;
+                func(data,
+                     valid_data,
+                     size,
+                     val,
+                     index,
+                     res,
+                     valid_res,
+                     offsets);
                 break;
             }
             default:

@@ -212,14 +212,15 @@ struct UnaryElementFuncForArray {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     res[i] = false;
                 } else {
-                    if (index >= src[i].length()) {
+                    if (index >= src[offset].length()) {
                         res[i] = false;
                         continue;
                     }
                     PatternMatchTranslator translator;
                     auto regex_pattern = translator(val);
                     RegexMatcher matcher(regex_pattern);
-                    auto array_data = src[i].template get_data<GetType>(index);
+                    auto array_data =
+                        src[offset].template get_data<GetType>(index);
                     res[i] = matcher(array_data);
                 }
             } else {
