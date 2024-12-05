@@ -188,7 +188,7 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 			d.checkPreCreatedTopic(ctx, factory, name)
 		}
 
-		ms.AsProducer([]string{name})
+		ms.AsProducer(ctx, []string{name})
 		dms := &dmlMsgStream{
 			ms:     ms,
 			refcnt: 0,
@@ -291,7 +291,7 @@ func (d *dmlChannels) broadcast(chanNames []string, pack *msgstream.MsgPack) err
 
 		dms.mutex.RLock()
 		if dms.refcnt > 0 {
-			if _, err := dms.ms.Broadcast(pack); err != nil {
+			if _, err := dms.ms.Broadcast(d.ctx, pack); err != nil {
 				log.Error("Broadcast failed", zap.Error(err), zap.String("chanName", chanName))
 				dms.mutex.RUnlock()
 				return err
@@ -312,7 +312,7 @@ func (d *dmlChannels) broadcastMark(chanNames []string, pack *msgstream.MsgPack)
 
 		dms.mutex.RLock()
 		if dms.refcnt > 0 {
-			ids, err := dms.ms.Broadcast(pack)
+			ids, err := dms.ms.Broadcast(d.ctx, pack)
 			if err != nil {
 				log.Error("BroadcastMark failed", zap.Error(err), zap.String("chanName", chanName))
 				dms.mutex.RUnlock()

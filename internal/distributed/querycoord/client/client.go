@@ -72,6 +72,7 @@ func NewClient(ctx context.Context) (types.QueryCoordClient, error) {
 			return nil, err
 		}
 		client.grpcClient.SetInternalTLSCertPool(cp)
+		client.grpcClient.SetInternalTLSServerName(Params.InternalTLSCfg.InternalTLSSNI.GetValue())
 	}
 	return client, nil
 }

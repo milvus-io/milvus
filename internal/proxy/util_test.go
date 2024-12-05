@@ -2430,7 +2430,7 @@ func TestSendReplicateMessagePack(t *testing.T) {
 	})
 
 	t.Run("produce fail", func(t *testing.T) {
-		mockStream.EXPECT().Produce(mock.Anything).Return(errors.New("produce error")).Once()
+		mockStream.EXPECT().Produce(mock.Anything, mock.Anything).Return(errors.New("produce error")).Once()
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateDatabaseRequest{
 			Base: &commonpb.MsgBase{ReplicateInfo: &commonpb.ReplicateInfo{
 				IsReplicate:  true,
@@ -2444,7 +2444,7 @@ func TestSendReplicateMessagePack(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		mockStream.EXPECT().Produce(mock.Anything).Return(nil)
+		mockStream.EXPECT().Produce(mock.Anything, mock.Anything).Return(nil)
 
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateDatabaseRequest{})
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DropDatabaseRequest{})

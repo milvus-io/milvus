@@ -3,6 +3,8 @@
 package proxy
 
 import (
+	context "context"
+
 	msgstream "github.com/milvus-io/milvus/pkg/mq/msgstream"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -78,9 +80,9 @@ func (_c *MockChannelsMgr_getChannels_Call) RunAndReturn(run func(int64) ([]stri
 	return _c
 }
 
-// getOrCreateDmlStream provides a mock function with given fields: collectionID
-func (_m *MockChannelsMgr) getOrCreateDmlStream(collectionID int64) (msgstream.MsgStream, error) {
-	ret := _m.Called(collectionID)
+// getOrCreateDmlStream provides a mock function with given fields: ctx, collectionID
+func (_m *MockChannelsMgr) getOrCreateDmlStream(ctx context.Context, collectionID int64) (msgstream.MsgStream, error) {
+	ret := _m.Called(ctx, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for getOrCreateDmlStream")
@@ -88,19 +90,19 @@ func (_m *MockChannelsMgr) getOrCreateDmlStream(collectionID int64) (msgstream.M
 
 	var r0 msgstream.MsgStream
 	var r1 error
-	if rf, ok := ret.Get(0).(func(int64) (msgstream.MsgStream, error)); ok {
-		return rf(collectionID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (msgstream.MsgStream, error)); ok {
+		return rf(ctx, collectionID)
 	}
-	if rf, ok := ret.Get(0).(func(int64) msgstream.MsgStream); ok {
-		r0 = rf(collectionID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) msgstream.MsgStream); ok {
+		r0 = rf(ctx, collectionID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(msgstream.MsgStream)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(int64) error); ok {
-		r1 = rf(collectionID)
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, collectionID)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -114,14 +116,15 @@ type MockChannelsMgr_getOrCreateDmlStream_Call struct {
 }
 
 // getOrCreateDmlStream is a helper method to define mock.On call
+//   - ctx context.Context
 //   - collectionID int64
-func (_e *MockChannelsMgr_Expecter) getOrCreateDmlStream(collectionID interface{}) *MockChannelsMgr_getOrCreateDmlStream_Call {
-	return &MockChannelsMgr_getOrCreateDmlStream_Call{Call: _e.mock.On("getOrCreateDmlStream", collectionID)}
+func (_e *MockChannelsMgr_Expecter) getOrCreateDmlStream(ctx interface{}, collectionID interface{}) *MockChannelsMgr_getOrCreateDmlStream_Call {
+	return &MockChannelsMgr_getOrCreateDmlStream_Call{Call: _e.mock.On("getOrCreateDmlStream", ctx, collectionID)}
 }
 
-func (_c *MockChannelsMgr_getOrCreateDmlStream_Call) Run(run func(collectionID int64)) *MockChannelsMgr_getOrCreateDmlStream_Call {
+func (_c *MockChannelsMgr_getOrCreateDmlStream_Call) Run(run func(ctx context.Context, collectionID int64)) *MockChannelsMgr_getOrCreateDmlStream_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
@@ -131,7 +134,7 @@ func (_c *MockChannelsMgr_getOrCreateDmlStream_Call) Return(_a0 msgstream.MsgStr
 	return _c
 }
 
-func (_c *MockChannelsMgr_getOrCreateDmlStream_Call) RunAndReturn(run func(int64) (msgstream.MsgStream, error)) *MockChannelsMgr_getOrCreateDmlStream_Call {
+func (_c *MockChannelsMgr_getOrCreateDmlStream_Call) RunAndReturn(run func(context.Context, int64) (msgstream.MsgStream, error)) *MockChannelsMgr_getOrCreateDmlStream_Call {
 	_c.Call.Return(run)
 	return _c
 }

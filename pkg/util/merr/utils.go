@@ -461,7 +461,7 @@ func WrapErrDatabaseNameInvalid(database any, msg ...string) error {
 }
 
 func WrapErrPrivilegeGroupNameInvalid(privilegeGroup any, msg ...string) error {
-	err := wrapFields(ErrPrivilegeGroupInvalidName, value("privielgeGroup", privilegeGroup))
+	err := wrapFields(ErrPrivilegeGroupInvalidName, value("privilegeGroup", privilegeGroup))
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}

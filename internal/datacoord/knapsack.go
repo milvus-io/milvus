@@ -21,8 +21,9 @@ import (
 	"sort"
 
 	"github.com/bits-and-blooms/bitset"
-	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type Sizable interface {

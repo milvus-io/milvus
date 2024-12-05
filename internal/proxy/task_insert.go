@@ -243,7 +243,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	it.insertMsg.CollectionID = collID
 
 	getCacheDur := tr.RecordSpan()
-	stream, err := it.chMgr.getOrCreateDmlStream(collID)
+	stream, err := it.chMgr.getOrCreateDmlStream(ctx, collID)
 	if err != nil {
 		return err
 	}
@@ -280,7 +280,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	log.Debug("assign segmentID for insert data success",
 		zap.Duration("assign segmentID duration", assignSegmentIDDur))
-	err = stream.Produce(msgPack)
+	err = stream.Produce(ctx, msgPack)
 	if err != nil {
 		log.Warn("fail to produce insert msg", zap.Error(err))
 		it.result.Status = merr.Status(err)

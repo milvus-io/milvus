@@ -78,6 +78,7 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.ProxyClien
 			return nil, err
 		}
 		client.grpcClient.SetInternalTLSCertPool(cp)
+		client.grpcClient.SetInternalTLSServerName(Params.InternalTLSCfg.InternalTLSSNI.GetValue())
 	}
 	return client, nil
 }

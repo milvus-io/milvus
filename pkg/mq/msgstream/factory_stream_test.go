@@ -173,11 +173,11 @@ func testTimeTickerAndInsert(t *testing.T, f []Factory) {
 	defer consumer.Close()
 
 	var err error
-	_, err = producer.Broadcast(&msgPack0)
+	_, err = producer.Broadcast(ctx, &msgPack0)
 	assert.NoError(t, err)
-	err = producer.Produce(&msgPack1)
+	err = producer.Produce(ctx, &msgPack1)
 	assert.NoError(t, err)
-	_, err = producer.Broadcast(&msgPack2)
+	_, err = producer.Broadcast(ctx, &msgPack2)
 	assert.NoError(t, err)
 
 	receiveAndValidateMsg(ctx, consumer, len(msgPack1.Msgs))
@@ -210,17 +210,17 @@ func testTimeTickerNoSeek(t *testing.T, f []Factory) {
 	defer producer.Close()
 
 	var err error
-	_, err = producer.Broadcast(&msgPack0)
+	_, err = producer.Broadcast(ctx, &msgPack0)
 	assert.NoError(t, err)
-	err = producer.Produce(&msgPack1)
+	err = producer.Produce(ctx, &msgPack1)
 	assert.NoError(t, err)
-	_, err = producer.Broadcast(&msgPack2)
+	_, err = producer.Broadcast(ctx, &msgPack2)
 	assert.NoError(t, err)
-	err = producer.Produce(&msgPack3)
+	err = producer.Produce(ctx, &msgPack3)
 	assert.NoError(t, err)
-	_, err = producer.Broadcast(&msgPack4)
+	_, err = producer.Broadcast(ctx, &msgPack4)
 	assert.NoError(t, err)
-	_, err = producer.Broadcast(&msgPack5)
+	_, err = producer.Broadcast(ctx, &msgPack5)
 	assert.NoError(t, err)
 
 	o1 := consume(ctx, consumer)
@@ -259,7 +259,7 @@ func testSeekToLast(t *testing.T, f []Factory) {
 	}
 
 	// produce test data
-	err := producer.Produce(msgPack)
+	err := producer.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 
 	// pick a seekPosition
@@ -346,21 +346,21 @@ func testTimeTickerSeek(t *testing.T, f []Factory) {
 	defer producer.Close()
 
 	// Send message
-	_, err := producer.Broadcast(&msgPack0)
+	_, err := producer.Broadcast(ctx, &msgPack0)
 	assert.NoError(t, err)
-	err = producer.Produce(&msgPack1)
+	err = producer.Produce(ctx, &msgPack1)
 	assert.NoError(t, err)
-	_, err = producer.Broadcast(&msgPack2)
+	_, err = producer.Broadcast(ctx, &msgPack2)
 	assert.NoError(t, err)
-	err = producer.Produce(&msgPack3)
+	err = producer.Produce(ctx, &msgPack3)
 	assert.NoError(t, err)
-	_, err = producer.Broadcast(&msgPack4)
+	_, err = producer.Broadcast(ctx, &msgPack4)
 	assert.NoError(t, err)
-	err = producer.Produce(&msgPack5)
+	err = producer.Produce(ctx, &msgPack5)
 	assert.NoError(t, err)
-	_, err = producer.Broadcast(&msgPack6)
+	_, err = producer.Broadcast(ctx, &msgPack6)
 	assert.NoError(t, err)
-	_, err = producer.Broadcast(&msgPack7)
+	_, err = producer.Broadcast(ctx, &msgPack7)
 	assert.NoError(t, err)
 
 	// Test received message
@@ -434,13 +434,13 @@ func testTimeTickUnmarshalHeader(t *testing.T, f []Factory) {
 	defer producer.Close()
 	defer consumer.Close()
 
-	_, err := producer.Broadcast(&msgPack0)
+	_, err := producer.Broadcast(ctx, &msgPack0)
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
-	err = producer.Produce(&msgPack1)
+	err = producer.Produce(ctx, &msgPack1)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
-	_, err = producer.Broadcast(&msgPack2)
+	_, err = producer.Broadcast(ctx, &msgPack2)
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
 	receiveAndValidateMsg(ctx, consumer, len(msgPack1.Msgs))
@@ -571,7 +571,7 @@ func testMqMsgStreamSeek(t *testing.T, f []Factory) {
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 
-	err := producer.Produce(msgPack)
+	err := producer.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 	var seekPosition *msgpb.MsgPosition
 	for i := 0; i < 10; i++ {
@@ -605,7 +605,7 @@ func testMqMsgStreamSeekInvalidMessage(t *testing.T, f []Factory, pg positionGen
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 
-	err := producer.Produce(msgPack)
+	err := producer.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 	var seekPosition *msgpb.MsgPosition
 	for i := 0; i < 10; i++ {
@@ -622,7 +622,7 @@ func testMqMsgStreamSeekInvalidMessage(t *testing.T, f []Factory, pg positionGen
 		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
-	err = producer.Produce(msgPack)
+	err = producer.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 	result := consume(ctx, consumer2)
 	assert.Equal(t, result.Msgs[0].ID(), int64(1))
@@ -642,7 +642,7 @@ func testMqMsgStreamSeekLatest(t *testing.T, f []Factory) {
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 
-	err := producer.Produce(msgPack)
+	err := producer.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 	consumer2 := createLatestConsumer(ctx, t, f[1].NewMsgStream, channels)
 	defer consumer2.Close()
@@ -653,7 +653,7 @@ func testMqMsgStreamSeekLatest(t *testing.T, f []Factory) {
 		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
-	err = producer.Produce(msgPack)
+	err = producer.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 
 	for i := 10; i < 20; i++ {
@@ -673,7 +673,7 @@ func testBroadcastMark(t *testing.T, f []Factory) {
 	msgPack0 := MsgPack{}
 	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0))
 
-	ids, err := producer.Broadcast(&msgPack0)
+	ids, err := producer.Broadcast(ctx, &msgPack0)
 	assert.NoError(t, err)
 	assert.NotNil(t, ids)
 	assert.Equal(t, len(channels), len(ids))
@@ -687,7 +687,7 @@ func testBroadcastMark(t *testing.T, f []Factory) {
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 
-	ids, err = producer.Broadcast(&msgPack1)
+	ids, err = producer.Broadcast(ctx, &msgPack1)
 	assert.NoError(t, err)
 	assert.NotNil(t, ids)
 	assert.Equal(t, len(channels), len(ids))
@@ -698,12 +698,12 @@ func testBroadcastMark(t *testing.T, f []Factory) {
 	}
 
 	// edge cases
-	_, err = producer.Broadcast(nil)
+	_, err = producer.Broadcast(ctx, nil)
 	assert.Error(t, err)
 
 	msgPack2 := MsgPack{}
 	msgPack2.Msgs = append(msgPack2.Msgs, &MarshalFailTsMsg{})
-	_, err = producer.Broadcast(&msgPack2)
+	_, err = producer.Broadcast(ctx, &msgPack2)
 	assert.Error(t, err)
 }
 
@@ -712,7 +712,7 @@ func applyBroadCastAndConsume(t *testing.T, msgPack *MsgPack, newer []streamNewe
 	defer producer.Close()
 	defer consumer.Close()
 
-	_, err := producer.Broadcast(msgPack)
+	_, err := producer.Broadcast(context.TODO(), msgPack)
 	assert.NoError(t, err)
 	receiveAndValidateMsg(context.Background(), consumer, len(msgPack.Msgs)*channelNum)
 }
@@ -728,7 +728,7 @@ func applyProduceAndConsumeWithRepack(
 	defer producer.Close()
 	defer consumer.Close()
 
-	err := producer.Produce(msgPack)
+	err := producer.Produce(context.TODO(), msgPack)
 	assert.NoError(t, err)
 	receiveAndValidateMsg(context.Background(), consumer, len(msgPack.Msgs))
 }
@@ -743,7 +743,7 @@ func applyProduceAndConsume(
 	defer producer.Close()
 	defer consumer.Close()
 
-	err := producer.Produce(msgPack)
+	err := producer.Produce(context.TODO(), msgPack)
 	assert.NoError(t, err)
 	receiveAndValidateMsg(context.Background(), consumer, len(msgPack.Msgs))
 }
@@ -774,7 +774,7 @@ func createAndSeekConsumer(ctx context.Context, t *testing.T, newer streamNewer,
 func createProducer(ctx context.Context, t *testing.T, newer streamNewer, channels []string) MsgStream {
 	producer, err := newer(ctx)
 	assert.NoError(t, err)
-	producer.AsProducer(channels)
+	producer.AsProducer(ctx, channels)
 	return producer
 }
 
@@ -798,7 +798,7 @@ func createStream(ctx context.Context, t *testing.T, newer []streamNewer, channe
 	assert.NotEmpty(t, channels)
 	producer, err := newer[0](ctx)
 	assert.NoError(t, err)
-	producer.AsProducer(channels)
+	producer.AsProducer(ctx, channels)
 
 	consumer, err := newer[1](ctx)
 	assert.NoError(t, err)

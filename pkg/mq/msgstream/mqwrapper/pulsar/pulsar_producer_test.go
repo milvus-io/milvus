@@ -34,7 +34,7 @@ func TestPulsarProducer(t *testing.T) {
 	assert.NotNil(t, pc)
 
 	topic := "TEST"
-	producer, err := pc.CreateProducer(common.ProducerOptions{Topic: topic})
+	producer, err := pc.CreateProducer(context.TODO(), common.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 

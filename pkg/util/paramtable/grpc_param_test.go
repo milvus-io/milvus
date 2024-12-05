@@ -189,8 +189,10 @@ func TestInternalTLSParams(t *testing.T) {
 	base.Save("internaltls.serverPemPath", "/pem")
 	base.Save("internaltls.serverKeyPath", "/key")
 	base.Save("internaltls.caPemPath", "/ca")
+	base.Save("internaltls.sni", "localhost")
 	assert.Equal(t, internalTLSCfg.InternalTLSEnabled.GetAsBool(), true)
 	assert.Equal(t, internalTLSCfg.InternalTLSServerPemPath.GetValue(), "/pem")
 	assert.Equal(t, internalTLSCfg.InternalTLSServerKeyPath.GetValue(), "/key")
 	assert.Equal(t, internalTLSCfg.InternalTLSCaPemPath.GetValue(), "/ca")
+	assert.Equal(t, internalTLSCfg.InternalTLSSNI.GetValue(), "localhost")
 }

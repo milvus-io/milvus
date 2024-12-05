@@ -17,6 +17,7 @@
 package pulsar
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -66,7 +67,7 @@ func NewClient(tenant string, namespace string, opts pulsar.ClientOptions) (*pul
 }
 
 // CreateProducer create a pulsar producer from options
-func (pc *pulsarClient) CreateProducer(options mqcommon.ProducerOptions) (mqwrapper.Producer, error) {
+func (pc *pulsarClient) CreateProducer(ctx context.Context, options mqcommon.ProducerOptions) (mqwrapper.Producer, error) {
 	start := timerecord.NewTimeRecorder("create producer")
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.TotalLabel).Inc()
 
@@ -102,7 +103,7 @@ func (pc *pulsarClient) CreateProducer(options mqcommon.ProducerOptions) (mqwrap
 }
 
 // Subscribe creates a pulsar consumer instance and subscribe a topic
-func (pc *pulsarClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
+func (pc *pulsarClient) Subscribe(ctx context.Context, options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
 	start := timerecord.NewTimeRecorder("create consumer")
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.TotalLabel).Inc()
 

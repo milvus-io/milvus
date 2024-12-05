@@ -1479,8 +1479,11 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 		if fieldIndexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
 			var estimateResult ResourceEstimate
 			err := GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
-				loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
-				estimateResult = GetResourceEstimate(&loadResourceRequest)
+				GetDynamicPool().Submit(func() (any, error) {
+					loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
+					estimateResult = GetResourceEstimate(&loadResourceRequest)
+					return nil, nil
+				}).Await()
 				return nil
 			})
 			if err != nil {

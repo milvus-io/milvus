@@ -393,7 +393,7 @@ func (it *upsertTask) insertExecute(ctx context.Context, msgPack *msgstream.MsgP
 		zap.Int64("collectionID", collID))
 	getCacheDur := tr.RecordSpan()
 
-	_, err = it.chMgr.getOrCreateDmlStream(collID)
+	_, err = it.chMgr.getOrCreateDmlStream(ctx, collID)
 	if err != nil {
 		return err
 	}
@@ -526,7 +526,7 @@ func (it *upsertTask) Execute(ctx context.Context) (err error) {
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.req.CollectionName))
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute upsert %d", it.ID()))
-	stream, err := it.chMgr.getOrCreateDmlStream(it.collectionID)
+	stream, err := it.chMgr.getOrCreateDmlStream(ctx, it.collectionID)
 	if err != nil {
 		return err
 	}
@@ -547,7 +547,7 @@ func (it *upsertTask) Execute(ctx context.Context) (err error) {
 	}
 
 	tr.RecordSpan()
-	err = stream.Produce(msgPack)
+	err = stream.Produce(ctx, msgPack)
 	if err != nil {
 		it.result.Status = merr.Status(err)
 		return err

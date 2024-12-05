@@ -81,6 +81,7 @@ func NewClient(ctx context.Context, addr string, serverID int64) (types.DataNode
 			return nil, err
 		}
 		client.grpcClient.SetInternalTLSCertPool(cp)
+		client.grpcClient.SetInternalTLSServerName(Params.InternalTLSCfg.InternalTLSSNI.GetValue())
 	}
 	return client, nil
 }

@@ -46,7 +46,7 @@ func benchmarkProduceAndConsume(b *testing.B, mqClient mqwrapper.Client, cases [
 
 	go func() {
 		defer wg.Done()
-		p, err := mqClient.CreateProducer(common.ProducerOptions{
+		p, err := mqClient.CreateProducer(context.TODO(), common.ProducerOptions{
 			Topic: topic,
 		})
 		assert.NoError(b, err)
@@ -55,7 +55,7 @@ func benchmarkProduceAndConsume(b *testing.B, mqClient mqwrapper.Client, cases [
 	}()
 	go func() {
 		defer wg.Done()
-		c, _ := mqClient.Subscribe(mqwrapper.ConsumerOptions{
+		c, _ := mqClient.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 			Topic:                       topic,
 			SubscriptionName:            topic,
 			SubscriptionInitialPosition: common.SubscriptionPositionEarliest,

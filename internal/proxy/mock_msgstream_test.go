@@ -16,7 +16,7 @@ type mockMsgStream struct {
 	enableProduce func(bool)
 }
 
-func (m *mockMsgStream) AsProducer(producers []string) {
+func (m *mockMsgStream) AsProducer(ctx context.Context, producers []string) {
 	if m.asProducer != nil {
 		m.asProducer(producers)
 	}

@@ -533,6 +533,13 @@ func (h *HandlersV1) query(c *gin.Context) {
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
+		if _, err := CheckLimiter(ctx, &req, h.proxy); err != nil {
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error() + ", error: " + err.Error(),
+			})
+			return nil, err
+		}
 		return h.proxy.Query(reqCtx, req.(*milvuspb.QueryRequest))
 	})
 	if err == RestRequestInterceptorErr {
@@ -604,6 +611,13 @@ func (h *HandlersV1) get(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		queryReq := req.(*milvuspb.QueryRequest)
+		if _, err := CheckLimiter(ctx, &req, h.proxy); err != nil {
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error() + ", error: " + err.Error(),
+			})
+			return nil, err
+		}
 		queryReq.Expr = filter
 		return h.proxy.Query(reqCtx, queryReq)
 	})
@@ -676,6 +690,13 @@ func (h *HandlersV1) delete(c *gin.Context) {
 				return nil, RestRequestInterceptorErr
 			}
 			deleteReq.Expr = filter
+		}
+		if _, err := CheckLimiter(ctx, &req, h.proxy); err != nil {
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error() + ", error: " + err.Error(),
+			})
+			return nil, err
 		}
 		return h.proxy.Delete(ctx, deleteReq)
 	})
@@ -752,6 +773,13 @@ func (h *HandlersV1) insert(c *gin.Context) {
 				HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
 			})
 			return nil, RestRequestInterceptorErr
+		}
+		if _, err := CheckLimiter(ctx, &req, h.proxy); err != nil {
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error() + ", error: " + err.Error(),
+			})
+			return nil, err
 		}
 		return h.proxy.Insert(ctx, insertReq)
 	})
@@ -852,6 +880,13 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 			})
 			return nil, RestRequestInterceptorErr
 		}
+		if _, err := CheckLimiter(ctx, &req, h.proxy); err != nil {
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error() + ", error: " + err.Error(),
+			})
+			return nil, err
+		}
 		return h.proxy.Upsert(ctx, upsertReq)
 	})
 	if err == RestRequestInterceptorErr {
@@ -948,6 +983,13 @@ func (h *HandlersV1) search(c *gin.Context) {
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
+		if _, err := CheckLimiter(ctx, &req, h.proxy); err != nil {
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error() + ", error: " + err.Error(),
+			})
+			return nil, err
+		}
 		return h.proxy.Search(ctx, req.(*milvuspb.SearchRequest))
 	})
 	if err == RestRequestInterceptorErr {

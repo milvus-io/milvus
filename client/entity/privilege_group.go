@@ -14,34 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package nmq
+package entity
 
-import (
-	"context"
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-
-	"github.com/milvus-io/milvus/pkg/mq/common"
-)
-
-func TestNatsMQProducer(t *testing.T) {
-	c, err := createNmqClient()
-	assert.NoError(t, err)
-	defer c.Close()
-	topic := t.Name()
-	pOpts := common.ProducerOptions{Topic: topic}
-
-	// Check Topic()
-	p, err := c.CreateProducer(context.TODO(), pOpts)
-	assert.NoError(t, err)
-	assert.Equal(t, p.(*nmqProducer).Topic(), topic)
-
-	// Check Send()
-	msg := &common.ProducerMessage{
-		Payload:    []byte{},
-		Properties: map[string]string{},
-	}
-	_, err = p.Send(context.TODO(), msg)
-	assert.NoError(t, err)
+// PrivilegeGroup is the entity model for custom privilege group.
+type PrivilegeGroup struct {
+	GroupName  string
+	Privileges []string
 }
