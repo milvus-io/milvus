@@ -5,11 +5,15 @@ import (
 	"fmt"
 	"strings"
 
+	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util"
@@ -40,6 +44,25 @@ func validSourceID(ctx context.Context, authorization []string) bool {
 		return false
 	}
 	return sourceID == util.MemberCredID
+}
+
+func GrpcAuthInterceptor(authFunc grpc_auth.AuthFunc) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		var newCtx context.Context
+		var err error
+		if overrideSrv, ok := info.Server.(grpc_auth.ServiceAuthFuncOverride); ok {
+			newCtx, err = overrideSrv.AuthFuncOverride(ctx, info.FullMethod)
+		} else {
+			newCtx, err = authFunc(ctx)
+		}
+		if err != nil {
+			hookutil.GetExtension().ReportRefused(context.Background(), req, &milvuspb.BoolResponse{
+				Status: merr.Status(err),
+			}, err, info.FullMethod)
+			return nil, err
+		}
+		return handler(newCtx, req)
+	}
 }
 
 // AuthenticationInterceptor verify based on kv pair <"authorization": "token"> in header
