@@ -36,7 +36,7 @@ func TestPulsarMsgUtil(t *testing.T) {
 	defer msgStream.Close()
 
 	// create a topic
-	msgStream.AsProducer([]string{"test"})
+	msgStream.AsProducer(ctx, []string{"test"})
 
 	UnsubscribeChannels(ctx, pmsFactory, "sub", []string{"test"})
 }

@@ -73,6 +73,7 @@ MmapBlock::Init() {
         file_size_);
     milvus::monitor::internal_mmap_in_used_space_bytes_file.Increment(
         file_size_);
+    milvus::monitor::internal_mmap_in_used_count_file.Increment();
     is_valid_ = true;
     allocated_size_.fetch_add(file_size_);
 }
@@ -98,6 +99,7 @@ MmapBlock::Close() {
     allocated_size_.fetch_sub(file_size_);
     milvus::monitor::internal_mmap_in_used_space_bytes_file.Decrement(
         file_size_);
+    milvus::monitor::internal_mmap_in_used_count_file.Decrement();
     is_valid_ = false;
 }
 

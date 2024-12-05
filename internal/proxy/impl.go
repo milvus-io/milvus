@@ -129,21 +129,21 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	if globalMetaCache != nil {
 		switch msgType {
 		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias:
-			if collectionName != "" {
-				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
-				globalMetaCache.DeprecateShardCache(request.GetDbName(), collectionName)
-			}
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), msgType == commonpb.MsgType_DropCollection)
 				for _, name := range aliasName {
 					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
 				}
+			}
+			if collectionName != "" {
+				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
+				globalMetaCache.DeprecateShardCache(request.GetDbName(), collectionName)
 			}
 			log.Info("complete to invalidate collection meta cache with collection name", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
 			// All the request from query use collectionID
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
 				for _, name := range aliasName {
 					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
 				}
@@ -154,30 +154,26 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 				log.Warn("invalidate collection meta cache failed. partitionName is empty")
 				return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
 			}
-			// no need to deprecate shard cache because shard won't change when create or drop partition
-			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
 			// drop all the alias as well
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
-				for _, name := range aliasName {
-					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
-				}
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
 			}
+			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
 			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
 		default:
 			log.Warn("receive unexpected msgType of invalidate collection meta cache", zap.String("msgType", request.GetBase().GetMsgType().String()))
+			if request.CollectionID != UniqueID(0) {
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
+				for _, name := range aliasName {
+					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
+				}
+			}
 
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
 				globalMetaCache.DeprecateShardCache(request.GetDbName(), collectionName)
-			}
-			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
-				for _, name := range aliasName {
-					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
-				}
 			}
 		}
 	}
@@ -4620,6 +4616,7 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	defer sp.End()
 
 	log := log.Ctx(ctx).With(
+		zap.String("collectionName", req.GetCollectionName()),
 		zap.Int64("collectionID", req.GetCollectionID()))
 
 	log.Info("received ManualCompaction request")
@@ -4627,6 +4624,16 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
+	}
+
+	// before v2.4.18, manual compact request only pass collectionID, should correct sdk's behavior to pass collectionName
+	if req.GetCollectionName() != "" {
+		var err error
+		req.CollectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
 	}
 
 	resp, err := node.dataCoord.ManualCompaction(ctx, req)
@@ -5332,9 +5339,9 @@ func (node *Proxy) validPrivilegeParams(req *milvuspb.OperatePrivilegeRequest) e
 	return nil
 }
 
-func (node *Proxy) validOperatePrivilegeV2Params(req *milvuspb.OperatePrivilegeV2Request) error {
+func (node *Proxy) validateOperatePrivilegeV2Params(req *milvuspb.OperatePrivilegeV2Request) error {
 	if req.Role == nil {
-		return fmt.Errorf("the role in the request is nil")
+		return merr.WrapErrParameterInvalidMsg("the role in the request is nil")
 	}
 	if err := ValidateRoleName(req.Role.Name); err != nil {
 		return err
@@ -5342,13 +5349,19 @@ func (node *Proxy) validOperatePrivilegeV2Params(req *milvuspb.OperatePrivilegeV
 	if err := ValidatePrivilege(req.Grantor.Privilege.Name); err != nil {
 		return err
 	}
-	if req.Type != milvuspb.OperatePrivilegeType_Grant && req.Type != milvuspb.OperatePrivilegeType_Revoke {
-		return fmt.Errorf("the type in the request not grant or revoke")
-	}
-	if err := ValidateObjectName(req.DbName); err != nil {
+	// validate built-in privilege group params
+	if err := ValidateBuiltInPrivilegeGroup(req.Grantor.Privilege.Name, req.DbName, req.CollectionName); err != nil {
 		return err
 	}
-	if err := ValidateObjectName(req.CollectionName); err != nil {
+	if req.Type != milvuspb.OperatePrivilegeType_Grant && req.Type != milvuspb.OperatePrivilegeType_Revoke {
+		return merr.WrapErrParameterInvalidMsg("the type in the request not grant or revoke")
+	}
+	if req.DbName != "" && !util.IsAnyWord(req.DbName) {
+		if err := ValidateDatabaseName(req.DbName); err != nil {
+			return err
+		}
+	}
+	if err := ValidateCollectionName(req.CollectionName); err != nil {
 		return err
 	}
 	return nil
@@ -5365,7 +5378,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if err := node.validOperatePrivilegeV2Params(req); err != nil {
+	if err := node.validateOperatePrivilegeV2Params(req); err != nil {
 		return merr.Status(err), nil
 	}
 	curUser, err := GetCurUserFromContext(ctx)
@@ -6310,7 +6323,7 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 			Status: merr.Status(err),
 		}, nil
 	}
-	messageIDsMap, err := msgStream.Broadcast(msgPack)
+	messageIDsMap, err := msgStream.Broadcast(ctx, msgPack)
 	if err != nil {
 		log.Ctx(ctx).Warn("failed to produce msg", zap.Error(err))
 		return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -127,7 +128,7 @@ func convertRange(field *schemapb.FieldSchema, result gjson.Result) (string, err
 	fieldType := field.DataType
 
 	if fieldType == schemapb.DataType_Int64 {
-		var dataArray []int64
+		dataArray := make([]int64, 0, len(result.Array()))
 		for _, data := range result.Array() {
 			if data.Type == gjson.String {
 				value, err := cast.ToInt64E(data.Str)
@@ -145,7 +146,7 @@ func convertRange(field *schemapb.FieldSchema, result gjson.Result) (string, err
 		}
 		resultStr = joinArray(dataArray)
 	} else if fieldType == schemapb.DataType_VarChar {
-		var dataArray []string
+		dataArray := make([]string, 0, len(result.Array()))
 		for _, data := range result.Array() {
 			value, err := cast.ToStringE(data.Str)
 			if err != nil {
@@ -175,7 +176,7 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 // --------------------- collection details --------------------- //
 
 func printFields(fields []*schemapb.FieldSchema) []gin.H {
-	var res []gin.H
+	res := make([]gin.H, 0, len(fields))
 	for _, field := range fields {
 		if field.Name == common.MetaFieldName {
 			continue
@@ -187,7 +188,7 @@ func printFields(fields []*schemapb.FieldSchema) []gin.H {
 }
 
 func printFieldsV2(fields []*schemapb.FieldSchema) []gin.H {
-	var res []gin.H
+	res := make([]gin.H, 0, len(fields))
 	for _, field := range fields {
 		if field.Name == common.MetaFieldName {
 			continue
@@ -242,7 +243,7 @@ func printFieldDetail(field *schemapb.FieldSchema, oldVersion bool) gin.H {
 }
 
 func printFunctionDetails(functions []*schemapb.FunctionSchema) []gin.H {
-	var res []gin.H
+	res := make([]gin.H, 0, len(functions))
 	for _, function := range functions {
 		res = append(res, gin.H{
 			HTTPReturnFunctionName:             function.Name,
@@ -269,7 +270,7 @@ func getMetricType(pairs []*commonpb.KeyValuePair) string {
 }
 
 func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
-	var res []gin.H
+	res := make([]gin.H, 0, len(indexes))
 	for _, index := range indexes {
 		res = append(res, gin.H{
 			HTTPIndexName:             index.IndexName,
@@ -291,7 +292,7 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 		return merr.ErrMissingRequiredParameters, reallyDataArray, validDataMap
 	}
 
-	var fieldNames []string
+	fieldNames := make([]string, 0, len(collSchema.Fields))
 	for _, field := range collSchema.Fields {
 		if field.IsDynamic {
 			continue
@@ -1099,12 +1100,12 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 }
 
 func serializeFloatVectors(vectorStr string, dataType schemapb.DataType, dimension, bytesLen int64, fpArrayToBytesFunc func([]float32) []byte) ([][]byte, error) {
-	values := make([][]byte, 0)
 	var fp32Values [][]float32
 	err := json.Unmarshal([]byte(vectorStr), &fp32Values)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vectorStr, err.Error())
 	}
+	values := make([][]byte, 0, len(fp32Values))
 	for _, vectorArray := range fp32Values {
 		if int64(len(vectorArray)) != dimension {
 			return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vectorStr,
@@ -1150,7 +1151,7 @@ func serializeFloatOrByteVectors(jsonResult gjson.Result, dataType schemapb.Data
 }
 
 func serializeSparseFloatVectors(vectors []gjson.Result, dataType schemapb.DataType) ([][]byte, error) {
-	values := make([][]byte, 0)
+	values := make([][]byte, 0, len(vectors))
 	for _, vector := range vectors {
 		vectorBytes := []byte(vector.String())
 		sparseVector, err := typeutil.CreateSparseFloatRowFromJSON(vectorBytes)
@@ -1185,6 +1186,7 @@ func convertQueries2Placeholder(body string, dataType schemapb.DataType, dimensi
 	case schemapb.DataType_VarChar:
 		valueType = commonpb.PlaceholderType_VarChar
 		res := gjson.Get(body, HTTPRequestData).Array()
+		values = make([][]byte, 0, len(res))
 		for _, v := range res {
 			values = append(values, []byte(v.String()))
 		}
@@ -1242,8 +1244,6 @@ func genDynamicFields(fields []string, list []*schemapb.FieldData) []string {
 }
 
 func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs, scores []float32, enableInt64 bool) ([]map[string]interface{}, error) {
-	var queryResp []map[string]interface{}
-
 	columnNum := len(fieldDataList)
 	if rowsNum == int64(0) { // always
 		if columnNum > 0 {
@@ -1299,6 +1299,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	if rowsNum == int64(0) {
 		return []map[string]interface{}{}, nil
 	}
+	queryResp := make([]map[string]interface{}, 0, rowsNum)
 	dynamicOutputFields := genDynamicFields(needFields, fieldDataList)
 	for i := int64(0); i < rowsNum; i++ {
 		row := map[string]interface{}{}
@@ -1439,7 +1440,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 }
 
 func formatInt64(intArray []int64) []string {
-	stringArray := make([]string, 0)
+	stringArray := make([]string, 0, len(intArray))
 	for _, i := range intArray {
 		stringArray = append(stringArray, strconv.FormatInt(i, 10))
 	}
@@ -1678,4 +1679,171 @@ func RequestHandlerFunc(c *gin.Context) {
 		return
 	}
 	c.Next()
+}
+
+func generateTemplateArrayData(list []interface{}) *schemapb.TemplateArrayValue {
+	dtype := getTemplateArrayType(list)
+	var data *schemapb.TemplateArrayValue
+	switch dtype {
+	case schemapb.DataType_Bool:
+		result := make([]bool, len(list))
+		for i, item := range list {
+			result[i] = item.(bool)
+		}
+		data = &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_BoolData{
+				BoolData: &schemapb.BoolArray{
+					Data: result,
+				},
+			},
+		}
+	case schemapb.DataType_String:
+		result := make([]string, len(list))
+		for i, item := range list {
+			result[i] = item.(string)
+		}
+		data = &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_StringData{
+				StringData: &schemapb.StringArray{
+					Data: result,
+				},
+			},
+		}
+	case schemapb.DataType_Int64:
+		result := make([]int64, len(list))
+		for i, item := range list {
+			result[i] = int64(item.(float64))
+		}
+		data = &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_LongData{
+				LongData: &schemapb.LongArray{
+					Data: result,
+				},
+			},
+		}
+	case schemapb.DataType_Float:
+		result := make([]float64, len(list))
+		for i, item := range list {
+			result[i] = item.(float64)
+		}
+		data = &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_DoubleData{
+				DoubleData: &schemapb.DoubleArray{
+					Data: result,
+				},
+			},
+		}
+	case schemapb.DataType_Array:
+		result := make([]*schemapb.TemplateArrayValue, len(list))
+		for i, item := range list {
+			result[i] = generateTemplateArrayData(item.([]interface{}))
+		}
+		data = &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_ArrayData{
+				ArrayData: &schemapb.TemplateArrayValueArray{
+					Data: result,
+				},
+			},
+		}
+	case schemapb.DataType_JSON:
+		result := make([][]byte, len(list))
+		for i, item := range list {
+			bytes, err := json.Marshal(item)
+			// won't happen
+			if err != nil {
+				panic(fmt.Sprintf("marshal data(%v) fail, please check it!", item))
+			}
+			result[i] = bytes
+		}
+		data = &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_JsonData{
+				JsonData: &schemapb.JSONArray{
+					Data: result,
+				},
+			},
+		}
+	// won't happen
+	default:
+		panic(fmt.Sprintf("Unexpected data(%v) type when generateTemplateArrayData, please check it!", list))
+	}
+	return data
+}
+
+func getTemplateArrayType(value []interface{}) schemapb.DataType {
+	dtype := getTemplateType(value[0])
+
+	for _, v := range value {
+		if getTemplateType(v) != dtype {
+			return schemapb.DataType_JSON
+		}
+	}
+	return dtype
+}
+
+func getTemplateType(value interface{}) schemapb.DataType {
+	switch v := value.(type) {
+	case bool:
+		return schemapb.DataType_Bool
+	case string:
+		return schemapb.DataType_String
+	case float64:
+		// note: all passed number is float64 type
+		// if field type is float64, but value in ExpressionTemplate is int64, it's ok to use TemplateValue_Int64Val to store it
+		// it will convert to float64 in ./internal/parser/planparserv2/utils.go, Line 233
+		if v == math.Trunc(v) && v >= math.MinInt64 && v <= math.MaxInt64 {
+			return schemapb.DataType_Int64
+		}
+		return schemapb.DataType_Float
+	// it won't happen
+	// case int64:
+	case []interface{}:
+		return schemapb.DataType_Array
+	default:
+		panic(fmt.Sprintf("Unexpected data(%v) when getTemplateType, please check it!", value))
+	}
+}
+
+func generateExpressionTemplate(params map[string]interface{}) map[string]*schemapb.TemplateValue {
+	expressionTemplate := make(map[string]*schemapb.TemplateValue, len(params))
+
+	for name, value := range params {
+		dtype := getTemplateType(value)
+		var data *schemapb.TemplateValue
+		switch dtype {
+		case schemapb.DataType_Bool:
+			data = &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_BoolVal{
+					BoolVal: value.(bool),
+				},
+			}
+		case schemapb.DataType_String:
+			data = &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_StringVal{
+					StringVal: value.(string),
+				},
+			}
+		case schemapb.DataType_Int64:
+			data = &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_Int64Val{
+					Int64Val: int64(value.(float64)),
+				},
+			}
+		case schemapb.DataType_Float:
+			data = &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_FloatVal{
+					FloatVal: value.(float64),
+				},
+			}
+		case schemapb.DataType_Array:
+			data = &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_ArrayVal{
+					ArrayVal: generateTemplateArrayData(value.([]interface{})),
+				},
+			}
+		default:
+			panic(fmt.Sprintf("Unexpected data(%v) when generateExpressionTemplate, please check it!", data))
+		}
+		expressionTemplate[name] = data
+	}
+	return expressionTemplate
 }

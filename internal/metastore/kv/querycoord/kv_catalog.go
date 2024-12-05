@@ -19,6 +19,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/compressor"
 )
 
+var paginationSize = 2000
+
 var ErrInvalidKey = errors.New("invalid load info key")
 
 const (
@@ -49,7 +51,7 @@ func (s Catalog) SaveCollection(ctx context.Context, collection *querypb.Collect
 	if err != nil {
 		return err
 	}
-	err = s.cli.Save(k, string(v))
+	err = s.cli.Save(ctx, k, string(v))
 	if err != nil {
 		return err
 	}
@@ -63,7 +65,7 @@ func (s Catalog) SavePartition(ctx context.Context, info ...*querypb.PartitionLo
 		if err != nil {
 			return err
 		}
-		err = s.cli.Save(k, string(v))
+		err = s.cli.Save(ctx, k, string(v))
 		if err != nil {
 			return err
 		}
@@ -81,7 +83,7 @@ func (s Catalog) SaveReplica(ctx context.Context, replicas ...*querypb.Replica) 
 		}
 		kvs[key] = string(value)
 	}
-	return s.cli.MultiSave(kvs)
+	return s.cli.MultiSave(ctx, kvs)
 }
 
 func (s Catalog) SaveResourceGroup(ctx context.Context, rgs ...*querypb.ResourceGroup) error {
@@ -96,60 +98,66 @@ func (s Catalog) SaveResourceGroup(ctx context.Context, rgs ...*querypb.Resource
 		ret[key] = string(value)
 	}
 
-	return s.cli.MultiSave(ret)
+	return s.cli.MultiSave(ctx, ret)
 }
 
 func (s Catalog) RemoveResourceGroup(ctx context.Context, rgName string) error {
 	key := encodeResourceGroupKey(rgName)
-	return s.cli.Remove(key)
+	return s.cli.Remove(ctx, key)
 }
 
 func (s Catalog) GetCollections(ctx context.Context) ([]*querypb.CollectionLoadInfo, error) {
-	_, values, err := s.cli.LoadWithPrefix(CollectionLoadInfoPrefix)
-	if err != nil {
-		return nil, err
-	}
-	ret := make([]*querypb.CollectionLoadInfo, 0, len(values))
-	for _, v := range values {
+	ret := make([]*querypb.CollectionLoadInfo, 0)
+	applyFn := func(key []byte, value []byte) error {
 		info := querypb.CollectionLoadInfo{}
-		if err := proto.Unmarshal([]byte(v), &info); err != nil {
-			return nil, err
+		if err := proto.Unmarshal(value, &info); err != nil {
+			return err
 		}
 		ret = append(ret, &info)
+		return nil
+	}
+
+	err := s.cli.WalkWithPrefix(ctx, CollectionLoadInfoPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
 	}
 
 	return ret, nil
 }
 
 func (s Catalog) GetPartitions(ctx context.Context) (map[int64][]*querypb.PartitionLoadInfo, error) {
-	_, values, err := s.cli.LoadWithPrefix(PartitionLoadInfoPrefix)
-	if err != nil {
-		return nil, err
-	}
 	ret := make(map[int64][]*querypb.PartitionLoadInfo)
-	for _, v := range values {
+	applyFn := func(key []byte, value []byte) error {
 		info := querypb.PartitionLoadInfo{}
-		if err := proto.Unmarshal([]byte(v), &info); err != nil {
-			return nil, err
+		if err := proto.Unmarshal(value, &info); err != nil {
+			return err
 		}
 		ret[info.GetCollectionID()] = append(ret[info.GetCollectionID()], &info)
+		return nil
+	}
+
+	err := s.cli.WalkWithPrefix(ctx, PartitionLoadInfoPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
 	}
 
 	return ret, nil
 }
 
 func (s Catalog) GetReplicas(ctx context.Context) ([]*querypb.Replica, error) {
-	_, values, err := s.cli.LoadWithPrefix(ReplicaPrefix)
-	if err != nil {
-		return nil, err
-	}
-	ret := make([]*querypb.Replica, 0, len(values))
-	for _, v := range values {
+	ret := make([]*querypb.Replica, 0)
+	applyFn := func(key []byte, value []byte) error {
 		info := querypb.Replica{}
-		if err := proto.Unmarshal([]byte(v), &info); err != nil {
-			return nil, err
+		if err := proto.Unmarshal(value, &info); err != nil {
+			return err
 		}
 		ret = append(ret, &info)
+		return nil
+	}
+
+	err := s.cli.WalkWithPrefix(ctx, ReplicaPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
 	}
 
 	replicasV1, err := s.getReplicasFromV1(ctx)
@@ -162,7 +170,7 @@ func (s Catalog) GetReplicas(ctx context.Context) ([]*querypb.Replica, error) {
 }
 
 func (s Catalog) getReplicasFromV1(ctx context.Context) ([]*querypb.Replica, error) {
-	_, replicaValues, err := s.cli.LoadWithPrefix(ReplicaMetaPrefixV1)
+	_, replicaValues, err := s.cli.LoadWithPrefix(ctx, ReplicaMetaPrefixV1)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +193,7 @@ func (s Catalog) getReplicasFromV1(ctx context.Context) ([]*querypb.Replica, err
 }
 
 func (s Catalog) GetResourceGroups(ctx context.Context) ([]*querypb.ResourceGroup, error) {
-	_, rgs, err := s.cli.LoadWithPrefix(ResourceGroupPrefix)
+	_, rgs, err := s.cli.LoadWithPrefix(ctx, ResourceGroupPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -206,12 +214,12 @@ func (s Catalog) GetResourceGroups(ctx context.Context) ([]*querypb.ResourceGrou
 func (s Catalog) ReleaseCollection(ctx context.Context, collection int64) error {
 	// remove collection and obtained partitions
 	collectionKey := EncodeCollectionLoadInfoKey(collection)
-	err := s.cli.Remove(collectionKey)
+	err := s.cli.Remove(ctx, collectionKey)
 	if err != nil {
 		return err
 	}
 	partitionsPrefix := fmt.Sprintf("%s/%d", PartitionLoadInfoPrefix, collection)
-	return s.cli.RemoveWithPrefix(partitionsPrefix)
+	return s.cli.RemoveWithPrefix(ctx, partitionsPrefix)
 }
 
 func (s Catalog) ReleasePartition(ctx context.Context, collection int64, partitions ...int64) error {
@@ -225,7 +233,7 @@ func (s Catalog) ReleasePartition(ctx context.Context, collection int64, partiti
 			if endIndex > len(partitions) {
 				endIndex = len(partitions)
 			}
-			err := s.cli.MultiRemove(keys[index:endIndex])
+			err := s.cli.MultiRemove(ctx, keys[index:endIndex])
 			if err != nil {
 				return err
 			}
@@ -233,12 +241,12 @@ func (s Catalog) ReleasePartition(ctx context.Context, collection int64, partiti
 		}
 		return nil
 	}
-	return s.cli.MultiRemove(keys)
+	return s.cli.MultiRemove(ctx, keys)
 }
 
 func (s Catalog) ReleaseReplicas(ctx context.Context, collectionID int64) error {
 	key := encodeCollectionReplicaKey(collectionID)
-	return s.cli.RemoveWithPrefix(key)
+	return s.cli.RemoveWithPrefix(ctx, key)
 }
 
 func (s Catalog) ReleaseReplica(ctx context.Context, collection int64, replicas ...int64) error {
@@ -252,7 +260,7 @@ func (s Catalog) ReleaseReplica(ctx context.Context, collection int64, replicas 
 			if endIndex > len(replicas) {
 				endIndex = len(replicas)
 			}
-			err := s.cli.MultiRemove(keys[index:endIndex])
+			err := s.cli.MultiRemove(ctx, keys[index:endIndex])
 			if err != nil {
 				return err
 			}
@@ -260,7 +268,7 @@ func (s Catalog) ReleaseReplica(ctx context.Context, collection int64, replicas 
 		}
 		return nil
 	}
-	return s.cli.MultiRemove(keys)
+	return s.cli.MultiRemove(ctx, keys)
 }
 
 func (s Catalog) SaveCollectionTargets(ctx context.Context, targets ...*querypb.CollectionTarget) error {
@@ -277,7 +285,7 @@ func (s Catalog) SaveCollectionTargets(ctx context.Context, targets ...*querypb.
 	}
 
 	// to reduce the target size, we do compress before write to etcd
-	err := s.cli.MultiSave(kvs)
+	err := s.cli.MultiSave(ctx, kvs)
 	if err != nil {
 		return err
 	}
@@ -286,25 +294,27 @@ func (s Catalog) SaveCollectionTargets(ctx context.Context, targets ...*querypb.
 
 func (s Catalog) RemoveCollectionTarget(ctx context.Context, collectionID int64) error {
 	k := encodeCollectionTargetKey(collectionID)
-	return s.cli.Remove(k)
+	return s.cli.Remove(ctx, k)
 }
 
 func (s Catalog) GetCollectionTargets(ctx context.Context) (map[int64]*querypb.CollectionTarget, error) {
-	keys, values, err := s.cli.LoadWithPrefix(CollectionTargetPrefix)
-	if err != nil {
-		return nil, err
-	}
 	ret := make(map[int64]*querypb.CollectionTarget)
-	for i, v := range values {
+	applyFn := func(key []byte, value []byte) error {
 		var decompressed bytes.Buffer
-		compressor.ZstdDecompress(bytes.NewReader([]byte(v)), io.Writer(&decompressed))
+		compressor.ZstdDecompress(bytes.NewReader(value), io.Writer(&decompressed))
 		target := &querypb.CollectionTarget{}
 		if err := proto.Unmarshal(decompressed.Bytes(), target); err != nil {
 			// recover target from meta is a optimize policy, skip when failure happens
-			log.Warn("failed to unmarshal collection target", zap.String("key", keys[i]), zap.Error(err))
-			continue
+			log.Warn("failed to unmarshal collection target", zap.String("key", string(key)), zap.Error(err))
+			return nil
 		}
 		ret[target.GetCollectionID()] = target
+		return nil
+	}
+
+	err := s.cli.WalkWithPrefix(ctx, CollectionTargetPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
 	}
 
 	return ret, nil

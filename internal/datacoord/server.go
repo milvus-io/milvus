@@ -1122,8 +1122,8 @@ func (s *Server) Stop() error {
 // CleanMeta only for test
 func (s *Server) CleanMeta() error {
 	log.Debug("clean meta", zap.Any("kv", s.kv))
-	err := s.kv.RemoveWithPrefix("")
-	err2 := s.watchClient.RemoveWithPrefix("")
+	err := s.kv.RemoveWithPrefix(s.ctx, "")
+	err2 := s.watchClient.RemoveWithPrefix(s.ctx, "")
 	if err2 != nil {
 		if err != nil {
 			err = fmt.Errorf("Failed to CleanMeta[metadata cleanup error: %w][watchdata cleanup error: %v]", err, err2)

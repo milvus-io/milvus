@@ -37,8 +37,9 @@ func (t *dropAliasTask) Prepare(ctx context.Context) error {
 }
 
 func (t *dropAliasTask) Execute(ctx context.Context) error {
+	collID := t.core.meta.GetCollectionID(ctx, t.Req.GetDbName(), t.Req.GetAlias())
 	// drop alias is atomic enough.
-	if err := t.core.ExpireMetaCache(ctx, t.Req.GetDbName(), []string{t.Req.GetAlias()}, InvalidCollectionID, "", t.GetTs(), proxyutil.SetMsgType(commonpb.MsgType_DropAlias)); err != nil {
+	if err := t.core.ExpireMetaCache(ctx, t.Req.GetDbName(), []string{t.Req.GetAlias()}, collID, "", t.GetTs(), proxyutil.SetMsgType(commonpb.MsgType_DropAlias)); err != nil {
 		return err
 	}
 	return t.core.meta.DropAlias(ctx, t.Req.GetDbName(), t.Req.GetAlias(), t.GetTs())

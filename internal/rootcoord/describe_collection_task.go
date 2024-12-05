@@ -51,6 +51,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 	t.Rsp = convertModelToDesc(coll, aliases, db.Name)
+	t.Rsp.RequestTime = t.ts
 	return nil
 }
 

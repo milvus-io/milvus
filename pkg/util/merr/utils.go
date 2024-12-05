@@ -460,6 +460,14 @@ func WrapErrDatabaseNameInvalid(database any, msg ...string) error {
 	return err
 }
 
+func WrapErrPrivilegeGroupNameInvalid(privilegeGroup any, msg ...string) error {
+	err := wrapFields(ErrPrivilegeGroupInvalidName, value("privilegeGroup", privilegeGroup))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
 // Collection related
 func WrapErrCollectionNotFound(collection any, msg ...string) error {
 	err := wrapFields(ErrCollectionNotFound, value("collection", collection))

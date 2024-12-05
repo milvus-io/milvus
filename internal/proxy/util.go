@@ -158,25 +158,25 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 
 func ValidatePrivilegeGroupName(groupName string) error {
 	if groupName == "" {
-		return merr.WrapErrDatabaseNameInvalid(groupName, "privilege group name couldn't be empty")
+		return merr.WrapErrPrivilegeGroupNameInvalid("privilege group name should not be empty")
 	}
 
 	if len(groupName) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
-		return merr.WrapErrDatabaseNameInvalid(groupName,
-			fmt.Sprintf("the length of a privilege group name must be less than %d characters", Params.ProxyCfg.MaxNameLength.GetAsInt()))
+		return merr.WrapErrPrivilegeGroupNameInvalid(
+			"the length of a privilege group name %s must be less than %s characters", groupName, Params.ProxyCfg.MaxNameLength.GetValue())
 	}
 
 	firstChar := groupName[0]
 	if firstChar != '_' && !isAlpha(firstChar) {
-		return merr.WrapErrDatabaseNameInvalid(groupName,
-			"the first character of a privilege group name must be an underscore or letter")
+		return merr.WrapErrPrivilegeGroupNameInvalid(
+			"the first character of a privilege group name %s must be an underscore or letter", groupName)
 	}
 
 	for i := 1; i < len(groupName); i++ {
 		c := groupName[i]
 		if c != '_' && !isAlpha(c) && !isNumber(c) {
-			return merr.WrapErrDatabaseNameInvalid(groupName,
-				"privilege group name can only contain numbers, letters and underscores")
+			return merr.WrapErrParameterInvalidMsg(
+				"privilege group name %s can only contain numbers, letters and underscores", groupName)
 		}
 	}
 	return nil
@@ -1099,7 +1099,14 @@ func ValidateObjectName(entity string) error {
 	if util.IsAnyWord(entity) {
 		return nil
 	}
-	return validateName(entity, "role name")
+	return validateName(entity, "object name")
+}
+
+func ValidateCollectionName(entity string) error {
+	if util.IsAnyWord(entity) {
+		return nil
+	}
+	return validateName(entity, "collection name")
 }
 
 func ValidateObjectType(entity string) error {
@@ -1111,6 +1118,31 @@ func ValidatePrivilege(entity string) error {
 		return nil
 	}
 	return validateName(entity, "Privilege")
+}
+
+func ValidateBuiltInPrivilegeGroup(entity string, dbName string, collectionName string) error {
+	if !util.IsBuiltinPrivilegeGroup(entity) {
+		return nil
+	}
+	switch {
+	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Cluster.String()):
+		if !util.IsAnyWord(dbName) || !util.IsAnyWord(collectionName) {
+			return merr.WrapErrParameterInvalidMsg("dbName and collectionName should be * for the cluster level privilege: %s", entity)
+		}
+		return nil
+	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Database.String()):
+		if collectionName != "" && collectionName != util.AnyWord {
+			return merr.WrapErrParameterInvalidMsg("collectionName should be * for the database level privilege: %s", entity)
+		}
+		return nil
+	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Collection.String()):
+		if util.IsAnyWord(dbName) && !util.IsAnyWord(collectionName) && collectionName != "" {
+			return merr.WrapErrParameterInvalidMsg("please specify database name for the collection level privilege: %s", entity)
+		}
+		return nil
+	default:
+		return nil
+	}
 }
 
 func GetCurUserFromContext(ctx context.Context) (string, error) {
@@ -1136,13 +1168,16 @@ func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 
 func NewContextWithMetadata(ctx context.Context, username string, dbName string) context.Context {
 	dbKey := strings.ToLower(util.HeaderDBName)
-	if username == "" {
-		return contextutil.AppendToIncomingContext(ctx, dbKey, dbName)
+	if dbName != "" {
+		ctx = contextutil.AppendToIncomingContext(ctx, dbKey, dbName)
 	}
-	originValue := fmt.Sprintf("%s%s%s", username, util.CredentialSeperator, username)
-	authKey := strings.ToLower(util.HeaderAuthorize)
-	authValue := crypto.Base64Encode(originValue)
-	return contextutil.AppendToIncomingContext(ctx, authKey, authValue, dbKey, dbName)
+	if username != "" {
+		originValue := fmt.Sprintf("%s%s%s", username, util.CredentialSeperator, username)
+		authKey := strings.ToLower(util.HeaderAuthorize)
+		authValue := crypto.Base64Encode(originValue)
+		ctx = contextutil.AppendToIncomingContext(ctx, authKey, authValue)
+	}
+	return ctx
 }
 
 func AppendUserInfoForRPC(ctx context.Context) context.Context {
@@ -1792,10 +1827,20 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 			for _, rowData := range field.GetScalars().GetJsonData().GetData() {
 				jsonData := make(map[string]interface{})
 				if err := json.Unmarshal(rowData, &jsonData); err != nil {
-					return err
+					log.Info("insert invalid dynamic data, milvus only support json map",
+						zap.ByteString("data", rowData),
+						zap.Error(err),
+					)
+					return merr.WrapErrIoFailedReason(err.Error())
 				}
 				if _, ok := jsonData[common.MetaFieldName]; ok {
 					return fmt.Errorf("cannot set json key to: %s", common.MetaFieldName)
+				}
+				for _, f := range schema.GetFields() {
+					if _, ok := jsonData[f.GetName()]; ok {
+						log.Info("dynamic field name include the static field name", zap.String("fieldName", f.GetName()))
+						return fmt.Errorf("dynamic field name cannot include the static field name: %s", f.GetName())
+					}
 				}
 			}
 		}
@@ -1940,7 +1985,7 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 		EndTs:   ts,
 		Msgs:    []msgstream.TsMsg{tsMsg},
 	}
-	msgErr := replicateMsgStream.Produce(msgPack)
+	msgErr := replicateMsgStream.Produce(ctx, msgPack)
 	// ignore the error if the msg stream failed to produce the msg,
 	// because it can be manually fixed in this error
 	if msgErr != nil {

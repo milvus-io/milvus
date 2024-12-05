@@ -12,6 +12,7 @@
 package server
 
 import (
+	"context"
 	"os"
 	"strconv"
 	"testing"
@@ -97,24 +98,24 @@ func TestRmqRetention_Basic(t *testing.T) {
 
 	// test acked size acked ts and other meta are updated as expect
 	msgSizeKey := MessageSizeTitle + topicName
-	msgSizeVal, err := rmq.kv.Load(msgSizeKey)
+	msgSizeVal, err := rmq.kv.Load(context.TODO(), msgSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, msgSizeVal, "0")
 
 	pageMsgSizeKey := constructKey(PageMsgSizeTitle, topicName)
-	keys, values, err := rmq.kv.LoadWithPrefix(pageMsgSizeKey)
+	keys, values, err := rmq.kv.LoadWithPrefix(context.TODO(), pageMsgSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 0)
 	assert.Equal(t, len(values), 0)
 
 	pageTsSizeKey := constructKey(PageTsTitle, topicName)
-	keys, values, err = rmq.kv.LoadWithPrefix(pageTsSizeKey)
+	keys, values, err = rmq.kv.LoadWithPrefix(context.TODO(), pageTsSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 0)
 	assert.Equal(t, len(values), 0)
 
 	aclTsSizeKey := constructKey(AckedTsTitle, topicName)
-	keys, values, err = rmq.kv.LoadWithPrefix(aclTsSizeKey)
+	keys, values, err = rmq.kv.LoadWithPrefix(context.TODO(), aclTsSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 0)
 	assert.Equal(t, len(values), 0)
@@ -183,7 +184,7 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 	id := cMsgs[0].MsgID
 
 	aclTsSizeKey := constructKey(AckedTsTitle, topicName)
-	keys, values, err := rmq.kv.LoadWithPrefix(aclTsSizeKey)
+	keys, values, err := rmq.kv.LoadWithPrefix(context.TODO(), aclTsSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 2)
 	assert.Equal(t, len(values), 2)
@@ -202,26 +203,26 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 
 	// test acked size acked ts and other meta are updated as expect
 	msgSizeKey := MessageSizeTitle + topicName
-	msgSizeVal, err := rmq.kv.Load(msgSizeKey)
+	msgSizeVal, err := rmq.kv.Load(context.TODO(), msgSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, msgSizeVal, "0")
 
 	// should only clean 2 pages
 	pageMsgSizeKey := constructKey(PageMsgSizeTitle, topicName)
-	keys, values, err = rmq.kv.LoadWithPrefix(pageMsgSizeKey)
+	keys, values, err = rmq.kv.LoadWithPrefix(context.TODO(), pageMsgSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 48)
 	assert.Equal(t, len(values), 48)
 
 	pageTsSizeKey := constructKey(PageTsTitle, topicName)
-	keys, values, err = rmq.kv.LoadWithPrefix(pageTsSizeKey)
+	keys, values, err = rmq.kv.LoadWithPrefix(context.TODO(), pageTsSizeKey)
 	assert.NoError(t, err)
 
 	assert.Equal(t, len(keys), 48)
 	assert.Equal(t, len(values), 48)
 
 	aclTsSizeKey = constructKey(AckedTsTitle, topicName)
-	keys, values, err = rmq.kv.LoadWithPrefix(aclTsSizeKey)
+	keys, values, err = rmq.kv.LoadWithPrefix(context.TODO(), aclTsSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 0)
 	assert.Equal(t, len(values), 0)
@@ -317,46 +318,46 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 
 	// test acked size acked ts and other meta are updated as expect
 	msgSizeKey := MessageSizeTitle + topicName
-	msgSizeVal, err := rmq.kv.Load(msgSizeKey)
+	msgSizeVal, err := rmq.kv.Load(context.TODO(), msgSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, msgSizeVal, "0")
 
 	// 100 page left, each entity is a page
 	pageMsgSizeKey := constructKey(PageMsgSizeTitle, "topic_a")
-	keys, values, err := rmq.kv.LoadWithPrefix(pageMsgSizeKey)
+	keys, values, err := rmq.kv.LoadWithPrefix(context.TODO(), pageMsgSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 0)
 	assert.Equal(t, len(values), 0)
 
 	pageTsSizeKey := constructKey(PageTsTitle, "topic_a")
-	keys, values, err = rmq.kv.LoadWithPrefix(pageTsSizeKey)
+	keys, values, err = rmq.kv.LoadWithPrefix(context.TODO(), pageTsSizeKey)
 	assert.NoError(t, err)
 
 	assert.Equal(t, len(keys), 0)
 	assert.Equal(t, len(values), 0)
 
 	aclTsSizeKey := constructKey(AckedTsTitle, "topic_a")
-	keys, values, err = rmq.kv.LoadWithPrefix(aclTsSizeKey)
+	keys, values, err = rmq.kv.LoadWithPrefix(context.TODO(), aclTsSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 0)
 	assert.Equal(t, len(values), 0)
 
 	// for topic B, nothing has been cleadn
 	pageMsgSizeKey = constructKey(PageMsgSizeTitle, "topic_b")
-	keys, values, err = rmq.kv.LoadWithPrefix(pageMsgSizeKey)
+	keys, values, err = rmq.kv.LoadWithPrefix(context.TODO(), pageMsgSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 50)
 	assert.Equal(t, len(values), 50)
 
 	pageTsSizeKey = constructKey(PageTsTitle, "topic_b")
-	keys, values, err = rmq.kv.LoadWithPrefix(pageTsSizeKey)
+	keys, values, err = rmq.kv.LoadWithPrefix(context.TODO(), pageTsSizeKey)
 	assert.NoError(t, err)
 
 	assert.Equal(t, len(keys), 50)
 	assert.Equal(t, len(values), 50)
 
 	aclTsSizeKey = constructKey(AckedTsTitle, "topic_b")
-	keys, values, err = rmq.kv.LoadWithPrefix(aclTsSizeKey)
+	keys, values, err = rmq.kv.LoadWithPrefix(context.TODO(), aclTsSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 0)
 	assert.Equal(t, len(values), 0)
@@ -539,26 +540,26 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 
 	// test acked size acked ts and other meta are updated as expect
 	msgSizeKey := MessageSizeTitle + topicName
-	msgSizeVal, err := rmq.kv.Load(msgSizeKey)
+	msgSizeVal, err := rmq.kv.Load(context.TODO(), msgSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, msgSizeVal, "0")
 
 	// 100 page left, each entity is a page
 	pageMsgSizeKey := constructKey(PageMsgSizeTitle, topicName)
-	keys, values, err := rmq.kv.LoadWithPrefix(pageMsgSizeKey)
+	keys, values, err := rmq.kv.LoadWithPrefix(context.TODO(), pageMsgSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 100)
 	assert.Equal(t, len(values), 100)
 
 	pageTsSizeKey := constructKey(PageTsTitle, topicName)
-	keys, values, err = rmq.kv.LoadWithPrefix(pageTsSizeKey)
+	keys, values, err = rmq.kv.LoadWithPrefix(context.TODO(), pageTsSizeKey)
 	assert.NoError(t, err)
 
 	assert.Equal(t, len(keys), 100)
 	assert.Equal(t, len(values), 100)
 
 	aclTsSizeKey := constructKey(AckedTsTitle, topicName)
-	keys, values, err = rmq.kv.LoadWithPrefix(aclTsSizeKey)
+	keys, values, err = rmq.kv.LoadWithPrefix(context.TODO(), aclTsSizeKey)
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 100)
 	assert.Equal(t, len(values), 100)

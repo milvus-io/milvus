@@ -102,12 +102,12 @@ WriteFieldData(File& file,
                     auto str =
                         static_cast<const std::string*>(data->RawValue(i));
                     ssize_t written_data_size =
-                        file.WriteInt<uint32_t>(uint32_t(str->size()));
+                        file.FWriteInt<uint32_t>(uint32_t(str->size()));
                     if (written_data_size != sizeof(uint32_t)) {
                         THROW_FILE_WRITE_ERROR
                     }
                     total_written += written_data_size;
-                    auto written_data = file.Write(str->data(), str->size());
+                    auto written_data = file.FWrite(str->data(), str->size());
                     if (written_data < str->size()) {
                         THROW_FILE_WRITE_ERROR
                     }
@@ -121,14 +121,14 @@ WriteFieldData(File& file,
                     indices.push_back(total_written);
                     auto padded_string =
                         static_cast<const Json*>(data->RawValue(i))->data();
-                    ssize_t written_data_size =
-                        file.WriteInt<uint32_t>(uint32_t(padded_string.size()));
+                    ssize_t written_data_size = file.FWriteInt<uint32_t>(
+                        uint32_t(padded_string.size()));
                     if (written_data_size != sizeof(uint32_t)) {
                         THROW_FILE_WRITE_ERROR
                     }
                     total_written += written_data_size;
                     ssize_t written_data =
-                        file.Write(padded_string.data(), padded_string.size());
+                        file.FWrite(padded_string.data(), padded_string.size());
                     if (written_data < padded_string.size()) {
                         THROW_FILE_WRITE_ERROR
                     }
@@ -142,7 +142,7 @@ WriteFieldData(File& file,
                     indices.push_back(total_written);
                     auto array = static_cast<const Array*>(data->RawValue(i));
                     ssize_t written =
-                        file.Write(array->data(), array->byte_size());
+                        file.FWrite(array->data(), array->byte_size());
                     if (written < array->byte_size()) {
                         THROW_FILE_WRITE_ERROR
                     }
@@ -158,7 +158,7 @@ WriteFieldData(File& file,
                         static_cast<const knowhere::sparse::SparseRow<float>*>(
                             data->RawValue(i));
                     ssize_t written =
-                        file.Write(vec->data(), vec->data_byte_size());
+                        file.FWrite(vec->data(), vec->data_byte_size());
                     if (written < vec->data_byte_size()) {
                         break;
                     }
@@ -173,7 +173,7 @@ WriteFieldData(File& file,
         }
     } else {
         // write as: data|data|data|data|data|data......
-        size_t written = file.Write(data->Data(), data->DataSize());
+        size_t written = file.FWrite(data->Data(), data->DataSize());
         if (written < data->DataSize()) {
             THROW_FILE_WRITE_ERROR
         }
@@ -191,5 +191,6 @@ WriteFieldData(File& file,
             valid_data.push_back(data->is_valid(i));
         }
     }
+    file.FFlush();
 }
 }  // namespace milvus

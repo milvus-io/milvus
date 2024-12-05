@@ -107,7 +107,7 @@ func (t *createCollectionTask) validate() error {
 	if t.Req.GetNumPartitions() > 0 {
 		newPartNum = t.Req.GetNumPartitions()
 	}
-	return checkGeneralCapacity(t.ctx, 1, newPartNum, t.Req.GetShardsNum(), t.core, t.ts)
+	return checkGeneralCapacity(t.ctx, 1, newPartNum, t.Req.GetShardsNum(), t.core)
 }
 
 // checkMaxCollectionsPerDB DB properties take precedence over quota configurations for max collections.
@@ -611,7 +611,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		baseStep:        baseStep{core: t.core},
 		dbName:          t.Req.GetDbName(),
 		collectionNames: []string{t.Req.GetCollectionName()},
-		collectionID:    InvalidCollectionID,
+		collectionID:    collID,
 		ts:              ts,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
 	}, &nullStep{})

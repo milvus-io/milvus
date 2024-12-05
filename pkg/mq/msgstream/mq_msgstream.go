@@ -121,7 +121,7 @@ func NewMqMsgStream(ctx context.Context,
 }
 
 // AsProducer create producer to send message to channels
-func (ms *mqMsgStream) AsProducer(channels []string) {
+func (ms *mqMsgStream) AsProducer(ctx context.Context, channels []string) {
 	for _, channel := range channels {
 		if len(channel) == 0 {
 			log.Error("MsgStream asProducer's channel is an empty string")
@@ -129,7 +129,7 @@ func (ms *mqMsgStream) AsProducer(channels []string) {
 		}
 
 		fn := func() error {
-			pp, err := ms.client.CreateProducer(common.ProducerOptions{Topic: channel, EnableCompression: true})
+			pp, err := ms.client.CreateProducer(ctx, common.ProducerOptions{Topic: channel, EnableCompression: true})
 			if err != nil {
 				return err
 			}
@@ -176,7 +176,7 @@ func (ms *mqMsgStream) AsConsumer(ctx context.Context, channels []string, subNam
 			continue
 		}
 		fn := func() error {
-			pc, err := ms.client.Subscribe(mqwrapper.ConsumerOptions{
+			pc, err := ms.client.Subscribe(ctx, mqwrapper.ConsumerOptions{
 				Topic:                       channel,
 				SubscriptionName:            subName,
 				SubscriptionInitialPosition: position,
@@ -273,7 +273,7 @@ func (ms *mqMsgStream) isEnabledProduce() bool {
 	return ms.enableProduce.Load().(bool)
 }
 
-func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
+func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
 	if !ms.isEnabledProduce() {
 		log.Warn("can't produce the msg in the backup instance", zap.Stack("stack"))
 		return merr.ErrDenyProduceMsg
@@ -346,7 +346,7 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 
 // BroadcastMark broadcast msg pack to all producers and returns corresponding msg id
 // the returned message id serves as marking
-func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) (map[string][]MessageID, error) {
+func (ms *mqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) (map[string][]MessageID, error) {
 	ids := make(map[string][]MessageID)
 	if msgPack == nil || len(msgPack.Msgs) <= 0 {
 		return ids, errors.New("empty msgs")
@@ -581,7 +581,7 @@ func (ms *MqTtMsgStream) AsConsumer(ctx context.Context, channels []string, subN
 			continue
 		}
 		fn := func() error {
-			pc, err := ms.client.Subscribe(mqwrapper.ConsumerOptions{
+			pc, err := ms.client.Subscribe(ctx, mqwrapper.ConsumerOptions{
 				Topic:                       channel,
 				SubscriptionName:            subName,
 				SubscriptionInitialPosition: position,
