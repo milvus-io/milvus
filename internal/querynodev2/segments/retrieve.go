@@ -141,9 +141,9 @@ func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []
 }
 
 // retrieve will retrieve all the validate target segments
-func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest) ([]RetrieveSegmentResult, []Segment, error) {
+func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest) ([]RetrieveSegmentResult, error) {
 	if ctx.Err() != nil {
-		return nil, nil, ctx.Err()
+		return nil, ctx.Err()
 	}
 
 	var err error
@@ -156,41 +156,38 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed
-		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
 	} else {
 		SegType = SegmentTypeGrowing
-		retrieveSegments, err = validateOnStream(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
 	}
-
+	retrieveSegments, err = manager.Segment.GetAndPin(segIDs)
 	if err != nil {
-		return nil, retrieveSegments, err
+		return nil, err
 	}
+	defer manager.Segment.Unpin(retrieveSegments)
 
 	result, err := retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan, req)
-	return result, retrieveSegments, err
+	return result, err
 }
 
 // retrieveStreaming will retrieve all the validate target segments  and  return by stream
-func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) ([]Segment, error) {
+func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
 	var err error
 	var SegType commonpb.SegmentState
 	var retrieveSegments []Segment
 
 	segIDs := req.GetSegmentIDs()
-	collID := req.Req.GetCollectionID()
 
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed
-		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
 	} else {
 		SegType = SegmentTypeGrowing
-		retrieveSegments, err = validateOnStream(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
 	}
-
+	retrieveSegments, err = manager.Segment.GetAndPin(segIDs)
 	if err != nil {
-		return retrieveSegments, err
+		return err
 	}
+	defer manager.Segment.Unpin(retrieveSegments)
 
 	err = retrieveOnSegmentsWithStream(ctx, manager, retrieveSegments, SegType, plan, srv)
-	return retrieveSegments, err
+	return err
 }
