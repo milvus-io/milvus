@@ -73,7 +73,10 @@ class Chunk {
 
     virtual bool
     isValid(int offset) {
-        return valid_[offset];
+        if (nullable_) {
+            return valid_[offset];
+        }
+        return true;
     };
 
  protected:

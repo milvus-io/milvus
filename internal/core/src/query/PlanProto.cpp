@@ -54,10 +54,9 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         search_info.materialized_view_involved =
             query_info_proto.materialized_view_involved();
         // currently, iterative filter does not support range search
-        if (search_info.search_params_.contains(ITERATIVE_FILTER) &&
-            !search_info.search_params_.contains(RADIUS)) {
+        if (!search_info.search_params_.contains(RADIUS)) {
             search_info.iterative_filter_execution =
-                search_info.search_params_[ITERATIVE_FILTER];
+                (query_info_proto.hints() == ITERATIVE_FILTER);
         }
 
         if (query_info_proto.bm25_avgdl() > 0) {
