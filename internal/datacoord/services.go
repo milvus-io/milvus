@@ -204,7 +204,6 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			zap.Int64("partitionID", r.GetPartitionID()),
 			zap.String("channelName", r.GetChannelName()),
 			zap.Uint32("count", r.GetCount()),
-			zap.String("segment level", r.GetLevel().String()),
 		)
 
 		// Load the collection info from Root Coordinator, if it is not found in server meta.

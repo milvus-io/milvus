@@ -167,7 +167,7 @@ message SegmentIDRequest {
   int64 partitionID = 4;
   bool isImport = 5;        // deprecated
   int64 importTaskID = 6;   // deprecated
-  SegmentLevel level = 7;
+  SegmentLevel level = 7; // deprecated
 }
 
 message AssignSegmentIDRequest {
