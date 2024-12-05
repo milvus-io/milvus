@@ -264,6 +264,12 @@ type commonConfig struct {
 	ReadOnlyPrivileges                  ParamItem `refreshable:"false"`
 	ReadWritePrivileges                 ParamItem `refreshable:"false"`
 	AdminPrivileges                     ParamItem `refreshable:"false"`
+
+	HealthCheckInterval   ParamItem `refreshable:"true"`
+	HealthCheckRPCTimeout ParamItem `refreshable:"true"`
+
+	// Local RPC enabled for milvus internal communication when mix or standalone mode.
+	LocalRPCEnabled ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -913,6 +919,31 @@ This helps Milvus-CDC synchronize incremental data`,
 		Doc:     `use to override the default value of admin privileges,  example: "PrivilegeCreateOwnership,PrivilegeDropOwnership"`,
 	}
 	p.AdminPrivileges.Init(base.mgr)
+
+	p.HealthCheckInterval = ParamItem{
+		Key:          "common.healthcheck.interval.seconds",
+		Version:      "2.4.8",
+		DefaultValue: "30",
+		Doc:          `health check interval in seconds, default 30s`,
+	}
+	p.HealthCheckInterval.Init(base.mgr)
+
+	p.HealthCheckRPCTimeout = ParamItem{
+		Key:          "common.healthcheck.timeout.seconds",
+		Version:      "2.4.8",
+		DefaultValue: "10",
+		Doc:          `RPC timeout for health check request`,
+	}
+	p.HealthCheckRPCTimeout.Init(base.mgr)
+
+	p.LocalRPCEnabled = ParamItem{
+		Key:          "common.localRPCEnabled",
+		Version:      "2.4.18",
+		DefaultValue: "true",
+		Doc:          `enable local rpc for internal communication when mix or standalone mode.`,
+		Export:       true,
+	}
+	p.LocalRPCEnabled.Init(base.mgr)
 }
 
 type gpuConfig struct {
