@@ -3,9 +3,9 @@
 package meta
 
 import (
-	metastore "github.com/milvus-io/milvus/internal/metastore"
-	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
+	context "context"
 
+	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 
 	typeutil "github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -606,13 +606,17 @@ func (_c *MockTargetManager_IsNextTargetExist_Call) RunAndReturn(run func(int64)
 	return _c
 }
 
-// Recover provides a mock function with given fields: catalog
-func (_m *MockTargetManager) Recover(catalog metastore.QueryCoordCatalog) error {
-	ret := _m.Called(catalog)
+// Recover provides a mock function with given fields: ctx
+func (_m *MockTargetManager) Recover() error {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Recover")
+	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(metastore.QueryCoordCatalog) error); ok {
-		r0 = rf(catalog)
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf()
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -626,14 +630,14 @@ type MockTargetManager_Recover_Call struct {
 }
 
 // Recover is a helper method to define mock.On call
-//   - catalog metastore.QueryCoordCatalog
-func (_e *MockTargetManager_Expecter) Recover(catalog interface{}) *MockTargetManager_Recover_Call {
-	return &MockTargetManager_Recover_Call{Call: _e.mock.On("Recover", catalog)}
+//   - ctx context.Context
+func (_e *MockTargetManager_Expecter) Recover() *MockTargetManager_Recover_Call {
+	return &MockTargetManager_Recover_Call{Call: _e.mock.On("Recover")}
 }
 
-func (_c *MockTargetManager_Recover_Call) Run(run func(catalog metastore.QueryCoordCatalog)) *MockTargetManager_Recover_Call {
+func (_c *MockTargetManager_Recover_Call) Run(run func()) *MockTargetManager_Recover_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(metastore.QueryCoordCatalog))
+		run()
 	})
 	return _c
 }
@@ -643,7 +647,7 @@ func (_c *MockTargetManager_Recover_Call) Return(_a0 error) *MockTargetManager_R
 	return _c
 }
 
-func (_c *MockTargetManager_Recover_Call) RunAndReturn(run func(metastore.QueryCoordCatalog) error) *MockTargetManager_Recover_Call {
+func (_c *MockTargetManager_Recover_Call) RunAndReturn(run func(context.Context) error) *MockTargetManager_Recover_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -729,42 +733,13 @@ func (_c *MockTargetManager_RemovePartition_Call) RunAndReturn(run func(int64, .
 	return _c
 }
 
-// SaveCurrentTarget provides a mock function with given fields: catalog
-func (_m *MockTargetManager) SaveCurrentTarget(catalog metastore.QueryCoordCatalog) {
-	_m.Called(catalog)
-}
+// UpdateCollectionCurrentTarget provides a mock function with given fields: ctx, collectionID
+func (_m *MockTargetManager) UpdateCollectionCurrentTarget(ctx context.Context, collectionID int64) bool {
+	ret := _m.Called(ctx, collectionID)
 
-// MockTargetManager_SaveCurrentTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveCurrentTarget'
-type MockTargetManager_SaveCurrentTarget_Call struct {
-	*mock.Call
-}
-
-// SaveCurrentTarget is a helper method to define mock.On call
-//   - catalog metastore.QueryCoordCatalog
-func (_e *MockTargetManager_Expecter) SaveCurrentTarget(catalog interface{}) *MockTargetManager_SaveCurrentTarget_Call {
-	return &MockTargetManager_SaveCurrentTarget_Call{Call: _e.mock.On("SaveCurrentTarget", catalog)}
-}
-
-func (_c *MockTargetManager_SaveCurrentTarget_Call) Run(run func(catalog metastore.QueryCoordCatalog)) *MockTargetManager_SaveCurrentTarget_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(metastore.QueryCoordCatalog))
-	})
-	return _c
-}
-
-func (_c *MockTargetManager_SaveCurrentTarget_Call) Return() *MockTargetManager_SaveCurrentTarget_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockTargetManager_SaveCurrentTarget_Call) RunAndReturn(run func(metastore.QueryCoordCatalog)) *MockTargetManager_SaveCurrentTarget_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// UpdateCollectionCurrentTarget provides a mock function with given fields: collectionID
-func (_m *MockTargetManager) UpdateCollectionCurrentTarget(collectionID int64) bool {
-	ret := _m.Called(collectionID)
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateCollectionCurrentTarget")
+	}
 
 	var r0 bool
 	if rf, ok := ret.Get(0).(func(int64) bool); ok {
