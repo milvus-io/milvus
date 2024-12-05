@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
@@ -156,7 +157,7 @@ func getValidSearchParams() []*commonpb.KeyValuePair {
 			Value: metric.L2,
 		},
 		{
-			Key:   SearchParamsKey,
+			Key:   ParamsKey,
 			Value: `{"nprobe": 10}`,
 		},
 		{
@@ -2259,7 +2260,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 
 		noMetricTypeParams := getBaseSearchParams()
 		noMetricTypeParams = append(noMetricTypeParams, &commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
+			Key:   ParamsKey,
 			Value: `{"nprobe": 10}`,
 		})
 
@@ -2405,7 +2406,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 
 		// no roundDecimal is valid
 		noRoundDecimal := append(spNoSearchParams, &commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
+			Key:   ParamsKey,
 			Value: `{"nprobe": 10}`,
 		})
 
@@ -2484,7 +2485,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 	})
 	t.Run("check range-search and groupBy", func(t *testing.T) {
 		normalParam := getValidSearchParams()
-		resetSearchParamsValue(normalParam, SearchParamsKey, `{"nprobe": 10, "radius":0.2}`)
+		resetSearchParamsValue(normalParam, ParamsKey, `{"nprobe": 10, "radius":0.2}`)
 		normalParam = append(normalParam, &commonpb.KeyValuePair{
 			Key:   GroupByFieldKey,
 			Value: "string_field",
@@ -2598,6 +2599,119 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			assert.Error(t, searchInfo.parseError)
 			assert.True(t, strings.Contains(searchInfo.parseError.Error(), "failed to parse input group size"))
 		}
+	})
+
+	t.Run("parameters in searchParams and searchParams.Params are inconsistent with same key", func(t *testing.T) {
+		normalParam := getValidSearchParams()
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   nprobeKey,
+			Value: "100",
+		})
+		fields := make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: int64(101),
+			Name:    "string_field",
+		})
+		schema := &schemapb.CollectionSchema{
+			Fields: fields,
+		}
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		assert.Nil(t, searchInfo.planInfo)
+		assert.ErrorIs(t, searchInfo.parseError, merr.ErrParameterInvalid)
+	})
+
+	t.Run("type of param is incorrect", func(t *testing.T) {
+		normalParam := getValidSearchParams()
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   nprobeKey,
+			Value: "true",
+		})
+		fields := make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: int64(101),
+			Name:    "string_field",
+		})
+		schema := &schemapb.CollectionSchema{
+			Fields: fields,
+		}
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		assert.Nil(t, searchInfo.planInfo)
+		assert.NotNil(t, searchInfo.parseError)
+	})
+
+	t.Run("type of param is incorrect", func(t *testing.T) {
+		normalParam := getValidSearchParams()
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   pageRetainOrderKey,
+			Value: "10",
+		})
+		fields := make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: int64(101),
+			Name:    "string_field",
+		})
+		schema := &schemapb.CollectionSchema{
+			Fields: fields,
+		}
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		assert.Nil(t, searchInfo.planInfo)
+		assert.NotNil(t, searchInfo.parseError)
+	})
+
+	t.Run("old parameters forms", func(t *testing.T) {
+		normalParam := getValidSearchParams()
+		resetSearchParamsValue(normalParam, ParamsKey, `{"nprobe": 10, "radius":0.2, "range_filter": 1, "page_retain_order":true}`)
+		fields := make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: int64(101),
+			Name:    "string_field",
+		})
+		schema := &schemapb.CollectionSchema{
+			Fields: fields,
+		}
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		var searchParamMap map[string]any
+		_ = json.Unmarshal([]byte(searchInfo.planInfo.SearchParams), &searchParamMap)
+		assert.Nil(t, searchInfo.parseError)
+		assert.Equal(t, 4, len(searchParamMap))
+		assert.Equal(t, searchParamMap[nprobeKey], float64(10))
+		assert.Equal(t, searchParamMap[radiusKey], 0.2)
+		assert.Equal(t, searchParamMap[rangeFilterKey], float64(1))
+		assert.Equal(t, searchParamMap[pageRetainOrderKey], true)
+	})
+
+	t.Run("new parameters forms", func(t *testing.T) {
+		normalParam := getValidSearchParams()
+		resetSearchParamsValue(normalParam, ParamsKey, `{"nprobe": 10, "radius":0.2}`)
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   nprobeKey,
+			Value: "10",
+		})
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   rangeFilterKey,
+			Value: "1",
+		})
+		normalParam = append(normalParam, &commonpb.KeyValuePair{
+			Key:   pageRetainOrderKey,
+			Value: "true",
+		})
+		fields := make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: int64(101),
+			Name:    "string_field",
+		})
+		schema := &schemapb.CollectionSchema{
+			Fields: fields,
+		}
+		searchInfo := parseSearchInfo(normalParam, schema, nil)
+		var searchParamMap map[string]any
+		_ = json.Unmarshal([]byte(searchInfo.planInfo.SearchParams), &searchParamMap)
+		assert.Nil(t, searchInfo.parseError)
+		assert.Equal(t, 4, len(searchParamMap))
+		assert.Equal(t, searchParamMap[nprobeKey], float64(10))
+		assert.Equal(t, searchParamMap[radiusKey], 0.2)
+		assert.Equal(t, searchParamMap[rangeFilterKey], float64(1))
+		assert.Equal(t, searchParamMap[pageRetainOrderKey], true)
 	})
 }
 

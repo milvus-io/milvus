@@ -61,7 +61,7 @@ const (
 	TopKKey              = "topk"
 	NQKey                = "nq"
 	MetricTypeKey        = common.MetricTypeKey
-	SearchParamsKey      = "params"
+	ParamsKey            = "params"
 	ExprParamsKey        = "expr_params"
 	RoundDecimalKey      = "round_decimal"
 	OffsetKey            = "offset"

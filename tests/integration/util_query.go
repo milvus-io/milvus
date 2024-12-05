@@ -41,7 +41,7 @@ const (
 	TopKKey         = "topk"
 	NQKey           = "nq"
 	MetricTypeKey   = common.MetricTypeKey
-	SearchParamsKey = common.IndexParamsKey
+	ParamsKey       = common.IndexParamsKey
 	RoundDecimalKey = "round_decimal"
 	OffsetKey       = "offset"
 	LimitKey        = "limit"
@@ -196,7 +196,7 @@ func ConstructSearchRequest(
 				Value: metricType,
 			},
 			{
-				Key:   SearchParamsKey,
+				Key:   ParamsKey,
 				Value: string(b),
 			},
 			{
@@ -255,7 +255,7 @@ func ConstructSearchRequestWithConsistencyLevel(
 				Value: metricType,
 			},
 			{
-				Key:   SearchParamsKey,
+				Key:   ParamsKey,
 				Value: string(b),
 			},
 			{

@@ -43,8 +43,6 @@ const (
 	// a second query request will be initiated to retrieve output fields data.
 	// In this case, the first search will not return any output field from QueryNodes.
 	requeryThreshold = 0.5 * 1024 * 1024
-	radiusKey        = "radius"
-	rangeFilterKey   = "range_filter"
 )
 
 type searchTask struct {
