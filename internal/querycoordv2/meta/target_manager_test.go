@@ -120,7 +120,7 @@ func (suite *TargetManagerSuite) SetupTest() {
 	idAllocator := RandomIncrementIDAllocator()
 	suite.meta = NewMeta(idAllocator, suite.catalog, session.NewNodeManager())
 	suite.broker = NewMockBroker(suite.T())
-	suite.mgr = NewTargetManager(suite.broker, suite.meta)
+	suite.mgr = NewTargetManager(suite.broker, suite.meta, querycoord.NewCatalog(suite.kv))
 
 	for _, collection := range suite.collections {
 		dmChannels := make([]*datapb.VchannelInfo, 0)
@@ -596,13 +596,16 @@ func (suite *TargetManagerSuite) TestRecover() {
 	suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
 	suite.mgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
-	suite.mgr.SaveCurrentTarget(ctx, suite.catalog)
+	// target should be save to meta store after update current target
+	targets, err := suite.catalog.GetCollectionTargets(ctx)
+	suite.NoError(err)
+	suite.Len(targets, 1)
 
 	// clear target in memory
 	version := suite.mgr.current.getCollectionTarget(collectionID).GetTargetVersion()
 	suite.mgr.current.removeCollectionTarget(collectionID)
 	// try to recover
-	suite.mgr.Recover(ctx, suite.catalog)
+	suite.mgr.Recover(ctx)
 
 	target := suite.mgr.current.getCollectionTarget(collectionID)
 	suite.NotNil(target)
@@ -610,8 +613,9 @@ func (suite *TargetManagerSuite) TestRecover() {
 	suite.Len(target.GetAllSegmentIDs(), 2)
 	suite.Equal(target.GetTargetVersion(), version)
 
-	// after recover, target info should be cleaned up
-	targets, err := suite.catalog.GetCollectionTargets(ctx)
+	// target should be removed from meta store after collection released
+	suite.mgr.RemoveCollection(ctx, collectionID)
+	targets, err = suite.catalog.GetCollectionTargets(ctx)
 	suite.NoError(err)
 	suite.Len(targets, 0)
 }

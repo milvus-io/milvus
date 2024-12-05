@@ -159,7 +159,7 @@ func (suite *TaskSuite) SetupTest() {
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store, session.NewNodeManager())
 	suite.dist = meta.NewDistributionManager()
 	suite.broker = meta.NewMockBroker(suite.T())
-	suite.target = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.target = meta.NewTargetManager(suite.broker, suite.meta, querycoord.NewCatalog(suite.kv))
 	suite.nodeMgr = session.NewNodeManager()
 	suite.cluster = session.NewMockCluster(suite.T())
 
