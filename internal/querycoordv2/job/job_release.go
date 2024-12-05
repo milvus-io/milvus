@@ -80,11 +80,6 @@ func (job *ReleaseCollectionJob) Execute() error {
 		return nil
 	}
 
-	loadedPartitions := job.meta.CollectionManager.GetPartitionsByCollection(job.ctx, req.GetCollectionID())
-	toRelease := lo.Map(loadedPartitions, func(partition *meta.Partition, _ int) int64 {
-		return partition.GetPartitionID()
-	})
-
 	err := job.meta.CollectionManager.RemoveCollection(job.ctx, req.GetCollectionID())
 	if err != nil {
 		msg := "failed to remove collection"
