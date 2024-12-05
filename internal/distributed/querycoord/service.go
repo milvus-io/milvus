@@ -31,7 +31,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
+	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
+	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -168,7 +169,11 @@ func (s *Server) init() error {
 
 	// --- Master Server Client ---
 	if s.rootCoord == nil {
-		s.rootCoord = coordclient.GetRootCoordClient(s.loopCtx)
+		s.rootCoord, err = rcc.NewClient(s.loopCtx)
+		if err != nil {
+			log.Error("QueryCoord try to new RootCoord client failed", zap.Error(err))
+			panic(err)
+		}
 	}
 
 	// wait for master init or healthy
@@ -186,7 +191,11 @@ func (s *Server) init() error {
 
 	// --- Data service client ---
 	if s.dataCoord == nil {
-		s.dataCoord = coordclient.GetDataCoordClient(s.loopCtx)
+		s.dataCoord, err = dcc.NewClient(s.loopCtx)
+		if err != nil {
+			log.Error("QueryCoord try to new DataCoord client failed", zap.Error(err))
+			panic(err)
+		}
 	}
 
 	log.Info("QueryCoord try to wait for DataCoord ready")
@@ -249,7 +258,6 @@ func (s *Server) startGrpcLoop() {
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 	)
 	querypb.RegisterQueryCoordServer(s.grpcServer, s)
-	coordclient.RegisterQueryCoordServer(s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {
