@@ -17,6 +17,7 @@
 package etcdkv_test
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -49,7 +50,7 @@ func TestEtcdConfigLoad(te *testing.T) {
 		require.NoError(t, err)
 
 		defer metaKv.Close()
-		defer metaKv.RemoveWithPrefix("")
+		defer metaKv.RemoveWithPrefix(context.TODO(), "")
 
 		kv := metaKv.(*embed_etcd_kv.EmbedEtcdKV)
 		assert.Equal(t, kv.GetConfig().SnapshotCount, uint64(1000))

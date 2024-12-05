@@ -17,6 +17,8 @@
 package kv
 
 import (
+	"context"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/pkg/kv/predicates"
@@ -40,16 +42,16 @@ func NewCompareFailedError(err error) error {
 
 // BaseKV contains base operations of kv. Include save, load and remove.
 type BaseKV interface {
-	Load(key string) (string, error)
-	MultiLoad(keys []string) ([]string, error)
-	LoadWithPrefix(key string) ([]string, []string, error)
-	Save(key, value string) error
-	MultiSave(kvs map[string]string) error
-	Remove(key string) error
-	MultiRemove(keys []string) error
-	RemoveWithPrefix(key string) error
-	Has(key string) (bool, error)
-	HasPrefix(prefix string) (bool, error)
+	Load(ctx context.Context, key string) (string, error)
+	MultiLoad(ctx context.Context, keys []string) ([]string, error)
+	LoadWithPrefix(ctx context.Context, key string) ([]string, []string, error)
+	Save(ctx context.Context, key, value string) error
+	MultiSave(ctx context.Context, kvs map[string]string) error
+	Remove(ctx context.Context, key string) error
+	MultiRemove(ctx context.Context, keys []string) error
+	RemoveWithPrefix(ctx context.Context, key string) error
+	Has(ctx context.Context, key string) (bool, error)
+	HasPrefix(ctx context.Context, prefix string) (bool, error)
 	Close()
 }
 
@@ -58,8 +60,8 @@ type BaseKV interface {
 //go:generate mockery --name=TxnKV --with-expecter
 type TxnKV interface {
 	BaseKV
-	MultiSaveAndRemove(saves map[string]string, removals []string, preds ...predicates.Predicate) error
-	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, preds ...predicates.Predicate) error
+	MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error
+	MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error
 }
 
 // MetaKv is TxnKV for metadata. It should save data with lease.
@@ -68,9 +70,9 @@ type TxnKV interface {
 type MetaKv interface {
 	TxnKV
 	GetPath(key string) string
-	LoadWithPrefix(key string) ([]string, []string, error)
-	CompareVersionAndSwap(key string, version int64, target string) (bool, error)
-	WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error
+	LoadWithPrefix(ctx context.Context, key string) ([]string, []string, error)
+	CompareVersionAndSwap(ctx context.Context, key string, version int64, target string) (bool, error)
+	WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error
 }
 
 // WatchKV is watchable MetaKv. As of today(2023/06/24), it's coupled with etcd.
@@ -78,19 +80,19 @@ type MetaKv interface {
 //go:generate mockery --name=WatchKV --with-expecter
 type WatchKV interface {
 	MetaKv
-	Watch(key string) clientv3.WatchChan
-	WatchWithPrefix(key string) clientv3.WatchChan
-	WatchWithRevision(key string, revision int64) clientv3.WatchChan
+	Watch(ctx context.Context, key string) clientv3.WatchChan
+	WatchWithPrefix(ctx context.Context, key string) clientv3.WatchChan
+	WatchWithRevision(ctx context.Context, key string, revision int64) clientv3.WatchChan
 }
 
 // SnapShotKV is TxnKV for snapshot data. It must save timestamp.
 //
 //go:generate mockery --name=SnapShotKV --with-expecter
 type SnapShotKV interface {
-	Save(key string, value string, ts typeutil.Timestamp) error
-	Load(key string, ts typeutil.Timestamp) (string, error)
-	MultiSave(kvs map[string]string, ts typeutil.Timestamp) error
-	LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error)
-	MultiSaveAndRemove(saves map[string]string, removals []string, ts typeutil.Timestamp) error
-	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp) error
+	Save(ctx context.Context, key string, value string, ts typeutil.Timestamp) error
+	Load(ctx context.Context, key string, ts typeutil.Timestamp) (string, error)
+	MultiSave(ctx context.Context, kvs map[string]string, ts typeutil.Timestamp) error
+	LoadWithPrefix(ctx context.Context, key string, ts typeutil.Timestamp) ([]string, []string, error)
+	MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, ts typeutil.Timestamp) error
+	MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, ts typeutil.Timestamp) error
 }

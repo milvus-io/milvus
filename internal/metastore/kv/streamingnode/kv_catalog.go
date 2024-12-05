@@ -29,7 +29,7 @@ type catalog struct {
 
 func (c *catalog) ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error) {
 	prefix := buildSegmentAssignmentMetaPath(pChannelName)
-	keys, values, err := c.metaKV.LoadWithPrefix(prefix)
+	keys, values, err := c.metaKV.LoadWithPrefix(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +66,7 @@ func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName strin
 
 	if len(removes) > 0 {
 		if err := etcd.RemoveByBatchWithLimit(removes, util.MaxEtcdTxnNum, func(partialRemoves []string) error {
-			return c.metaKV.MultiRemove(partialRemoves)
+			return c.metaKV.MultiRemove(ctx, partialRemoves)
 		}); err != nil {
 			return err
 		}
@@ -74,7 +74,7 @@ func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName strin
 
 	if len(kvs) > 0 {
 		return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
-			return c.metaKV.MultiSave(partialKvs)
+			return c.metaKV.MultiSave(ctx, partialKvs)
 		})
 	}
 	return nil
