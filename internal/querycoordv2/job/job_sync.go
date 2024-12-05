@@ -75,7 +75,7 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 		return nil
 	}
 
-	err := loadPartitions(job.ctx, job.meta, job.cluster, job.broker, false, req.GetCollectionID(), req.GetPartitionID())
+	err := loadPartitions(job.ctx, job.meta, job.cluster, req.GetCollectionID(), req.GetPartitionID())
 	if err != nil {
 		return err
 	}
