@@ -188,7 +188,11 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 }
 
 func (dt *deleteTask) PostExecute(ctx context.Context) error {
-	metrics.ProxyDeleteVectors.WithLabelValues(paramtable.GetStringNodeID(), dt.req.GetDbName()).Add(float64(dt.count))
+	metrics.ProxyDeleteVectors.WithLabelValues(
+		paramtable.GetStringNodeID(),
+		dt.req.GetDbName(),
+		dt.req.GetCollectionName(),
+	).Add(float64(dt.count))
 	return nil
 }
 
