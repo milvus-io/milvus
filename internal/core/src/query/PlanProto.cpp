@@ -57,6 +57,11 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         if (!search_info.search_params_.contains(RADIUS)) {
             search_info.iterative_filter_execution =
                 (query_info_proto.hints() == ITERATIVE_FILTER);
+            if (!search_info.iterative_filter_execution &&
+                search_info.search_params_.contains(HINTS)) {
+                search_info.iterative_filter_execution =
+                    (search_info.search_params_[HINTS] == ITERATIVE_FILTER);
+            }
         }
 
         if (query_info_proto.bm25_avgdl() > 0) {
