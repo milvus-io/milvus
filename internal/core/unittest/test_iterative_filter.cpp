@@ -145,7 +145,8 @@ TEST(IterativeFilter, SealedIndex) {
                                         query_info: <
                                           topk: 10
                                           metric_type: "L2"
-                                          search_params: "{\"ef\": 50, \"iterative_filter\": true}"
+                                          hints: "iterative_filter"
+                                          search_params: "{\"ef\": 50}"
                                         >
                                         placeholder_tag: "$0">)";
         proto::plan::PlanNode plan_node;
@@ -210,7 +211,8 @@ TEST(IterativeFilter, SealedIndex) {
                                         query_info: <
                                           topk: 10
                                           metric_type: "L2"
-                                          search_params: "{\"ef\": 50, \"iterative_filter\": true}"
+                                          hints: "iterative_filter"
+                                          search_params: "{\"ef\": 50}"
                                         >
                                         placeholder_tag: "$0">)";
         proto::plan::PlanNode plan_node;
@@ -313,7 +315,8 @@ TEST(IterativeFilter, SealedData) {
                                         query_info: <
                                           topk: 10
                                           metric_type: "L2"
-                                          search_params: "{\"ef\": 50, \"iterative_filter\": true}"
+                                          hints: "iterative_filter"
+                                          search_params: "{\"ef\": 50}"
                                         >
                                         placeholder_tag: "$0">)";
         proto::plan::PlanNode plan_node;
@@ -419,7 +422,8 @@ TEST(IterativeFilter, GrowingRawData) {
                                         query_info: <
                                           topk: 10
                                           metric_type: "L2"
-                                          search_params: "{\"ef\": 50, \"iterative_filter\": true}"
+                                          hints: "iterative_filter"
+                                          search_params: "{\"ef\": 50}"
                                         >
                                         placeholder_tag: "$0">)";
         proto::plan::PlanNode plan_node;
@@ -538,7 +542,8 @@ TEST(IterativeFilter, GrowingIndex) {
                                         query_info: <
                                           topk: 10
                                           metric_type: "L2"
-                                          search_params: "{\"nprobe\": 4, \"iterative_filter\": true}"
+                                          hints: "iterative_filter"
+                                          search_params: "{\"nprobe\": 4}"
                                         >
                                         placeholder_tag: "$0">)";
         proto::plan::PlanNode plan_node;
