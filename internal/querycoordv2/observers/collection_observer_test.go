@@ -174,6 +174,7 @@ func (suite *CollectionObserverSuite) SetupSuite() {
 }
 
 func (suite *CollectionObserverSuite) SetupTest() {
+	suite.ctx = context.Background()
 	// Mocks
 	var err error
 	suite.idAllocator = RandomIncrementIDAllocator()

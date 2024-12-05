@@ -23,6 +23,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // SnapshotItem group segmentEntry slice
@@ -36,6 +37,7 @@ type snapshotCleanup func()
 
 // snapshot records segment distribution with ref count.
 type snapshot struct {
+	partitions    typeutil.Set[int64]
 	dist          []SnapshotItem
 	growing       []SegmentEntry
 	targetVersion int64
@@ -60,6 +62,7 @@ type snapshot struct {
 // NewSnapshot returns a prepared snapshot with channel initialized.
 func NewSnapshot(sealed []SnapshotItem, growing []SegmentEntry, last *snapshot, version int64, targetVersion int64) *snapshot {
 	return &snapshot{
+		partitions:    typeutil.NewSet[int64](),
 		version:       version,
 		growing:       growing,
 		dist:          sealed,
