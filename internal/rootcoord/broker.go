@@ -225,7 +225,11 @@ func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID
 }
 
 func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
-	log.Info("broadcasting request to alter collection", zap.String("collectionName", req.GetCollectionName()), zap.Int64("collectionID", req.GetCollectionID()), zap.Any("props", req.GetProperties()))
+	log.Info("broadcasting request to alter collection",
+		zap.String("collectionName", req.GetCollectionName()),
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Any("props", req.GetProperties()),
+		zap.Any("deleteKeys", req.GetDeleteKeys()))
 
 	colMeta, err := b.s.meta.GetCollectionByID(ctx, req.GetDbName(), req.GetCollectionID(), typeutil.MaxTimestamp, false)
 	if err != nil {

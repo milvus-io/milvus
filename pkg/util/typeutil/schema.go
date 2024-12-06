@@ -527,6 +527,15 @@ func IsStringType(dataType schemapb.DataType) bool {
 	}
 }
 
+func IsArrayContainStringElementType(dataType schemapb.DataType, elementType schemapb.DataType) bool {
+	if IsArrayType(dataType) {
+		if elementType == schemapb.DataType_String || elementType == schemapb.DataType_VarChar {
+			return true
+		}
+	}
+	return false
+}
+
 func IsVariableDataType(dataType schemapb.DataType) bool {
 	return IsStringType(dataType) || IsArrayType(dataType) || IsJSONType(dataType)
 }
