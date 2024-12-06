@@ -1140,7 +1140,7 @@ func (t *alterCollectionFieldTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
-	t.Base.MsgType = commonpb.MsgType_AlterCollection
+	t.Base.MsgType = commonpb.MsgType_AlterCollectionField
 	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
@@ -1152,17 +1152,17 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	}
 
 	IsStringType := false
-	indexName := ""
+	fieldName := ""
 	var dataType int32
 	for _, field := range collSchema.Fields {
-		if field.GetName() == t.FieldName && typeutil.IsStringType(field.DataType) {
+		if field.GetName() == t.FieldName && (typeutil.IsStringType(field.DataType) || typeutil.IsArrayContainStringElementType(field.DataType, field.ElementType)) {
 			IsStringType = true
-			indexName = field.GetName()
+			fieldName = field.GetName()
 			dataType = int32(field.DataType)
 		}
 	}
 	if !IsStringType {
-		return merr.WrapErrParameterInvalid(indexName, "%s can not modify the maxlength for non-string types", schemapb.DataType_name[dataType])
+		return merr.WrapErrParameterInvalid(fieldName, "%s can not modify the maxlength for non-string types", schemapb.DataType_name[dataType])
 	}
 
 	return nil
