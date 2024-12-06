@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"testing"
 	"time"
 
@@ -43,6 +44,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+var _ kv.MetaKv = &metaMemoryKV{}
+
 type metaMemoryKV struct {
 	memkv.MemoryKV
 }
@@ -51,8 +54,8 @@ func NewMetaMemoryKV() *metaMemoryKV {
 	return &metaMemoryKV{MemoryKV: *memkv.NewMemoryKV()}
 }
 
-func (mm *metaMemoryKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
-	keys, values, err := mm.MemoryKV.LoadWithPrefix(prefix)
+func (mm *metaMemoryKV) WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error {
+	keys, values, err := mm.MemoryKV.LoadWithPrefix(context.TODO(), prefix)
 	if err != nil {
 		return err
 	}
@@ -69,19 +72,19 @@ func (mm *metaMemoryKV) GetPath(key string) string {
 	panic("implement me")
 }
 
-func (mm *metaMemoryKV) Watch(key string) clientv3.WatchChan {
+func (mm *metaMemoryKV) Watch(ctx context.Context, key string) clientv3.WatchChan {
 	panic("implement me")
 }
 
-func (mm *metaMemoryKV) WatchWithPrefix(key string) clientv3.WatchChan {
+func (mm *metaMemoryKV) WatchWithPrefix(ctx context.Context, key string) clientv3.WatchChan {
 	panic("implement me")
 }
 
-func (mm *metaMemoryKV) WatchWithRevision(key string, revision int64) clientv3.WatchChan {
+func (mm *metaMemoryKV) WatchWithRevision(ctx context.Context, key string, revision int64) clientv3.WatchChan {
 	panic("implement me")
 }
 
-func (mm *metaMemoryKV) CompareVersionAndSwap(key string, version int64, target string) (bool, error) {
+func (mm *metaMemoryKV) CompareVersionAndSwap(ctx context.Context, key string, version int64, target string) (bool, error) {
 	panic("implement me")
 }
 

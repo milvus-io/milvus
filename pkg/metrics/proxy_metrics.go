@@ -66,7 +66,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "delete_vectors_count",
 			Help:      "counter of vectors successfully deleted",
-		}, []string{nodeIDLabelName, databaseLabelName})
+		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
 
 	// ProxySQLatency record the latency of search successfully.
 	ProxySQLatency = prometheus.NewHistogramVec(

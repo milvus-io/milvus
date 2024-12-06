@@ -40,8 +40,10 @@ type HardwareMetrics struct {
 	MemoryUsage  uint64  `json:"memory_usage"`
 
 	// how to metric disk & disk usage in distributed storage
-	Disk      uint64 `json:"disk"`
-	DiskUsage uint64 `json:"disk_usage"`
+	Disk      float64 `json:"disk,string"`
+	DiskUsage float64 `json:"disk_usage,string"`
+
+	IOWaitPercentage float64 `json:"io_wait_percentage,string"` // IO Wait in %
 }
 
 const (
@@ -303,15 +305,16 @@ type DataNodeConfiguration struct {
 }
 
 type IndexTaskStats struct {
-	IndexID        int64  `json:"index_id,omitempty,string"`
-	CollectionID   int64  `json:"collection_id,omitempty,string"`
-	SegmentID      int64  `json:"segment_id,omitempty,string"`
-	BuildID        int64  `json:"build_id,omitempty,string"`
-	IndexState     string `json:"index_state,omitempty"`
-	FailReason     string `json:"fail_reason,omitempty"`
-	IndexSize      uint64 `json:"index_size,omitempty,string"`
-	IndexVersion   int64  `json:"index_version,omitempty,string"`
-	CreatedUTCTime string `json:"create_time,omitempty"`
+	IndexID         int64  `json:"index_id,omitempty,string"`
+	CollectionID    int64  `json:"collection_id,omitempty,string"`
+	SegmentID       int64  `json:"segment_id,omitempty,string"`
+	BuildID         int64  `json:"build_id,omitempty,string"`
+	IndexState      string `json:"index_state,omitempty"`
+	FailReason      string `json:"fail_reason,omitempty"`
+	IndexSize       uint64 `json:"index_size,omitempty,string"`
+	IndexVersion    int64  `json:"index_version,omitempty,string"`
+	CreatedUTCTime  string `json:"create_time,omitempty"`
+	FinishedUTCTime string `json:"finished_time,omitempty"`
 }
 
 type SyncTask struct {

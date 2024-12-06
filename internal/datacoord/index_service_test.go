@@ -249,8 +249,8 @@ func TestServer_CreateIndex(t *testing.T) {
 
 	t.Run("save index fail", func(t *testing.T) {
 		metakv := mockkv.NewMetaKv(t)
-		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
 		s.meta.indexMeta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
 		s.meta.catalog = &datacoord.Catalog{MetaKv: metakv}
 		s.meta.indexMeta.catalog = s.meta.catalog

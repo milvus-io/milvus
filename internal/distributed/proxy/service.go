@@ -63,6 +63,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/tracer"
@@ -143,6 +144,10 @@ func authenticate(c *gin.Context) {
 		}
 		log.Warn("fail to verify apikey", zap.Error(err))
 	}
+
+	hookutil.GetExtension().ReportRefused(context.Background(), nil, &milvuspb.BoolResponse{
+		Status: merr.Status(merr.ErrNeedAuthenticate),
+	}, nil, c.FullPath())
 	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{mhttp.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 }
 

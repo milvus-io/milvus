@@ -375,6 +375,66 @@ func (_c *MockTargetManager_GetGrowingSegmentsByCollection_Call) RunAndReturn(ru
 	return _c
 }
 
+// GetPartitions provides a mock function with given fields: ctx, collectionID, scope
+func (_m *MockTargetManager) GetPartitions(ctx context.Context, collectionID int64, scope int32) ([]int64, error) {
+	ret := _m.Called(ctx, collectionID, scope)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPartitions")
+	}
+
+	var r0 []int64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int32) ([]int64, error)); ok {
+		return rf(ctx, collectionID, scope)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int32) []int64); ok {
+		r0 = rf(ctx, collectionID, scope)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]int64)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, int32) error); ok {
+		r1 = rf(ctx, collectionID, scope)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockTargetManager_GetPartitions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPartitions'
+type MockTargetManager_GetPartitions_Call struct {
+	*mock.Call
+}
+
+// GetPartitions is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - scope int32
+func (_e *MockTargetManager_Expecter) GetPartitions(ctx interface{}, collectionID interface{}, scope interface{}) *MockTargetManager_GetPartitions_Call {
+	return &MockTargetManager_GetPartitions_Call{Call: _e.mock.On("GetPartitions", ctx, collectionID, scope)}
+}
+
+func (_c *MockTargetManager_GetPartitions_Call) Run(run func(ctx context.Context, collectionID int64, scope int32)) *MockTargetManager_GetPartitions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(int32))
+	})
+	return _c
+}
+
+func (_c *MockTargetManager_GetPartitions_Call) Return(_a0 []int64, _a1 error) *MockTargetManager_GetPartitions_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockTargetManager_GetPartitions_Call) RunAndReturn(run func(context.Context, int64, int32) ([]int64, error)) *MockTargetManager_GetPartitions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSealedSegment provides a mock function with given fields: ctx, collectionID, id, scope
 func (_m *MockTargetManager) GetSealedSegment(ctx context.Context, collectionID int64, id int64, scope int32) *datapb.SegmentInfo {
 	ret := _m.Called(ctx, collectionID, id, scope)

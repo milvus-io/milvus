@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strconv"
@@ -334,7 +335,7 @@ func NewStateChannelStore(kv kv.TxnKV) *StateChannelStore {
 
 func (c *StateChannelStore) Reload() error {
 	record := timerecord.NewTimeRecorder("datacoord")
-	keys, values, err := c.store.LoadWithPrefix(Params.CommonCfg.DataCoordWatchSubPath.GetValue())
+	keys, values, err := c.store.LoadWithPrefix(context.TODO(), Params.CommonCfg.DataCoordWatchSubPath.GetValue())
 	if err != nil {
 		return err
 	}
@@ -592,7 +593,7 @@ func (c *StateChannelStore) txn(opSet *ChannelOpSet) error {
 		saves = lo.Assign(opSaves, saves)
 		removals = append(removals, opRemovals...)
 	}
-	return c.store.MultiSaveAndRemove(saves, removals)
+	return c.store.MultiSaveAndRemove(context.TODO(), saves, removals)
 }
 
 func (c *StateChannelStore) RemoveNode(nodeID int64) {
@@ -735,5 +736,5 @@ func (c *StateChannelStore) GetNodes() []int64 {
 // remove deletes kv pairs from the kv store where keys have given nodeID as prefix.
 func (c *StateChannelStore) remove(nodeID int64) error {
 	k := buildKeyPrefix(nodeID)
-	return c.store.RemoveWithPrefix(k)
+	return c.store.RemoveWithPrefix(context.TODO(), k)
 }

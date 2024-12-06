@@ -12,6 +12,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"strconv"
@@ -356,7 +357,7 @@ func (rmq *rocksmq) Info() bool {
 		}
 
 		pageTsSizeKey := constructKey(PageTsTitle, topic)
-		pages, _, err := rmq.kv.LoadWithPrefix(pageTsSizeKey)
+		pages, _, err := rmq.kv.LoadWithPrefix(context.TODO(), pageTsSizeKey)
 		if err != nil {
 			log.Error("Rocksmq get page num failed", zap.String("topic", topic))
 			rtn = false
@@ -364,7 +365,7 @@ func (rmq *rocksmq) Info() bool {
 		}
 
 		msgSizeKey := MessageSizeTitle + topic
-		msgSizeVal, err := rmq.kv.Load(msgSizeKey)
+		msgSizeVal, err := rmq.kv.Load(context.TODO(), msgSizeKey)
 		if err != nil {
 			log.Error("Rocksmq get last page size failed", zap.String("topic", topic))
 			rtn = false
@@ -405,7 +406,7 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 
 	// topicIDKey is the only identifier of a topic
 	topicIDKey := TopicIDTitle + topicName
-	val, err := rmq.kv.Load(topicIDKey)
+	val, err := rmq.kv.Load(context.TODO(), topicIDKey)
 	if err != nil {
 		return err
 	}
@@ -429,7 +430,7 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 	// Initialize topic id to its creating time, we don't really use it for now
 	nowTs := strconv.FormatInt(time.Now().Unix(), 10)
 	kvs[topicIDKey] = nowTs
-	if err = rmq.kv.MultiSave(kvs); err != nil {
+	if err = rmq.kv.MultiSave(context.TODO(), kvs); err != nil {
 		return retry.Unrecoverable(err)
 	}
 
@@ -459,28 +460,28 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 
 	// clean the topic data it self
 	fixTopicName := topicName + "/"
-	err := rmq.kv.RemoveWithPrefix(fixTopicName)
+	err := rmq.kv.RemoveWithPrefix(context.TODO(), fixTopicName)
 	if err != nil {
 		return err
 	}
 
 	// clean page size info
 	pageMsgSizeKey := constructKey(PageMsgSizeTitle, topicName)
-	err = rmq.kv.RemoveWithPrefix(pageMsgSizeKey)
+	err = rmq.kv.RemoveWithPrefix(context.TODO(), pageMsgSizeKey)
 	if err != nil {
 		return err
 	}
 
 	// clean page ts info
 	pageMsgTsKey := constructKey(PageTsTitle, topicName)
-	err = rmq.kv.RemoveWithPrefix(pageMsgTsKey)
+	err = rmq.kv.RemoveWithPrefix(context.TODO(), pageMsgTsKey)
 	if err != nil {
 		return err
 	}
 
 	// cleaned acked ts info
 	ackedTsKey := constructKey(AckedTsTitle, topicName)
-	err = rmq.kv.RemoveWithPrefix(ackedTsKey)
+	err = rmq.kv.RemoveWithPrefix(context.TODO(), ackedTsKey)
 	if err != nil {
 		return err
 	}
@@ -492,7 +493,7 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 	var removedKeys []string
 	removedKeys = append(removedKeys, topicIDKey, msgSizeKey)
 	// Batch remove, atomic operation
-	err = rmq.kv.MultiRemove(removedKeys)
+	err = rmq.kv.MultiRemove(context.TODO(), removedKeys)
 	if err != nil {
 		return err
 	}
@@ -702,7 +703,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes map[UniqueID]int64) error {
 	params := paramtable.Get()
 	msgSizeKey := MessageSizeTitle + topicName
-	msgSizeVal, err := rmq.kv.Load(msgSizeKey)
+	msgSizeVal, err := rmq.kv.Load(context.TODO(), msgSizeKey)
 	if err != nil {
 		return err
 	}
@@ -731,7 +732,7 @@ func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes
 		}
 	}
 	mutateBuffer[msgSizeKey] = strconv.FormatInt(curMsgSize, 10)
-	err = rmq.kv.MultiSave(mutateBuffer)
+	err = rmq.kv.MultiSave(context.TODO(), mutateBuffer)
 	return err
 }
 
@@ -1125,7 +1126,7 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, firstID UniqueI
 				ackedTsKvs[pageAckedTsKey] = nowTs
 			}
 		}
-		err := rmq.kv.MultiSave(ackedTsKvs)
+		err := rmq.kv.MultiSave(context.TODO(), ackedTsKvs)
 		if err != nil {
 			return err
 		}

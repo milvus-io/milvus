@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -70,6 +71,7 @@ type TargetManagerInterface interface {
 	Recover(ctx context.Context, catalog metastore.QueryCoordCatalog) error
 	CanSegmentBeMoved(ctx context.Context, collectionID, segmentID int64) bool
 	GetTargetJSON(ctx context.Context, scope TargetScope) string
+	GetPartitions(ctx context.Context, collectionID int64, scope TargetScope) ([]int64, error)
 }
 
 type TargetManager struct {
@@ -140,9 +142,9 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, col
 func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collectionID int64) error {
 	var vChannelInfos []*datapb.VchannelInfo
 	var segmentInfos []*datapb.SegmentInfo
-	err := retry.Handle(context.TODO(), func() (bool, error) {
+	err := retry.Handle(ctx, func() (bool, error) {
 		var err error
-		vChannelInfos, segmentInfos, err = mgr.broker.GetRecoveryInfoV2(context.TODO(), collectionID)
+		vChannelInfos, segmentInfos, err = mgr.broker.GetRecoveryInfoV2(ctx, collectionID)
 		if err != nil {
 			return true, err
 		}
@@ -649,6 +651,18 @@ func (mgr *TargetManager) GetTargetJSON(ctx context.Context, scope TargetScope) 
 		return ""
 	}
 	return string(v)
+}
+
+func (mgr *TargetManager) GetPartitions(ctx context.Context, collectionID int64, scope TargetScope) ([]int64, error) {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+
+	ret := mgr.getCollectionTarget(scope, collectionID)
+	if len(ret) == 0 {
+		return nil, merr.WrapErrCollectionNotLoaded(collectionID)
+	}
+
+	return ret[0].partitions.Collect(), nil
 }
 
 func (mgr *TargetManager) getTarget(scope TargetScope) *target {

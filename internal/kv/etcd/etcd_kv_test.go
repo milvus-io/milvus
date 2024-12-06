@@ -17,6 +17,7 @@
 package etcdkv
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -79,7 +80,7 @@ func (s *EtcdKVSuite) SetupTest() {
 }
 
 func (s *EtcdKVSuite) TearDownTest() {
-	s.etcdKV.RemoveWithPrefix("")
+	s.etcdKV.RemoveWithPrefix(context.TODO(), "")
 	s.etcdKV.Close()
 }
 
@@ -97,11 +98,11 @@ func (s *EtcdKVSuite) TestSaveLoad() {
 
 	for i, test := range saveAndLoadTests {
 		if i < 4 {
-			err := etcdKV.Save(test.key, test.value)
+			err := etcdKV.Save(context.TODO(), test.key, test.value)
 			s.Require().NoError(err)
 		}
 
-		val, err := etcdKV.Load(test.key)
+		val, err := etcdKV.Load(context.TODO(), test.key)
 		s.Require().NoError(err)
 		s.Equal(test.value, val)
 	}
@@ -115,7 +116,7 @@ func (s *EtcdKVSuite) TestSaveLoad() {
 	}
 
 	for _, test := range invalidLoadTests {
-		val, err := etcdKV.Load(test.invalidKey)
+		val, err := etcdKV.Load(context.TODO(), test.invalidKey)
 		s.Error(err)
 		s.Zero(val)
 	}
@@ -152,7 +153,7 @@ func (s *EtcdKVSuite) TestSaveLoad() {
 	}
 
 	for _, test := range loadPrefixTests {
-		actualKeys, actualValues, err := etcdKV.LoadWithPrefix(test.prefix)
+		actualKeys, actualValues, err := etcdKV.LoadWithPrefix(context.TODO(), test.prefix)
 		s.ElementsMatch(test.expectedKeys, actualKeys)
 		s.ElementsMatch(test.expectedValues, actualValues)
 		s.Equal(test.expectedError, err)
@@ -169,15 +170,15 @@ func (s *EtcdKVSuite) TestSaveLoad() {
 	}
 
 	for _, test := range removeTests {
-		err := etcdKV.Remove(test.validKey)
+		err := etcdKV.Remove(context.TODO(), test.validKey)
 		s.NoError(err)
 
-		_, err = etcdKV.Load(test.validKey)
+		_, err = etcdKV.Load(context.TODO(), test.validKey)
 		s.Error(err)
 
-		err = etcdKV.Remove(test.validKey)
+		err = etcdKV.Remove(context.TODO(), test.validKey)
 		s.NoError(err)
-		err = etcdKV.Remove(test.invalidKey)
+		err = etcdKV.Remove(context.TODO(), test.invalidKey)
 		s.NoError(err)
 	}
 }
@@ -197,11 +198,11 @@ func (s *EtcdKVSuite) TestSaveAndLoadBytes() {
 
 	for i, test := range saveAndLoadTests {
 		if i < 4 {
-			err := etcdKV.SaveBytes(test.key, []byte(test.value))
+			err := etcdKV.SaveBytes(context.TODO(), test.key, []byte(test.value))
 			s.Require().NoError(err)
 		}
 
-		val, err := etcdKV.LoadBytes(test.key)
+		val, err := etcdKV.LoadBytes(context.TODO(), test.key)
 		s.NoError(err)
 		s.Equal(test.value, string(val))
 	}
@@ -215,7 +216,7 @@ func (s *EtcdKVSuite) TestSaveAndLoadBytes() {
 	}
 
 	for _, test := range invalidLoadTests {
-		val, err := etcdKV.LoadBytes(test.invalidKey)
+		val, err := etcdKV.LoadBytes(context.TODO(), test.invalidKey)
 		s.Error(err)
 		s.Zero(string(val))
 	}
@@ -252,7 +253,7 @@ func (s *EtcdKVSuite) TestSaveAndLoadBytes() {
 	}
 
 	for _, test := range loadPrefixTests {
-		actualKeys, actualValues, err := etcdKV.LoadBytesWithPrefix(test.prefix)
+		actualKeys, actualValues, err := etcdKV.LoadBytesWithPrefix(context.TODO(), test.prefix)
 		actualStringValues := make([]string, len(actualValues))
 		for i := range actualValues {
 			actualStringValues[i] = string(actualValues[i])
@@ -261,7 +262,7 @@ func (s *EtcdKVSuite) TestSaveAndLoadBytes() {
 		s.ElementsMatch(test.expectedValues, actualStringValues)
 		s.Equal(test.expectedError, err)
 
-		actualKeys, actualValues, versions, err := etcdKV.LoadBytesWithPrefix2(test.prefix)
+		actualKeys, actualValues, versions, err := etcdKV.LoadBytesWithPrefix2(context.TODO(), test.prefix)
 		actualStringValues = make([]string, len(actualValues))
 		for i := range actualValues {
 			actualStringValues[i] = string(actualValues[i])
@@ -283,15 +284,15 @@ func (s *EtcdKVSuite) TestSaveAndLoadBytes() {
 	}
 
 	for _, test := range removeTests {
-		err := etcdKV.Remove(test.validKey)
+		err := etcdKV.Remove(context.TODO(), test.validKey)
 		s.NoError(err)
 
-		_, err = etcdKV.Load(test.validKey)
+		_, err = etcdKV.Load(context.TODO(), test.validKey)
 		s.Error(err)
 
-		err = etcdKV.Remove(test.validKey)
+		err = etcdKV.Remove(context.TODO(), test.validKey)
 		s.NoError(err)
-		err = etcdKV.Remove(test.invalidKey)
+		err = etcdKV.Remove(context.TODO(), test.invalidKey)
 		s.NoError(err)
 	}
 }
@@ -311,7 +312,7 @@ func (s *EtcdKVSuite) TestLoadBytesWithRevision() {
 	}
 
 	for _, test := range prepareKV {
-		err := etcdKV.SaveBytes(test.inKey, []byte(test.inValue))
+		err := etcdKV.SaveBytes(context.TODO(), test.inKey, []byte(test.inValue))
 		s.NoError(err)
 	}
 
@@ -327,7 +328,7 @@ func (s *EtcdKVSuite) TestLoadBytesWithRevision() {
 	}
 
 	for _, test := range loadWithRevisionTests {
-		keys, values, revision, err := etcdKV.LoadBytesWithRevision(test.inKey)
+		keys, values, revision, err := etcdKV.LoadBytesWithRevision(context.TODO(), test.inKey)
 		s.NoError(err)
 		s.Equal(test.expectedKeyNo, len(keys))
 		stringValues := make([]string, len(values))
@@ -350,10 +351,10 @@ func (s *EtcdKVSuite) TestMultiSaveAndMultiLoad() {
 		"_":          "other",
 	}
 
-	err := etcdKV.MultiSave(multiSaveTests)
+	err := etcdKV.MultiSave(context.TODO(), multiSaveTests)
 	s.Require().NoError(err)
 	for k, v := range multiSaveTests {
-		actualV, err := etcdKV.Load(k)
+		actualV, err := etcdKV.Load(context.TODO(), k)
 		s.NoError(err)
 		s.Equal(v, actualV)
 	}
@@ -369,7 +370,7 @@ func (s *EtcdKVSuite) TestMultiSaveAndMultiLoad() {
 	}
 
 	for _, test := range multiLoadTests {
-		vs, err := etcdKV.MultiLoad(test.inputKeys)
+		vs, err := etcdKV.MultiLoad(context.TODO(), test.inputKeys)
 		s.NoError(err)
 		s.Equal(test.expectedValues, vs)
 	}
@@ -385,7 +386,7 @@ func (s *EtcdKVSuite) TestMultiSaveAndMultiLoad() {
 	}
 
 	for _, test := range invalidMultiLoad {
-		vs, err := etcdKV.MultiLoad(test.invalidKeys)
+		vs, err := etcdKV.MultiLoad(context.TODO(), test.invalidKeys)
 		s.Error(err)
 		s.Equal(test.expectedValues, vs)
 	}
@@ -396,10 +397,10 @@ func (s *EtcdKVSuite) TestMultiSaveAndMultiLoad() {
 	}
 
 	for _, k := range removeWithPrefixTests {
-		err = etcdKV.RemoveWithPrefix(k)
+		err = etcdKV.RemoveWithPrefix(context.TODO(), k)
 		s.NoError(err)
 
-		ks, vs, err := etcdKV.LoadWithPrefix(k)
+		ks, vs, err := etcdKV.LoadWithPrefix(context.TODO(), k)
 		s.Empty(ks)
 		s.Empty(vs)
 		s.NoError(err)
@@ -412,10 +413,10 @@ func (s *EtcdKVSuite) TestMultiSaveAndMultiLoad() {
 		"_",
 	}
 
-	err = etcdKV.MultiRemove(multiRemoveTests)
+	err = etcdKV.MultiRemove(context.TODO(), multiRemoveTests)
 	s.NoError(err)
 
-	ks, vs, err := etcdKV.LoadWithPrefix("")
+	ks, vs, err := etcdKV.LoadWithPrefix(context.TODO(), "")
 	s.NoError(err)
 	s.Empty(ks)
 	s.Empty(vs)
@@ -432,11 +433,11 @@ func (s *EtcdKVSuite) TestMultiSaveAndMultiLoad() {
 		{make(map[string]string), []string{"multikey_2"}},
 	}
 	for _, test := range multiSaveAndRemoveTests {
-		err = etcdKV.MultiSaveAndRemove(test.multiSaves, test.multiRemoves)
+		err = etcdKV.MultiSaveAndRemove(context.TODO(), test.multiSaves, test.multiRemoves)
 		s.NoError(err)
 	}
 
-	ks, vs, err = etcdKV.LoadWithPrefix("")
+	ks, vs, err = etcdKV.LoadWithPrefix(context.TODO(), "")
 	s.NoError(err)
 	s.Empty(ks)
 	s.Empty(vs)
@@ -458,10 +459,10 @@ func (s *EtcdKVSuite) TestMultiSaveBytesAndMultiLoadBytes() {
 		multiSaveBytesTests[k] = []byte(v)
 	}
 
-	err := etcdKV.MultiSaveBytes(multiSaveBytesTests)
+	err := etcdKV.MultiSaveBytes(context.TODO(), multiSaveBytesTests)
 	s.Require().NoError(err)
 	for k, v := range multiSaveTests {
-		actualV, err := etcdKV.LoadBytes(k)
+		actualV, err := etcdKV.LoadBytes(context.TODO(), k)
 		s.NoError(err)
 		s.Equal(v, string(actualV))
 	}
@@ -477,7 +478,7 @@ func (s *EtcdKVSuite) TestMultiSaveBytesAndMultiLoadBytes() {
 	}
 
 	for _, test := range multiLoadTests {
-		vs, err := etcdKV.MultiLoadBytes(test.inputKeys)
+		vs, err := etcdKV.MultiLoadBytes(context.TODO(), test.inputKeys)
 		stringVs := make([]string, len(vs))
 		for i := range vs {
 			stringVs[i] = string(vs[i])
@@ -497,7 +498,7 @@ func (s *EtcdKVSuite) TestMultiSaveBytesAndMultiLoadBytes() {
 	}
 
 	for _, test := range invalidMultiLoad {
-		vs, err := etcdKV.MultiLoadBytes(test.invalidKeys)
+		vs, err := etcdKV.MultiLoadBytes(context.TODO(), test.invalidKeys)
 		stringVs := make([]string, len(vs))
 		for i := range vs {
 			stringVs[i] = string(vs[i])
@@ -512,10 +513,10 @@ func (s *EtcdKVSuite) TestMultiSaveBytesAndMultiLoadBytes() {
 	}
 
 	for _, k := range removeWithPrefixTests {
-		err = etcdKV.RemoveWithPrefix(k)
+		err = etcdKV.RemoveWithPrefix(context.TODO(), k)
 		s.NoError(err)
 
-		ks, vs, err := etcdKV.LoadBytesWithPrefix(k)
+		ks, vs, err := etcdKV.LoadBytesWithPrefix(context.TODO(), k)
 		s.Empty(ks)
 		s.Empty(vs)
 		s.NoError(err)
@@ -528,10 +529,10 @@ func (s *EtcdKVSuite) TestMultiSaveBytesAndMultiLoadBytes() {
 		"_",
 	}
 
-	err = etcdKV.MultiRemove(multiRemoveTests)
+	err = etcdKV.MultiRemove(context.TODO(), multiRemoveTests)
 	s.NoError(err)
 
-	ks, vs, err := etcdKV.LoadBytesWithPrefix("")
+	ks, vs, err := etcdKV.LoadBytesWithPrefix(context.TODO(), "")
 	s.NoError(err)
 	s.Empty(ks)
 	s.Empty(vs)
@@ -549,11 +550,11 @@ func (s *EtcdKVSuite) TestMultiSaveBytesAndMultiLoadBytes() {
 	}
 
 	for _, test := range multiSaveAndRemoveTests {
-		err = etcdKV.MultiSaveBytesAndRemove(test.multiSaves, test.multiRemoves)
+		err = etcdKV.MultiSaveBytesAndRemove(context.TODO(), test.multiSaves, test.multiRemoves)
 		s.NoError(err)
 	}
 
-	ks, vs, err = etcdKV.LoadBytesWithPrefix("")
+	ks, vs, err = etcdKV.LoadBytesWithPrefix(context.TODO(), "")
 	s.NoError(err)
 	s.Empty(ks)
 	s.Empty(vs)
@@ -567,7 +568,7 @@ func (s *EtcdKVSuite) TestTxnWithPredicates() {
 		"lease2": "2",
 	}
 
-	err := etcdKV.MultiSave(prepareKV)
+	err := etcdKV.MultiSave(context.TODO(), prepareKV)
 	s.Require().NoError(err)
 
 	badPredicate := predicates.NewMockPredicate(s.T())
@@ -587,13 +588,13 @@ func (s *EtcdKVSuite) TestTxnWithPredicates() {
 
 	for _, test := range multiSaveAndRemovePredTests {
 		s.Run(test.tag, func() {
-			err := etcdKV.MultiSaveAndRemove(test.multiSave, nil, test.preds...)
+			err := etcdKV.MultiSaveAndRemove(context.TODO(), test.multiSave, nil, test.preds...)
 			if test.expectSuccess {
 				s.NoError(err)
 			} else {
 				s.Error(err)
 			}
-			err = etcdKV.MultiSaveAndRemoveWithPrefix(test.multiSave, nil, test.preds...)
+			err = etcdKV.MultiSaveAndRemoveWithPrefix(context.TODO(), test.multiSave, nil, test.preds...)
 			if test.expectSuccess {
 				s.NoError(err)
 			} else {
@@ -616,7 +617,7 @@ func (s *EtcdKVSuite) TestMultiSaveAndRemoveWithPrefix() {
 	}
 
 	// MultiSaveAndRemoveWithPrefix
-	err := etcdKV.MultiSave(prepareTests)
+	err := etcdKV.MultiSave(context.TODO(), prepareTests)
 	s.Require().NoError(err)
 	multiSaveAndRemoveWithPrefixTests := []struct {
 		multiSave map[string]string
@@ -634,14 +635,14 @@ func (s *EtcdKVSuite) TestMultiSaveAndRemoveWithPrefix() {
 	}
 
 	for _, test := range multiSaveAndRemoveWithPrefixTests {
-		k, _, err := etcdKV.LoadWithPrefix(test.loadPrefix)
+		k, _, err := etcdKV.LoadWithPrefix(context.TODO(), test.loadPrefix)
 		s.NoError(err)
 		s.Equal(test.lengthBeforeRemove, len(k))
 
-		err = etcdKV.MultiSaveAndRemoveWithPrefix(test.multiSave, test.prefix)
+		err = etcdKV.MultiSaveAndRemoveWithPrefix(context.TODO(), test.multiSave, test.prefix)
 		s.NoError(err)
 
-		k, _, err = etcdKV.LoadWithPrefix(test.loadPrefix)
+		k, _, err = etcdKV.LoadWithPrefix(context.TODO(), test.loadPrefix)
 		s.NoError(err)
 		s.Equal(test.lengthAfterRemove, len(k))
 	}
@@ -650,11 +651,11 @@ func (s *EtcdKVSuite) TestMultiSaveAndRemoveWithPrefix() {
 func (s *EtcdKVSuite) TestWatch() {
 	etcdKV := s.etcdKV
 
-	ch := etcdKV.Watch("x")
+	ch := etcdKV.Watch(context.TODO(), "x")
 	resp := <-ch
 	s.True(resp.Created)
 
-	ch = etcdKV.WatchWithPrefix("x")
+	ch = etcdKV.WatchWithPrefix(context.TODO(), "x")
 	resp = <-ch
 	s.True(resp.Created)
 }
@@ -673,13 +674,13 @@ func (s *EtcdKVSuite) TestRevisionBytes() {
 	}
 
 	for _, test := range revisionTests {
-		err := etcdKV.SaveBytes(test.inKey, test.fistValue)
+		err := etcdKV.SaveBytes(context.TODO(), test.inKey, test.fistValue)
 		s.Require().NoError(err)
 
-		_, _, revision, _ := etcdKV.LoadBytesWithRevision(test.inKey)
-		ch := etcdKV.WatchWithRevision(test.inKey, revision+1)
+		_, _, revision, _ := etcdKV.LoadBytesWithRevision(context.TODO(), test.inKey)
+		ch := etcdKV.WatchWithRevision(context.TODO(), test.inKey, revision+1)
 
-		err = etcdKV.SaveBytes(test.inKey, test.secondValue)
+		err = etcdKV.SaveBytes(context.TODO(), test.inKey, test.secondValue)
 		s.Require().NoError(err)
 
 		resp := <-ch
@@ -688,15 +689,15 @@ func (s *EtcdKVSuite) TestRevisionBytes() {
 		s.Equal(revision+1, resp.Header.Revision)
 	}
 
-	success, err := etcdKV.CompareVersionAndSwapBytes("a/b/c", 0, []byte("1"))
+	success, err := etcdKV.CompareVersionAndSwapBytes(context.TODO(), "a/b/c", 0, []byte("1"))
 	s.NoError(err)
 	s.True(success)
 
-	value, err := etcdKV.LoadBytes("a/b/c")
+	value, err := etcdKV.LoadBytes(context.TODO(), "a/b/c")
 	s.NoError(err)
 	s.Equal(string(value), "1")
 
-	success, err = etcdKV.CompareVersionAndSwapBytes("a/b/c", 0, []byte("1"))
+	success, err = etcdKV.CompareVersionAndSwapBytes(context.TODO(), "a/b/c", 0, []byte("1"))
 	s.NoError(err)
 	s.False(success)
 }
@@ -721,7 +722,7 @@ func Test_WalkWithPagination(t *testing.T) {
 	etcdKV := NewEtcdKV(etcdCli, rootPath)
 
 	defer etcdKV.Close()
-	defer etcdKV.RemoveWithPrefix("")
+	defer etcdKV.RemoveWithPrefix(context.TODO(), "")
 
 	kvs := map[string]string{
 		"A/100":    "v1",
@@ -731,23 +732,23 @@ func Test_WalkWithPagination(t *testing.T) {
 		"B/100":    "v5",
 	}
 
-	err = etcdKV.MultiSave(kvs)
+	err = etcdKV.MultiSave(context.TODO(), kvs)
 	assert.NoError(t, err)
 	for k, v := range kvs {
-		actualV, err := etcdKV.Load(k)
+		actualV, err := etcdKV.Load(context.TODO(), k)
 		assert.NoError(t, err)
 		assert.Equal(t, v, actualV)
 	}
 
 	t.Run("apply function error ", func(t *testing.T) {
-		err = etcdKV.WalkWithPrefix("A", 5, func(key []byte, value []byte) error {
+		err = etcdKV.WalkWithPrefix(context.TODO(), "A", 5, func(key []byte, value []byte) error {
 			return errors.New("error")
 		})
 		assert.Error(t, err)
 	})
 
 	t.Run("get with non-exist prefix ", func(t *testing.T) {
-		err = etcdKV.WalkWithPrefix("non-exist-prefix", 5, func(key []byte, value []byte) error {
+		err = etcdKV.WalkWithPrefix(context.TODO(), "non-exist-prefix", 5, func(key []byte, value []byte) error {
 			return nil
 		})
 		assert.NoError(t, err)
@@ -768,7 +769,7 @@ func Test_WalkWithPagination(t *testing.T) {
 			ret := make(map[string]string)
 			actualSortedKey := make([]string, 0)
 
-			err = etcdKV.WalkWithPrefix("A", pagination, func(key []byte, value []byte) error {
+			err = etcdKV.WalkWithPrefix(context.TODO(), "A", pagination, func(key []byte, value []byte) error {
 				k := string(key)
 				k = k[len(rootPath)+1:]
 				ret[k] = string(value)
@@ -844,27 +845,27 @@ func TestHas(t *testing.T) {
 	assert.NoError(t, err)
 	rootPath := "/etcd/test/root/has"
 	kv := NewEtcdKV(etcdCli, rootPath)
-	err = kv.RemoveWithPrefix("")
+	err = kv.RemoveWithPrefix(context.TODO(), "")
 	require.NoError(t, err)
 
 	defer kv.Close()
-	defer kv.RemoveWithPrefix("")
+	defer kv.RemoveWithPrefix(context.TODO(), "")
 
-	has, err := kv.Has("key1")
+	has, err := kv.Has(context.TODO(), "key1")
 	assert.NoError(t, err)
 	assert.False(t, has)
 
-	err = kv.Save("key1", "value1")
+	err = kv.Save(context.TODO(), "key1", "value1")
 	assert.NoError(t, err)
 
-	has, err = kv.Has("key1")
+	has, err = kv.Has(context.TODO(), "key1")
 	assert.NoError(t, err)
 	assert.True(t, has)
 
-	err = kv.Remove("key1")
+	err = kv.Remove(context.TODO(), "key1")
 	assert.NoError(t, err)
 
-	has, err = kv.Has("key1")
+	has, err = kv.Has(context.TODO(), "key1")
 	assert.NoError(t, err)
 	assert.False(t, has)
 }
@@ -882,27 +883,27 @@ func TestHasPrefix(t *testing.T) {
 	assert.NoError(t, err)
 	rootPath := "/etcd/test/root/hasprefix"
 	kv := NewEtcdKV(etcdCli, rootPath)
-	err = kv.RemoveWithPrefix("")
+	err = kv.RemoveWithPrefix(context.TODO(), "")
 	require.NoError(t, err)
 
 	defer kv.Close()
-	defer kv.RemoveWithPrefix("")
+	defer kv.RemoveWithPrefix(context.TODO(), "")
 
-	has, err := kv.HasPrefix("key")
+	has, err := kv.HasPrefix(context.TODO(), "key")
 	assert.NoError(t, err)
 	assert.False(t, has)
 
-	err = kv.Save("key1", "value1")
+	err = kv.Save(context.TODO(), "key1", "value1")
 	assert.NoError(t, err)
 
-	has, err = kv.HasPrefix("key")
+	has, err = kv.HasPrefix(context.TODO(), "key")
 	assert.NoError(t, err)
 	assert.True(t, has)
 
-	err = kv.Remove("key1")
+	err = kv.Remove(context.TODO(), "key1")
 	assert.NoError(t, err)
 
-	has, err = kv.HasPrefix("key")
+	has, err = kv.HasPrefix(context.TODO(), "key")
 	assert.NoError(t, err)
 	assert.False(t, has)
 }

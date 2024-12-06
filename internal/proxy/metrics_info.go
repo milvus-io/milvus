@@ -20,8 +20,11 @@ import (
 	"context"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -82,25 +85,54 @@ func getQuotaMetrics() (*metricsinfo.ProxyQuotaMetrics, error) {
 
 // getProxyMetrics get metrics of Proxy, not including the topological metrics of Query cluster and Data cluster.
 func getProxyMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest, node *Proxy) (*milvuspb.GetMetricsResponse, error) {
-	totalMem := hardware.GetMemoryCount()
-	usedMem := hardware.GetUsedMemoryCount()
 	quotaMetrics, err := getQuotaMetrics()
 	if err != nil {
 		return nil, err
 	}
-	hardwareMetrics := metricsinfo.HardwareMetrics{
-		IP:           node.session.Address,
-		CPUCoreCount: hardware.GetCPUNum(),
-		CPUCoreUsage: hardware.GetCPUUsage(),
-		Memory:       totalMem,
-		MemoryUsage:  usedMem,
-		Disk:         hardware.GetDiskCount(),
-		DiskUsage:    hardware.GetDiskUsage(),
+	proxyMetricInfo := getProxyMetricInfo(ctx, node, quotaMetrics)
+	proxyRoleName := metricsinfo.ConstructComponentName(typeutil.ProxyRole, paramtable.GetNodeID())
+
+	resp, err := metricsinfo.MarshalComponentInfos(proxyMetricInfo)
+	if err != nil {
+		return nil, err
 	}
-	quotaMetrics.Hms = hardwareMetrics
+
+	return &milvuspb.GetMetricsResponse{
+		Status:        merr.Success(),
+		Response:      resp,
+		ComponentName: proxyRoleName,
+	}, nil
+}
+
+func getProxyMetricInfo(ctx context.Context, node *Proxy, quotaMetrics *metricsinfo.ProxyQuotaMetrics) *metricsinfo.ProxyInfos {
+	totalMem := hardware.GetMemoryCount()
+	usedMem := hardware.GetUsedMemoryCount()
+	used, total, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
+	if err != nil {
+		log.Ctx(ctx).Warn("get disk usage failed", zap.Error(err))
+	}
+
+	ioWait, err := hardware.GetIOWait()
+	if err != nil {
+		log.Ctx(ctx).Warn("get iowait failed", zap.Error(err))
+	}
+	hardwareMetrics := metricsinfo.HardwareMetrics{
+		IP:               node.session.Address,
+		CPUCoreCount:     hardware.GetCPUNum(),
+		CPUCoreUsage:     hardware.GetCPUUsage(),
+		Memory:           totalMem,
+		MemoryUsage:      usedMem,
+		Disk:             total,
+		DiskUsage:        used,
+		IOWaitPercentage: ioWait,
+	}
+
+	if quotaMetrics != nil {
+		quotaMetrics.Hms = hardwareMetrics
+	}
 
 	proxyRoleName := metricsinfo.ConstructComponentName(typeutil.ProxyRole, paramtable.GetNodeID())
-	proxyMetricInfo := metricsinfo.ProxyInfos{
+	return &metricsinfo.ProxyInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			HasError:      false,
 			Name:          proxyRoleName,
@@ -117,17 +149,6 @@ func getProxyMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest, n
 		},
 		QuotaMetrics: quotaMetrics,
 	}
-
-	resp, err := metricsinfo.MarshalComponentInfos(proxyMetricInfo)
-	if err != nil {
-		return nil, err
-	}
-
-	return &milvuspb.GetMetricsResponse{
-		Status:        merr.Success(),
-		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.ProxyRole, paramtable.GetNodeID()),
-	}, nil
 }
 
 // getSystemInfoMetrics returns the system information metrics.
@@ -146,34 +167,12 @@ func getSystemInfoMetrics(
 	proxyRoleName := metricsinfo.ConstructComponentName(typeutil.ProxyRole, paramtable.GetNodeID())
 	identifierMap[proxyRoleName] = int(node.session.ServerID)
 
+	// FIXME:All proxy metrics are retrieved from RootCoord, while single proxy metrics are obtained from the proxy itself.
+	proxyInfo := getProxyMetricInfo(ctx, node, nil)
 	proxyTopologyNode := metricsinfo.SystemTopologyNode{
 		Identifier: int(node.session.ServerID),
 		Connected:  make([]metricsinfo.ConnectionEdge, 0),
-		Infos: &metricsinfo.ProxyInfos{
-			BaseComponentInfos: metricsinfo.BaseComponentInfos{
-				HasError:    false,
-				ErrorReason: "",
-				Name:        proxyRoleName,
-				HardwareInfos: metricsinfo.HardwareMetrics{
-					IP:           node.session.Address,
-					CPUCoreCount: hardware.GetCPUNum(),
-					CPUCoreUsage: hardware.GetCPUUsage(),
-					Memory:       hardware.GetMemoryCount(),
-					MemoryUsage:  hardware.GetUsedMemoryCount(),
-					Disk:         hardware.GetDiskCount(),
-					DiskUsage:    hardware.GetDiskUsage(),
-				},
-				SystemInfo:  metricsinfo.DeployMetrics{},
-				CreatedTime: paramtable.GetCreateTime().String(),
-				UpdatedTime: paramtable.GetUpdateTime().String(),
-				Type:        typeutil.ProxyRole,
-				ID:          node.session.ServerID,
-			},
-			SystemConfigurations: metricsinfo.ProxyConfiguration{
-				DefaultPartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(),
-				DefaultIndexName:     Params.CommonCfg.DefaultIndexName.GetValue(),
-			},
-		},
+		Infos:      proxyInfo,
 	}
 	metricsinfo.FillDeployMetricsWithEnv(&(proxyTopologyNode.Infos.(*metricsinfo.ProxyInfos).SystemInfo))
 

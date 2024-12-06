@@ -30,18 +30,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-func GetPartitions(ctx context.Context, collectionMgr *meta.CollectionManager, collectionID int64) ([]int64, error) {
-	collection := collectionMgr.GetCollection(ctx, collectionID)
-	if collection != nil {
-		partitions := collectionMgr.GetPartitionsByCollection(ctx, collectionID)
-		if partitions != nil {
-			return lo.Map(partitions, func(partition *meta.Partition, i int) int64 {
-				return partition.PartitionID
-			}), nil
-		}
-	}
-
-	return nil, merr.WrapErrCollectionNotLoaded(collectionID)
+func GetPartitions(ctx context.Context, targetMgr meta.TargetManagerInterface, collectionID int64) ([]int64, error) {
+	// fetch next target first, sync next target contains the wanted partition list
+	// if not found, current will be used instead for dist adjustment requests
+	return targetMgr.GetPartitions(ctx, collectionID, meta.NextTargetFirst)
 }
 
 // GroupNodesByReplica groups nodes by replica,

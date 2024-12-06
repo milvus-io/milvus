@@ -68,15 +68,16 @@ type indexMeta struct {
 
 func newIndexTaskStats(s *model.SegmentIndex) *metricsinfo.IndexTaskStats {
 	return &metricsinfo.IndexTaskStats{
-		IndexID:        s.IndexID,
-		CollectionID:   s.CollectionID,
-		SegmentID:      s.SegmentID,
-		BuildID:        s.BuildID,
-		IndexState:     s.IndexState.String(),
-		FailReason:     s.FailReason,
-		IndexSize:      s.IndexSize,
-		IndexVersion:   s.IndexVersion,
-		CreatedUTCTime: typeutil.TimestampToString(s.CreatedUTCTime),
+		IndexID:         s.IndexID,
+		CollectionID:    s.CollectionID,
+		SegmentID:       s.SegmentID,
+		BuildID:         s.BuildID,
+		IndexState:      s.IndexState.String(),
+		FailReason:      s.FailReason,
+		IndexSize:       s.IndexSize,
+		IndexVersion:    s.IndexVersion,
+		CreatedUTCTime:  typeutil.TimestampToString(s.CreatedUTCTime),
+		FinishedUTCTime: typeutil.TimestampToString(s.FinishedUTCTime),
 	}
 }
 
@@ -789,6 +790,7 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		segIdx.FailReason = taskInfo.GetFailReason()
 		segIdx.IndexSize = taskInfo.GetSerializedSize()
 		segIdx.CurrentIndexVersion = taskInfo.GetCurrentIndexVersion()
+		segIdx.FinishedUTCTime = uint64(time.Now().Unix())
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 

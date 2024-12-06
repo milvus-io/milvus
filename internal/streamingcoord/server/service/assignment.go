@@ -8,13 +8,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 var _ streamingpb.StreamingCoordAssignmentServiceServer = (*assignmentServiceImpl)(nil)
 
 // NewAssignmentService returns a new assignment service.
 func NewAssignmentService(
-	balancer balancer.Balancer,
+	balancer *syncutil.Future[balancer.Balancer],
 ) streamingpb.StreamingCoordAssignmentServiceServer {
 	return &assignmentServiceImpl{
 		balancer:      balancer,
@@ -28,7 +29,7 @@ type AssignmentService interface {
 
 // assignmentServiceImpl is the implementation of the assignment service.
 type assignmentServiceImpl struct {
-	balancer      balancer.Balancer
+	balancer      *syncutil.Future[balancer.Balancer]
 	listenerTotal prometheus.Gauge
 }
 
@@ -37,5 +38,9 @@ func (s *assignmentServiceImpl) AssignmentDiscover(server streamingpb.StreamingC
 	s.listenerTotal.Inc()
 	defer s.listenerTotal.Dec()
 
-	return discover.NewAssignmentDiscoverServer(s.balancer, server).Execute()
+	balancer, err := s.balancer.GetWithContext(server.Context())
+	if err != nil {
+		return err
+	}
+	return discover.NewAssignmentDiscoverServer(balancer, server).Execute()
 }

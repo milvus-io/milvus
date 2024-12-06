@@ -77,13 +77,19 @@ func (m *bufferManager) Start() {
 }
 
 func (m *bufferManager) check() {
-	ticker := time.NewTimer(paramtable.Get().DataNodeCfg.MemoryCheckInterval.GetAsDuration(time.Millisecond))
-	defer ticker.Stop()
+	timer := time.NewTimer(paramtable.Get().DataNodeCfg.MemoryCheckInterval.GetAsDuration(time.Millisecond))
+	defer timer.Stop()
 	for {
 		select {
-		case <-ticker.C:
+		case <-timer.C:
 			m.memoryCheck()
-			ticker.Reset(paramtable.Get().DataNodeCfg.MemoryCheckInterval.GetAsDuration(time.Millisecond))
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(paramtable.Get().DataNodeCfg.MemoryCheckInterval.GetAsDuration(time.Millisecond))
 		case <-m.ch.CloseCh():
 			log.Info("buffer manager memory check stopped")
 			return
@@ -112,6 +118,13 @@ func (m *bufferManager) memoryCheck() {
 
 		toMB := func(mem float64) float64 {
 			return mem / 1024 / 1024
+		}
+
+		select {
+		case <-m.ch.CloseCh():
+			log.Info("stop memory check due to manager stop")
+			return
+		default:
 		}
 
 		m.buffers.Range(func(chanName string, buf WriteBuffer) bool {

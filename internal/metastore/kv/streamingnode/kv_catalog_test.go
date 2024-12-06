@@ -19,15 +19,15 @@ func TestCatalog(t *testing.T) {
 	vs, err := proto.Marshal(&v)
 	assert.NoError(t, err)
 
-	kv.EXPECT().LoadWithPrefix(mock.Anything).Return([]string{k}, []string{string(vs)}, nil)
+	kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return([]string{k}, []string{string(vs)}, nil)
 	catalog := NewCataLog(kv)
 	ctx := context.Background()
 	metas, err := catalog.ListSegmentAssignment(ctx, "p1")
 	assert.Len(t, metas, 1)
 	assert.NoError(t, err)
 
-	kv.EXPECT().MultiRemove(mock.Anything).Return(nil)
-	kv.EXPECT().MultiSave(mock.Anything).Return(nil)
+	kv.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(nil)
+	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
 
 	err = catalog.SaveSegmentAssignments(ctx, "p1", []*streamingpb.SegmentAssignmentMeta{
 		{
