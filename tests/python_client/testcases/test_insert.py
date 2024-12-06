@@ -1259,7 +1259,7 @@ class TestInsertInvalid(TestcaseBase):
                 elif data[i][dirty_i].__class__ is str:
                     tmp = data[i][dirty_i]
                     data[i][dirty_i] = random.randint(0, 1000)
-                    error = {ct.err_code: 999, ct.err_msg: "expect string input, got: <class 'int'>"}
+                    error = {ct.err_code: 999, ct.err_msg: "field (varchar) expects string input, got: <class 'int'>"}
                     collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
                     data[i][dirty_i] = tmp
                 elif data[i][dirty_i].__class__ is bool:
@@ -2206,7 +2206,7 @@ class TestUpsertInvalid(TestcaseBase):
                 elif data[i][dirty_i].__class__ is str:
                     tmp = data[i][dirty_i]
                     data[i][dirty_i] = random.randint(0, 1000)
-                    error = {ct.err_code: 999, ct.err_msg: "expect string input, got: <class 'int'>"}
+                    error = {ct.err_code: 999, ct.err_msg: "field (varchar) expects string input, got: <class 'int'>"}
                     collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
                     data[i][dirty_i] = tmp
                 elif data[i][dirty_i].__class__ is bool:
