@@ -10,6 +10,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt
 from requests.exceptions import ConnectionError
 import urllib.parse
 
+
 ENABLE_LOG_SAVE = False
 
 
@@ -900,6 +901,56 @@ class ImportJobClient(Requests):
             if time.time() - t0 > 120:
                 break
         return rsp, finished
+
+
+class DatabaseClient(Requests):
+    def __init__(self, endpoint, token):
+        super().__init__(url=endpoint, api_key=token)
+        self.endpoint = endpoint
+        self.api_key = token
+        self.headers = self.update_headers()
+        self.db_name = None
+        self.db_names = []  # Track created databases
+
+    @classmethod
+    def update_headers(cls):
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {cls.api_key}'
+        }
+        return headers
+
+    def database_create(self, payload):
+        """Create a database"""
+        url = f"{self.endpoint}/v2/vectordb/databases/create"
+        rsp = self.post(url, data=payload).json()
+        if rsp['code'] == 0:
+            self.db_name = payload['dbName']
+            self.db_names.append(payload['dbName'])
+        return rsp
+
+    def database_list(self, payload):
+        """List all databases"""
+        url = f"{self.endpoint}/v2/vectordb/databases/list"
+        return self.post(url, data=payload).json()
+
+    def database_describe(self, payload):
+        """Describe a database"""
+        url = f"{self.endpoint}/v2/vectordb/databases/describe"
+        return self.post(url, data=payload).json()
+
+    def database_alter(self, payload):
+        """Alter database properties"""
+        url = f"{self.endpoint}/v2/vectordb/databases/alter"
+        return self.post(url, data=payload).json()
+
+    def database_drop(self, payload):
+        """Drop a database"""
+        url = f"{self.endpoint}/v2/vectordb/databases/drop"
+        rsp = self.post(url, data=payload).json()
+        if rsp['code'] == 0 and payload['dbName'] in self.db_names:
+            self.db_names.remove(payload['dbName'])
+        return rsp
 
 
 class StorageClient():
