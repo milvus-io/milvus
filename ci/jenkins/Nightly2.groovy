@@ -1,4 +1,4 @@
-@Library('jenkins-shared-library@v0.67.0') _
+@Library('jenkins-shared-library@tekton') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 
@@ -29,6 +29,12 @@ pipeline {
             yaml pod
         }
     }
+
+    environment {
+        LOKI_ADDR = 'http://loki-1-loki-distributed-gateway.loki.svc.cluster.local'
+        LOKI_CLIENT_RETRIES = 3
+    }
+
     stages {
         stage('meta') {
             steps {
