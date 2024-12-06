@@ -325,6 +325,71 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 	return nil
 }
 
+func splitCentroids(centroids []int, num int) ([][]int, map[int]int) {
+	if num <= 0 {
+		return nil, nil
+	}
+
+	result := make([][]int, num)
+	resultIndex := make(map[int]int, len(centroids))
+	listLen := len(centroids)
+
+	for i := 0; i < listLen; i++ {
+		group := i % num
+		result[group] = append(result[group], centroids[i])
+		resultIndex[i] = group
+	}
+
+	return result, resultIndex
+}
+
+func (t *clusteringCompactionTask) generatedVectorPlan(bufferNum int, centroids []*schemapb.VectorField) error {
+	centroidsOffset := make([]int, len(centroids))
+	for i := 0; i < len(centroids); i++ {
+		centroidsOffset[i] = i
+	}
+	centroidGroups, groupIndex := splitCentroids(centroidsOffset, bufferNum)
+	for id, group := range centroidGroups {
+		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
+		if err != nil {
+			return err
+		}
+
+		centroidValues := make([]storage.VectorFieldValue, len(group))
+		for i, offset := range group {
+			centroidValues[i] = storage.NewVectorFieldValue(t.clusteringKeyField.DataType, centroids[offset])
+		}
+
+		fieldStats.SetVectorCentroids(centroidValues...)
+		clusterBuffer := &ClusterBuffer{
+			id:                      id,
+			flushedRowNum:           map[typeutil.UniqueID]atomic.Int64{},
+			flushedBinlogs:          make(map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog, 0),
+			uploadedSegments:        make([]*datapb.CompactionSegment, 0),
+			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
+			clusteringKeyFieldStats: fieldStats,
+		}
+		if _, err = t.refreshBufferWriterWithPack(clusterBuffer); err != nil {
+			return err
+		}
+		t.clusterBuffers = append(t.clusterBuffers, clusterBuffer)
+	}
+	t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {
+		centroidGroupOffset := groupIndex[int(idMapping[offset])]
+		return t.clusterBuffers[centroidGroupOffset]
+	}
+	return nil
+}
+
+func (t *clusteringCompactionTask) switchPolicyForVectorPlan(centroids *clusteringpb.ClusteringCentroidsStats) error {
+	bufferNum := len(centroids.GetCentroids())
+	bufferNumByMemory := int(t.memoryBufferSize / expectedBinlogSize)
+	if bufferNumByMemory < bufferNum {
+		bufferNum = bufferNumByMemory
+	}
+	return t.generatedVectorPlan(bufferNum, centroids.GetCentroids())
+}
+
 func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) error {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("getVectorAnalyzeResult-%d", t.GetPlanID()))
 	defer span.End()
@@ -349,28 +414,7 @@ func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) e
 	log.Debug("read clustering centroids stats", zap.String("path", centroidFilePath),
 		zap.Int("centroidNum", len(centroids.GetCentroids())),
 		zap.Any("offsetMappingFiles", t.segmentIDOffsetMapping))
-
-	for id, centroid := range centroids.GetCentroids() {
-		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
-		if err != nil {
-			return err
-		}
-		fieldStats.SetVectorCentroids(storage.NewVectorFieldValue(t.clusteringKeyField.DataType, centroid))
-		clusterBuffer := &ClusterBuffer{
-			id:                      id,
-			flushedRowNum:           map[typeutil.UniqueID]atomic.Int64{},
-			flushedBinlogs:          make(map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog, 0),
-			uploadedSegments:        make([]*datapb.CompactionSegment, 0),
-			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
-			clusteringKeyFieldStats: fieldStats,
-		}
-		t.refreshBufferWriterWithPack(clusterBuffer)
-		t.clusterBuffers = append(t.clusterBuffers, clusterBuffer)
-	}
-	t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {
-		return t.clusterBuffers[idMapping[offset]]
-	}
-	return nil
+	return t.switchPolicyForVectorPlan(centroids)
 }
 
 // mapping read and split input segments into buffers
@@ -1184,15 +1228,15 @@ func (t *clusteringCompactionTask) generatedScalarPlan(maxRows, preferRows int64
 
 func (t *clusteringCompactionTask) switchPolicyForScalarPlan(totalRows int64, keys []interface{}, dict map[interface{}]int64) [][]interface{} {
 	bufferNumBySegmentMaxRows := totalRows / t.plan.MaxSegmentRows
-	bufferNumBySegmentMemoryBuffer := t.memoryBufferSize / expectedBinlogSize
+	bufferNumByMemory := t.memoryBufferSize / expectedBinlogSize
 	log.Info("switchPolicyForScalarPlan", zap.Int64("totalRows", totalRows),
 		zap.Int64("bufferNumBySegmentMaxRows", bufferNumBySegmentMaxRows),
-		zap.Int64("bufferNumBySegmentMemoryBuffer", bufferNumBySegmentMemoryBuffer))
-	if bufferNumBySegmentMemoryBuffer > bufferNumBySegmentMaxRows {
+		zap.Int64("bufferNumByMemory", bufferNumByMemory))
+	if bufferNumByMemory > bufferNumBySegmentMaxRows {
 		return t.generatedScalarPlan(t.plan.GetMaxSegmentRows(), t.plan.GetPreferSegmentRows(), keys, dict)
 	}
 
-	maxRows := totalRows / bufferNumBySegmentMemoryBuffer
+	maxRows := totalRows / bufferNumByMemory
 	return t.generatedScalarPlan(maxRows, int64(float64(maxRows)*paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat()), keys, dict)
 }
 
