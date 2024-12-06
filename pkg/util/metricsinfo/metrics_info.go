@@ -40,8 +40,10 @@ type HardwareMetrics struct {
 	MemoryUsage  uint64  `json:"memory_usage"`
 
 	// how to metric disk & disk usage in distributed storage
-	Disk      uint64 `json:"disk"`
-	DiskUsage uint64 `json:"disk_usage"`
+	Disk      float64 `json:"disk,string"`
+	DiskUsage float64 `json:"disk_usage,string"`
+
+	IOWaitPercentage float64 `json:"io_wait_percentage,string"` // IO Wait in %
 }
 
 const (
