@@ -58,15 +58,15 @@ template <typename T>
 class SealedDataGetter : public DataGetter<T> {
  private:
     std::shared_ptr<Span<T>> field_data_;
-    std::shared_ptr<Span<std::string>> str_field_data_;
+    std::shared_ptr<Span<std::string_view>> str_field_data_;
     const index::ScalarIndex<T>* field_index_;
 
  public:
     SealedDataGetter(const segcore::SegmentSealed& segment, FieldId& field_id) {
         if (segment.HasFieldData(field_id)) {
             if constexpr (std::is_same_v<T, std::string>) {
-                str_field_data_ = std::make_shared<Span<std::string>>(
-                    segment.chunk_data<std::string>(field_id, 0));
+                str_field_data_ = std::make_shared<Span<std::string_view>>(
+                    segment.chunk_data<std::string_view>(field_id, 0));
             } else {
                 auto span = segment.chunk_data<T>(field_id, 0);
                 field_data_ = std::make_shared<Span<T>>(
@@ -92,7 +92,9 @@ class SealedDataGetter : public DataGetter<T> {
     Get(int64_t idx) const {
         if (field_data_ || str_field_data_) {
             if constexpr (std::is_same_v<T, std::string>) {
-                return str_field_data_->data()[idx];
+                std::string_view str_val_view =
+                    str_field_data_->operator[](idx);
+                return std::string(str_val_view.data(), str_val_view.length());
             }
             return field_data_->operator[](idx);
         } else {

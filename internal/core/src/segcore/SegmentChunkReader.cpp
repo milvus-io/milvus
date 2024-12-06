@@ -123,7 +123,7 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
         };
     } else {
         auto span =
-            segment_->chunk_data<std::string>(field_id, current_chunk_id);
+            segment_->chunk_data<std::string_view>(field_id, current_chunk_id);
         auto chunk_data = span.data();
         auto chunk_valid_data = span.valid_data();
         auto current_chunk_size =
@@ -134,8 +134,8 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
             if (current_chunk_pos >= current_chunk_size) {
                 current_chunk_id++;
                 current_chunk_pos = 0;
-                auto span = segment_->chunk_data<std::string>(field_id,
-                                                              current_chunk_id);
+                auto span = segment_->chunk_data<std::string_view>(
+                    field_id, current_chunk_id);
                 chunk_data = span.data();
                 chunk_valid_data = span.valid_data();
                 current_chunk_size =

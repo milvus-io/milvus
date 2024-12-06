@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cassert>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -43,6 +44,24 @@ class SpanBase {
           element_sizeof_(element_sizeof) {
     }
 
+    explicit SpanBase(const void* data,
+                      const bool* valid_data,
+                      int64_t row_count,
+                      int64_t element_sizeof,
+                      bool owned_data)
+        : data_(data),
+          valid_data_(valid_data),
+          row_count_(row_count),
+          element_sizeof_(element_sizeof),
+          owned_data_(owned_data) {
+    }
+
+    ~SpanBase() {
+        if (owned_data_) {
+            delete[] static_cast<const char*>(data_);
+        }
+    }
+
     int64_t
     row_count() const {
         return row_count_;
@@ -65,6 +84,7 @@ class SpanBase {
 
  private:
     const void* data_;
+    const bool owned_data_ = false;
     const bool* valid_data_{nullptr};
     int64_t row_count_;
     int64_t element_sizeof_;

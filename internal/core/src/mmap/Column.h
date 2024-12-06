@@ -317,12 +317,6 @@ class SingleChunkColumnBase : public ColumnBase {
                   "GetBatchBuffer only supported for VariableColumn");
     }
 
-    virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    StringViews() const {
-        PanicInfo(ErrorCode::Unsupported,
-                  "StringViews only supported for VariableColumn");
-    }
-
     virtual void
     AppendBatch(const FieldDataPtr data) {
         size_t required_size = data_size_ + data->DataSize();
@@ -675,23 +669,17 @@ class SingleChunkVariableColumn : public SingleChunkColumnBase {
 
     SpanBase
     Span() const override {
-        PanicInfo(ErrorCode::NotImplemented,
-                  "span() interface is not implemented for variable column");
-    }
-
-    std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    StringViews() const override {
-        std::vector<std::string_view> res;
-        res.reserve(num_rows_);
+        const auto res = new std::string_view[num_rows_];
         char* pos = data_;
         for (size_t i = 0; i < num_rows_; ++i) {
             uint32_t size;
             size = *reinterpret_cast<uint32_t*>(pos);
             pos += sizeof(uint32_t);
-            res.emplace_back(std::string_view(pos, size));
+            res[i] = std::string_view(pos, size);
             pos += size;
         }
-        return std::make_pair(res, valid_data_);
+        return SpanBase(
+            res, valid_data_.data(), num_rows_, sizeof(std::string_view), true);
     }
 
     [[nodiscard]] std::vector<ViewType>
