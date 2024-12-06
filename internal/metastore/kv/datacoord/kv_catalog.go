@@ -23,6 +23,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
@@ -46,16 +49,21 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var paginationSize = 2000
-
 type Catalog struct {
-	MetaKv               kv.MetaKv
+	MetaKv kv.MetaKv
+
+	paginationSize       int
 	ChunkManagerRootPath string
 	metaRootpath         string
 }
 
 func NewCatalog(MetaKv kv.MetaKv, chunkManagerRootPath string, metaRootpath string) *Catalog {
-	return &Catalog{MetaKv: MetaKv, ChunkManagerRootPath: chunkManagerRootPath, metaRootpath: metaRootpath}
+	return &Catalog{
+		MetaKv:               MetaKv,
+		paginationSize:       paramtable.Get().MetaStoreCfg.PaginationSize.GetAsInt(),
+		ChunkManagerRootPath: chunkManagerRootPath,
+		metaRootpath:         metaRootpath,
+	}
 }
 
 func (kc *Catalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, error) {
@@ -121,7 +129,7 @@ func (kc *Catalog) listSegments() ([]*datapb.SegmentInfo, error) {
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(SegmentPrefix+"/", paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(SegmentPrefix+"/", kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +212,7 @@ func (kc *Catalog) listBinlogs(binlogType storage.BinlogType) (map[typeutil.Uniq
 		return nil
 	}
 
-	err = kc.MetaKv.WalkWithPrefix(logPathPrefix, paginationSize, applyFn)
+	err = kc.MetaKv.WalkWithPrefix(logPathPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -483,7 +491,7 @@ func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ChannelCheckpointPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ChannelCheckpointPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -568,7 +576,7 @@ func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(util.FieldIndexPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(util.FieldIndexPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -644,7 +652,7 @@ func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentInde
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(util.SegmentIndexPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(util.SegmentIndexPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -698,7 +706,7 @@ func (kc *Catalog) ListImportJobs() ([]*datapb.ImportJob, error) {
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ImportJobPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ImportJobPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -732,7 +740,7 @@ func (kc *Catalog) ListPreImportTasks() ([]*datapb.PreImportTask, error) {
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(PreImportTaskPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(PreImportTaskPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -766,7 +774,7 @@ func (kc *Catalog) ListImportTasks() ([]*datapb.ImportTaskV2, error) {
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ImportTaskPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ImportTaskPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -806,7 +814,7 @@ func (kc *Catalog) ListCompactionTask(ctx context.Context) ([]*datapb.Compaction
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(CompactionTaskPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(CompactionTaskPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -845,7 +853,7 @@ func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(AnalyzeTaskPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(AnalyzeTaskPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -885,7 +893,7 @@ func (kc *Catalog) ListPartitionStatsInfos(ctx context.Context) ([]*datapb.Parti
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(PartitionStatsInfoPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(PartitionStatsInfoPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
