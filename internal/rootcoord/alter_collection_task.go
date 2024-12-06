@@ -224,7 +224,7 @@ func (a *alterCollectionFieldTask) Execute(ctx context.Context) error {
 		dbName:          a.Req.GetDbName(),
 		collectionNames: append(collectionNames, a.Req.GetCollectionName()),
 		collectionID:    oldColl.CollectionID,
-		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)},
+		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollectionField)},
 	})
 
 	return redoTask.Execute(ctx)
@@ -232,6 +232,7 @@ func (a *alterCollectionFieldTask) Execute(ctx context.Context) error {
 
 var allowedProps = []string{
 	common.MaxLengthKey,
+	common.MmapEnabledKey,
 }
 
 func IsKeyAllowed(key string) bool {
