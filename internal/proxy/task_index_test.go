@@ -374,7 +374,7 @@ func Test_sparse_parseIndexParams(t *testing.T) {
 	}
 
 	t.Run("parse index params", func(t *testing.T) {
-		err := cit.parseIndexParams()
+		err := cit.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 
 		assert.ElementsMatch(t,
@@ -452,7 +452,7 @@ func Test_parseIndexParams(t *testing.T) {
 	}
 
 	t.Run("parse index params", func(t *testing.T) {
-		err := cit.parseIndexParams()
+		err := cit.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 
 		assert.ElementsMatch(t,
@@ -545,7 +545,7 @@ func Test_parseIndexParams(t *testing.T) {
 		indexParamsStr, err := json.Marshal(indexParams)
 		assert.NoError(t, err)
 		Params.Save(Params.AutoIndexConfig.IndexParams.Key, string(indexParamsStr))
-		err = cit2.parseIndexParams()
+		err = cit2.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 
 		assert.ElementsMatch(t,
@@ -622,7 +622,7 @@ func Test_parseIndexParams(t *testing.T) {
 				DataType:     schemapb.DataType_JSON,
 			},
 		}
-		err := cit3.parseIndexParams()
+		err := cit3.parseIndexParams(context.TODO())
 		assert.Error(t, err)
 	})
 
@@ -644,7 +644,7 @@ func Test_parseIndexParams(t *testing.T) {
 				DataType:     schemapb.DataType_VarChar,
 			},
 		}
-		err := cit.parseIndexParams()
+		err := cit.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 	})
 
@@ -661,7 +661,7 @@ func Test_parseIndexParams(t *testing.T) {
 				DataType:     schemapb.DataType_VarChar,
 			},
 		}
-		err := cit.parseIndexParams()
+		err := cit.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
@@ -687,7 +687,7 @@ func Test_parseIndexParams(t *testing.T) {
 				DataType:     schemapb.DataType_Int64,
 			},
 		}
-		err := cit.parseIndexParams()
+		err := cit.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 	})
 
@@ -704,7 +704,7 @@ func Test_parseIndexParams(t *testing.T) {
 				DataType:     schemapb.DataType_Int64,
 			},
 		}
-		err := cit.parseIndexParams()
+		err := cit.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
@@ -731,7 +731,7 @@ func Test_parseIndexParams(t *testing.T) {
 				DataType:     schemapb.DataType_VarChar,
 			},
 		}
-		err := cit.parseIndexParams()
+		err := cit.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 	})
 
@@ -754,7 +754,7 @@ func Test_parseIndexParams(t *testing.T) {
 				DataType:     schemapb.DataType_Int64,
 			},
 		}
-		err := cit.parseIndexParams()
+		err := cit.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 	})
 
@@ -776,7 +776,7 @@ func Test_parseIndexParams(t *testing.T) {
 				DataType:     schemapb.DataType_Int64,
 			},
 		}
-		err := cit.parseIndexParams()
+		err := cit.parseIndexParams(context.TODO())
 		assert.Error(t, err)
 	})
 
@@ -812,7 +812,7 @@ func Test_parseIndexParams(t *testing.T) {
 				ElementType:  schemapb.DataType_Int64,
 			},
 		}
-		err := cit3.parseIndexParams()
+		err := cit3.parseIndexParams(context.TODO())
 		assert.Error(t, err)
 	})
 
@@ -859,7 +859,7 @@ func Test_parseIndexParams(t *testing.T) {
 				DataType:     schemapb.DataType_VarChar,
 			},
 		}
-		err := cit4.parseIndexParams()
+		err := cit4.parseIndexParams(context.TODO())
 		assert.Error(t, err)
 
 		cit5 := &createIndexTask{
@@ -904,7 +904,7 @@ func Test_parseIndexParams(t *testing.T) {
 				DataType:     schemapb.DataType_Int64,
 			},
 		}
-		err = cit5.parseIndexParams()
+		err = cit5.parseIndexParams(context.TODO())
 		assert.Error(t, err)
 	})
 
@@ -932,7 +932,7 @@ func Test_parseIndexParams(t *testing.T) {
 			},
 		}
 
-		err = cit.parseIndexParams()
+		err = cit.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
@@ -961,7 +961,7 @@ func Test_parseIndexParams(t *testing.T) {
 			},
 		}
 
-		err := cit.parseIndexParams()
+		err := cit.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
@@ -990,7 +990,7 @@ func Test_parseIndexParams(t *testing.T) {
 			},
 		}
 
-		err := cit.parseIndexParams()
+		err := cit.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
@@ -1019,7 +1019,7 @@ func Test_parseIndexParams(t *testing.T) {
 			},
 		}
 
-		err := cit.parseIndexParams()
+		err := cit.parseIndexParams(context.TODO())
 		assert.Error(t, err)
 	})
 
@@ -1051,7 +1051,7 @@ func Test_parseIndexParams(t *testing.T) {
 			},
 		}
 
-		err := cit.parseIndexParams()
+		err := cit.parseIndexParams(context.TODO())
 		assert.Error(t, err)
 	})
 
@@ -1087,7 +1087,7 @@ func Test_parseIndexParams(t *testing.T) {
 				},
 			},
 		}
-		err := cit.parseIndexParams()
+		err := cit.parseIndexParams(context.TODO())
 		// Out of range in json: param 'M' (3000) should be in range [2, 2048]
 		assert.Error(t, err)
 	})
@@ -1142,7 +1142,7 @@ func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 				},
 			},
 		}
-		err := task.parseIndexParams()
+		err := task.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 		assert.True(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
@@ -1162,7 +1162,7 @@ func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 				},
 			},
 		}
-		err := task.parseIndexParams()
+		err := task.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 		assert.True(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
@@ -1181,7 +1181,7 @@ func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 				},
 			},
 		}
-		err := task.parseIndexParams()
+		err := task.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 		assert.True(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
@@ -1232,7 +1232,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 				ExtraParams: make([]*commonpb.KeyValuePair, 0),
 			},
 		}
-		err := task.parseIndexParams()
+		err := task.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 		assert.False(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
@@ -1248,7 +1248,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 				ExtraParams: make([]*commonpb.KeyValuePair, 0),
 			},
 		}
-		err := task.parseIndexParams()
+		err := task.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 		assert.False(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
@@ -1264,7 +1264,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 				ExtraParams: make([]*commonpb.KeyValuePair, 0),
 			},
 		}
-		err := task.parseIndexParams()
+		err := task.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 		assert.False(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
@@ -1282,7 +1282,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 				},
 			},
 		}
-		err := task.parseIndexParams()
+		err := task.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 		assert.True(t, task.userAutoIndexMetricTypeSpecified)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
@@ -1301,7 +1301,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 				},
 			},
 		}
-		err := task.parseIndexParams()
+		err := task.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: AutoIndexName},
@@ -1318,7 +1318,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 				},
 			},
 		}
-		err := task.parseIndexParams()
+		err := task.parseIndexParams(context.TODO())
 		assert.Error(t, err)
 	})
 
@@ -1332,7 +1332,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 				},
 			},
 		}
-		err := task.parseIndexParams()
+		err := task.parseIndexParams(context.TODO())
 		assert.Error(t, err)
 	})
 
@@ -1347,7 +1347,7 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 				},
 			},
 		}
-		err := task.parseIndexParams()
+		err := task.parseIndexParams(context.TODO())
 		assert.Error(t, err)
 	})
 }

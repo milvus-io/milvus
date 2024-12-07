@@ -56,8 +56,9 @@ var (
 )
 
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	log.Ctx(ctx).Info("show collections request received", zap.Int64s("collections", req.GetCollectionIDs()))
+	log := log.Ctx(ctx).With(zap.Int64s("collections", req.GetCollectionIDs()))
 
+	log.Info("show collections request received")
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to show collections"
 		log.Warn(msg, zap.Error(err))
@@ -683,15 +684,15 @@ func (s *Server) refreshCollection(ctx context.Context, collectionID int64) erro
 // 	}
 // }
 
-func (s *Server) isStoppingNode(nodeID int64) error {
+func (s *Server) isStoppingNode(ctx context.Context, nodeID int64) error {
 	isStopping, err := s.nodeMgr.IsStoppingNode(nodeID)
 	if err != nil {
-		log.Warn("fail to check whether the node is stopping", zap.Int64("node_id", nodeID), zap.Error(err))
+		log.Ctx(ctx).Warn("fail to check whether the node is stopping", zap.Int64("node_id", nodeID), zap.Error(err))
 		return err
 	}
 	if isStopping {
 		msg := fmt.Sprintf("failed to balance due to the source/destination node[%d] is stopping", nodeID)
-		log.Warn(msg)
+		log.Ctx(ctx).Warn(msg)
 		return errors.New(msg)
 	}
 	return nil
@@ -734,7 +735,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		log.Warn(msg)
 		return merr.Status(err), nil
 	}
-	if err := s.isStoppingNode(srcNode); err != nil {
+	if err := s.isStoppingNode(ctx, srcNode); err != nil {
 		return merr.Status(errors.Wrap(err,
 			fmt.Sprintf("can't balance, because the source node[%d] is invalid", srcNode))), nil
 	}
@@ -756,7 +757,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 
 	// check whether dstNode is healthy
 	for dstNode := range dstNodeSet {
-		if err := s.isStoppingNode(dstNode); err != nil {
+		if err := s.isStoppingNode(ctx, dstNode); err != nil {
 			return merr.Status(errors.Wrap(err,
 				fmt.Sprintf("can't balance, because the destination node[%d] is invalid", dstNode))), nil
 		}
@@ -920,7 +921,7 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 	}
 
 	if err := utils.CheckCollectionsQueryable(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr); err != nil {
-		log.Warn("some collection is not queryable during health check", zap.Error(err))
+		log.Ctx(ctx).Warn("some collection is not queryable during health check", zap.Error(err))
 	}
 
 	return componentutil.CheckHealthRespWithErr(nil), nil

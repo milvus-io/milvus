@@ -29,8 +29,8 @@ type StreamingNode struct {
 }
 
 // NewStreamingNode creates a new StreamingNode
-func NewStreamingNode(_ context.Context, factory dependency.Factory) (*StreamingNode, error) {
-	svr, err := streamingnode.NewServer(factory)
+func NewStreamingNode(ctx context.Context, factory dependency.Factory) (*StreamingNode, error) {
+	svr, err := streamingnode.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}

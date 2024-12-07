@@ -98,6 +98,7 @@ func (ddn *ddNode) IsValidInMsg(in []Msg) bool {
 
 // Operate handles input messages, implementing flowgrpah.Node
 func (ddn *ddNode) Operate(in []Msg) []Msg {
+	log := log.Ctx(ddn.ctx)
 	msMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
 		log.Warn("type assertion failed for MsgStreamMsg", zap.String("channel", ddn.vChannelName), zap.String("name", reflect.TypeOf(in[0]).Name()))

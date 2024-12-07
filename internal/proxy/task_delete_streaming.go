@@ -60,7 +60,7 @@ func (dt *deleteTaskByStreamingService) Execute(ctx context.Context) (err error)
 		}
 	}
 
-	log.Debug("send delete request to virtual channels",
+	log.Ctx(ctx).Debug("send delete request to virtual channels",
 		zap.String("collectionName", dt.req.GetCollectionName()),
 		zap.Int64("collectionID", dt.collectionID),
 		zap.Strings("virtual_channels", dt.vChannels),
@@ -69,7 +69,7 @@ func (dt *deleteTaskByStreamingService) Execute(ctx context.Context) (err error)
 
 	resp := streaming.WAL().AppendMessages(ctx, msgs...)
 	if resp.UnwrapFirstError(); err != nil {
-		log.Warn("append messages to wal failed", zap.Error(err))
+		log.Ctx(ctx).Warn("append messages to wal failed", zap.Error(err))
 		return err
 	}
 	dt.sessionTS = resp.MaxTimeTick()

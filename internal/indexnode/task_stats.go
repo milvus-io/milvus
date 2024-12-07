@@ -127,13 +127,13 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 
 	if err := binlog.DecompressBinLogWithRootPath(st.req.GetStorageConfig().GetRootPath(), storage.InsertBinlog, st.req.GetCollectionID(), st.req.GetPartitionID(),
 		st.req.GetSegmentID(), st.req.GetInsertLogs()); err != nil {
-		log.Warn("Decompress insert binlog error", zap.Error(err))
+		log.Ctx(ctx).Warn("Decompress insert binlog error", zap.Error(err))
 		return err
 	}
 
 	if err := binlog.DecompressBinLogWithRootPath(st.req.GetStorageConfig().GetRootPath(), storage.DeleteBinlog, st.req.GetCollectionID(), st.req.GetPartitionID(),
 		st.req.GetSegmentID(), st.req.GetDeltaLogs()); err != nil {
-		log.Warn("Decompress delta binlog error", zap.Error(err))
+		log.Ctx(ctx).Warn("Decompress delta binlog error", zap.Error(err))
 		return err
 	}
 
@@ -162,7 +162,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 	bm25FieldIds := compaction.GetBM25FieldIDs(st.req.GetSchema())
 	writer, err := compaction.NewSegmentWriter(st.req.GetSchema(), numRows, statsBatchSize, st.req.GetTargetSegmentID(), st.req.GetPartitionID(), st.req.GetCollectionID(), bm25FieldIds)
 	if err != nil {
-		log.Warn("sort segment wrong, unable to init segment writer",
+		log.Ctx(ctx).Warn("sort segment wrong, unable to init segment writer",
 			zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 		return nil, err
 	}
@@ -181,7 +181,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 	downloadStart := time.Now()
 	values, err := st.downloadData(ctx, numRows, writer.GetPkID(), bm25FieldIds)
 	if err != nil {
-		log.Warn("download data failed", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
+		log.Ctx(ctx).Warn("download data failed", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 		return nil, err
 	}
 	downloadCost = time.Since(downloadStart)
@@ -195,7 +195,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 	for i, v := range values {
 		err := writer.Write(v)
 		if err != nil {
-			log.Warn("write value wrong, failed to writer row", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
+			log.Ctx(ctx).Warn("write value wrong, failed to writer row", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 			return nil, err
 		}
 
@@ -203,7 +203,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 			serWriteStart := time.Now()
 			binlogNum, kvs, partialBinlogs, err := serializeWrite(ctx, st.req.GetStartLogID()+st.logIDOffset, writer)
 			if err != nil {
-				log.Warn("stats wrong, failed to serialize writer", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
+				log.Ctx(ctx).Warn("stats wrong, failed to serialize writer", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 				return nil, err
 			}
 			serWriteTimeCost += time.Since(serWriteStart)
@@ -214,7 +214,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 			flushBatchCount++
 			st.logIDOffset += binlogNum
 			if st.req.GetStartLogID()+st.logIDOffset >= st.req.GetEndLogID() {
-				log.Warn("binlog files too much, log is not enough", zap.Int64("taskID", st.req.GetTaskID()),
+				log.Ctx(ctx).Warn("binlog files too much, log is not enough", zap.Int64("taskID", st.req.GetTaskID()),
 					zap.Int64("binlog num", binlogNum), zap.Int64("startLogID", st.req.GetStartLogID()),
 					zap.Int64("endLogID", st.req.GetEndLogID()), zap.Int64("logIDOffset", st.logIDOffset))
 				return nil, fmt.Errorf("binlog files too much, log is not enough")
@@ -226,7 +226,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		serWriteStart := time.Now()
 		binlogNum, kvs, partialBinlogs, err := serializeWrite(ctx, st.req.GetStartLogID()+st.logIDOffset, writer)
 		if err != nil {
-			log.Warn("stats wrong, failed to serialize writer", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
+			log.Ctx(ctx).Warn("stats wrong, failed to serialize writer", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 			return nil, err
 		}
 		serWriteTimeCost += time.Since(serWriteStart)
@@ -239,14 +239,14 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 
 	err = conc.AwaitAll(uploadFutures...)
 	if err != nil {
-		log.Warn("stats wrong, failed to upload kvs", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
+		log.Ctx(ctx).Warn("stats wrong, failed to upload kvs", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 		return nil, err
 	}
 
 	serWriteStart := time.Now()
 	binlogNums, sPath, err := statSerializeWrite(ctx, st.binlogIO, st.req.GetStartLogID()+st.logIDOffset, writer, numRows)
 	if err != nil {
-		log.Warn("stats wrong, failed to serialize write segment stats", zap.Int64("taskID", st.req.GetTaskID()),
+		log.Ctx(ctx).Warn("stats wrong, failed to serialize write segment stats", zap.Int64("taskID", st.req.GetTaskID()),
 			zap.Int64("remaining row count", numRows), zap.Error(err))
 		return nil, err
 	}
@@ -258,7 +258,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 	if len(bm25FieldIds) > 0 {
 		binlogNums, bm25StatsLogs, err = bm25SerializeWrite(ctx, st.binlogIO, st.req.GetStartLogID()+st.logIDOffset, writer, numRows)
 		if err != nil {
-			log.Warn("compact wrong, failed to serialize write segment bm25 stats", zap.Error(err))
+			log.Ctx(ctx).Warn("compact wrong, failed to serialize write segment bm25 stats", zap.Error(err))
 			return nil, err
 		}
 		st.logIDOffset += binlogNums
@@ -288,7 +288,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		st.req.GetInsertChannel(),
 		int64(len(values)), insertLogs, statsLogs, bm25StatsLogs)
 
-	log.Info("sort segment end",
+	log.Ctx(ctx).Info("sort segment end",
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),
 		zap.Int64("collectionID", st.req.GetCollectionID()),
@@ -330,7 +330,7 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			st.req.GetTaskID(),
 			insertLogs)
 		if err != nil {
-			log.Warn("stats wrong, failed to create text index", zap.Error(err))
+			log.Ctx(ctx).Warn("stats wrong, failed to create text index", zap.Error(err))
 			return err
 		}
 	}
@@ -569,7 +569,7 @@ func statSerializeWrite(ctx context.Context, io io.BinlogIO, startID int64, writ
 		},
 	}
 	if err := io.Upload(ctx, kvs); err != nil {
-		log.Warn("failed to upload insert log", zap.Error(err))
+		log.Ctx(ctx).Warn("failed to upload insert log", zap.Error(err))
 		return binlogNum, nil, err
 	}
 
@@ -607,7 +607,7 @@ func bm25SerializeWrite(ctx context.Context, io io.BinlogIO, startID int64, writ
 	}
 
 	if err := io.Upload(ctx, kvs); err != nil {
-		log.Warn("failed to upload bm25 log", zap.Error(err))
+		log.Ctx(ctx).Warn("failed to upload bm25 log", zap.Error(err))
 		return 0, nil, err
 	}
 

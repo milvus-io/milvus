@@ -58,10 +58,10 @@ func (n *Proxy) Prepare() error {
 // Run starts service
 func (n *Proxy) Run() error {
 	if err := n.svr.Run(); err != nil {
-		log.Error("Proxy starts error", zap.Error(err))
+		log.Ctx(context.TODO()).Error("Proxy starts error", zap.Error(err))
 		return err
 	}
-	log.Info("Proxy successfully started")
+	log.Ctx(context.TODO()).Info("Proxy successfully started")
 	return nil
 }
 

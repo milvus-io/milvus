@@ -166,7 +166,7 @@ func (p *ProxyWatcher) handlePutEvent(e *clientv3.Event) error {
 	if err != nil {
 		return err
 	}
-	log.Debug("received proxy put event with session", zap.Any("session", session))
+	log.Ctx(context.TODO()).Debug("received proxy put event with session", zap.Any("session", session))
 	for _, f := range p.addSessionsFunc {
 		f(session)
 	}
@@ -178,7 +178,7 @@ func (p *ProxyWatcher) handleDeleteEvent(e *clientv3.Event) error {
 	if err != nil {
 		return err
 	}
-	log.Debug("received proxy delete event with session", zap.Any("session", session))
+	log.Ctx(context.TODO()).Debug("received proxy delete event with session", zap.Any("session", session))
 	for _, f := range p.delSessionsFunc {
 		f(session)
 	}
