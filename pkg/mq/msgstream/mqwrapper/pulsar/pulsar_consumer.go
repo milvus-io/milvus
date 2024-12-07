@@ -143,7 +143,8 @@ func (pc *Consumer) Close() {
 			return nil
 		}
 
-		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+		err := retry.Do(log.WithFields(context.TODO(), zap.String("action", "Unsubscribe")),
+			fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
 			log.Error("failed to unsubscribe", zap.String("subscription", pc.Subscription()), zap.Error(err))
 			panic(err)
