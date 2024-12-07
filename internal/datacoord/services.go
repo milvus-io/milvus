@@ -690,7 +690,7 @@ func (s *Server) GetStateCode() commonpb.StateCode {
 // GetComponentStates returns DataCoord's current state
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	code := s.GetStateCode()
-	log.Debug("DataCoord current state", zap.String("StateCode", code.String()))
+	log.Ctx(ctx).Debug("DataCoord current state", zap.String("StateCode", code.String()))
 	nodeID := common.NotRegisteredID
 	if s.session != nil && s.session.Registered() {
 		nodeID = s.session.GetServerID() // or Params.NodeID
@@ -1528,12 +1528,12 @@ func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeT
 // An error status will be returned and error will be logged, if we failed to mark *all* segments.
 // Deprecated, do not use it
 func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
-	log.Info("marking segments dropped", zap.Int64s("segments", req.GetSegmentIds()))
+	log.Ctx(ctx).Info("marking segments dropped", zap.Int64s("segments", req.GetSegmentIds()))
 	var err error
 	for _, segID := range req.GetSegmentIds() {
 		if err = s.meta.SetState(ctx, segID, commonpb.SegmentState_Dropped); err != nil {
 			// Fail-open.
-			log.Error("failed to set segment state as dropped", zap.Int64("segmentID", segID))
+			log.Ctx(ctx).Error("failed to set segment state as dropped", zap.Int64("segmentID", segID))
 			break
 		}
 	}
@@ -1664,7 +1664,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		Status: merr.Success(),
 	}
 
-	log := log.With(zap.Int64("collection", in.GetCollectionID()),
+	log := log.Ctx(ctx).With(zap.Int64("collection", in.GetCollectionID()),
 		zap.Int64s("partitions", in.GetPartitionIDs()),
 		zap.Strings("channels", in.GetChannelNames()))
 	log.Info("receive import request", zap.Any("files", in.GetFiles()), zap.Any("options", in.GetOptions()))
@@ -1749,7 +1749,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 }
 
 func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {
-	log := log.With(zap.String("jobID", in.GetJobID()))
+	log := log.Ctx(ctx).With(zap.String("jobID", in.GetJobID()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.GetImportProgressResponse{
 			Status: merr.Status(err),

@@ -363,6 +363,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) error {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("getVectorAnalyzeResult-%d", t.GetPlanID()))
 	defer span.End()
+	log := log.Ctx(ctx)
 	analyzeResultPath := t.plan.AnalyzeResultPath
 	centroidFilePath := path.Join(analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID), common.Centroids)
 	offsetMappingFiles := make(map[int64]string, 0)
@@ -417,6 +418,7 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 	defer span.End()
 	inputSegments := t.plan.GetSegmentBinlogs()
 	mapStart := time.Now()
+	log := log.Ctx(ctx)
 
 	// start flush goroutine
 	go t.backgroundFlush(ctx)
@@ -881,6 +883,7 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 		return nil
 	}
 
+	log := log.Ctx(ctx)
 	binlogNum := 0
 	numRows := buffer.flushedRowNum[segmentID]
 	insertLogs := make([]*datapb.FieldBinlog, 0)
@@ -1309,6 +1312,7 @@ func (t *clusteringCompactionTask) GetSlotUsage() int64 {
 }
 
 func (t *clusteringCompactionTask) checkBuffersAfterCompaction() error {
+	log := log.Ctx(t.ctx)
 	for _, buffer := range t.clusterBuffers {
 		if len(buffer.flushedBinlogs) != 0 {
 			log.Warn("there are some binlogs have leaked, please check", zap.Int("buffer id", buffer.id),

@@ -605,6 +605,7 @@ func (ss *SuffixSnapshot) Close() {
 
 // startBackgroundGC the data will clean up if key ts!=0 and expired
 func (ss *SuffixSnapshot) startBackgroundGC(ctx context.Context) {
+	log := log.Ctx(ctx)
 	log.Debug("suffix snapshot GC goroutine start!")
 	ticker := time.NewTicker(60 * time.Minute)
 	defer ticker.Stop()
@@ -653,6 +654,7 @@ func (ss *SuffixSnapshot) batchRemoveExpiredKvs(ctx context.Context, keyGroup []
 // It walks through all keys with the snapshot prefix, groups them by original key,
 // and removes expired versions or all versions if the original key has been deleted
 func (ss *SuffixSnapshot) removeExpiredKvs(ctx context.Context, now time.Time) error {
+	log := log.Ctx(ctx)
 	ttlTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotTTLSeconds.GetAsDuration(time.Second)
 	reserveTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotReserveTimeSeconds.GetAsDuration(time.Second)
 
