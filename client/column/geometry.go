@@ -10,9 +10,7 @@ import (
 )
 
 type ColumnGeometryBytes struct {
-	ColumnBase
-	name   string
-	values [][]byte
+	*genericColumnBase[[]byte]
 }
 
 // Name returns column name.
@@ -39,9 +37,7 @@ func (c *ColumnGeometryBytes) Slice(start, end int) Column {
 		end = l
 	}
 	return &ColumnGeometryBytes{
-		ColumnBase: c.ColumnBase,
-		name:       c.name,
-		values:     c.values[start:end],
+		genericColumnBase: c.genericColumnBase.slice(start, end),
 	}
 }
 
@@ -112,7 +108,10 @@ func (c *ColumnGeometryBytes) Data() [][]byte {
 
 func NewColumnGeometryBytes(name string, values [][]byte) *ColumnGeometryBytes {
 	return &ColumnGeometryBytes{
-		name:   name,
-		values: values,
+		genericColumnBase: &genericColumnBase[[]byte]{
+			name:      name,
+			fieldType: entity.FieldTypeGeometry,
+			values:    values,
+		},
 	}
 }
