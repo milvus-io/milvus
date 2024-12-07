@@ -20,6 +20,9 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"runtime"
+	"runtime/debug"
+	"sync"
 
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/samber/lo"
@@ -35,17 +38,19 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-// Not concurrent safe.
+// concurrent safe
 type MultiSegmentWriter struct {
 	binlogIO  io.BinlogIO
 	allocator *compactionAlloactor
 
-	writers []*SegmentWriter
-	current int
+	writers  []*SegmentWriter
+	current  *atomic.Int32
+	rowCount *atomic.Int64
 
 	maxRows     int64
 	segmentSize int64
@@ -58,10 +63,17 @@ type MultiSegmentWriter struct {
 	collectionID int64
 	channel      string
 
-	cachedMeta map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog
+	flushedBinlogs map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog
 	// segID -> fieldID -> binlogs
+	flushedSize map[typeutil.UniqueID]int64
+	// segID -> size
+	flushingSize *atomic.Int64
 
 	res []*datapb.CompactionSegment
+
+	supportConcurrent bool
+	writeLock         sync.Mutex
+
 	// DONOT leave it empty of all segments are deleted, just return a segment with zero meta for datacoord
 	bm25Fields []int64
 }
@@ -86,31 +98,36 @@ func (alloc *compactionAlloactor) getLogIDAllocator() allocator.Interface {
 	return alloc.logIDAlloc
 }
 
-func NewMultiSegmentWriter(binlogIO io.BinlogIO, allocator *compactionAlloactor, plan *datapb.CompactionPlan, maxRows int64, partitionID, collectionID int64, bm25Fields []int64) *MultiSegmentWriter {
+func NewMultiSegmentWriter(binlogIO io.BinlogIO, allocator *compactionAlloactor, schema *schemapb.CollectionSchema, channel string, segmentSize int64,
+	maxRows int64, partitionID, collectionID int64, bm25Fields []int64, supportConcurrent bool) *MultiSegmentWriter {
 	return &MultiSegmentWriter{
 		binlogIO:  binlogIO,
 		allocator: allocator,
 
 		writers: make([]*SegmentWriter, 0),
-		current: -1,
+		current: atomic.NewInt32(-1),
 
 		maxRows:     maxRows, // For bloomfilter only
-		segmentSize: plan.GetMaxSize(),
+		segmentSize: segmentSize,
 
-		schema:       plan.GetSchema(),
+		schema:       schema,
 		partitionID:  partitionID,
 		collectionID: collectionID,
-		channel:      plan.GetChannel(),
+		channel:      channel,
 
-		cachedMeta: make(map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog),
-		res:        make([]*datapb.CompactionSegment, 0),
-		bm25Fields: bm25Fields,
+		flushedBinlogs:    make(map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog),
+		flushedSize:       make(map[typeutil.UniqueID]int64),
+		res:               make([]*datapb.CompactionSegment, 0),
+		bm25Fields:        bm25Fields,
+		supportConcurrent: supportConcurrent,
+		rowCount:          atomic.NewInt64(0),
+		flushingSize:      atomic.NewInt64(0),
 	}
 }
 
 func (w *MultiSegmentWriter) finishCurrent() error {
-	writer := w.writers[w.current]
-	allBinlogs, ok := w.cachedMeta[writer.segmentID]
+	writer := w.writers[w.current.Load()]
+	allBinlogs, ok := w.flushedBinlogs[writer.segmentID]
 	if !ok {
 		allBinlogs = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
 	}
@@ -133,11 +150,16 @@ func (w *MultiSegmentWriter) finishCurrent() error {
 		return err
 	}
 
+	totalRows := int64(0)
+	for _, log := range allBinlogs[0].GetBinlogs() {
+		totalRows += log.EntriesNum
+	}
+
 	result := &datapb.CompactionSegment{
 		SegmentID:           writer.GetSegmentID(),
 		InsertLogs:          lo.Values(allBinlogs),
 		Field2StatslogPaths: []*datapb.FieldBinlog{sPath},
-		NumOfRows:           writer.GetRowNum(),
+		NumOfRows:           totalRows,
 		Channel:             w.channel,
 	}
 
@@ -156,9 +178,11 @@ func (w *MultiSegmentWriter) finishCurrent() error {
 		zap.Int64("segmentID", writer.GetSegmentID()),
 		zap.String("channel", w.channel),
 		zap.Int64("totalRows", writer.GetRowNum()),
-		zap.Int64("totalSize", writer.GetTotalSize()))
+		zap.Int64("totalSize", writer.GetTotalSize()),
+		zap.Int("binlogNum", len(result.InsertLogs[0].GetBinlogs())))
 
-	w.cachedMeta[writer.segmentID] = nil
+	w.flushedBinlogs[writer.segmentID] = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
+	w.flushedSize[writer.segmentID] = 0
 	return nil
 }
 
@@ -172,7 +196,7 @@ func (w *MultiSegmentWriter) addNewWriter() error {
 		return err
 	}
 	w.writers = append(w.writers, writer)
-	w.current++
+	w.current.Inc()
 	return nil
 }
 
@@ -182,10 +206,12 @@ func (w *MultiSegmentWriter) getWriter() (*SegmentWriter, error) {
 			return nil, err
 		}
 
-		return w.writers[w.current], nil
+		return w.writers[w.current.Load()], nil
 	}
 
-	if w.writers[w.current].GetTotalSize() > w.segmentSize {
+	// todo finishCurrent should not couple with getWriter
+	// current segment size = current writer size + flushed binlog size
+	if w.flushedSize[w.writers[w.current.Load()].GetSegmentID()]+w.writers[w.current.Load()].GetTotalSize() > w.segmentSize {
 		if err := w.finishCurrent(); err != nil {
 			return nil, err
 		}
@@ -194,14 +220,14 @@ func (w *MultiSegmentWriter) getWriter() (*SegmentWriter, error) {
 		}
 	}
 
-	return w.writers[w.current], nil
+	return w.writers[w.current.Load()], nil
 }
 
 func (w *MultiSegmentWriter) writeInternal(writer *SegmentWriter) error {
 	if writer.IsFull() {
 		// init segment fieldBinlogs if it is not exist
-		if _, ok := w.cachedMeta[writer.segmentID]; !ok {
-			w.cachedMeta[writer.segmentID] = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
+		if _, ok := w.flushedBinlogs[writer.segmentID]; !ok {
+			w.flushedBinlogs[writer.segmentID] = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
 		}
 
 		kvs, partialBinlogs, err := serializeWrite(context.TODO(), w.allocator.getLogIDAllocator(), writer)
@@ -213,12 +239,16 @@ func (w *MultiSegmentWriter) writeInternal(writer *SegmentWriter) error {
 			return err
 		}
 
-		mergeFieldBinlogs(w.cachedMeta[writer.segmentID], partialBinlogs)
+		mergeFieldBinlogs(w.flushedBinlogs[writer.segmentID], partialBinlogs)
 	}
 	return nil
 }
 
 func (w *MultiSegmentWriter) WriteRecord(r storage.Record) error {
+	if w.supportConcurrent {
+		w.writeLock.Lock()
+		defer w.writeLock.Unlock()
+	}
 	writer, err := w.getWriter()
 	if err != nil {
 		return err
@@ -227,10 +257,19 @@ func (w *MultiSegmentWriter) WriteRecord(r storage.Record) error {
 		return err
 	}
 
-	return writer.WriteRecord(r)
+	err = writer.WriteRecord(r)
+	if err != nil {
+		return err
+	}
+	w.rowCount.Inc()
+	return nil
 }
 
 func (w *MultiSegmentWriter) Write(v *storage.Value) error {
+	if w.supportConcurrent {
+		w.writeLock.Lock()
+		defer w.writeLock.Unlock()
+	}
 	writer, err := w.getWriter()
 	if err != nil {
 		return err
@@ -239,7 +278,37 @@ func (w *MultiSegmentWriter) Write(v *storage.Value) error {
 		return err
 	}
 
-	return writer.Write(v)
+	err = writer.Write(v)
+	if err != nil {
+		return err
+	}
+	w.rowCount.Inc()
+	return nil
+}
+
+func (w *MultiSegmentWriter) flushBinlog(writer *SegmentWriter) error {
+	flushingSize := writer.WrittenMemorySize()
+	segmentID := writer.segmentID
+	// init segment fieldBinlogs if it is not exist
+	if _, ok := w.flushedBinlogs[segmentID]; !ok {
+		w.flushedBinlogs[segmentID] = make(map[typeutil.UniqueID]*datapb.FieldBinlog, 0)
+	}
+
+	kvs, partialBinlogs, err := serializeWrite(context.TODO(), w.allocator.getLogIDAllocator(), writer)
+	if err != nil {
+		return err
+	}
+
+	if err := w.binlogIO.Upload(context.TODO(), kvs); err != nil {
+		return err
+	}
+
+	mergeFieldBinlogs(w.flushedBinlogs[segmentID], partialBinlogs)
+	writer = nil
+	runtime.GC()
+	debug.FreeOSMemory()
+	w.flushingSize.Sub(int64(flushingSize))
+	return nil
 }
 
 func (w *MultiSegmentWriter) appendEmptySegment() error {
@@ -247,7 +316,6 @@ func (w *MultiSegmentWriter) appendEmptySegment() error {
 	if err != nil {
 		return err
 	}
-
 	w.res = append(w.res, &datapb.CompactionSegment{
 		SegmentID: writer.GetSegmentID(),
 		NumOfRows: 0,
@@ -259,20 +327,112 @@ func (w *MultiSegmentWriter) appendEmptySegment() error {
 // DONOT return an empty list if every insert of the segment is deleted,
 // append an empty segment instead
 func (w *MultiSegmentWriter) Finish() ([]*datapb.CompactionSegment, error) {
-	if w.current == -1 {
+	if w.current.Load() == int32(-1) {
 		if err := w.appendEmptySegment(); err != nil {
 			return nil, err
 		}
 		return w.res, nil
 	}
 
-	if !w.writers[w.current].FlushAndIsEmpty() {
+	if !w.writers[w.current.Load()].FlushAndIsEmpty() {
 		if err := w.finishCurrent(); err != nil {
 			return nil, err
 		}
 	}
 
 	return w.res, nil
+}
+
+// switchWriter clones the current writer as the new 'current' writer.
+// The new writer inherits pkstats and bm25stats from the current writer, as they belong to the same segment.
+// Returns the old writer to allow flushing its data to storage.
+func (w *MultiSegmentWriter) switchWriter() (*SegmentWriter, error) {
+	writer, err := w.getWriter()
+	if err != nil {
+		return nil, err
+	}
+
+	// new writer inherit the pkstats and bm25stats
+	// todo: other stats also if added in the future
+	newBinlogWriter, closers, err := newBinlogWriter(w.collectionID, w.partitionID, writer.segmentID, w.schema, compactionBatchSize)
+	if err != nil {
+		return nil, err
+	}
+	segWriter := &SegmentWriter{
+		writer:        newBinlogWriter,
+		closers:       closers,
+		tsFrom:        math.MaxUint64,
+		tsTo:          0,
+		pkstats:       writer.pkstats,
+		bm25Stats:     writer.bm25Stats,
+		sch:           w.schema,
+		segmentID:     writer.segmentID,
+		partitionID:   w.partitionID,
+		collectionID:  w.collectionID,
+		rowCount:      atomic.NewInt64(0),
+		syncedSize:    atomic.NewInt64(0),
+		maxBinlogSize: paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+	}
+
+	w.writers = append(w.writers, segWriter)
+	w.current.Inc()
+
+	// clean the stats, or it won't be GCed
+	// todo: other stats also if added in the future
+	writer.pkstats = nil
+	writer.bm25Stats = nil
+	return writer, nil
+}
+
+func (w *MultiSegmentWriter) Flush(pool *conc.Pool[any]) (*conc.Future[any], error) {
+	if w.current.Load() == int32(-1) {
+		return nil, nil
+	}
+	w.writeLock.Lock()
+	defer w.writeLock.Unlock()
+
+	writer, err := w.switchWriter()
+	if err != nil {
+		return nil, err
+	}
+	// init segment fieldBinlogs if it is not exist
+	if _, ok := w.flushedBinlogs[writer.segmentID]; !ok {
+		w.flushedBinlogs[writer.segmentID] = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
+		w.flushedSize[writer.segmentID] = 0
+	}
+	w.flushedSize[writer.segmentID] = w.flushedSize[writer.segmentID] + int64(writer.WrittenMemorySize())
+	w.flushingSize.Add(int64(writer.WrittenMemorySize()))
+	log.Debug("switch writer with the same segmentID", zap.Int64("segmentID", writer.GetSegmentID()))
+
+	if pool != nil {
+		writerClone := writer
+		future := pool.Submit(func() (any, error) {
+			err := w.flushBinlog(writerClone)
+			if err != nil {
+				return nil, err
+			}
+			return struct{}{}, nil
+		})
+		return future, nil
+	}
+	err = w.flushBinlog(writer)
+	return nil, err
+}
+
+func (w *MultiSegmentWriter) GetRowNum() int64 {
+	return w.rowCount.Load()
+}
+
+func (w *MultiSegmentWriter) WrittenMemorySize() uint64 {
+	if w.current.Load() == int32(-1) {
+		return 0
+	}
+	writer, err := w.getWriter()
+	if err != nil {
+		return 0
+	}
+	// flushing may wait in pool, so it should count in memory usage
+	return writer.WrittenMemorySize() + uint64(w.flushingSize.Load())
 }
 
 func NewSegmentDeltaWriter(segmentID, partitionID, collectionID int64) *SegmentDeltaWriter {

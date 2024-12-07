@@ -39,7 +39,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegmentIDs().GetBegin(), plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter := NewMultiSegmentWriter(binlogIO, compAlloc, plan, maxRows, partitionID, collectionID, bm25FieldIds)
+	mWriter := NewMultiSegmentWriter(binlogIO, compAlloc, plan.GetSchema(), plan.GetChannel(), plan.GetMaxSize(), maxRows, partitionID, collectionID, bm25FieldIds, false)
 
 	var (
 		expiredRowCount int64 // the number of expired entities
@@ -162,7 +162,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 
 	totalElapse := tr.RecordSpan()
 	log.Info("compact mergeSortMultipleSegments end",
-		zap.Int64s("mergeSplit to segments", lo.Keys(mWriter.cachedMeta)),
+		zap.Int64s("mergeSplit to segments", lo.Keys(mWriter.flushedBinlogs)),
 		zap.Int64("deleted row count", deletedRowCount),
 		zap.Int64("expired entities", expiredRowCount),
 		zap.Duration("total elapse", totalElapse))
