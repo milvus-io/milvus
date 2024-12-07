@@ -1220,10 +1220,16 @@ func compareRow(m1 map[string]interface{}, m2 map[string]interface{}) bool {
 					return false
 				}
 			}
-		} else if key == "field-json" || key == "field-geometry" {
+		} else if key == "field-json" {
 			arr1 := value.(string)
 			arr2 := m2[key].([]byte)
 			if arr1 != string(arr2) {
+				return false
+			}
+		} else if key == "field-geometry" {
+			arr1 := value.([]uint8)
+			arr2 := string(m2[key].([]byte))
+			if arr2 != (string)(arr1) {
 				return false
 			}
 		} else if strings.HasPrefix(key, "array-") {

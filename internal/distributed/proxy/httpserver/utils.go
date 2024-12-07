@@ -1449,6 +1449,10 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 						}
 					}
 				case schemapb.DataType_Geometry:
+					if len(fieldDataList[j].ValidData) != 0 && !fieldDataList[j].ValidData[i] {
+						row[fieldDataList[j].FieldName] = nil
+						continue
+					}
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetGeometryData().Data[i]
 				default:
 					row[fieldDataList[j].FieldName] = ""

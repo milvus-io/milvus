@@ -623,7 +623,7 @@ DataGen(SchemaPtr schema,
                     OGRGeometryFactory::destroyGeometry(geo);
                     delete[] wkb_data;
                 }
-                insert_cols(data, N, field_meta,random_valid);
+                insert_cols(data, N, field_meta, random_valid);
                 break;
             }
 
