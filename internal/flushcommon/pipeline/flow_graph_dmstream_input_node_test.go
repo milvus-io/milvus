@@ -62,6 +62,9 @@ func (mm *mockMsgStreamFactory) NewMsgStreamDisposer(ctx context.Context) func([
 
 type mockTtMsgStream struct{}
 
+func (mtm *mockTtMsgStream) SetReplicate(config *msgstream.ReplicateConfig) {
+}
+
 func (mtm *mockTtMsgStream) Close() {}
 
 func (mtm *mockTtMsgStream) Chan() <-chan *msgstream.MsgPack {
