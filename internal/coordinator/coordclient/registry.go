@@ -66,7 +66,7 @@ func RegisterQueryCoordServer(server querypb.QueryCoordServer) {
 	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&querypb.QueryCoord_ServiceDesc, server, querypb.NewQueryCoordClient)
 	glocalClient.queryCoordClient.Set(&nopCloseQueryCoordClient{newLocalClient})
-	log.Info("register query coord server", zap.Any("enableLocalClient", enableLocal))
+	log.Ctx(context.TODO()).Info("register query coord server", zap.Any("enableLocalClient", enableLocal))
 }
 
 // RegsterDataCoordServer register data coord server
@@ -76,7 +76,7 @@ func RegisterDataCoordServer(server datapb.DataCoordServer) {
 	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&datapb.DataCoord_ServiceDesc, server, datapb.NewDataCoordClient)
 	glocalClient.dataCoordClient.Set(&nopCloseDataCoordClient{newLocalClient})
-	log.Info("register data coord server", zap.Any("enableLocalClient", enableLocal))
+	log.Ctx(context.TODO()).Info("register data coord server", zap.Any("enableLocalClient", enableLocal))
 }
 
 // RegisterRootCoordServer register root coord server
@@ -86,7 +86,7 @@ func RegisterRootCoordServer(server rootcoordpb.RootCoordServer) {
 	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&rootcoordpb.RootCoord_ServiceDesc, server, rootcoordpb.NewRootCoordClient)
 	glocalClient.rootCoordClient.Set(&nopCloseRootCoordClient{newLocalClient})
-	log.Info("register root coord server", zap.Any("enableLocalClient", enableLocal))
+	log.Ctx(context.TODO()).Info("register root coord server", zap.Any("enableLocalClient", enableLocal))
 }
 
 // GetQueryCoordClient return query coord client

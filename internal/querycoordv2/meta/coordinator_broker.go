@@ -113,6 +113,7 @@ func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, coll
 		return nil, 0, err
 	}
 
+	log := log.Ctx(ctx)
 	replicaNum, err := common.CollectionLevelReplicaNumber(collectionInfo.GetProperties())
 	if err != nil {
 		log.Debug("failed to get collection level load info", zap.Int64("collectionID", collectionID), zap.Error(err))

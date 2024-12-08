@@ -1664,7 +1664,7 @@ func TestRBAC_Role(t *testing.T) {
 		}
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				err := c.remove(context.TODO(), test.key)
+				err := c.remove(ctx, test.key)
 				if test.isValid {
 					assert.NoError(t, err)
 				} else {
@@ -1710,7 +1710,7 @@ func TestRBAC_Role(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				err := c.save(context.TODO(), test.key)
+				err := c.save(ctx, test.key)
 				if test.isValid {
 					assert.NoError(t, err)
 				} else {
@@ -2081,7 +2081,7 @@ func TestRBAC_Role(t *testing.T) {
 
 			for _, test := range tests {
 				t.Run(test.description, func(t *testing.T) {
-					res, err := c.getUserResult(context.TODO(), tenant, test.user, test.includeRoleInfo)
+					res, err := c.getUserResult(ctx, tenant, test.user, test.includeRoleInfo)
 
 					assert.Equal(t, test.user, res.GetUser().GetName())
 

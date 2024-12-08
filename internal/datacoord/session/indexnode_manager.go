@@ -71,6 +71,7 @@ func NewNodeManager(ctx context.Context, indexNodeCreator IndexNodeCreatorFunc) 
 
 // SetClient sets IndexNode client to node manager.
 func (nm *IndexNodeManager) SetClient(nodeID typeutil.UniqueID, client types.IndexNodeClient) {
+	log := log.Ctx(nm.ctx)
 	log.Debug("set IndexNode client", zap.Int64("nodeID", nodeID))
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
@@ -81,7 +82,7 @@ func (nm *IndexNodeManager) SetClient(nodeID typeutil.UniqueID, client types.Ind
 
 // RemoveNode removes the unused client of IndexNode.
 func (nm *IndexNodeManager) RemoveNode(nodeID typeutil.UniqueID) {
-	log.Debug("remove IndexNode", zap.Int64("nodeID", nodeID))
+	log.Ctx(nm.ctx).Debug("remove IndexNode", zap.Int64("nodeID", nodeID))
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
 	delete(nm.nodeClients, nodeID)
@@ -90,7 +91,7 @@ func (nm *IndexNodeManager) RemoveNode(nodeID typeutil.UniqueID) {
 }
 
 func (nm *IndexNodeManager) StoppingNode(nodeID typeutil.UniqueID) {
-	log.Debug("IndexCoord", zap.Int64("Stopping node with ID", nodeID))
+	log.Ctx(nm.ctx).Debug("IndexCoord", zap.Int64("Stopping node with ID", nodeID))
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
 	nm.stoppingNodes[nodeID] = struct{}{}
@@ -98,7 +99,7 @@ func (nm *IndexNodeManager) StoppingNode(nodeID typeutil.UniqueID) {
 
 // AddNode adds the client of IndexNode.
 func (nm *IndexNodeManager) AddNode(nodeID typeutil.UniqueID, address string) error {
-	log.Debug("add IndexNode", zap.Int64("nodeID", nodeID), zap.String("node address", address))
+	log.Ctx(nm.ctx).Debug("add IndexNode", zap.Int64("nodeID", nodeID), zap.String("node address", address))
 	var (
 		nodeClient types.IndexNodeClient
 		err        error
@@ -106,7 +107,7 @@ func (nm *IndexNodeManager) AddNode(nodeID typeutil.UniqueID, address string) er
 
 	nodeClient, err = nm.indexNodeCreator(context.TODO(), address, nodeID)
 	if err != nil {
-		log.Error("create IndexNode client fail", zap.Error(err))
+		log.Ctx(nm.ctx).Error("create IndexNode client fail", zap.Error(err))
 		return err
 	}
 
@@ -126,6 +127,7 @@ func (nm *IndexNodeManager) PickClient() (typeutil.UniqueID, types.IndexNodeClie
 		wg         = sync.WaitGroup{}
 	)
 
+	log := log.Ctx(ctx)
 	for nodeID, client := range nm.nodeClients {
 		if _, ok := nm.stoppingNodes[nodeID]; !ok {
 			nodeID := nodeID
@@ -167,6 +169,7 @@ func (nm *IndexNodeManager) PickClient() (typeutil.UniqueID, types.IndexNodeClie
 }
 
 func (nm *IndexNodeManager) ClientSupportDisk() bool {
+	log := log.Ctx(nm.ctx)
 	log.Debug("check if client support disk index")
 	allClients := nm.GetAllClients()
 	if len(allClients) == 0 {

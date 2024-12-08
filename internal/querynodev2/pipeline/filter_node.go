@@ -17,6 +17,7 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
@@ -46,6 +47,7 @@ type filterNode struct {
 }
 
 func (fNode *filterNode) Operate(in Msg) Msg {
+	log := log.Ctx(context.TODO())
 	if in == nil {
 		log.Debug("type assertion failed for Msg in filterNode because it's nil",
 			zap.String("name", fNode.Name()))

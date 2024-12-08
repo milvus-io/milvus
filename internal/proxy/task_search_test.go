@@ -1369,7 +1369,7 @@ func TestTaskSearch_selectHighestScoreIndex(t *testing.T) {
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
 				for nqNum := int64(0); nqNum < test.args.nq; nqNum++ {
-					idx, dataIdx := selectHighestScoreIndex(test.args.subSearchResultData, test.args.subSearchNqOffset, test.args.cursors, nqNum)
+					idx, dataIdx := selectHighestScoreIndex(context.TODO(), test.args.subSearchResultData, test.args.subSearchNqOffset, test.args.cursors, nqNum)
 					assert.Equal(t, test.expectedIdx[nqNum], idx)
 					assert.Equal(t, test.expectedDataIdx[nqNum], int(dataIdx))
 				}
@@ -1493,7 +1493,7 @@ func TestTaskSearch_selectHighestScoreIndex(t *testing.T) {
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
 				for nqNum := int64(0); nqNum < test.args.nq; nqNum++ {
-					idx, dataIdx := selectHighestScoreIndex(test.args.subSearchResultData, test.args.subSearchNqOffset, test.args.cursors, nqNum)
+					idx, dataIdx := selectHighestScoreIndex(context.TODO(), test.args.subSearchResultData, test.args.subSearchNqOffset, test.args.cursors, nqNum)
 					assert.Equal(t, test.expectedIdx[nqNum], idx)
 					assert.Equal(t, test.expectedDataIdx[nqNum], int(dataIdx))
 				}

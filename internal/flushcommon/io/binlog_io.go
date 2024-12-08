@@ -71,7 +71,7 @@ func (b *BinlogIoImpl) AsyncDownload(ctx context.Context, paths []string) []*con
 			var err error
 
 			start := time.Now()
-			log.Debug("BinlogIO download", zap.String("path", path))
+			log.Ctx(ctx).Debug("BinlogIO download", zap.String("path", path))
 			err = retry.Do(ctx, func() error {
 				val, err = b.Read(ctx, path)
 				if err != nil {
@@ -80,7 +80,7 @@ func (b *BinlogIoImpl) AsyncDownload(ctx context.Context, paths []string) []*con
 				return err
 			})
 
-			log.Debug("BinlogIO download success", zap.String("path", path), zap.Int64("cost", time.Since(start).Milliseconds()),
+			log.Ctx(ctx).Debug("BinlogIO download success", zap.String("path", path), zap.Int64("cost", time.Since(start).Milliseconds()),
 				zap.Error(err))
 
 			return val, err
@@ -106,7 +106,7 @@ func (b *BinlogIoImpl) AsyncUpload(ctx context.Context, kvs map[string][]byte) [
 		future := b.pool.Submit(func() (any, error) {
 			var err error
 			start := time.Now()
-			log.Debug("BinlogIO upload", zap.String("paths", innerK))
+			log.Ctx(ctx).Debug("BinlogIO upload", zap.String("paths", innerK))
 			err = retry.Do(ctx, func() error {
 				err = b.Write(ctx, innerK, innerV)
 				if err != nil {
@@ -114,7 +114,7 @@ func (b *BinlogIoImpl) AsyncUpload(ctx context.Context, kvs map[string][]byte) [
 				}
 				return err
 			})
-			log.Debug("BinlogIO upload success", zap.String("paths", innerK), zap.Int64("cost", time.Since(start).Milliseconds()), zap.Error(err))
+			log.Ctx(ctx).Debug("BinlogIO upload success", zap.String("paths", innerK), zap.Int64("cost", time.Since(start).Milliseconds()), zap.Error(err))
 			return struct{}{}, err
 		})
 		futures = append(futures, future)

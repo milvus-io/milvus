@@ -57,10 +57,10 @@ func (q *QueryNode) Prepare() error {
 // Run starts service
 func (q *QueryNode) Run() error {
 	if err := q.svr.Run(); err != nil {
-		log.Error("QueryNode starts error", zap.Error(err))
+		log.Ctx(q.ctx).Error("QueryNode starts error", zap.Error(err))
 		return err
 	}
-	log.Debug("QueryNode successfully started")
+	log.Ctx(q.ctx).Info("QueryNode successfully started")
 	return nil
 }
 

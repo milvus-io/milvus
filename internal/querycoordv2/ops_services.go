@@ -257,7 +257,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 
 	// check whether srcNode is healthy
 	srcNode := req.GetSourceNodeID()
-	if err := s.isStoppingNode(srcNode); err != nil {
+	if err := s.isStoppingNode(ctx, srcNode); err != nil {
 		err := merr.WrapErrNodeNotAvailable(srcNode, "the source node is invalid")
 		return merr.Status(err), nil
 	}
@@ -270,7 +270,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 			dstNodeSet.Insert(replica.GetRWNodes()...)
 		} else {
 			// check whether dstNode is healthy
-			if err := s.isStoppingNode(req.GetTargetNodeID()); err != nil {
+			if err := s.isStoppingNode(ctx, req.GetTargetNodeID()); err != nil {
 				err := merr.WrapErrNodeNotAvailable(srcNode, "the target node is invalid")
 				return merr.Status(err), nil
 			}
@@ -329,7 +329,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 
 	// check whether srcNode is healthy
 	srcNode := req.GetSourceNodeID()
-	if err := s.isStoppingNode(srcNode); err != nil {
+	if err := s.isStoppingNode(ctx, srcNode); err != nil {
 		err := merr.WrapErrNodeNotAvailable(srcNode, "the source node is invalid")
 		return merr.Status(err), nil
 	}
@@ -342,7 +342,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 			dstNodeSet.Insert(replica.GetRWNodes()...)
 		} else {
 			// check whether dstNode is healthy
-			if err := s.isStoppingNode(req.GetTargetNodeID()); err != nil {
+			if err := s.isStoppingNode(ctx, req.GetTargetNodeID()); err != nil {
 				err := merr.WrapErrNodeNotAvailable(srcNode, "the target node is invalid")
 				return merr.Status(err), nil
 			}

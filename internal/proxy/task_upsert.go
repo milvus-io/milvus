@@ -148,7 +148,7 @@ func (it *upsertTask) OnEnqueue() error {
 func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	collectionName := it.upsertMsg.InsertMsg.CollectionName
 	if err := validateCollectionName(collectionName); err != nil {
-		log.Error("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
+		log.Ctx(ctx).Error("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
 		return err
 	}
 
