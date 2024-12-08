@@ -39,6 +39,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+const InitialDataViewVersion = 0
+
 type targetOp int
 
 func (op *targetOp) String() string {
@@ -92,6 +94,8 @@ type TargetObserver struct {
 	// loadedDispatcher updates targets for loaded collections.
 	loadedDispatcher *taskDispatcher[int64]
 
+	dataViewVersions *typeutil.ConcurrentMap[int64, int64]
+
 	keylocks *lock.KeyLock[int64]
 
 	startOnce sync.Once
@@ -117,6 +121,7 @@ func NewTargetObserver(
 		updateChan:           make(chan targetUpdateRequest, 10),
 		readyNotifiers:       make(map[int64][]chan struct{}),
 		initChan:             make(chan initRequest),
+		dataViewVersions:     typeutil.NewConcurrentMap[int64, int64](),
 		keylocks:             lock.NewKeyLock[int64](),
 	}
 
@@ -175,13 +180,8 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 
 		case <-ticker.C:
 			ob.clean()
-			loaded := lo.FilterMap(ob.meta.GetAllCollections(ctx), func(collection *meta.Collection, _ int) (int64, bool) {
-				if collection.GetStatus() == querypb.LoadStatus_Loaded {
-					return collection.GetCollectionID(), true
-				}
-				return 0, false
-			})
-			ob.loadedDispatcher.AddTask(loaded...)
+			versionUpdatedCollections := ob.GetVersionUpdatedCollections()
+			ob.loadedDispatcher.AddTask(versionUpdatedCollections...)
 
 		case req := <-ob.updateChan:
 			log.Info("manually trigger update target",
@@ -224,6 +224,41 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 				zap.String("opType", req.opType.String()))
 		}
 	}
+}
+
+func (ob *TargetObserver) GetVersionUpdatedCollections() []int64 {
+	loaded := lo.FilterMap(ob.meta.GetAllCollections(context.TODO()), func(collection *meta.Collection, _ int) (int64, bool) {
+		if collection.GetStatus() == querypb.LoadStatus_Loaded {
+			return collection.GetCollectionID(), true
+		}
+		return 0, false
+	})
+	versions, err := ob.broker.GetDataViewVersions(context.Background(), loaded)
+	if err != nil {
+		log.Warn("GetDataViewVersions from dc failed", zap.Error(err))
+		return nil
+	}
+
+	var (
+		staleCnt   int
+		updatedCnt int
+	)
+
+	ret := make([]int64, 0)
+	for _, id := range loaded {
+		new := versions[id]
+		current, ok := ob.dataViewVersions.Get(id)
+		if !ok || new == InitialDataViewVersion || new > current {
+			ret = append(ret, id)
+			ob.dataViewVersions.GetOrInsert(id, new)
+			updatedCnt++
+			continue
+		}
+		staleCnt++
+	}
+	log.Info("get version updated collections done", zap.Int("totalCnt", len(loaded)),
+		zap.Int("staleCnt", staleCnt), zap.Int("updatedCnt", updatedCnt))
+	return ret
 }
 
 // Check whether provided collection is has current target.
@@ -310,6 +345,14 @@ func (ob *TargetObserver) ReleasePartition(collectionID int64, partitionID ...in
 
 func (ob *TargetObserver) clean() {
 	collectionSet := typeutil.NewUniqueSet(ob.meta.GetAll(context.TODO())...)
+	// for collection which has been dropped/released, clear data version cache
+	ob.dataViewVersions.Range(func(collectionID int64, _ int64) bool {
+		if !collectionSet.Contain(collectionID) {
+			ob.dataViewVersions.Remove(collectionID)
+		}
+		return true
+	})
+
 	// for collection which has been removed from target, try to clear nextTargetLastUpdate
 	ob.nextTargetLastUpdate.Range(func(collectionID int64, _ time.Time) bool {
 		if !collectionSet.Contain(collectionID) {
@@ -351,6 +394,8 @@ func (ob *TargetObserver) updateNextTarget(ctx context.Context, collectionID int
 	if err != nil {
 		log.Warn("failed to update next target for collection",
 			zap.Error(err))
+		// update next target failed, remove data view version cache
+		ob.dataViewVersions.Remove(collectionID)
 		return err
 	}
 	ob.updateNextTargetTimestamp(collectionID)
