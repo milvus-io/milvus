@@ -5,9 +5,7 @@ package meta
 import (
 	context "context"
 
-	metastore "github.com/milvus-io/milvus/internal/metastore"
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
-
 	mock "github.com/stretchr/testify/mock"
 
 	typeutil "github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -780,17 +778,17 @@ func (_c *MockTargetManager_IsNextTargetExist_Call) RunAndReturn(run func(contex
 	return _c
 }
 
-// Recover provides a mock function with given fields: ctx, catalog
-func (_m *MockTargetManager) Recover(ctx context.Context, catalog metastore.QueryCoordCatalog) error {
-	ret := _m.Called(ctx, catalog)
+// Recover provides a mock function with given fields: ctx
+func (_m *MockTargetManager) Recover(ctx context.Context) error {
+	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Recover")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, metastore.QueryCoordCatalog) error); ok {
-		r0 = rf(ctx, catalog)
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf(ctx)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -805,14 +803,13 @@ type MockTargetManager_Recover_Call struct {
 
 // Recover is a helper method to define mock.On call
 //   - ctx context.Context
-//   - catalog metastore.QueryCoordCatalog
-func (_e *MockTargetManager_Expecter) Recover(ctx interface{}, catalog interface{}) *MockTargetManager_Recover_Call {
-	return &MockTargetManager_Recover_Call{Call: _e.mock.On("Recover", ctx, catalog)}
+func (_e *MockTargetManager_Expecter) Recover(ctx interface{}) *MockTargetManager_Recover_Call {
+	return &MockTargetManager_Recover_Call{Call: _e.mock.On("Recover", ctx)}
 }
 
-func (_c *MockTargetManager_Recover_Call) Run(run func(ctx context.Context, catalog metastore.QueryCoordCatalog)) *MockTargetManager_Recover_Call {
+func (_c *MockTargetManager_Recover_Call) Run(run func(ctx context.Context)) *MockTargetManager_Recover_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(metastore.QueryCoordCatalog))
+		run(args[0].(context.Context))
 	})
 	return _c
 }
@@ -822,7 +819,7 @@ func (_c *MockTargetManager_Recover_Call) Return(_a0 error) *MockTargetManager_R
 	return _c
 }
 
-func (_c *MockTargetManager_Recover_Call) RunAndReturn(run func(context.Context, metastore.QueryCoordCatalog) error) *MockTargetManager_Recover_Call {
+func (_c *MockTargetManager_Recover_Call) RunAndReturn(run func(context.Context) error) *MockTargetManager_Recover_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -906,40 +903,6 @@ func (_c *MockTargetManager_RemovePartition_Call) Return() *MockTargetManager_Re
 }
 
 func (_c *MockTargetManager_RemovePartition_Call) RunAndReturn(run func(context.Context, int64, ...int64)) *MockTargetManager_RemovePartition_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// SaveCurrentTarget provides a mock function with given fields: ctx, catalog
-func (_m *MockTargetManager) SaveCurrentTarget(ctx context.Context, catalog metastore.QueryCoordCatalog) {
-	_m.Called(ctx, catalog)
-}
-
-// MockTargetManager_SaveCurrentTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveCurrentTarget'
-type MockTargetManager_SaveCurrentTarget_Call struct {
-	*mock.Call
-}
-
-// SaveCurrentTarget is a helper method to define mock.On call
-//   - ctx context.Context
-//   - catalog metastore.QueryCoordCatalog
-func (_e *MockTargetManager_Expecter) SaveCurrentTarget(ctx interface{}, catalog interface{}) *MockTargetManager_SaveCurrentTarget_Call {
-	return &MockTargetManager_SaveCurrentTarget_Call{Call: _e.mock.On("SaveCurrentTarget", ctx, catalog)}
-}
-
-func (_c *MockTargetManager_SaveCurrentTarget_Call) Run(run func(ctx context.Context, catalog metastore.QueryCoordCatalog)) *MockTargetManager_SaveCurrentTarget_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(metastore.QueryCoordCatalog))
-	})
-	return _c
-}
-
-func (_c *MockTargetManager_SaveCurrentTarget_Call) Return() *MockTargetManager_SaveCurrentTarget_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockTargetManager_SaveCurrentTarget_Call) RunAndReturn(run func(context.Context, metastore.QueryCoordCatalog)) *MockTargetManager_SaveCurrentTarget_Call {
 	_c.Call.Return(run)
 	return _c
 }
