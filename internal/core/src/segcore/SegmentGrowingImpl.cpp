@@ -507,7 +507,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                    DataType::VECTOR_SPARSE_FLOAT) {
             bulk_subscript_sparse_float_vector_impl(
                 field_id,
-                (const ConcurrentVector<SparseFloatVector>*)vec_ptr,
+                static_cast<const ConcurrentVector<SparseFloatVector>*>(
+                    vec_ptr),
                 seg_offsets,
                 count,
                 result->mutable_vectors()->mutable_sparse_float_vector());
@@ -733,7 +734,8 @@ SegmentGrowingImpl::bulk_subscript_impl(FieldId field_id,
                 if (offset == INVALID_SEG_OFFSET) {
                     memset(dst, 0, element_sizeof);
                 } else {
-                    auto src = (const uint8_t*)vec.get_element(offset);
+                    auto src = reinterpret_cast<const uint8_t*>(
+                        vec.get_element(offset));
                     memcpy(dst, src, element_sizeof);
                 }
             }
