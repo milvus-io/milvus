@@ -554,7 +554,7 @@ class TestMilvusClientReleasePartitionInvalid(TestcaseBase):
         client_w.release_partitions(client, collection_name, partition_names,
                                    check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_release_not_exist_partition_name(self):
         """
         target: test fast release partition -- invalid partition name type
