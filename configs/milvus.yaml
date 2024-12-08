@@ -64,6 +64,7 @@ etcd:
 
 metastore:
   type: etcd # Default value: etcd, Valid values: [etcd, tikv]
+  paginationSize: 10000 # limits the number of results to return from metastore.
   snapshot:
     ttl: 86400 # snapshot ttl in seconds
     reserveTime: 3600 # snapshot reserve time in seconds

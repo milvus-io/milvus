@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+
 	"github.com/cockroachdb/errors"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pingcap/log"
@@ -18,8 +20,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/compressor"
 )
-
-var paginationSize = 2000
 
 var ErrInvalidKey = errors.New("invalid load info key")
 
@@ -36,12 +36,14 @@ const (
 )
 
 type Catalog struct {
-	cli kv.MetaKv
+	cli            kv.MetaKv
+	paginationSize int
 }
 
 func NewCatalog(cli kv.MetaKv) Catalog {
 	return Catalog{
-		cli: cli,
+		cli:            cli,
+		paginationSize: paramtable.Get().MetaStoreCfg.PaginationSize.GetAsInt(),
 	}
 }
 
@@ -117,7 +119,7 @@ func (s Catalog) GetCollections(ctx context.Context) ([]*querypb.CollectionLoadI
 		return nil
 	}
 
-	err := s.cli.WalkWithPrefix(ctx, CollectionLoadInfoPrefix, paginationSize, applyFn)
+	err := s.cli.WalkWithPrefix(ctx, CollectionLoadInfoPrefix, s.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +138,7 @@ func (s Catalog) GetPartitions(ctx context.Context) (map[int64][]*querypb.Partit
 		return nil
 	}
 
-	err := s.cli.WalkWithPrefix(ctx, PartitionLoadInfoPrefix, paginationSize, applyFn)
+	err := s.cli.WalkWithPrefix(ctx, PartitionLoadInfoPrefix, s.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +157,7 @@ func (s Catalog) GetReplicas(ctx context.Context) ([]*querypb.Replica, error) {
 		return nil
 	}
 
-	err := s.cli.WalkWithPrefix(ctx, ReplicaPrefix, paginationSize, applyFn)
+	err := s.cli.WalkWithPrefix(ctx, ReplicaPrefix, s.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +314,7 @@ func (s Catalog) GetCollectionTargets(ctx context.Context) (map[int64]*querypb.C
 		return nil
 	}
 
-	err := s.cli.WalkWithPrefix(ctx, CollectionTargetPrefix, paginationSize, applyFn)
+	err := s.cli.WalkWithPrefix(ctx, CollectionTargetPrefix, s.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
