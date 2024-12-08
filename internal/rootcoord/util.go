@@ -308,7 +308,7 @@ func CheckTimeTickLagExceeded(ctx context.Context, queryCoord types.QueryCoordCl
 					delay := now.Sub(minTt)
 
 					if delay.Milliseconds() >= maxDelay.Milliseconds() {
-						queryNodeTTDelay.Insert(qm.Fgm.MinFlowGraphChannel, delay)
+						queryNodeTTDelay.Insert(qm.Fgm.MinFlowGraphChannel+"/query", delay)
 					}
 				}
 			}
@@ -331,7 +331,7 @@ func CheckTimeTickLagExceeded(ctx context.Context, queryCoord types.QueryCoordCl
 					delay := now.Sub(minTt)
 
 					if delay.Milliseconds() >= maxDelay.Milliseconds() {
-						dataNodeTTDelay.Insert(dm.Fgm.MinFlowGraphChannel, delay)
+						dataNodeTTDelay.Insert(dm.Fgm.MinFlowGraphChannel+"/data", delay)
 					}
 				}
 			}

@@ -69,6 +69,7 @@ type mqMsgStream struct {
 	consumerLock  *sync.Mutex
 	closed        int32
 	onceChan      sync.Once
+	ttMsgEnable   atomic.Value
 	enableProduce atomic.Value
 	configEvent   config.EventHandler
 }
@@ -105,14 +106,15 @@ func NewMqMsgStream(ctx context.Context,
 		closed:       0,
 	}
 	ctxLog := log.Ctx(ctx)
-	stream.enableProduce.Store(paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool())
+	stream.enableProduce.Store(false)
+	stream.ttMsgEnable.Store(paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool())
 	stream.configEvent = config.NewHandler("enable send tt msg "+fmt.Sprint(streamCounter.Inc()), func(event *config.Event) {
 		value, err := strconv.ParseBool(event.Value)
 		if err != nil {
 			ctxLog.Warn("Failed to parse bool value", zap.String("v", event.Value), zap.Error(err))
 			return
 		}
-		stream.enableProduce.Store(value)
+		stream.ttMsgEnable.Store(value)
 		ctxLog.Info("Msg Stream state updated", zap.Bool("can_produce", stream.isEnabledProduce()))
 	})
 	paramtable.Get().Watch(paramtable.Get().CommonCfg.TTMsgEnabled.Key, stream.configEvent)
@@ -271,7 +273,7 @@ func (ms *mqMsgStream) EnableProduce(can bool) {
 }
 
 func (ms *mqMsgStream) isEnabledProduce() bool {
-	return ms.enableProduce.Load().(bool)
+	return ms.enableProduce.Load().(bool) || ms.ttMsgEnable.Load().(bool)
 }
 
 func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
