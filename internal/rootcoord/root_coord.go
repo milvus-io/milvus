@@ -1263,15 +1263,23 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 		allowUnavailable: allowUnavailable,
 	}
 
-	if err := c.scheduler.AddTask(t); err != nil {
-		log.Info("failed to enqueue request to describe collection", zap.Error(err))
+	ts, err := c.tsoAllocator.GenerateTSO(1)
+	if err != nil {
+		log.Warn("failed to generate ts for describe collection", zap.Error(err))
+		return &milvuspb.DescribeCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	t.SetTs(ts)
+
+	if err := t.Prepare(ctx); err != nil {
+		log.Info("failed to prepare describe collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.FailLabel).Inc()
 		return &milvuspb.DescribeCollectionResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
-
-	if err := t.WaitToFinish(); err != nil {
+	if err := t.Execute(ctx); err != nil {
 		log.Warn("failed to describe collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.FailLabel).Inc()
 		return &milvuspb.DescribeCollectionResponse{

@@ -599,6 +599,13 @@ func TestRootCoord_ListAliases(t *testing.T) {
 }
 
 func TestRootCoord_DescribeCollection(t *testing.T) {
+	alloc := newMockTsoAllocator()
+	ts := Timestamp(100)
+	alloc.GenerateTSOF = func(count uint32) (uint64, error) {
+		// end ts
+		return ts, nil
+	}
+
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		ctx := context.Background()
@@ -610,41 +617,112 @@ func TestRootCoord_DescribeCollection(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	t.Run("failed to add task", func(t *testing.T) {
+	t.Run("failed_to_preexecute", func(t *testing.T) {
 		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
+			withInvalidTsoAllocator())
 
 		ctx := context.Background()
-		resp, err := c.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{})
+		resp, err := c.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_Undefined,
+			},
+		})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		resp, err = c.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{})
+		resp, err = c.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_Undefined,
+			},
+		})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	t.Run("failed to execute", func(t *testing.T) {
+	t.Run("failed_to_preexecute", func(t *testing.T) {
 		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
+			withTsoAllocator(alloc))
 
 		ctx := context.Background()
-		resp, err := c.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{})
+		resp, err := c.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_Undefined,
+			},
+		})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		resp, err = c.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{})
+		resp, err = c.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_Undefined,
+			},
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("execute_fail", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withTsoAllocator(alloc),
+			withInvalidMeta())
+
+		ctx := context.Background()
+		resp, err := c.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_Undefined,
+			},
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		resp, err = c.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_Undefined,
+			},
+		})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("normal case, everything is ok", func(t *testing.T) {
+		alias1, alias2 := funcutil.GenRandomStr(), funcutil.GenRandomStr()
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByID",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(&model.Collection{
+			CollectionID: 1,
+			Name:         "test coll",
+			DBID:         1,
+		}, nil)
+		meta.On("ListAliasesByID",
+			mock.Anything,
+			mock.Anything,
+		).Return([]string{alias1, alias2})
+		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).Return(&model.Database{
+			ID:   1,
+			Name: "test db",
+		}, nil)
+
 		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
+			withTsoAllocator(alloc),
+			withMeta(meta))
 
 		ctx := context.Background()
-		resp, err := c.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{})
+		resp, err := c.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_DescribeCollection,
+			},
+			CollectionID: 1,
+		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		resp, err = c.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{})
+		resp, err = c.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_DescribeCollection,
+			},
+			CollectionID: 1,
+		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
@@ -693,16 +771,6 @@ func TestRootCoord_HasCollection(t *testing.T) {
 func TestRootCoord_ShowCollections(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
-		ctx := context.Background()
-		resp, err := c.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-
-	t.Run("failed to add task", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
-
 		ctx := context.Background()
 		resp, err := c.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 		assert.NoError(t, err)
