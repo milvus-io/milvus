@@ -10,6 +10,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -307,4 +311,100 @@ func TestMaxInsertSize(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	})
+}
+
+func TestInsertTask_Function(t *testing.T) {
+	ts := function.CreateEmbeddingServer()
+	defer ts.Close()
+	data := []*schemapb.FieldData{}
+	f := schemapb.FieldData{
+		Type:      schemapb.DataType_VarChar,
+		FieldId:   101,
+		FieldName: "text",
+		IsDynamic: false,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: []string{"sentence", "sentence"},
+					},
+				},
+			},
+		},
+	}
+	data = append(data, &f)
+	collectionName := "TestInsertTask_function"
+	schema := &schemapb.CollectionSchema{
+		Name:        collectionName,
+		Description: "TestInsertTask_function",
+		AutoID:      true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "200"},
+				}},
+			{FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				}, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:            "test_function",
+				Type:            schemapb.FunctionType_TextEmbedding,
+				InputFieldIds:   []int64{101},
+				InputFieldNames: []string{"text"},
+				OutputFieldIds:  []int64{102},
+				Params: []*commonpb.KeyValuePair{
+					{Key: function.Provider, Value: function.OpenAIProvider},
+					{Key: function.ModelNameParamKey, Value: "text-embedding-ada-002"},
+					{Key: function.OpenaiApiKeyParamKey, Value: "mock"},
+					{Key: function.OpenaiEmbeddingUrlParamKey, Value: ts.URL},
+					{Key: function.DimParamKey, Value: "4"},
+				},
+			},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rc := mocks.NewMockRootCoordClient(t)
+	rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+		Status: merr.Status(nil),
+		ID:     11198,
+		Count:  10,
+	}, nil)
+	idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
+	idAllocator.Start()
+	defer idAllocator.Close()
+	assert.NoError(t, err)
+	task := insertTask{
+		ctx: context.Background(),
+		insertMsg: &BaseInsertTask{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: collectionName,
+				DbName:         "hooooooo",
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				Version:    msgpb.InsertDataVersion_ColumnBased,
+				FieldsData: data,
+				NumRows:    2,
+			},
+		},
+		schema:      schema,
+		idAllocator: idAllocator,
+	}
+
+	info := newSchemaInfo(schema)
+	cache := NewMockCache(t)
+	cache.On("GetCollectionSchema",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(info, nil)
+	globalMetaCache = cache
+	err = task.PreExecute(ctx)
+	assert.NoError(t, err)
 }

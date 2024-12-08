@@ -20,24 +20,37 @@ package function
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
-type FunctionRunner interface {
-	BatchRun(inputs ...any) ([]any, error)
+const (
+	Provider string = "provider"
+)
 
-	GetSchema() *schemapb.FunctionSchema
-	GetOutputFields() []*schemapb.FieldSchema
+const (
+	OpenAIProvider string = "openai"
+)
+
+func getProvider(schema *schemapb.FunctionSchema) (string, error) {
+	for _, param := range schema.Params {
+		switch strings.ToLower(param.Key) {
+		case Provider:
+			return strings.ToLower(param.Value), nil
+		default:
+		}
+	}
+	return "", fmt.Errorf("The provider parameter was not found in the function's parameters")
 }
 
-func NewFunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (FunctionRunner, error) {
-	switch schema.GetType() {
-	case schemapb.FunctionType_BM25:
-		return NewBM25FunctionRunner(coll, schema)
-	case schemapb.FunctionType_TextEmbedding:
-		return nil, nil
-	default:
-		return nil, fmt.Errorf("unknown functionRunner type %s", schema.GetType().String())
+func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (*OpenAIEmbeddingFunction, error) {
+	provider, err := getProvider(schema)
+	if err != nil {
+		return nil, err
 	}
+	if provider == OpenAIProvider {
+		return NewOpenAIEmbeddingFunction(coll, schema)
+	}
+	return nil, fmt.Errorf("Provider: [%s] not exist, only supports [%s]", provider, OpenAIProvider)
 }
