@@ -71,6 +71,45 @@ ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
     return buffer.GetString();
 }
 
+inline std::pair<std::string, std::string>
+ParseTopLevelKey(const std::string& json_pointer, bool escaped = false) {
+    if (json_pointer.empty()) {
+        return {"", ""};
+    }
+
+    Assert(json_pointer[0] == '/');
+    size_t start = 1;
+    size_t end = json_pointer.find('/', start);
+
+    std::string top_key = (end == std::string::npos)
+                              ? json_pointer.substr(start)
+                              : json_pointer.substr(start, end - start);
+
+    if (escaped) {
+        if (top_key.find("~0") != std::string::npos) {
+            top_key.replace(top_key.find("~0"), 2, "~");
+        }
+        if (top_key.find("~1") != std::string::npos) {
+            top_key.replace(top_key.find("~1"), 2, "/");
+        }
+    }
+
+    std::string remaining_path =
+        (end == std::string::npos) ? "" : json_pointer.substr(end);
+
+    return {top_key, remaining_path};
+}
+
+static std::string
+ToLower(const std::string_view& str) {
+    std::string result(str);
+    std::transform(
+        result.begin(), result.end(), result.begin(), [](unsigned char c) {
+            return std::tolower(c);
+        });
+    return result;
+}
+
 using document = simdjson::ondemand::document;
 template <typename T>
 using value_result = simdjson::simdjson_result<T>;
@@ -149,6 +188,25 @@ class Json {
         return doc;
     }
 
+    value_result<document>
+    doc(uint16_t offset, uint16_t length) const {
+        thread_local simdjson::ondemand::parser parser;
+
+        // it's always safe to add the padding,
+        // as we have allocated the memory with this padding
+        auto doc = parser.iterate(
+            data_.data() + offset, length, length + simdjson::SIMDJSON_PADDING);
+        AssertInfo(doc.error() == simdjson::SUCCESS,
+                   "failed to parse the json {} offset {}, length {}: {}, "
+                   "total_json:{}",
+                   std::string(data_.data() + offset, length),
+                   offset,
+                   length,
+                   simdjson::error_message(doc.error()),
+                   data_);
+        return doc;
+    }
+
     value_result<simdjson::dom::element>
     dom_doc() const {
         if (data_.size() == 0) {
@@ -162,6 +220,21 @@ class Json {
         AssertInfo(doc.error() == simdjson::SUCCESS,
                    "failed to parse the json {}: {}",
                    data_,
+                   simdjson::error_message(doc.error()));
+        return doc;
+    }
+
+    value_result<simdjson::dom::element>
+    dom_doc(uint16_t offset, uint16_t length) const {
+        thread_local simdjson::dom::parser parser;
+
+        // it's always safe to add the padding,
+        // as we have allocated the memory with this padding
+        auto doc = parser.parse(data_.data() + offset,
+                                length + simdjson::SIMDJSON_PADDING);
+        AssertInfo(doc.error() == simdjson::SUCCESS,
+                   "failed to parse the json {}: {}",
+                   std::string(data_.data() + offset, length),
                    simdjson::error_message(doc.error()));
         return doc;
     }
@@ -203,6 +276,62 @@ class Json {
         }
 
         return doc().at_pointer(pointer).get<T>();
+    }
+
+    template <typename T>
+    value_result<T>
+    at(uint16_t offset, uint16_t length) const {
+        if constexpr (std::is_same_v<T, std::string_view> ||
+                      std::is_same_v<T, std::string>) {
+            return value_result<T>(T(data_.data() + offset, length));
+        }
+        return doc(offset, length).get<T>();
+    }
+
+    template <typename T>
+    std::pair<T, std::string>
+    at_pos(uint16_t offset, uint16_t length) const {
+        const char* pos = data_.data() + offset;
+        std::string_view str(pos, length);
+        if constexpr (std::is_same_v<T, bool>) {
+            if (milvus::ToLower(str) == "true") {
+                return {true, ""};
+            } else if (milvus::ToLower(str) == "false") {
+                return {false, ""};
+            } else {
+                return {false, "invalid boolean value"};
+            }
+        } else if constexpr (std::is_same_v<T, int64_t>) {
+            try {
+                size_t parsed_chars;
+                int64_t int_value = std::stoll(pos, &parsed_chars, 10);
+                if (parsed_chars == length) {
+                    return {int_value, ""};
+                }
+                return {0, "string contains non-integer characters"};
+            } catch (...) {
+                return {0, "invalid integer string"};
+            }
+        } else if constexpr (std::is_same_v<T, double>) {
+            try {
+                size_t parsed_chars;
+                double double_value = std::stod(pos, &parsed_chars);
+                if (parsed_chars == length) {
+                    return {double_value, ""};
+                }
+                return {0, "string contains non-integer characters"};
+            } catch (...) {
+                return {0, "invalid double string"};
+            }
+        } else {
+            static_assert(std::is_same_v<std::string_view, T>);
+            return {str, ""};
+        }
+    }
+
+    value_result<simdjson::dom::array>
+    array_at(uint16_t offset, uint16_t length) const {
+        return dom_doc(offset, length).get_array();
     }
 
     // get dom array by JSON pointer,
