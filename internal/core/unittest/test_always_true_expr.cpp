@@ -67,10 +67,29 @@ TEST_P(ExprAlwaysTrueTest, AlwaysTrue) {
     final = ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
     EXPECT_EQ(final.size(), N * num_iters);
 
+    // specify some offsets and do scalar filtering on these offsets
+    milvus::exec::OffsetVector offsets;
+    offsets.reserve(N * num_iters / 2);
+    for (auto i = 0; i < N * num_iters; ++i) {
+        if (i % 2 == 0) {
+            offsets.emplace_back(i);
+        }
+    }
+    auto col_vec = milvus::test::gen_filter_res(plan->sources()[0].get(),
+                                                seg_promote,
+                                                N * num_iters,
+                                                MAX_TIMESTAMP,
+                                                &offsets);
+    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    EXPECT_EQ(view.size(), N * num_iters / 2);
+
     for (int i = 0; i < N * num_iters; ++i) {
         auto ans = final[i];
 
         auto val = age_col[i];
         ASSERT_EQ(ans, true) << "@" << i << "!!" << val;
+        if (i % 2 == 0) {
+            ASSERT_EQ(view[int(i / 2)], true) << "@" << i << "!!" << val;
+        }
     }
 }

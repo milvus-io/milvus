@@ -138,6 +138,7 @@ const (
 	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
 	IgnoreGrowing             = "ignore_growing"
 	ConsistencyLevel          = "consistency_level"
+	HintsKey                  = "hints"
 )
 
 // Doc-in-doc-out

@@ -21,7 +21,7 @@
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
 #include "query/helper.h"
-#include "exec/operator/groupby/SearchGroupByOperator.h"
+#include "exec/operator/Utils.h"
 
 namespace milvus::query {
 
@@ -119,7 +119,7 @@ SearchOnSealed(const Schema& schema,
         auto data_id = offset;
         auto raw_dataset =
             query::dataset::RawDataset{offset, dim, chunk_size, vec_data};
-        if (search_info.group_by_field_id_.has_value()) {
+        if (milvus::exec::UseVectorIterator(search_info)) {
             auto sub_qr = BruteForceSearchIterators(query_dataset,
                                                     raw_dataset,
                                                     search_info,
@@ -139,7 +139,7 @@ SearchOnSealed(const Schema& schema,
 
         offset += chunk_size;
     }
-    if (search_info.group_by_field_id_.has_value()) {
+    if (milvus::exec::UseVectorIterator(search_info)) {
         result.AssembleChunkVectorIterators(num_queries,
                                             num_chunk,
                                             column->GetNumRowsUntilChunk(),
@@ -180,7 +180,7 @@ SearchOnSealed(const Schema& schema,
     auto data_type = field.get_data_type();
     CheckBruteForceSearchParam(field, search_info);
     auto raw_dataset = query::dataset::RawDataset{0, dim, row_count, vec_data};
-    if (search_info.group_by_field_id_.has_value()) {
+    if (milvus::exec::UseVectorIterator(search_info)) {
         auto sub_qr = BruteForceSearchIterators(query_dataset,
                                                 raw_dataset,
                                                 search_info,

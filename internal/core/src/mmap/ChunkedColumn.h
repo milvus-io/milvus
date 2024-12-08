@@ -155,6 +155,13 @@ class ChunkedColumnBase : public ColumnBase {
                   "StringViews only supported for VariableColumn");
     }
 
+    virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    ViewsByOffsets(int64_t chunk_id,
+                   const FixedVector<int32_t>& offsets) const {
+        PanicInfo(ErrorCode::Unsupported,
+                  "viewsbyoffsets only supported for VariableColumn");
+    }
+
     std::pair<size_t, size_t>
     GetChunkIDByOffset(int64_t offset) const {
         AssertInfo(offset < num_rows_,
@@ -331,6 +338,13 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
     std::shared_ptr<Chunk>
     GetChunk(int64_t chunk_id) const {
         return chunks_[chunk_id];
+    }
+
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    ViewsByOffsets(int64_t chunk_id,
+                   const FixedVector<int32_t>& offsets) const override {
+        return std::dynamic_pointer_cast<StringChunk>(chunks_[chunk_id])
+            ->ViewsByOffsets(offsets);
     }
 
     BufferView

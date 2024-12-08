@@ -27,7 +27,10 @@
 namespace milvus {
 namespace exec {
 
-template <typename T, bool lower_inclusive, bool upper_inclusive>
+template <typename T,
+          bool lower_inclusive,
+          bool upper_inclusive,
+          FilterType filter_type = FilterType::sequential>
 struct BinaryRangeElementFunc {
     typedef std::conditional_t<std::is_integral_v<T> &&
                                    !std::is_same_v<bool, T>,
@@ -35,7 +38,28 @@ struct BinaryRangeElementFunc {
                                T>
         HighPrecisionType;
     void
-    operator()(T val1, T val2, const T* src, size_t n, TargetBitmapView res) {
+    operator()(T val1,
+               T val2,
+               const T* src,
+               size_t n,
+               TargetBitmapView res,
+               const int32_t* offsets = nullptr) {
+        if constexpr (filter_type == FilterType::random) {
+            for (size_t i = 0; i < n; ++i) {
+                auto offset = (offsets) ? offsets[i] : i;
+                if constexpr (lower_inclusive && upper_inclusive) {
+                    res[i] = val1 <= src[offset] && src[offset] <= val2;
+                } else if constexpr (lower_inclusive && !upper_inclusive) {
+                    res[i] = val1 <= src[offset] && src[offset] < val2;
+                } else if constexpr (!lower_inclusive && upper_inclusive) {
+                    res[i] = val1 < src[offset] && src[offset] <= val2;
+                } else {
+                    res[i] = val1 < src[offset] && src[offset] < val2;
+                }
+            }
+            return;
+        }
+
         if constexpr (lower_inclusive && upper_inclusive) {
             res.inplace_within_range_val<T, milvus::bitset::RangeType::IncInc>(
                 val1, val2, src, n);
@@ -52,30 +76,33 @@ struct BinaryRangeElementFunc {
     }
 };
 
-#define BinaryRangeJSONCompare(cmp)                           \
-    do {                                                      \
-        if (valid_data != nullptr && !valid_data[i]) {        \
-            res[i] = valid_res[i] = false;                    \
-            break;                                            \
-        }                                                     \
-        auto x = src[i].template at<GetType>(pointer);        \
-        if (x.error()) {                                      \
-            if constexpr (std::is_same_v<GetType, int64_t>) { \
-                auto x = src[i].template at<double>(pointer); \
-                if (!x.error()) {                             \
-                    auto value = x.value();                   \
-                    res[i] = (cmp);                           \
-                    break;                                    \
-                }                                             \
-            }                                                 \
-            res[i] = false;                                   \
-            break;                                            \
-        }                                                     \
-        auto value = x.value();                               \
-        res[i] = (cmp);                                       \
+#define BinaryRangeJSONCompare(cmp)                                \
+    do {                                                           \
+        if (valid_data != nullptr && !valid_data[offset]) {        \
+            res[i] = valid_res[i] = false;                         \
+            break;                                                 \
+        }                                                          \
+        auto x = src[offset].template at<GetType>(pointer);        \
+        if (x.error()) {                                           \
+            if constexpr (std::is_same_v<GetType, int64_t>) {      \
+                auto x = src[offset].template at<double>(pointer); \
+                if (!x.error()) {                                  \
+                    auto value = x.value();                        \
+                    res[i] = (cmp);                                \
+                    break;                                         \
+                }                                                  \
+            }                                                      \
+            res[i] = false;                                        \
+            break;                                                 \
+        }                                                          \
+        auto value = x.value();                                    \
+        res[i] = (cmp);                                            \
     } while (false)
 
-template <typename ValueType, bool lower_inclusive, bool upper_inclusive>
+template <typename ValueType,
+          bool lower_inclusive,
+          bool upper_inclusive,
+          FilterType filter_type = FilterType::sequential>
 struct BinaryRangeElementFuncForJson {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -88,8 +115,13 @@ struct BinaryRangeElementFuncForJson {
                const bool* valid_data,
                size_t n,
                TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmapView valid_res,
+               const int32_t* offsets = nullptr) {
         for (size_t i = 0; i < n; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
             if constexpr (lower_inclusive && upper_inclusive) {
                 BinaryRangeJSONCompare(val1 <= value && value <= val2);
             } else if constexpr (lower_inclusive && !upper_inclusive) {
@@ -103,7 +135,10 @@ struct BinaryRangeElementFuncForJson {
     }
 };
 
-template <typename ValueType, bool lower_inclusive, bool upper_inclusive>
+template <typename ValueType,
+          bool lower_inclusive,
+          bool upper_inclusive,
+          FilterType filter_type = FilterType::sequential>
 struct BinaryRangeElementFuncForArray {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -116,39 +151,44 @@ struct BinaryRangeElementFuncForArray {
                const bool* valid_data,
                size_t n,
                TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmapView valid_res,
+               const int32_t* offsets = nullptr) {
         for (size_t i = 0; i < n; ++i) {
-            if (valid_data != nullptr && !valid_data[i]) {
+            size_t offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
             if constexpr (lower_inclusive && upper_inclusive) {
-                if (index >= src[i].length()) {
+                if (index >= src[offset].length()) {
                     res[i] = false;
                     continue;
                 }
-                auto value = src[i].get_data<GetType>(index);
+                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 <= value && value <= val2;
             } else if constexpr (lower_inclusive && !upper_inclusive) {
-                if (index >= src[i].length()) {
+                if (index >= src[offset].length()) {
                     res[i] = false;
                     continue;
                 }
-                auto value = src[i].get_data<GetType>(index);
+                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 <= value && value < val2;
             } else if constexpr (!lower_inclusive && upper_inclusive) {
-                if (index >= src[i].length()) {
+                if (index >= src[offset].length()) {
                     res[i] = false;
                     continue;
                 }
-                auto value = src[i].get_data<GetType>(index);
+                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 < value && value <= val2;
             } else {
-                if (index >= src[i].length()) {
+                if (index >= src[offset].length()) {
                     res[i] = false;
                     continue;
                 }
-                auto value = src[i].get_data<GetType>(index);
+                auto value = src[offset].get_data<GetType>(index);
                 res[i] = val1 < value && value < val2;
             }
         }
@@ -211,11 +251,12 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     PreCheckOverflow(HighPrecisionType& val1,
                      HighPrecisionType& val2,
                      bool& lower_inclusive,
-                     bool& upper_inclusive);
+                     bool& upper_inclusive,
+                     OffsetVector* input = nullptr);
 
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImpl();
+    ExecRangeVisitorImpl(OffsetVector* input = nullptr);
 
     template <typename T>
     VectorPtr
@@ -223,15 +264,15 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
 
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImplForData();
+    ExecRangeVisitorImplForData(OffsetVector* input = nullptr);
 
     template <typename ValueType>
     VectorPtr
-    ExecRangeVisitorImplForJson();
+    ExecRangeVisitorImplForJson(OffsetVector* input = nullptr);
 
     template <typename ValueType>
     VectorPtr
-    ExecRangeVisitorImplForArray();
+    ExecRangeVisitorImplForArray(OffsetVector* input = nullptr);
 
  private:
     std::shared_ptr<const milvus::expr::BinaryRangeFilterExpr> expr_;

@@ -323,6 +323,12 @@ class SingleChunkColumnBase : public ColumnBase {
                   "StringViews only supported for VariableColumn");
     }
 
+    virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    ViewsByOffsets(const FixedVector<int32_t>& offsets) const {
+        PanicInfo(ErrorCode::Unsupported,
+                  "viewsbyoffsets only supported for VariableColumn");
+    }
+
     virtual void
     AppendBatch(const FieldDataPtr data) {
         size_t required_size = data_size_ + data->DataSize();
@@ -696,6 +702,19 @@ class SingleChunkVariableColumn : public SingleChunkColumnBase {
             pos += size;
         }
         return std::make_pair(res, valid_data_);
+    }
+
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    ViewsByOffsets(const FixedVector<int32_t>& offsets) const {
+        std::vector<std::string_view> res;
+        FixedVector<bool> valid;
+        res.reserve(offsets.size());
+        valid.reserve(offsets.size());
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            res.emplace_back(RawAt(offsets[i]));
+            valid.emplace_back(IsValid(offsets[i]));
+        }
+        return {res, valid};
     }
 
     [[nodiscard]] std::vector<ViewType>
