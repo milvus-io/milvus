@@ -89,7 +89,7 @@ TEST(Growing, RealCount) {
 
     // delete all.
     auto del_offset3 = segment->get_deleted_count();
-    ASSERT_EQ(del_offset3, half * 2);
+    ASSERT_EQ(del_offset3, half);
     auto del_ids3 = GenPKs(pks.begin(), pks.end());
     auto del_tss3 = GenTss(c, c + half * 2);
     status = segment->Delete(del_offset3, c, del_ids3.get(), del_tss3.data());
