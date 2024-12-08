@@ -56,6 +56,7 @@ default_resource_group_capacity = 1000000
 default_tag = "1970_01_01"
 row_count = "row_count"
 default_length = 65535
+varchar_index_max_length = 65530
 default_json_list_length = 1
 default_desc = ""
 default_collection_desc = "default collection"
@@ -213,21 +214,28 @@ get_wrong_format_dict = [
 ]
 
 """ Specially defined list """
+HNSW_FLAT = "HNSW"
+HNSW_SQ = "HNSW_SQ"
+HNSW_PQ = "HNSW_PQ"
+HNSW_PRQ = "HNSW_PRQ"
 L0_index_types = ["IVF_SQ8", "HNSW", "DISKANN"]
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ",
-                   "HNSW", "SCANN", "DISKANN",
+                   "HNSW", "SCANN", "DISKANN", HNSW_FLAT,
+                   HNSW_SQ, HNSW_PQ, HNSW_PRQ,
                    "BIN_FLAT", "BIN_IVF_FLAT",
                    "SPARSE_INVERTED_INDEX", "SPARSE_WAND",
                    "GPU_IVF_FLAT", "GPU_IVF_PQ"]
 
 default_all_indexes_params = [{}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
-                              {"M": 32, "efConstruction": 360}, {"nlist": 128}, {},
+                              {"M": 32, "efConstruction": 360}, {"nlist": 128}, {}, {}, {"sq_type": "SQ8"},
+                              {"m": 32, "nbits": 8}, {"m": 32, "nrq": 6},
                               {}, {"nlist": 64},
                               {"drop_ratio_build": 0.2}, {"drop_ratio_build": 0.2},
                               {"nlist": 64}, {"nlist": 64, "m": 16, "nbits": 8}]
 
 default_all_search_params_params = [{}, {"nprobe": 32}, {"nprobe": 32}, {"nprobe": 32},
                                     {"ef": 100}, {"nprobe": 32, "reorder_k": 100}, {"search_list": 30},
+                                    {}, {}, {}, {},
                                     {}, {"nprobe": 32},
                                     {"drop_ratio_search": "0.2"}, {"drop_ratio_search": "0.2"},
                                     {}, {}]
@@ -253,7 +261,7 @@ default_search_params = {"params": default_all_search_params_params[2].copy()}
 default_search_ip_params = {"metric_type": "IP", "params": default_all_search_params_params[2].copy()}
 default_search_binary_params = {"metric_type": "JACCARD", "params": {"nprobe": 32}}
 default_index = {"index_type": "IVF_SQ8", "metric_type": default_L0_metric, "params": default_all_indexes_params[2].copy()}
-default_binary_index = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": default_all_indexes_params[8].copy()}
+default_binary_index = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": default_all_indexes_params[12].copy()}
 default_diskann_index = {"index_type": "DISKANN", "metric_type": default_L0_metric, "params": {}}
 default_diskann_search_params = {"params": {"search_list": 30}}
 default_sparse_search_params = {"metric_type": "IP", "params": {"drop_ratio_search": "0.2"}}

@@ -1235,6 +1235,7 @@ class TestInsertInvalid(TestcaseBase):
       ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.skip(reason="issue #37543")
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
     def test_insert_with_invalid_field_value(self, primary_field):
         """
@@ -1247,31 +1248,42 @@ class TestInsertInvalid(TestcaseBase):
                                                     is_all_data_type=True, with_json=True)[0]
         nb = 100
         data = cf.gen_data_by_collection_schema(collection_w.schema, nb=nb)
+        field_name = []
+        for field in collection_w.schema.fields:
+            field_name.append(field.name)
         for dirty_i in [0, nb // 2, nb - 1]:      # check the dirty data at first, middle and last
             log.debug(f"dirty_i: {dirty_i}")
             for i in range(len(data)):
                 if data[i][dirty_i].__class__ is int:
                     tmp = data[i][0]
                     data[i][dirty_i] = "iamstring"
-                    error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+                    log.debug(dirty_i)
+                    log.debug(i)
+                    string = field_name[i]
+                    if string != "int64":
+                        string = "int"
+                    error = {ct.err_code: 1, ct.err_msg: "The Input data type is inconsistent with defined schema, "
+                                                         "{%s} field should be a %s, but got a {<class 'str'>} "
+                                                         "instead."%(field_name[i], string)}
                     collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
                     data[i][dirty_i] = tmp
                 elif data[i][dirty_i].__class__ is str:
                     tmp = data[i][dirty_i]
                     data[i][dirty_i] = random.randint(0, 1000)
-                    error = {ct.err_code: 999, ct.err_msg: "expect string input, got: <class 'int'>"}
+                    error = {ct.err_code: 1, ct.err_msg: "field (varchar) expects string input, got: <class 'int'>"}
                     collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
                     data[i][dirty_i] = tmp
                 elif data[i][dirty_i].__class__ is bool:
                     tmp = data[i][dirty_i]
                     data[i][dirty_i] = "iamstring"
-                    error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+                    error = {ct.err_code: 1, ct.err_msg: "The Input data type is inconsistent with defined schema, "
+                                                         "{bool} field should be a bool, but got a {<class 'str'>} instead."}
                     collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
                     data[i][dirty_i] = tmp
                 elif data[i][dirty_i].__class__ is float:
                     tmp = data[i][dirty_i]
                     data[i][dirty_i] = "iamstring"
-                    error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+                    error = {ct.err_code: 1, ct.err_msg: "The Input data type is inconsistent with defined schema"}
                     collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
                     data[i][dirty_i] = tmp
                 else:
@@ -1428,7 +1440,7 @@ class TestInsertInvalid(TestcaseBase):
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index ", ct.all_index_types[13:15])
     @pytest.mark.parametrize("invalid_vector_type ", ["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
     def test_invalid_sparse_vector_data(self, index, invalid_vector_type):
         """
@@ -2154,7 +2166,7 @@ class TestUpsertValid(TestcaseBase):
         assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index ", ct.all_index_types[13:15])
     def test_upsert_sparse_data(self, index):
         """
         target: multiple upserts and counts(*)
@@ -2182,6 +2194,7 @@ class TestUpsertInvalid(TestcaseBase):
     """ Invalid test case of Upsert interface """
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.skip(reason="issue #37543")
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
     def test_upsert_data_type_dismatch(self, primary_field):
         """
@@ -2194,31 +2207,40 @@ class TestUpsertInvalid(TestcaseBase):
                                                     is_all_data_type=True, with_json=True)[0]
         nb = 100
         data = cf.gen_data_by_collection_schema(collection_w.schema, nb=nb)
+        field_name = []
+        for field in collection_w.schema.fields:
+            field_name.append(field.name)
         for dirty_i in [0, nb // 2, nb - 1]:  # check the dirty data at first, middle and last
             log.debug(f"dirty_i: {dirty_i}")
             for i in range(len(data)):
                 if data[i][dirty_i].__class__ is int:
                     tmp = data[i][0]
                     data[i][dirty_i] = "iamstring"
-                    error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+                    string = field_name[i]
+                    if string != "int64":
+                        string = "int"
+                    error = {ct.err_code: 1, ct.err_msg: "The Input data type is inconsistent with defined schema, "
+                                                         "{%s} field should be a %s, but got a {<class 'str'>} "
+                                                         "instead."%(field_name[i], string)}
                     collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
                     data[i][dirty_i] = tmp
                 elif data[i][dirty_i].__class__ is str:
                     tmp = data[i][dirty_i]
                     data[i][dirty_i] = random.randint(0, 1000)
-                    error = {ct.err_code: 999, ct.err_msg: "expect string input, got: <class 'int'>"}
+                    error = {ct.err_code: 1, ct.err_msg: "field (varchar) expects string input, got: <class 'int'>"}
                     collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
                     data[i][dirty_i] = tmp
                 elif data[i][dirty_i].__class__ is bool:
                     tmp = data[i][dirty_i]
                     data[i][dirty_i] = "iamstring"
-                    error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+                    error = {ct.err_code: 1, ct.err_msg: "The Input data type is inconsistent with defined schema, "
+                                                         "{bool} field should be a bool, but got a {<class 'str'>} instead."}
                     collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
                     data[i][dirty_i] = tmp
                 elif data[i][dirty_i].__class__ is float:
                     tmp = data[i][dirty_i]
                     data[i][dirty_i] = "iamstring"
-                    error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+                    error = {ct.err_code: 1, ct.err_msg: "The Input data type is inconsistent with defined schema"}
                     collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
                     data[i][dirty_i] = tmp
                 else:

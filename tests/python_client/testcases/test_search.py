@@ -25,6 +25,7 @@ import threading
 import pytest
 import pandas as pd
 from faker import Faker
+import string
 
 Faker.seed(19530)
 fake_en = Faker("en_US")
@@ -64,7 +65,7 @@ default_string_field_name = ct.default_string_field_name
 default_json_field_name = ct.default_json_field_name
 default_index_params = ct.default_index
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-range_search_supported_indexes = ct.all_index_types[:7]
+range_search_supported_indexes = ct.all_index_types[:11]
 uid = "test_search"
 nq = 1
 epsilon = 0.001
@@ -2147,9 +2148,9 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": limit,
                                          "_async": _async})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.tags(CaseLabel.GPU)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:11])
     def test_search_after_different_index_with_params(self, index, _async, scalar_index):
         """
         target: test search after different index
@@ -2250,7 +2251,7 @@ class TestCollectionSearch(TestcaseBase):
                                              "_async": _async})
 
     @pytest.mark.tags(CaseLabel.GPU)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[-2:])
     def test_search_after_different_index_with_params_gpu(self, index, _async):
         """
         target: test search after different index
@@ -2318,8 +2319,7 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.tags(CaseLabel.GPU)
-    @pytest.mark.skip("issue #27252")
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:11])
     def test_search_after_different_index_with_min_dim(self, index, _async):
         """
         target: test search after different index with min dim
@@ -2352,7 +2352,7 @@ class TestCollectionSearch(TestcaseBase):
                                              "_async": _async})
 
     @pytest.mark.tags(CaseLabel.GPU)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[-2:])
     def test_search_after_different_index_with_min_dim_gpu(self, index, _async):
         """
         target: test search after different index with min dim
@@ -2390,7 +2390,7 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.tags(CaseLabel.GPU)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:11])
     def test_search_after_index_different_metric_type(self, index, _async, metric_type):
         """
         target: test search with different metric type
@@ -2454,8 +2454,150 @@ class TestCollectionSearch(TestcaseBase):
                                              "original_vectors": original_vectors})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue 24957")
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.tags(CaseLabel.GPU)
+    @pytest.mark.parametrize("index", ct.all_index_types[7:11])
+    @pytest.mark.parametrize("refine_type", ["SQ6", "SQ8", "FP16", "BF16", "FP32", "FLAT"])
+    def test_search_after_new_hnsw_index_with_refine(self, index, _async, metric_type, refine_type):
+        """
+        target: test search new HNSW index with refine
+        method: search new HNSW index with refine
+        expected: searched successfully
+        """
+        if index == ct.HNSW_FLAT:
+            pytest.skip("HNSW_FLAT index not support refine")
+        # 1. initialize with data
+        dim = 64
+        auto_id = True
+        enable_dynamic_field = True
+        collection_w, _vectors, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
+                                                                                         partition_num=1,
+                                                                                         auto_id=auto_id,
+                                                                                         dim=dim, is_index=False,
+                                                                                         enable_dynamic_field=enable_dynamic_field)[0:5]
+        # 2. get vectors that inserted into collection
+        original_vectors = []
+        if enable_dynamic_field:
+            for vector in _vectors[0]:
+                vector = vector[ct.default_float_vec_field_name]
+                original_vectors.append(vector)
+        else:
+            for _vector in _vectors:
+                vectors_tmp = np.array(_vector).tolist()
+                vectors_single = [vectors_tmp[i][-1] for i in range(2500)]
+                original_vectors.append(vectors_single)
+        log.info(len(original_vectors))
+        # 3. create different index
+        params = cf.get_index_params_params(index)
+        if params.get("m"):
+            if (dim % params["m"]) != 0:
+                params["m"] = dim // 4
+        if params.get("PQM"):
+            if (dim % params["PQM"]) != 0:
+                params["PQM"] = dim // 4
+        if index.startswith("FAISS_"):
+            params["refine_type"] = refine_type
+        log.info("test_search_after_new_hnsw_index_with_refine: Creating index-%s" % index)
+        default_index = {"index_type": index, "params": params, "metric_type": metric_type}
+        collection_w.create_index("float_vector", default_index)
+        log.info("test_search_after_new_hnsw_index_with_refine: Created index-%s" % index)
+        collection_w.load()
+        # 4. search
+        search_params = cf.gen_search_param(index, metric_type)
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        for search_param in search_params:
+            limit = default_limit
+            if index == "HNSW":
+                limit = search_param["params"]["ef"]
+                if limit > max_limit:
+                    limit = default_nb
+            if index == "DISKANN":
+                limit = search_param["params"]["search_list"]
+            if index.startswith("FAISS_"):
+                search_param["params"]["refine_k"] = 1.0
+            log.info("Searching with search params: {}".format(search_param))
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                search_param, limit,
+                                default_search_exp, _async=_async,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "ids": insert_ids,
+                                             "limit": limit,
+                                             "_async": _async,
+                                             "metric": metric_type,
+                                             "vector_nq": vectors[:default_nq],
+                                             "original_vectors": original_vectors})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #37620")
+    @pytest.mark.parametrize("index", ct.all_index_types[7:11])
+    @pytest.mark.parametrize("refine_type", ["SQ6", "SQ8", "FP16", "BF16", "FP32", "FLAT"])
+    def test_search_after_new_hnsw_index_with_invalid_refine_k(self, index, refine_type):
+        """
+        target: test search new HNSW index with refine
+        method: search new HNSW index with refine
+        expected: searched successfully
+        """
+        if index == ct.HNSW_FLAT:
+            pytest.skip("HNSW_FLAT index not support refine")
+        # 1. initialize with data
+        dim = 64
+        auto_id = True
+        enable_dynamic_field = True
+        collection_w, _vectors, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 3000,
+                                                                                         partition_num=1,
+                                                                                         auto_id=auto_id,
+                                                                                         dim=dim, is_index=False,
+                                                                                         enable_dynamic_field=enable_dynamic_field)[0:5]
+        # 2. get vectors that inserted into collection
+        original_vectors = []
+        if enable_dynamic_field:
+            for vector in _vectors[0]:
+                vector = vector[ct.default_float_vec_field_name]
+                original_vectors.append(vector)
+        else:
+            for _vector in _vectors:
+                vectors_tmp = np.array(_vector).tolist()
+                vectors_single = [vectors_tmp[i][-1] for i in range(2500)]
+                original_vectors.append(vectors_single)
+        log.info(len(original_vectors))
+        # 3. create different index
+        params = cf.get_index_params_params(index)
+        if params.get("m"):
+            if (dim % params["m"]) != 0:
+                params["m"] = dim // 4
+        if params.get("PQM"):
+            if (dim % params["PQM"]) != 0:
+                params["PQM"] = dim // 4
+        if index in [ct.HNSW_FLAT, ct.HNSW_SQ, ct.HNSW_PQ, ct.HNSW_PRQ]:
+            params["refine_type"] = refine_type
+        log.info("test_search_after_new_hnsw_index_with_invalid_refine_k: Creating index-%s" % index)
+        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        collection_w.create_index("float_vector", default_index)
+        log.info("test_search_after_new_hnsw_index_with_invalid_refine_k: Created index-%s" % index)
+        collection_w.load()
+        # 4. search
+        search_params = cf.gen_search_param(index, "L2")
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        for search_param in search_params:
+            limit = default_limit
+            if index == "HNSW":
+                limit = search_param["params"]["ef"]
+                if limit > max_limit:
+                    limit = default_nb
+            if index == "DISKANN":
+                limit = search_param["params"]["search_list"]
+            if index in [ct.HNSW_FLAT, ct.HNSW_SQ, ct.HNSW_PQ, ct.HNSW_PRQ]:
+                search_param["params"]["refine_k"] = "invalid"
+            log.info("Searching with search params: {}".format(search_param))
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                search_param, limit,
+                                default_search_exp,
+                                check_task=CheckTasks.err_res,
+                                check_items={"err_code": 65535,
+                                             "err_msg": "invalid refine_k"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index", ct.all_index_types[:11])
     def test_search_after_release_recreate_index(self, index, _async, metric_type):
         """
         target: test search after new metric with different metric type
@@ -2489,12 +2631,12 @@ class TestCollectionSearch(TestcaseBase):
             if (dim % params["PQM"]) != 0:
                 params["PQM"] = dim // 4
         log.info("test_search_after_release_recreate_index: Creating index-%s" % index)
-        default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
+        default_index = {"index_type": index, "params": params, "metric_type": metric_type}
         collection_w.create_index("float_vector", default_index)
         log.info("test_search_after_release_recreate_index: Created index-%s" % index)
         collection_w.load()
         # 4. search
-        search_params = cf.gen_search_param(index, "COSINE")
+        search_params = cf.gen_search_param(index, metric_type)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         for search_param in search_params:
             log.info("Searching with search params: {}".format(search_param))
@@ -2522,7 +2664,7 @@ class TestCollectionSearch(TestcaseBase):
                                              "original_vectors": original_vectors})
 
     @pytest.mark.tags(CaseLabel.GPU)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[-2:])
     def test_search_after_index_different_metric_type_gpu(self, index, _async):
         """
         target: test search with different metric type
@@ -3690,8 +3832,8 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": default_limit,
                                          "output_fields": output_fields})
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index", ct.all_index_types[:11])
     @pytest.mark.parametrize("metrics", ct.float_metrics)
     @pytest.mark.parametrize("limit", [20, 1200])
     def test_search_output_field_vector_after_different_index_metrics(self, index, metrics, limit):
@@ -4911,7 +5053,7 @@ class TestSearchBase(TestcaseBase):
                                                         f" [1, 16384], but got {top_k}"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:11])
     def test_search_index_empty_partition(self, index):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -4953,7 +5095,7 @@ class TestSearchBase(TestcaseBase):
                                          "limit": 0})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:11])
     def test_search_index_partitions(self, index, get_top_k):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -5010,7 +5152,7 @@ class TestSearchBase(TestcaseBase):
         assert len(res[0]) <= top_k
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:11])
     def test_search_ip_after_index(self, index):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -5069,7 +5211,7 @@ class TestSearchBase(TestcaseBase):
             assert abs(got - ref) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:11])
     def test_search_ip_index_empty_partition(self, index):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -5111,7 +5253,7 @@ class TestSearchBase(TestcaseBase):
                                          "limit": 0})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:11])
     def test_search_ip_index_partitions(self, index):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -5141,7 +5283,7 @@ class TestSearchBase(TestcaseBase):
                                      default_search_exp, [par_name])
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:11])
     def test_search_cosine_all_indexes(self, index):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -5346,13 +5488,15 @@ class TestSearchBase(TestcaseBase):
                                              "limit": top_k})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[:6])
-    def test_each_index_with_mmap_enabled_search(self, index):
+    @pytest.mark.parametrize("index", ct.all_index_types[:11])
+    def test_search_index_with_mmap_enabled_search(self, index):
         """
         target: test each index with mmap enabled search
         method: test each index with mmap enabled search
         expected: search success
         """
+        if index == "DISKANN":
+            pytest.skip("DISKANN not support mmap")
         self._connect()
         nb = 2000
         dim = 32
@@ -5382,7 +5526,7 @@ class TestSearchBase(TestcaseBase):
                                          "limit": ct.default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[7:9])
+    @pytest.mark.parametrize("index", ct.all_index_types[11:13])
     def test_enable_mmap_search_for_binary_indexes(self, index):
         """
         target: enable mmap for binary indexes
@@ -6623,7 +6767,7 @@ class TestSearchPagination(TestcaseBase):
         assert res[0].ids == []
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:11])
     def test_search_pagination_after_different_index(self, index, offset, _async):
         """
         target: test search pagination after different index
@@ -7172,7 +7316,7 @@ class TestSearchDiskann(TestcaseBase):
 class TestCollectionRangeSearch(TestcaseBase):
     """ Test case of range search interface """
 
-    @pytest.fixture(scope="function", params=ct.all_index_types[:7])
+    @pytest.fixture(scope="function", params=ct.all_index_types[:11])
     def index_type(self, request):
         tags = request.config.getoption("--tags")
         if CaseLabel.L2 not in tags:
@@ -7863,6 +8007,8 @@ class TestCollectionRangeSearch(TestcaseBase):
         """
         # 1. initialize with data
         dim = 96
+        if index.startswith("FAISS_"):
+            dim = 128
         enable_dynamic_field = False
         collection_w, _, _, insert_ids, time_stamp = \
             self.init_collection_general(prefix, True, 5000, partition_num=1,
@@ -7904,6 +8050,8 @@ class TestCollectionRangeSearch(TestcaseBase):
             pytest.skip("https://github.com/milvus-io/milvus/issues/32648")
         # 1. initialize with data
         dim = 208
+        if index.startswith("FAISS_"):
+            dim = 256
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
                                                                                   dim=dim, is_index=False)[0:5]
@@ -9997,7 +10145,6 @@ class TestCollectionSearchJSON(TestcaseBase):
                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="issue 37113")
     def test_search_json_nullable_insert_before_load(self, nq, is_flush, enable_dynamic_field):
         """
         target: test search case with default json expression
@@ -10437,8 +10584,7 @@ class TestSearchIterator(TestcaseBase):
                                                   "radius": 35.0})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #25145")
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:11])
     @pytest.mark.parametrize("metrics", ct.float_metrics)
     def test_search_iterator_after_different_index_metrics(self, index, metrics):
         """
@@ -11103,9 +11249,12 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         # 2. extract vector field name
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
         vector_name_list.append(ct.default_float_vec_field_name)
-        flat_index = {"index_type": "FLAT", "params": {}, "metric_type": metric_type}
-        for vector_name in vector_name_list:
-            collection_w.create_index(vector_name, flat_index)
+        flat_index = {"index_type": ct.HNSW_SQ, "params": {}, "metric_type": metric_type}
+        collection_w.create_index(vector_name_list[0], flat_index)
+        flat_index = {"index_type": ct.HNSW_PQ, "params": {}, "metric_type": metric_type}
+        collection_w.create_index(vector_name_list[1], flat_index)
+        flat_index = {"index_type": ct.HNSW_PRQ, "params": {"nrq": 6}, "metric_type": metric_type}
+        collection_w.create_index(vector_name_list[2], flat_index)
         collection_w.load()
         # 3. prepare search params
         req_list = []
@@ -12722,7 +12871,7 @@ class TestSparseSearch(TestcaseBase):
     """ Add some test cases for the sparse vector """
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[13:15])
     def test_sparse_index_search(self, index):
         """
         target: verify that sparse index for sparse vectors can be searched properly
@@ -12759,7 +12908,7 @@ class TestSparseSearch(TestcaseBase):
                                          "output_fields": [ct.default_sparse_vec_field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[13:15])
     @pytest.mark.parametrize("dim", [32768, ct.max_sparse_vector_dim])
     def test_sparse_index_dim(self, index, dim):
         """
@@ -12785,7 +12934,7 @@ class TestSparseSearch(TestcaseBase):
                                          "limit": 1})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[13:15])
     def test_sparse_index_enable_mmap_search(self, index):
         """
         target: verify that the sparse indexes of sparse vectors can be searched properly after turning on mmap
@@ -12832,7 +12981,7 @@ class TestSparseSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("ratio", [0.01, 0.1, 0.5, 0.9])
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[13:15])
     def test_search_sparse_ratio(self, ratio, index):
         """
         target: create a sparse index by adjusting the ratio parameter.
@@ -12857,7 +13006,7 @@ class TestSparseSearch(TestcaseBase):
                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[13:15])
     def test_sparse_vector_search_output_field(self, index):
         """
         target: create sparse vectors and search
@@ -12886,7 +13035,7 @@ class TestSparseSearch(TestcaseBase):
                                          })
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[13:15])
     @pytest.mark.xfail(reason="issue #36174")
     def test_sparse_vector_search_iterator(self, index):
         """
@@ -13068,6 +13217,76 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                          "output_fields": [ct.default_string_field_name,
                                                            ct.default_float_field_name]})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("varchar_length", [ct.default_length, ct.varchar_index_max_length])
+    def test_search_after_none_data_all_field_datatype_maximum_varchar(self, varchar_scalar_index, null_data_percent, varchar_length):
+        """
+        target: test search after different index, insert maximum length string data with/without None data
+        method: test search after different index, insert maximum length string data with/without None data
+        expected: search successfully with limit(topK)
+        """
+        # 1. initialize with data
+        dim = 4
+        nullable_fields = {ct.default_float_field_name: null_data_percent,
+                           ct.default_string_field_name: null_data_percent}
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, False,
+                                         with_json=False, dim=dim,
+                                         is_index=False, nullable_fields=nullable_fields)[0:4]
+        # 2. insert
+        nb = 1000
+        null_number = int(nb * nullable_fields[ct.default_float_field_name])
+        null_data = [None for _ in range(null_number)]
+        float_data = [np.float32(i) for i in range(nb-null_number)] + null_data
+        float_values = pd.Series(data=float_data, dtype=object)
+        null_number = int(nb * nullable_fields[ct.default_string_field_name])
+        null_data = [None for _ in range(null_number)]
+        str_value = "".join(random.choice(string.ascii_letters + string.digits) for _ in range(varchar_length))
+        string_data = [str_value for _ in range(nb-null_number)] + null_data
+        string_values = pd.Series(data=string_data, dtype=object)
+
+        for i in range(2):
+            int_values = pd.Series(data=[i for i in range(i*nb, (i+1)*nb)])
+            float_vec_values = cf.gen_vectors(nb, dim, vector_data_type="FLOAT_VECTOR")
+            df = pd.DataFrame({
+                ct.default_int64_field_name: int_values,
+                ct.default_float_field_name: float_values,
+                ct.default_string_field_name: string_values,
+                ct.default_float_vec_field_name: float_vec_values})
+            collection_w.insert(df)
+        # 3. create index on vector field and load
+        index = "HNSW"
+        params = cf.get_index_params_params(index)
+        default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
+        vector_name_list = cf.extract_vector_field_name_list(collection_w)
+        vector_name_list.append(ct.default_float_vec_field_name)
+        for vector_name in vector_name_list:
+            collection_w.create_index(vector_name, default_index)
+        # 4. create index on scalar field with None data
+        scalar_index_params = {"index_type": varchar_scalar_index, "params": {}}
+        collection_w.create_index(ct.default_string_field_name, scalar_index_params)
+        # 5. load
+        collection_w.load()
+        # 6. search
+        search_params = cf.gen_search_param(index, "COSINE")
+        limit = search_params[0]["params"]["ef"]
+        log.info("Searching with search params: {}".format(search_params[0]))
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        search_exp = f"{ct.default_string_field_name} == '{str_value}'"
+        if null_data_percent == 1:
+            limit_check = 0
+        else:
+            limit_check = limit
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            search_param, limit, search_exp,
+                            output_fields=[ct.default_string_field_name, ct.default_float_field_name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": limit_check})
+        res = collection_w.query(search_exp, output_fields=[ct.default_string_field_name, ct.default_float_field_name],
+                                 limit = limit)[0]
+        assert len(res) == limit_check
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_default_value_with_insert(self, nq, dim, auto_id, is_flush, enable_dynamic_field, vector_data_type):
         """
@@ -13246,7 +13465,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                          "output_fields": [ct.default_float_field_name,
                                                            ct.default_string_field_name]})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.tags(CaseLabel.GPU)
     def test_search_after_different_index_with_params_none_default_data(self, varchar_scalar_index,
                                                                         numeric_scalar_index,

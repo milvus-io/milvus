@@ -949,13 +949,15 @@ class TestNewIndexBase(TestcaseBase):
                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index, params", zip(ct.all_index_types[:6], ct.default_all_indexes_params[:6]))
+    @pytest.mark.parametrize("index, params", zip(ct.all_index_types[:11], ct.default_all_indexes_params[:11]))
     def test_drop_mmap_index(self, index, params):
         """
         target: disabling and re-enabling mmap for index
         method: disabling and re-enabling mmap for index
         expected: search success
         """
+        if index == "DISKANN":
+            pytest.skip("DISKANN not support mmap")
         self._connect()
         collection_w = self.init_collection_general(prefix, insert_data=True, is_index=False)[0]
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
@@ -1444,7 +1446,7 @@ class TestIndexInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "   ", "invalid"])
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[13:15])
     def test_invalid_sparse_metric_type(self, metric_type, index):
         """
         target: unsupported metric_type create index
@@ -1465,7 +1467,7 @@ class TestIndexInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("ratio", [-0.5, 1, 3])
-    @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index ", ct.all_index_types[13:15])
     def test_invalid_sparse_ratio(self, ratio, index):
         """
         target: index creation for unsupported ratio parameter
@@ -3140,3 +3142,468 @@ class TestBitmapIndex(TestcaseBase):
 
         # load collection
         self.collection_wrap.load()
+
+
+@pytest.mark.tags(CaseLabel.GPU)
+class TestNewHNSWIndexInvalid(TestcaseBase):
+    """ Test case of Auto index """
+
+    @pytest.fixture(scope="function", params=["IP", "COSINE", "L2"])
+    def metric_type(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["invalid", 1])
+    def invalid_sq_type(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[0, 65537])
+    def invalid_m_value(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["invalid"])
+    def invalid_m_type(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[0, 25])
+    def invalid_nbits_value(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["invalid"])
+    def invalid_nbits_type(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[0, 17])
+    def invalid_nrq_value(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["invalid"])
+    def invalid_nrq_type(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["SQ6", "SQ8", "FP16", "BF16", "FP32", "FLAT"])
+    def refine_type(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["invalid", 1])
+    def invalid_refine_type(self, request):
+        yield request.param
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("index, params", zip(ct.all_index_types[7:11], ct.default_all_indexes_params[7:11]))
+    def test_create_new_hnsw_index_sparse_vector(self, index, params):
+        """
+        target: create new HNSW indexes on sparse_vector
+        method: create new HNSW indexes on sparse_vector
+        expected: raise exception
+        """
+        self._connect()
+        collection_w = self.init_collection_general(prefix, True, is_index=False, with_json=False,
+                                                    vector_data_type="SPARSE_FLOAT_VECTOR")[0]
+        default_index = {"index_type": index, "params": params, "metric_type": "IP"}
+        vector_name_list = cf.extract_vector_field_name_list(collection_w)
+        collection_w.create_index(vector_name_list[0], default_index,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": f"data type SparseFloatVector can't build with this index {index}: "
+                                                          f"invalid parameter[expected=valid index params][actual=invalid index params]"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_flat_index_with_refine(self, invalid_sq_type):
+        """
+        target: test create hnsw_flat index  with refine parameter
+        method: create hnsw_flat index  with refine parameter
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_FLAT, "metric_type": "L2",
+                        "params": {"refine_type": "SQ6"}}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": "refine is not supported for this index: invalid parameter"
+                                                          "[expected=valid index params][actual=invalid index params]"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_sq_index_invalid_sq_type(self, invalid_sq_type):
+        """
+        target: test create hnsw_sq index invalid type of sq
+        method: create hnsw_sq index invalid type of sq
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_SQ, "metric_type": "L2",
+                        "params": {"sq_type": invalid_sq_type}}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": "invalid scalar quantizer type: invalid parameter"
+                                                          "[expected=valid index params][actual=invalid index params]"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue 37587")
+    def test_create_hnsw_sq_index_invalid_refine_type(self, invalid_refine_type):
+        """
+        target: test create hnsw_pq index with invalid refine parameters
+        method: create index with invalid refine parameters
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_SQ, "metric_type": "L2",
+                        "params": {"sq_type": "SQ6", "refine_type": invalid_refine_type}}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": "invalid refine type type: invalid parameter"
+                                                          "[expected=valid index params][actual=invalid index params]"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_pq_index_invalid_m_value(self, invalid_m_value):
+        """
+        target: test create hnsw_pq index with invalid value of m
+        method: create index with invalid value of m
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PQ, "metric_type": "IP",
+                        "params": {"m": invalid_m_value, "nbits": 8}}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": f"Out of range in json: param 'm' ({invalid_m_value}) should be "
+                                                          f"in range [1, 65536]: invalid parameter[expected=valid index "
+                                                          f"params][actual=invalid index params]"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_pq_index_invalid_m_type(self, invalid_m_type):
+        """
+        target: test create hnsw_pq index with with invalid type of m
+        method: create index with with invalid type of m
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PQ, "metric_type": "IP",
+                        "params": {"m": invalid_m_type, "nbits": 8}}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": f"invalid integer value, key: 'm', value: '{invalid_m_type}': "
+                                                          f"invalid parameter[expected=valid index params][actual=invalid index params]"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_pq_index_invalid_nbits_value(self, invalid_nbits_value):
+        """
+        target: test create hnsw_pq index with invalid value of nbits
+        method: create index with invalid value of nbits
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PQ, "metric_type": "IP",
+                        "params": {"m": 32, "nbits": invalid_nbits_value}}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": f"Out of range in json: param 'nbits' ({invalid_nbits_value}) "
+                                                          f"should be in range [1, 24]: invalid parameter[expected=valid index "
+                                                          f"params][actual=invalid index params]"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_pq_index_invalid_nbits_type(self, invalid_nbits_type):
+        """
+        target: test create hnsw_pq index with invalid type of nbits
+        method: create index with invalid type of nbits
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PQ, "metric_type": "IP",
+                        "params": {"m": 32, "nbits": invalid_nbits_type}}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": f"invalid integer value, key: 'nbits', value: '{invalid_nbits_type}': "
+                                                          f"invalid parameter[expected=valid index params][actual=invalid index params]"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue 37587")
+    def test_create_hnsw_pq_index_invalid_refine_type(self, invalid_refine_type):
+        """
+        target: test create hnsw_pq index with invalid refine parameters
+        method: create index with invalid refine parameters
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PQ, "metric_type": "L2",
+                        "params": {"m": 32, "nbits": 8, "refine_type": invalid_refine_type}}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": "invalid refine type: invalid parameter"
+                                                          "[expected=valid index params][actual=invalid index params]"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_prq_index_invalid_m_value(self, invalid_m_value):
+        """
+        target: test create hnsw_prq index with invalid value of m
+        method: create hnsw_prq index with invalid value of m
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PRQ, "metric_type": "COSINE",
+                        "params": {"m": invalid_m_value, "nbits": 8, "nrq": 6}}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": f"Out of range in json: param 'm' ({invalid_m_value}) should be "
+                                                          f"in range [1, 65536]: invalid parameter[expected=valid index "
+                                                          f"params][actual=invalid index params]"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_prq_index_invalid_m_type(self, invalid_m_type):
+        """
+        target: test create hnsw_prq index with invalid type of m
+        method: create hnsw_prq index with invalid type of m
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PRQ, "metric_type": "COSINE",
+                        "params": {"m": invalid_m_type, "nbits": 8, "nrq": 6}}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": f"invalid integer value, key: 'm', value: '{invalid_m_type}': "
+                                                          f"invalid parameter[expected=valid index params][actual=invalid index params]"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_prq_index_invalid_nbits_value(self, invalid_nbits_value):
+        """
+        target: test create hnsw_prq index with invalid value of nbits
+        method: create index with invalid value of nbits
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PRQ, "metric_type": "COSINE",
+                        "params": {"m": 32, "nbits": invalid_nbits_value, "nrq": 6}}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": f"Out of range in json: param 'nbits' ({invalid_nbits_value}) "
+                                                          f"should be in range [1, 24]: invalid parameter[expected=valid index "
+                                                          f"params][actual=invalid index params]"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_prq_index_invalid_nbits_type(self, invalid_nbits_type):
+        """
+        target: test create hnsw_prq index with invalid type of nbits
+        method: create index with invalid type of nbits
+        expected: create successfully
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PRQ, "metric_type": "COSINE",
+                        "params": {"m": 32, "nbits": invalid_nbits_type, "nrq": 6}}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": f"invalid integer value, key: 'nbits', value: '{invalid_nbits_type}': "
+                                                          f"invalid parameter[expected=valid index params][actual=invalid index params]"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_prq_index_invalid_nrq_value(self, invalid_nrq_value):
+        """
+        target: test create hnsw_prq index with invalid value of nrq
+        method: create index with invalid value of nrq
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PRQ, "metric_type": "COSINE",
+                        "params": {"m": 32, "nbits": 8, "nrq": invalid_nrq_value}}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": f"Out of range in json: param 'nrq' ({invalid_nrq_value}) "
+                                                          f"should be in range [1, 16]: invalid parameter[expected="
+                                                          f"valid index params][actual=invalid index params]"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_prq_index_invalid_nrq_type(self, invalid_nrq_type):
+        """
+        target: test create hnsw_prq index with invalid type of nrq
+        method: create index with invalid value of nrq
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PRQ, "metric_type": "COSINE",
+                        "params": {"m": 32, "nbits": 8, "nrq": invalid_nrq_type}}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": f"invalid integer value, key: 'nrq', value: '{invalid_nrq_type}': "
+                                                          f"invalid parameter[expected=valid index params][actual=invalid index params]"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue #37587")
+    def test_create_hnsw_prq_index_invalid_refine_type(self, invalid_refine_type):
+        """
+        target: test create hnsw_prq index with invalid refine parameters
+        method: create index with invalid refine parameters
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PRQ, "metric_type": "L2",
+                        "params": {"m": 32, "nbits": 8, "nrq": 6, "refine_type": invalid_refine_type}}
+        collection_w.create_index(default_field_name, index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1100,
+                                               "err_msg": "invalid refine type: invalid parameter"
+                                                          "[expected=valid index params][actual=invalid index params]"})
+
+
+@pytest.mark.tags(CaseLabel.GPU)
+class TestNewHNSWIndexValid(TestcaseBase):
+    """ Test case of Auto index """
+
+    @pytest.fixture(scope="function", params=["IP", "COSINE", "L2"])
+    def metric_type(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["SQ6", "SQ8", "FP16", "BF16"])
+    def sq_type(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[1, 30, 32768, "30"])
+    def m(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[1, 8, 16])
+    def nbits_pq(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[1, 24])
+    def nbits_prq(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[1, 16])
+    def nrq(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["SQ6", "SQ8", "FP16", "BF16", "FP32", "FLAT"])
+    def refine_type(self, request):
+        yield request.param
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_flat_index(self, metric_type):
+        """
+        target: test create hnsw_flat index with all allowed parameters
+        method: create index with only one field name
+        expected: create successfully
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_FLAT, "metric_type": metric_type,
+                        "params": {}}
+        collection_w.create_index(default_field_name, index_params)
+        assert collection_w.has_index()[0] is True
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_sq_index(self, metric_type, sq_type):
+        """
+        target: test create hnsw_sq index with all allowed parameters
+        method: create index with only one field name
+        expected: create successfully
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_SQ, "metric_type": metric_type,
+                        "params": {"sq_type": sq_type}}
+        collection_w.create_index(default_field_name, index_params)
+        assert collection_w.has_index()[0] is True
+        assert collection_w.index()[0].params["params"]["sq_type"] == sq_type
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_create_hnsw_sq_index_refine(self, metric_type, sq_type, refine_type):
+        """
+        target: test create hnsw_sq index with all allowed parameters including refine parameters
+        method: create index with only one field name
+        expected: create successfully
+        """
+        collection_w = self.init_collection_general(prefix, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_SQ, "metric_type": metric_type,
+                        "params": {"sq_type": sq_type, "refine_type": refine_type}}
+        collection_w.create_index(default_field_name, index_params)
+        assert collection_w.has_index()[0] is True
+        assert collection_w.index()[0].params["params"]["sq_type"] == sq_type
+        assert collection_w.index()[0].params["params"]["refine_type"] == refine_type
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_pq_index(self, metric_type, m, nbits_pq):
+        """
+        target: test create hnsw_pq index with all allowed parameters
+        method: create index with only one field name
+        expected: create successfully
+        """
+        dim = 300
+        if int(m) >= 32768:
+            dim = 32768
+        collection_w = self.init_collection_general(prefix, dim=dim, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PQ, "metric_type": metric_type,
+                        "params": {"m": m, "nbits": nbits_pq}}
+        collection_w.create_index(default_field_name, index_params)
+        assert collection_w.has_index()[0] is True
+        assert collection_w.index()[0].params["params"]["m"] == m
+        assert collection_w.index()[0].params["params"]["nbits"] == nbits_pq
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_create_hnsw_pq_index_refine(self, metric_type, m, nbits_pq, refine_type):
+        """
+        target: test create hnsw_pq index with all allowed parameters including refine parameters
+        method: create index with only one field name
+        expected: create successfully
+        """
+        dim = 300
+        if int(m) >= 32768:
+            dim = 32768
+        collection_w = self.init_collection_general(prefix, dim=dim, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PQ, "metric_type": metric_type,
+                        "params": {"m": m, "nbits": nbits_pq, "refine_type": refine_type}}
+        collection_w.create_index(default_field_name, index_params)
+        assert collection_w.has_index()[0] is True
+        assert collection_w.index()[0].params["params"]["m"] == m
+        assert collection_w.index()[0].params["params"]["nbits"] == nbits_pq
+        assert collection_w.index()[0].params["params"]["refine_type"] == refine_type
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_hnsw_prq_index(self, metric_type, m, nbits_prq, nrq):
+        """
+        target: test create hnsw_prq index with all allowed parameters
+        method: create index with only one field name
+        expected: create successfully
+        """
+        dim = 120
+        if int(m) >= 32768:
+            dim = 32768
+        collection_w = self.init_collection_general(prefix, dim=dim, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PRQ, "metric_type": metric_type,
+                        "params": {"m": m, "nbits": nbits_prq, "nrq": nrq}}
+        collection_w.create_index(default_field_name, index_params)
+        assert collection_w.has_index()[0] is True
+        assert collection_w.index()[0].params["params"]["m"] == m
+        assert collection_w.index()[0].params["params"]["nbits"] == nbits_prq
+        assert collection_w.index()[0].params["params"]["nrq"] == nrq
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_create_hnsw_prq_index_refine(self, metric_type, m, nbits_prq, nrq, refine_type):
+        """
+        target: test create hnsw_prq index with all allowed parameters including refine parameters
+        method: create index with only one field name
+        expected: create successfully
+        """
+        dim = 120
+        if int(m) >= 32768:
+            dim = 32768
+        collection_w = self.init_collection_general(prefix, dim=dim, is_index=False)[0]
+        index_params = {"index_type": ct.HNSW_PRQ, "metric_type": metric_type,
+                        "params": {"m": m, "nbits": nbits_prq, "nrq": nrq, "refine_type": refine_type}}
+        collection_w.create_index(default_field_name, index_params)
+        assert collection_w.has_index()[0] is True
+        assert collection_w.index()[0].params["params"]["m"] == m
+        assert collection_w.index()[0].params["params"]["nbits"] == nbits_prq
+        assert collection_w.index()[0].params["params"]["nrq"] == nrq
+        assert collection_w.index()[0].params["params"]["refine_type"] == refine_type
+
+
