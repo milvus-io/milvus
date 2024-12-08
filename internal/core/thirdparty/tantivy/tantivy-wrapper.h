@@ -4,6 +4,7 @@
 #include <set>
 #include <iostream>
 #include <map>
+#include <type_traits>
 
 #include "tantivy-binding.h"
 #include "rust-binding.h"
@@ -315,6 +316,11 @@ struct TantivyIndexWrapper {
     RustArrayWrapper
     lower_bound_range_query(T lower_bound, bool inclusive) {
         auto array = [&]() {
+            if constexpr (std::is_same_v<T, bool>) {
+                return tantivy_lower_bound_range_query_bool(
+                    reader_, static_cast<bool>(lower_bound), inclusive);
+            }
+
             if constexpr (std::is_integral_v<T>) {
                 return tantivy_lower_bound_range_query_i64(
                     reader_, static_cast<int64_t>(lower_bound), inclusive);
@@ -344,6 +350,11 @@ struct TantivyIndexWrapper {
     RustArrayWrapper
     upper_bound_range_query(T upper_bound, bool inclusive) {
         auto array = [&]() {
+            if constexpr (std::is_same_v<T, bool>) {
+                return tantivy_upper_bound_range_query_bool(
+                    reader_, static_cast<bool>(upper_bound), inclusive);
+            }
+
             if constexpr (std::is_integral_v<T>) {
                 return tantivy_upper_bound_range_query_i64(
                     reader_, static_cast<int64_t>(upper_bound), inclusive);
@@ -376,6 +387,14 @@ struct TantivyIndexWrapper {
                 bool lb_inclusive,
                 bool ub_inclusive) {
         auto array = [&]() {
+            if constexpr (std::is_same_v<T, bool>) {
+                return tantivy_range_query_bool(reader_,
+                                                static_cast<bool>(lower_bound),
+                                                static_cast<bool>(upper_bound),
+                                                lb_inclusive,
+                                                ub_inclusive);
+            }
+
             if constexpr (std::is_integral_v<T>) {
                 return tantivy_range_query_i64(
                     reader_,

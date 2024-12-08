@@ -58,6 +58,19 @@ pub extern "C" fn tantivy_lower_bound_range_query_i64(
 }
 
 #[no_mangle]
+pub extern "C" fn tantivy_lower_bound_range_query_bool(
+    ptr: *mut c_void,
+    lower_bound: bool,
+    inclusive: bool,
+) -> RustArray {
+    let real = ptr as *mut IndexReaderWrapper;
+    unsafe {
+        let hits = (*real).lower_bound_range_query_bool(lower_bound, inclusive);
+        RustArray::from_vec(hits)
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_upper_bound_range_query_i64(
     ptr: *mut c_void,
     upper_bound: i64,
@@ -66,6 +79,19 @@ pub extern "C" fn tantivy_upper_bound_range_query_i64(
     let real = ptr as *mut IndexReaderWrapper;
     unsafe {
         let hits = (*real).upper_bound_range_query_i64(upper_bound, inclusive);
+        RustArray::from_vec(hits)
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_upper_bound_range_query_bool(
+    ptr: *mut c_void,
+    upper_bound: bool,
+    inclusive: bool,
+) -> RustArray {
+    let real = ptr as *mut IndexReaderWrapper;
+    unsafe {
+        let hits = (*real).upper_bound_range_query_bool(upper_bound, inclusive);
         RustArray::from_vec(hits)
     }
 }
@@ -85,6 +111,20 @@ pub extern "C" fn tantivy_range_query_i64(
     }
 }
 
+#[no_mangle]
+pub extern "C" fn tantivy_range_query_bool(
+    ptr: *mut c_void,
+    lower_bound: bool,
+    upper_bound: bool,
+    lb_inclusive: bool,
+    ub_inclusive: bool,
+) -> RustArray {
+    let real = ptr as *mut IndexReaderWrapper;
+    unsafe {
+        let hits = (*real).range_query_bool(lower_bound, upper_bound, lb_inclusive, ub_inclusive);
+        RustArray::from_vec(hits)
+    }
+}
 #[no_mangle]
 pub extern "C" fn tantivy_term_query_f64(ptr: *mut c_void, term: f64) -> RustArray {
     let real = ptr as *mut IndexReaderWrapper;
