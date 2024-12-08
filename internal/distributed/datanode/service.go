@@ -134,6 +134,7 @@ func (s *Server) startGrpcLoop() {
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
+		grpc.MaxConcurrentStreams(Params.MaxConcurrentStreams.GetAsUint32()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			logutil.UnaryTraceLoggerInterceptor,
 			interceptor.ClusterValidationUnaryServerInterceptor(),
