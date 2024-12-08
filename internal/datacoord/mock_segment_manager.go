@@ -145,9 +145,9 @@ func (_c *MockManager_AllocSegment_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// DropSegment provides a mock function with given fields: ctx, segmentID
-func (_m *MockManager) DropSegment(ctx context.Context, segmentID int64) {
-	_m.Called(ctx, segmentID)
+// DropSegment provides a mock function with given fields: ctx, channel, segmentID
+func (_m *MockManager) DropSegment(ctx context.Context, channel string, segmentID int64) {
+	_m.Called(ctx, channel, segmentID)
 }
 
 // MockManager_DropSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropSegment'
@@ -157,14 +157,15 @@ type MockManager_DropSegment_Call struct {
 
 // DropSegment is a helper method to define mock.On call
 //   - ctx context.Context
+//   - channel string
 //   - segmentID int64
-func (_e *MockManager_Expecter) DropSegment(ctx interface{}, segmentID interface{}) *MockManager_DropSegment_Call {
-	return &MockManager_DropSegment_Call{Call: _e.mock.On("DropSegment", ctx, segmentID)}
+func (_e *MockManager_Expecter) DropSegment(ctx interface{}, channel interface{}, segmentID interface{}) *MockManager_DropSegment_Call {
+	return &MockManager_DropSegment_Call{Call: _e.mock.On("DropSegment", ctx, channel, segmentID)}
 }
 
-func (_c *MockManager_DropSegment_Call) Run(run func(ctx context.Context, segmentID int64)) *MockManager_DropSegment_Call {
+func (_c *MockManager_DropSegment_Call) Run(run func(ctx context.Context, channel string, segmentID int64)) *MockManager_DropSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64))
+		run(args[0].(context.Context), args[1].(string), args[2].(int64))
 	})
 	return _c
 }
@@ -174,7 +175,7 @@ func (_c *MockManager_DropSegment_Call) Return() *MockManager_DropSegment_Call {
 	return _c
 }
 
-func (_c *MockManager_DropSegment_Call) RunAndReturn(run func(context.Context, int64)) *MockManager_DropSegment_Call {
+func (_c *MockManager_DropSegment_Call) RunAndReturn(run func(context.Context, string, int64)) *MockManager_DropSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -213,22 +214,9 @@ func (_c *MockManager_DropSegmentsOfChannel_Call) RunAndReturn(run func(context.
 	return _c
 }
 
-// ExpireAllocations provides a mock function with given fields: channel, ts
-func (_m *MockManager) ExpireAllocations(channel string, ts uint64) error {
-	ret := _m.Called(channel, ts)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ExpireAllocations")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(string, uint64) error); ok {
-		r0 = rf(channel, ts)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
+// ExpireAllocations provides a mock function with given fields: ctx, channel, ts
+func (_m *MockManager) ExpireAllocations(ctx context.Context, channel string, ts uint64) {
+	_m.Called(ctx, channel, ts)
 }
 
 // MockManager_ExpireAllocations_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ExpireAllocations'
@@ -237,25 +225,26 @@ type MockManager_ExpireAllocations_Call struct {
 }
 
 // ExpireAllocations is a helper method to define mock.On call
+//   - ctx context.Context
 //   - channel string
 //   - ts uint64
-func (_e *MockManager_Expecter) ExpireAllocations(channel interface{}, ts interface{}) *MockManager_ExpireAllocations_Call {
-	return &MockManager_ExpireAllocations_Call{Call: _e.mock.On("ExpireAllocations", channel, ts)}
+func (_e *MockManager_Expecter) ExpireAllocations(ctx interface{}, channel interface{}, ts interface{}) *MockManager_ExpireAllocations_Call {
+	return &MockManager_ExpireAllocations_Call{Call: _e.mock.On("ExpireAllocations", ctx, channel, ts)}
 }
 
-func (_c *MockManager_ExpireAllocations_Call) Run(run func(channel string, ts uint64)) *MockManager_ExpireAllocations_Call {
+func (_c *MockManager_ExpireAllocations_Call) Run(run func(ctx context.Context, channel string, ts uint64)) *MockManager_ExpireAllocations_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(uint64))
+		run(args[0].(context.Context), args[1].(string), args[2].(uint64))
 	})
 	return _c
 }
 
-func (_c *MockManager_ExpireAllocations_Call) Return(_a0 error) *MockManager_ExpireAllocations_Call {
-	_c.Call.Return(_a0)
+func (_c *MockManager_ExpireAllocations_Call) Return() *MockManager_ExpireAllocations_Call {
+	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockManager_ExpireAllocations_Call) RunAndReturn(run func(string, uint64) error) *MockManager_ExpireAllocations_Call {
+func (_c *MockManager_ExpireAllocations_Call) RunAndReturn(run func(context.Context, string, uint64)) *MockManager_ExpireAllocations_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -320,9 +309,9 @@ func (_c *MockManager_GetFlushableSegments_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
-// SealAllSegments provides a mock function with given fields: ctx, collectionID, segIDs
-func (_m *MockManager) SealAllSegments(ctx context.Context, collectionID int64, segIDs []int64) ([]int64, error) {
-	ret := _m.Called(ctx, collectionID, segIDs)
+// SealAllSegments provides a mock function with given fields: ctx, channel, segIDs
+func (_m *MockManager) SealAllSegments(ctx context.Context, channel string, segIDs []int64) ([]int64, error) {
+	ret := _m.Called(ctx, channel, segIDs)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SealAllSegments")
@@ -330,19 +319,19 @@ func (_m *MockManager) SealAllSegments(ctx context.Context, collectionID int64, 
 
 	var r0 []int64
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64) ([]int64, error)); ok {
-		return rf(ctx, collectionID, segIDs)
+	if rf, ok := ret.Get(0).(func(context.Context, string, []int64) ([]int64, error)); ok {
+		return rf(ctx, channel, segIDs)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64) []int64); ok {
-		r0 = rf(ctx, collectionID, segIDs)
+	if rf, ok := ret.Get(0).(func(context.Context, string, []int64) []int64); ok {
+		r0 = rf(ctx, channel, segIDs)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]int64)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64, []int64) error); ok {
-		r1 = rf(ctx, collectionID, segIDs)
+	if rf, ok := ret.Get(1).(func(context.Context, string, []int64) error); ok {
+		r1 = rf(ctx, channel, segIDs)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -357,15 +346,15 @@ type MockManager_SealAllSegments_Call struct {
 
 // SealAllSegments is a helper method to define mock.On call
 //   - ctx context.Context
-//   - collectionID int64
+//   - channel string
 //   - segIDs []int64
-func (_e *MockManager_Expecter) SealAllSegments(ctx interface{}, collectionID interface{}, segIDs interface{}) *MockManager_SealAllSegments_Call {
-	return &MockManager_SealAllSegments_Call{Call: _e.mock.On("SealAllSegments", ctx, collectionID, segIDs)}
+func (_e *MockManager_Expecter) SealAllSegments(ctx interface{}, channel interface{}, segIDs interface{}) *MockManager_SealAllSegments_Call {
+	return &MockManager_SealAllSegments_Call{Call: _e.mock.On("SealAllSegments", ctx, channel, segIDs)}
 }
 
-func (_c *MockManager_SealAllSegments_Call) Run(run func(ctx context.Context, collectionID int64, segIDs []int64)) *MockManager_SealAllSegments_Call {
+func (_c *MockManager_SealAllSegments_Call) Run(run func(ctx context.Context, channel string, segIDs []int64)) *MockManager_SealAllSegments_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].([]int64))
+		run(args[0].(context.Context), args[1].(string), args[2].([]int64))
 	})
 	return _c
 }
@@ -375,7 +364,7 @@ func (_c *MockManager_SealAllSegments_Call) Return(_a0 []int64, _a1 error) *Mock
 	return _c
 }
 
-func (_c *MockManager_SealAllSegments_Call) RunAndReturn(run func(context.Context, int64, []int64) ([]int64, error)) *MockManager_SealAllSegments_Call {
+func (_c *MockManager_SealAllSegments_Call) RunAndReturn(run func(context.Context, string, []int64) ([]int64, error)) *MockManager_SealAllSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }
