@@ -4,12 +4,13 @@ use tantivy::{
     Term,
 };
 
+use crate::error::Result;
 use crate::{index_reader::IndexReaderWrapper, tokenizer::standard_analyzer};
 
 impl IndexReaderWrapper {
     // split the query string into multiple tokens using index's default tokenizer,
     // and then execute the disconjunction of term query.
-    pub(crate) fn match_query(&self, q: &str) -> Vec<u32> {
+    pub(crate) fn match_query(&self, q: &str) -> Result<Vec<u32>> {
         // clone the tokenizer to make `match_query` thread-safe.
         let mut tokenizer = self
             .index
