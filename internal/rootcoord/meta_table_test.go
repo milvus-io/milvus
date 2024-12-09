@@ -1947,17 +1947,17 @@ func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
 			},
 		}
 
-		ret, err := mt.listCollectionFromCache("none", false)
+		ret, err := mt.listCollectionFromCache(context.TODO(), "none", false)
 		assert.Error(t, err)
 		assert.Nil(t, ret)
 
-		ret, err = mt.listCollectionFromCache("", false)
+		ret, err = mt.listCollectionFromCache(context.TODO(), "", false)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(ret))
 		assert.Contains(t, []int64{1, 2}, ret[0].CollectionID)
 		assert.Contains(t, []int64{1, 2}, ret[1].CollectionID)
 
-		ret, err = mt.listCollectionFromCache("db2", false)
+		ret, err = mt.listCollectionFromCache(context.TODO(), "db2", false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(ret))
 		assert.Equal(t, int64(3), ret[0].CollectionID)

@@ -456,6 +456,7 @@ func SaveBinLog(ctx context.Context,
 	schema *schemapb.CollectionSchema,
 	chunkManager storage.ChunkManager,
 ) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
+	log := log.Ctx(ctx)
 	binLogs, statsLogs, err := genStorageBlob(collectionID,
 		partitionID,
 		segmentID,
@@ -660,6 +661,7 @@ func SaveDeltaLog(collectionID int64,
 	segmentID int64,
 	cm storage.ChunkManager,
 ) ([]*datapb.FieldBinlog, error) {
+	log := log.Ctx(context.TODO())
 	binlogWriter := storage.NewDeleteBinlogWriter(schemapb.DataType_String, collectionID, partitionID, segmentID)
 	eventWriter, _ := binlogWriter.NextDeleteEventWriter()
 	dData := &storage.DeleteData{

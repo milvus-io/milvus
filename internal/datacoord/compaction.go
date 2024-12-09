@@ -452,9 +452,9 @@ func (c *compactionPlanHandler) cleanCompactionTaskMeta() {
 				if duration > float64(Params.DataCoordCfg.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds()) {
 					// try best to delete meta
 					err := c.meta.DropCompactionTask(context.TODO(), task)
-					log.Debug("drop compaction task meta", zap.Int64("planID", task.PlanID))
+					log.Ctx(context.TODO()).Debug("drop compaction task meta", zap.Int64("planID", task.PlanID))
 					if err != nil {
-						log.Warn("fail to drop task", zap.Int64("planID", task.PlanID), zap.Error(err))
+						log.Ctx(context.TODO()).Warn("fail to drop task", zap.Int64("planID", task.PlanID), zap.Error(err))
 					}
 				}
 			}
@@ -463,6 +463,7 @@ func (c *compactionPlanHandler) cleanCompactionTaskMeta() {
 }
 
 func (c *compactionPlanHandler) cleanPartitionStats() error {
+	log := log.Ctx(context.TODO())
 	log.Debug("start gc partitionStats meta and files")
 	// gc partition stats
 	channelPartitionStatsInfos := make(map[string][]*datapb.PartitionStatsInfo)
@@ -520,6 +521,7 @@ func (c *compactionPlanHandler) stop() {
 }
 
 func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
+	log := log.Ctx(context.TODO())
 	log.Info("removing tasks by channel", zap.String("channel", channel))
 	c.queueTasks.RemoveAll(func(task CompactionTask) bool {
 		if task.GetTaskProto().GetChannel() == channel {
@@ -590,7 +592,7 @@ func (c *compactionPlanHandler) getCompactionTask(planID int64) CompactionTask {
 }
 
 func (c *compactionPlanHandler) enqueueCompaction(task *datapb.CompactionTask) error {
-	log := log.With(zap.Int64("planID", task.GetPlanID()), zap.Int64("triggerID", task.GetTriggerID()), zap.Int64("collectionID", task.GetCollectionID()), zap.String("type", task.GetType().String()))
+	log := log.Ctx(context.TODO()).With(zap.Int64("planID", task.GetPlanID()), zap.Int64("triggerID", task.GetTriggerID()), zap.Int64("collectionID", task.GetCollectionID()), zap.String("type", task.GetType().String()))
 	t, err := c.createCompactTask(task)
 	if err != nil {
 		// Conflict is normal
@@ -646,6 +648,7 @@ func assignNodeID(slots map[int64]int64, t CompactionTask) int64 {
 		return NullNodeID
 	}
 
+	log := log.Ctx(context.TODO())
 	nodeID, useSlot := pickAnyNode(slots, t)
 	if nodeID == NullNodeID {
 		log.Info("compactionHandler cannot find datanode for compaction task",
@@ -715,7 +718,7 @@ func pickAnyNode(nodeSlots map[int64]int64, task CompactionTask) (nodeID int64, 
 
 	useSlot = task.GetSlotUsage()
 	if useSlot <= 0 {
-		log.Warn("task slot should not be 0", zap.Int64("planID", task.GetTaskProto().GetPlanID()), zap.String("type", task.GetTaskProto().GetType().String()))
+		log.Ctx(context.TODO()).Warn("task slot should not be 0", zap.Int64("planID", task.GetTaskProto().GetPlanID()), zap.String("type", task.GetTaskProto().GetType().String()))
 		return NullNodeID, useSlot
 	}
 

@@ -99,10 +99,10 @@ func (s *Server) Prepare() error {
 		netutil.OptPort(paramtable.Get().QueryCoordGrpcServerCfg.Port.GetAsInt()),
 	)
 	if err != nil {
-		log.Warn("QueryCoord fail to create net listener", zap.Error(err))
+		log.Ctx(s.loopCtx).Warn("QueryCoord fail to create net listener", zap.Error(err))
 		return err
 	}
-	log.Info("QueryCoord listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	log.Ctx(s.loopCtx).Info("QueryCoord listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
 	s.listener = listener
 	return nil
 }
@@ -112,12 +112,12 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Info("QueryCoord init done ...")
+	log.Ctx(s.loopCtx).Info("QueryCoord init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Info("QueryCoord start done ...")
+	log.Ctx(s.loopCtx).Info("QueryCoord start done ...")
 	return nil
 }
 
@@ -125,6 +125,7 @@ var getTiKVClient = tikv.GetTiKVClient
 
 // init initializes QueryCoord's grpc service.
 func (s *Server) init() error {
+	log := log.Ctx(s.loopCtx)
 	params := paramtable.Get()
 	etcdConfig := &params.EtcdCfg
 
@@ -275,7 +276,7 @@ func (s *Server) GetQueryCoord() types.QueryCoordComponent {
 
 // Stop stops QueryCoord's grpc service.
 func (s *Server) Stop() (err error) {
-	logger := log.With()
+	logger := log.Ctx(s.loopCtx)
 	if s.listener != nil {
 		logger = log.With(zap.String("address", s.listener.Address()))
 	}

@@ -237,7 +237,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		)
 
 		for j = 0; j < groupBound; {
-			subSearchIdx, resultDataIdx := selectHighestScoreIndex(subSearchResultData, subSearchNqOffset, cursors, i)
+			subSearchIdx, resultDataIdx := selectHighestScoreIndex(ctx, subSearchResultData, subSearchNqOffset, cursors, i)
 			if subSearchIdx == -1 {
 				break
 			}
@@ -382,7 +382,7 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 
 			// skip offset results
 			for k := int64(0); k < offset; k++ {
-				subSearchIdx, _ := selectHighestScoreIndex(subSearchResultData, subSearchNqOffset, cursors, i)
+				subSearchIdx, _ := selectHighestScoreIndex(ctx, subSearchResultData, subSearchNqOffset, cursors, i)
 				if subSearchIdx == -1 {
 					break
 				}
@@ -395,7 +395,7 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				// From all the sub-query result sets of the i-th query vector,
 				//   find the sub-query result set index of the score j-th data,
 				//   and the index of the data in schemapb.SearchResultData
-				subSearchIdx, resultDataIdx := selectHighestScoreIndex(subSearchResultData, subSearchNqOffset, cursors, i)
+				subSearchIdx, resultDataIdx := selectHighestScoreIndex(ctx, subSearchResultData, subSearchNqOffset, cursors, i)
 				if subSearchIdx == -1 {
 					break
 				}

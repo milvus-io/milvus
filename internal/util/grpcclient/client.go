@@ -271,7 +271,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 		compress = Zstd
 	}
 	if c.encryption {
-		log.Debug("Running in internalTLS mode with encryption enabled")
+		log.Ctx(ctx).Debug("Running in internalTLS mode with encryption enabled")
 		conn, err = grpc.DialContext(
 			dialContext,
 			addr,

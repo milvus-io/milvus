@@ -57,10 +57,10 @@ func (qs *QueryCoord) Prepare() error {
 // Run starts service
 func (qs *QueryCoord) Run() error {
 	if err := qs.svr.Run(); err != nil {
-		log.Error("QueryCoord starts error", zap.Error(err))
+		log.Ctx(qs.ctx).Error("QueryCoord starts error", zap.Error(err))
 		return err
 	}
-	log.Debug("QueryCoord successfully started")
+	log.Ctx(qs.ctx).Info("QueryCoord successfully started")
 	return nil
 }
 

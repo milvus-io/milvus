@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,7 +12,7 @@ import (
 
 func TestRescorer(t *testing.T) {
 	t.Run("default scorer", func(t *testing.T) {
-		rescorers, err := NewReScorers(2, nil)
+		rescorers, err := NewReScorers(context.TODO(), 2, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(rescorers))
 		assert.Equal(t, rrfRankType, rescorers[0].scorerType())
@@ -26,7 +27,7 @@ func TestRescorer(t *testing.T) {
 			{Key: RankParamsKey, Value: string(b)},
 		}
 
-		_, err = NewReScorers(2, rankParams)
+		_, err = NewReScorers(context.TODO(), 2, rankParams)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "k not found in rank_params")
 	})
@@ -41,7 +42,7 @@ func TestRescorer(t *testing.T) {
 			{Key: RankParamsKey, Value: string(b)},
 		}
 
-		_, err = NewReScorers(2, rankParams)
+		_, err = NewReScorers(context.TODO(), 2, rankParams)
 		assert.Error(t, err)
 
 		params[RRFParamsKey] = maxRRFParamsValue + 1
@@ -52,7 +53,7 @@ func TestRescorer(t *testing.T) {
 			{Key: RankParamsKey, Value: string(b)},
 		}
 
-		_, err = NewReScorers(2, rankParams)
+		_, err = NewReScorers(context.TODO(), 2, rankParams)
 		assert.Error(t, err)
 	})
 
@@ -66,7 +67,7 @@ func TestRescorer(t *testing.T) {
 			{Key: RankParamsKey, Value: string(b)},
 		}
 
-		rescorers, err := NewReScorers(2, rankParams)
+		rescorers, err := NewReScorers(context.TODO(), 2, rankParams)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(rescorers))
 		assert.Equal(t, rrfRankType, rescorers[0].scorerType())
@@ -82,7 +83,7 @@ func TestRescorer(t *testing.T) {
 			{Key: RankParamsKey, Value: string(b)},
 		}
 
-		_, err = NewReScorers(2, rankParams)
+		_, err = NewReScorers(context.TODO(), 2, rankParams)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not found in rank_params")
 	})
@@ -98,7 +99,7 @@ func TestRescorer(t *testing.T) {
 			{Key: RankParamsKey, Value: string(b)},
 		}
 
-		_, err = NewReScorers(2, rankParams)
+		_, err = NewReScorers(context.TODO(), 2, rankParams)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "rank param weight should be in range [0, 1]")
 	})
@@ -114,7 +115,7 @@ func TestRescorer(t *testing.T) {
 			{Key: RankParamsKey, Value: string(b)},
 		}
 
-		rescorers, err := NewReScorers(2, rankParams)
+		rescorers, err := NewReScorers(context.TODO(), 2, rankParams)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(rescorers))
 		assert.Equal(t, weightedRankType, rescorers[0].scorerType())

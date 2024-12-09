@@ -471,7 +471,7 @@ func GenRowData() (rawData []byte) {
 		panic(err)
 	}
 	rawData = append(rawData, bfloat64.Bytes()...)
-	log.Debug("Rawdata length:", zap.Int("Length of rawData", len(rawData)))
+	log.Ctx(context.TODO()).Debug("Rawdata length:", zap.Int("Length of rawData", len(rawData)))
 	return
 }
 

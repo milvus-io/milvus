@@ -35,13 +35,13 @@ func RoundRobinPolicy(
 		for _, target := range leaders {
 			qn, err := mgr.GetClient(ctx, target)
 			if err != nil {
-				log.Warn("query channel failed, node not available", zap.String("channel", channel), zap.Int64("nodeID", target.nodeID), zap.Error(err))
+				log.Ctx(ctx).Warn("query channel failed, node not available", zap.String("channel", channel), zap.Int64("nodeID", target.nodeID), zap.Error(err))
 				combineErr = merr.Combine(combineErr, err)
 				continue
 			}
 			err = query(ctx, target.nodeID, qn, channel)
 			if err != nil {
-				log.Warn("query channel failed", zap.String("channel", channel), zap.Int64("nodeID", target.nodeID), zap.Error(err))
+				log.Ctx(ctx).Warn("query channel failed", zap.String("channel", channel), zap.Int64("nodeID", target.nodeID), zap.Error(err))
 				combineErr = merr.Combine(combineErr, err)
 				continue
 			}

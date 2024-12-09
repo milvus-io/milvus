@@ -87,6 +87,7 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context) (map[int64]*ty
 }
 
 func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state discoverer.VersionedState) (map[int64]*types.StreamingNodeStatus, error) {
+	log := log.Ctx(ctx)
 	// wait for manager service ready.
 	manager, err := c.service.GetService(ctx)
 	if err != nil {
