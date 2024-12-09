@@ -132,6 +132,22 @@ var (
 			Help:      "latency of all kind of task in query coord scheduler scheduler",
 			Buckets:   longTaskBuckets,
 		}, []string{collectionIDLabelName, taskTypeLabel, channelNameLabelName})
+
+	QueryCoordResourceGroupInfo = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "resource_group_info",
+			Help:      "all resource group detail info in query coord",
+		}, []string{ResourceGroupLabelName, NodeIDLabelName, nodeHostLabelName})
+
+	QueryCoordResourceGroupReplicaTotal = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "resource_group_replica_total",
+			Help:      "total replica number of resource group",
+		}, []string{ResourceGroupLabelName})
 )
 
 // RegisterQueryCoord registers QueryCoord metrics
@@ -146,6 +162,8 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordNumQueryNodes)
 	registry.MustRegister(QueryCoordCurrentTargetCheckpointUnixSeconds)
 	registry.MustRegister(QueryCoordTaskLatency)
+	registry.MustRegister(QueryCoordResourceGroupInfo)
+	registry.MustRegister(QueryCoordResourceGroupReplicaTotal)
 }
 
 func CleanQueryCoordMetricsWithCollectionID(collectionID int64) {
