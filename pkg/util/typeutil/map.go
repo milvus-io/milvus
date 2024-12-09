@@ -7,7 +7,7 @@ import (
 )
 
 // MapEqual returns true if the two map contain the same keys and values
-func MapEqual(left, right map[int64]int64) bool {
+func MapEqual[K, V comparable](left, right map[K]V) bool {
 	if len(left) != len(right) {
 		return false
 	}
