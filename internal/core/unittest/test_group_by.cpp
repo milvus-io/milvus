@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <cstdint>
 #include "common/Schema.h"
 #include "query/Plan.h"
 #include "segcore/SegmentSealedImpl.h"
@@ -543,9 +544,9 @@ TEST(GroupBY, Reduce) {
     int repeat_count_1 = 2;
     int repeat_count_2 = 5;
     auto raw_data1 =
-        DataGen(schema, N, seed, ts_offset, repeat_count_1, false, false);
+        DataGen(schema, N, seed, ts_offset, repeat_count_1, 10, false, false);
     auto raw_data2 =
-        DataGen(schema, N, seed, ts_offset, repeat_count_2, false, false);
+        DataGen(schema, N, seed, ts_offset, repeat_count_2, 10, false, false);
 
     auto fields = schema->get_fields();
     //load segment1 raw data

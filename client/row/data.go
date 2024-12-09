@@ -125,6 +125,10 @@ func AnyToColumns(rows []interface{}, schemas ...*entity.Schema) ([]column.Colum
 			data := make([][]byte, 0, rowsLen)
 			col := column.NewColumnJSONBytes(field.Name, data)
 			nameColumns[field.Name] = col
+		case entity.FieldTypeGeometry:
+			data := make([][]byte, 0, rowsLen)
+			col := column.NewColumnGeometryBytes(field.Name, data)
+			nameColumns[field.Name] = col
 		case entity.FieldTypeArray:
 			col := NewArrayColumn(field)
 			if col == nil {
