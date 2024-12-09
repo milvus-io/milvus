@@ -403,12 +403,6 @@ SegmentGrowingImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     return get_insert_record().get_span_base(field_id, chunk_id);
 }
 
-std::pair<std::vector<std::string_view>, FixedVector<bool>>
-SegmentGrowingImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
-    PanicInfo(ErrorCode::NotImplemented,
-              "chunk view impl not implement for growing segment");
-}
-
 int64_t
 SegmentGrowingImpl::num_chunk(FieldId field_id) const {
     auto size = get_insert_record().ack_responder_.GetAck();

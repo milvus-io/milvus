@@ -812,21 +812,6 @@ ChunkedSegmentSealedImpl::chunk_data_impl(FieldId field_id,
     return field_data->get_span_base(0);
 }
 
-std::pair<std::vector<std::string_view>, FixedVector<bool>>
-ChunkedSegmentSealedImpl::chunk_view_impl(FieldId field_id,
-                                          int64_t chunk_id) const {
-    std::shared_lock lck(mutex_);
-    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
-    auto& field_meta = schema_->operator[](field_id);
-    if (auto it = fields_.find(field_id); it != fields_.end()) {
-        auto& field_data = it->second;
-        return field_data->StringViews(chunk_id);
-    }
-    PanicInfo(ErrorCode::UnexpectedError,
-              "chunk_view_impl only used for variable column field ");
-}
-
 const index::IndexBase*
 ChunkedSegmentSealedImpl::chunk_index_impl(FieldId field_id,
                                            int64_t chunk_id) const {
