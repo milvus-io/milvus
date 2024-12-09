@@ -640,11 +640,7 @@ func (ss *SuffixSnapshot) removeExpiredKvs(now time.Time) error {
 	}
 
 	// Walk through all keys with the snapshot prefix
-<<<<<<< HEAD
-	err := ss.MetaKv.WalkWithPrefix(ss.snapshotPrefix, PaginationSize, func(k []byte, v []byte) error {
-=======
-	err := ss.MetaKv.WalkWithPrefix(ctx, ss.snapshotPrefix, ss.paginationSize, func(k []byte, v []byte) error {
->>>>>>> 2b26abd409 (enhance: Speed up meta recovery)
+	err := ss.MetaKv.WalkWithPrefix(ss.snapshotPrefix, ss.paginationSize, func(k []byte, v []byte) error {
 		key := ss.hideRootPrefix(string(k))
 		ts, ok := ss.isTSKey(key)
 		if !ok {
