@@ -367,7 +367,7 @@ func TestUpsertTaskForReplicate(t *testing.T) {
 }
 
 func TestUpsertTask_Function(t *testing.T) {
-	ts := function.CreateEmbeddingServer()
+	ts := function.CreateOpenAIEmbeddingServer()
 	defer ts.Close()
 	data := []*schemapb.FieldData{}
 	f1 := schemapb.FieldData{
@@ -427,10 +427,10 @@ func TestUpsertTask_Function(t *testing.T) {
 				OutputFieldIds:  []int64{102},
 				Params: []*commonpb.KeyValuePair{
 					{Key: function.Provider, Value: function.OpenAIProvider},
-					{Key: function.ModelNameParamKey, Value: "text-embedding-ada-002"},
-					{Key: function.OpenaiApiKeyParamKey, Value: "mock"},
-					{Key: function.OpenaiEmbeddingUrlParamKey, Value: ts.URL},
-					{Key: function.DimParamKey, Value: "4"},
+					{Key: "model_name", Value: "text-embedding-ada-002"},
+					{Key: "api_key", Value: "mock"},
+					{Key: "url", Value: ts.URL},
+					{Key: "dim", Value: "4"},
 				},
 			},
 		},
