@@ -182,26 +182,30 @@ func (c *ClusterImpl) DropImport(nodeID int64, in *datapb.DropImportRequest) err
 
 func (c *ClusterImpl) QuerySlots() map[int64]int64 {
 	nodeIDs := c.sessionManager.GetSessionIDs()
-	nodeSlots := make(map[int64]int64)
-	mu := &sync.Mutex{}
+	nodeSlots := make([]int64, len(nodeIDs))
 	wg := &sync.WaitGroup{}
-	for _, nodeID := range nodeIDs {
+	for i, nodeID := range nodeIDs {
 		wg.Add(1)
-		go func(nodeID int64) {
+		go func(index int, nodeID int64) {
 			defer wg.Done()
 			resp, err := c.sessionManager.QuerySlot(nodeID)
 			if err != nil {
 				log.Warn("query slot failed", zap.Int64("nodeID", nodeID), zap.Error(err))
 				return
 			}
-			mu.Lock()
-			defer mu.Unlock()
-			nodeSlots[nodeID] = resp.GetNumSlots()
-		}(nodeID)
+
+			nodeSlots[index] = resp.GetNumSlots()
+		}(i, nodeID)
 	}
 	wg.Wait()
-	log.Debug("query slot done", zap.Any("nodeSlots", nodeSlots))
-	return nodeSlots
+
+	nodeSlotsMap := make(map[int64]int64)
+	for i, numsSlots := range nodeSlots {
+		nodeSlotsMap[nodeIDs[i]] = numsSlots
+	}
+
+	log.Debug("query slot done", zap.Any("nodeSlots", nodeSlotsMap))
+	return nodeSlotsMap
 }
 
 // GetSessions returns all sessions
