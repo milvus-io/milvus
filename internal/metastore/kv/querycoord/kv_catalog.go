@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-
 	"github.com/cockroachdb/errors"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pingcap/log"
@@ -19,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/compressor"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var ErrInvalidKey = errors.New("invalid load info key")

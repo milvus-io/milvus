@@ -494,7 +494,6 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Version:      "2.5.1",
 		DefaultValue: "10000",
 		Doc:          `limits the number of results to return from metastore.`,
-		Export:       true,
 	}
 	p.PaginationSize.Init(base.mgr)
 
