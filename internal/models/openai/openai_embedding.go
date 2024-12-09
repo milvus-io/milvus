@@ -14,16 +14,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package models
+package openai
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/models/utils"
 )
 
 type EmbeddingRequest struct {
@@ -97,66 +99,28 @@ type EmbedddingError struct {
 	Error ErrorInfo `json:"error"`
 }
 
-type OpenAIEmbeddingClient struct {
+type OpenAIEmbeddingInterface interface {
+	Check() error
+	Embedding(modelName string, texts []string, dim int, user string, timeoutSec time.Duration) (*EmbeddingResponse, error)
+}
+
+type openAIBase struct {
 	apiKey string
 	url    string
 }
 
-func (c *OpenAIEmbeddingClient) Check() error {
+func (c *openAIBase) Check() error {
 	if c.apiKey == "" {
-		return fmt.Errorf("OpenAI api key is empty")
+		return fmt.Errorf("api key is empty")
 	}
 
 	if c.url == "" {
-		return fmt.Errorf("OpenAI embedding url is empty")
+		return fmt.Errorf("url is empty")
 	}
 	return nil
 }
 
-func NewOpenAIEmbeddingClient(apiKey string, url string) OpenAIEmbeddingClient {
-	return OpenAIEmbeddingClient{
-		apiKey: apiKey,
-		url:    url,
-	}
-}
-
-func (c *OpenAIEmbeddingClient) send(client *http.Client, req *http.Request, res *EmbeddingResponse) error {
-	// call openai
-	resp, err := client.Do(req)
-
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-
-	if resp.StatusCode != 200 {
-		return fmt.Errorf(string(body))
-	}
-
-	err = json.Unmarshal(body, &res)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (c *OpenAIEmbeddingClient) sendWithRetry(client *http.Client, req *http.Request, res *EmbeddingResponse, maxRetries int) error {
-	var err error
-	for i := 0; i < maxRetries; i++ {
-		err = c.send(client, req, res)
-		if err == nil {
-			return nil
-		}
-	}
-	return err
-}
-
-func (c *OpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim int, user string, timeoutSec time.Duration) (*EmbeddingResponse, error) {
+func (c *openAIBase) genReq(modelName string, texts []string, dim int, user string) *EmbeddingRequest {
 	var r EmbeddingRequest
 	r.Model = modelName
 	r.Input = texts
@@ -167,13 +131,29 @@ func (c *OpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim 
 	if dim != 0 {
 		r.Dimensions = dim
 	}
+	return &r
+}
 
+type OpenAIEmbeddingClient struct {
+	openAIBase
+}
+
+func NewOpenAIEmbeddingClient(apiKey string, url string) *OpenAIEmbeddingClient {
+	return &OpenAIEmbeddingClient{
+		openAIBase{
+			apiKey: apiKey,
+			url:    url,
+		},
+	}
+}
+
+func (c *OpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim int, user string, timeoutSec time.Duration) (*EmbeddingResponse, error) {
+	r := c.genReq(modelName, texts, dim, user)
 	data, err := json.Marshal(r)
 	if err != nil {
 		return nil, err
 	}
 
-	// call openai
 	if timeoutSec <= 0 {
 		timeoutSec = 30
 	}
@@ -186,13 +166,74 @@ func (c *OpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
-
+	body, err := utils.RetrySend(client, req, 3)
+	if err != nil {
+		return nil, err
+	}
 	var res EmbeddingResponse
-	err = c.sendWithRetry(client, req, &res, 3)
+	err = json.Unmarshal(body, &res)
 	if err != nil {
 		return nil, err
 	}
 	sort.Sort(&ByIndex{&res})
 	return &res, err
+}
 
+type AzureOpenAIEmbeddingClient struct {
+	openAIBase
+	apiVersion string
+}
+
+func NewAzureOpenAIEmbeddingClient(apiKey string, url string) *AzureOpenAIEmbeddingClient {
+	return &AzureOpenAIEmbeddingClient{
+		openAIBase: openAIBase{
+			apiKey: apiKey,
+			url:    url,
+		},
+		apiVersion: "2024-06-01",
+	}
+}
+
+func (c *AzureOpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim int, user string, timeoutSec time.Duration) (*EmbeddingResponse, error) {
+	r := c.genReq(modelName, texts, dim, user)
+	data, err := json.Marshal(r)
+	if err != nil {
+		return nil, err
+	}
+
+	if timeoutSec <= 0 {
+		timeoutSec = 30
+	}
+
+	base, err := url.Parse(c.url)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/openai/deployments/%s/embeddings", modelName)
+	base.Path = path
+	params := url.Values{}
+	params.Add("api-version", c.apiVersion)
+	base.RawQuery = params.Encode()
+
+	client := &http.Client{
+		Timeout: timeoutSec * time.Second,
+	}
+	req, err := http.NewRequest("POST", c.url, bytes.NewBuffer(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
+	body, err := utils.RetrySend(client, req, 3)
+	if err != nil {
+		return nil, err
+	}
+
+	var res EmbeddingResponse
+	err = json.Unmarshal(body, &res)
+	if err != nil {
+		return nil, err
+	}
+	sort.Sort(&ByIndex{&res})
+	return &res, err
 }

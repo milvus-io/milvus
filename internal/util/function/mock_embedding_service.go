@@ -19,12 +19,15 @@
 package function
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 
-	"github.com/milvus-io/milvus/internal/models"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"github.com/milvus-io/milvus/internal/models/ali"
+	"github.com/milvus-io/milvus/internal/models/openai"
 )
 
 func mockEmbedding(texts []string, dim int) [][]float32 {
@@ -40,25 +43,25 @@ func mockEmbedding(texts []string, dim int) [][]float32 {
 	return embeddings
 }
 
-func CreateEmbeddingServer() *httptest.Server {
+func CreateOpenAIEmbeddingServer() *httptest.Server {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req models.EmbeddingRequest
+		var req openai.EmbeddingRequest
 		body, _ := io.ReadAll(r.Body)
 		defer r.Body.Close()
 		json.Unmarshal(body, &req)
 		embs := mockEmbedding(req.Input, req.Dimensions)
-		var res models.EmbeddingResponse
+		var res openai.EmbeddingResponse
 		res.Object = "list"
 		res.Model = "text-embedding-3-small"
 		for i := 0; i < len(req.Input); i++ {
-			res.Data = append(res.Data, models.EmbeddingData{
+			res.Data = append(res.Data, openai.EmbeddingData{
 				Object:    "embedding",
 				Embedding: embs[i],
 				Index:     i,
 			})
 		}
 
-		res.Usage = models.Usage{
+		res.Usage = openai.Usage{
 			PromptTokens: 1,
 			TotalTokens:  100,
 		}
@@ -68,4 +71,46 @@ func CreateEmbeddingServer() *httptest.Server {
 
 	}))
 	return ts
+}
+
+func CreateAliEmbeddingServer() *httptest.Server {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req ali.EmbeddingRequest
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		json.Unmarshal(body, &req)
+		embs := mockEmbedding(req.Input.Texts, req.Parameters.Dimension)
+		var res ali.EmbeddingResponse
+		for i := 0; i < len(req.Input.Texts); i++ {
+			res.Output.Embeddings = append(res.Output.Embeddings, ali.Embeddings{
+				Embedding: embs[i],
+				TextIndex: i,
+			})
+		}
+
+		res.Usage = ali.Usage{
+			TotalTokens: 100,
+		}
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(res)
+		w.Write(data)
+
+	}))
+	return ts
+}
+
+type MockBedrockClient struct {
+	dim int
+}
+
+func (c *MockBedrockClient) InvokeModel(ctx context.Context, params *bedrockruntime.InvokeModelInput, optFns ...func(*bedrockruntime.Options)) (*bedrockruntime.InvokeModelOutput, error) {
+	var req BedRockRequest
+	json.Unmarshal(params.Body, &req)
+	embs := mockEmbedding([]string{req.InputText}, c.dim)
+
+	var resp BedRockResponse
+	resp.Embedding = embs[0]
+	resp.InputTextTokenCount = 2
+	body, _ := json.Marshal(resp)
+	return &bedrockruntime.InvokeModelOutput{Body: body}, nil
 }
