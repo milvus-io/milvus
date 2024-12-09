@@ -29,6 +29,7 @@ import (
 	"github.com/samber/lo"
 	uatomic "go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
@@ -121,7 +122,7 @@ func NewMqMsgStream(ctx context.Context,
 }
 
 // AsProducer create producer to send message to channels
-func (ms *mqMsgStream) AsProducer(channels []string) {
+func (ms *mqMsgStream) AsProducer(ctx context.Context, channels []string) {
 	for _, channel := range channels {
 		if len(channel) == 0 {
 			log.Error("MsgStream asProducer's channel is an empty string")
@@ -129,7 +130,7 @@ func (ms *mqMsgStream) AsProducer(channels []string) {
 		}
 
 		fn := func() error {
-			pp, err := ms.client.CreateProducer(common.ProducerOptions{Topic: channel, EnableCompression: true})
+			pp, err := ms.client.CreateProducer(ctx, common.ProducerOptions{Topic: channel, EnableCompression: true})
 			if err != nil {
 				return err
 			}
@@ -176,7 +177,7 @@ func (ms *mqMsgStream) AsConsumer(ctx context.Context, channels []string, subNam
 			continue
 		}
 		fn := func() error {
-			pc, err := ms.client.Subscribe(mqwrapper.ConsumerOptions{
+			pc, err := ms.client.Subscribe(ctx, mqwrapper.ConsumerOptions{
 				Topic:                       channel,
 				SubscriptionName:            subName,
 				SubscriptionInitialPosition: position,
@@ -273,7 +274,7 @@ func (ms *mqMsgStream) isEnabledProduce() bool {
 	return ms.enableProduce.Load().(bool)
 }
 
-func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
+func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
 	if !ms.isEnabledProduce() {
 		log.Warn("can't produce the msg in the backup instance", zap.Stack("stack"))
 		return merr.ErrDenyProduceMsg
@@ -310,7 +311,14 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 		k := k
 		v := v
 		eg.Go(func() error {
+			ms.producerLock.RLock()
 			channel := ms.producerChannels[k]
+			producer, ok := ms.producers[channel]
+			ms.producerLock.RUnlock()
+			if !ok {
+				return errors.New("producer not found for channel: " + channel)
+			}
+
 			for i := 0; i < len(v.Msgs); i++ {
 				spanCtx, sp := MsgSpanFromCtx(v.Msgs[i].TraceCtx(), v.Msgs[i])
 				defer sp.End()
@@ -330,13 +338,10 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 				}}
 				InjectCtx(spanCtx, msg.Properties)
 
-				ms.producerLock.RLock()
-				if _, err := ms.producers[channel].Send(spanCtx, msg); err != nil {
-					ms.producerLock.RUnlock()
+				if _, err := producer.Send(spanCtx, msg); err != nil {
 					sp.RecordError(err)
 					return err
 				}
-				ms.producerLock.RUnlock()
 			}
 			return nil
 		})
@@ -346,7 +351,7 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 
 // BroadcastMark broadcast msg pack to all producers and returns corresponding msg id
 // the returned message id serves as marking
-func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) (map[string][]MessageID, error) {
+func (ms *mqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) (map[string][]MessageID, error) {
 	ids := make(map[string][]MessageID)
 	if msgPack == nil || len(msgPack.Msgs) <= 0 {
 		return ids, errors.New("empty msgs")
@@ -375,18 +380,20 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) (map[string][]MessageID, erro
 		msg := &common.ProducerMessage{Payload: m, Properties: map[string]string{}}
 		InjectCtx(spanCtx, msg.Properties)
 
-		ms.producerLock.Lock()
-		for channel, producer := range ms.producers {
+		ms.producerLock.RLock()
+		// since the element never be removed in ms.producers, so it's safe to clone and iterate producers
+		producers := maps.Clone(ms.producers)
+		ms.producerLock.RUnlock()
+
+		for channel, producer := range producers {
 			id, err := producer.Send(spanCtx, msg)
 			if err != nil {
-				ms.producerLock.Unlock()
 				sp.RecordError(err)
 				sp.End()
 				return ids, err
 			}
 			ids[channel] = append(ids[channel], id)
 		}
-		ms.producerLock.Unlock()
 		sp.End()
 	}
 	return ids, nil
@@ -581,7 +588,7 @@ func (ms *MqTtMsgStream) AsConsumer(ctx context.Context, channels []string, subN
 			continue
 		}
 		fn := func() error {
-			pc, err := ms.client.Subscribe(mqwrapper.ConsumerOptions{
+			pc, err := ms.client.Subscribe(ctx, mqwrapper.ConsumerOptions{
 				Topic:                       channel,
 				SubscriptionName:            subName,
 				SubscriptionInitialPosition: position,

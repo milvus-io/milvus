@@ -23,7 +23,7 @@ func TestKafkaProducer_SendSuccess(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	topic := fmt.Sprintf("test-topic-%d", rand.Int())
 
-	producer, err := kc.CreateProducer(common.ProducerOptions{Topic: topic})
+	producer, err := kc.CreateProducer(context.TODO(), common.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
@@ -76,7 +76,7 @@ func TestKafkaProducer_SendFailAfterClose(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	topic := fmt.Sprintf("test-topic-%d", rand.Int())
 
-	producer, err := kc.CreateProducer(common.ProducerOptions{Topic: topic})
+	producer, err := kc.CreateProducer(context.TODO(), common.ProducerOptions{Topic: topic})
 	assert.Nil(t, err)
 	assert.NotNil(t, producer)
 

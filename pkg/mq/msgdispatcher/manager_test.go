@@ -226,7 +226,7 @@ func (suite *SimulationSuite) produceMsg(wg *sync.WaitGroup, collectionID int64)
 		insNum := rand.Intn(10)
 		for j := 0; j < insNum; j++ {
 			vchannel := vchannelKeys[rand.Intn(len(vchannelKeys))].Interface().(string)
-			err := suite.producer.Produce(&msgstream.MsgPack{
+			err := suite.producer.Produce(context.TODO(), &msgstream.MsgPack{
 				Msgs: []msgstream.TsMsg{genInsertMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
 			})
 			assert.NoError(suite.T(), err)
@@ -237,7 +237,7 @@ func (suite *SimulationSuite) produceMsg(wg *sync.WaitGroup, collectionID int64)
 		delNum := rand.Intn(2)
 		for j := 0; j < delNum; j++ {
 			vchannel := vchannelKeys[rand.Intn(len(vchannelKeys))].Interface().(string)
-			err := suite.producer.Produce(&msgstream.MsgPack{
+			err := suite.producer.Produce(context.TODO(), &msgstream.MsgPack{
 				Msgs: []msgstream.TsMsg{genDeleteMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
 			})
 			assert.NoError(suite.T(), err)
@@ -247,7 +247,7 @@ func (suite *SimulationSuite) produceMsg(wg *sync.WaitGroup, collectionID int64)
 		// produce random ddl
 		ddlNum := rand.Intn(2)
 		for j := 0; j < ddlNum; j++ {
-			err := suite.producer.Produce(&msgstream.MsgPack{
+			err := suite.producer.Produce(context.TODO(), &msgstream.MsgPack{
 				Msgs: []msgstream.TsMsg{genDDLMsg(commonpb.MsgType_DropCollection, collectionID)},
 			})
 			assert.NoError(suite.T(), err)
@@ -257,7 +257,7 @@ func (suite *SimulationSuite) produceMsg(wg *sync.WaitGroup, collectionID int64)
 		}
 		// produce time tick
 		ts := uint64(i * 100)
-		err := suite.producer.Produce(&msgstream.MsgPack{
+		err := suite.producer.Produce(context.TODO(), &msgstream.MsgPack{
 			Msgs: []msgstream.TsMsg{genTimeTickMsg(ts)},
 		})
 		assert.NoError(suite.T(), err)
@@ -305,7 +305,7 @@ func (suite *SimulationSuite) produceTimeTickOnly(ctx context.Context) {
 			return
 		case <-ticker.C:
 			ts := uint64(tt * 1000)
-			err := suite.producer.Produce(&msgstream.MsgPack{
+			err := suite.producer.Produce(ctx, &msgstream.MsgPack{
 				Msgs: []msgstream.TsMsg{genTimeTickMsg(ts)},
 			})
 			assert.NoError(suite.T(), err)

@@ -230,14 +230,26 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 	if err != nil {
 		return "", err
 	}
+
+	used, total, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
+	if err != nil {
+		log.Ctx(ctx).Warn("get disk usage failed", zap.Error(err))
+	}
+
+	ioWait, err := hardware.GetIOWait()
+	if err != nil {
+		log.Ctx(ctx).Warn("get iowait failed", zap.Error(err))
+	}
+
 	hardwareInfos := metricsinfo.HardwareMetrics{
-		IP:           node.session.Address,
-		CPUCoreCount: hardware.GetCPUNum(),
-		CPUCoreUsage: hardware.GetCPUUsage(),
-		Memory:       totalMem,
-		MemoryUsage:  usedMem,
-		Disk:         hardware.GetDiskCount(),
-		DiskUsage:    hardware.GetDiskUsage(),
+		IP:               node.session.Address,
+		CPUCoreCount:     hardware.GetCPUNum(),
+		CPUCoreUsage:     hardware.GetCPUUsage(),
+		Memory:           totalMem,
+		MemoryUsage:      usedMem,
+		Disk:             total,
+		DiskUsage:        used,
+		IOWaitPercentage: ioWait,
 	}
 	quotaMetrics.Hms = hardwareInfos
 

@@ -4,10 +4,13 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/service"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/kv"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -41,8 +44,11 @@ func (s *ServerBuilder) Build() *Server {
 		resource.OptETCD(s.etcdClient),
 		resource.OptStreamingCatalog(streamingcoord.NewCataLog(s.metaKV)),
 	)
+	balancer := syncutil.NewFuture[balancer.Balancer]()
 	return &Server{
 		session:               s.session,
 		componentStateService: componentutil.NewComponentStateService(typeutil.StreamingCoordRole),
+		assignmentService:     service.NewAssignmentService(balancer),
+		balancer:              balancer,
 	}
 }

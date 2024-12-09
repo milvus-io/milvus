@@ -40,13 +40,13 @@ func testStreamOperation(t *testing.T, mqClient mqwrapper.Client) {
 func testConcurrentStream(t *testing.T, mqClient mqwrapper.Client) {
 	topics := getChannel(2)
 
-	producer, err := mqClient.CreateProducer(common.ProducerOptions{
+	producer, err := mqClient.CreateProducer(context.TODO(), common.ProducerOptions{
 		Topic: topics[0],
 	})
 	defer producer.Close()
 	assert.NoError(t, err)
 
-	consumer, err := mqClient.Subscribe(mqwrapper.ConsumerOptions{
+	consumer, err := mqClient.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topics[0],
 		SubscriptionName:            funcutil.RandomString(8),
 		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
@@ -61,7 +61,7 @@ func testConcurrentStream(t *testing.T, mqClient mqwrapper.Client) {
 func testConcurrentStreamAndSubscribeLast(t *testing.T, mqClient mqwrapper.Client) {
 	topics := getChannel(2)
 
-	producer, err := mqClient.CreateProducer(common.ProducerOptions{
+	producer, err := mqClient.CreateProducer(context.TODO(), common.ProducerOptions{
 		Topic: topics[0],
 	})
 	defer producer.Close()
@@ -69,7 +69,7 @@ func testConcurrentStreamAndSubscribeLast(t *testing.T, mqClient mqwrapper.Clien
 
 	ids := sendMessages(context.Background(), t, producer, generateRandMessage(1024, 1000))
 
-	consumer, err := mqClient.Subscribe(mqwrapper.ConsumerOptions{
+	consumer, err := mqClient.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topics[0],
 		SubscriptionName:            funcutil.RandomString(8),
 		SubscriptionInitialPosition: common.SubscriptionPositionLatest,
@@ -90,7 +90,7 @@ func testConcurrentStreamAndSubscribeLast(t *testing.T, mqClient mqwrapper.Clien
 func testConcurrentStreamAndSeekInclusive(t *testing.T, mqClient mqwrapper.Client) {
 	topics := getChannel(2)
 
-	producer, err := mqClient.CreateProducer(common.ProducerOptions{
+	producer, err := mqClient.CreateProducer(context.TODO(), common.ProducerOptions{
 		Topic: topics[0],
 	})
 	defer producer.Close()
@@ -99,7 +99,7 @@ func testConcurrentStreamAndSeekInclusive(t *testing.T, mqClient mqwrapper.Clien
 	cases := generateRandMessage(1024, 1000)
 	ids := sendMessages(context.Background(), t, producer, cases)
 
-	consumer, err := mqClient.Subscribe(mqwrapper.ConsumerOptions{
+	consumer, err := mqClient.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topics[0],
 		SubscriptionName:            funcutil.RandomString(8),
 		SubscriptionInitialPosition: common.SubscriptionPositionUnknown,
@@ -124,7 +124,7 @@ func testConcurrentStreamAndSeekInclusive(t *testing.T, mqClient mqwrapper.Clien
 func testConcurrentStreamAndSeekNoInclusive(t *testing.T, mqClient mqwrapper.Client) {
 	topics := getChannel(2)
 
-	producer, err := mqClient.CreateProducer(common.ProducerOptions{
+	producer, err := mqClient.CreateProducer(context.TODO(), common.ProducerOptions{
 		Topic: topics[0],
 	})
 	defer producer.Close()
@@ -133,7 +133,7 @@ func testConcurrentStreamAndSeekNoInclusive(t *testing.T, mqClient mqwrapper.Cli
 	cases := generateRandMessage(1024, 1000)
 	ids := sendMessages(context.Background(), t, producer, cases)
 
-	consumer, err := mqClient.Subscribe(mqwrapper.ConsumerOptions{
+	consumer, err := mqClient.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topics[0],
 		SubscriptionName:            funcutil.RandomString(8),
 		SubscriptionInitialPosition: common.SubscriptionPositionUnknown,
@@ -158,7 +158,7 @@ func testConcurrentStreamAndSeekNoInclusive(t *testing.T, mqClient mqwrapper.Cli
 func testConcurrentStreamAndSeekToLast(t *testing.T, mqClient mqwrapper.Client) {
 	topics := getChannel(2)
 
-	producer, err := mqClient.CreateProducer(common.ProducerOptions{
+	producer, err := mqClient.CreateProducer(context.TODO(), common.ProducerOptions{
 		Topic: topics[0],
 	})
 	defer producer.Close()
@@ -167,7 +167,7 @@ func testConcurrentStreamAndSeekToLast(t *testing.T, mqClient mqwrapper.Client) 
 	cases := generateRandMessage(1024, 1000)
 	sendMessages(context.Background(), t, producer, cases)
 
-	consumer, err := mqClient.Subscribe(mqwrapper.ConsumerOptions{
+	consumer, err := mqClient.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topics[0],
 		SubscriptionName:            funcutil.RandomString(8),
 		SubscriptionInitialPosition: common.SubscriptionPositionUnknown,

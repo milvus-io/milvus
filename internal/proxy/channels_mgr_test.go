@@ -214,7 +214,7 @@ func Test_createStream(t *testing.T) {
 		factory.fQStream = func(ctx context.Context) (msgstream.MsgStream, error) {
 			return nil, errors.New("mock")
 		}
-		_, err := createStream(factory, nil, nil)
+		_, err := createStream(context.TODO(), factory, nil, nil)
 		assert.Error(t, err)
 	})
 
@@ -223,7 +223,7 @@ func Test_createStream(t *testing.T) {
 		factory.f = func(ctx context.Context) (msgstream.MsgStream, error) {
 			return nil, errors.New("mock")
 		}
-		_, err := createStream(factory, nil, nil)
+		_, err := createStream(context.TODO(), factory, nil, nil)
 		assert.Error(t, err)
 	})
 
@@ -232,7 +232,7 @@ func Test_createStream(t *testing.T) {
 		factory.f = func(ctx context.Context) (msgstream.MsgStream, error) {
 			return newMockMsgStream(), nil
 		}
-		_, err := createStream(factory, []string{"111"}, func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
+		_, err := createStream(context.TODO(), factory, []string{"111"}, func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 			return nil, nil
 		})
 		assert.NoError(t, err)
@@ -247,7 +247,7 @@ func Test_singleTypeChannelsMgr_createMsgStream(t *testing.T) {
 				100: {stream: newMockMsgStream()},
 			},
 		}
-		stream, err := m.createMsgStream(100)
+		stream, err := m.createMsgStream(context.TODO(), 100)
 		assert.NoError(t, err)
 		assert.NotNil(t, stream)
 	})
@@ -275,7 +275,7 @@ func Test_singleTypeChannelsMgr_createMsgStream(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			stream, err := m.createMsgStream(100)
+			stream, err := m.createMsgStream(context.TODO(), 100)
 			assert.NoError(t, err)
 			assert.NotNil(t, stream)
 		}()
@@ -295,7 +295,7 @@ func Test_singleTypeChannelsMgr_createMsgStream(t *testing.T) {
 				return channelInfos{}, errors.New("mock")
 			},
 		}
-		_, err := m.createMsgStream(100)
+		_, err := m.createMsgStream(context.TODO(), 100)
 		assert.Error(t, err)
 	})
 
@@ -311,7 +311,7 @@ func Test_singleTypeChannelsMgr_createMsgStream(t *testing.T) {
 			msgStreamFactory: factory,
 			repackFunc:       nil,
 		}
-		_, err := m.createMsgStream(100)
+		_, err := m.createMsgStream(context.TODO(), 100)
 		assert.Error(t, err)
 	})
 
@@ -328,10 +328,10 @@ func Test_singleTypeChannelsMgr_createMsgStream(t *testing.T) {
 			msgStreamFactory: factory,
 			repackFunc:       nil,
 		}
-		stream, err := m.createMsgStream(100)
+		stream, err := m.createMsgStream(context.TODO(), 100)
 		assert.NoError(t, err)
 		assert.NotNil(t, stream)
-		stream, err = m.getOrCreateStream(100)
+		stream, err = m.getOrCreateStream(context.TODO(), 100)
 		assert.NoError(t, err)
 		assert.NotNil(t, stream)
 	})
@@ -365,7 +365,7 @@ func Test_singleTypeChannelsMgr_getStream(t *testing.T) {
 				100: {stream: newMockMsgStream()},
 			},
 		}
-		stream, err := m.getOrCreateStream(100)
+		stream, err := m.getOrCreateStream(context.TODO(), 100)
 		assert.NoError(t, err)
 		assert.NotNil(t, stream)
 	})
@@ -377,7 +377,7 @@ func Test_singleTypeChannelsMgr_getStream(t *testing.T) {
 				return channelInfos{}, errors.New("mock")
 			},
 		}
-		_, err := m.getOrCreateStream(100)
+		_, err := m.getOrCreateStream(context.TODO(), 100)
 		assert.Error(t, err)
 	})
 
@@ -394,7 +394,7 @@ func Test_singleTypeChannelsMgr_getStream(t *testing.T) {
 			msgStreamFactory: factory,
 			repackFunc:       nil,
 		}
-		stream, err := m.getOrCreateStream(100)
+		stream, err := m.getOrCreateStream(context.TODO(), 100)
 		assert.NoError(t, err)
 		assert.NotNil(t, stream)
 	})
