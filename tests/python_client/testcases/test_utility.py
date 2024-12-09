@@ -288,6 +288,8 @@ class TestUtilityParams(TestcaseBase):
         method: input invalid partition names
         expected: raise an exception
         """
+        if partition_name == "":
+            pytest.skip("partition name '' means default partition now")
         collection_w = self.init_collection_general(prefix, nb=10)[0]
         partition_names = [partition_name]
         collection_w.load()
