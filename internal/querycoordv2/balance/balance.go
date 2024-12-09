@@ -58,7 +58,7 @@ func (chanPlan *ChannelAssignPlan) String() string {
 
 type Balance interface {
 	AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan
-	AssignChannel(channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan
+	AssignChannel(collectionID int64, channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan
 	BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan)
 }
 
@@ -103,7 +103,7 @@ func (b *RoundRobinBalancer) AssignSegment(collectionID int64, segments []*meta.
 	return ret
 }
 
-func (b *RoundRobinBalancer) AssignChannel(channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
+func (b *RoundRobinBalancer) AssignChannel(collectionID int64, channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
 	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
 	if !manualBalance {
 		versionRangeFilter := semver.MustParseRange(">2.3.x")

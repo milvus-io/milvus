@@ -602,9 +602,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceWithExecutingTask() {
 
 			// set node delta count
 			suite.mockScheduler.ExpectedCalls = nil
-			for i, node := range c.nodes {
-				suite.mockScheduler.EXPECT().GetSegmentTaskDelta(node, int64(1)).Return(c.deltaCounts[i]).Maybe()
-				suite.mockScheduler.EXPECT().GetSegmentTaskDelta(node, int64(-1)).Return(c.deltaCounts[i]).Maybe()
+			for i := range c.nodes {
+				suite.mockScheduler.EXPECT().GetSegmentTaskDelta(c.nodes[i], mock.Anything).Return(c.deltaCounts[i]).Maybe()
+				suite.mockScheduler.EXPECT().GetChannelTaskDelta(c.nodes[i], mock.Anything).Return(c.deltaCounts[i]).Maybe()
+				suite.mockScheduler.EXPECT().GetSegmentTaskNum().Return(0).Maybe()
+				suite.mockScheduler.EXPECT().GetChannelTaskNum().Return(0).Maybe()
 			}
 
 			// 4. balance and verify result
