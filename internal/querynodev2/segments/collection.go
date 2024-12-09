@@ -141,6 +141,7 @@ type Collection struct {
 	partitions    *typeutil.ConcurrentSet[int64]
 	loadType      querypb.LoadType
 	dbName        string
+	dbProperties  []*commonpb.KeyValuePair
 	resourceGroup string
 	// resource group of node may be changed if node transfer,
 	// but Collection in Manager will be released before assign new replica of new resource group on these node.
@@ -157,6 +158,10 @@ type Collection struct {
 // GetDBName returns the database name of collection.
 func (c *Collection) GetDBName() string {
 	return c.dbName
+}
+
+func (c *Collection) GetDBProperties() []*commonpb.KeyValuePair {
+	return c.dbProperties
 }
 
 // GetResourceGroup returns the resource group of collection.
@@ -277,6 +282,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		partitions:    typeutil.NewConcurrentSet[int64](),
 		loadType:      loadMetaInfo.GetLoadType(),
 		dbName:        loadMetaInfo.GetDbName(),
+		dbProperties:  loadMetaInfo.GetDbProperties(),
 		resourceGroup: loadMetaInfo.GetResourceGroup(),
 		refCount:      atomic.NewUint32(0),
 		isGpuIndex:    isGpuIndex,
@@ -290,13 +296,16 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	return coll
 }
 
-func NewCollectionWithoutSchema(collectionID int64, loadType querypb.LoadType) *Collection {
-	return &Collection{
+// Only for test
+func NewTestCollection(collectionID int64, loadType querypb.LoadType, schema *schemapb.CollectionSchema) *Collection {
+	col := &Collection{
 		id:         collectionID,
 		partitions: typeutil.NewConcurrentSet[int64](),
 		loadType:   loadType,
 		refCount:   atomic.NewUint32(0),
 	}
+	col.schema.Store(schema)
+	return col
 }
 
 // new collection without segcore prepare

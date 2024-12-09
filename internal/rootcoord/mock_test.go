@@ -1058,6 +1058,31 @@ func newTickerWithFactory(factory msgstream.Factory) *timetickSync {
 	return ticker
 }
 
+func newChanTimeTickSync(packChan chan *msgstream.MsgPack) *timetickSync {
+	f := msgstream.NewMockMqFactory()
+	f.NewMsgStreamFunc = func(ctx context.Context) (msgstream.MsgStream, error) {
+		stream := msgstream.NewWastedMockMsgStream()
+		stream.BroadcastFunc = func(pack *msgstream.MsgPack) error {
+			log.Info("mock Broadcast")
+			packChan <- pack
+			return nil
+		}
+		stream.BroadcastMarkFunc = func(pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
+			log.Info("mock BroadcastMark")
+			packChan <- pack
+			return map[string][]msgstream.MessageID{}, nil
+		}
+		stream.AsProducerFunc = func(channels []string) {
+		}
+		stream.ChanFunc = func() <-chan *msgstream.MsgPack {
+			return packChan
+		}
+		return stream, nil
+	}
+
+	return newTickerWithFactory(f)
+}
+
 type mockDdlTsLockManager struct {
 	DdlTsLockManager
 	GetMinDdlTsFunc func() Timestamp

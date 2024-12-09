@@ -43,6 +43,7 @@ type watchInfo struct {
 	vChannels      []string
 	startPositions []*commonpb.KeyDataPair
 	schema         *schemapb.CollectionSchema
+	dbProperties   []*commonpb.KeyValuePair
 }
 
 // Broker communicates with other components.
@@ -165,6 +166,7 @@ func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error
 		StartPositions:  info.startPositions,
 		Schema:          info.schema,
 		CreateTimestamp: info.ts,
+		DbProperties:    info.dbProperties,
 	})
 	if err != nil {
 		return err

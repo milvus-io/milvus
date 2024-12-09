@@ -350,7 +350,13 @@ func NewDataSyncService(initCtx context.Context, pipelineParams *util.PipelinePa
 		return nil, err
 	}
 
-	input, err := createNewInputFromDispatcher(initCtx, pipelineParams.DispClient, info.GetVchan().GetChannelName(), info.GetVchan().GetSeekPosition())
+	input, err := createNewInputFromDispatcher(initCtx,
+		pipelineParams.DispClient,
+		info.GetVchan().GetChannelName(),
+		info.GetVchan().GetSeekPosition(),
+		info.GetSchema(),
+		info.GetDbProperties(),
+	)
 	if err != nil {
 		return nil, err
 	}

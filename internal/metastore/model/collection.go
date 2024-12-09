@@ -15,6 +15,7 @@ type Collection struct {
 	CollectionID         int64
 	Partitions           []*Partition
 	Name                 string
+	DBName               string
 	Description          string
 	AutoID               bool
 	Fields               []*Field
@@ -41,6 +42,7 @@ func (c *Collection) Clone() *Collection {
 		DBID:                 c.DBID,
 		CollectionID:         c.CollectionID,
 		Name:                 c.Name,
+		DBName:               c.DBName,
 		Description:          c.Description,
 		AutoID:               c.AutoID,
 		Fields:               CloneFields(c.Fields),
@@ -99,6 +101,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		CollectionID:         coll.ID,
 		DBID:                 coll.DbId,
 		Name:                 coll.Schema.Name,
+		DBName:               coll.Schema.DbName,
 		Description:          coll.Schema.Description,
 		AutoID:               coll.Schema.AutoID,
 		Fields:               UnmarshalFieldModels(coll.GetSchema().GetFields()),
@@ -154,6 +157,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		Description:        coll.Description,
 		AutoID:             coll.AutoID,
 		EnableDynamicField: coll.EnableDynamicField,
+		DbName:             coll.DBName,
 	}
 
 	if c.withFields {
