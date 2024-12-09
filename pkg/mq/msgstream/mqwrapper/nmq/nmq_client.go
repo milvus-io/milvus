@@ -80,7 +80,7 @@ func NewClient(url string, options ...nats.Option) (*nmqClient, error) {
 }
 
 // CreateProducer creates a producer for natsmq client
-func (nc *nmqClient) CreateProducer(options common.ProducerOptions) (mqwrapper.Producer, error) {
+func (nc *nmqClient) CreateProducer(ctx context.Context, options common.ProducerOptions) (mqwrapper.Producer, error) {
 	start := timerecord.NewTimeRecorder("create producer")
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.TotalLabel).Inc()
 
@@ -112,7 +112,7 @@ func (nc *nmqClient) CreateProducer(options common.ProducerOptions) (mqwrapper.P
 	return &rp, nil
 }
 
-func (nc *nmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
+func (nc *nmqClient) Subscribe(ctx context.Context, options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
 	start := timerecord.NewTimeRecorder("create consumer")
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.TotalLabel).Inc()
 

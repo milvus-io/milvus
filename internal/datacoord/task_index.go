@@ -211,7 +211,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	optionalFields := make([]*indexpb.OptionalFieldInfo, 0)
 	partitionKeyIsolation := false
 	isVectorTypeSupported := typeutil.IsDenseFloatVectorType(field.DataType) || typeutil.IsBinaryVectorType(field.DataType)
-	if Params.CommonCfg.EnableMaterializedView.GetAsBool() && isOptionalScalarFieldSupported(indexType) && isVectorTypeSupported {
+	if Params.CommonCfg.EnableMaterializedView.GetAsBool() && isVectorTypeSupported && isMvSupported(indexType) {
 		if collectionInfo == nil {
 			log.Ctx(ctx).Warn("get collection failed", zap.Int64("collID", segIndex.CollectionID), zap.Error(err))
 			it.SetState(indexpb.JobState_JobStateInit, err.Error())

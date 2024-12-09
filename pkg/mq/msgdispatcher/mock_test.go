@@ -55,7 +55,7 @@ func newMockProducer(factory msgstream.Factory, pchannel string) (msgstream.MsgS
 	if err != nil {
 		return nil, err
 	}
-	stream.AsProducer([]string{pchannel})
+	stream.AsProducer(context.TODO(), []string{pchannel})
 	stream.SetRepackFunc(defaultInsertRepackFunc)
 	return stream, nil
 }

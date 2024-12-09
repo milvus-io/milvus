@@ -1752,7 +1752,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 func TestOptions(t *testing.T) {
 	kv := getWatchKV(t)
 	defer func() {
-		kv.RemoveWithPrefix("")
+		kv.RemoveWithPrefix(context.TODO(), "")
 		kv.Close()
 	}()
 
@@ -1772,7 +1772,7 @@ func TestOptions(t *testing.T) {
 		assert.NotNil(t, svr.rootCoordClientCreator)
 	})
 	t.Run("WithCluster", func(t *testing.T) {
-		defer kv.RemoveWithPrefix("")
+		defer kv.RemoveWithPrefix(context.TODO(), "")
 
 		sessionManager := session.NewDataNodeManagerImpl()
 		mockAlloc := globalIDAllocator.NewMockGlobalIDAllocator(t)
@@ -1810,7 +1810,7 @@ func TestOptions(t *testing.T) {
 func TestHandleSessionEvent(t *testing.T) {
 	kv := getWatchKV(t)
 	defer func() {
-		kv.RemoveWithPrefix("")
+		kv.RemoveWithPrefix(context.TODO(), "")
 		kv.Close()
 	}()
 	ctx, cancel := context.WithCancel(context.TODO())

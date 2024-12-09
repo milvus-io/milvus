@@ -191,7 +191,7 @@ func TestLastExpireReset(t *testing.T) {
 		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	rootPath := "/test/segment/last/expire"
 	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	metaKV.RemoveWithPrefix("")
+	metaKV.RemoveWithPrefix(ctx, "")
 	catalog := datacoord.NewCatalog(metaKV, "", "")
 	meta, err := newMeta(context.TODO(), catalog, nil)
 	assert.Nil(t, err)
@@ -243,7 +243,7 @@ func TestLastExpireReset(t *testing.T) {
 		Params.EtcdCfg.Endpoints.GetAsStrings(), Params.EtcdCfg.EtcdTLSCert.GetValue(),
 		Params.EtcdCfg.EtcdTLSKey.GetValue(), Params.EtcdCfg.EtcdTLSCACert.GetValue(), Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	newMetaKV := etcdkv.NewEtcdKV(newEtcdCli, rootPath)
-	defer newMetaKV.RemoveWithPrefix("")
+	defer newMetaKV.RemoveWithPrefix(ctx, "")
 	newCatalog := datacoord.NewCatalog(newMetaKV, "", "")
 	restartedMeta, err := newMeta(context.TODO(), newCatalog, nil)
 	restartedMeta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
@@ -683,9 +683,9 @@ func TestTryToSealSegment(t *testing.T) {
 		assert.EqualValues(t, 1, len(allocations))
 
 		metakv := mockkv.NewMetaKv(t)
-		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
+		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
 		segmentManager.meta.catalog = &datacoord.Catalog{MetaKv: metakv}
 
 		ts, err := segmentManager.allocator.AllocTimestamp(context.Background())
@@ -712,9 +712,9 @@ func TestTryToSealSegment(t *testing.T) {
 		assert.EqualValues(t, 1, len(allocations))
 
 		metakv := mockkv.NewMetaKv(t)
-		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil).Maybe()
+		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
 		segmentManager.meta.catalog = &datacoord.Catalog{MetaKv: metakv}
 
 		ts, err := segmentManager.allocator.AllocTimestamp(context.Background())

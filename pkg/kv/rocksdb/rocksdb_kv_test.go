@@ -17,6 +17,7 @@
 package rocksdbkv_test
 
 import (
+	"context"
 	"os"
 	"strconv"
 	"sync"
@@ -39,27 +40,27 @@ func TestRocksdbKV(t *testing.T) {
 	defer os.RemoveAll(name)
 	defer rocksdbKV.Close()
 	// Need to call RemoveWithPrefix
-	defer rocksdbKV.RemoveWithPrefix("")
+	defer rocksdbKV.RemoveWithPrefix(context.TODO(), "")
 
-	err = rocksdbKV.Save("abc", "123")
+	err = rocksdbKV.Save(context.TODO(), "abc", "123")
 	assert.NoError(t, err)
 
-	err = rocksdbKV.SaveBytes("abcd", []byte("1234"))
+	err = rocksdbKV.SaveBytes(context.TODO(), "abcd", []byte("1234"))
 	assert.NoError(t, err)
 
-	val, err := rocksdbKV.Load("abc")
+	val, err := rocksdbKV.Load(context.TODO(), "abc")
 	assert.NoError(t, err)
 	assert.Equal(t, val, "123")
-	value, err := rocksdbKV.LoadBytes("abc")
+	value, err := rocksdbKV.LoadBytes(context.TODO(), "abc")
 	assert.NoError(t, err)
 	assert.Equal(t, value, []byte("123"))
 
-	_, err = rocksdbKV.Load("")
+	_, err = rocksdbKV.Load(context.TODO(), "")
 	assert.Error(t, err)
-	_, err = rocksdbKV.LoadBytes("")
+	_, err = rocksdbKV.LoadBytes(context.TODO(), "")
 	assert.Error(t, err)
 
-	keys, vals, err := rocksdbKV.LoadWithPrefix("abc")
+	keys, vals, err := rocksdbKV.LoadWithPrefix(context.TODO(), "abc")
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), len(vals))
 	assert.Equal(t, len(keys), 2)
@@ -70,7 +71,7 @@ func TestRocksdbKV(t *testing.T) {
 	assert.Equal(t, vals[1], "1234")
 
 	var values [][]byte
-	keys, values, err = rocksdbKV.LoadBytesWithPrefix("abc")
+	keys, values, err = rocksdbKV.LoadBytesWithPrefix(context.TODO(), "abc")
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), len(vals))
 	assert.Equal(t, len(keys), 2)
@@ -80,27 +81,27 @@ func TestRocksdbKV(t *testing.T) {
 	assert.Equal(t, values[0], []byte("123"))
 	assert.Equal(t, values[1], []byte("1234"))
 
-	err = rocksdbKV.Save("key_1", "123")
+	err = rocksdbKV.Save(context.TODO(), "key_1", "123")
 	assert.NoError(t, err)
-	err = rocksdbKV.Save("key_2", "456")
+	err = rocksdbKV.Save(context.TODO(), "key_2", "456")
 	assert.NoError(t, err)
-	err = rocksdbKV.Save("key_3", "789")
+	err = rocksdbKV.Save(context.TODO(), "key_3", "789")
 	assert.NoError(t, err)
 
 	keys = []string{"key_1", "key_2"}
-	vals, err = rocksdbKV.MultiLoad(keys)
+	vals, err = rocksdbKV.MultiLoad(context.TODO(), keys)
 	assert.NoError(t, err)
 	assert.Equal(t, len(vals), len(keys))
 	assert.Equal(t, vals[0], "123")
 	assert.Equal(t, vals[1], "456")
 
-	values, err = rocksdbKV.MultiLoadBytes(keys)
+	values, err = rocksdbKV.MultiLoadBytes(context.TODO(), keys)
 	assert.NoError(t, err)
 	assert.Equal(t, len(values), len(keys))
 	assert.Equal(t, values[0], []byte("123"))
 	assert.Equal(t, values[1], []byte("456"))
 
-	err = rocksdbKV.MultiRemove(keys)
+	err = rocksdbKV.MultiRemove(context.TODO(), keys)
 	assert.NoError(t, err)
 
 	saves := map[string]string{
@@ -109,10 +110,10 @@ func TestRocksdbKV(t *testing.T) {
 		"s_3": "333",
 	}
 	removals := []string{"key_3"}
-	err = rocksdbKV.MultiSaveAndRemove(saves, removals)
+	err = rocksdbKV.MultiSaveAndRemove(context.TODO(), saves, removals)
 	assert.NoError(t, err)
 
-	err = rocksdbKV.DeleteRange("s_1", "s_3")
+	err = rocksdbKV.DeleteRange(context.TODO(), "s_1", "s_3")
 	assert.NoError(t, err)
 }
 
@@ -125,17 +126,17 @@ func TestRocksdbKV_Prefix(t *testing.T) {
 	defer os.RemoveAll(name)
 	defer rocksdbKV.Close()
 	// Need to call RemoveWithPrefix
-	defer rocksdbKV.RemoveWithPrefix("")
+	defer rocksdbKV.RemoveWithPrefix(context.TODO(), "")
 
 	kvs := map[string]string{
 		"abcd":    "123",
 		"abdd":    "1234",
 		"abddqqq": "1234555",
 	}
-	err = rocksdbKV.MultiSave(kvs)
+	err = rocksdbKV.MultiSave(context.TODO(), kvs)
 	assert.NoError(t, err)
 
-	keys, vals, err := rocksdbKV.LoadWithPrefix("abc")
+	keys, vals, err := rocksdbKV.LoadWithPrefix(context.TODO(), "abc")
 	assert.NoError(t, err)
 
 	assert.Equal(t, len(keys), 1)
@@ -145,50 +146,50 @@ func TestRocksdbKV_Prefix(t *testing.T) {
 
 	bytesKvs := map[string][]byte{}
 	for k, v := range kvs {
-		rocksdbKV.Remove(k)
+		rocksdbKV.Remove(context.TODO(), k)
 		bytesKvs[k] = []byte(v)
 	}
 
-	err = rocksdbKV.MultiSaveBytes(bytesKvs)
+	err = rocksdbKV.MultiSaveBytes(context.TODO(), bytesKvs)
 	assert.NoError(t, err)
 
 	var values [][]byte
-	keys, values, err = rocksdbKV.LoadBytesWithPrefix("abc")
+	keys, values, err = rocksdbKV.LoadBytesWithPrefix(context.TODO(), "abc")
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 1)
 	assert.Equal(t, len(values), 1)
 	assert.Equal(t, keys[0], "abcd")
 	assert.Equal(t, values[0], []byte("123"))
 
-	err = rocksdbKV.RemoveWithPrefix("abc")
+	err = rocksdbKV.RemoveWithPrefix(context.TODO(), "abc")
 	assert.NoError(t, err)
-	val, err := rocksdbKV.Load("abc")
+	val, err := rocksdbKV.Load(context.TODO(), "abc")
 	assert.NoError(t, err)
 	assert.Equal(t, len(val), 0)
-	val, err = rocksdbKV.Load("abdd")
+	val, err = rocksdbKV.Load(context.TODO(), "abdd")
 	assert.NoError(t, err)
 	assert.Equal(t, val, "1234")
-	val, err = rocksdbKV.Load("abddqqq")
+	val, err = rocksdbKV.Load(context.TODO(), "abddqqq")
 	assert.NoError(t, err)
 	assert.Equal(t, val, "1234555")
 
 	// test remove ""
-	err = rocksdbKV.RemoveWithPrefix("")
+	err = rocksdbKV.RemoveWithPrefix(context.TODO(), "")
 	assert.NoError(t, err)
 
 	// test remove from an empty cf
-	err = rocksdbKV.RemoveWithPrefix("")
+	err = rocksdbKV.RemoveWithPrefix(context.TODO(), "")
 	assert.NoError(t, err)
 
-	val, err = rocksdbKV.Load("abddqqq")
+	val, err = rocksdbKV.Load(context.TODO(), "abddqqq")
 	assert.NoError(t, err)
 	assert.Equal(t, len(val), 0)
 
 	// test we can still save after drop
-	err = rocksdbKV.Save("abcd", "123")
+	err = rocksdbKV.Save(context.TODO(), "abcd", "123")
 	assert.NoError(t, err)
 
-	val, err = rocksdbKV.Load("abcd")
+	val, err = rocksdbKV.Load(context.TODO(), "abcd")
 	assert.NoError(t, err)
 	assert.Equal(t, val, "123")
 }
@@ -202,24 +203,24 @@ func TestRocksdbKV_Txn(t *testing.T) {
 	defer os.RemoveAll(name)
 	defer rocksdbKV.Close()
 	// Need to call RemoveWithPrefix
-	defer rocksdbKV.RemoveWithPrefix("")
+	defer rocksdbKV.RemoveWithPrefix(context.TODO(), "")
 
 	kvs := map[string]string{
 		"abcd":    "123",
 		"abdd":    "1234",
 		"abddqqq": "1234555",
 	}
-	err = rocksdbKV.MultiSave(kvs)
+	err = rocksdbKV.MultiSave(context.TODO(), kvs)
 	assert.NoError(t, err)
 
-	keys, vals, err := rocksdbKV.LoadWithPrefix("")
+	keys, vals, err := rocksdbKV.LoadWithPrefix(context.TODO(), "")
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 3)
 	assert.Equal(t, len(vals), 3)
 
-	err = rocksdbKV.MultiSave(kvs)
+	err = rocksdbKV.MultiSave(context.TODO(), kvs)
 	assert.NoError(t, err)
-	keys, vals, err = rocksdbKV.LoadWithPrefix("")
+	keys, vals, err = rocksdbKV.LoadWithPrefix(context.TODO(), "")
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 3)
 	assert.Equal(t, len(vals), 3)
@@ -229,8 +230,8 @@ func TestRocksdbKV_Txn(t *testing.T) {
 	kvs2 := map[string]string{
 		"abfad": "12345",
 	}
-	rocksdbKV.MultiSaveAndRemoveWithPrefix(kvs2, removePrefix)
-	keys, vals, err = rocksdbKV.LoadWithPrefix("")
+	rocksdbKV.MultiSaveAndRemoveWithPrefix(context.TODO(), kvs2, removePrefix)
+	keys, vals, err = rocksdbKV.LoadWithPrefix(context.TODO(), "")
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 1)
 	assert.Equal(t, len(vals), 1)
@@ -242,7 +243,7 @@ func TestRocksdbKV_Goroutines(t *testing.T) {
 	assert.NoError(t, err)
 	defer os.RemoveAll(name)
 	defer rocksdbkv.Close()
-	defer rocksdbkv.RemoveWithPrefix("")
+	defer rocksdbkv.RemoveWithPrefix(context.TODO(), "")
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
@@ -251,10 +252,10 @@ func TestRocksdbKV_Goroutines(t *testing.T) {
 			defer wg.Done()
 			key := "key_" + strconv.Itoa(i)
 			val := "val_" + strconv.Itoa(i)
-			err := rocksdbkv.Save(key, val)
+			err := rocksdbkv.Save(context.TODO(), key, val)
 			assert.NoError(t, err)
 
-			getVal, err := rocksdbkv.Load(key)
+			getVal, err := rocksdbkv.Load(context.TODO(), key)
 			assert.NoError(t, err)
 			assert.Equal(t, getVal, val)
 		}(i)
@@ -268,32 +269,32 @@ func TestRocksdbKV_DummyDB(t *testing.T) {
 	assert.NoError(t, err)
 	defer os.RemoveAll(name)
 	defer rocksdbkv.Close()
-	defer rocksdbkv.RemoveWithPrefix("")
+	defer rocksdbkv.RemoveWithPrefix(context.TODO(), "")
 
 	rocksdbkv.DB = nil
-	_, err = rocksdbkv.Load("")
+	_, err = rocksdbkv.Load(context.TODO(), "")
 	assert.Error(t, err)
-	_, _, err = rocksdbkv.LoadWithPrefix("")
+	_, _, err = rocksdbkv.LoadWithPrefix(context.TODO(), "")
 	assert.Error(t, err)
-	_, err = rocksdbkv.MultiLoad(nil)
+	_, err = rocksdbkv.MultiLoad(context.TODO(), nil)
 	assert.Error(t, err)
-	err = rocksdbkv.Save("", "")
+	err = rocksdbkv.Save(context.TODO(), "", "")
 	assert.Error(t, err)
-	err = rocksdbkv.MultiSave(nil)
+	err = rocksdbkv.MultiSave(context.TODO(), nil)
 	assert.Error(t, err)
-	err = rocksdbkv.RemoveWithPrefix("")
+	err = rocksdbkv.RemoveWithPrefix(context.TODO(), "")
 	assert.Error(t, err)
-	err = rocksdbkv.Remove("")
+	err = rocksdbkv.Remove(context.TODO(), "")
 	assert.Error(t, err)
-	err = rocksdbkv.MultiRemove(nil)
+	err = rocksdbkv.MultiRemove(context.TODO(), nil)
 	assert.Error(t, err)
-	err = rocksdbkv.MultiSaveAndRemove(nil, nil)
+	err = rocksdbkv.MultiSaveAndRemove(context.TODO(), nil, nil)
 	assert.Error(t, err)
-	err = rocksdbkv.DeleteRange("", "")
+	err = rocksdbkv.DeleteRange(context.TODO(), "", "")
 	assert.Error(t, err)
 
 	rocksdbkv.ReadOptions = nil
-	_, err = rocksdbkv.Load("dummy")
+	_, err = rocksdbkv.Load(context.TODO(), "dummy")
 	assert.Error(t, err)
 }
 
@@ -303,20 +304,20 @@ func TestRocksdbKV_CornerCase(t *testing.T) {
 	assert.NoError(t, err)
 	defer os.RemoveAll(name)
 	defer rocksdbkv.Close()
-	defer rocksdbkv.RemoveWithPrefix("")
-	_, err = rocksdbkv.Load("")
+	defer rocksdbkv.RemoveWithPrefix(context.TODO(), "")
+	_, err = rocksdbkv.Load(context.TODO(), "")
 	assert.Error(t, err)
-	keys, values, err := rocksdbkv.LoadWithPrefix("")
+	keys, values, err := rocksdbkv.LoadWithPrefix(context.TODO(), "")
 	assert.NoError(t, err)
 	assert.Equal(t, len(keys), 0)
 	assert.Equal(t, len(values), 0)
-	err = rocksdbkv.Save("", "")
+	err = rocksdbkv.Save(context.TODO(), "", "")
 	assert.Error(t, err)
-	err = rocksdbkv.Save("test", "")
+	err = rocksdbkv.Save(context.TODO(), "test", "")
 	assert.Error(t, err)
-	err = rocksdbkv.Remove("")
+	err = rocksdbkv.Remove(context.TODO(), "")
 	assert.Error(t, err)
-	err = rocksdbkv.DeleteRange("a", "a")
+	err = rocksdbkv.DeleteRange(context.TODO(), "a", "a")
 	assert.Error(t, err)
 }
 
@@ -325,19 +326,19 @@ func TestHas(t *testing.T) {
 	db, err := rocksdbkv.NewRocksdbKV(dir)
 	assert.NoError(t, err)
 	defer db.Close()
-	defer db.RemoveWithPrefix("")
+	defer db.RemoveWithPrefix(context.TODO(), "")
 
-	has, err := db.Has("key1")
+	has, err := db.Has(context.TODO(), "key1")
 	assert.NoError(t, err)
 	assert.False(t, has)
-	err = db.Save("key1", "value1")
+	err = db.Save(context.TODO(), "key1", "value1")
 	assert.NoError(t, err)
-	has, err = db.Has("key1")
+	has, err = db.Has(context.TODO(), "key1")
 	assert.NoError(t, err)
 	assert.True(t, has)
-	err = db.Remove("key1")
+	err = db.Remove(context.TODO(), "key1")
 	assert.NoError(t, err)
-	has, err = db.Has("key1")
+	has, err = db.Has(context.TODO(), "key1")
 	assert.NoError(t, err)
 	assert.False(t, has)
 }
@@ -347,23 +348,23 @@ func TestHasPrefix(t *testing.T) {
 	db, err := rocksdbkv.NewRocksdbKV(dir)
 	assert.NoError(t, err)
 	defer db.Close()
-	defer db.RemoveWithPrefix("")
+	defer db.RemoveWithPrefix(context.TODO(), "")
 
-	has, err := db.HasPrefix("key")
+	has, err := db.HasPrefix(context.TODO(), "key")
 	assert.NoError(t, err)
 	assert.False(t, has)
 
-	err = db.Save("key1", "value1")
+	err = db.Save(context.TODO(), "key1", "value1")
 	assert.NoError(t, err)
 
-	has, err = db.HasPrefix("key")
+	has, err = db.HasPrefix(context.TODO(), "key")
 	assert.NoError(t, err)
 	assert.True(t, has)
 
-	err = db.Remove("key1")
+	err = db.Remove(context.TODO(), "key1")
 	assert.NoError(t, err)
 
-	has, err = db.HasPrefix("key")
+	has, err = db.HasPrefix(context.TODO(), "key")
 	assert.NoError(t, err)
 	assert.False(t, has)
 }
@@ -374,13 +375,13 @@ func TestPredicates(t *testing.T) {
 
 	require.NoError(t, err)
 	defer db.Close()
-	defer db.RemoveWithPrefix("")
+	defer db.RemoveWithPrefix(context.TODO(), "")
 
-	err = db.MultiSaveAndRemove(map[string]string{}, []string{}, predicates.ValueEqual("a", "b"))
+	err = db.MultiSaveAndRemove(context.TODO(), map[string]string{}, []string{}, predicates.ValueEqual("a", "b"))
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 
-	err = db.MultiSaveAndRemoveWithPrefix(map[string]string{}, []string{}, predicates.ValueEqual("a", "b"))
+	err = db.MultiSaveAndRemoveWithPrefix(context.TODO(), map[string]string{}, []string{}, predicates.ValueEqual("a", "b"))
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }

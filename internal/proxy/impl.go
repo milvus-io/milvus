@@ -6323,7 +6323,7 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 			Status: merr.Status(err),
 		}, nil
 	}
-	messageIDsMap, err := msgStream.Broadcast(msgPack)
+	messageIDsMap, err := msgStream.Broadcast(ctx, msgPack)
 	if err != nil {
 		log.Ctx(ctx).Warn("failed to produce msg", zap.Error(err))
 		return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil

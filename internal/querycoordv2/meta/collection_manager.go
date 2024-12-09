@@ -543,6 +543,11 @@ func (m *CollectionManager) putPartition(ctx context.Context, partitions []*Part
 	return nil
 }
 
+func (m *CollectionManager) updateLoadMetrics() {
+	metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(lo.Filter(lo.Values(m.collections), func(coll *Collection, _ int) bool { return coll.LoadPercentage == 100 }))))
+	metrics.QueryCoordNumPartitions.WithLabelValues().Set(float64(len(lo.Filter(lo.Values(m.partitions), func(part *Partition, _ int) bool { return part.LoadPercentage == 100 }))))
+}
+
 func (m *CollectionManager) UpdateLoadPercent(ctx context.Context, partitionID int64, loadPercent int32) (int32, error) {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
@@ -590,7 +595,7 @@ func (m *CollectionManager) UpdateLoadPercent(ctx context.Context, partitionID i
 		// if collection becomes loaded, clear it's recoverTimes in load info
 		newCollection.RecoverTimes = 0
 
-		metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(lo.Values(m.collections))))
+		defer m.updateLoadMetrics()
 		elapsed := time.Since(newCollection.CreatedAt)
 		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
 		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Collection %d loaded", newCollection.CollectionID)))
@@ -616,6 +621,7 @@ func (m *CollectionManager) RemoveCollection(ctx context.Context, collectionID t
 		delete(m.collectionPartitions, collectionID)
 	}
 	metrics.CleanQueryCoordMetricsWithCollectionID(collectionID)
+	m.updateLoadMetrics()
 	return nil
 }
 
@@ -627,7 +633,8 @@ func (m *CollectionManager) RemovePartition(ctx context.Context, collectionID ty
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
-	return m.removePartition(ctx, collectionID, partitionIDs...)
+	err := m.removePartition(ctx, collectionID, partitionIDs...)
+	return err
 }
 
 func (m *CollectionManager) removePartition(ctx context.Context, collectionID typeutil.UniqueID, partitionIDs ...typeutil.UniqueID) error {
@@ -640,6 +647,7 @@ func (m *CollectionManager) removePartition(ctx context.Context, collectionID ty
 		delete(m.partitions, id)
 		delete(partitions, id)
 	}
+	m.updateLoadMetrics()
 
 	return nil
 }

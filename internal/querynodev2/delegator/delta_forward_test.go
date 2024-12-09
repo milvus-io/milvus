@@ -174,18 +174,21 @@ func (s *StreamingForwardSuite) TestBFStreamingForward() {
 
 	// Setup distribution
 	delegator.distribution.AddGrowing(SegmentEntry{
-		NodeID:    1,
-		SegmentID: 100,
+		NodeID:      1,
+		PartitionID: 1,
+		SegmentID:   100,
 	})
 	delegator.distribution.AddDistributions(SegmentEntry{
-		NodeID:    1,
-		SegmentID: 101,
+		NodeID:      1,
+		PartitionID: 1,
+		SegmentID:   101,
 	})
 	delegator.distribution.AddDistributions(SegmentEntry{
-		NodeID:    1,
-		SegmentID: 102,
+		NodeID:      1,
+		PartitionID: 1,
+		SegmentID:   102,
 	})
-	delegator.distribution.SyncTargetVersion(1, []int64{100}, []int64{101, 102}, nil)
+	delegator.distribution.SyncTargetVersion(1, []int64{1}, []int64{100}, []int64{101, 102}, nil)
 
 	// Setup pk oracle
 	// empty bfs will not match
@@ -224,18 +227,21 @@ func (s *StreamingForwardSuite) TestDirectStreamingForward() {
 
 	// Setup distribution
 	delegator.distribution.AddGrowing(SegmentEntry{
-		NodeID:    1,
-		SegmentID: 100,
+		NodeID:      1,
+		PartitionID: 1,
+		SegmentID:   100,
 	})
 	delegator.distribution.AddDistributions(SegmentEntry{
-		NodeID:    1,
-		SegmentID: 101,
+		NodeID:      1,
+		PartitionID: 1,
+		SegmentID:   101,
 	})
 	delegator.distribution.AddDistributions(SegmentEntry{
-		NodeID:    1,
-		SegmentID: 102,
+		NodeID:      1,
+		PartitionID: 1,
+		SegmentID:   102,
 	})
-	delegator.distribution.SyncTargetVersion(1, []int64{100}, []int64{101, 102}, nil)
+	delegator.distribution.SyncTargetVersion(1, []int64{1}, []int64{100}, []int64{101, 102}, nil)
 
 	// Setup pk oracle
 	// empty bfs will not match

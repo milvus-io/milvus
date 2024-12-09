@@ -64,7 +64,7 @@ func BytesToInt(b []byte) int {
 
 // Consume1 will consume random messages and record the last MessageID it received
 func Consume1(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, subName string, c chan mqcommon.MessageID, total *int) {
-	consumer, err := kc.Subscribe(mqwrapper.ConsumerOptions{
+	consumer, err := kc.Subscribe(ctx, mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
@@ -103,7 +103,7 @@ func Consume1(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, 
 
 // Consume2 will consume messages from specified MessageID
 func Consume2(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, subName string, msgID mqcommon.MessageID, total *int) {
-	consumer, err := kc.Subscribe(mqwrapper.ConsumerOptions{
+	consumer, err := kc.Subscribe(ctx, mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
@@ -139,7 +139,7 @@ func Consume2(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, 
 }
 
 func Consume3(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, subName string, total *int) {
-	consumer, err := kc.Subscribe(mqwrapper.ConsumerOptions{
+	consumer, err := kc.Subscribe(ctx, mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
@@ -418,7 +418,7 @@ func createConsumer(t *testing.T,
 	groupID string,
 	initPosition mqcommon.SubscriptionInitialPosition,
 ) mqwrapper.Consumer {
-	consumer, err := kc.Subscribe(mqwrapper.ConsumerOptions{
+	consumer, err := kc.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            groupID,
 		BufSize:                     1024,
@@ -429,7 +429,7 @@ func createConsumer(t *testing.T,
 }
 
 func createProducer(t *testing.T, kc *kafkaClient, topic string) mqwrapper.Producer {
-	producer, err := kc.CreateProducer(mqcommon.ProducerOptions{Topic: topic})
+	producer, err := kc.CreateProducer(context.TODO(), mqcommon.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 	return producer

@@ -110,6 +110,7 @@ type Server struct {
 	address        string
 	watchClient    kv.WatchKV
 	kv             kv.MetaKv
+	metaRootPath   string
 	meta           *meta
 	segmentManager Manager
 	allocator      allocator.Allocator
@@ -306,6 +307,15 @@ func (s *Server) Init() error {
 	if err = s.initSession(); err != nil {
 		return err
 	}
+	if err := s.initKV(); err != nil {
+		return err
+	}
+	if streamingutil.IsStreamingServiceEnabled() {
+		s.streamingCoord = streamingcoord.NewServerBuilder().
+			WithETCD(s.etcdCli).
+			WithMetaKV(s.kv).
+			WithSession(s.session).Build()
+	}
 	if s.enableActiveStandBy {
 		s.activateFunc = func() error {
 			log.Info("DataCoord switch from standby to active, activating")
@@ -365,10 +375,7 @@ func (s *Server) initDataCoord() error {
 
 	// Initialize streaming coordinator.
 	if streamingutil.IsStreamingServiceEnabled() {
-		s.streamingCoord = streamingcoord.NewServerBuilder().
-			WithETCD(s.etcdCli).
-			WithMetaKV(s.kv).
-			WithSession(s.session).Build()
+
 		if err = s.streamingCoord.Init(context.TODO()); err != nil {
 			return err
 		}
@@ -648,31 +655,36 @@ func (s *Server) initSegmentManager() error {
 	return nil
 }
 
-func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
-	if s.meta != nil {
+func (s *Server) initKV() error {
+	if s.kv != nil {
 		return nil
 	}
 	s.watchClient = etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
 		etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 	metaType := Params.MetaStoreCfg.MetaStoreType.GetValue()
 	log.Info("data coordinator connecting to metadata store", zap.String("metaType", metaType))
-	metaRootPath := ""
 	if metaType == util.MetaStoreTypeTiKV {
-		metaRootPath = Params.TiKVCfg.MetaRootPath.GetValue()
-		s.kv = tikv.NewTiKV(s.tikvCli, metaRootPath,
+		s.metaRootPath = Params.TiKVCfg.MetaRootPath.GetValue()
+		s.kv = tikv.NewTiKV(s.tikvCli, s.metaRootPath,
 			tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 	} else if metaType == util.MetaStoreTypeEtcd {
-		metaRootPath = Params.EtcdCfg.MetaRootPath.GetValue()
-		s.kv = etcdkv.NewEtcdKV(s.etcdCli, metaRootPath,
+		s.metaRootPath = Params.EtcdCfg.MetaRootPath.GetValue()
+		s.kv = etcdkv.NewEtcdKV(s.etcdCli, s.metaRootPath,
 			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 	} else {
 		return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", metaType))
 	}
 	log.Info("data coordinator successfully connected to metadata store", zap.String("metaType", metaType))
+	return nil
+}
 
+func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
+	if s.meta != nil {
+		return nil
+	}
 	reloadEtcdFn := func() error {
 		var err error
-		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), metaRootPath)
+		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
 		s.meta, err = newMeta(s.ctx, catalog, chunkManager)
 		if err != nil {
 			return err
@@ -1122,8 +1134,8 @@ func (s *Server) Stop() error {
 // CleanMeta only for test
 func (s *Server) CleanMeta() error {
 	log.Debug("clean meta", zap.Any("kv", s.kv))
-	err := s.kv.RemoveWithPrefix("")
-	err2 := s.watchClient.RemoveWithPrefix("")
+	err := s.kv.RemoveWithPrefix(s.ctx, "")
+	err2 := s.watchClient.RemoveWithPrefix(s.ctx, "")
 	if err2 != nil {
 		if err != nil {
 			err = fmt.Errorf("Failed to CleanMeta[metadata cleanup error: %w][watchdata cleanup error: %v]", err, err2)

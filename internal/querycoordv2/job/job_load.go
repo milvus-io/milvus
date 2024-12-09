@@ -50,7 +50,6 @@ type LoadCollectionJob struct {
 	dist               *meta.DistributionManager
 	meta               *meta.Meta
 	broker             meta.Broker
-	cluster            session.Cluster
 	targetMgr          meta.TargetManagerInterface
 	targetObserver     *observers.TargetObserver
 	collectionObserver *observers.CollectionObserver
@@ -63,7 +62,6 @@ func NewLoadCollectionJob(
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
 	broker meta.Broker,
-	cluster session.Cluster,
 	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	collectionObserver *observers.CollectionObserver,
@@ -72,11 +70,10 @@ func NewLoadCollectionJob(
 	return &LoadCollectionJob{
 		BaseJob:            NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
 		req:                req,
-		undo:               NewUndoList(ctx, meta, cluster, targetMgr, targetObserver),
+		undo:               NewUndoList(ctx, meta, targetMgr, targetObserver),
 		dist:               dist,
 		meta:               meta,
 		broker:             broker,
-		cluster:            cluster,
 		targetMgr:          targetMgr,
 		targetObserver:     targetObserver,
 		collectionObserver: collectionObserver,
@@ -193,12 +190,6 @@ func (job *LoadCollectionJob) Execute() error {
 		job.undo.IsReplicaCreated = true
 	}
 
-	// 3. loadPartitions on QueryNodes
-	err = loadPartitions(job.ctx, job.meta, job.cluster, job.broker, true, req.GetCollectionID(), lackPartitionIDs...)
-	if err != nil {
-		return err
-	}
-
 	// 4. put collection/partitions meta
 	partitions := lo.Map(lackPartitionIDs, func(partID int64, _ int) *meta.Partition {
 		return &meta.Partition{
@@ -264,7 +255,6 @@ type LoadPartitionJob struct {
 	dist               *meta.DistributionManager
 	meta               *meta.Meta
 	broker             meta.Broker
-	cluster            session.Cluster
 	targetMgr          meta.TargetManagerInterface
 	targetObserver     *observers.TargetObserver
 	collectionObserver *observers.CollectionObserver
@@ -277,7 +267,6 @@ func NewLoadPartitionJob(
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
 	broker meta.Broker,
-	cluster session.Cluster,
 	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	collectionObserver *observers.CollectionObserver,
@@ -286,11 +275,10 @@ func NewLoadPartitionJob(
 	return &LoadPartitionJob{
 		BaseJob:            NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
 		req:                req,
-		undo:               NewUndoList(ctx, meta, cluster, targetMgr, targetObserver),
+		undo:               NewUndoList(ctx, meta, targetMgr, targetObserver),
 		dist:               dist,
 		meta:               meta,
 		broker:             broker,
-		cluster:            cluster,
 		targetMgr:          targetMgr,
 		targetObserver:     targetObserver,
 		collectionObserver: collectionObserver,
@@ -397,12 +385,6 @@ func (job *LoadPartitionJob) Execute() error {
 			return errors.Wrap(err, msg)
 		}
 		job.undo.IsReplicaCreated = true
-	}
-
-	// 3. loadPartitions on QueryNodes
-	err = loadPartitions(job.ctx, job.meta, job.cluster, job.broker, true, req.GetCollectionID(), lackPartitionIDs...)
-	if err != nil {
-		return err
 	}
 
 	// 4. put collection/partitions meta

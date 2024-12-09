@@ -860,6 +860,7 @@ func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string
 		mrg := rg.CopyForWrite()
 		mrg.UnassignNode(node)
 		rg := mrg.ToResourceGroup()
+
 		if err := rm.catalog.SaveResourceGroup(ctx, rg.GetMeta()); err != nil {
 			log.Fatal("unassign node from resource group",
 				zap.String("rgName", rg.GetName()),

@@ -1985,7 +1985,7 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 		EndTs:   ts,
 		Msgs:    []msgstream.TsMsg{tsMsg},
 	}
-	msgErr := replicateMsgStream.Produce(msgPack)
+	msgErr := replicateMsgStream.Produce(ctx, msgPack)
 	// ignore the error if the msg stream failed to produce the msg,
 	// because it can be manually fixed in this error
 	if msgErr != nil {
