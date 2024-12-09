@@ -23,8 +23,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
@@ -46,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
