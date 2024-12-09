@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package models
+package openai
 
 import (
 	"encoding/json"
@@ -30,21 +30,21 @@ import (
 
 func TestEmbeddingClientCheck(t *testing.T) {
 	{
-		c := OpenAIEmbeddingClient{"", "mock_uri"}
+		c := NewOpenAIEmbeddingClient("", "mock_uri")
 		err := c.Check()
 		assert.True(t, err != nil)
 		fmt.Println(err)
 	}
 
 	{
-		c := OpenAIEmbeddingClient{"mock_key", ""}
+		c := NewOpenAIEmbeddingClient("mock_key", "")
 		err := c.Check()
 		assert.True(t, err != nil)
 		fmt.Println(err)
 	}
 
 	{
-		c := OpenAIEmbeddingClient{"mock_key", "mock_uri"}
+		c := NewOpenAIEmbeddingClient("mock_key", "mock_uri")
 		err := c.Check()
 		assert.True(t, err == nil)
 	}
@@ -55,6 +55,11 @@ func TestEmbeddingOK(t *testing.T) {
 	res.Object = "list"
 	res.Model = "text-embedding-3-small"
 	res.Data = []EmbeddingData{
+		{
+			Object:    "embedding",
+			Embedding: []float32{1.1, 2.2, 3.3, 4.4},
+			Index:     1,
+		},
 		{
 			Object:    "embedding",
 			Embedding: []float32{1.1, 2.2, 3.3, 4.4},
@@ -76,12 +81,13 @@ func TestEmbeddingOK(t *testing.T) {
 	url := ts.URL
 
 	{
-		c := OpenAIEmbeddingClient{"mock_key", url}
+		c := NewOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
 		ret, err := c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
 		assert.True(t, err == nil)
-		assert.Equal(t, ret, &res)
+		assert.Equal(t, ret.Data[0].Index, 0)
+		assert.Equal(t, ret.Data[1].Index, 1)
 	}
 }
 
@@ -128,7 +134,7 @@ func TestEmbeddingRetry(t *testing.T) {
 	url := ts.URL
 
 	{
-		c := OpenAIEmbeddingClient{"mock_key", url}
+		c := NewOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
 		ret, err := c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
@@ -154,7 +160,7 @@ func TestEmbeddingFailed(t *testing.T) {
 	url := ts.URL
 
 	{
-		c := OpenAIEmbeddingClient{"mock_key", url}
+		c := NewOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
 		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
@@ -175,7 +181,7 @@ func TestTimeout(t *testing.T) {
 	url := ts.URL
 
 	{
-		c := OpenAIEmbeddingClient{"mock_key", url}
+		c := NewOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
 		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 1)
