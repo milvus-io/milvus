@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -48,6 +49,7 @@ type CompactionPlanHandlerSuite struct {
 	mockCm      *MockChannelManager
 	mockSessMgr *session.MockDataNodeManager
 	handler     *compactionPlanHandler
+	mockHandler *NMockHandler
 	cluster     *MockCluster
 }
 
@@ -59,6 +61,8 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockSessMgr = session.NewMockDataNodeManager(s.T())
 	s.cluster = NewMockCluster(s.T())
 	s.handler = newCompactionPlanHandler(s.cluster, s.mockSessMgr, s.mockMeta, s.mockAlloc, nil, nil)
+	s.mockHandler = NewNMockHandler(s.T())
+	s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 }
 
 func (s *CompactionPlanHandlerSuite) TestScheduleEmpty() {
@@ -937,6 +941,179 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 	s.handler.schedule()
 	err := s.handler.checkCompaction()
 	s.NoError(err)
+}
+
+func (s *CompactionPlanHandlerSuite) TestCleanCompaction() {
+	s.SetupTest()
+
+	tests := []struct {
+		task CompactionTask
+	}{
+		{
+			newMixCompactionTask(
+				&datapb.CompactionTask{
+					PlanID:        1,
+					TriggerID:     1,
+					Type:          datapb.CompactionType_MixCompaction,
+					State:         datapb.CompactionTaskState_failed,
+					NodeID:        1,
+					InputSegments: []UniqueID{1, 2},
+				},
+				nil, s.mockMeta, s.mockSessMgr),
+		},
+		{
+			newL0CompactionTask(&datapb.CompactionTask{
+				PlanID:        1,
+				TriggerID:     1,
+				Type:          datapb.CompactionType_Level0DeleteCompaction,
+				State:         datapb.CompactionTaskState_failed,
+				NodeID:        1,
+				InputSegments: []UniqueID{1, 2},
+			},
+				nil, s.mockMeta, s.mockSessMgr),
+		},
+	}
+	for _, test := range tests {
+		task := test.task
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Once()
+		s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+		s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+
+		s.handler.executingTasks[1] = task
+		s.Equal(1, len(s.handler.executingTasks))
+		err := s.handler.checkCompaction()
+		s.NoError(err)
+		s.Equal(0, len(s.handler.executingTasks))
+		s.Equal(1, len(s.handler.cleaningTasks))
+		s.handler.cleanFailedTasks()
+		s.Equal(0, len(s.handler.cleaningTasks))
+	}
+}
+
+func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompaction() {
+	s.SetupTest()
+
+	task := newClusteringCompactionTask(
+		&datapb.CompactionTask{
+			PlanID:        1,
+			TriggerID:     1,
+			CollectionID:  1001,
+			Type:          datapb.CompactionType_ClusteringCompaction,
+			State:         datapb.CompactionTaskState_failed,
+			NodeID:        1,
+			InputSegments: []UniqueID{1, 2},
+		},
+		nil, s.mockMeta, s.mockSessMgr, s.mockHandler, nil)
+	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).Return(nil)
+	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Once()
+	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(nil)
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+	s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+
+	s.handler.executingTasks[1] = task
+	s.Equal(1, len(s.handler.executingTasks))
+	s.handler.checkCompaction()
+	s.Equal(0, len(s.handler.executingTasks))
+	s.Equal(1, len(s.handler.cleaningTasks))
+	s.handler.cleanFailedTasks()
+	s.Equal(0, len(s.handler.cleaningTasks))
+}
+
+func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompactionCommitFail() {
+	s.SetupTest()
+
+	task := newClusteringCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		TriggerID:     1,
+		CollectionID:  1001,
+		Channel:       "ch-1",
+		Type:          datapb.CompactionType_ClusteringCompaction,
+		State:         datapb.CompactionTaskState_executing,
+		NodeID:        1,
+		InputSegments: []UniqueID{1, 2},
+		ClusteringKeyField: &schemapb.FieldSchema{
+			FieldID:         100,
+			Name:            Int64Field,
+			IsPrimaryKey:    true,
+			DataType:        schemapb.DataType_Int64,
+			AutoID:          true,
+			IsClusteringKey: true,
+		},
+	},
+		nil, s.mockMeta, s.mockSessMgr, s.mockHandler, nil)
+
+	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).Return(nil)
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+	s.mockSessMgr.EXPECT().GetCompactionPlanResult(UniqueID(1), int64(1)).Return(
+		&datapb.CompactionPlanResult{
+			PlanID: 1,
+			State:  datapb.CompactionTaskState_completed,
+			Segments: []*datapb.CompactionSegment{
+				{
+					PlanID:    1,
+					SegmentID: 101,
+				},
+			},
+		}, nil).Once()
+	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, errors.New("mock error"))
+	s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+	s.handler.executingTasks[1] = task
+	s.Equal(1, len(s.handler.executingTasks))
+	s.handler.checkCompaction()
+	s.Equal(0, len(task.GetTaskProto().GetResultSegments()))
+
+	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+	s.Equal(0, len(s.handler.executingTasks))
+	s.Equal(1, len(s.handler.cleaningTasks))
+
+	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Once()
+	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(nil)
+	s.handler.cleanFailedTasks()
+	s.Equal(0, len(s.handler.cleaningTasks))
+}
+
+// test compactionHandler should keep clean the failed task until it become cleaned
+func (s *CompactionPlanHandlerSuite) TestKeepClean() {
+	s.SetupTest()
+
+	tests := []struct {
+		task CompactionTask
+	}{
+		{
+			newClusteringCompactionTask(&datapb.CompactionTask{
+				PlanID:        1,
+				TriggerID:     1,
+				Type:          datapb.CompactionType_ClusteringCompaction,
+				State:         datapb.CompactionTaskState_failed,
+				NodeID:        1,
+				InputSegments: []UniqueID{1, 2},
+			},
+				nil, s.mockMeta, s.mockSessMgr, s.mockHandler, nil),
+		},
+	}
+	for _, test := range tests {
+		task := test.task
+		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return()
+		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+		s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+
+		s.handler.executingTasks[1] = task
+		s.Equal(1, len(s.handler.executingTasks))
+		s.handler.checkCompaction()
+		s.Equal(0, len(s.handler.executingTasks))
+		s.Equal(1, len(s.handler.cleaningTasks))
+		s.handler.cleanFailedTasks()
+		s.Equal(1, len(s.handler.cleaningTasks))
+		s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(nil).Once()
+		s.handler.cleanFailedTasks()
+		s.Equal(0, len(s.handler.cleaningTasks))
+	}
 }
 
 func getFieldBinlogIDs(fieldID int64, logIDs ...int64) *datapb.FieldBinlog {
