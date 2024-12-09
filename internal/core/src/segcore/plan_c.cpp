@@ -20,7 +20,7 @@ CreateSearchPlanByExpr(CCollection c_col,
                        const void* serialized_expr_plan,
                        const int64_t size,
                        CSearchPlan* res_plan) {
-    auto col = (milvus::segcore::Collection*)c_col;
+    auto col = static_cast<milvus::segcore::Collection*>(c_col);
 
     try {
         auto res = milvus::query::CreateSearchPlanByExpr(
@@ -36,7 +36,7 @@ CreateSearchPlanByExpr(CCollection c_col,
         auto status = CStatus();
         status.error_code = milvus::Success;
         status.error_msg = "";
-        auto plan = (CSearchPlan)res.release();
+        auto plan = static_cast<CSearchPlan>(res.release());
         *res_plan = plan;
         return status;
     } catch (milvus::SegcoreError& e) {
@@ -59,16 +59,18 @@ ParsePlaceholderGroup(CSearchPlan c_plan,
                       const void* placeholder_group_blob,
                       const int64_t blob_size,
                       CPlaceholderGroup* res_placeholder_group) {
-    auto plan = (milvus::query::Plan*)c_plan;
+    auto plan = static_cast<milvus::query::Plan*>(c_plan);
 
     try {
         auto res = milvus::query::ParsePlaceholderGroup(
-            plan, (const uint8_t*)(placeholder_group_blob), blob_size);
+            plan,
+            static_cast<const uint8_t*>(placeholder_group_blob),
+            blob_size);
 
         auto status = CStatus();
         status.error_code = milvus::Success;
         status.error_msg = "";
-        auto group = (CPlaceholderGroup)res.release();
+        auto group = static_cast<CPlaceholderGroup>(res.release());
         *res_placeholder_group = group;
         return status;
     } catch (std::exception& e) {
@@ -147,7 +149,7 @@ CreateRetrievePlanByExpr(CCollection c_col,
         auto status = CStatus();
         status.error_code = milvus::Success;
         status.error_msg = "";
-        auto plan = (CRetrievePlan)res.release();
+        auto plan = static_cast<CRetrievePlan>(res.release());
         *res_plan = plan;
         return status;
     } catch (milvus::SegcoreError& e) {

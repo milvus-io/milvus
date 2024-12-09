@@ -198,11 +198,11 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
                     chunk_id == chunk_id_end
                         ? vector_id_end - chunk_id * size_per_chunk + 1
                         : size_per_chunk;
-                std::memcpy(
-                    vec_data.get() + offset * dim,
-                    (const float*)field_raw_data->get_chunk_data(chunk_id) +
-                        chunk_offset * dim,
-                    chunk_copysz * dim * sizeof(float));
+                std::memcpy(vec_data.get() + offset * dim,
+                            static_cast<const float*>(
+                                field_raw_data->get_chunk_data(chunk_id)) +
+                                chunk_offset * dim,
+                            chunk_copysz * dim * sizeof(float));
                 offset += chunk_copysz;
             }
             data_addr = vec_data.get();
@@ -249,7 +249,7 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
             auto dataset = knowhere::GenDataSet(
                 chunk_sz,
                 dim,
-                (const float*)source->get_chunk_data(chunk_id) +
+                static_cast<const float*>(source->get_chunk_data(chunk_id)) +
                     chunk_offset * dim);
             index_->AddWithDataset(dataset, conf);
             index_cur_.fetch_add(chunk_sz);

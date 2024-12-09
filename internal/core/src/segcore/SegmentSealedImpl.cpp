@@ -713,7 +713,7 @@ int64_t
 SegmentSealedImpl::num_chunk_index(FieldId field_id) const {
     auto& field_meta = schema_->operator[](field_id);
     if (field_meta.is_vector()) {
-        return int64_t(vector_indexings_.is_ready(field_id));
+        return static_cast<int64_t>(vector_indexings_.is_ready(field_id));
     }
 
     return scalar_indexings_.count(field_id);
@@ -1966,8 +1966,8 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         build_config[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
         auto index_metric = field_binlog_config->GetMetricType();
 
-        auto dataset =
-            knowhere::GenDataSet(row_count, dim, (void*)vec_data->Data());
+        auto dataset = knowhere::GenDataSet(
+            row_count, dim, static_cast<const void*>(vec_data->Data()));
         dataset->SetIsOwner(false);
         dataset->SetIsSparse(is_sparse);
 
