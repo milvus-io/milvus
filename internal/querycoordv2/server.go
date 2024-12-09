@@ -226,7 +226,7 @@ func (s *Server) initQueryCoord() error {
 	log.Info("QueryCoord try to wait for RootCoord ready")
 	if err := componentutil.WaitForComponentHealthy(s.ctx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200); err != nil {
 		log.Error("QueryCoord wait for RootCoord ready failed", zap.Error(err))
-		panic(err)
+		return errors.Wrap(err, "RootCoord not ready")
 	}
 	log.Info("QueryCoord report RootCoord ready")
 
@@ -234,7 +234,7 @@ func (s *Server) initQueryCoord() error {
 	log.Info("QueryCoord try to wait for DataCoord ready")
 	if err := componentutil.WaitForComponentHealthy(s.ctx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200); err != nil {
 		log.Error("QueryCoord wait for DataCoord ready failed", zap.Error(err))
-		panic(err)
+		return errors.Wrap(err, "DataCoord not ready")
 	}
 	log.Info("QueryCoord report DataCoord ready")
 
