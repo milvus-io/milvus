@@ -948,7 +948,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	return nil
 }
 
-func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64,
+func (sd *shardDelegator) SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64,
 	sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition,
 ) {
 	growings := sd.segmentManager.GetBy(
@@ -980,7 +980,7 @@ func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []
 		log.Warn("found redundant growing segments",
 			zap.Int64s("growingSegments", redundantGrowingIDs))
 	}
-	sd.distribution.SyncTargetVersion(newVersion, growingInTarget, sealedInTarget, redundantGrowingIDs)
+	sd.distribution.SyncTargetVersion(newVersion, partitions, growingInTarget, sealedInTarget, redundantGrowingIDs)
 	sd.deleteBuffer.TryDiscard(checkpoint.GetTimestamp())
 }
 

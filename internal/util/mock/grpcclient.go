@@ -39,6 +39,7 @@ type GRPCClientBase[T any] struct {
 
 	grpcClient       T
 	cpInternalTLS    *x509.CertPool
+	cpInternalSNI    string
 	conn             *grpc.ClientConn
 	grpcClientMtx    sync.RWMutex
 	GetGrpcClientErr error
@@ -64,6 +65,10 @@ func (c *GRPCClientBase[T]) EnableEncryption() {
 
 func (c *GRPCClientBase[T]) SetInternalTLSCertPool(cp *x509.CertPool) {
 	c.cpInternalTLS = cp
+}
+
+func (c *GRPCClientBase[T]) SetInternalTLSServerName(cp string) {
+	c.cpInternalSNI = cp
 }
 
 func (c *GRPCClientBase[T]) SetNewGrpcClientFunc(f func(cc *grpc.ClientConn) T) {

@@ -1363,9 +1363,10 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 
 	s.ElementsMatch([]SegmentEntry{
 		{
-			SegmentID:   1001,
-			NodeID:      1,
-			PartitionID: 500,
+			SegmentID:     1001,
+			NodeID:        1,
+			PartitionID:   500,
+			TargetVersion: unreadableTargetVersion,
 		},
 	}, growing)
 
@@ -1503,7 +1504,7 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 		s.manager.Segment.Put(context.Background(), segments.SegmentTypeGrowing, ms)
 	}
 
-	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{2}, []int64{3, 4}, &msgpb.MsgPosition{})
+	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{1}, []int64{2}, []int64{3, 4}, &msgpb.MsgPosition{})
 	s.Equal(int64(5), s.delegator.GetTargetVersion())
 }
 

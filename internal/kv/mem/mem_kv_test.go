@@ -17,6 +17,7 @@
 package memkv
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -30,15 +31,15 @@ func TestMemoryKV_SaveAndLoadBytes(t *testing.T) {
 
 	key := "key"
 	value := []byte("value")
-	err := mem.SaveBytes(key, value)
+	err := mem.SaveBytes(context.TODO(), key, value)
 	assert.NoError(t, err)
 
-	_value, err := mem.LoadBytes(key)
+	_value, err := mem.LoadBytes(context.TODO(), key)
 	assert.NoError(t, err)
 	assert.Equal(t, value, _value)
 
 	noKey := "no_key"
-	_value, err = mem.LoadBytes(noKey)
+	_value, err = mem.LoadBytes(context.TODO(), noKey)
 	assert.Error(t, err)
 	assert.Empty(t, _value)
 }
@@ -56,16 +57,16 @@ func TestMemoryKV_LoadBytesRange(t *testing.T) {
 
 	mem := NewMemoryKV()
 	for _, kv := range saveAndLoadBytesTests {
-		err := mem.SaveBytes(kv.key, kv.value)
+		err := mem.SaveBytes(context.TODO(), kv.key, kv.value)
 		assert.NoError(t, err)
 	}
 
-	keys, values, err := mem.LoadBytesRange("test1", "test1/b", 0)
+	keys, values, err := mem.LoadBytesRange(context.TODO(), "test1", "test1/b", 0)
 	assert.Equal(t, len(keys), 2)
 	assert.Equal(t, len(values), 2)
 	assert.NoError(t, err)
 
-	keys, values, err = mem.LoadBytesRange("test1", "test1/a", 2)
+	keys, values, err = mem.LoadBytesRange(context.TODO(), "test1", "test1/a", 2)
 	assert.Equal(t, len(keys), 1)
 	assert.Equal(t, len(values), 1)
 	assert.NoError(t, err)
@@ -76,15 +77,15 @@ func TestMemoryKV_LoadBytesWithDefault(t *testing.T) {
 
 	key := "key"
 	value := []byte("value")
-	err := mem.SaveBytes(key, value)
+	err := mem.SaveBytes(context.TODO(), key, value)
 	assert.NoError(t, err)
 
 	_default := []byte("default")
-	_value := mem.LoadBytesWithDefault(key, _default)
+	_value := mem.LoadBytesWithDefault(context.TODO(), key, _default)
 	assert.Equal(t, value, _value)
 
 	noKey := "no_key"
-	_value = mem.LoadBytesWithDefault(noKey, _default)
+	_value = mem.LoadBytesWithDefault(context.TODO(), noKey, _default)
 	assert.Equal(t, _value, _default)
 }
 
@@ -101,21 +102,21 @@ func TestMemoryKV_LoadBytesWithPrefix(t *testing.T) {
 
 	mem := NewMemoryKV()
 	for _, kv := range saveAndLoadBytesTests {
-		err := mem.SaveBytes(kv.key, kv.value)
+		err := mem.SaveBytes(context.TODO(), kv.key, kv.value)
 		assert.NoError(t, err)
 	}
 
-	keys, values, err := mem.LoadBytesWithPrefix("test1")
+	keys, values, err := mem.LoadBytesWithPrefix(context.TODO(), "test1")
 	assert.Equal(t, len(keys), 3)
 	assert.Equal(t, len(values), 3)
 	assert.NoError(t, err)
 
-	keys, values, err = mem.LoadBytesWithPrefix("test")
+	keys, values, err = mem.LoadBytesWithPrefix(context.TODO(), "test")
 	assert.Equal(t, len(keys), 4)
 	assert.Equal(t, len(values), 4)
 	assert.NoError(t, err)
 
-	keys, values, err = mem.LoadBytesWithPrefix("a")
+	keys, values, err = mem.LoadBytesWithPrefix(context.TODO(), "a")
 	assert.Equal(t, len(keys), 0)
 	assert.Equal(t, len(values), 0)
 	assert.NoError(t, err)
@@ -137,14 +138,14 @@ func TestMemoryKV_MultiSaveBytes(t *testing.T) {
 	}
 
 	mem := NewMemoryKV()
-	err := mem.MultiSaveBytes(saveAndLoadBytesTests)
+	err := mem.MultiSaveBytes(context.TODO(), saveAndLoadBytesTests)
 	assert.NoError(t, err)
 
-	_values, err := mem.MultiLoadBytes(keys)
+	_values, err := mem.MultiLoadBytes(context.TODO(), keys)
 	assert.Equal(t, values, _values)
 	assert.NoError(t, err)
 
-	_values, err = mem.MultiLoadBytes([]string{})
+	_values, err = mem.MultiLoadBytes(context.TODO(), []string{})
 	assert.Empty(t, _values)
 	assert.NoError(t, err)
 }
@@ -165,14 +166,14 @@ func TestMemoryKV_MultiSaveBytesAndRemove(t *testing.T) {
 	}
 
 	mem := NewMemoryKV()
-	err := mem.MultiSaveBytesAndRemove(saveAndLoadBytesTests, []string{keys[0]})
+	err := mem.MultiSaveBytesAndRemove(context.TODO(), saveAndLoadBytesTests, []string{keys[0]})
 	assert.NoError(t, err)
 
-	_value, err := mem.LoadBytes(keys[0])
+	_value, err := mem.LoadBytes(context.TODO(), keys[0])
 	assert.Empty(t, _value)
 	assert.Error(t, err)
 
-	_values, err := mem.MultiLoadBytes(keys[1:])
+	_values, err := mem.MultiLoadBytes(context.TODO(), keys[1:])
 	assert.Equal(t, values[1:], _values)
 	assert.NoError(t, err)
 }
@@ -193,10 +194,10 @@ func TestMemoryKV_MultiSaveBytesAndRemoveWithPrefix(t *testing.T) {
 	}
 
 	mem := NewMemoryKV()
-	err := mem.MultiSaveBytesAndRemoveWithPrefix(saveAndLoadBytesTests, []string{"test1"})
+	err := mem.MultiSaveBytesAndRemoveWithPrefix(context.TODO(), saveAndLoadBytesTests, []string{"test1"})
 	assert.NoError(t, err)
 
-	_keys, _values, err := mem.LoadBytesWithPrefix("test")
+	_keys, _values, err := mem.LoadBytesWithPrefix(context.TODO(), "test")
 	assert.ElementsMatch(t, keys, _keys)
 	assert.ElementsMatch(t, values, _values)
 	assert.NoError(t, err)
@@ -205,21 +206,21 @@ func TestMemoryKV_MultiSaveBytesAndRemoveWithPrefix(t *testing.T) {
 func TestHas(t *testing.T) {
 	kv := NewMemoryKV()
 
-	has, err := kv.Has("key1")
+	has, err := kv.Has(context.TODO(), "key1")
 	assert.NoError(t, err)
 	assert.False(t, has)
 
-	err = kv.Save("key1", "value1")
+	err = kv.Save(context.TODO(), "key1", "value1")
 	assert.NoError(t, err)
 
-	has, err = kv.Has("key1")
+	has, err = kv.Has(context.TODO(), "key1")
 	assert.NoError(t, err)
 	assert.True(t, has)
 
-	err = kv.Remove("key1")
+	err = kv.Remove(context.TODO(), "key1")
 	assert.NoError(t, err)
 
-	has, err = kv.Has("key1")
+	has, err = kv.Has(context.TODO(), "key1")
 	assert.NoError(t, err)
 	assert.False(t, has)
 }
@@ -227,21 +228,21 @@ func TestHas(t *testing.T) {
 func TestHasPrefix(t *testing.T) {
 	kv := NewMemoryKV()
 
-	has, err := kv.HasPrefix("key")
+	has, err := kv.HasPrefix(context.TODO(), "key")
 	assert.NoError(t, err)
 	assert.False(t, has)
 
-	err = kv.Save("key1", "value1")
+	err = kv.Save(context.TODO(), "key1", "value1")
 	assert.NoError(t, err)
 
-	has, err = kv.HasPrefix("key")
+	has, err = kv.HasPrefix(context.TODO(), "key")
 	assert.NoError(t, err)
 	assert.True(t, has)
 
-	err = kv.Remove("key1")
+	err = kv.Remove(context.TODO(), "key1")
 	assert.NoError(t, err)
 
-	has, err = kv.HasPrefix("key")
+	has, err = kv.HasPrefix(context.TODO(), "key")
 	assert.NoError(t, err)
 	assert.False(t, has)
 }
@@ -250,11 +251,11 @@ func TestPredicates(t *testing.T) {
 	kv := NewMemoryKV()
 
 	// predicates not supported for mem kv for now
-	err := kv.MultiSaveAndRemove(map[string]string{}, []string{}, predicates.ValueEqual("a", "b"))
+	err := kv.MultiSaveAndRemove(context.TODO(), map[string]string{}, []string{}, predicates.ValueEqual("a", "b"))
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 
-	err = kv.MultiSaveAndRemoveWithPrefix(map[string]string{}, []string{}, predicates.ValueEqual("a", "b"))
+	err = kv.MultiSaveAndRemoveWithPrefix(context.TODO(), map[string]string{}, []string{}, predicates.ValueEqual("a", "b"))
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }

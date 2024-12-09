@@ -80,13 +80,13 @@ func TestNodeManager_Start(t *testing.T) {
 	msgStream.AsConsumer(context.TODO(), channels, "sub", common.SubscriptionPositionEarliest)
 
 	produceStream, _ := factory.NewMsgStream(context.TODO())
-	produceStream.AsProducer(channels)
+	produceStream.AsProducer(context.TODO(), channels)
 
 	msgPack := generateMsgPack()
-	produceStream.Produce(&msgPack)
+	produceStream.Produce(context.TODO(), &msgPack)
 	time.Sleep(time.Millisecond * 2)
 	msgPack = generateMsgPack()
-	produceStream.Produce(&msgPack)
+	produceStream.Produce(context.TODO(), &msgPack)
 
 	nodeName := "input_node"
 	inputNode := NewInputNode(msgStream.Chan(), nodeName, 100, 100, "", 0, 0, "")

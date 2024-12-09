@@ -25,11 +25,28 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
+type EmptyReq struct{}
+
+func (req *EmptyReq) GetDbName() string { return "" }
+
 type DatabaseReq struct {
 	DbName string `json:"dbName"`
 }
 
 func (req *DatabaseReq) GetDbName() string { return req.DbName }
+
+type DatabaseReqRequiredName struct {
+	DbName string `json:"dbName" binding:"required"`
+}
+
+func (req *DatabaseReqRequiredName) GetDbName() string { return req.DbName }
+
+type DatabaseReqWithProperties struct {
+	DbName     string                 `json:"dbName" binding:"required"`
+	Properties map[string]interface{} `json:"properties"`
+}
+
+func (req *DatabaseReqWithProperties) GetDbName() string { return req.DbName }
 
 type CollectionNameReq struct {
 	DbName         string   `json:"dbName"`

@@ -773,7 +773,7 @@ func (s *Server) watchNodes(revision int64) {
 				)
 				s.nodeMgr.Stopping(nodeID)
 				s.checkerController.Check()
-				s.meta.ResourceManager.HandleNodeStopping(s.ctx, nodeID)
+				s.meta.ResourceManager.HandleNodeStopping(context.Background(), nodeID)
 
 			case sessionutil.SessionDelEvent:
 				nodeID := event.Session.ServerID
@@ -848,7 +848,7 @@ func (s *Server) handleNodeDown(node int64) {
 	// Clear tasks
 	s.taskScheduler.RemoveByNode(node)
 
-	s.meta.ResourceManager.HandleNodeDown(s.ctx, node)
+	s.meta.ResourceManager.HandleNodeDown(context.Background(), node)
 }
 
 func (s *Server) checkNodeStateInRG() {
@@ -857,9 +857,9 @@ func (s *Server) checkNodeStateInRG() {
 		for _, node := range rg.GetNodes() {
 			info := s.nodeMgr.Get(node)
 			if info == nil {
-				s.meta.ResourceManager.HandleNodeDown(s.ctx, node)
+				s.meta.ResourceManager.HandleNodeDown(context.Background(), node)
 			} else if info.IsStoppingState() {
-				s.meta.ResourceManager.HandleNodeStopping(s.ctx, node)
+				s.meta.ResourceManager.HandleNodeStopping(context.Background(), node)
 			}
 		}
 	}

@@ -97,7 +97,7 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 		for tokenStream.Advance() {
 			token := tokenStream.Token()
 			// TODO More Hash Option
-			hash := typeutil.HashString2Uint32(token)
+			hash := typeutil.HashString2LessUint32(token)
 			embeddingMap[hash] += 1
 		}
 		dst[i] = embeddingMap

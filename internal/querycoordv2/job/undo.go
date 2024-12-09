@@ -23,7 +23,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
-	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
@@ -37,18 +36,16 @@ type UndoList struct {
 
 	ctx            context.Context
 	meta           *meta.Meta
-	cluster        session.Cluster
 	targetMgr      meta.TargetManagerInterface
 	targetObserver *observers.TargetObserver
 }
 
 func NewUndoList(ctx context.Context, meta *meta.Meta,
-	cluster session.Cluster, targetMgr meta.TargetManagerInterface, targetObserver *observers.TargetObserver,
+	targetMgr meta.TargetManagerInterface, targetObserver *observers.TargetObserver,
 ) *UndoList {
 	return &UndoList{
 		ctx:            ctx,
 		meta:           meta,
-		cluster:        cluster,
 		targetMgr:      targetMgr,
 		targetObserver: targetObserver,
 	}

@@ -116,7 +116,7 @@ func (t *clusteringCompactionTask) Process() bool {
 		if t.GetTaskProto().State == datapb.CompactionTaskState_completed || t.GetTaskProto().State == datapb.CompactionTaskState_cleaned {
 			updateOps = append(updateOps, setEndTime(ts))
 			elapse := ts - t.GetTaskProto().StartTime
-			log.Info("clustering compaction task total elapse", zap.Int64("elapse seconds", elapse))
+			log.Info("clustering compaction task total elapse", zap.Duration("costs", time.Duration(elapse)*time.Second))
 			metrics.DataCoordCompactionLatency.
 				WithLabelValues(fmt.Sprint(typeutil.IsVectorType(t.GetTaskProto().GetClusteringKeyField().DataType)), fmt.Sprint(t.GetTaskProto().CollectionID), t.GetTaskProto().Channel, datapb.CompactionType_ClusteringCompaction.String(), "total").
 				Observe(float64(elapse * 1000))
@@ -247,6 +247,7 @@ func (t *clusteringCompactionTask) processExecuting() error {
 	log := log.With(zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("type", t.GetTaskProto().GetType().String()))
 	result, err := t.sessions.GetCompactionPlanResult(t.GetTaskProto().GetNodeID(), t.GetTaskProto().GetPlanID())
 	if err != nil || result == nil {
+		log.Warn("processExecuting clustering compaction", zap.Error(err))
 		if errors.Is(err, merr.ErrNodeNotFound) {
 			log.Warn("GetCompactionPlanResult fail", zap.Error(err))
 			// setNodeID(NullNodeID) to trigger reassign node ID
@@ -254,7 +255,8 @@ func (t *clusteringCompactionTask) processExecuting() error {
 		}
 		return err
 	}
-	log.Info("compaction result", zap.Any("result", result.String()))
+	log.Debug("compaction result", zap.String("result state", result.GetState().String()),
+		zap.Int("result segments num", len(result.GetSegments())), zap.Int("result string length", len(result.String())))
 	switch result.GetState() {
 	case datapb.CompactionTaskState_completed:
 		t.result = result
@@ -685,6 +687,7 @@ func (t *clusteringCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskO
 		return merr.WrapErrClusteringCompactionMetaError("updateAndSaveTaskMeta", err) // retryable
 	}
 	t.SetTask(task)
+	log.Info("updateAndSaveTaskMeta success", zap.String("task state", t.GetTaskProto().GetState().String()))
 	return nil
 }
 

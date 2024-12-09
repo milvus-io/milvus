@@ -1245,6 +1245,54 @@ func (_c *IMetaTable_GetCollectionByName_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// GetCollectionID provides a mock function with given fields: ctx, dbName, collectionName
+func (_m *IMetaTable) GetCollectionID(ctx context.Context, dbName string, collectionName string) int64 {
+	ret := _m.Called(ctx, dbName, collectionName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCollectionID")
+	}
+
+	var r0 int64
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) int64); ok {
+		r0 = rf(ctx, dbName, collectionName)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	return r0
+}
+
+// IMetaTable_GetCollectionID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCollectionID'
+type IMetaTable_GetCollectionID_Call struct {
+	*mock.Call
+}
+
+// GetCollectionID is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dbName string
+//   - collectionName string
+func (_e *IMetaTable_Expecter) GetCollectionID(ctx interface{}, dbName interface{}, collectionName interface{}) *IMetaTable_GetCollectionID_Call {
+	return &IMetaTable_GetCollectionID_Call{Call: _e.mock.On("GetCollectionID", ctx, dbName, collectionName)}
+}
+
+func (_c *IMetaTable_GetCollectionID_Call) Run(run func(ctx context.Context, dbName string, collectionName string)) *IMetaTable_GetCollectionID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetCollectionID_Call) Return(_a0 int64) *IMetaTable_GetCollectionID_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_GetCollectionID_Call) RunAndReturn(run func(context.Context, string, string) int64) *IMetaTable_GetCollectionID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCollectionVirtualChannels provides a mock function with given fields: ctx, colID
 func (_m *IMetaTable) GetCollectionVirtualChannels(ctx context.Context, colID int64) []string {
 	ret := _m.Called(ctx, colID)

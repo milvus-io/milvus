@@ -1272,20 +1272,25 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 		return
 	}
 
-	C.DeleteSegment(ptr)
-
-	localDiskUsage, err := segcore.GetLocalUsedSize(context.Background(), paramtable.Get().LocalStorageCfg.Path.GetValue())
-	// ignore error here, shall not block releasing
-	if err == nil {
-		metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(localDiskUsage) / 1024 / 1024) // in MB
-	}
+	GetDynamicPool().Submit(func() (any, error) {
+		C.DeleteSegment(ptr)
+		localDiskUsage, err := segcore.GetLocalUsedSize(context.Background(), paramtable.Get().LocalStorageCfg.Path.GetValue())
+		// ignore error here, shall not block releasing
+		if err == nil {
+			metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(localDiskUsage) / 1024 / 1024) // in MB
+		}
+		return nil, nil
+	}).Await()
 
 	log.Info("delete segment from memory")
 }
 
 // ReleaseSegmentData releases the segment data.
 func (s *LocalSegment) ReleaseSegmentData() {
-	C.ClearSegmentData(s.ptr)
+	GetDynamicPool().Submit(func() (any, error) {
+		C.ClearSegmentData(s.ptr)
+		return nil, nil
+	}).Await()
 	for _, indexInfo := range s.Indexes() {
 		indexInfo.IsLoaded = false
 	}
@@ -1309,7 +1314,10 @@ func (s *LocalSegment) startRelease(scope ReleaseScope) state.LoadStateLockGuard
 }
 
 func (s *LocalSegment) RemoveFieldFile(fieldId int64) {
-	C.RemoveFieldFile(s.ptr, C.int64_t(fieldId))
+	GetDynamicPool().Submit(func() (any, error) {
+		C.RemoveFieldFile(s.ptr, C.int64_t(fieldId))
+		return nil, nil
+	}).Await()
 }
 
 func (s *LocalSegment) RemoveUnusedFieldFiles() error {
