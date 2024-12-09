@@ -583,7 +583,7 @@ func (suite *TargetManagerSuite) TestRecover() {
 	suite.mgr.UpdateCollectionCurrentTarget(collectionID)
 
 	// target should be save to meta store after update current target
-	targets, err := suite.catalog.GetCollectionTargets(ctx)
+	targets, err := suite.catalog.GetCollectionTargets()
 	suite.NoError(err)
 	suite.Len(targets, 1)
 
@@ -591,7 +591,7 @@ func (suite *TargetManagerSuite) TestRecover() {
 	version := suite.mgr.current.getCollectionTarget(collectionID).GetTargetVersion()
 	suite.mgr.current.removeCollectionTarget(collectionID)
 	// try to recover
-	suite.mgr.Recover(ctx)
+	suite.mgr.Recover()
 
 	target := suite.mgr.current.getCollectionTarget(collectionID)
 	suite.NotNil(target)
@@ -600,8 +600,8 @@ func (suite *TargetManagerSuite) TestRecover() {
 	suite.Equal(target.GetTargetVersion(), version)
 
 	// target should be removed from meta store after collection released
-	suite.mgr.RemoveCollection(ctx, collectionID)
-	targets, err = suite.catalog.GetCollectionTargets(ctx)
+	suite.mgr.RemoveCollection(collectionID)
+	targets, err = suite.catalog.GetCollectionTargets()
 	suite.NoError(err)
 	suite.Len(targets, 0)
 }

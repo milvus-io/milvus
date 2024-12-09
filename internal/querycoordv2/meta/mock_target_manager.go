@@ -3,8 +3,6 @@
 package meta
 
 import (
-	context "context"
-
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 
@@ -606,16 +604,12 @@ func (_c *MockTargetManager_IsNextTargetExist_Call) RunAndReturn(run func(int64)
 	return _c
 }
 
-// Recover provides a mock function with given fields: ctx
+// Recover provides a mock function with given fields:
 func (_m *MockTargetManager) Recover() error {
 	ret := _m.Called()
 
-	if len(ret) == 0 {
-		panic("no return value specified for Recover")
-	}
-
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
 	} else {
 		r0 = ret.Error(0)
@@ -630,7 +624,6 @@ type MockTargetManager_Recover_Call struct {
 }
 
 // Recover is a helper method to define mock.On call
-//   - ctx context.Context
 func (_e *MockTargetManager_Expecter) Recover() *MockTargetManager_Recover_Call {
 	return &MockTargetManager_Recover_Call{Call: _e.mock.On("Recover")}
 }
@@ -647,7 +640,7 @@ func (_c *MockTargetManager_Recover_Call) Return(_a0 error) *MockTargetManager_R
 	return _c
 }
 
-func (_c *MockTargetManager_Recover_Call) RunAndReturn(run func(context.Context) error) *MockTargetManager_Recover_Call {
+func (_c *MockTargetManager_Recover_Call) RunAndReturn(run func() error) *MockTargetManager_Recover_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -733,13 +726,9 @@ func (_c *MockTargetManager_RemovePartition_Call) RunAndReturn(run func(int64, .
 	return _c
 }
 
-// UpdateCollectionCurrentTarget provides a mock function with given fields: ctx, collectionID
-func (_m *MockTargetManager) UpdateCollectionCurrentTarget(ctx context.Context, collectionID int64) bool {
-	ret := _m.Called(ctx, collectionID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for UpdateCollectionCurrentTarget")
-	}
+// UpdateCollectionCurrentTarget provides a mock function with given fields: collectionID
+func (_m *MockTargetManager) UpdateCollectionCurrentTarget(collectionID int64) bool {
+	ret := _m.Called(collectionID)
 
 	var r0 bool
 	if rf, ok := ret.Get(0).(func(int64) bool); ok {
