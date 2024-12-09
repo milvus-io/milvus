@@ -436,18 +436,20 @@ func (ss *SuffixSnapshot) generateSaveExecute(ctx context.Context, kvs map[strin
 func (ss *SuffixSnapshot) LoadWithPrefix(ctx context.Context, key string, ts typeutil.Timestamp) ([]string, []string, error) {
 	// ts 0 case shall be treated as fetch latest/current value
 	if ts == 0 || ts == typeutil.MaxTimestamp {
-		keys, values, err := ss.MetaKv.LoadWithPrefix(ctx, key)
-		fks := keys[:0]   // make([]string, 0, len(keys))
-		fvs := values[:0] // make([]string, 0, len(values))
+		fks := make([]string, 0)
+		fvs := make([]string, 0)
 		// hide rootPrefix from return value
-		for i, k := range keys {
+		applyFn := func(key []byte, value []byte) error {
 			// filters tombstone
-			if ss.isTombstone(values[i]) {
-				continue
+			if ss.isTombstone(string(value)) {
+				return nil
 			}
-			fks = append(fks, ss.hideRootPrefix(k))
-			fvs = append(fvs, values[i])
+			fks = append(fks, ss.hideRootPrefix(string(key)))
+			fvs = append(fvs, string(value))
+			return nil
 		}
+
+		err := ss.MetaKv.WalkWithPrefix(ctx, key, PaginationSize, applyFn)
 		return fks, fvs, err
 	}
 	ss.Lock()
