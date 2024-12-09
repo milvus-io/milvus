@@ -143,7 +143,7 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 	return plans
 }
 
-func (b *ScoreBasedBalancer) AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
+func (b *ScoreBasedBalancer) AssignChannel(collectionID int64, channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
 	br := NewBalanceReport()
 	return b.assignChannel(br, collectionID, channels, nodes, manualBalance)
 }
@@ -510,14 +510,11 @@ func (b *ScoreBasedBalancer) genSegmentPlan(br *balanceReport, replica *meta.Rep
 		return nil
 	}
 
-<<<<<<< HEAD
-=======
 	log.Info("node segment workload status",
 		zap.Int64("collectionID", replica.GetCollectionID()),
 		zap.Int64("replicaID", replica.GetID()),
 		zap.Stringers("nodes", lo.Values(nodeItemsMap)))
 
->>>>>>> 8126aac752 (enhance: Enable score based balance channel policy)
 	// list all segment which could be balanced, and calculate node's score
 	for _, node := range onlineNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))
@@ -582,7 +579,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(br *balanceReport, replica *meta.Rep
 	return segmentPlans
 }
 
-func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, onlineNodes []int64) []ChannelAssignPlan {
+func (b *ScoreBasedBalancer) genChannelPlan(br *balanceReport, replica *meta.Replica, onlineNodes []int64) []ChannelAssignPlan {
 	nodeItemsMap := b.convertToNodeItemsByChannel(br, replica.GetCollectionID(), onlineNodes)
 	if len(nodeItemsMap) == 0 {
 		return nil

@@ -16,8 +16,6 @@
 package balance
 
 import (
-	"context"
-	"fmt"
 	"testing"
 
 	"github.com/samber/lo"
@@ -607,8 +605,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceWithExecutingTask() {
 			for i := range c.nodes {
 				suite.mockScheduler.EXPECT().GetSegmentTaskDelta(c.nodes[i], mock.Anything).Return(c.deltaCounts[i]).Maybe()
 				suite.mockScheduler.EXPECT().GetChannelTaskDelta(c.nodes[i], mock.Anything).Return(c.deltaCounts[i]).Maybe()
-				suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
-				suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
+				suite.mockScheduler.EXPECT().GetSegmentTaskNum().Return(0).Maybe()
+				suite.mockScheduler.EXPECT().GetChannelTaskNum().Return(0).Maybe()
 			}
 
 			// 4. balance and verify result
