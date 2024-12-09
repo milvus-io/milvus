@@ -112,8 +112,6 @@ func (job *ReleaseCollectionJob) Execute() error {
 		proxyutil.SetMsgType(commonpb.MsgType_ReleaseCollection))
 
 	waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
-	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
-	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(len(toRelease)))
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	return nil
@@ -196,7 +194,6 @@ func (job *ReleasePartitionJob) Execute() error {
 			log.Warn("failed to remove replicas", zap.Error(err))
 		}
 		job.targetObserver.ReleaseCollection(req.GetCollectionID())
-		metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 		// try best discard cache
 		// shall not affect releasing if failed
 		job.proxyManager.InvalidateCollectionMetaCache(job.ctx,
@@ -216,6 +213,5 @@ func (job *ReleasePartitionJob) Execute() error {
 		job.targetObserver.ReleasePartition(req.GetCollectionID(), toRelease...)
 		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID(), toRelease...)
 	}
-	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(len(toRelease)))
 	return nil
 }

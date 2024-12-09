@@ -505,6 +505,10 @@ func (m *mockRootCoordClient) AlterCollection(ctx context.Context, request *milv
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockRootCoordClient) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockRootCoordClient) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }

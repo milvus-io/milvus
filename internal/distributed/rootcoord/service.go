@@ -534,6 +534,10 @@ func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCol
 	return s.rootCoord.AlterCollection(ctx, request)
 }
 
+func (s *Server) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
+	return s.rootCoord.AlterCollectionField(ctx, request)
+}
+
 func (s *Server) RenameCollection(ctx context.Context, request *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.RenameCollection(ctx, request)
 }
