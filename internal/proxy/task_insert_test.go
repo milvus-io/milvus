@@ -404,6 +404,18 @@ func TestInsertTask_Function(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(info, nil)
+
+	cache.On("GetPartitionInfo",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(&partitionInfo{
+		name:                "p1",
+		partitionID:         10,
+		createdTimestamp:    10001,
+		createdUtcTimestamp: 10002,
+	}, nil)
 	globalMetaCache = cache
 	err = task.PreExecute(ctx)
 	assert.NoError(t, err)
