@@ -261,19 +261,31 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
 		}
 
 		loaded := true
+		hasUpdate := false
+
+		channelTargetNum, subChannelCount := ob.observeChannelStatus(ctx, task.CollectionID)
+
 		for _, partition := range partitions {
 			if partition.LoadPercentage == 100 {
 				continue
 			}
 			if ob.readyToObserve(ctx, partition.CollectionID) {
 				replicaNum := ob.meta.GetReplicaNumber(ctx, partition.GetCollectionID())
-				ob.observePartitionLoadStatus(ctx, partition, replicaNum)
+				has := ob.observePartitionLoadStatus(ctx, partition, replicaNum, channelTargetNum, subChannelCount)
+				if has {
+					hasUpdate = true
+				}
 			}
 			partition = ob.meta.GetPartition(ctx, partition.PartitionID)
 			if partition != nil && partition.LoadPercentage != 100 {
 				loaded = false
 			}
 		}
+
+		if hasUpdate {
+			ob.observeCollectionLoadStatus(ctx, task.CollectionID)
+		}
+
 		// all partition loaded, finish task
 		if len(partitions) > 0 && loaded {
 			log.Info("Load task finish",
@@ -293,37 +305,48 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
 	}
 }
 
-func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, partition *meta.Partition, replicaNum int32) {
+func (ob *CollectionObserver) observeChannelStatus(ctx context.Context, collectionID int64) (int, int) {
+	channelTargets := ob.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTarget)
+
+	channelTargetNum := len(channelTargets)
+	if channelTargetNum == 0 {
+		log.Info("channels in target is empty, waiting for new target content")
+		return 0, 0
+	}
+
+	subChannelCount := 0
+	for _, channel := range channelTargets {
+		views := ob.dist.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel.GetChannelName()))
+		nodes := lo.Map(views, func(v *meta.LeaderView, _ int) int64 { return v.ID })
+		group := utils.GroupNodesByReplica(ctx, ob.meta.ReplicaManager, collectionID, nodes)
+		subChannelCount += len(group)
+	}
+	return channelTargetNum, subChannelCount
+}
+
+func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, partition *meta.Partition, replicaNum int32, channelTargetNum, subChannelCount int) bool {
 	log := log.Ctx(ctx).WithRateGroup("qcv2.observePartitionLoadStatus", 1, 60).With(
 		zap.Int64("collectionID", partition.GetCollectionID()),
 		zap.Int64("partitionID", partition.GetPartitionID()),
 	)
 
 	segmentTargets := ob.targetMgr.GetSealedSegmentsByPartition(ctx, partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTarget)
-	channelTargets := ob.targetMgr.GetDmChannelsByCollection(ctx, partition.GetCollectionID(), meta.NextTarget)
 
-	targetNum := len(segmentTargets) + len(channelTargets)
+	targetNum := len(segmentTargets) + channelTargetNum
 	if targetNum == 0 {
 		log.Info("segments and channels in target are both empty, waiting for new target content")
-		return
+		return false
 	}
 
 	log.RatedInfo(10, "partition targets",
 		zap.Int("segmentTargetNum", len(segmentTargets)),
-		zap.Int("channelTargetNum", len(channelTargets)),
+		zap.Int("channelTargetNum", channelTargetNum),
 		zap.Int("totalTargetNum", targetNum),
 		zap.Int32("replicaNum", replicaNum),
 	)
-	loadedCount := 0
+	loadedCount := subChannelCount
 	loadPercentage := int32(0)
 
-	for _, channel := range channelTargets {
-		views := ob.dist.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel.GetChannelName()))
-		nodes := lo.Map(views, func(v *meta.LeaderView, _ int) int64 { return v.ID })
-		group := utils.GroupNodesByReplica(ctx, ob.meta.ReplicaManager, partition.GetCollectionID(), nodes)
-		loadedCount += len(group)
-	}
-	subChannelCount := loadedCount
 	for _, segment := range segmentTargets {
 		views := ob.dist.LeaderViewManager.GetByFilter(
 			meta.WithChannelName2LeaderView(segment.GetInsertChannel()),
@@ -341,29 +364,42 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 
 	if loadedCount <= ob.partitionLoadedCount[partition.GetPartitionID()] && loadPercentage != 100 {
 		ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
-		return
+		return false
 	}
 
 	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
 	if loadPercentage == 100 {
 		if !ob.targetObserver.Check(ctx, partition.GetCollectionID(), partition.PartitionID) {
 			log.Warn("failed to manual check current target, skip update load status")
-			return
+			return false
 		}
 		delete(ob.partitionLoadedCount, partition.GetPartitionID())
 	}
-	collectionPercentage, err := ob.meta.CollectionManager.UpdateLoadPercent(ctx, partition.PartitionID, loadPercentage)
+	err := ob.meta.CollectionManager.UpdatePartitionLoadPercent(ctx, partition.PartitionID, loadPercentage)
 	if err != nil {
-		log.Warn("failed to update load percentage")
+		log.Warn("failed to update partition load percentage")
 	}
-	log.Info("load status updated",
+	log.Info("partition load status updated",
 		zap.Int32("partitionLoadPercentage", loadPercentage),
+	)
+	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("partition %d load percentage update: %d", partition.PartitionID, loadPercentage)))
+	return true
+}
+
+func (ob *CollectionObserver) observeCollectionLoadStatus(ctx context.Context, collectionID int64) {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+
+	collectionPercentage, err := ob.meta.CollectionManager.UpdateCollectionLoadPercent(ctx, collectionID)
+	if err != nil {
+		log.Warn("failed to update collection load percentage")
+	}
+	log.Info("collection load status updated",
 		zap.Int32("collectionLoadPercentage", collectionPercentage),
 	)
 	if collectionPercentage == 100 {
-		ob.invalidateCache(ctx, partition.GetCollectionID())
+		ob.invalidateCache(ctx, collectionID)
 	}
-	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("collection %d load percentage update: %d", partition.CollectionID, loadPercentage)))
+	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("collection %d load percentage update: %d", collectionID, collectionPercentage)))
 }
 
 func (ob *CollectionObserver) invalidateCache(ctx context.Context, collectionID int64) {
