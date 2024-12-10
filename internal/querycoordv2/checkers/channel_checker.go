@@ -228,11 +228,8 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
 	plans := make([]balance.ChannelAssignPlan, 0)
 	for _, ch := range channels {
-		rwNodes := replica.GetChannelRWNodes(ch.GetChannelName())
-		if len(rwNodes) == 0 {
-			rwNodes = replica.GetRWNodes()
-		}
-		plan := c.getBalancerFunc().AssignChannel(ctx, replica.GetCollectionID(), []*meta.DmChannel{ch}, rwNodes, true)
+		rwSQNodes := replica.GetRWSQNodes()
+		plan := c.getBalancerFunc().AssignChannel(ctx, replica.GetCollectionID(), []*meta.DmChannel{ch}, rwSQNodes, true)
 		plans = append(plans, plan...)
 	}
 

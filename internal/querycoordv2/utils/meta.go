@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -161,6 +162,7 @@ func SpawnReplicasWithRG(ctx context.Context, m *meta.Meta, collection int64, re
 	}
 	// Active recover it.
 	RecoverReplicaOfCollection(ctx, m, collection)
+	m.RecoverSQNodesInCollection(ctx, collection, snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs())
 	return replicas, nil
 }
 

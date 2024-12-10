@@ -439,52 +439,72 @@ func (b *ScoreBasedBalancer) BalanceReplica(ctx context.Context, replica *meta.R
 			log.Info("balance plan generated", zap.Stringers("nodesInfo", br.NodesInfo()), zap.Stringers("report details", br.records))
 		}
 	}()
+
 	if replica.NodesCount() == 0 {
 		br.AddRecord(StrRecord("replica has no querynode"))
 		return nil, nil
 	}
 
+	stoppingBalance := paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool()
+
+	channelPlans = b.balanceChannels(ctx, br, replica, stoppingBalance)
+	if len(channelPlans) != 0 {
+		segmentPlans = b.balanceSegments(ctx, br, replica, stoppingBalance)
+	}
+	return
+}
+
+func (b *ScoreBasedBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica, stoppingBalance bool) []ChannelAssignPlan {
+	rwNodes := replica.GetRWSQNodes()
+	roNodes := replica.GetROSQNodes()
+	if len(rwNodes) == 0 || !b.permitBalanceChannel(replica.GetCollectionID()) {
+		return nil
+	}
+
+	if len(roNodes) != 0 {
+		if !stoppingBalance {
+			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
+			br.AddRecord(StrRecord("stopping balance is disabled"))
+			return nil
+		}
+
+		br.AddRecord(StrRecordf("executing stopping balance: %v", roNodes))
+		return b.genStoppingChannelPlan(ctx, replica, rwNodes, roNodes)
+	}
+
+	if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
+		return b.genChannelPlan(ctx, br, replica, rwNodes)
+	}
+	return nil
+}
+
+func (b *ScoreBasedBalancer) balanceSegments(ctx context.Context, br *balanceReport, replica *meta.Replica, stoppingBalance bool) []SegmentAssignPlan {
 	rwNodes := replica.GetRWNodes()
 	roNodes := replica.GetRONodes()
 
 	if len(rwNodes) == 0 {
 		// no available nodes to balance
 		br.AddRecord(StrRecord("no rwNodes to balance"))
-		return nil, nil
+		return nil
 	}
-
+	if !b.permitBalanceSegment(replica.GetCollectionID()) {
+		return nil
+	}
 	// print current distribution before generating plans
-	segmentPlans, channelPlans = make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
 	if len(roNodes) != 0 {
-		if !paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
+		if !stoppingBalance {
 			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
-			br.AddRecord(StrRecord("stopping balance is disabled"))
-			return nil, nil
+			return nil
 		}
 
 		log.Info("Handle stopping nodes",
 			zap.Any("stopping nodes", roNodes),
 			zap.Any("available nodes", rwNodes),
 		)
-		br.AddRecord(StrRecordf("executing stopping balance: %v", roNodes))
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		if b.permitBalanceChannel(replica.GetCollectionID()) {
-			channelPlans = append(channelPlans, b.genStoppingChannelPlan(ctx, replica, rwNodes, roNodes)...)
-		}
-		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
-			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(ctx, replica, rwNodes, roNodes)...)
-		}
-	} else {
-		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && b.permitBalanceChannel(replica.GetCollectionID()) {
-			channelPlans = append(channelPlans, b.genChannelPlan(ctx, br, replica, rwNodes)...)
-		}
-
-		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
-			segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, br, replica, rwNodes)...)
-		}
+		return b.genStoppingSegmentPlan(ctx, replica, rwNodes, roNodes)
 	}
-
-	return segmentPlans, channelPlans
+	return b.genSegmentPlan(ctx, br, replica, rwNodes)
 }
 
 func (b *ScoreBasedBalancer) genStoppingSegmentPlan(ctx context.Context, replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []SegmentAssignPlan {

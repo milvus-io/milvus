@@ -119,22 +119,25 @@ func (b *RoundRobinBalancer) AssignChannel(ctx context.Context, collectionID int
 	if len(nodesInfo) == 0 {
 		return nil
 	}
+
+	channels, plans, scoreDelta := assignChannelToWALLocatedFirstForNodeInfo(channels, nodesInfo)
+
 	sort.Slice(nodesInfo, func(i, j int) bool {
 		cnt1, cnt2 := nodesInfo[i].ChannelCnt(), nodesInfo[j].ChannelCnt()
 		id1, id2 := nodesInfo[i].ID(), nodesInfo[j].ID()
-		delta1, delta2 := b.scheduler.GetChannelTaskDelta(id1, -1), b.scheduler.GetChannelTaskDelta(id2, -1)
+		delta1, delta2 := b.scheduler.GetChannelTaskDelta(id1, -1)-scoreDelta[id1], b.scheduler.GetChannelTaskDelta(id2, -1)-scoreDelta[id2]
 		return cnt1+delta1 < cnt2+delta2
 	})
-	ret := make([]ChannelAssignPlan, 0, len(channels))
+
 	for i, c := range channels {
 		plan := ChannelAssignPlan{
 			Channel: c,
 			From:    -1,
 			To:      nodesInfo[i%len(nodesInfo)].ID(),
 		}
-		ret = append(ret, plan)
+		plans = append(plans, plan)
 	}
-	return ret
+	return plans
 }
 
 func (b *RoundRobinBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {

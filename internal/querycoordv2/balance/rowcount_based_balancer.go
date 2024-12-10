@@ -103,12 +103,14 @@ func (b *RowCountBasedBalancer) AssignChannel(ctx context.Context, collectionID 
 	if len(nodeItems) == 0 {
 		return nil
 	}
+
+	channels, plans := assignChannelToWALLocatedFirst(channels, nodeItems)
+
 	queue := newPriorityQueue()
 	for _, item := range nodeItems {
 		queue.push(item)
 	}
 
-	plans := make([]ChannelAssignPlan, 0, len(channels))
 	for _, c := range channels {
 		// pick the node with the least channel num and allocate to it.
 		ni := queue.pop().(*nodeItem)
@@ -181,22 +183,49 @@ func (b *RowCountBasedBalancer) BalanceReplica(ctx context.Context, replica *met
 			log.Info("balance plan generated", zap.Stringers("report details", br.records))
 		}
 	}()
-	if replica.NodesCount() == 0 {
-		return nil, nil
+
+	stoppingBalance := paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool()
+
+	channelPlans = b.balanceChannels(ctx, br, replica, stoppingBalance)
+	if len(channelPlans) != 0 {
+		segmentPlans = b.balanceSegments(ctx, replica, stoppingBalance)
+	}
+	return
+}
+
+func (b *RowCountBasedBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica, stoppingBalance bool) []ChannelAssignPlan {
+	rwNodes := replica.GetRWSQNodes()
+	roNodes := replica.GetROSQNodes()
+	if len(rwNodes) == 0 || !b.permitBalanceChannel(replica.GetCollectionID()) {
+		return nil
 	}
 
+	if len(roNodes) != 0 {
+		if !stoppingBalance {
+			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
+			return nil
+		}
+		return b.genStoppingChannelPlan(ctx, replica, rwNodes, roNodes)
+	}
+
+	if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
+		return b.genChannelPlan(ctx, br, replica, rwNodes)
+	}
+	return nil
+}
+
+func (b *RowCountBasedBalancer) balanceSegments(ctx context.Context, replica *meta.Replica, stoppingBalance bool) []SegmentAssignPlan {
 	rwNodes := replica.GetRWNodes()
 	roNodes := replica.GetRONodes()
-	if len(rwNodes) == 0 {
-		// no available nodes to balance
-		return nil, nil
-	}
 
-	segmentPlans, channelPlans = make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
+	if len(rwNodes) == 0 || !b.permitBalanceSegment(replica.GetCollectionID()) {
+		return nil
+	}
+	// print current distribution before generating plans
 	if len(roNodes) != 0 {
-		if !paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
+		if !stoppingBalance {
 			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
-			return nil, nil
+			return nil
 		}
 
 		log.Info("Handle stopping nodes",
@@ -204,24 +233,9 @@ func (b *RowCountBasedBalancer) BalanceReplica(ctx context.Context, replica *met
 			zap.Any("available nodes", rwNodes),
 		)
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		if b.permitBalanceChannel(replica.GetCollectionID()) {
-			channelPlans = append(channelPlans, b.genStoppingChannelPlan(ctx, replica, rwNodes, roNodes)...)
-		}
-
-		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
-			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(ctx, replica, rwNodes, roNodes)...)
-		}
-	} else {
-		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && b.permitBalanceChannel(replica.GetCollectionID()) {
-			channelPlans = append(channelPlans, b.genChannelPlan(ctx, br, replica, rwNodes)...)
-		}
-
-		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
-			segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, replica, rwNodes)...)
-		}
+		return b.genStoppingSegmentPlan(ctx, replica, rwNodes, roNodes)
 	}
-
-	return segmentPlans, channelPlans
+	return b.genSegmentPlan(ctx, replica, rwNodes)
 }
 
 func (b *RowCountBasedBalancer) genStoppingSegmentPlan(ctx context.Context, replica *meta.Replica, rwNodes []int64, roNodes []int64) []SegmentAssignPlan {
