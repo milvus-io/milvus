@@ -57,7 +57,7 @@ class PhyExistsFilterExpr : public SegmentExpr {
 
  private:
     VectorPtr
-    EvalJsonExistsForDataSegment();
+    EvalJsonExistsForDataSegment(OffsetVector* input = nullptr);
 
  private:
     std::shared_ptr<const milvus::expr::ExistsExpr> expr_;

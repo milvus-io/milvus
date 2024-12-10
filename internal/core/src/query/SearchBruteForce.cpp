@@ -272,12 +272,11 @@ BruteForceSearchIterators(const dataset::SearchDataset& query_ds,
             "equal to nq:{} for single chunk",
             iterators_val.value().size(),
             nq);
-        SubSearchResult subSearchResult(query_ds.num_queries,
-                                        query_ds.topk,
-                                        query_ds.metric_type,
-                                        query_ds.round_decimal,
-                                        iterators_val.value());
-        return std::move(subSearchResult);
+        return SubSearchResult(query_ds.num_queries,
+                               query_ds.topk,
+                               query_ds.metric_type,
+                               query_ds.round_decimal,
+                               iterators_val.value());
     } else {
         LOG_ERROR(
             "Failed to get valid knowhere brute-force-iterators from chunk, "

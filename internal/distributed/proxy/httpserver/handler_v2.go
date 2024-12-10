@@ -975,6 +975,7 @@ func generateSearchParams(reqSearchParams searchParams) []*commonpb.KeyValuePair
 	bs, _ := json.Marshal(reqSearchParams.Params)
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: Params, Value: string(bs)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.IgnoreGrowing, Value: strconv.FormatBool(reqSearchParams.IgnoreGrowing)})
+	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.HintsKey, Value: reqSearchParams.Hints})
 	// need to exposure ParamRoundDecimal in req?
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
 	return searchParams
