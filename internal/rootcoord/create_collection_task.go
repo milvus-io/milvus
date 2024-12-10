@@ -620,68 +620,81 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 	}
 	collInfo.StartPositions = toKeyDataPairs(startPositions)
 
-	undoTask := newBaseUndoTask(t.core.stepExecutor)
-	undoTask.AddStep(&expireCacheStep{
-		baseStep:        baseStep{core: t.core},
-		dbName:          t.Req.GetDbName(),
-		collectionNames: []string{t.Req.GetCollectionName()},
-		collectionID:    collID,
-		ts:              ts,
-		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
-	}, &nullStep{})
-	undoTask.AddStep(&nullStep{}, &removeDmlChannelsStep{
-		baseStep:  baseStep{core: t.core},
-		pChannels: chanNames,
-	}) // remove dml channels if any error occurs.
-	undoTask.AddStep(&addCollectionMetaStep{
-		baseStep: baseStep{core: t.core},
-		coll:     &collInfo,
-	}, &deleteCollectionMetaStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: collID,
-		// When we undo createCollectionTask, this ts may be less than the ts when unwatch channels.
-		ts: ts,
-	})
-	// serve for this case: watching channels succeed in datacoord but failed due to network failure.
-	undoTask.AddStep(&nullStep{}, &unwatchChannelsStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: collID,
-		channels:     t.channels,
-		isSkip:       !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
-	})
-	undoTask.AddStep(&watchChannelsStep{
-		baseStep: baseStep{core: t.core},
-		info: &watchInfo{
-			ts:             ts,
-			collectionID:   collID,
-			vChannels:      t.channels.virtualChannels,
-			startPositions: toKeyDataPairs(startPositions),
-			schema: &schemapb.CollectionSchema{
-				Name:        collInfo.Name,
-				DbName:      collInfo.DBName,
-				Description: collInfo.Description,
-				AutoID:      collInfo.AutoID,
-				Fields:      model.MarshalFieldModels(collInfo.Fields),
-				Properties:  collInfo.Properties,
-				Functions:   model.MarshalFunctionModels(collInfo.Functions),
-			},
-			dbProperties: t.dbProperties,
-		},
-	}, &nullStep{})
-	undoTask.AddStep(&changeCollectionStateStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: collID,
-		state:        pb.CollectionState_CollectionCreated,
-		ts:           ts,
-	}, &nullStep{}) // We'll remove the whole collection anyway.
-
-	return undoTask.Execute(ctx)
+	return executeCreateCollectionTaskSteps(ctx, t.core, &collInfo, t.Req.GetDbName(), t.dbProperties, ts)
 }
 
 func (t *createCollectionTask) GetLockerKey() LockerKey {
 	return NewLockerKeyChain(
 		NewClusterLockerKey(false),
 		NewDatabaseLockerKey(t.Req.GetDbName(), false),
-		NewCollectionLockerKey(t.Req.GetCollectionName(), true),
+		NewCollectionLockerKey(strconv.FormatInt(t.collID, 10), true),
 	)
+}
+
+func executeCreateCollectionTaskSteps(ctx context.Context,
+	core *Core,
+	col *model.Collection,
+	dbName string,
+	dbProperties []*commonpb.KeyValuePair,
+	ts Timestamp,
+) error {
+	undoTask := newBaseUndoTask(core.stepExecutor)
+	collID := col.CollectionID
+	undoTask.AddStep(&expireCacheStep{
+		baseStep:        baseStep{core: core},
+		dbName:          dbName,
+		collectionNames: []string{col.Name},
+		collectionID:    collID,
+		ts:              ts,
+		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
+	}, &nullStep{})
+	undoTask.AddStep(&nullStep{}, &removeDmlChannelsStep{
+		baseStep:  baseStep{core: core},
+		pChannels: col.PhysicalChannelNames,
+	}) // remove dml channels if any error occurs.
+	undoTask.AddStep(&addCollectionMetaStep{
+		baseStep: baseStep{core: core},
+		coll:     col,
+	}, &deleteCollectionMetaStep{
+		baseStep:     baseStep{core: core},
+		collectionID: collID,
+		// When we undo createCollectionTask, this ts may be less than the ts when unwatch channels.
+		ts: ts,
+	})
+	// serve for this case: watching channels succeed in datacoord but failed due to network failure.
+	undoTask.AddStep(&nullStep{}, &unwatchChannelsStep{
+		baseStep:     baseStep{core: core},
+		collectionID: collID,
+		channels: collectionChannels{
+			virtualChannels:  col.VirtualChannelNames,
+			physicalChannels: col.PhysicalChannelNames,
+		},
+		isSkip: !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
+	})
+	undoTask.AddStep(&watchChannelsStep{
+		baseStep: baseStep{core: core},
+		info: &watchInfo{
+			ts:             ts,
+			collectionID:   collID,
+			vChannels:      col.VirtualChannelNames,
+			startPositions: col.StartPositions,
+			schema: &schemapb.CollectionSchema{
+				Name:        col.Name,
+				DbName:      col.DBName,
+				Description: col.Description,
+				AutoID:      col.AutoID,
+				Fields:      model.MarshalFieldModels(col.Fields),
+				Properties:  col.Properties,
+				Functions:   model.MarshalFunctionModels(col.Functions),
+			},
+			dbProperties: dbProperties,
+		},
+	}, &nullStep{})
+	undoTask.AddStep(&changeCollectionStateStep{
+		baseStep:     baseStep{core: core},
+		collectionID: collID,
+		state:        pb.CollectionState_CollectionCreated,
+		ts:           ts,
+	}, &nullStep{}) // We'll remove the whole collection anyway.
+	return undoTask.Execute(ctx)
 }
