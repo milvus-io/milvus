@@ -26,6 +26,55 @@ func (suite *ReplicaSuite) SetupSuite() {
 	}
 }
 
+func (suite *ReplicaSuite) TestSNNodes() {
+	replicaPB := &querypb.Replica{
+		ID:            1,
+		CollectionID:  2,
+		Nodes:         []int64{1, 2, 3},
+		ResourceGroup: DefaultResourceGroupName,
+		RoNodes:       []int64{4},
+		RwSqNodes:     []int64{6, 7, 8, 2},
+		RoSqNodes:     []int64{5},
+	}
+	r := newReplica(replicaPB)
+	suite.Len(r.GetNodes(), 8)
+	suite.Len(r.GetROSQNodes(), r.ROSQNodesCount())
+	suite.Len(r.GetRWSQNodes(), r.RWSQNodesCount())
+	cnt := 0
+	r.RangeOverRWSQNodes(func(nodeID int64) bool {
+		cnt++
+		return true
+	})
+	suite.Equal(r.RWSQNodesCount(), cnt)
+
+	cnt = 0
+	r.RangeOverROSQNodes(func(nodeID int64) bool {
+		cnt++
+		return true
+	})
+	suite.Equal(r.RONodesCount(), cnt)
+
+	suite.Len(r.GetChannelRWNodes("channel1"), 0)
+
+	copiedR := r.CopyForWrite()
+	copiedR.AddRWSQNode(9, 5)
+	r2 := copiedR.IntoReplica()
+	suite.Equal(6, r2.RWSQNodesCount())
+	suite.Equal(0, r2.ROSQNodesCount())
+
+	copiedR = r.CopyForWrite()
+	copiedR.AddROSQNode(7, 8)
+	r2 = copiedR.IntoReplica()
+	suite.Equal(2, r2.RWSQNodesCount())
+	suite.Equal(3, r2.ROSQNodesCount())
+
+	copiedR = r.CopyForWrite()
+	copiedR.RemoveSQNode(5, 8)
+	r2 = copiedR.IntoReplica()
+	suite.Equal(3, r2.RWSQNodesCount())
+	suite.Equal(0, r2.ROSQNodesCount())
+}
+
 func (suite *ReplicaSuite) TestReadOperations() {
 	r := newReplica(suite.replicaPB)
 	suite.testRead(r)

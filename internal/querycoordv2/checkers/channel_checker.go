@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -228,9 +229,13 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
 	plans := make([]balance.ChannelAssignPlan, 0)
 	for _, ch := range channels {
-		rwNodes := replica.GetChannelRWNodes(ch.GetChannelName())
-		if len(rwNodes) == 0 {
-			rwNodes = replica.GetRWNodes()
+		var rwNodes []int64
+		if streamingutil.IsStreamingServiceEnabled() {
+			rwNodes = replica.GetRWSQNodes()
+		} else {
+			if rwNodes = replica.GetChannelRWNodes(ch.GetChannelName()); len(rwNodes) == 0 {
+				rwNodes = replica.GetRWNodes()
+			}
 		}
 		plan := c.getBalancerFunc().AssignChannel(ctx, replica.GetCollectionID(), []*meta.DmChannel{ch}, rwNodes, true)
 		plans = append(plans, plan...)
