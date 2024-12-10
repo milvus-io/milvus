@@ -1037,6 +1037,10 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 		return 0, err
 	}
 
+	for _, idf := range idfSparseVector {
+		metrics.QueryNodeSearchFTSNumTokens.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(sd.collectionID)).Observe(float64(typeutil.SparseFloatRowElementCount(idf)))
+	}
+
 	err = SetBM25Params(req, avgdl)
 	if err != nil {
 		return 0, err
