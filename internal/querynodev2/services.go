@@ -492,6 +492,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	if req.GetLoadScope() == querypb.LoadScope_Index {
 		return node.loadIndex(ctx, req), nil
 	}
+	if req.GetLoadScope() == querypb.LoadScope_Stats {
+		return node.loadStats(ctx, req), nil
+	}
 
 	// Actual load segment
 	log.Info("start to load segments...")
@@ -1168,6 +1171,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	sealedSegments := node.manager.Segment.GetBy(segments.WithType(commonpb.SegmentState_Sealed))
 	segmentVersionInfos := make([]*querypb.SegmentVersionInfo, 0, len(sealedSegments))
 	for _, s := range sealedSegments {
+		log.Info("GetDataDistribution", zap.Any("JsonKeyStatsLogs", s.LoadInfo().GetJsonKeyStatsLogs()), zap.Any("Indexes", s.Indexes()))
 		segmentVersionInfos = append(segmentVersionInfos, &querypb.SegmentVersionInfo{
 			ID:                 s.ID(),
 			Collection:         s.Collection(),
@@ -1180,6 +1184,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *segments.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {
 				return info.IndexInfo.FieldID, info.IndexInfo
 			}),
+			FieldJsonIndexStats: s.GetFieldJSONIndexStats(),
 		})
 	}
 

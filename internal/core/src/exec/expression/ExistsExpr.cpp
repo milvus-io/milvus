@@ -67,18 +67,18 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(OffsetVector* input) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer) {
-            for (int i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                res[i] = data[offset].exist(pointer);
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
             }
-        };
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = data[offset].exist(pointer);
+        }
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -102,7 +102,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(OffsetVector* input) {
 
 VectorPtr
 PhyExistsFilterExpr::EvalJsonExistsForDataSegmentForIndex() {
-    Assert(segment_->type() == SegmentType::Sealed && num_data_chunk_ == 1);
+    Assert(segment_->type() == SegmentType::Sealed);
     auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
                                ? active_count_ - current_data_chunk_pos_
                                : batch_size_;
@@ -125,7 +125,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentForIndex() {
             return json.exist(pointer);
         };
         cached_index_chunk_res_ =
-            index->FilterByPath(pointer, real_batch_size, filter_func).clone();
+            index->FilterByPath(pointer, active_count_, filter_func).clone();
         cached_index_chunk_id_ = 0;
     }
     TargetBitmap result;

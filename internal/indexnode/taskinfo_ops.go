@@ -309,7 +309,7 @@ type statsTaskInfo struct {
 	insertLogs       []*datapb.FieldBinlog
 	statsLogs        []*datapb.FieldBinlog
 	textStatsLogs    map[int64]*datapb.TextIndexStats
-	bm25Logs      []*datapb.FieldBinlog
+	bm25Logs         []*datapb.FieldBinlog
 	jsonKeyStatsLogs map[int64]*datapb.JsonKeyStats
 }
 
@@ -397,14 +397,15 @@ func (i *IndexNode) storeStatsTextIndexResult(
 	}
 }
 
-func (i *IndexNode) storeJsonKeyIndexResult(
+func (i *IndexNode) storeJSONKeyIndexResult(
 	clusterID string,
 	taskID UniqueID,
 	collID UniqueID,
 	partID UniqueID,
 	segID UniqueID,
 	channel string,
-	jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) {
+	jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats,
+) {
 	key := taskKey{ClusterID: clusterID, TaskID: taskID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
@@ -434,7 +435,7 @@ func (i *IndexNode) getStatsTaskInfo(clusterID string, taskID UniqueID) *statsTa
 			insertLogs:       info.insertLogs,
 			statsLogs:        info.statsLogs,
 			textStatsLogs:    info.textStatsLogs,
-			bm25Logs:      info.bm25Logs,
+			bm25Logs:         info.bm25Logs,
 			jsonKeyStatsLogs: info.jsonKeyStatsLogs,
 		}
 	}

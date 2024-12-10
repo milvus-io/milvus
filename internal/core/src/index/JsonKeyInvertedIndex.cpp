@@ -25,9 +25,7 @@ JsonKeyInvertedIndex::AddInvertedRecord(const std::vector<std::string>& paths,
                                         uint32_t row_id,
                                         uint16_t offset,
                                         uint16_t length) {
-    auto key = std::string("/") + Join(paths, ".");
-    std::cout << "xxx insert inverted key" << key << "rowid" << row_id
-              << "offset" << offset << "length" << length << std::endl;
+    auto key = std::string("/") + Join(paths, "/");
     LOG_DEBUG(
         "insert inverted key: {}, row_id: {}, offset: "
         "{}, length:{}",
@@ -129,6 +127,7 @@ JsonKeyInvertedIndex::AddJson(const char* json, int64_t offset) {
     int index = 0;
     std::vector<std::string> paths;
     TravelJson(json, tokens, index, paths, offset);
+    free(tokens);
 }
 
 JsonKeyInvertedIndex::JsonKeyInvertedIndex(
@@ -234,6 +233,9 @@ JsonKeyInvertedIndex::BuildWithFieldData(
             for (int i = 0; i < n; i++) {
                 if (!data->is_valid(i)) {
                     null_offset.push_back(i);
+                    std::string empty = "";
+                    wrapper_->add_multi_data(&empty, 0, offset++);
+                    return;
                 }
                 AddJson(static_cast<const milvus::Json*>(data->RawValue(i))
                             ->data()
