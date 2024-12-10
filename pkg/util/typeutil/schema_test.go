@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"math/rand"
 	"reflect"
 	"testing"
 
@@ -2713,4 +2714,68 @@ func TestParseJsonSparseFloatRowBytes(t *testing.T) {
 		_, err := CreateSparseFloatRowFromJSON(row)
 		assert.Error(t, err)
 	})
+}
+
+// test EstimateSparseVectorNNZFromPlaceholderGroup: given a PlaceholderGroup
+// with various nq and averageNNZ, test if the estimated number of non-zero
+// elements is close to the actual number.
+func TestSparsePlaceholderGroupSize(t *testing.T) {
+	nqs := []int{1, 10, 100, 1000, 10000}
+	averageNNZs := []int{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048}
+	numCases := 0
+	casesWithLargeError := 0
+	for _, nq := range nqs {
+		for _, averageNNZ := range averageNNZs {
+			variants := make([]int, 0)
+			for i := 1; i <= averageNNZ/2; i *= 2 {
+				variants = append(variants, i)
+			}
+
+			for _, variant := range variants {
+				numCases++
+				contents := make([][]byte, nq)
+				contentsSize := 0
+				totalNNZ := 0
+				for i := range contents {
+					// nnz of each row is in range [averageNNZ - variant/2, averageNNZ + variant/2] and at least 1.
+					nnz := averageNNZ + variant/2 + rand.Intn(variant)
+					if nnz < 1 {
+						nnz = 1
+					}
+					indices := make([]uint32, nnz)
+					values := make([]float32, nnz)
+					for j := 0; j < nnz; j++ {
+						indices[j] = uint32(i*averageNNZ + j)
+						values[j] = float32(i*averageNNZ + j)
+					}
+					contents[i] = CreateSparseFloatRow(indices, values)
+					contentsSize += len(contents[i])
+					totalNNZ += nnz
+				}
+
+				placeholderGroup := &commonpb.PlaceholderGroup{
+					Placeholders: []*commonpb.PlaceholderValue{
+						{
+							Tag:    "$0",
+							Type:   commonpb.PlaceholderType_SparseFloatVector,
+							Values: contents,
+						},
+					},
+				}
+				bytes, _ := proto.Marshal(placeholderGroup)
+				estimatedNNZ := EstimateSparseVectorNNZFromPlaceholderGroup(bytes, nq)
+				errorRatio := (float64(totalNNZ-estimatedNNZ) / float64(totalNNZ)) * 100
+				assert.Less(t, errorRatio, 10.0)
+				if errorRatio > 5.0 {
+					casesWithLargeError++
+				}
+				// keep the logs for easy debugging.
+				// fmt.Printf("nq: %d, total nnz: %d, overhead bytes: %d, len of bytes: %d\n", nq, totalNNZ, len(bytes)-contentsSize, len(bytes))
+				// fmt.Printf("\tnq: %d, total nnz: %d, estimated nnz: %d, diff: %d, error ratio: %f%%\n", nq, totalNNZ, estimatedNNZ, totalNNZ-estimatedNNZ, errorRatio)
+			}
+		}
+	}
+	largeErrorRatio := (float64(casesWithLargeError) / float64(numCases)) * 100
+	// no more than 2% cases have large error ratio.
+	assert.Less(t, largeErrorRatio, 2.0)
 }
