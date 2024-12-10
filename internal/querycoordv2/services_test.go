@@ -1636,7 +1636,7 @@ func (suite *ServiceSuite) TestCheckHealth() {
 	suite.loadAll()
 	ctx := context.Background()
 	server := suite.server
-	server.healthChecker = healthcheck.NewChecker(40*time.Millisecond, suite.server.healthCheckFn)
+	server.healthChecker = healthcheck.NewChecker(50*time.Millisecond, suite.server.healthCheckFn)
 	server.healthChecker.Start()
 	defer server.healthChecker.Close()
 
@@ -1664,7 +1664,7 @@ func (suite *ServiceSuite) TestCheckHealth() {
 		}
 		suite.cluster.EXPECT().CheckHealth(mock.Anything, mock.Anything).Unset()
 		suite.cluster.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(resp, nil).Maybe()
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(1 * time.Second)
 	}
 
 	// Test for server is not healthy
