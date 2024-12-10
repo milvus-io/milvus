@@ -1292,7 +1292,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				})
 			})
 		case querypb.SyncType_UpdateVersion:
-			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()))
+			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()), zap.Int64s("partitions", req.GetLoadMeta().GetPartitionIDs()))
 			droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
 				if action.GetCheckpoint() == nil {
 					return id, typeutil.MaxTimestamp
@@ -1307,7 +1307,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				return id, action.GetCheckpoint().Timestamp
 			})
 			shardDelegator.AddExcludedSegments(flushedInfo)
-			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
+			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), req.GetLoadMeta().GetPartitionIDs(), action.GetGrowingInTarget(),
 				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint())
 		case querypb.SyncType_UpdatePartitionStats:
 			log.Info("sync update partition stats versions")

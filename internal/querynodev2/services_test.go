@@ -1162,6 +1162,20 @@ func (suite *ServiceSuite) TestGetSegmentInfo_Failed() {
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, rsp.GetStatus().GetErrorCode())
 }
 
+func (suite *ServiceSuite) syncDistribution(ctx context.Context) {
+	suite.node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
+		Channel:      suite.vchannel,
+		CollectionID: suite.collectionID,
+		LoadMeta: &querypb.LoadMetaInfo{
+			CollectionID: suite.collectionID,
+			PartitionIDs: suite.partitionIDs,
+		},
+		Actions: []*querypb.SyncAction{
+			{Type: querypb.SyncType_UpdateVersion, SealedInTarget: suite.validSegmentIDs, TargetVersion: time.Now().UnixNano()},
+		},
+	})
+}
+
 // Test Search
 func (suite *ServiceSuite) genCSearchRequest(nq int64, dataType schemapb.DataType, fieldID int64, metricType string, isTopkReduce bool) (*internalpb.SearchRequest, error) {
 	placeHolder, err := genPlaceHolderGroup(nq)
@@ -1196,6 +1210,7 @@ func (suite *ServiceSuite) TestSearch_Normal() {
 	// pre
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
+	suite.syncDistribution(ctx)
 
 	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, false)
 	req := &querypb.SearchRequest{
@@ -1216,6 +1231,7 @@ func (suite *ServiceSuite) TestSearch_Concurrent() {
 	// pre
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
+	suite.syncDistribution(ctx)
 
 	concurrency := 16
 	futures := make([]*conc.Future[*internalpb.SearchResults], 0, concurrency)
@@ -1278,6 +1294,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
+	// suite.syncDistribution(ctx)
 
 	// sync segment data
 	syncReq := &querypb.SyncDistributionRequest{
@@ -1287,6 +1304,10 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 		},
 		CollectionID: suite.collectionID,
 		Channel:      suite.vchannel,
+		LoadMeta: &querypb.LoadMetaInfo{
+			CollectionID: suite.collectionID,
+			PartitionIDs: suite.partitionIDs,
+		},
 	}
 
 	syncVersionAction := &querypb.SyncAction{
@@ -1458,6 +1479,7 @@ func (suite *ServiceSuite) TestQuery_Normal() {
 	// pre
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
+	suite.syncDistribution(ctx)
 
 	// data
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
@@ -1539,6 +1561,7 @@ func (suite *ServiceSuite) TestQueryStream_Normal() {
 	// prepare
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
+	suite.syncDistribution(ctx)
 
 	// data
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
