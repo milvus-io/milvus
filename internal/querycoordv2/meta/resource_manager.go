@@ -318,6 +318,12 @@ func (rm *ResourceManager) RemoveResourceGroup(rgName string) error {
 	// After recovering, all node assigned to these rg has been removed.
 	// no secondary index need to be removed.
 	delete(rm.groups, rgName)
+	metrics.QueryCoordResourceGroupInfo.DeletePartialMatch(prometheus.Labels{
+		metrics.ResourceGroupLabelName: rgName,
+	})
+	metrics.QueryCoordResourceGroupReplicaTotal.DeletePartialMatch(prometheus.Labels{
+		metrics.ResourceGroupLabelName: rgName,
+	})
 
 	log.Info("remove resource group",
 		zap.String("rgName", rgName),
@@ -957,11 +963,9 @@ func (rm *ResourceManager) setupInMemResourceGroup(r *ResourceGroup) {
 	}
 	// add new metrics.
 	for _, nodeID := range r.GetNodes() {
-		nodeInfo := rm.nodeMgr.Get(nodeID)
 		metrics.QueryCoordResourceGroupInfo.WithLabelValues(
 			r.GetName(),
 			strconv.FormatInt(nodeID, 10),
-			nodeInfo.Hostname(),
 		).Set(1)
 	}
 	rm.groups[r.GetName()] = r
