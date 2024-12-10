@@ -1370,6 +1370,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnDifferentQN() {
 	suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, 2)
 	utils.RecoverAllCollection(balancer.meta)
 
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.CollectionBalanceChannelBatchSize.Key, "10")
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.CollectionBalanceChannelBatchSize.Key)
+
 	// test balance channel on same query node
 	_, channelPlans = suite.getCollectionBalancePlans(balancer, collectionID)
 	suite.Len(channelPlans, 2)

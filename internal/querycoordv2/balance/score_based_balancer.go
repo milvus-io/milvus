@@ -93,6 +93,9 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 	})
 
 	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
+	if manualBalance {
+		balanceBatchSize = math.MaxInt64
+	}
 	plans := make([]SegmentAssignPlan, 0, len(segments))
 	for _, s := range segments {
 		func(s *meta.Segment) {
@@ -172,7 +175,10 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 		queue.push(item)
 	}
 
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
+	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceChannelBatchSize.GetAsInt()
+	if manualBalance {
+		balanceBatchSize = math.MaxInt64
+	}
 	plans := make([]ChannelAssignPlan, 0, len(channels))
 	for _, ch := range channels {
 		func(ch *meta.DmChannel) {
@@ -526,8 +532,6 @@ func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceRepo
 		segmentDist[node] = segments
 	}
 
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
-
 	// find the segment from the node which has more score than the average
 	segmentsToMove := make([]*meta.Segment, 0)
 	for node, segments := range segmentDist {
@@ -545,11 +549,6 @@ func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceRepo
 			segmentScore := b.calculateSegmentScore(s)
 			br.AddRecord(StrRecordf("pick segment %d with score %f from node %d", s.ID, segmentScore, node))
 			segmentsToMove = append(segmentsToMove, s)
-			if len(segmentsToMove) >= balanceBatchSize {
-				br.AddRecord(StrRecordf("stop add segment candidate since current plan is equal to batch max(%d)", balanceBatchSize))
-				break
-			}
-
 			currentScore -= segmentScore
 			if currentScore <= assignedScore {
 				br.AddRecord(StrRecordf("stop add segment candidate since node[%d] current score(%f) below assigned(%f)", node, currentScore, assignedScore))
