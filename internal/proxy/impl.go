@@ -142,7 +142,6 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			log.Info("complete to invalidate collection meta cache with collection name", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
 			// All the request from query use collectionID
-			// All the request from query use collectionID
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
 				for _, name := range aliasName {
@@ -164,6 +163,12 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		case commonpb.MsgType_DropDatabase:
 			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
 		case commonpb.MsgType_AlterCollection, commonpb.MsgType_AlterCollectionField:
+			if request.CollectionID != UniqueID(0) {
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
+				for _, name := range aliasName {
+					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
+				}
+			}
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
 			}
