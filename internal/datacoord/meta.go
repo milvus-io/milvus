@@ -138,6 +138,12 @@ type collectionInfo struct {
 	VChannelNames  []string
 }
 
+type dbInfo struct {
+	ID         int64
+	Name       string
+	Properties []*commonpb.KeyValuePair
+}
+
 // NewMeta creates meta from provided `kv.TxnKV`
 func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager) (*meta, error) {
 	im, err := newIndexMeta(ctx, catalog)
@@ -244,12 +250,12 @@ func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker
 		return err
 	}
 	for _, dbName := range resp.GetDbNames() {
-		resp, err := broker.ShowCollections(ctx, dbName)
+		collectionsResp, err := broker.ShowCollections(ctx, dbName)
 		if err != nil {
 			return err
 		}
-		for _, collectionID := range resp.GetCollectionIds() {
-			resp, err := broker.DescribeCollectionInternal(ctx, collectionID)
+		for _, collectionID := range collectionsResp.GetCollectionIds() {
+			descResp, err := broker.DescribeCollectionInternal(ctx, collectionID)
 			if err != nil {
 				return err
 			}
@@ -259,14 +265,14 @@ func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker
 			}
 			collection := &collectionInfo{
 				ID:             collectionID,
-				Schema:         resp.GetSchema(),
+				Schema:         descResp.GetSchema(),
 				Partitions:     partitionIDs,
-				StartPositions: resp.GetStartPositions(),
-				Properties:     funcutil.KeyValuePair2Map(resp.GetProperties()),
-				CreatedAt:      resp.GetCreatedTimestamp(),
-				DatabaseName:   resp.GetDbName(),
-				DatabaseID:     resp.GetDbId(),
-				VChannelNames:  resp.GetVirtualChannelNames(),
+				StartPositions: descResp.GetStartPositions(),
+				Properties:     funcutil.KeyValuePair2Map(descResp.GetProperties()),
+				CreatedAt:      descResp.GetCreatedTimestamp(),
+				DatabaseName:   descResp.GetDbName(),
+				DatabaseID:     descResp.GetDbId(),
+				VChannelNames:  descResp.GetVirtualChannelNames(),
 			}
 			m.AddCollection(collection)
 		}

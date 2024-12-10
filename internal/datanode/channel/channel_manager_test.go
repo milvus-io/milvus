@@ -70,7 +70,7 @@ func (s *OpRunnerSuite) SetupTest() {
 		Return(nil).Maybe()
 
 	dispClient := msgdispatcher.NewMockClient(s.T())
-	dispClient.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+	dispClient.EXPECT().Register(mock.Anything, mock.Anything).
 		Return(make(chan *msgstream.MsgPack), nil).Maybe()
 	dispClient.EXPECT().Deregister(mock.Anything).Maybe()
 
