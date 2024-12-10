@@ -114,12 +114,6 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 		partitionIDs: []int64{partID},
 	})
 
-	undoTask.AddStep(&syncNewCreatedPartitionStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: t.collMeta.CollectionID,
-		partitionID:  partID,
-	}, &nullStep{})
-
 	undoTask.AddStep(&changePartitionStateStep{
 		baseStep:     baseStep{core: t.core},
 		collectionID: t.collMeta.CollectionID,
