@@ -67,18 +67,18 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(OffsetVector* input) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer) {
-            for (int i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                res[i] = data[offset].exist(pointer);
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
             }
-        };
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = data[offset].exist(pointer);
+        }
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {

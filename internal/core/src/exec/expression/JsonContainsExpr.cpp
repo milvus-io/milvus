@@ -196,28 +196,27 @@ PhyJsonContainsFilterExpr::ExecArrayContains(OffsetVector* input) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::unordered_set<GetType>& elements) {
-            auto executor = [&](size_t i) {
-                const auto& array = data[i];
-                for (int j = 0; j < array.length(); ++j) {
-                    if (elements.count(array.template get_data<GetType>(j)) >
-                        0) {
-                        return true;
-                    }
+        auto executor = [&](size_t i) {
+            const auto& array = data[i];
+            for (int j = 0; j < array.length(); ++j) {
+                if (elements.count(array.template get_data<GetType>(j)) > 0) {
+                    return true;
                 }
-                return false;
-            };
-            for (int i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                res[i] = executor(offset);
             }
+            return false;
         };
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = executor(offset);
+        }
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -280,35 +279,35 @@ PhyJsonContainsFilterExpr::ExecJsonContains(OffsetVector* input) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::unordered_set<GetType>& elements) {
-            auto executor = [&](size_t i) {
-                auto doc = data[i].doc();
-                auto array = doc.at_pointer(pointer).get_array();
-                if (array.error()) {
-                    return false;
-                }
-                for (auto&& it : array) {
-                    auto val = it.template get<GetType>();
-                    if (val.error()) {
-                        continue;
-                    }
-                    if (elements.count(val.value()) > 0) {
-                        return true;
-                    }
-                }
+        auto executor = [&](size_t i) {
+            auto doc = data[i].doc();
+            auto array = doc.at_pointer(pointer).get_array();
+            if (array.error()) {
                 return false;
-            };
-            for (size_t i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
+            }
+            for (auto&& it : array) {
+                auto val = it.template get<GetType>();
+                if (val.error()) {
                     continue;
                 }
-                res[i] = executor(offset);
+                if (elements.count(val.value()) > 0) {
+                    return true;
+                }
             }
+            return false;
         };
+        for (size_t i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = executor(offset);
+        }
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -433,44 +432,44 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(OffsetVector* input) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::vector<proto::plan::Array>& elements) {
-            auto executor = [&](size_t i) -> bool {
-                auto doc = data[i].doc();
-                auto array = doc.at_pointer(pointer).get_array();
-                if (array.error()) {
-                    return false;
-                }
-                for (auto&& it : array) {
-                    auto val = it.get_array();
-                    if (val.error()) {
-                        continue;
-                    }
-                    std::vector<
-                        simdjson::simdjson_result<simdjson::ondemand::value>>
-                        json_array;
-                    json_array.reserve(val.count_elements());
-                    for (auto&& e : val) {
-                        json_array.emplace_back(e);
-                    }
-                    for (auto const& element : elements) {
-                        if (CompareTwoJsonArray(json_array, element)) {
-                            return true;
-                        }
-                    }
-                }
+        auto executor = [&](size_t i) -> bool {
+            auto doc = data[i].doc();
+            auto array = doc.at_pointer(pointer).get_array();
+            if (array.error()) {
                 return false;
-            };
-            for (size_t i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
+            }
+            for (auto&& it : array) {
+                auto val = it.get_array();
+                if (val.error()) {
                     continue;
                 }
-                res[i] = executor(offset);
+                std::vector<
+                    simdjson::simdjson_result<simdjson::ondemand::value>>
+                    json_array;
+                json_array.reserve(val.count_elements());
+                for (auto&& e : val) {
+                    json_array.emplace_back(e);
+                }
+                for (auto const& element : elements) {
+                    if (CompareTwoJsonArray(json_array, element)) {
+                        return true;
+                    }
+                }
             }
+            return false;
         };
+        for (size_t i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = executor(offset);
+        }
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -593,29 +592,29 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(OffsetVector* input) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::unordered_set<GetType>& elements) {
-            auto executor = [&](size_t i) {
-                std::unordered_set<GetType> tmp_elements(elements);
-                // Note: array can only be iterated once
-                for (int j = 0; j < data[i].length(); ++j) {
-                    tmp_elements.erase(data[i].template get_data<GetType>(j));
-                    if (tmp_elements.size() == 0) {
-                        return true;
-                    }
+        auto executor = [&](size_t i) {
+            std::unordered_set<GetType> tmp_elements(elements);
+            // Note: array can only be iterated once
+            for (int j = 0; j < data[i].length(); ++j) {
+                tmp_elements.erase(data[i].template get_data<GetType>(j));
+                if (tmp_elements.size() == 0) {
+                    return true;
                 }
-                return tmp_elements.size() == 0;
-            };
-            for (int i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                res[i] = executor(offset);
             }
+            return tmp_elements.size() == 0;
         };
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = executor(offset);
+        }
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -678,38 +677,38 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(OffsetVector* input) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::unordered_set<GetType>& elements) {
-            auto executor = [&](const size_t i) -> bool {
-                auto doc = data[i].doc();
-                auto array = doc.at_pointer(pointer).get_array();
-                if (array.error()) {
-                    return false;
-                }
-                std::unordered_set<GetType> tmp_elements(elements);
-                // Note: array can only be iterated once
-                for (auto&& it : array) {
-                    auto val = it.template get<GetType>();
-                    if (val.error()) {
-                        continue;
-                    }
-                    tmp_elements.erase(val.value());
-                    if (tmp_elements.size() == 0) {
-                        return true;
-                    }
-                }
-                return tmp_elements.size() == 0;
-            };
-            for (size_t i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
+        auto executor = [&](const size_t i) -> bool {
+            auto doc = data[i].doc();
+            auto array = doc.at_pointer(pointer).get_array();
+            if (array.error()) {
+                return false;
+            }
+            std::unordered_set<GetType> tmp_elements(elements);
+            // Note: array can only be iterated once
+            for (auto&& it : array) {
+                auto val = it.template get<GetType>();
+                if (val.error()) {
                     continue;
                 }
-                res[i] = executor(offset);
+                tmp_elements.erase(val.value());
+                if (tmp_elements.size() == 0) {
+                    return true;
+                }
             }
+            return tmp_elements.size() == 0;
         };
+        for (size_t i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = executor(offset);
+        }
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -841,98 +840,96 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(
             const std::string& pointer,
             const std::vector<proto::plan::GenericValue>& elements,
             const std::unordered_set<int> elements_index) {
-            auto executor = [&](size_t i) -> bool {
-                const auto& json = data[i];
-                auto doc = json.doc();
-                auto array = doc.at_pointer(pointer).get_array();
-                if (array.error()) {
-                    return false;
-                }
-                std::unordered_set<int> tmp_elements_index(elements_index);
-                for (auto&& it : array) {
-                    int i = -1;
-                    for (auto& element : elements) {
-                        i++;
-                        switch (element.val_case()) {
-                            case proto::plan::GenericValue::kBoolVal: {
-                                auto val = it.template get<bool>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.bool_val()) {
-                                    tmp_elements_index.erase(i);
-                                }
-                                break;
+        auto executor = [&](size_t i) -> bool {
+            const auto& json = data[i];
+            auto doc = json.doc();
+            auto array = doc.at_pointer(pointer).get_array();
+            if (array.error()) {
+                return false;
+            }
+            std::unordered_set<int> tmp_elements_index(elements_index);
+            for (auto&& it : array) {
+                int i = -1;
+                for (auto& element : elements) {
+                    i++;
+                    switch (element.val_case()) {
+                        case proto::plan::GenericValue::kBoolVal: {
+                            auto val = it.template get<bool>();
+                            if (val.error()) {
+                                continue;
                             }
-                            case proto::plan::GenericValue::kInt64Val: {
-                                auto val = it.template get<int64_t>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.int64_val()) {
-                                    tmp_elements_index.erase(i);
-                                }
-                                break;
+                            if (val.value() == element.bool_val()) {
+                                tmp_elements_index.erase(i);
                             }
-                            case proto::plan::GenericValue::kFloatVal: {
-                                auto val = it.template get<double>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.float_val()) {
-                                    tmp_elements_index.erase(i);
-                                }
-                                break;
-                            }
-                            case proto::plan::GenericValue::kStringVal: {
-                                auto val = it.template get<std::string_view>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.string_val()) {
-                                    tmp_elements_index.erase(i);
-                                }
-                                break;
-                            }
-                            case proto::plan::GenericValue::kArrayVal: {
-                                auto val = it.get_array();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (CompareTwoJsonArray(val,
-                                                        element.array_val())) {
-                                    tmp_elements_index.erase(i);
-                                }
-                                break;
-                            }
-                            default:
-                                PanicInfo(
-                                    DataTypeInvalid,
-                                    fmt::format("unsupported data type {}",
-                                                element.val_case()));
+                            break;
                         }
-                        if (tmp_elements_index.size() == 0) {
-                            return true;
+                        case proto::plan::GenericValue::kInt64Val: {
+                            auto val = it.template get<int64_t>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.int64_val()) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
                         }
+                        case proto::plan::GenericValue::kFloatVal: {
+                            auto val = it.template get<double>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.float_val()) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kStringVal: {
+                            auto val = it.template get<std::string_view>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.string_val()) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kArrayVal: {
+                            auto val = it.get_array();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (CompareTwoJsonArray(val, element.array_val())) {
+                                tmp_elements_index.erase(i);
+                            }
+                            break;
+                        }
+                        default:
+                            PanicInfo(DataTypeInvalid,
+                                      fmt::format("unsupported data type {}",
+                                                  element.val_case()));
                     }
                     if (tmp_elements_index.size() == 0) {
                         return true;
                     }
                 }
-                return tmp_elements_index.size() == 0;
-            };
-            for (size_t i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
+                if (tmp_elements_index.size() == 0) {
+                    return true;
                 }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                res[i] = executor(offset);
             }
+            return tmp_elements_index.size() == 0;
         };
+        for (size_t i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = executor(offset);
+        }
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -1119,48 +1116,48 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(OffsetVector* input) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::vector<proto::plan::Array>& elements) {
-            auto executor = [&](const size_t i) {
-                auto doc = data[i].doc();
-                auto array = doc.at_pointer(pointer).get_array();
-                if (array.error()) {
-                    return false;
-                }
-                std::unordered_set<int> exist_elements_index;
-                for (auto&& it : array) {
-                    auto val = it.get_array();
-                    if (val.error()) {
-                        continue;
-                    }
-                    std::vector<
-                        simdjson::simdjson_result<simdjson::ondemand::value>>
-                        json_array;
-                    json_array.reserve(val.count_elements());
-                    for (auto&& e : val) {
-                        json_array.emplace_back(e);
-                    }
-                    for (int index = 0; index < elements.size(); ++index) {
-                        if (CompareTwoJsonArray(json_array, elements[index])) {
-                            exist_elements_index.insert(index);
-                        }
-                    }
-                    if (exist_elements_index.size() == elements.size()) {
-                        return true;
-                    }
-                }
-                return exist_elements_index.size() == elements.size();
-            };
-            for (size_t i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
+        auto executor = [&](const size_t i) {
+            auto doc = data[i].doc();
+            auto array = doc.at_pointer(pointer).get_array();
+            if (array.error()) {
+                return false;
+            }
+            std::unordered_set<int> exist_elements_index;
+            for (auto&& it : array) {
+                auto val = it.get_array();
+                if (val.error()) {
                     continue;
                 }
-                res[i] = executor(offset);
+                std::vector<
+                    simdjson::simdjson_result<simdjson::ondemand::value>>
+                    json_array;
+                json_array.reserve(val.count_elements());
+                for (auto&& e : val) {
+                    json_array.emplace_back(e);
+                }
+                for (int index = 0; index < elements.size(); ++index) {
+                    if (CompareTwoJsonArray(json_array, elements[index])) {
+                        exist_elements_index.insert(index);
+                    }
+                }
+                if (exist_elements_index.size() == elements.size()) {
+                    return true;
+                }
             }
+            return exist_elements_index.size() == elements.size();
         };
+        for (size_t i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = executor(offset);
+        }
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -1290,90 +1287,88 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(OffsetVector* input) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::vector<proto::plan::GenericValue>& elements) {
-            auto executor = [&](const size_t i) {
-                auto& json = data[i];
-                auto doc = json.doc();
-                auto array = doc.at_pointer(pointer).get_array();
-                if (array.error()) {
-                    return false;
-                }
-                // Note: array can only be iterated once
-                for (auto&& it : array) {
-                    for (auto const& element : elements) {
-                        switch (element.val_case()) {
-                            case proto::plan::GenericValue::kBoolVal: {
-                                auto val = it.template get<bool>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.bool_val()) {
-                                    return true;
-                                }
-                                break;
+        auto executor = [&](const size_t i) {
+            auto& json = data[i];
+            auto doc = json.doc();
+            auto array = doc.at_pointer(pointer).get_array();
+            if (array.error()) {
+                return false;
+            }
+            // Note: array can only be iterated once
+            for (auto&& it : array) {
+                for (auto const& element : elements) {
+                    switch (element.val_case()) {
+                        case proto::plan::GenericValue::kBoolVal: {
+                            auto val = it.template get<bool>();
+                            if (val.error()) {
+                                continue;
                             }
-                            case proto::plan::GenericValue::kInt64Val: {
-                                auto val = it.template get<int64_t>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.int64_val()) {
-                                    return true;
-                                }
-                                break;
+                            if (val.value() == element.bool_val()) {
+                                return true;
                             }
-                            case proto::plan::GenericValue::kFloatVal: {
-                                auto val = it.template get<double>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.float_val()) {
-                                    return true;
-                                }
-                                break;
-                            }
-                            case proto::plan::GenericValue::kStringVal: {
-                                auto val = it.template get<std::string_view>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.string_val()) {
-                                    return true;
-                                }
-                                break;
-                            }
-                            case proto::plan::GenericValue::kArrayVal: {
-                                auto val = it.get_array();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (CompareTwoJsonArray(val,
-                                                        element.array_val())) {
-                                    return true;
-                                }
-                                break;
-                            }
-                            default:
-                                PanicInfo(
-                                    DataTypeInvalid,
-                                    fmt::format("unsupported data type {}",
-                                                element.val_case()));
+                            break;
                         }
+                        case proto::plan::GenericValue::kInt64Val: {
+                            auto val = it.template get<int64_t>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.int64_val()) {
+                                return true;
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kFloatVal: {
+                            auto val = it.template get<double>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.float_val()) {
+                                return true;
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kStringVal: {
+                            auto val = it.template get<std::string_view>();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (val.value() == element.string_val()) {
+                                return true;
+                            }
+                            break;
+                        }
+                        case proto::plan::GenericValue::kArrayVal: {
+                            auto val = it.get_array();
+                            if (val.error()) {
+                                continue;
+                            }
+                            if (CompareTwoJsonArray(val, element.array_val())) {
+                                return true;
+                            }
+                            break;
+                        }
+                        default:
+                            PanicInfo(DataTypeInvalid,
+                                      fmt::format("unsupported data type {}",
+                                                  element.val_case()));
                     }
                 }
-                return false;
-            };
-            for (size_t i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                res[i] = executor(offset);
             }
+            return false;
         };
+        for (size_t i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = executor(offset);
+        }
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {

@@ -282,8 +282,8 @@ BuildJsonKeyIndex(CBinarySet* c_binary_set,
 
         auto field_schema =
             FieldMeta::ParseFrom(build_index_info->field_schema());
-        auto index =
-            std::make_unique<index::JsonKeyInvertedIndex>(fileManagerContext, false);
+        auto index = std::make_unique<index::JsonKeyInvertedIndex>(
+            fileManagerContext, false);
         index->Build(config);
         auto binary =
             std::make_unique<knowhere::BinarySet>(index->Upload(config));

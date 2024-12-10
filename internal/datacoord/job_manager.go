@@ -145,7 +145,15 @@ func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	if !isFlush(segment) {
 		return false
 	}
-	return true
+	for _, fieldID := range fieldIDs {
+		if segment.GetJsonKeyStats() == nil {
+			return true
+		}
+		if segment.GetJsonKeyStats()[fieldID] == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {

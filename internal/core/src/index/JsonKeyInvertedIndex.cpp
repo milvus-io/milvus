@@ -129,6 +129,7 @@ JsonKeyInvertedIndex::AddJson(const char* json, int64_t offset) {
     int index = 0;
     std::vector<std::string> paths;
     TravelJson(json, tokens, index, paths, offset);
+    free(tokens);
 }
 
 JsonKeyInvertedIndex::JsonKeyInvertedIndex(

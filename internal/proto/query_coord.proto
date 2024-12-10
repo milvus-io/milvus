@@ -396,6 +396,7 @@ enum LoadScope {
     Full = 0;
     Delta = 1;
     Index = 2;
+    Stats = 3;
 }
 
 message LoadSegmentsRequest {
@@ -645,6 +646,7 @@ message SegmentVersionInfo {
     map<int64, FieldIndexInfo> index_info = 7;
     data.SegmentLevel level = 8;
     bool is_sorted = 9;
+    repeated int64 field_json_index_stats = 10;
 }
 
 message ChannelVersionInfo {
