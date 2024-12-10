@@ -19,6 +19,11 @@ import (
 )
 
 func (s *LevelZeroSuite) TestDeletePartitionKeyHint() {
+	s.MiniClusterSuite.TearDownSuite()
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableStatsTask.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableStatsTask.Key)
+	s.MiniClusterSuite.SetupTest()
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	defer cancel()
 
