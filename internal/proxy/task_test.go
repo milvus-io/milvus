@@ -1380,9 +1380,19 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 }
 
 func TestCreatePartitionTask(t *testing.T) {
-	rc := NewRootCoordMock()
+	rc := mocks.NewMockRootCoordClient(t)
+	qc := mocks.NewMockQueryCoordClient(t)
 
-	defer rc.Close()
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(newSchemaInfo(&schemapb.CollectionSchema{
+		EnableDynamicField: false,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "ID", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "Vector", DataType: schemapb.DataType_FloatVector},
+		},
+	}), nil)
+	globalMetaCache = mockCache
+
 	ctx := context.Background()
 	prefix := "TestCreatePartitionTask"
 	dbName := ""
@@ -1401,9 +1411,10 @@ func TestCreatePartitionTask(t *testing.T) {
 			CollectionName: collectionName,
 			PartitionName:  partitionName,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
+		ctx:        ctx,
+		rootCoord:  rc,
+		queryCoord: qc,
+		result:     nil,
 	}
 	task.OnEnqueue()
 	task.PreExecute(ctx)
@@ -1413,8 +1424,14 @@ func TestCreatePartitionTask(t *testing.T) {
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
 	assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
+
+	// setup global meta cache
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(100, nil).Once()
+	mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(1000, nil).Once()
+	rc.EXPECT().CreatePartition(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+	qc.EXPECT().SyncNewCreatedPartition(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 	err := task.Execute(ctx)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 
 	task.CollectionName = "#0xc0de"
 	err = task.PreExecute(ctx)

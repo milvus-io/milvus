@@ -1069,9 +1069,10 @@ type createPartitionTask struct {
 	baseTask
 	Condition
 	*milvuspb.CreatePartitionRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	result    *commonpb.Status
+	ctx        context.Context
+	rootCoord  types.RootCoordClient
+	queryCoord types.QueryCoordClient
+	result     *commonpb.Status
 }
 
 func (t *createPartitionTask) TraceCtx() context.Context {
@@ -1139,6 +1140,24 @@ func (t *createPartitionTask) PreExecute(ctx context.Context) error {
 
 func (t *createPartitionTask) Execute(ctx context.Context) (err error) {
 	t.result, err = t.rootCoord.CreatePartition(ctx, t.CreatePartitionRequest)
+	if err := merr.CheckRPCCall(t.result, err); err != nil {
+		return err
+	}
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.GetCollectionName())
+	if err != nil {
+		t.result = merr.Status(err)
+		return err
+	}
+	partitionID, err := globalMetaCache.GetPartitionID(ctx, t.GetDbName(), t.GetCollectionName(), t.GetPartitionName())
+	if err != nil {
+		t.result = merr.Status(err)
+		return err
+	}
+	t.result, err = t.queryCoord.SyncNewCreatedPartition(ctx, &querypb.SyncNewCreatedPartitionRequest{
+		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions)),
+		CollectionID: collectionID,
+		PartitionID:  partitionID,
+	})
 	return merr.CheckRPCCall(t.result, err)
 }
 

@@ -1324,6 +1324,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		Condition:              NewTaskCondition(ctx),
 		CreatePartitionRequest: request,
 		rootCoord:              node.rootCoord,
+		queryCoord:             node.queryCoord,
 		result:                 nil,
 	}
 
