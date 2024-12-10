@@ -65,11 +65,6 @@ func (c *Knapsack[T]) tryPack(size, maxLeftSize, minSegs, maxSegs int64) (bitset
 
 	nSelections := selection.Count()
 	if left > maxLeftSize || nSelections < uint(minSegs) {
-		log.Debug("tryPack failed",
-			zap.String("name", c.name),
-			zap.Int64("left", left), zap.Int64("maxLeftSize", maxLeftSize),
-			zap.Int64("minSegs", minSegs),
-			zap.Uint("nselections", nSelections))
 		selection.ClearAll()
 		left = size
 	}
@@ -102,6 +97,7 @@ func (c *Knapsack[T]) pack(size, maxLeftSize, minSegs, maxSegs int64) ([]T, int6
 		return nil, size
 	}
 	segs := c.commit(selection)
+	log.Debug("pack", zap.String("name", c.name), zap.Int("segments", len(segs)))
 	return segs, left
 }
 
@@ -123,6 +119,7 @@ func (c *Knapsack[T]) packWith(size, maxLeftSize, minSegs, maxSegs int64, other 
 	}
 	segs := c.commit(selection)
 	otherSegs := other.commit(otherSelection)
+	log.Debug("packWith", zap.String("name", c.name), zap.Int("segments", len(segs)+len(otherSegs)), zap.String("with", other.name))
 	return append(segs, otherSegs...), left
 }
 

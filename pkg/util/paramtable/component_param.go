@@ -3262,7 +3262,6 @@ type dataCoordConfig struct {
 	CompactionMaxParallelTasks       ParamItem `refreshable:"true"`
 	CompactionWorkerParalleTasks     ParamItem `refreshable:"true"`
 	MinSegmentToMerge                ParamItem `refreshable:"true"`
-	MaxSegmentToMerge                ParamItem `refreshable:"true"`
 	SegmentSmallProportion           ParamItem `refreshable:"true"`
 	SegmentCompactableProportion     ParamItem `refreshable:"true"`
 	SegmentExpansionRate             ParamItem `refreshable:"true"`
@@ -3587,13 +3586,6 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		DefaultValue: "3",
 	}
 	p.MinSegmentToMerge.Init(base.mgr)
-
-	p.MaxSegmentToMerge = ParamItem{
-		Key:          "dataCoord.compaction.max.segment",
-		Version:      "2.0.0",
-		DefaultValue: "30",
-	}
-	p.MaxSegmentToMerge.Init(base.mgr)
 
 	p.SegmentSmallProportion = ParamItem{
 		Key:          "dataCoord.segment.smallProportion",
@@ -4281,6 +4273,7 @@ type dataNodeConfig struct {
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
 	L0CompactionMaxBatchSize ParamItem `refreshable:"true"`
 	UseMergeSort             ParamItem `refreshable:"true"`
+	MaxSegmentMergeSort      ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -4620,6 +4613,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.UseMergeSort.Init(base.mgr)
+
+	p.MaxSegmentMergeSort = ParamItem{
+		Key:          "dataNode.compaction.maxSegmentMergeSort",
+		Version:      "2.5.0",
+		Doc:          "The maximum number of segments to be merged in mergeSort mode.",
+		DefaultValue: "30",
+		Export:       true,
+	}
+	p.MaxSegmentMergeSort.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",
