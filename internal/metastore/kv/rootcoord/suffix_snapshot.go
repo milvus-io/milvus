@@ -596,6 +596,10 @@ func (ss *SuffixSnapshot) batchRemoveExpiredKvs(keyGroup []string, originalKey s
 
 	// to protect txn finished with ascend order, reverse the latest kv with tombstone to tail of array
 	sort.Strings(keyGroup)
+	if !includeOriginalKey && len(keyGroup) > 0 {
+		// keep the latest snapshot key for historical version compatibility
+		keyGroup = keyGroup[0 : len(keyGroup)-1]
+	}
 	removeFn := func(partialKeys []string) error {
 		return ss.MetaKv.MultiRemove(partialKeys)
 	}
