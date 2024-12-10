@@ -48,8 +48,9 @@ const (
 	// DefaultServiceRoot default root path used in kv by Session
 	DefaultServiceRoot = "session/"
 	// DefaultIDKey default id key for Session
-	DefaultIDKey         = "id"
-	SupportedLabelPrefix = "MILVUS_SERVER_LABEL_"
+	DefaultIDKey                       = "id"
+	SupportedLabelPrefix               = "MILVUS_SERVER_LABEL_"
+	LabelStreamingNodeEmbededQueryNode = "QUERYNODE_STREAMING-EMBEDED"
 )
 
 // SessionEventType session event type
