@@ -3,6 +3,7 @@ package walmanager
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -72,7 +73,14 @@ func (w *walLifetime) Remove(ctx context.Context, term int64) error {
 	}
 
 	// Wait until the WAL state is ready or term expired or error occurs.
-	return w.statePair.WaitCurrentStateReachExpected(ctx, expected)
+	err := w.statePair.WaitCurrentStateReachExpected(ctx, expected)
+	if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
+		return err
+	}
+	if err != nil {
+		w.logger.Info("remove wal success because that previous open operation is failure", zap.NamedError("previousOpenError", err))
+	}
+	return nil
 }
 
 // Close closes the wal lifetime.

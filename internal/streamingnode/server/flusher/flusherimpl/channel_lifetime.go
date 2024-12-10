@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	adaptor2 "github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
@@ -112,7 +111,7 @@ func (c *channelLifetime) Run() error {
 
 	// Create scanner.
 	policy := options.DeliverPolicyStartFrom(messageID)
-	handler := adaptor2.NewMsgPackAdaptorHandler()
+	handler := adaptor.NewMsgPackAdaptorHandler()
 	ro := wal.ReadOption{
 		VChannel:       c.vchannel,
 		DeliverPolicy:  policy,
