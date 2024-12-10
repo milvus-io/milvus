@@ -146,3 +146,8 @@ func MergeProperties(oldProps []*commonpb.KeyValuePair, updatedProps []*commonpb
 
 	return propKV
 }
+
+func executeAlterDatabaseTaskSteps() error {
+	// TODO simfg
+	return nil
+}
