@@ -144,7 +144,8 @@ func (ms *mqMsgStream) AsProducer(ctx context.Context, channels []string) {
 			ms.producerChannels = append(ms.producerChannels, channel)
 			return nil
 		}
-		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+		err := retry.Do(log.WithFields(context.Background(), zap.String("action", "CreateProducer")),
+			fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
 			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
 			panic(errMsg)
@@ -197,7 +198,8 @@ func (ms *mqMsgStream) AsConsumer(ctx context.Context, channels []string, subNam
 			return nil
 		}
 
-		err := retry.Do(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+		err := retry.Do(log.WithFields(ctx, zap.String("action", "Subscribe")),
+			fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
 			errMsg := fmt.Sprintf("Failed to create consumer %s", channel)
 			if merr.IsCanceledOrTimeout(err) {
@@ -607,7 +609,8 @@ func (ms *MqTtMsgStream) AsConsumer(ctx context.Context, channels []string, subN
 			return nil
 		}
 
-		err := retry.Do(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+		err := retry.Do(log.WithFields(ctx, zap.String("action", "Subscribe")),
+			fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
 			errMsg := fmt.Sprintf("Failed to create consumer %s", channel)
 			if merr.IsCanceledOrTimeout(err) {
