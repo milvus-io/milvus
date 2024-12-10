@@ -13,12 +13,38 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+const (
+	// float64
+	nlistKey              = "nlist"
+	nprobeKey             = "nprobe"
+	maxEmptyResultBuckets = "max_empty_result_buckets"
+	reorderKKey           = "reorder_k"
+	searchListKey         = "search_list"
+	itopkSizeKey          = "itopk_size"
+	searchWidthKey        = "search_width"
+	minIterationsKey      = "min_iterations"
+	maxIterationsKey      = "max_iterations"
+	teamSizeKey           = "team_size"
+	radiusKey             = "radius"
+	rangeFilterKey        = "range_filter"
+	levelKey              = "level"
+	// bool
+	pageRetainOrderKey = "page_retain_order"
+)
+
+var ParamsKeyList = []string{
+	nlistKey, nprobeKey, maxEmptyResultBuckets, reorderKKey, searchListKey,
+	itopkSizeKey, searchWidthKey, minIterationsKey, maxIterationsKey,
+	teamSizeKey, radiusKey, rangeFilterKey, levelKey, pageRetainOrderKey,
+}
 
 type rankParams struct {
 	limit           int64
@@ -163,9 +189,37 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	}
 
 	// 4. parse search param str
-	searchParamStr, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, searchParamsPair)
+	searchParamStr, err := funcutil.GetAttrByKeyFromRepeatedKV(ParamsKey, searchParamsPair)
+	var searchParamMap map[string]any
 	if err != nil {
 		searchParamStr = ""
+	} else {
+		err = json.Unmarshal([]byte(searchParamStr), &searchParamMap)
+		if err != nil {
+			return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: err}
+		}
+	}
+
+	// related with https://github.com/milvus-io/milvus/issues/37972
+	// before 2.5.1, all key in ParamsKeyList will be write in search_params.params
+	// after 2.5.1, allow user to write all this key in search_params
+	// SearchParams in planpb.QueryInfo is the params set passed to segcore
+	// so if you want to use the params in segcore/knowhere, remember to add the new params into ParamsKeyList after 2.5.1
+	for _, key := range ParamsKeyList {
+		stringValue, err := funcutil.GetAttrByKeyFromRepeatedKV(key, searchParamsPair)
+		if err == nil {
+			err := checkParams(searchParamMap, key, stringValue)
+			if err != nil {
+				return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: err}
+			}
+		}
+	}
+	if len(searchParamMap) > 0 {
+		jsonStrBytes, err := json.Marshal(searchParamMap)
+		if err != nil {
+			return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: err}
+		}
+		searchParamStr = string(jsonStrBytes)
 	}
 
 	// 5. parse group by field and group by size
@@ -493,4 +547,41 @@ func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 		ret.SubReqs = append(ret.SubReqs, subReq)
 	}
 	return ret
+}
+
+func checkParams(m map[string]any, key string, stringValue string) error {
+	switch key {
+	case pageRetainOrderKey:
+		value, err := strconv.ParseBool(stringValue)
+		if err != nil {
+			return err
+		}
+		if v, ok := m[key]; ok {
+			v, ok := v.(bool)
+			if !ok {
+				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("parameter(%s) has the wrong type, expect bool type", key))
+			}
+			if v != value {
+				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("inconsistent parameter(%s), search_param(%t),search_param.params(%t)", key, v, value))
+			}
+		}
+		m[key] = value
+	default:
+		// all number will be convert to float64 in json
+		value, err := strconv.ParseFloat(stringValue, 64)
+		if err != nil {
+			return err
+		}
+		if v, ok := m[key]; ok {
+			v, ok := v.(float64)
+			if !ok {
+				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("parameter(%s) has the wrong type, expect bool type", key))
+			}
+			if v != value {
+				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("inconsistent parameter(%s), search_param(%f),search_param.params(%f)", key, v, value))
+			}
+		}
+		m[key] = value
+	}
+	return nil
 }
