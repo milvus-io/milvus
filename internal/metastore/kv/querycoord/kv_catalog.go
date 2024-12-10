@@ -279,8 +279,14 @@ func (s Catalog) SaveCollectionTargets(ctx context.Context, targets ...*querypb.
 		if err != nil {
 			return err
 		}
+
+		// only compress data when size is larger than 1MB
+		compressLevel := zstd.SpeedFastest
+		if len(v) > 1024*1024 {
+			compressLevel = zstd.SpeedBetterCompression
+		}
 		var compressed bytes.Buffer
-		compressor.ZstdCompress(bytes.NewReader(v), io.Writer(&compressed), zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+		compressor.ZstdCompress(bytes.NewReader(v), io.Writer(&compressed), zstd.WithEncoderLevel(compressLevel))
 		kvs[k] = compressed.String()
 	}
 
