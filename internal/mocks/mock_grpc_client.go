@@ -360,7 +360,6 @@ func (_c *MockGrpcClient_SetInternalTLSCertPool_Call[T]) RunAndReturn(run func(*
 	return _c
 }
 
-
 // SetInternalTLSServerName provides a mock function with given fields: cp
 func (_m *MockGrpcClient[T]) SetInternalTLSServerName(cp string) {
 	_m.Called(cp)
