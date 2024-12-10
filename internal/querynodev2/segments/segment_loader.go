@@ -95,6 +95,10 @@ type Loader interface {
 		segment Segment,
 		loadInfo *querypb.SegmentLoadInfo,
 	) error
+
+	LoadJSONIndex(ctx context.Context,
+		segment Segment,
+		info *querypb.SegmentLoadInfo) error
 }
 
 type ResourceEstimate struct {
@@ -831,11 +835,11 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	}
 
 	for _, info := range jsonKeyStats {
-		if err := segment.LoadJsonKeyIndex(ctx, info, schemaHelper); err != nil {
+		if err := segment.LoadJSONKeyIndex(ctx, info, schemaHelper); err != nil {
 			return err
 		}
 	}
-	loadJsonKeyIndexesSpan := tr.RecordSpan()
+	loadJSONKeyIndexesSpan := tr.RecordSpan()
 
 	// 4. rectify entries number for binlog in very rare cases
 	// https://github.com/milvus-io/milvus/23654
@@ -850,7 +854,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		zap.Duration("loadRawDataSpan", loadRawDataSpan),
 		zap.Duration("patchEntryNumberSpan", patchEntryNumberSpan),
 		zap.Duration("loadTextIndexesSpan", loadTextIndexesSpan),
-		zap.Duration("loadJsonKeyIndexSpan", loadJsonKeyIndexesSpan),
+		zap.Duration("loadJsonKeyIndexSpan", loadJSONKeyIndexesSpan),
 	)
 	return nil
 }
@@ -1705,6 +1709,35 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 	}
 
 	return loader.waitSegmentLoadDone(ctx, commonpb.SegmentState_SegmentStateNone, []int64{loadInfo.GetSegmentID()}, version)
+}
+
+func (loader *segmentLoader) LoadJSONIndex(ctx context.Context,
+	seg Segment,
+	loadInfo *querypb.SegmentLoadInfo,
+) error {
+	segment, ok := seg.(*LocalSegment)
+	if !ok {
+		return merr.WrapErrParameterInvalid("LocalSegment", fmt.Sprintf("%T", seg))
+	}
+
+	collection := segment.GetCollection()
+	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
+
+	jsonKeyIndexInfo := make(map[int64]*datapb.JsonKeyStats, len(loadInfo.GetJsonKeyStatsLogs()))
+	for _, fieldStatsLog := range loadInfo.GetJsonKeyStatsLogs() {
+		jsonKeyLog, ok := jsonKeyIndexInfo[fieldStatsLog.FieldID]
+		if !ok {
+			jsonKeyIndexInfo[fieldStatsLog.FieldID] = fieldStatsLog
+		} else if fieldStatsLog.GetVersion() > jsonKeyLog.GetVersion() {
+			jsonKeyIndexInfo[fieldStatsLog.FieldID] = fieldStatsLog
+		}
+	}
+	for _, info := range jsonKeyIndexInfo {
+		if err := segment.LoadJSONKeyIndex(ctx, info, schemaHelper); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func getBinlogDataDiskSize(fieldBinlog *datapb.FieldBinlog) int64 {

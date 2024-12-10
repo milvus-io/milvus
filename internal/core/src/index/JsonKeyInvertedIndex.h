@@ -25,7 +25,7 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
     explicit JsonKeyInvertedIndex(const storage::FileManagerContext& ctx,
                                   bool is_load);
 
-    ~JsonKeyInvertedIndex() override {};
+    ~JsonKeyInvertedIndex() override{};
 
  public:
     IndexStatsPtr

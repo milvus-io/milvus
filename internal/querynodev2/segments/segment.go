@@ -297,6 +297,7 @@ type LocalSegment struct {
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo]
 	warmupDispatcher   *AsyncWarmupDispatcher
+	fieldJSONStats     []int64
 }
 
 func NewSegment(ctx context.Context,
@@ -1137,9 +1138,19 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 	return HandleCStatus(ctx, &status, "LoadTextIndex failed")
 }
 
-func (s *LocalSegment) LoadJsonKeyIndex(ctx context.Context, jsonKeyStats *datapb.JsonKeyStats, schemaHelper *typeutil.SchemaHelper) error {
+func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datapb.JsonKeyStats, schemaHelper *typeutil.SchemaHelper) error {
 	log.Ctx(ctx).Info("load json key index", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
-
+	exists := false
+	for _, field := range s.fieldJSONStats {
+		if field == jsonKeyStats.GetFieldID() {
+			exists = true
+			break
+		}
+	}
+	if exists {
+		log.Warn("JsonKeyIndexStats already loaded")
+		return nil
+	}
 	f, err := schemaHelper.GetFieldFromID(jsonKeyStats.GetFieldID())
 	if err != nil {
 		return err
@@ -1166,9 +1177,8 @@ func (s *LocalSegment) LoadJsonKeyIndex(ctx context.Context, jsonKeyStats *datap
 		status = C.LoadJsonKeyIndex(traceCtx.ctx, s.ptr, (*C.uint8_t)(unsafe.Pointer(&marshaled[0])), (C.uint64_t)(len(marshaled)))
 		return nil, nil
 	}).Await()
-
+	s.fieldJSONStats = append(s.fieldJSONStats, jsonKeyStats.GetFieldID())
 	return HandleCStatus(ctx, &status, "Load JsonKeyStats failed")
-
 }
 
 func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {
@@ -1475,4 +1485,8 @@ func (d *AsyncWarmupDispatcher) Run(ctx context.Context) {
 			d.mu.Unlock()
 		}
 	}
+}
+
+func (s *LocalSegment) GetFieldJSONIndexStats() []int64 {
+	return s.fieldJSONStats
 }

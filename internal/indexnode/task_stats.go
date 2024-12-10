@@ -499,7 +499,7 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			return err
 		}
 	} else if st.req.GetSubJobType() == indexpb.StatsSubJob_JsonKeyIndexJob {
-		err = st.createJsonKeyIndex(ctx,
+		err = st.createJSONKeyIndex(ctx,
 			st.req.GetStorageConfig(),
 			st.req.GetCollectionID(),
 			st.req.GetPartitionID(),
@@ -734,7 +734,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	return nil
 }
 
-func (st *statsTask) createJsonKeyIndex(ctx context.Context,
+func (st *statsTask) createJSONKeyIndex(ctx context.Context,
 	storageConfig *indexpb.StorageConfig,
 	collectionID int64,
 	partitionID int64,
@@ -778,7 +778,7 @@ func (st *statsTask) createJsonKeyIndex(ctx context.Context,
 	jsonKeyIndexStats := make(map[int64]*datapb.JsonKeyStats)
 	for _, field := range st.req.GetSchema().GetFields() {
 		h := typeutil.CreateFieldSchemaHelper(field)
-		if !h.EnableJsonKeyIndex() {
+		if !h.EnableJSONKeyIndex() {
 			continue
 		}
 		log.Info("field enable json key index, ready to create json key index", zap.Int64("field id", field.GetFieldID()))
@@ -799,7 +799,7 @@ func (st *statsTask) createJsonKeyIndex(ctx context.Context,
 			StorageConfig: newStorageConfig,
 		}
 
-		uploaded, err := indexcgowrapper.CreateJsonKeyIndex(ctx, buildIndexParams)
+		uploaded, err := indexcgowrapper.CreateJSONKeyIndex(ctx, buildIndexParams)
 		if err != nil {
 			return err
 		}
@@ -817,7 +817,7 @@ func (st *statsTask) createJsonKeyIndex(ctx context.Context,
 
 	totalElapse := st.tr.RecordSpan()
 
-	st.node.storeJsonKeyIndexResult(st.req.GetClusterID(),
+	st.node.storeJSONKeyIndexResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),
