@@ -47,13 +47,15 @@ const (
 	TaskTypeReduce
 	TaskTypeMove
 	TaskTypeUpdate
+	TaskTypeStatsUpdate
 )
 
 var TaskTypeName = map[Type]string{
-	TaskTypeGrow:   "Grow",
-	TaskTypeReduce: "Reduce",
-	TaskTypeMove:   "Move",
-	TaskTypeUpdate: "Update",
+	TaskTypeGrow:        "Grow",
+	TaskTypeReduce:      "Reduce",
+	TaskTypeMove:        "Move",
+	TaskTypeUpdate:      "Update",
+	TaskTypeStatsUpdate: "StatsUpdate",
 }
 
 type Type int32
