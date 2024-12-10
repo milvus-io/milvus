@@ -25,13 +25,6 @@
 #include "common/EasyAssert.h"
 #include "common/Exception.h"
 
-#define THROWLOCALERROR(code, FUNCTION)                           \
-    do {                                                          \
-        std::stringstream err_msg;                                \
-        err_msg << "Error:" << #FUNCTION << ":" << err.message(); \
-        throw SegcoreError(code, err_msg.str());                  \
-    } while (0)
-
 namespace milvus::storage {
 
 bool
@@ -40,7 +33,10 @@ LocalChunkManager::Exist(const std::string& filepath) {
     boost::system::error_code err;
     bool isExist = boost::filesystem::exists(absPath, err);
     if (err && err.value() != boost::system::errc::no_such_file_or_directory) {
-        THROWLOCALERROR(FileReadFailed, Exist);
+        PanicInfo(FileReadFailed,
+                  fmt::format("local file {} exist interface failed, error: {}",
+                              filepath,
+                              err.message()));
     }
     return isExist;
 }
@@ -55,7 +51,10 @@ LocalChunkManager::Size(const std::string& filepath) {
     boost::system::error_code err;
     int64_t size = boost::filesystem::file_size(absPath, err);
     if (err) {
-        THROWLOCALERROR(FileReadFailed, FileSize);
+        PanicInfo(FileReadFailed,
+                  fmt::format("get local file {} size failed, error: {}",
+                              filepath,
+                              err.message()));
     }
     return size;
 }
@@ -66,7 +65,10 @@ LocalChunkManager::Remove(const std::string& filepath) {
     boost::system::error_code err;
     boost::filesystem::remove(absPath, err);
     if (err) {
-        THROWLOCALERROR(FileWriteFailed, Remove);
+        PanicInfo(FileWriteFailed,
+                  fmt::format("remove local file {} failed, error: {}",
+                              filepath,
+                              err.message()));
     }
 }
 
@@ -187,7 +189,11 @@ LocalChunkManager::DirExist(const std::string& dir) {
     boost::system::error_code err;
     bool isExist = boost::filesystem::exists(dirPath, err);
     if (err && err.value() != boost::system::errc::no_such_file_or_directory) {
-        THROWLOCALERROR(FileReadFailed, DirExist);
+        PanicInfo(
+            FileWriteFailed,
+            fmt::format("local directory {} exist interface failed, error: {}",
+                        dir,
+                        err.message()));
     }
     return isExist;
 }
@@ -201,7 +207,7 @@ LocalChunkManager::CreateDir(const std::string& dir) {
     boost::filesystem::path dirPath(dir);
     auto create_success = boost::filesystem::create_directories(dirPath);
     if (!create_success) {
-        PanicInfo(FileCreateFailed, "create dir failed" + dir);
+        PanicInfo(FileCreateFailed, "create dir:" + dir + " failed");
     }
 }
 
@@ -211,7 +217,10 @@ LocalChunkManager::RemoveDir(const std::string& dir) {
     boost::system::error_code err;
     boost::filesystem::remove_all(dirPath, err);
     if (err) {
-        THROWLOCALERROR(FileCreateFailed, RemoveDir);
+        PanicInfo(FileWriteFailed,
+                  fmt::format("remove local directory:{} failed, error: {}",
+                              dir,
+                              err.message()));
     }
 }
 
