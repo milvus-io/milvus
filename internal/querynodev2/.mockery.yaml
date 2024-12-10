@@ -1,0 +1,23 @@
+quiet: False
+with-expecter: True
+inpackage: True
+filename: "mock_{{.InterfaceNameSnake}}.go"
+mockname: "Mock{{.InterfaceName}}"
+outpkg: "{{.PackageName}}"
+dir: "{{.InterfaceDir}}"
+packages:
+  github.com/milvus-io/milvus/internal/querynodev2/cluster:
+    interfaces:
+      Manager:
+      Worker:
+  github.com/milvus-io/milvus/internal/querynodev2/segments:
+    interfaces:
+      SegmentManager:
+      CollectionManager:
+      Loader:
+      Segment:
+  github.com/milvus-io/milvus/internal/querynodev2/delegator:
+    interfaces:
+      ShardDelegator:
+        config:
+          filename: "mock_delegator.go"
