@@ -408,6 +408,15 @@ var (
 			Name:      "retry_search_result_insufficient_cnt",
 			Help:      "counter of retry search which does not have enough results",
 		}, []string{nodeIDLabelName, queryTypeLabelName, collectionName})
+
+	ProxySearchSparseNumNonZeros = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "search_sparse_num_non_zeros",
+			Help:      "the number of non-zeros in each sparse search task",
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, collectionName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -468,6 +477,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(MaxInsertRate)
 	registry.MustRegister(ProxyRetrySearchCount)
 	registry.MustRegister(ProxyRetrySearchResultInsufficientCount)
+
+	registry.MustRegister(ProxySearchSparseNumNonZeros)
 }
 
 func CleanupProxyDBMetrics(nodeID int64, dbName string) {
