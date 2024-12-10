@@ -33,7 +33,7 @@ import (
 
 type StreamPipeline interface {
 	Pipeline
-	ConsumeMsgStream(position *msgpb.MsgPosition) error
+	ConsumeMsgStream(ctx context.Context, position *msgpb.MsgPosition) error
 }
 
 type streamPipeline struct {
@@ -63,7 +63,7 @@ func (p *streamPipeline) work() {
 	}
 }
 
-func (p *streamPipeline) ConsumeMsgStream(position *msgpb.MsgPosition) error {
+func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.MsgPosition) error {
 	var err error
 	if position == nil {
 		log.Error("seek stream to nil position")
@@ -71,7 +71,7 @@ func (p *streamPipeline) ConsumeMsgStream(position *msgpb.MsgPosition) error {
 	}
 
 	start := time.Now()
-	p.input, err = p.dispatcher.Register(context.TODO(), p.vChannel, position, common.SubscriptionPositionUnknown)
+	p.input, err = p.dispatcher.Register(ctx, p.vChannel, position, common.SubscriptionPositionUnknown)
 	if err != nil {
 		log.Error("dispatcher register failed", zap.String("channel", position.ChannelName))
 		return WrapErrRegDispather(err)
