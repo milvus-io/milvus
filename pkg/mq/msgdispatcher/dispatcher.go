@@ -92,6 +92,12 @@ func NewDispatcher(ctx context.Context,
 		zap.String("subName", subName), zap.Bool("isMain", isMain))
 	log.Info("creating dispatcher...")
 	stream, err := factory.NewTtMsgStream(ctx)
+	defer func() {
+		if err != nil && stream != nil {
+			stream.Close()
+		}
+	}()
+
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +112,6 @@ func NewDispatcher(ctx context.Context,
 
 		err = stream.Seek(ctx, []*Pos{position}, includeCurrentMsg)
 		if err != nil {
-			stream.Close()
 			log.Error("seek failed", zap.Error(err))
 			return nil, err
 		}
@@ -114,7 +119,7 @@ func NewDispatcher(ctx context.Context,
 		log.Info("seek successfully", zap.Uint64("posTs", position.GetTimestamp()),
 			zap.Time("posTime", posTime), zap.Duration("tsLag", time.Since(posTime)))
 	} else {
-		err := stream.AsConsumer(ctx, []string{pchannel}, subName, subPos)
+		err = stream.AsConsumer(ctx, []string{pchannel}, subName, subPos)
 		if err != nil {
 			log.Error("asConsumer failed", zap.Error(err))
 			return nil, err
