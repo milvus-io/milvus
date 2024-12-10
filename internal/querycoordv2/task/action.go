@@ -35,12 +35,14 @@ const (
 	ActionTypeGrow ActionType = iota + 1
 	ActionTypeReduce
 	ActionTypeUpdate
+	ActionTypeStatsUpdate
 )
 
 var ActionTypeName = map[ActionType]string{
-	ActionTypeGrow:   "Grow",
-	ActionTypeReduce: "Reduce",
-	ActionTypeUpdate: "Update",
+	ActionTypeGrow:        "Grow",
+	ActionTypeReduce:      "Reduce",
+	ActionTypeUpdate:      "Update",
+	ActionTypeStatsUpdate: "StatsUpdate",
 }
 
 func (t ActionType) String() string {
@@ -155,7 +157,7 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 			return true
 		}
 		return action.rpcReturned.Load()
-	} else if action.Type() == ActionTypeUpdate {
+	} else if action.Type() == ActionTypeUpdate || action.Type() == ActionTypeStatsUpdate {
 		return action.rpcReturned.Load()
 	}
 
