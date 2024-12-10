@@ -352,6 +352,17 @@ var (
 			nodeIDLabelName,
 		})
 
+	QueryNodeSearchFTSNumTokens = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "search_fts_num_tokens",
+			Help:      "number of tokens in each Full Text Search search task",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+		})
+
 	QueryNodeSearchGroupSize = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -832,6 +843,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeEvictedReadReqCount)
 	registry.MustRegister(QueryNodeSearchGroupTopK)
 	registry.MustRegister(QueryNodeSearchTopK)
+	registry.MustRegister(QueryNodeSearchFTSNumTokens)
 	registry.MustRegister(QueryNodeNumFlowGraphs)
 	registry.MustRegister(QueryNodeNumEntities)
 	registry.MustRegister(QueryNodeEntitiesSize)
