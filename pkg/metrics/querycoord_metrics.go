@@ -139,7 +139,7 @@ var (
 			Subsystem: typeutil.QueryCoordRole,
 			Name:      "resource_group_info",
 			Help:      "all resource group detail info in query coord",
-		}, []string{ResourceGroupLabelName, NodeIDLabelName, nodeHostLabelName})
+		}, []string{ResourceGroupLabelName, NodeIDLabelName})
 
 	QueryCoordResourceGroupReplicaTotal = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
