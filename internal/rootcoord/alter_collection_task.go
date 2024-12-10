@@ -133,3 +133,8 @@ func (a *alterCollectionTask) GetLockerKey() LockerKey {
 		NewCollectionLockerKey(collection, true),
 	)
 }
+
+func executeAlterCollectionTaskSteps() error {
+	// TODO simfg
+	return nil
+}
