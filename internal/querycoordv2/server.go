@@ -215,6 +215,7 @@ func (s *Server) Init() error {
 		return nil
 	}
 
+	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	return s.initQueryCoord()
 }
 
@@ -235,7 +236,6 @@ func (s *Server) initQueryCoord() error {
 	}
 	log.Info("QueryCoord report DataCoord ready")
 
-	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	log.Info("start init querycoord", zap.Any("State", commonpb.StateCode_Initializing))
 	// Init KV and ID allocator
 	metaType := Params.MetaStoreCfg.MetaStoreType.GetValue()
@@ -599,6 +599,7 @@ func (s *Server) Stop() error {
 // UpdateStateCode updates the status of the coord, including healthy, unhealthy
 func (s *Server) UpdateStateCode(code commonpb.StateCode) {
 	s.status.Store(int32(code))
+	log.Info("update querycoord state", zap.String("state", code.String()))
 }
 
 func (s *Server) State() commonpb.StateCode {
