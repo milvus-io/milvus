@@ -21,9 +21,6 @@ import (
 	"sort"
 
 	"github.com/bits-and-blooms/bitset"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type Sizable interface {
@@ -97,7 +94,6 @@ func (c *Knapsack[T]) pack(size, maxLeftSize, minSegs, maxSegs int64) ([]T, int6
 		return nil, size
 	}
 	segs := c.commit(selection)
-	log.Debug("pack", zap.String("name", c.name), zap.Int("segments", len(segs)))
 	return segs, left
 }
 
@@ -119,7 +115,6 @@ func (c *Knapsack[T]) packWith(size, maxLeftSize, minSegs, maxSegs int64, other 
 	}
 	segs := c.commit(selection)
 	otherSegs := other.commit(otherSelection)
-	log.Debug("packWith", zap.String("name", c.name), zap.Int("segments", len(segs)+len(otherSegs)), zap.String("with", other.name))
 	return append(segs, otherSegs...), left
 }
 
