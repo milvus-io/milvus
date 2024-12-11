@@ -67,6 +67,10 @@ void free_rust_result(RustResult result);
 
 void free_rust_error(const char *error);
 
+RustResult test_enum_with_array();
+
+RustResult test_enum_with_ptr();
+
 void print_vector_of_strings(const char *const *ptr, uintptr_t len);
 
 void *create_hashmap();

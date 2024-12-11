@@ -159,3 +159,17 @@ macro_rules! cstr_to_str {
         }
     };
 }
+
+
+#[no_mangle]
+pub extern "C" fn test_enum_with_array() -> RustResult {
+    let array = vec![1, 2, 3];
+    RustResult::from(Result::Ok(array))
+}
+
+#[no_mangle]
+pub extern "C" fn test_enum_with_ptr() -> RustResult {
+    let ptr = Box::into_raw(Box::new(1));
+    RustResult::from(Result::Ok(ptr as *mut c_void))
+}
+
