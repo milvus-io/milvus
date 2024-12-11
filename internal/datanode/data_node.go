@@ -464,6 +464,13 @@ func (node *DataNode) Stop() error {
 			node.writeBufferManager.Stop()
 		}
 
+		if node.syncMgr != nil {
+			err := node.syncMgr.Close()
+			if err != nil {
+				log.Error("sync manager close failed", zap.Error(err))
+			}
+		}
+
 		if node.allocator != nil {
 			log.Info("close id allocator", zap.String("role", typeutil.DataNodeRole))
 			node.allocator.Close()

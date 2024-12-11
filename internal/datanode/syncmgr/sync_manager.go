@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -45,7 +46,7 @@ type SyncMeta struct {
 //go:generate mockery --name=SyncManager --structname=MockSyncManager --output=./  --filename=mock_sync_manager.go --with-expecter --inpackage
 type SyncManager interface {
 	// SyncData is the method to submit sync task.
-	SyncData(ctx context.Context, task Task, callbacks ...func(error) error) *conc.Future[struct{}]
+	SyncData(ctx context.Context, task Task, callbacks ...func(error) error) (*conc.Future[struct{}], error)
 }
 
 type syncManager struct {
@@ -97,7 +98,11 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 	}
 }
 
-func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
+func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+	if mgr.workerPool.IsClosed() {
+		return nil, fmt.Errorf("sync manager is closed")
+	}
+
 	switch t := task.(type) {
 	case *SyncTask:
 		t.WithAllocator(mgr.allocator).WithChunkManager(mgr.chunkManager)
@@ -105,7 +110,7 @@ func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...fu
 		t.WithAllocator(mgr.allocator)
 	}
 
-	return mgr.safeSubmitTask(task, callbacks...)
+	return mgr.safeSubmitTask(task, callbacks...), nil
 }
 
 // safeSubmitTask submits task to SyncManager
@@ -146,4 +151,9 @@ func (mgr *syncManager) GetEarliestPosition(channel string) (int64, *msgpb.MsgPo
 		return true
 	})
 	return segmentID, cp
+}
+
+func (mgr *syncManager) Close() error {
+	timeout := paramtable.Get().CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second)
+	return mgr.workerPool.ReleaseTimeout(timeout)
 }
