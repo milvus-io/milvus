@@ -17,14 +17,15 @@ import (
 func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
 	// Limit debug logging for these methods
 	rateLogMethods := map[string]struct{}{
-		"GetFlushState":    {},
+		"GetFlushState":      {},
 		"GetLoadingProgress": {},
-		"DescribeIndex":    {},
+		"DescribeIndex":      {},
 	}
 
 	logWithRateLimit := func(_methodShortName string, logFunc func(msg string, fields ...zap.Field),
 		logRateFunc func(cost float64, msg string, fields ...zap.Field) bool,
-		msg string, fields ...zap.Field) {
+		msg string, fields ...zap.Field,
+	) {
 		if _, exists := rateLogMethods[_methodShortName]; exists {
 			logRateFunc(10, msg, fields...)
 		} else {
@@ -39,16 +40,16 @@ func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
 
 		// Marshal request
 		marshalWithFallback := func(v interface{}, fallbackMsg string) string {
-			dataJson, err := json.Marshal(v)
+			dataJSON, err := json.Marshal(v)
 			if err != nil {
 				log.Error("Failed to marshal", zap.Error(err))
 				return fallbackMsg
 			}
-			strData := string(dataJson)
-			if len(strData) > maxLogLength {
-				return strData[:maxLogLength] + "......"
+			dataStr := string(dataJSON)
+			if len(dataStr) > maxLogLength {
+				return dataStr[:maxLogLength] + "......"
 			}
-			return strData
+			return dataStr
 		}
 
 		reqStr := marshalWithFallback(req, "could not marshal request")
@@ -67,7 +68,6 @@ func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
 		return errResp
 	}
 }
-
 
 type MilvusClient struct {
 	mClient *client.Client

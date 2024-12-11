@@ -82,7 +82,7 @@ func createMilvusClient(ctx context.Context, t *testing.T, cfg *clientv2.ClientC
 	return mc
 }
 
-func parseLogConfig()  {
+func parseLogConfig() {
 	log.Info("Parser Log Level", zap.String("logLevel", *logLevel))
 	switch *logLevel {
 	case "debug", "DEBUG", "Debug":
