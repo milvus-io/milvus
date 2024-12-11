@@ -952,7 +952,7 @@ This helps Milvus-CDC synchronize incremental data`,
 	p.SyncTaskPoolReleaseTimeoutSeconds = ParamItem{
 		Key:          "common.sync.taskPoolReleaseTimeoutSeconds",
 		DefaultValue: "60",
-		Version:      "2.4.19",
+		Version:      "2.4.18",
 		Doc:          "The maximum time to wait for the task to finish and release resources in the pool",
 		Export:       true,
 	}

@@ -347,8 +347,7 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 			return nil
 		})
 		if err != nil {
-			log.Warn("failed to sync data", zap.Int64("segmentID", segmentID), zap.Error(err))
-			continue
+			log.Fatal("failed to sync data", zap.Int64("segmentID", segmentID), zap.Error(err))
 		}
 		result = append(result, future)
 	}
@@ -667,8 +666,7 @@ func (wb *writeBufferBase) Close(drop bool) {
 			return nil
 		})
 		if err != nil {
-			log.Warn("failed to sync segment", zap.Int64("segmentID", id), zap.Error(err))
-			continue
+			log.Fatal("failed to sync segment", zap.Int64("segmentID", id), zap.Error(err))
 		}
 		futures = append(futures, f)
 	}

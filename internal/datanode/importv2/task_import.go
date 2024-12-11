@@ -237,8 +237,8 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 			}
 			future, err := t.syncMgr.SyncData(t.ctx, syncTask)
 			if err != nil {
-				log.Warn("sync data failed", WrapLogFields(t, zap.Error(err))...)
-				continue
+				log.Error("sync data failed", WrapLogFields(t, zap.Error(err))...)
+				return nil, nil, err
 			}
 			futures = append(futures, future)
 			syncTasks = append(syncTasks, syncTask)

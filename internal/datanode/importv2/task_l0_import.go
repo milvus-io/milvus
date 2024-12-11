@@ -225,8 +225,8 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 		}
 		future, err := t.syncMgr.SyncData(t.ctx, syncTask)
 		if err != nil {
-			log.Warn("failed to sync l0 delete data", WrapLogFields(t, zap.Error(err))...)
-			continue
+			log.Error("failed to sync l0 delete data", WrapLogFields(t, zap.Error(err))...)
+			return nil, nil, err
 		}
 		futures = append(futures, future)
 		syncTasks = append(syncTasks, syncTask)

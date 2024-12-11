@@ -47,6 +47,9 @@ type SyncMeta struct {
 type SyncManager interface {
 	// SyncData is the method to submit sync task.
 	SyncData(ctx context.Context, task Task, callbacks ...func(error) error) (*conc.Future[struct{}], error)
+
+	// Close waits for the task to finish and then shuts down the sync manager.
+	Close() error
 }
 
 type syncManager struct {

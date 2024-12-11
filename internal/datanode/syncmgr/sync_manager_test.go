@@ -285,7 +285,8 @@ func (s *SyncManagerSuite) TestUnexpectedError() {
 	task.EXPECT().Run().Return(merr.WrapErrServiceInternal("mocked")).Once()
 	task.EXPECT().HandleError(mock.Anything)
 
-	f, _ := manager.SyncData(context.Background(), task)
+	f, err := manager.SyncData(context.Background(), task)
+	s.NoError(err)
 	_, err = f.Await()
 	s.Error(err)
 }
@@ -300,7 +301,9 @@ func (s *SyncManagerSuite) TestTargetUpdateSameID() {
 	task.EXPECT().Run().Return(errors.New("mock err")).Once()
 	task.EXPECT().HandleError(mock.Anything)
 
-	f, _ := manager.SyncData(context.Background(), task)
+	f, err := manager.SyncData(context.Background(), task)
+	s.NoError(err)
+
 	_, err = f.Await()
 	s.Error(err)
 }
