@@ -125,13 +125,13 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		zap.Int64("segmentID", st.req.GetSegmentID()),
 	)
 
-	if err := binlog.DecompressBinLog(storage.InsertBinlog, st.req.GetCollectionID(), st.req.GetPartitionID(),
+	if err := binlog.DecompressBinLogWithRootPath(st.req.GetStorageConfig().GetRootPath(), storage.InsertBinlog, st.req.GetCollectionID(), st.req.GetPartitionID(),
 		st.req.GetSegmentID(), st.req.GetInsertLogs()); err != nil {
 		log.Warn("Decompress insert binlog error", zap.Error(err))
 		return err
 	}
 
-	if err := binlog.DecompressBinLog(storage.DeleteBinlog, st.req.GetCollectionID(), st.req.GetPartitionID(),
+	if err := binlog.DecompressBinLogWithRootPath(st.req.GetStorageConfig().GetRootPath(), storage.DeleteBinlog, st.req.GetCollectionID(), st.req.GetPartitionID(),
 		st.req.GetSegmentID(), st.req.GetDeltaLogs()); err != nil {
 		log.Warn("Decompress delta binlog error", zap.Error(err))
 		return err

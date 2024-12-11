@@ -277,8 +277,8 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 
 func (c *importChecker) checkStatsJob(job ImportJob) {
 	log := log.With(zap.Int64("jobID", job.GetJobID()))
-	updateJobState := func(state internalpb.ImportJobState) {
-		err := c.imeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(state))
+	updateJobState := func(state internalpb.ImportJobState, reason string) {
+		err := c.imeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(state), UpdateJobReason(reason))
 		if err != nil {
 			log.Warn("failed to update job state", zap.Error(err))
 			return
@@ -290,7 +290,7 @@ func (c *importChecker) checkStatsJob(job ImportJob) {
 
 	// Skip stats stage if not enable stats or is l0 import.
 	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() || importutilv2.IsL0Import(job.GetOptions()) {
-		updateJobState(internalpb.ImportJobState_IndexBuilding)
+		updateJobState(internalpb.ImportJobState_IndexBuilding, "")
 		return
 	}
 
@@ -306,8 +306,8 @@ func (c *importChecker) checkStatsJob(job ImportJob) {
 		taskCnt += len(originSegmentIDs)
 		for i, originSegmentID := range originSegmentIDs {
 			taskLogFields := WrapTaskLog(task, zap.Int64("origin", originSegmentID), zap.Int64("stats", statsSegmentIDs[i]))
-			state := c.sjm.GetStatsTaskState(originSegmentID, indexpb.StatsSubJob_Sort)
-			switch state {
+			t := c.sjm.GetStatsTask(originSegmentID, indexpb.StatsSubJob_Sort)
+			switch t.GetState() {
 			case indexpb.JobState_JobStateNone:
 				err := c.sjm.SubmitStatsTask(originSegmentID, statsSegmentIDs[i], indexpb.StatsSubJob_Sort, false)
 				if err != nil {
@@ -319,7 +319,7 @@ func (c *importChecker) checkStatsJob(job ImportJob) {
 				log.Debug("waiting for stats task...", taskLogFields...)
 			case indexpb.JobState_JobStateFailed:
 				log.Warn("import job stats failed", taskLogFields...)
-				updateJobState(internalpb.ImportJobState_Failed)
+				updateJobState(internalpb.ImportJobState_Failed, t.GetFailReason())
 				return
 			case indexpb.JobState_JobStateFinished:
 				doneCnt++
@@ -329,7 +329,7 @@ func (c *importChecker) checkStatsJob(job ImportJob) {
 
 	// All segments are stats-ed. Update job state to `IndexBuilding`.
 	if taskCnt == doneCnt {
-		updateJobState(internalpb.ImportJobState_IndexBuilding)
+		updateJobState(internalpb.ImportJobState_IndexBuilding, "")
 	}
 }
 

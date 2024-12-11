@@ -460,8 +460,8 @@ func getStatsProgress(jobID int64, imeta ImportMeta, sjm StatsJobManager) float3
 	}
 	doneCnt := 0
 	for _, originSegmentID := range originSegmentIDs {
-		state := sjm.GetStatsTaskState(originSegmentID, indexpb.StatsSubJob_Sort)
-		if state == indexpb.JobState_JobStateFinished {
+		t := sjm.GetStatsTask(originSegmentID, indexpb.StatsSubJob_Sort)
+		if t.GetState() == indexpb.JobState_JobStateFinished {
 			doneCnt++
 		}
 	}
