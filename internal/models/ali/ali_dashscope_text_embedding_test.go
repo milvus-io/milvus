@@ -21,9 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	//	"sync/atomic"
 	"testing"
-	//	"time"
 
 	"github.com/stretchr/testify/assert"
 )
