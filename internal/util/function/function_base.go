@@ -29,7 +29,7 @@ type FunctionBase struct {
 	outputFields []*schemapb.FieldSchema
 }
 
-func NewBase(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (*FunctionBase, error) {
+func NewFunctionBase(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (*FunctionBase, error) {
 	var base FunctionBase
 	base.schema = schema
 	for _, field_id := range schema.GetOutputFieldIds() {
