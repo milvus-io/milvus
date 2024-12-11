@@ -356,7 +356,7 @@ func (c *Core) initMetaTable() error {
 			if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, Params.EtcdCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
 				return err
 			}
-			catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
+			catalog = kvmetestore.NewCatalog(metaKV, ss)
 		case util.MetaStoreTypeTiKV:
 			log.Info("Using tikv as meta storage.")
 			var metaKV kv.MetaKv
@@ -370,7 +370,7 @@ func (c *Core) initMetaTable() error {
 			if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, Params.TiKVCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
 				return err
 			}
-			catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
+			catalog = kvmetestore.NewCatalog(metaKV, ss)
 		default:
 			return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType.GetValue()))
 		}
@@ -1343,6 +1343,73 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("ShowCollections").Observe(float64(t.queueDur.Milliseconds()))
 
 	return t.Rsp, nil
+}
+
+// ShowCollectionsInternal returns all collections, including unhealthy ones.
+func (c *Core) ShowCollectionsInternal(ctx context.Context, in *rootcoordpb.ShowCollectionsInternalRequest) (*rootcoordpb.ShowCollectionsInternalResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &rootcoordpb.ShowCollectionsInternalResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionsInternal", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("ShowCollectionsInternal")
+
+	ts := typeutil.MaxTimestamp
+	log := log.Ctx(ctx).With(zap.Strings("dbNames", in.GetDbNames()))
+
+	// Currently, this interface is only called during startup, so there is no need to execute it within the scheduler.
+	var err error
+	var dbs []*model.Database
+	if len(in.GetDbNames()) == 0 {
+		// show all collections
+		dbs, err = c.meta.ListDatabases(ctx, ts)
+		if err != nil {
+			log.Info("failed to ListDatabases", zap.Error(err))
+			metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionsInternal", metrics.FailLabel).Inc()
+			return &rootcoordpb.ShowCollectionsInternalResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+	} else {
+		dbs = make([]*model.Database, 0, len(in.GetDbNames()))
+		for _, name := range in.GetDbNames() {
+			db, err := c.meta.GetDatabaseByName(ctx, name, ts)
+			if err != nil {
+				log.Info("failed to GetDatabaseByName", zap.Error(err))
+				metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionsInternal", metrics.FailLabel).Inc()
+				return &rootcoordpb.ShowCollectionsInternalResponse{
+					Status: merr.Status(err),
+				}, nil
+			}
+			dbs = append(dbs, db)
+		}
+	}
+	dbCollections := make([]*rootcoordpb.DBCollections, 0, len(dbs))
+	for _, db := range dbs {
+		collections, err := c.meta.ListCollections(ctx, db.Name, ts, false)
+		if err != nil {
+			log.Info("failed to ListCollections", zap.Error(err))
+			metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionsInternal", metrics.FailLabel).Inc()
+			return &rootcoordpb.ShowCollectionsInternalResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+		dbCollections = append(dbCollections, &rootcoordpb.DBCollections{
+			DbName: db.Name,
+			CollectionIDs: lo.Map(collections, func(col *model.Collection, _ int) int64 {
+				return col.CollectionID
+			}),
+		})
+	}
+	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionsInternal", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowCollectionsInternal").Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	return &rootcoordpb.ShowCollectionsInternalResponse{
+		Status:        merr.Success(),
+		DbCollections: dbCollections,
+	}, nil
 }
 
 func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {

@@ -65,7 +65,7 @@ func NewCatalog(MetaKv kv.MetaKv, chunkManagerRootPath string, metaRootpath stri
 	}
 }
 
-func (kc *Catalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, error) {
+func (kc *Catalog) ListSegments(ctx context.Context, collectionID int64) ([]*datapb.SegmentInfo, error) {
 	group, _ := errgroup.WithContext(ctx)
 	segments := make([]*datapb.SegmentInfo, 0)
 	insertLogs := make(map[typeutil.UniqueID][]*datapb.FieldBinlog, 1)
@@ -75,7 +75,7 @@ func (kc *Catalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, err
 
 	executeFn := func(binlogType storage.BinlogType, result map[typeutil.UniqueID][]*datapb.FieldBinlog) {
 		group.Go(func() error {
-			ret, err := kc.listBinlogs(ctx, binlogType)
+			ret, err := kc.listBinlogs(ctx, binlogType, collectionID)
 			if err != nil {
 				return err
 			}
@@ -91,7 +91,7 @@ func (kc *Catalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, err
 	executeFn(storage.StatsBinlog, statsLogs)
 	executeFn(storage.BM25Binlog, bm25Logs)
 	group.Go(func() error {
-		ret, err := kc.listSegments(ctx)
+		ret, err := kc.listSegments(ctx, collectionID)
 		if err != nil {
 			return err
 		}
@@ -111,7 +111,7 @@ func (kc *Catalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, err
 	return segments, nil
 }
 
-func (kc *Catalog) listSegments(ctx context.Context) ([]*datapb.SegmentInfo, error) {
+func (kc *Catalog) listSegments(ctx context.Context, collectionID int64) ([]*datapb.SegmentInfo, error) {
 	segments := make([]*datapb.SegmentInfo, 0)
 
 	applyFn := func(key []byte, value []byte) error {
@@ -136,7 +136,7 @@ func (kc *Catalog) listSegments(ctx context.Context) ([]*datapb.SegmentInfo, err
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, SegmentPrefix+"/", kc.paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, buildCollectionPrefix(collectionID), kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -144,57 +144,39 @@ func (kc *Catalog) listSegments(ctx context.Context) ([]*datapb.SegmentInfo, err
 	return segments, nil
 }
 
-func (kc *Catalog) parseBinlogKey(key string, prefixIdx int) (int64, int64, int64, error) {
-	remainedKey := key[prefixIdx:]
-	keyWordGroup := strings.Split(remainedKey, "/")
+func (kc *Catalog) parseBinlogKey(key string) (int64, error) {
+	// by-dev/meta/datacoord-meta/binlog/454086059555817418/454086059555817543/454329387504816753/1
+	// ---------------------------------|collectionID      |partitionID       |segmentID         |fieldID
+	keyWordGroup := strings.Split(key, "/")
 	if len(keyWordGroup) < 3 {
-		return 0, 0, 0, fmt.Errorf("parse key: %s failed, trimmed key:%s", key, remainedKey)
+		return 0, fmt.Errorf("parse key: %s failed, key:%s", key, key)
 	}
-
-	collectionID, err := strconv.ParseInt(keyWordGroup[0], 10, 64)
+	segmentID, err := strconv.ParseInt(keyWordGroup[len(keyWordGroup)-2], 10, 64)
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("parse key: %s failed, trimmed key:%s, %w", key, remainedKey, err)
+		return 0, fmt.Errorf("parse key failed, key:%s, %w", key, err)
 	}
-
-	partitionID, err := strconv.ParseInt(keyWordGroup[1], 10, 64)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("parse key: %s failed, trimmed key:%s, %w", key, remainedKey, err)
-	}
-
-	segmentID, err := strconv.ParseInt(keyWordGroup[2], 10, 64)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("parse key: %s failed, trimmed key:%s, %w", key, remainedKey, err)
-	}
-
-	return collectionID, partitionID, segmentID, nil
+	return segmentID, nil
 }
 
-func (kc *Catalog) listBinlogs(ctx context.Context, binlogType storage.BinlogType) (map[typeutil.UniqueID][]*datapb.FieldBinlog, error) {
+func (kc *Catalog) listBinlogs(ctx context.Context, binlogType storage.BinlogType, collectionID int64) (map[typeutil.UniqueID][]*datapb.FieldBinlog, error) {
 	ret := make(map[typeutil.UniqueID][]*datapb.FieldBinlog)
 
 	var err error
 	var logPathPrefix string
 	switch binlogType {
 	case storage.InsertBinlog:
-		logPathPrefix = SegmentBinlogPathPrefix
+		logPathPrefix = fmt.Sprintf("%s/%d", SegmentBinlogPathPrefix, collectionID)
 	case storage.DeleteBinlog:
-		logPathPrefix = SegmentDeltalogPathPrefix
+		logPathPrefix = fmt.Sprintf("%s/%d", SegmentDeltalogPathPrefix, collectionID)
 	case storage.StatsBinlog:
-		logPathPrefix = SegmentStatslogPathPrefix
+		logPathPrefix = fmt.Sprintf("%s/%d", SegmentStatslogPathPrefix, collectionID)
 	case storage.BM25Binlog:
-		logPathPrefix = SegmentBM25logPathPrefix
+		logPathPrefix = fmt.Sprintf("%s/%d", SegmentBM25logPathPrefix, collectionID)
 	default:
 		err = fmt.Errorf("invalid binlog type: %d", binlogType)
 	}
 	if err != nil {
 		return nil, err
-	}
-
-	var prefixIdx int
-	if len(kc.metaRootpath) == 0 {
-		prefixIdx = len(logPathPrefix) + 1
-	} else {
-		prefixIdx = len(kc.metaRootpath) + 1 + len(logPathPrefix) + 1
 	}
 
 	applyFn := func(key []byte, value []byte) error {
@@ -204,7 +186,7 @@ func (kc *Catalog) listBinlogs(ctx context.Context, binlogType storage.BinlogTyp
 			return fmt.Errorf("failed to unmarshal datapb.FieldBinlog: %d, err:%w", fieldBinlog.FieldID, err)
 		}
 
-		_, _, segmentID, err := kc.parseBinlogKey(string(key), prefixIdx)
+		segmentID, err := kc.parseBinlogKey(string(key))
 		if err != nil {
 			return fmt.Errorf("prefix:%s, %w", path.Join(kc.metaRootpath, logPathPrefix), err)
 		}

@@ -123,18 +123,24 @@ func NewCollectionManager(catalog metastore.QueryCoordCatalog) *CollectionManage
 // Recover recovers collections from kv store,
 // panics if failed
 func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
+	start := time.Now()
 	collections, err := m.catalog.GetCollections(ctx)
 	if err != nil {
 		return err
 	}
-	partitions, err := m.catalog.GetPartitions(ctx)
+	log.Ctx(ctx).Info("recover collections from kv store", zap.Duration("dur", time.Since(start)))
+
+	start = time.Now()
+	partitions, err := m.catalog.GetPartitions(ctx, lo.Map(collections, func(collection *querypb.CollectionLoadInfo, _ int) int64 {
+		return collection.GetCollectionID()
+	}))
 	if err != nil {
 		return err
 	}
 
 	ctx = log.WithTraceID(ctx, strconv.FormatInt(time.Now().UnixNano(), 10))
 	ctxLog := log.Ctx(ctx)
-	ctxLog.Info("recover collections and partitions from kv store")
+	ctxLog.Info("recover partitions from kv store", zap.Duration("dur", time.Since(start)))
 
 	for _, collection := range collections {
 		if collection.GetReplicaNumber() <= 0 {
