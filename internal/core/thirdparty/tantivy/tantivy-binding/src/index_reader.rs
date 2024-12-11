@@ -96,11 +96,35 @@ impl IndexReaderWrapper {
         self.search(&q)
     }
 
+    pub fn lower_bound_range_query_bool(&self, lower_bound: bool, inclusive: bool) -> Vec<u32> {
+        let lower_bound = make_bounds(Term::from_field_bool(self.field, lower_bound), inclusive);
+        let upper_bound = Bound::Unbounded;
+        let q = RangeQuery::new_term_bounds(
+            self.field_name.to_string(),
+            tantivy::schema::Type::Bool,
+            &lower_bound,
+            &upper_bound,
+        );
+        self.search(&q)
+    }
+
     pub fn upper_bound_range_query_i64(&self, upper_bound: i64, inclusive: bool) -> Vec<u32> {
         let q = RangeQuery::new_i64_bounds(
             self.field_name.to_string(),
             Bound::Unbounded,
             make_bounds(upper_bound, inclusive),
+        );
+        self.search(&q)
+    }
+
+    pub fn upper_bound_range_query_bool(&self, upper_bound: bool, inclusive: bool) -> Vec<u32> {
+        let lower_bound = Bound::Unbounded;
+        let upper_bound = make_bounds(Term::from_field_bool(self.field, upper_bound), inclusive);
+        let q = RangeQuery::new_term_bounds(
+            self.field_name.to_string(),
+            tantivy::schema::Type::Bool,
+            &lower_bound,
+            &upper_bound,
         );
         self.search(&q)
     }
@@ -115,6 +139,24 @@ impl IndexReaderWrapper {
         let lb = make_bounds(lower_bound, lb_inclusive);
         let ub = make_bounds(upper_bound, ub_inclusive);
         let q = RangeQuery::new_i64_bounds(self.field_name.to_string(), lb, ub);
+        self.search(&q)
+    }
+
+    pub fn range_query_bool(
+        &self,
+        lower_bound: bool,
+        upper_bound: bool,
+        lb_inclusive: bool,
+        ub_inclusive: bool,
+    ) -> Vec<u32> {
+        let lower_bound = make_bounds(Term::from_field_bool(self.field, lower_bound), lb_inclusive);
+        let upper_bound = make_bounds(Term::from_field_bool(self.field, upper_bound), ub_inclusive);
+        let q = RangeQuery::new_term_bounds(
+            self.field_name.to_string(),
+            tantivy::schema::Type::Bool,
+            &lower_bound,
+            &upper_bound,
+        );
         self.search(&q)
     }
 
