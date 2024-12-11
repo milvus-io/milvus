@@ -16,6 +16,7 @@
 #include <folly/CancellationToken.h>
 #include <folly/futures/Future.h>
 #include <folly/futures/SharedPromise.h>
+#include <charconv>
 #include "future_c_types.h"
 #include "LeakyResult.h"
 #include "Ready.h"
@@ -215,7 +216,7 @@ class Future : public IFuture {
             .thenError(folly::tag_t<std::exception>{},
                        [ready = ready_](const std::exception& e) {
                            ready->setValue(LeakyResult<R>(
-                               milvus::UnexpectedError, e.what()));
+                               milvus::UnexpectedError, fmt::format("{} :{}", typeid(e).name(), e.what())));
                        });
     }
 
