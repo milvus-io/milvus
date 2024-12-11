@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -96,7 +97,9 @@ func (suite *CatalogTestSuite) TestCollectionWithPartition() {
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(int64(3), collections[0].GetCollectionID())
-	partitions, err := suite.catalog.GetPartitions()
+	partitions, err := suite.catalog.GetPartitions(lo.Map(collections, func(collection *querypb.CollectionLoadInfo, _ int) int64 {
+		return collection.GetCollectionID()
+	}))
 	suite.NoError(err)
 	suite.Len(partitions, 1)
 	suite.Len(partitions[int64(3)], 1)
@@ -119,9 +122,53 @@ func (suite *CatalogTestSuite) TestPartition() {
 	suite.catalog.ReleasePartition(1)
 	suite.catalog.ReleasePartition(2)
 
-	partitions, err := suite.catalog.GetPartitions()
+	partitions, err := suite.catalog.GetPartitions([]int64{0})
 	suite.NoError(err)
 	suite.Len(partitions, 1)
+}
+
+func (suite *CatalogTestSuite) TestGetPartitions() {
+	suite.catalog.SaveCollection(&querypb.CollectionLoadInfo{
+		CollectionID: 1,
+	})
+	suite.catalog.SavePartition(&querypb.PartitionLoadInfo{
+		CollectionID: 1,
+		PartitionID:  100,
+	})
+	suite.catalog.SaveCollection(&querypb.CollectionLoadInfo{
+		CollectionID: 2,
+	})
+	suite.catalog.SavePartition(&querypb.PartitionLoadInfo{
+		CollectionID: 2,
+		PartitionID:  200,
+	})
+	suite.catalog.SaveCollection(&querypb.CollectionLoadInfo{
+		CollectionID: 3,
+	})
+	suite.catalog.SavePartition(&querypb.PartitionLoadInfo{
+		CollectionID: 3,
+		PartitionID:  300,
+	})
+
+	partitions, err := suite.catalog.GetPartitions([]int64{1, 2, 3})
+	suite.NoError(err)
+	suite.Len(partitions, 3)
+	suite.Len(partitions[int64(1)], 1)
+	suite.Len(partitions[int64(2)], 1)
+	suite.Len(partitions[int64(3)], 1)
+	partitions, err = suite.catalog.GetPartitions([]int64{2, 3})
+	suite.NoError(err)
+	suite.Len(partitions, 2)
+	suite.Len(partitions[int64(2)], 1)
+	suite.Len(partitions[int64(3)], 1)
+	partitions, err = suite.catalog.GetPartitions([]int64{3})
+	suite.NoError(err)
+	suite.Len(partitions, 1)
+	suite.Len(partitions[int64(3)], 1)
+	suite.Equal(int64(300), partitions[int64(3)][0].GetPartitionID())
+	partitions, err = suite.catalog.GetPartitions([]int64{})
+	suite.NoError(err)
+	suite.Len(partitions, 0)
 }
 
 func (suite *CatalogTestSuite) TestReleaseManyPartitions() {
@@ -136,9 +183,10 @@ func (suite *CatalogTestSuite) TestReleaseManyPartitions() {
 
 	err := suite.catalog.ReleasePartition(1, partitionIDs...)
 	suite.NoError(err)
-	partitions, err := suite.catalog.GetPartitions()
+	partitions, err := suite.catalog.GetPartitions([]int64{1})
 	suite.NoError(err)
-	suite.Len(partitions, 0)
+	suite.Len(partitions, 1)
+	suite.Len(partitions[int64(1)], 0)
 }
 
 func (suite *CatalogTestSuite) TestReplica() {

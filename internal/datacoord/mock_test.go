@@ -83,9 +83,11 @@ func (mm *metaMemoryKV) CompareVersionAndSwap(key string, version int64, target 
 	panic("implement me")
 }
 
-func newMemoryMeta() (*meta, error) {
+func newMemoryMeta(t *testing.T) (*meta, error) {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-	return newMeta(context.TODO(), catalog, nil)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+	return newMeta(context.TODO(), catalog, nil, broker)
 }
 
 var _ allocator = (*MockAllocator)(nil)
@@ -464,6 +466,12 @@ func (m *mockRootCoordClient) ShowCollections(ctx context.Context, req *milvuspb
 	return &milvuspb.ShowCollectionsResponse{
 		Status:          merr.Success(),
 		CollectionNames: []string{"test"},
+	}, nil
+}
+
+func (m *mockRootCoordClient) ShowCollectionsInternal(ctx context.Context, req *rootcoordpb.ShowCollectionsInternalRequest, opts ...grpc.CallOption) (*rootcoordpb.ShowCollectionsInternalResponse, error) {
+	return &rootcoordpb.ShowCollectionsInternalResponse{
+		Status: merr.Success(),
 	}, nil
 }
 

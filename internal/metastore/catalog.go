@@ -119,7 +119,7 @@ type BinlogsIncrement struct {
 
 //go:generate mockery --name=DataCoordCatalog --with-expecter
 type DataCoordCatalog interface {
-	ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, error)
+	ListSegments(ctx context.Context, collectionID int64) ([]*datapb.SegmentInfo, error)
 	AddSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 	// TODO Remove this later, we should update flush segments info for each segment separately, so far we still need transaction
 	AlterSegments(ctx context.Context, newSegments []*datapb.SegmentInfo, binlogs ...BinlogsIncrement) error
@@ -181,7 +181,7 @@ type QueryCoordCatalog interface {
 	SavePartition(info ...*querypb.PartitionLoadInfo) error
 	SaveReplica(replicas ...*querypb.Replica) error
 	GetCollections() ([]*querypb.CollectionLoadInfo, error)
-	GetPartitions() (map[int64][]*querypb.PartitionLoadInfo, error)
+	GetPartitions(collectionIDs []int64) (map[int64][]*querypb.PartitionLoadInfo, error)
 	GetReplicas() ([]*querypb.Replica, error)
 	ReleaseCollection(collection int64) error
 	ReleasePartition(collection int64, partitions ...int64) error
