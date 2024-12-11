@@ -18,8 +18,7 @@
 #include "segcore/SegmentSealedImpl.h"
 #include "query/Utils.h"
 
-namespace milvus {
-namespace exec {
+namespace milvus::exec {
 
 void
 SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
@@ -211,5 +210,4 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
     }
 }
 
-}  // namespace exec
-}  // namespace milvus
+}  // namespace milvus::exec
