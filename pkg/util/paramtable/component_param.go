@@ -290,6 +290,8 @@ type commonConfig struct {
 
 	HealthCheckInterval   ParamItem `refreshable:"true"`
 	HealthCheckRPCTimeout ParamItem `refreshable:"true"`
+
+	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -965,6 +967,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Doc:          `RPC timeout for health check request`,
 	}
 	p.HealthCheckRPCTimeout.Init(base.mgr)
+
+	p.SyncTaskPoolReleaseTimeoutSeconds = ParamItem{
+		Key:          "common.sync.taskPoolReleaseTimeoutSeconds",
+		DefaultValue: "60",
+		Version:      "2.4.19",
+		Doc:          "The maximum time to wait for the task to finish and release resources in the pool",
+		Export:       true,
+	}
+	p.SyncTaskPoolReleaseTimeoutSeconds.Init(base.mgr)
 }
 
 type gpuConfig struct {
