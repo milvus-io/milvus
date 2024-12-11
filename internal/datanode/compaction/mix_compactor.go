@@ -331,16 +331,14 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 
 	sortMergeAppicable := paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool()
 	if sortMergeAppicable {
-		if len(t.plan.GetSegmentBinlogs()) <= 0 {
-			sortMergeAppicable = false
-		}
 		for _, segment := range t.plan.GetSegmentBinlogs() {
 			if !segment.GetIsSorted() {
 				sortMergeAppicable = false
 				break
 			}
 		}
-		if len(insertPaths) > paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt() {
+		if len(insertPaths) <= 1 || len(insertPaths) > paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt() {
+			// sort merge is not applicable if there is only one segment or too many segments
 			sortMergeAppicable = false
 		}
 	}
