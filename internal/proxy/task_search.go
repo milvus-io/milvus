@@ -65,6 +65,7 @@ type searchTask struct {
 	mustUsePartitionKey    bool
 	resultSizeInsufficient bool
 	isTopkReduce           bool
+	isRecallEvaluation     bool
 
 	userOutputFields  []string
 	userDynamicFields []string
@@ -647,9 +648,13 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	t.queryChannelsTs = make(map[string]uint64)
 	t.relatedDataSize = 0
 	isTopkReduce := false
+	isRecallEvaluation := false
 	for _, r := range toReduceResults {
 		if r.GetIsTopkReduce() {
 			isTopkReduce = true
+		}
+		if r.GetIsRecallEvaluation() {
+			isRecallEvaluation = true
 		}
 		t.relatedDataSize += r.GetCostAggregation().GetTotalRelatedDataSize()
 		for ch, ts := range r.GetChannelsMvcc() {
@@ -731,6 +736,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	}
 	t.resultSizeInsufficient = resultSizeInsufficient
 	t.isTopkReduce = isTopkReduce
+	t.isRecallEvaluation = isRecallEvaluation
 	t.result.CollectionName = t.collectionName
 	t.fillInFieldInfo()
 

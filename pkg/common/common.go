@@ -123,6 +123,7 @@ const (
 	ChannelNumKey   = "channel_num"
 	WithOptimizeKey = "with_optimize"
 	CollectionKey   = "collection"
+	RecallEvalKey   = "recall_eval"
 
 	IndexParamsKey = "params"
 	IndexTypeKey   = "index_type"
