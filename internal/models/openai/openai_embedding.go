@@ -18,6 +18,7 @@ package openai
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -157,16 +158,15 @@ func (c *OpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim 
 	if timeoutSec <= 0 {
 		timeoutSec = 30
 	}
-	client := &http.Client{
-		Timeout: timeoutSec * time.Second,
-	}
-	req, err := http.NewRequest("POST", c.url, bytes.NewBuffer(data))
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutSec*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewBuffer(data))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
-	body, err := utils.RetrySend(client, req, 3)
+	body, err := utils.RetrySend(req, 3)
 	if err != nil {
 		return nil, err
 	}
@@ -215,16 +215,15 @@ func (c *AzureOpenAIEmbeddingClient) Embedding(modelName string, texts []string,
 	params.Add("api-version", c.apiVersion)
 	base.RawQuery = params.Encode()
 
-	client := &http.Client{
-		Timeout: timeoutSec * time.Second,
-	}
-	req, err := http.NewRequest("POST", c.url, bytes.NewBuffer(data))
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutSec)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewBuffer(data))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
-	body, err := utils.RetrySend(client, req, 3)
+	body, err := utils.RetrySend(req, 3)
 	if err != nil {
 		return nil, err
 	}
