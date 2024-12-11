@@ -3873,7 +3873,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 TEST(CApiTest, SealedSegmentTest) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment, true);
+    auto status = NewSegment(collection, Sealed, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     int N = 1000;
