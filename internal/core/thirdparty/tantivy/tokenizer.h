@@ -16,10 +16,10 @@ struct Tokenizer {
         auto shared_params = std::make_shared<std::string>(std::move(params));
         auto res =
             RustResultWrapper(tantivy_create_tokenizer(shared_params->c_str()));
-        AssertInfo(res.result_.success,
+        AssertInfo(res.result_->success,
                    "Tokenizer creation failed: {}",
-                   res.result_.error);
-        ptr_ = res.result_.value.ptr._0;
+                   res.result_->error);
+        ptr_ = res.result_->value.ptr._0;
     }
 
     explicit Tokenizer(void* _ptr) : ptr_(_ptr) {

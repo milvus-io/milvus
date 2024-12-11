@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iostream>
+#include <memory>
 #include <sstream>
 
 #include "tantivy-binding.h"
@@ -72,7 +73,8 @@ struct RustResultWrapper {
     NO_COPY_OR_ASSIGN(RustResultWrapper);
 
     RustResultWrapper() = default;
-    explicit RustResultWrapper(RustResult result) : result_(result) {
+    explicit RustResultWrapper(RustResult result)
+        : result_(std::make_unique<RustResult>(result)) {
     }
 
     RustResultWrapper(RustResultWrapper&& other) noexcept {
@@ -93,12 +95,14 @@ struct RustResultWrapper {
         free();
     }
 
-    RustResult result_;
+    std::unique_ptr<RustResult> result_;
 
  private:
     void
     free() {
-        free_rust_result(result_);
+        if (result_) {
+            free_rust_result(*result_.release());
+        }
     }
 };
 
