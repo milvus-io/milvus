@@ -702,13 +702,14 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			BuildID: taskID,
 			Files:   lo.Keys(uploaded),
 		}
+		elapse := st.tr.RecordSpan()
 		log.Info("field enable match, create text index done",
+			zap.Int64("targetSegmentID", st.req.GetTargetSegmentID()),
 			zap.Int64("field id", field.GetFieldID()),
 			zap.Strings("files", lo.Keys(uploaded)),
+			zap.Duration("elapse", elapse),
 		)
 	}
-
-	totalElapse := st.tr.RecordSpan()
 
 	st.node.storeStatsTextIndexResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
@@ -717,9 +718,5 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
 		textIndexLogs)
-
-	log.Info("create text index done",
-		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
-		zap.Duration("total elapse", totalElapse))
 	return nil
 }
