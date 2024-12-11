@@ -42,6 +42,8 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     ~InvertedIndexTantivy();
 
+    void
+    InitForBuildIndex();
     /*
      * deprecated.
      * TODO: why not remove this?

@@ -207,6 +207,7 @@ test_run() {
         Config config;
         config["index_files"] = index_files;
 
+        ctx.set_for_loading_index(true);
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
         index->Load(milvus::tracer::TraceContext{}, config);
