@@ -339,6 +339,9 @@ queryCoord:
   rowCountFactor: 0.4 # the row count weight used when balancing segments among queryNodes
   segmentCountFactor: 0.4 # the segment count weight used when balancing segments among queryNodes
   globalSegmentCountFactor: 0.1 # the segment count weight used when balancing segments among queryNodes
+  # the channel count weight used when balancing channels among queryNodes, 
+  # 		A higher value reduces the likelihood of assigning channels from the same collection to the same QueryNode. Set to 1 to disable this feature.
+  collectionChannelCountFactor: 10
   segmentCountMaxSteps: 50 # segment count based plan generator max steps
   rowCountMaxSteps: 50 # segment count based plan generator max steps
   randomMaxSteps: 10 # segment count based plan generator max steps
