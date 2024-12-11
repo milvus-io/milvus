@@ -17,6 +17,7 @@ import (
 
 var (
 	addr       = flag.String("addr", "localhost:19530", "server host and port")
+	logLevel   = flag.String("log.level", "info", "log level for test")
 	defaultCfg clientv2.ClientConfig
 )
 
@@ -81,8 +82,25 @@ func createMilvusClient(ctx context.Context, t *testing.T, cfg *clientv2.ClientC
 	return mc
 }
 
+func parseLogConfig()  {
+	log.Info("Parser Log Level", zap.String("logLevel", *logLevel))
+	switch *logLevel {
+	case "debug", "DEBUG", "Debug":
+		log.SetLevel(zap.DebugLevel)
+	case "info", "INFO", "Info":
+		log.SetLevel(zap.InfoLevel)
+	case "warn", "WARN", "Warn":
+		log.SetLevel(zap.WarnLevel)
+	case "error", "ERROR", "Error":
+		log.SetLevel(zap.ErrorLevel)
+	default:
+		log.SetLevel(zap.InfoLevel)
+	}
+}
+
 func TestMain(m *testing.M) {
 	flag.Parse()
+	parseLogConfig()
 	log.Info("Parser Milvus address", zap.String("address", *addr))
 	defaultCfg = clientv2.ClientConfig{Address: *addr}
 	code := m.Run()
