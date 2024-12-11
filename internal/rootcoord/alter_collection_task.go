@@ -154,7 +154,6 @@ func DeleteProperties(oldProps []*commonpb.KeyValuePair, deleteKeys []string) []
 	for key, value := range propsMap {
 		propKV = append(propKV, &commonpb.KeyValuePair{Key: key, Value: value})
 	}
-	log.Info("Alter Collection Drop Properties", zap.Any("newProperties", propKV))
 	return propKV
 }
 
