@@ -405,7 +405,6 @@ func newMockProxy() *mockProxy {
 
 func newTestCore(opts ...Opt) *Core {
 	c := &Core{
-		ctx:            context.TODO(),
 		metricsRequest: metricsinfo.NewMetricsRequest(),
 		session:        &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}},
 	}

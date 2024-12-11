@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -290,18 +291,13 @@ func ConvertChannelName(chanName string, tokenFrom string, tokenTo string) (stri
 }
 
 func GetCollectionIDFromVChannel(vChannelName string) int64 {
-	end := strings.LastIndexByte(vChannelName, 'v')
-	if end <= 0 {
-		return -1
-	}
-	start := strings.LastIndexByte(vChannelName, '_')
-	if start <= 0 {
-		return -1
-	}
-
-	collectionIDStr := vChannelName[start+1 : end]
-	if collectionID, err := strconv.ParseInt(collectionIDStr, 0, 64); err == nil {
-		return collectionID
+	re := regexp.MustCompile(`.*_(\d+)v\d+`)
+	matches := re.FindStringSubmatch(vChannelName)
+	if len(matches) > 1 {
+		number, err := strconv.ParseInt(matches[1], 0, 64)
+		if err == nil {
+			return number
+		}
 	}
 	return -1
 }

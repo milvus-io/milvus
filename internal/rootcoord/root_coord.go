@@ -32,6 +32,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -50,7 +51,6 @@ import (
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -131,7 +131,6 @@ type Core struct {
 	activateFunc        func() error
 
 	metricsRequest *metricsinfo.MetricsRequest
-	healthChecker  *healthcheck.Checker
 }
 
 // --------------------- function --------------------------
@@ -502,8 +501,6 @@ func (c *Core) initInternal() error {
 		return err
 	}
 
-	interval := Params.CommonCfg.HealthCheckInterval.GetAsDuration(time.Second)
-	c.healthChecker = healthcheck.NewChecker(interval, c.healthCheckFn)
 	log.Info("init rootcoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", c.address))
 	return nil
 }
@@ -798,7 +795,6 @@ func (c *Core) startInternal() error {
 	}()
 
 	c.startServerLoop()
-	c.healthChecker.Start()
 	c.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.RootCoordRole, c.session.ServerID)
 	log.Info("rootcoord startup successfully")
@@ -860,10 +856,6 @@ func (c *Core) revokeSession() {
 // Stop stops rootCoord.
 func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
-	if c.healthChecker != nil {
-		c.healthChecker.Close()
-	}
-
 	c.stopExecutor()
 	c.stopScheduler()
 	if c.proxyWatcher != nil {
@@ -3130,40 +3122,53 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 		}, nil
 	}
 
-	latestCheckResult := c.healthChecker.GetLatestCheckResult()
-	return healthcheck.GetCheckHealthResponseFromResult(latestCheckResult), nil
-}
-
-func (c *Core) healthCheckFn() *healthcheck.Result {
-	timeout := Params.CommonCfg.HealthCheckRPCTimeout.GetAsDuration(time.Second)
-	ctx, cancel := context.WithTimeout(c.ctx, timeout)
-	defer cancel()
+	group, ctx := errgroup.WithContext(ctx)
+	errs := typeutil.NewConcurrentSet[error]()
 
 	proxyClients := c.proxyClientManager.GetProxyClients()
-	wg := sync.WaitGroup{}
-	lock := sync.Mutex{}
-	result := healthcheck.NewResult()
-
 	proxyClients.Range(func(key int64, value types.ProxyClient) bool {
 		nodeID := key
 		proxyClient := value
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			resp, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
-			err = merr.AnalyzeComponentStateResp(typeutil.ProxyRole, nodeID, resp, err)
-
-			lock.Lock()
-			defer lock.Unlock()
+		group.Go(func() error {
+			sta, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 			if err != nil {
-				result.AppendUnhealthyClusterMsg(healthcheck.NewUnhealthyClusterMsg(typeutil.ProxyRole, nodeID, err.Error(), healthcheck.NodeHealthCheck))
+				errs.Insert(err)
+				return err
 			}
-		}()
+
+			err = merr.AnalyzeState("Proxy", nodeID, sta)
+			if err != nil {
+				errs.Insert(err)
+			}
+
+			return err
+		})
 		return true
 	})
 
-	wg.Wait()
-	return result
+	maxDelay := Params.QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second)
+	if maxDelay > 0 {
+		group.Go(func() error {
+			err := CheckTimeTickLagExceeded(ctx, c.queryCoord, c.dataCoord, maxDelay)
+			if err != nil {
+				errs.Insert(err)
+			}
+			return err
+		})
+	}
+
+	err := group.Wait()
+	if err != nil {
+		return &milvuspb.CheckHealthResponse{
+			Status:    merr.Success(),
+			IsHealthy: false,
+			Reasons: lo.Map(errs.Collect(), func(e error, i int) string {
+				return err.Error()
+			}),
+		}, nil
+	}
+
+	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: []string{}}, nil
 }
 
 func (c *Core) CreatePrivilegeGroup(ctx context.Context, in *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error) {

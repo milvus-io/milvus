@@ -304,22 +304,6 @@ func (c *mockDataNodeClient) Stop() error {
 	return nil
 }
 
-func (c *mockDataNodeClient) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
-	if c.state == commonpb.StateCode_Healthy {
-		return &milvuspb.CheckHealthResponse{
-			Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			IsHealthy: true,
-			Reasons:   []string{},
-		}, nil
-	} else {
-		return &milvuspb.CheckHealthResponse{
-			Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_NotReadyServe},
-			IsHealthy: false,
-			Reasons:   []string{"fails"},
-		}, nil
-	}
-}
-
 type mockRootCoordClient struct {
 	state commonpb.StateCode
 	cnt   atomic.Int64

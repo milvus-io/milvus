@@ -309,61 +309,6 @@ func (_c *MockFlowgraphManager_GetFlowgraphService_Call) RunAndReturn(run func(s
 	return _c
 }
 
-// GetMinTTFlowGraph provides a mock function with given fields:
-func (_m *MockFlowgraphManager) GetMinTTFlowGraph() (string, uint64) {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetMinTTFlowGraph")
-	}
-
-	var r0 string
-	var r1 uint64
-	if rf, ok := ret.Get(0).(func() (string, uint64)); ok {
-		return rf()
-	}
-	if rf, ok := ret.Get(0).(func() string); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	if rf, ok := ret.Get(1).(func() uint64); ok {
-		r1 = rf()
-	} else {
-		r1 = ret.Get(1).(uint64)
-	}
-
-	return r0, r1
-}
-
-// MockFlowgraphManager_GetMinTTFlowGraph_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetMinTTFlowGraph'
-type MockFlowgraphManager_GetMinTTFlowGraph_Call struct {
-	*mock.Call
-}
-
-// GetMinTTFlowGraph is a helper method to define mock.On call
-func (_e *MockFlowgraphManager_Expecter) GetMinTTFlowGraph() *MockFlowgraphManager_GetMinTTFlowGraph_Call {
-	return &MockFlowgraphManager_GetMinTTFlowGraph_Call{Call: _e.mock.On("GetMinTTFlowGraph")}
-}
-
-func (_c *MockFlowgraphManager_GetMinTTFlowGraph_Call) Run(run func()) *MockFlowgraphManager_GetMinTTFlowGraph_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockFlowgraphManager_GetMinTTFlowGraph_Call) Return(_a0 string, _a1 uint64) *MockFlowgraphManager_GetMinTTFlowGraph_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockFlowgraphManager_GetMinTTFlowGraph_Call) RunAndReturn(run func() (string, uint64)) *MockFlowgraphManager_GetMinTTFlowGraph_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetSegmentsJSON provides a mock function with given fields:
 func (_m *MockFlowgraphManager) GetSegmentsJSON() string {
 	ret := _m.Called()

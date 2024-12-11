@@ -6,8 +6,6 @@ import (
 	context "context"
 
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
-	healthcheck "github.com/milvus-io/milvus/internal/util/healthcheck"
-
 	mock "github.com/stretchr/testify/mock"
 
 	typeutil "github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -119,50 +117,48 @@ func (_c *MockDataNodeManager_CheckChannelOperationProgress_Call) RunAndReturn(r
 	return _c
 }
 
-// CheckDNHealth provides a mock function with given fields: ctx
-func (_m *MockDataNodeManager) CheckDNHealth(ctx context.Context) *healthcheck.Result {
+// CheckHealth provides a mock function with given fields: ctx
+func (_m *MockDataNodeManager) CheckHealth(ctx context.Context) error {
 	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
-		panic("no return value specified for CheckDNHealth")
+		panic("no return value specified for CheckHealth")
 	}
 
-	var r0 *healthcheck.Result
-	if rf, ok := ret.Get(0).(func(context.Context) *healthcheck.Result); ok {
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
 		r0 = rf(ctx)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*healthcheck.Result)
-		}
+		r0 = ret.Error(0)
 	}
 
 	return r0
 }
 
-// MockDataNodeManager_CheckDNHealth_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckDNHealth'
-type MockDataNodeManager_CheckDNHealth_Call struct {
+// MockDataNodeManager_CheckHealth_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckHealth'
+type MockDataNodeManager_CheckHealth_Call struct {
 	*mock.Call
 }
 
-// CheckDNHealth is a helper method to define mock.On call
+// CheckHealth is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockDataNodeManager_Expecter) CheckDNHealth(ctx interface{}) *MockDataNodeManager_CheckDNHealth_Call {
-	return &MockDataNodeManager_CheckDNHealth_Call{Call: _e.mock.On("CheckDNHealth", ctx)}
+func (_e *MockDataNodeManager_Expecter) CheckHealth(ctx interface{}) *MockDataNodeManager_CheckHealth_Call {
+	return &MockDataNodeManager_CheckHealth_Call{Call: _e.mock.On("CheckHealth", ctx)}
 }
 
-func (_c *MockDataNodeManager_CheckDNHealth_Call) Run(run func(ctx context.Context)) *MockDataNodeManager_CheckDNHealth_Call {
+func (_c *MockDataNodeManager_CheckHealth_Call) Run(run func(ctx context.Context)) *MockDataNodeManager_CheckHealth_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context))
 	})
 	return _c
 }
 
-func (_c *MockDataNodeManager_CheckDNHealth_Call) Return(_a0 *healthcheck.Result) *MockDataNodeManager_CheckDNHealth_Call {
+func (_c *MockDataNodeManager_CheckHealth_Call) Return(_a0 error) *MockDataNodeManager_CheckHealth_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockDataNodeManager_CheckDNHealth_Call) RunAndReturn(run func(context.Context) *healthcheck.Result) *MockDataNodeManager_CheckDNHealth_Call {
+func (_c *MockDataNodeManager_CheckHealth_Call) RunAndReturn(run func(context.Context) error) *MockDataNodeManager_CheckHealth_Call {
 	_c.Call.Return(run)
 	return _c
 }
