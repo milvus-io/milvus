@@ -2372,7 +2372,8 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 
 	if !in.ForceDrop {
 		grantEntities, err := c.meta.SelectGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
-			Role: &milvuspb.RoleEntity{Name: in.RoleName},
+			Role:   &milvuspb.RoleEntity{Name: in.RoleName},
+			DbName: "*",
 		})
 		if len(grantEntities) != 0 {
 			errMsg := "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"
