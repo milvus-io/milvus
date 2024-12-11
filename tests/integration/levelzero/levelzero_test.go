@@ -41,14 +41,15 @@ type LevelZeroSuite struct {
 }
 
 func (s *LevelZeroSuite) SetupSuite() {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableStatsTask.Key, "false")
 	s.MiniClusterSuite.SetupSuite()
 	s.dim = 768
-
-	paramtable.Init()
 }
 
 func (s *LevelZeroSuite) TearDownSuite() {
 	s.MiniClusterSuite.TearDownSuite()
+	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableStatsTask.Key)
 }
 
 func TestLevelZero(t *testing.T) {
