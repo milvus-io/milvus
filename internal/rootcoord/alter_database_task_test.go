@@ -221,11 +221,19 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 			},
 		}
 
+<<<<<<< HEAD
 		deleteKeys := []string{
 			common.CollectionAutoCompactionKey,
 		}
 
 		ret := DeleteProperties(oldProps, deleteKeys)
+=======
+		delete_keys := []string{
+			common.CollectionAutoCompactionKey,
+		}
+
+		ret := DeleteProperties(oldProps, delete_keys)
+>>>>>>> e889fafe76 (improvement alterdatabase support delete property test)
 
 		assert.Contains(t, ret, &commonpb.KeyValuePair{
 			Key:   common.CollectionTTLConfigKey,
@@ -239,11 +247,19 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 			},
 		}
 
+<<<<<<< HEAD
 		deleteKeys2 := []string{
 			common.CollectionTTLConfigKey,
 		}
 
 		ret2 := DeleteProperties(oldProps2, deleteKeys2)
+=======
+		delete_keys2 := []string{
+			common.CollectionTTLConfigKey,
+		}
+
+		ret2 := DeleteProperties(oldProps2, delete_keys2)
+>>>>>>> e889fafe76 (improvement alterdatabase support delete property test)
 
 		assert.Empty(t, ret2)
 	})
