@@ -1401,7 +1401,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 		zap.String("channel", t.GetChannel()))
 
 	metricMutation := &segMetricMutation{stateChange: make(map[string]map[string]int)}
-	compactFromSegIDs := make([]int64, 0)
+	compactFromSegIDs := t.GetInputSegments()
 	compactToSegIDs := make([]int64, 0)
 	compactToSegInfos := make([]*SegmentInfo, 0)
 	var (
