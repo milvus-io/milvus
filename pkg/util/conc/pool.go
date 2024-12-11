@@ -20,8 +20,9 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
-	ants "github.com/panjf2000/ants/v2"
+	"github.com/panjf2000/ants/v2"
 
 	"github.com/milvus-io/milvus/pkg/util/generic"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
@@ -107,8 +108,16 @@ func (pool *Pool[T]) Free() int {
 	return pool.inner.Free()
 }
 
+func (pool *Pool[T]) IsClosed() bool {
+	return pool.inner.IsClosed()
+}
+
 func (pool *Pool[T]) Release() {
 	pool.inner.Release()
+}
+
+func (pool *Pool[T]) ReleaseTimeout(timeout time.Duration) error {
+	return pool.inner.ReleaseTimeout(timeout)
 }
 
 func (pool *Pool[T]) Resize(size int) error {

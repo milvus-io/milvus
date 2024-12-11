@@ -286,6 +286,8 @@ type commonConfig struct {
 
 	// Local RPC enabled for milvus internal communication when mix or standalone mode.
 	LocalRPCEnabled ParamItem `refreshable:"false"`
+
+	SyncTaskPoolReleaseWaitTimeout ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -936,6 +938,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.LocalRPCEnabled.Init(base.mgr)
+
+	p.SyncTaskPoolReleaseWaitTimeout = ParamItem{
+		Key:          "flush.sync.taskPoolReleaseWaitTimeout",
+		DefaultValue: "60s",
+		Version:      "2.4.19",
+		Doc:          "The maximum time to wait for the task to finish and release resources in the pool",
+		Export:       true,
+	}
+	p.SyncTaskPoolReleaseWaitTimeout.Init(base.mgr)
 }
 
 type gpuConfig struct {

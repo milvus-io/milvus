@@ -317,7 +317,7 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		serializer.EXPECT().EncodeBuffer(mock.Anything, mock.Anything).Return(syncmgr.NewSyncTask(), nil)
 		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything, mock.Anything).Return(conc.Go[struct{}](func() (struct{}, error) {
 			return struct{}{}, nil
-		}))
+		}), nil)
 		defer func() {
 			s.wb.mut.Lock()
 			defer s.wb.mut.Unlock()
