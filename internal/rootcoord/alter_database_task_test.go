@@ -212,4 +212,39 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 			Value: "true",
 		})
 	})
+
+	t.Run("test delete collection props", func(t *testing.T) {
+		oldProps := []*commonpb.KeyValuePair{
+			{
+				Key:   common.CollectionTTLConfigKey,
+				Value: "1",
+			},
+		}
+
+		delete_keys := []string{
+			common.CollectionAutoCompactionKey,
+		}
+
+		ret := DeleteProperties(oldProps, delete_keys)
+
+		assert.Contains(t, ret, &commonpb.KeyValuePair{
+			Key:   common.CollectionTTLConfigKey,
+			Value: "1",
+		})
+
+		oldProps2 := []*commonpb.KeyValuePair{
+			{
+				Key:   common.CollectionTTLConfigKey,
+				Value: "1",
+			},
+		}
+
+		delete_keys2 := []string{
+			common.CollectionTTLConfigKey,
+		}
+
+		ret2 := DeleteProperties(oldProps2, delete_keys2)
+
+		assert.Empty(t, ret2)
+	})
 }
