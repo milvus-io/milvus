@@ -20,7 +20,7 @@ type StatsJobManager interface {
 	Start()
 	Stop()
 	SubmitStatsTask(originSegmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob, canRecycle bool) error
-	GetStatsTaskState(originSegmentID int64, subJobType indexpb.StatsSubJob) indexpb.JobState
+	GetStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) *indexpb.StatsTask
 	DropStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) error
 }
 
@@ -264,11 +264,12 @@ func (jm *statsJobManager) SubmitStatsTask(originSegmentID, targetSegmentID int6
 	return nil
 }
 
-func (jm *statsJobManager) GetStatsTaskState(originSegmentID int64, subJobType indexpb.StatsSubJob) indexpb.JobState {
-	state := jm.mt.statsTaskMeta.GetStatsTaskStateBySegmentID(originSegmentID, subJobType)
+func (jm *statsJobManager) GetStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) *indexpb.StatsTask {
+	task := jm.mt.statsTaskMeta.GetStatsTaskBySegmentID(originSegmentID, subJobType)
 	log.Info("statsJobManager get stats task state", zap.Int64("segmentID", originSegmentID),
-		zap.String("subJobType", subJobType.String()), zap.String("state", state.String()))
-	return state
+		zap.String("subJobType", subJobType.String()), zap.String("state", task.GetState().String()),
+		zap.String("failReason", task.GetFailReason()))
+	return task
 }
 
 func (jm *statsJobManager) DropStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) error {

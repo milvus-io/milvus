@@ -23,6 +23,7 @@
 #include "exec/operator/CallbackSink.h"
 #include "exec/operator/CountNode.h"
 #include "exec/operator/FilterBitsNode.h"
+#include "exec/operator/IterativeFilterNode.h"
 #include "exec/operator/MvccNode.h"
 #include "exec/operator/Operator.h"
 #include "exec/operator/VectorSearchNode.h"
@@ -52,11 +53,16 @@ DriverFactory::CreateDriver(std::unique_ptr<DriverContext> ctx,
     for (size_t i = 0; i < plannodes_.size(); ++i) {
         auto id = operators.size();
         auto plannode = plannodes_[i];
-        if (auto filternode =
+        if (auto filterbitsnode =
                 std::dynamic_pointer_cast<const plan::FilterBitsNode>(
                     plannode)) {
-            operators.push_back(
-                std::make_unique<PhyFilterBitsNode>(id, ctx.get(), filternode));
+            operators.push_back(std::make_unique<PhyFilterBitsNode>(
+                id, ctx.get(), filterbitsnode));
+        } else if (auto filternode =
+                       std::dynamic_pointer_cast<const plan::FilterNode>(
+                           plannode)) {
+            operators.push_back(std::make_unique<PhyIterativeFilterNode>(
+                id, ctx.get(), filternode));
         } else if (auto mvccnode =
                        std::dynamic_pointer_cast<const plan::MvccNode>(
                            plannode)) {

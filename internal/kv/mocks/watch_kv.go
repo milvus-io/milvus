@@ -3,6 +3,8 @@
 package mocks
 
 import (
+	context "context"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	mock "github.com/stretchr/testify/mock"
@@ -55,9 +57,9 @@ func (_c *WatchKV_Close_Call) RunAndReturn(run func()) *WatchKV_Close_Call {
 	return _c
 }
 
-// CompareVersionAndSwap provides a mock function with given fields: key, version, target
-func (_m *WatchKV) CompareVersionAndSwap(key string, version int64, target string) (bool, error) {
-	ret := _m.Called(key, version, target)
+// CompareVersionAndSwap provides a mock function with given fields: ctx, key, version, target
+func (_m *WatchKV) CompareVersionAndSwap(ctx context.Context, key string, version int64, target string) (bool, error) {
+	ret := _m.Called(ctx, key, version, target)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CompareVersionAndSwap")
@@ -65,17 +67,17 @@ func (_m *WatchKV) CompareVersionAndSwap(key string, version int64, target strin
 
 	var r0 bool
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, int64, string) (bool, error)); ok {
-		return rf(key, version, target)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64, string) (bool, error)); ok {
+		return rf(ctx, key, version, target)
 	}
-	if rf, ok := ret.Get(0).(func(string, int64, string) bool); ok {
-		r0 = rf(key, version, target)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64, string) bool); ok {
+		r0 = rf(ctx, key, version, target)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, int64, string) error); ok {
-		r1 = rf(key, version, target)
+	if rf, ok := ret.Get(1).(func(context.Context, string, int64, string) error); ok {
+		r1 = rf(ctx, key, version, target)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -89,16 +91,17 @@ type WatchKV_CompareVersionAndSwap_Call struct {
 }
 
 // CompareVersionAndSwap is a helper method to define mock.On call
+//   - ctx context.Context
 //   - key string
 //   - version int64
 //   - target string
-func (_e *WatchKV_Expecter) CompareVersionAndSwap(key interface{}, version interface{}, target interface{}) *WatchKV_CompareVersionAndSwap_Call {
-	return &WatchKV_CompareVersionAndSwap_Call{Call: _e.mock.On("CompareVersionAndSwap", key, version, target)}
+func (_e *WatchKV_Expecter) CompareVersionAndSwap(ctx interface{}, key interface{}, version interface{}, target interface{}) *WatchKV_CompareVersionAndSwap_Call {
+	return &WatchKV_CompareVersionAndSwap_Call{Call: _e.mock.On("CompareVersionAndSwap", ctx, key, version, target)}
 }
 
-func (_c *WatchKV_CompareVersionAndSwap_Call) Run(run func(key string, version int64, target string)) *WatchKV_CompareVersionAndSwap_Call {
+func (_c *WatchKV_CompareVersionAndSwap_Call) Run(run func(ctx context.Context, key string, version int64, target string)) *WatchKV_CompareVersionAndSwap_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(int64), args[2].(string))
+		run(args[0].(context.Context), args[1].(string), args[2].(int64), args[3].(string))
 	})
 	return _c
 }
@@ -108,7 +111,7 @@ func (_c *WatchKV_CompareVersionAndSwap_Call) Return(_a0 bool, _a1 error) *Watch
 	return _c
 }
 
-func (_c *WatchKV_CompareVersionAndSwap_Call) RunAndReturn(run func(string, int64, string) (bool, error)) *WatchKV_CompareVersionAndSwap_Call {
+func (_c *WatchKV_CompareVersionAndSwap_Call) RunAndReturn(run func(context.Context, string, int64, string) (bool, error)) *WatchKV_CompareVersionAndSwap_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -159,9 +162,9 @@ func (_c *WatchKV_GetPath_Call) RunAndReturn(run func(string) string) *WatchKV_G
 	return _c
 }
 
-// Has provides a mock function with given fields: key
-func (_m *WatchKV) Has(key string) (bool, error) {
-	ret := _m.Called(key)
+// Has provides a mock function with given fields: ctx, key
+func (_m *WatchKV) Has(ctx context.Context, key string) (bool, error) {
+	ret := _m.Called(ctx, key)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Has")
@@ -169,17 +172,17 @@ func (_m *WatchKV) Has(key string) (bool, error) {
 
 	var r0 bool
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) (bool, error)); ok {
-		return rf(key)
+	if rf, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
+		return rf(ctx, key)
 	}
-	if rf, ok := ret.Get(0).(func(string) bool); ok {
-		r0 = rf(key)
+	if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+		r0 = rf(ctx, key)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(key)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, key)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -193,14 +196,15 @@ type WatchKV_Has_Call struct {
 }
 
 // Has is a helper method to define mock.On call
+//   - ctx context.Context
 //   - key string
-func (_e *WatchKV_Expecter) Has(key interface{}) *WatchKV_Has_Call {
-	return &WatchKV_Has_Call{Call: _e.mock.On("Has", key)}
+func (_e *WatchKV_Expecter) Has(ctx interface{}, key interface{}) *WatchKV_Has_Call {
+	return &WatchKV_Has_Call{Call: _e.mock.On("Has", ctx, key)}
 }
 
-func (_c *WatchKV_Has_Call) Run(run func(key string)) *WatchKV_Has_Call {
+func (_c *WatchKV_Has_Call) Run(run func(ctx context.Context, key string)) *WatchKV_Has_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -210,14 +214,14 @@ func (_c *WatchKV_Has_Call) Return(_a0 bool, _a1 error) *WatchKV_Has_Call {
 	return _c
 }
 
-func (_c *WatchKV_Has_Call) RunAndReturn(run func(string) (bool, error)) *WatchKV_Has_Call {
+func (_c *WatchKV_Has_Call) RunAndReturn(run func(context.Context, string) (bool, error)) *WatchKV_Has_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// HasPrefix provides a mock function with given fields: prefix
-func (_m *WatchKV) HasPrefix(prefix string) (bool, error) {
-	ret := _m.Called(prefix)
+// HasPrefix provides a mock function with given fields: ctx, prefix
+func (_m *WatchKV) HasPrefix(ctx context.Context, prefix string) (bool, error) {
+	ret := _m.Called(ctx, prefix)
 
 	if len(ret) == 0 {
 		panic("no return value specified for HasPrefix")
@@ -225,17 +229,17 @@ func (_m *WatchKV) HasPrefix(prefix string) (bool, error) {
 
 	var r0 bool
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) (bool, error)); ok {
-		return rf(prefix)
+	if rf, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
+		return rf(ctx, prefix)
 	}
-	if rf, ok := ret.Get(0).(func(string) bool); ok {
-		r0 = rf(prefix)
+	if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+		r0 = rf(ctx, prefix)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(prefix)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, prefix)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -249,14 +253,15 @@ type WatchKV_HasPrefix_Call struct {
 }
 
 // HasPrefix is a helper method to define mock.On call
+//   - ctx context.Context
 //   - prefix string
-func (_e *WatchKV_Expecter) HasPrefix(prefix interface{}) *WatchKV_HasPrefix_Call {
-	return &WatchKV_HasPrefix_Call{Call: _e.mock.On("HasPrefix", prefix)}
+func (_e *WatchKV_Expecter) HasPrefix(ctx interface{}, prefix interface{}) *WatchKV_HasPrefix_Call {
+	return &WatchKV_HasPrefix_Call{Call: _e.mock.On("HasPrefix", ctx, prefix)}
 }
 
-func (_c *WatchKV_HasPrefix_Call) Run(run func(prefix string)) *WatchKV_HasPrefix_Call {
+func (_c *WatchKV_HasPrefix_Call) Run(run func(ctx context.Context, prefix string)) *WatchKV_HasPrefix_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -266,14 +271,14 @@ func (_c *WatchKV_HasPrefix_Call) Return(_a0 bool, _a1 error) *WatchKV_HasPrefix
 	return _c
 }
 
-func (_c *WatchKV_HasPrefix_Call) RunAndReturn(run func(string) (bool, error)) *WatchKV_HasPrefix_Call {
+func (_c *WatchKV_HasPrefix_Call) RunAndReturn(run func(context.Context, string) (bool, error)) *WatchKV_HasPrefix_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// Load provides a mock function with given fields: key
-func (_m *WatchKV) Load(key string) (string, error) {
-	ret := _m.Called(key)
+// Load provides a mock function with given fields: ctx, key
+func (_m *WatchKV) Load(ctx context.Context, key string) (string, error) {
+	ret := _m.Called(ctx, key)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Load")
@@ -281,17 +286,17 @@ func (_m *WatchKV) Load(key string) (string, error) {
 
 	var r0 string
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
-		return rf(key)
+	if rf, ok := ret.Get(0).(func(context.Context, string) (string, error)); ok {
+		return rf(ctx, key)
 	}
-	if rf, ok := ret.Get(0).(func(string) string); ok {
-		r0 = rf(key)
+	if rf, ok := ret.Get(0).(func(context.Context, string) string); ok {
+		r0 = rf(ctx, key)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(key)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, key)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -305,14 +310,15 @@ type WatchKV_Load_Call struct {
 }
 
 // Load is a helper method to define mock.On call
+//   - ctx context.Context
 //   - key string
-func (_e *WatchKV_Expecter) Load(key interface{}) *WatchKV_Load_Call {
-	return &WatchKV_Load_Call{Call: _e.mock.On("Load", key)}
+func (_e *WatchKV_Expecter) Load(ctx interface{}, key interface{}) *WatchKV_Load_Call {
+	return &WatchKV_Load_Call{Call: _e.mock.On("Load", ctx, key)}
 }
 
-func (_c *WatchKV_Load_Call) Run(run func(key string)) *WatchKV_Load_Call {
+func (_c *WatchKV_Load_Call) Run(run func(ctx context.Context, key string)) *WatchKV_Load_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -322,14 +328,14 @@ func (_c *WatchKV_Load_Call) Return(_a0 string, _a1 error) *WatchKV_Load_Call {
 	return _c
 }
 
-func (_c *WatchKV_Load_Call) RunAndReturn(run func(string) (string, error)) *WatchKV_Load_Call {
+func (_c *WatchKV_Load_Call) RunAndReturn(run func(context.Context, string) (string, error)) *WatchKV_Load_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// LoadWithPrefix provides a mock function with given fields: key
-func (_m *WatchKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	ret := _m.Called(key)
+// LoadWithPrefix provides a mock function with given fields: ctx, key
+func (_m *WatchKV) LoadWithPrefix(ctx context.Context, key string) ([]string, []string, error) {
+	ret := _m.Called(ctx, key)
 
 	if len(ret) == 0 {
 		panic("no return value specified for LoadWithPrefix")
@@ -338,27 +344,27 @@ func (_m *WatchKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	var r0 []string
 	var r1 []string
 	var r2 error
-	if rf, ok := ret.Get(0).(func(string) ([]string, []string, error)); ok {
-		return rf(key)
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]string, []string, error)); ok {
+		return rf(ctx, key)
 	}
-	if rf, ok := ret.Get(0).(func(string) []string); ok {
-		r0 = rf(key)
+	if rf, ok := ret.Get(0).(func(context.Context, string) []string); ok {
+		r0 = rf(ctx, key)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]string)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string) []string); ok {
-		r1 = rf(key)
+	if rf, ok := ret.Get(1).(func(context.Context, string) []string); ok {
+		r1 = rf(ctx, key)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).([]string)
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func(string) error); ok {
-		r2 = rf(key)
+	if rf, ok := ret.Get(2).(func(context.Context, string) error); ok {
+		r2 = rf(ctx, key)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -372,14 +378,15 @@ type WatchKV_LoadWithPrefix_Call struct {
 }
 
 // LoadWithPrefix is a helper method to define mock.On call
+//   - ctx context.Context
 //   - key string
-func (_e *WatchKV_Expecter) LoadWithPrefix(key interface{}) *WatchKV_LoadWithPrefix_Call {
-	return &WatchKV_LoadWithPrefix_Call{Call: _e.mock.On("LoadWithPrefix", key)}
+func (_e *WatchKV_Expecter) LoadWithPrefix(ctx interface{}, key interface{}) *WatchKV_LoadWithPrefix_Call {
+	return &WatchKV_LoadWithPrefix_Call{Call: _e.mock.On("LoadWithPrefix", ctx, key)}
 }
 
-func (_c *WatchKV_LoadWithPrefix_Call) Run(run func(key string)) *WatchKV_LoadWithPrefix_Call {
+func (_c *WatchKV_LoadWithPrefix_Call) Run(run func(ctx context.Context, key string)) *WatchKV_LoadWithPrefix_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -389,14 +396,14 @@ func (_c *WatchKV_LoadWithPrefix_Call) Return(_a0 []string, _a1 []string, _a2 er
 	return _c
 }
 
-func (_c *WatchKV_LoadWithPrefix_Call) RunAndReturn(run func(string) ([]string, []string, error)) *WatchKV_LoadWithPrefix_Call {
+func (_c *WatchKV_LoadWithPrefix_Call) RunAndReturn(run func(context.Context, string) ([]string, []string, error)) *WatchKV_LoadWithPrefix_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// MultiLoad provides a mock function with given fields: keys
-func (_m *WatchKV) MultiLoad(keys []string) ([]string, error) {
-	ret := _m.Called(keys)
+// MultiLoad provides a mock function with given fields: ctx, keys
+func (_m *WatchKV) MultiLoad(ctx context.Context, keys []string) ([]string, error) {
+	ret := _m.Called(ctx, keys)
 
 	if len(ret) == 0 {
 		panic("no return value specified for MultiLoad")
@@ -404,19 +411,19 @@ func (_m *WatchKV) MultiLoad(keys []string) ([]string, error) {
 
 	var r0 []string
 	var r1 error
-	if rf, ok := ret.Get(0).(func([]string) ([]string, error)); ok {
-		return rf(keys)
+	if rf, ok := ret.Get(0).(func(context.Context, []string) ([]string, error)); ok {
+		return rf(ctx, keys)
 	}
-	if rf, ok := ret.Get(0).(func([]string) []string); ok {
-		r0 = rf(keys)
+	if rf, ok := ret.Get(0).(func(context.Context, []string) []string); ok {
+		r0 = rf(ctx, keys)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]string)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func([]string) error); ok {
-		r1 = rf(keys)
+	if rf, ok := ret.Get(1).(func(context.Context, []string) error); ok {
+		r1 = rf(ctx, keys)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -430,14 +437,15 @@ type WatchKV_MultiLoad_Call struct {
 }
 
 // MultiLoad is a helper method to define mock.On call
+//   - ctx context.Context
 //   - keys []string
-func (_e *WatchKV_Expecter) MultiLoad(keys interface{}) *WatchKV_MultiLoad_Call {
-	return &WatchKV_MultiLoad_Call{Call: _e.mock.On("MultiLoad", keys)}
+func (_e *WatchKV_Expecter) MultiLoad(ctx interface{}, keys interface{}) *WatchKV_MultiLoad_Call {
+	return &WatchKV_MultiLoad_Call{Call: _e.mock.On("MultiLoad", ctx, keys)}
 }
 
-func (_c *WatchKV_MultiLoad_Call) Run(run func(keys []string)) *WatchKV_MultiLoad_Call {
+func (_c *WatchKV_MultiLoad_Call) Run(run func(ctx context.Context, keys []string)) *WatchKV_MultiLoad_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]string))
+		run(args[0].(context.Context), args[1].([]string))
 	})
 	return _c
 }
@@ -447,22 +455,22 @@ func (_c *WatchKV_MultiLoad_Call) Return(_a0 []string, _a1 error) *WatchKV_Multi
 	return _c
 }
 
-func (_c *WatchKV_MultiLoad_Call) RunAndReturn(run func([]string) ([]string, error)) *WatchKV_MultiLoad_Call {
+func (_c *WatchKV_MultiLoad_Call) RunAndReturn(run func(context.Context, []string) ([]string, error)) *WatchKV_MultiLoad_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// MultiRemove provides a mock function with given fields: keys
-func (_m *WatchKV) MultiRemove(keys []string) error {
-	ret := _m.Called(keys)
+// MultiRemove provides a mock function with given fields: ctx, keys
+func (_m *WatchKV) MultiRemove(ctx context.Context, keys []string) error {
+	ret := _m.Called(ctx, keys)
 
 	if len(ret) == 0 {
 		panic("no return value specified for MultiRemove")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func([]string) error); ok {
-		r0 = rf(keys)
+	if rf, ok := ret.Get(0).(func(context.Context, []string) error); ok {
+		r0 = rf(ctx, keys)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -476,14 +484,15 @@ type WatchKV_MultiRemove_Call struct {
 }
 
 // MultiRemove is a helper method to define mock.On call
+//   - ctx context.Context
 //   - keys []string
-func (_e *WatchKV_Expecter) MultiRemove(keys interface{}) *WatchKV_MultiRemove_Call {
-	return &WatchKV_MultiRemove_Call{Call: _e.mock.On("MultiRemove", keys)}
+func (_e *WatchKV_Expecter) MultiRemove(ctx interface{}, keys interface{}) *WatchKV_MultiRemove_Call {
+	return &WatchKV_MultiRemove_Call{Call: _e.mock.On("MultiRemove", ctx, keys)}
 }
 
-func (_c *WatchKV_MultiRemove_Call) Run(run func(keys []string)) *WatchKV_MultiRemove_Call {
+func (_c *WatchKV_MultiRemove_Call) Run(run func(ctx context.Context, keys []string)) *WatchKV_MultiRemove_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]string))
+		run(args[0].(context.Context), args[1].([]string))
 	})
 	return _c
 }
@@ -493,22 +502,22 @@ func (_c *WatchKV_MultiRemove_Call) Return(_a0 error) *WatchKV_MultiRemove_Call 
 	return _c
 }
 
-func (_c *WatchKV_MultiRemove_Call) RunAndReturn(run func([]string) error) *WatchKV_MultiRemove_Call {
+func (_c *WatchKV_MultiRemove_Call) RunAndReturn(run func(context.Context, []string) error) *WatchKV_MultiRemove_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// MultiSave provides a mock function with given fields: kvs
-func (_m *WatchKV) MultiSave(kvs map[string]string) error {
-	ret := _m.Called(kvs)
+// MultiSave provides a mock function with given fields: ctx, kvs
+func (_m *WatchKV) MultiSave(ctx context.Context, kvs map[string]string) error {
+	ret := _m.Called(ctx, kvs)
 
 	if len(ret) == 0 {
 		panic("no return value specified for MultiSave")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(map[string]string) error); ok {
-		r0 = rf(kvs)
+	if rf, ok := ret.Get(0).(func(context.Context, map[string]string) error); ok {
+		r0 = rf(ctx, kvs)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -522,14 +531,15 @@ type WatchKV_MultiSave_Call struct {
 }
 
 // MultiSave is a helper method to define mock.On call
+//   - ctx context.Context
 //   - kvs map[string]string
-func (_e *WatchKV_Expecter) MultiSave(kvs interface{}) *WatchKV_MultiSave_Call {
-	return &WatchKV_MultiSave_Call{Call: _e.mock.On("MultiSave", kvs)}
+func (_e *WatchKV_Expecter) MultiSave(ctx interface{}, kvs interface{}) *WatchKV_MultiSave_Call {
+	return &WatchKV_MultiSave_Call{Call: _e.mock.On("MultiSave", ctx, kvs)}
 }
 
-func (_c *WatchKV_MultiSave_Call) Run(run func(kvs map[string]string)) *WatchKV_MultiSave_Call {
+func (_c *WatchKV_MultiSave_Call) Run(run func(ctx context.Context, kvs map[string]string)) *WatchKV_MultiSave_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(map[string]string))
+		run(args[0].(context.Context), args[1].(map[string]string))
 	})
 	return _c
 }
@@ -539,19 +549,19 @@ func (_c *WatchKV_MultiSave_Call) Return(_a0 error) *WatchKV_MultiSave_Call {
 	return _c
 }
 
-func (_c *WatchKV_MultiSave_Call) RunAndReturn(run func(map[string]string) error) *WatchKV_MultiSave_Call {
+func (_c *WatchKV_MultiSave_Call) RunAndReturn(run func(context.Context, map[string]string) error) *WatchKV_MultiSave_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// MultiSaveAndRemove provides a mock function with given fields: saves, removals, preds
-func (_m *WatchKV) MultiSaveAndRemove(saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+// MultiSaveAndRemove provides a mock function with given fields: ctx, saves, removals, preds
+func (_m *WatchKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	_va := make([]interface{}, len(preds))
 	for _i := range preds {
 		_va[_i] = preds[_i]
 	}
 	var _ca []interface{}
-	_ca = append(_ca, saves, removals)
+	_ca = append(_ca, ctx, saves, removals)
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
@@ -560,8 +570,8 @@ func (_m *WatchKV) MultiSaveAndRemove(saves map[string]string, removals []string
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(map[string]string, []string, ...predicates.Predicate) error); ok {
-		r0 = rf(saves, removals, preds...)
+	if rf, ok := ret.Get(0).(func(context.Context, map[string]string, []string, ...predicates.Predicate) error); ok {
+		r0 = rf(ctx, saves, removals, preds...)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -575,23 +585,24 @@ type WatchKV_MultiSaveAndRemove_Call struct {
 }
 
 // MultiSaveAndRemove is a helper method to define mock.On call
+//   - ctx context.Context
 //   - saves map[string]string
 //   - removals []string
 //   - preds ...predicates.Predicate
-func (_e *WatchKV_Expecter) MultiSaveAndRemove(saves interface{}, removals interface{}, preds ...interface{}) *WatchKV_MultiSaveAndRemove_Call {
+func (_e *WatchKV_Expecter) MultiSaveAndRemove(ctx interface{}, saves interface{}, removals interface{}, preds ...interface{}) *WatchKV_MultiSaveAndRemove_Call {
 	return &WatchKV_MultiSaveAndRemove_Call{Call: _e.mock.On("MultiSaveAndRemove",
-		append([]interface{}{saves, removals}, preds...)...)}
+		append([]interface{}{ctx, saves, removals}, preds...)...)}
 }
 
-func (_c *WatchKV_MultiSaveAndRemove_Call) Run(run func(saves map[string]string, removals []string, preds ...predicates.Predicate)) *WatchKV_MultiSaveAndRemove_Call {
+func (_c *WatchKV_MultiSaveAndRemove_Call) Run(run func(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate)) *WatchKV_MultiSaveAndRemove_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]predicates.Predicate, len(args)-2)
-		for i, a := range args[2:] {
+		variadicArgs := make([]predicates.Predicate, len(args)-3)
+		for i, a := range args[3:] {
 			if a != nil {
 				variadicArgs[i] = a.(predicates.Predicate)
 			}
 		}
-		run(args[0].(map[string]string), args[1].([]string), variadicArgs...)
+		run(args[0].(context.Context), args[1].(map[string]string), args[2].([]string), variadicArgs...)
 	})
 	return _c
 }
@@ -601,19 +612,19 @@ func (_c *WatchKV_MultiSaveAndRemove_Call) Return(_a0 error) *WatchKV_MultiSaveA
 	return _c
 }
 
-func (_c *WatchKV_MultiSaveAndRemove_Call) RunAndReturn(run func(map[string]string, []string, ...predicates.Predicate) error) *WatchKV_MultiSaveAndRemove_Call {
+func (_c *WatchKV_MultiSaveAndRemove_Call) RunAndReturn(run func(context.Context, map[string]string, []string, ...predicates.Predicate) error) *WatchKV_MultiSaveAndRemove_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// MultiSaveAndRemoveWithPrefix provides a mock function with given fields: saves, removals, preds
-func (_m *WatchKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+// MultiSaveAndRemoveWithPrefix provides a mock function with given fields: ctx, saves, removals, preds
+func (_m *WatchKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	_va := make([]interface{}, len(preds))
 	for _i := range preds {
 		_va[_i] = preds[_i]
 	}
 	var _ca []interface{}
-	_ca = append(_ca, saves, removals)
+	_ca = append(_ca, ctx, saves, removals)
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
@@ -622,8 +633,8 @@ func (_m *WatchKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removal
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(map[string]string, []string, ...predicates.Predicate) error); ok {
-		r0 = rf(saves, removals, preds...)
+	if rf, ok := ret.Get(0).(func(context.Context, map[string]string, []string, ...predicates.Predicate) error); ok {
+		r0 = rf(ctx, saves, removals, preds...)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -637,23 +648,24 @@ type WatchKV_MultiSaveAndRemoveWithPrefix_Call struct {
 }
 
 // MultiSaveAndRemoveWithPrefix is a helper method to define mock.On call
+//   - ctx context.Context
 //   - saves map[string]string
 //   - removals []string
 //   - preds ...predicates.Predicate
-func (_e *WatchKV_Expecter) MultiSaveAndRemoveWithPrefix(saves interface{}, removals interface{}, preds ...interface{}) *WatchKV_MultiSaveAndRemoveWithPrefix_Call {
+func (_e *WatchKV_Expecter) MultiSaveAndRemoveWithPrefix(ctx interface{}, saves interface{}, removals interface{}, preds ...interface{}) *WatchKV_MultiSaveAndRemoveWithPrefix_Call {
 	return &WatchKV_MultiSaveAndRemoveWithPrefix_Call{Call: _e.mock.On("MultiSaveAndRemoveWithPrefix",
-		append([]interface{}{saves, removals}, preds...)...)}
+		append([]interface{}{ctx, saves, removals}, preds...)...)}
 }
 
-func (_c *WatchKV_MultiSaveAndRemoveWithPrefix_Call) Run(run func(saves map[string]string, removals []string, preds ...predicates.Predicate)) *WatchKV_MultiSaveAndRemoveWithPrefix_Call {
+func (_c *WatchKV_MultiSaveAndRemoveWithPrefix_Call) Run(run func(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate)) *WatchKV_MultiSaveAndRemoveWithPrefix_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]predicates.Predicate, len(args)-2)
-		for i, a := range args[2:] {
+		variadicArgs := make([]predicates.Predicate, len(args)-3)
+		for i, a := range args[3:] {
 			if a != nil {
 				variadicArgs[i] = a.(predicates.Predicate)
 			}
 		}
-		run(args[0].(map[string]string), args[1].([]string), variadicArgs...)
+		run(args[0].(context.Context), args[1].(map[string]string), args[2].([]string), variadicArgs...)
 	})
 	return _c
 }
@@ -663,22 +675,22 @@ func (_c *WatchKV_MultiSaveAndRemoveWithPrefix_Call) Return(_a0 error) *WatchKV_
 	return _c
 }
 
-func (_c *WatchKV_MultiSaveAndRemoveWithPrefix_Call) RunAndReturn(run func(map[string]string, []string, ...predicates.Predicate) error) *WatchKV_MultiSaveAndRemoveWithPrefix_Call {
+func (_c *WatchKV_MultiSaveAndRemoveWithPrefix_Call) RunAndReturn(run func(context.Context, map[string]string, []string, ...predicates.Predicate) error) *WatchKV_MultiSaveAndRemoveWithPrefix_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// Remove provides a mock function with given fields: key
-func (_m *WatchKV) Remove(key string) error {
-	ret := _m.Called(key)
+// Remove provides a mock function with given fields: ctx, key
+func (_m *WatchKV) Remove(ctx context.Context, key string) error {
+	ret := _m.Called(ctx, key)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Remove")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(key)
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, key)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -692,14 +704,15 @@ type WatchKV_Remove_Call struct {
 }
 
 // Remove is a helper method to define mock.On call
+//   - ctx context.Context
 //   - key string
-func (_e *WatchKV_Expecter) Remove(key interface{}) *WatchKV_Remove_Call {
-	return &WatchKV_Remove_Call{Call: _e.mock.On("Remove", key)}
+func (_e *WatchKV_Expecter) Remove(ctx interface{}, key interface{}) *WatchKV_Remove_Call {
+	return &WatchKV_Remove_Call{Call: _e.mock.On("Remove", ctx, key)}
 }
 
-func (_c *WatchKV_Remove_Call) Run(run func(key string)) *WatchKV_Remove_Call {
+func (_c *WatchKV_Remove_Call) Run(run func(ctx context.Context, key string)) *WatchKV_Remove_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -709,22 +722,22 @@ func (_c *WatchKV_Remove_Call) Return(_a0 error) *WatchKV_Remove_Call {
 	return _c
 }
 
-func (_c *WatchKV_Remove_Call) RunAndReturn(run func(string) error) *WatchKV_Remove_Call {
+func (_c *WatchKV_Remove_Call) RunAndReturn(run func(context.Context, string) error) *WatchKV_Remove_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// RemoveWithPrefix provides a mock function with given fields: key
-func (_m *WatchKV) RemoveWithPrefix(key string) error {
-	ret := _m.Called(key)
+// RemoveWithPrefix provides a mock function with given fields: ctx, key
+func (_m *WatchKV) RemoveWithPrefix(ctx context.Context, key string) error {
+	ret := _m.Called(ctx, key)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RemoveWithPrefix")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(key)
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, key)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -738,14 +751,15 @@ type WatchKV_RemoveWithPrefix_Call struct {
 }
 
 // RemoveWithPrefix is a helper method to define mock.On call
+//   - ctx context.Context
 //   - key string
-func (_e *WatchKV_Expecter) RemoveWithPrefix(key interface{}) *WatchKV_RemoveWithPrefix_Call {
-	return &WatchKV_RemoveWithPrefix_Call{Call: _e.mock.On("RemoveWithPrefix", key)}
+func (_e *WatchKV_Expecter) RemoveWithPrefix(ctx interface{}, key interface{}) *WatchKV_RemoveWithPrefix_Call {
+	return &WatchKV_RemoveWithPrefix_Call{Call: _e.mock.On("RemoveWithPrefix", ctx, key)}
 }
 
-func (_c *WatchKV_RemoveWithPrefix_Call) Run(run func(key string)) *WatchKV_RemoveWithPrefix_Call {
+func (_c *WatchKV_RemoveWithPrefix_Call) Run(run func(ctx context.Context, key string)) *WatchKV_RemoveWithPrefix_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -755,22 +769,22 @@ func (_c *WatchKV_RemoveWithPrefix_Call) Return(_a0 error) *WatchKV_RemoveWithPr
 	return _c
 }
 
-func (_c *WatchKV_RemoveWithPrefix_Call) RunAndReturn(run func(string) error) *WatchKV_RemoveWithPrefix_Call {
+func (_c *WatchKV_RemoveWithPrefix_Call) RunAndReturn(run func(context.Context, string) error) *WatchKV_RemoveWithPrefix_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// Save provides a mock function with given fields: key, value
-func (_m *WatchKV) Save(key string, value string) error {
-	ret := _m.Called(key, value)
+// Save provides a mock function with given fields: ctx, key, value
+func (_m *WatchKV) Save(ctx context.Context, key string, value string) error {
+	ret := _m.Called(ctx, key, value)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Save")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, string) error); ok {
-		r0 = rf(key, value)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = rf(ctx, key, value)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -784,15 +798,16 @@ type WatchKV_Save_Call struct {
 }
 
 // Save is a helper method to define mock.On call
+//   - ctx context.Context
 //   - key string
 //   - value string
-func (_e *WatchKV_Expecter) Save(key interface{}, value interface{}) *WatchKV_Save_Call {
-	return &WatchKV_Save_Call{Call: _e.mock.On("Save", key, value)}
+func (_e *WatchKV_Expecter) Save(ctx interface{}, key interface{}, value interface{}) *WatchKV_Save_Call {
+	return &WatchKV_Save_Call{Call: _e.mock.On("Save", ctx, key, value)}
 }
 
-func (_c *WatchKV_Save_Call) Run(run func(key string, value string)) *WatchKV_Save_Call {
+func (_c *WatchKV_Save_Call) Run(run func(ctx context.Context, key string, value string)) *WatchKV_Save_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string))
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
 	})
 	return _c
 }
@@ -802,22 +817,22 @@ func (_c *WatchKV_Save_Call) Return(_a0 error) *WatchKV_Save_Call {
 	return _c
 }
 
-func (_c *WatchKV_Save_Call) RunAndReturn(run func(string, string) error) *WatchKV_Save_Call {
+func (_c *WatchKV_Save_Call) RunAndReturn(run func(context.Context, string, string) error) *WatchKV_Save_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// WalkWithPrefix provides a mock function with given fields: prefix, paginationSize, fn
-func (_m *WatchKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
-	ret := _m.Called(prefix, paginationSize, fn)
+// WalkWithPrefix provides a mock function with given fields: ctx, prefix, paginationSize, fn
+func (_m *WatchKV) WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error {
+	ret := _m.Called(ctx, prefix, paginationSize, fn)
 
 	if len(ret) == 0 {
 		panic("no return value specified for WalkWithPrefix")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, int, func([]byte, []byte) error) error); ok {
-		r0 = rf(prefix, paginationSize, fn)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, func([]byte, []byte) error) error); ok {
+		r0 = rf(ctx, prefix, paginationSize, fn)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -831,16 +846,17 @@ type WatchKV_WalkWithPrefix_Call struct {
 }
 
 // WalkWithPrefix is a helper method to define mock.On call
+//   - ctx context.Context
 //   - prefix string
 //   - paginationSize int
 //   - fn func([]byte , []byte) error
-func (_e *WatchKV_Expecter) WalkWithPrefix(prefix interface{}, paginationSize interface{}, fn interface{}) *WatchKV_WalkWithPrefix_Call {
-	return &WatchKV_WalkWithPrefix_Call{Call: _e.mock.On("WalkWithPrefix", prefix, paginationSize, fn)}
+func (_e *WatchKV_Expecter) WalkWithPrefix(ctx interface{}, prefix interface{}, paginationSize interface{}, fn interface{}) *WatchKV_WalkWithPrefix_Call {
+	return &WatchKV_WalkWithPrefix_Call{Call: _e.mock.On("WalkWithPrefix", ctx, prefix, paginationSize, fn)}
 }
 
-func (_c *WatchKV_WalkWithPrefix_Call) Run(run func(prefix string, paginationSize int, fn func([]byte, []byte) error)) *WatchKV_WalkWithPrefix_Call {
+func (_c *WatchKV_WalkWithPrefix_Call) Run(run func(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error)) *WatchKV_WalkWithPrefix_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(int), args[2].(func([]byte, []byte) error))
+		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(func([]byte, []byte) error))
 	})
 	return _c
 }
@@ -850,22 +866,22 @@ func (_c *WatchKV_WalkWithPrefix_Call) Return(_a0 error) *WatchKV_WalkWithPrefix
 	return _c
 }
 
-func (_c *WatchKV_WalkWithPrefix_Call) RunAndReturn(run func(string, int, func([]byte, []byte) error) error) *WatchKV_WalkWithPrefix_Call {
+func (_c *WatchKV_WalkWithPrefix_Call) RunAndReturn(run func(context.Context, string, int, func([]byte, []byte) error) error) *WatchKV_WalkWithPrefix_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// Watch provides a mock function with given fields: key
-func (_m *WatchKV) Watch(key string) clientv3.WatchChan {
-	ret := _m.Called(key)
+// Watch provides a mock function with given fields: ctx, key
+func (_m *WatchKV) Watch(ctx context.Context, key string) clientv3.WatchChan {
+	ret := _m.Called(ctx, key)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Watch")
 	}
 
 	var r0 clientv3.WatchChan
-	if rf, ok := ret.Get(0).(func(string) clientv3.WatchChan); ok {
-		r0 = rf(key)
+	if rf, ok := ret.Get(0).(func(context.Context, string) clientv3.WatchChan); ok {
+		r0 = rf(ctx, key)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(clientv3.WatchChan)
@@ -881,14 +897,15 @@ type WatchKV_Watch_Call struct {
 }
 
 // Watch is a helper method to define mock.On call
+//   - ctx context.Context
 //   - key string
-func (_e *WatchKV_Expecter) Watch(key interface{}) *WatchKV_Watch_Call {
-	return &WatchKV_Watch_Call{Call: _e.mock.On("Watch", key)}
+func (_e *WatchKV_Expecter) Watch(ctx interface{}, key interface{}) *WatchKV_Watch_Call {
+	return &WatchKV_Watch_Call{Call: _e.mock.On("Watch", ctx, key)}
 }
 
-func (_c *WatchKV_Watch_Call) Run(run func(key string)) *WatchKV_Watch_Call {
+func (_c *WatchKV_Watch_Call) Run(run func(ctx context.Context, key string)) *WatchKV_Watch_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -898,22 +915,22 @@ func (_c *WatchKV_Watch_Call) Return(_a0 clientv3.WatchChan) *WatchKV_Watch_Call
 	return _c
 }
 
-func (_c *WatchKV_Watch_Call) RunAndReturn(run func(string) clientv3.WatchChan) *WatchKV_Watch_Call {
+func (_c *WatchKV_Watch_Call) RunAndReturn(run func(context.Context, string) clientv3.WatchChan) *WatchKV_Watch_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// WatchWithPrefix provides a mock function with given fields: key
-func (_m *WatchKV) WatchWithPrefix(key string) clientv3.WatchChan {
-	ret := _m.Called(key)
+// WatchWithPrefix provides a mock function with given fields: ctx, key
+func (_m *WatchKV) WatchWithPrefix(ctx context.Context, key string) clientv3.WatchChan {
+	ret := _m.Called(ctx, key)
 
 	if len(ret) == 0 {
 		panic("no return value specified for WatchWithPrefix")
 	}
 
 	var r0 clientv3.WatchChan
-	if rf, ok := ret.Get(0).(func(string) clientv3.WatchChan); ok {
-		r0 = rf(key)
+	if rf, ok := ret.Get(0).(func(context.Context, string) clientv3.WatchChan); ok {
+		r0 = rf(ctx, key)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(clientv3.WatchChan)
@@ -929,14 +946,15 @@ type WatchKV_WatchWithPrefix_Call struct {
 }
 
 // WatchWithPrefix is a helper method to define mock.On call
+//   - ctx context.Context
 //   - key string
-func (_e *WatchKV_Expecter) WatchWithPrefix(key interface{}) *WatchKV_WatchWithPrefix_Call {
-	return &WatchKV_WatchWithPrefix_Call{Call: _e.mock.On("WatchWithPrefix", key)}
+func (_e *WatchKV_Expecter) WatchWithPrefix(ctx interface{}, key interface{}) *WatchKV_WatchWithPrefix_Call {
+	return &WatchKV_WatchWithPrefix_Call{Call: _e.mock.On("WatchWithPrefix", ctx, key)}
 }
 
-func (_c *WatchKV_WatchWithPrefix_Call) Run(run func(key string)) *WatchKV_WatchWithPrefix_Call {
+func (_c *WatchKV_WatchWithPrefix_Call) Run(run func(ctx context.Context, key string)) *WatchKV_WatchWithPrefix_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -946,22 +964,22 @@ func (_c *WatchKV_WatchWithPrefix_Call) Return(_a0 clientv3.WatchChan) *WatchKV_
 	return _c
 }
 
-func (_c *WatchKV_WatchWithPrefix_Call) RunAndReturn(run func(string) clientv3.WatchChan) *WatchKV_WatchWithPrefix_Call {
+func (_c *WatchKV_WatchWithPrefix_Call) RunAndReturn(run func(context.Context, string) clientv3.WatchChan) *WatchKV_WatchWithPrefix_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// WatchWithRevision provides a mock function with given fields: key, revision
-func (_m *WatchKV) WatchWithRevision(key string, revision int64) clientv3.WatchChan {
-	ret := _m.Called(key, revision)
+// WatchWithRevision provides a mock function with given fields: ctx, key, revision
+func (_m *WatchKV) WatchWithRevision(ctx context.Context, key string, revision int64) clientv3.WatchChan {
+	ret := _m.Called(ctx, key, revision)
 
 	if len(ret) == 0 {
 		panic("no return value specified for WatchWithRevision")
 	}
 
 	var r0 clientv3.WatchChan
-	if rf, ok := ret.Get(0).(func(string, int64) clientv3.WatchChan); ok {
-		r0 = rf(key, revision)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64) clientv3.WatchChan); ok {
+		r0 = rf(ctx, key, revision)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(clientv3.WatchChan)
@@ -977,15 +995,16 @@ type WatchKV_WatchWithRevision_Call struct {
 }
 
 // WatchWithRevision is a helper method to define mock.On call
+//   - ctx context.Context
 //   - key string
 //   - revision int64
-func (_e *WatchKV_Expecter) WatchWithRevision(key interface{}, revision interface{}) *WatchKV_WatchWithRevision_Call {
-	return &WatchKV_WatchWithRevision_Call{Call: _e.mock.On("WatchWithRevision", key, revision)}
+func (_e *WatchKV_Expecter) WatchWithRevision(ctx interface{}, key interface{}, revision interface{}) *WatchKV_WatchWithRevision_Call {
+	return &WatchKV_WatchWithRevision_Call{Call: _e.mock.On("WatchWithRevision", ctx, key, revision)}
 }
 
-func (_c *WatchKV_WatchWithRevision_Call) Run(run func(key string, revision int64)) *WatchKV_WatchWithRevision_Call {
+func (_c *WatchKV_WatchWithRevision_Call) Run(run func(ctx context.Context, key string, revision int64)) *WatchKV_WatchWithRevision_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(int64))
+		run(args[0].(context.Context), args[1].(string), args[2].(int64))
 	})
 	return _c
 }
@@ -995,7 +1014,7 @@ func (_c *WatchKV_WatchWithRevision_Call) Return(_a0 clientv3.WatchChan) *WatchK
 	return _c
 }
 
-func (_c *WatchKV_WatchWithRevision_Call) RunAndReturn(run func(string, int64) clientv3.WatchChan) *WatchKV_WatchWithRevision_Call {
+func (_c *WatchKV_WatchWithRevision_Call) RunAndReturn(run func(context.Context, string, int64) clientv3.WatchChan) *WatchKV_WatchWithRevision_Call {
 	_c.Call.Return(run)
 	return _c
 }

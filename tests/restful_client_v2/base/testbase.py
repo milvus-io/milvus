@@ -6,7 +6,7 @@ import uuid
 from pymilvus import connections, db, MilvusClient
 from utils.util_log import test_log as logger
 from api.milvus import (VectorClient, CollectionClient, PartitionClient, IndexClient, AliasClient,
-                        UserClient, RoleClient, ImportJobClient, StorageClient, Requests)
+                        UserClient, RoleClient, ImportJobClient, StorageClient, Requests, DatabaseClient)
 from utils.utils import get_data_by_payload
 
 
@@ -34,12 +34,14 @@ class Base:
     import_job_client = None
     storage_client = None
     milvus_client = None
+    database_client = None
 
 
 class TestBase(Base):
     req = None
 
     def teardown_method(self):
+        # Clean up collections
         self.collection_client.api_key = self.api_key
         all_collections = self.collection_client.collection_list()['data']
         if self.name in all_collections:
@@ -50,7 +52,8 @@ class TestBase(Base):
             try:
                 rsp = self.collection_client.collection_drop(payload)
             except Exception as e:
-                logger.error(e)
+                logger.error(f"drop collection error: {e}")
+
         for item in self.collection_client.name_list:
             db_name = item[0]
             c_name = item[1]
@@ -61,7 +64,17 @@ class TestBase(Base):
             try:
                 self.collection_client.collection_drop(payload)
             except Exception as e:
-                logger.error(e)
+                logger.error(f"drop collection error: {e}")
+
+
+        # Clean up databases created by this client
+        self.database_client.api_key = self.api_key
+        for db_name in self.database_client.db_names[:]:  # Create a copy of the list to iterate
+            logger.info(f"database {db_name} exist, drop it")
+            try:
+                rsp = self.database_client.database_drop({"dbName": db_name})
+            except Exception as e:
+                logger.error(f"drop database error: {e}")
 
     @pytest.fixture(scope="function", autouse=True)
     def init_client(self, endpoint, token, minio_host, bucket_name, root_path):
@@ -88,6 +101,8 @@ class TestBase(Base):
         self.import_job_client = ImportJobClient(self.endpoint, self.api_key)
         self.import_job_client.update_uuid(_uuid)
         self.storage_client = StorageClient(f"{minio_host}:9000", "minioadmin", "minioadmin", bucket_name, root_path)
+        self.database_client = DatabaseClient(self.endpoint, self.api_key)
+        self.database_client.update_uuid(_uuid)
         if token is None:
             self.vector_client.api_key = None
             self.collection_client.api_key = None

@@ -230,6 +230,11 @@ class QueryContext : public Context {
         return search_info_;
     }
 
+    knowhere::MetricType
+    get_metric_type() {
+        return search_info_.metric_type_;
+    }
+
     const query::PlaceholderGroup*
     get_placeholder_group() {
         return placeholder_group_;

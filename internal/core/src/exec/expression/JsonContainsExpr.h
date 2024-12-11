@@ -50,35 +50,35 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
 
  private:
     VectorPtr
-    EvalJsonContainsForDataSegment();
+    EvalJsonContainsForDataSegment(OffsetVector* input = nullptr);
 
     template <typename ExprValueType>
     VectorPtr
-    ExecJsonContains();
+    ExecJsonContains(OffsetVector* input = nullptr);
 
     template <typename ExprValueType>
     VectorPtr
-    ExecArrayContains();
+    ExecArrayContains(OffsetVector* input = nullptr);
 
     template <typename ExprValueType>
     VectorPtr
-    ExecJsonContainsAll();
+    ExecJsonContainsAll(OffsetVector* input = nullptr);
 
     template <typename ExprValueType>
     VectorPtr
-    ExecArrayContainsAll();
+    ExecArrayContainsAll(OffsetVector* input = nullptr);
 
     VectorPtr
-    ExecJsonContainsArray();
+    ExecJsonContainsArray(OffsetVector* input = nullptr);
 
     VectorPtr
-    ExecJsonContainsAllArray();
+    ExecJsonContainsAllArray(OffsetVector* input = nullptr);
 
     VectorPtr
-    ExecJsonContainsAllWithDiffType();
+    ExecJsonContainsAllWithDiffType(OffsetVector* input = nullptr);
 
     VectorPtr
-    ExecJsonContainsWithDiffType();
+    ExecJsonContainsWithDiffType(OffsetVector* input = nullptr);
 
     VectorPtr
     EvalArrayContainsForIndexSegment();

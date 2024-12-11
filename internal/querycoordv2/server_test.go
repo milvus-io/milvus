@@ -321,7 +321,19 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 	suite.server, err = suite.newQueryCoord()
 	suite.NoError(err)
 	mockRootCoord := coordMocks.NewMockRootCoordClient(suite.T())
+	mockRootCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			StateCode: commonpb.StateCode_Healthy,
+		},
+		Status: merr.Success(),
+	}, nil).Maybe()
 	mockDataCoord := coordMocks.NewMockDataCoordClient(suite.T())
+	mockDataCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			StateCode: commonpb.StateCode_Healthy,
+		},
+		Status: merr.Success(),
+	}, nil).Maybe()
 
 	mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status: merr.Success(),
@@ -612,7 +624,19 @@ func (suite *ServerSuite) hackServer() {
 
 func (suite *ServerSuite) hackBroker(server *Server) {
 	mockRootCoord := coordMocks.NewMockRootCoordClient(suite.T())
+	mockRootCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			StateCode: commonpb.StateCode_Healthy,
+		},
+		Status: merr.Success(),
+	}, nil).Maybe()
 	mockDataCoord := coordMocks.NewMockDataCoordClient(suite.T())
+	mockDataCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			StateCode: commonpb.StateCode_Healthy,
+		},
+		Status: merr.Success(),
+	}, nil).Maybe()
 
 	for _, collection := range suite.collections {
 		mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{

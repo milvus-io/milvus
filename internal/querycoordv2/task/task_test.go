@@ -134,7 +134,6 @@ func (suite *TaskSuite) SetupSuite() {
 			segments: typeutil.NewSet[int64](),
 		},
 	}
-	suite.ctx = context.Background()
 }
 
 func (suite *TaskSuite) TearDownSuite() {
@@ -144,6 +143,7 @@ func (suite *TaskSuite) TearDownSuite() {
 
 func (suite *TaskSuite) SetupTest() {
 	config := GenerateEtcdConfig()
+	suite.ctx = context.Background()
 	cli, err := etcd.GetEtcdClient(
 		config.UseEmbedEtcd.GetAsBool(),
 		config.EtcdUseSSL.GetAsBool(),

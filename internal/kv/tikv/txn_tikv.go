@@ -138,10 +138,10 @@ func logWarnOnFailure(err *error, msg string, fields ...zap.Field) {
 }
 
 // Has returns if a key exists.
-func (kv *txnTiKV) Has(key string) (bool, error) {
+func (kv *txnTiKV) Has(ctx context.Context, key string) (bool, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -167,7 +167,7 @@ func rollbackOnFailure(err *error, txn *transaction.KVTxn) {
 }
 
 // HasPrefix returns if a key prefix exists.
-func (kv *txnTiKV) HasPrefix(prefix string) (bool, error) {
+func (kv *txnTiKV) HasPrefix(ctx context.Context, prefix string) (bool, error) {
 	start := time.Now()
 	prefix = path.Join(kv.rootPath, prefix)
 
@@ -197,10 +197,10 @@ func (kv *txnTiKV) HasPrefix(prefix string) (bool, error) {
 }
 
 // Load returns value of the key.
-func (kv *txnTiKV) Load(key string) (string, error) {
+func (kv *txnTiKV) Load(ctx context.Context, key string) (string, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -229,9 +229,9 @@ func batchConvertFromString(prefix string, keys []string) [][]byte {
 }
 
 // MultiLoad gets the values of input keys in a transaction.
-func (kv *txnTiKV) MultiLoad(keys []string) ([]string, error) {
+func (kv *txnTiKV) MultiLoad(ctx context.Context, keys []string) ([]string, error) {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -271,7 +271,7 @@ func (kv *txnTiKV) MultiLoad(keys []string) ([]string, error) {
 }
 
 // LoadWithPrefix returns all the keys and values for the given key prefix.
-func (kv *txnTiKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
+func (kv *txnTiKV) LoadWithPrefix(ctx context.Context, prefix string) ([]string, []string, error) {
 	start := time.Now()
 	prefix = path.Join(kv.rootPath, prefix)
 
@@ -311,9 +311,9 @@ func (kv *txnTiKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
 }
 
 // Save saves the input key-value pair.
-func (kv *txnTiKV) Save(key, value string) error {
+func (kv *txnTiKV) Save(ctx context.Context, key, value string) error {
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -324,9 +324,9 @@ func (kv *txnTiKV) Save(key, value string) error {
 }
 
 // MultiSave saves the input key-value pairs in transaction manner.
-func (kv *txnTiKV) MultiSave(kvs map[string]string) error {
+func (kv *txnTiKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -366,9 +366,9 @@ func (kv *txnTiKV) MultiSave(kvs map[string]string) error {
 }
 
 // Remove removes the input key.
-func (kv *txnTiKV) Remove(key string) error {
+func (kv *txnTiKV) Remove(ctx context.Context, key string) error {
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -379,9 +379,9 @@ func (kv *txnTiKV) Remove(key string) error {
 }
 
 // MultiRemove removes the input keys in transaction manner.
-func (kv *txnTiKV) MultiRemove(keys []string) error {
+func (kv *txnTiKV) MultiRemove(ctx context.Context, keys []string) error {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -415,10 +415,10 @@ func (kv *txnTiKV) MultiRemove(keys []string) error {
 }
 
 // RemoveWithPrefix removes the keys for the given prefix.
-func (kv *txnTiKV) RemoveWithPrefix(prefix string) error {
+func (kv *txnTiKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	start := time.Now()
 	prefix = path.Join(kv.rootPath, prefix)
-	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -436,9 +436,9 @@ func (kv *txnTiKV) RemoveWithPrefix(prefix string) error {
 }
 
 // MultiSaveAndRemove saves the key-value pairs and removes the keys in a transaction.
-func (kv *txnTiKV) MultiSaveAndRemove(saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -499,9 +499,9 @@ func (kv *txnTiKV) MultiSaveAndRemove(saves map[string]string, removals []string
 }
 
 // MultiSaveAndRemoveWithPrefix saves kv in @saves and removes the keys with given prefix in @removals.
-func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), kv.requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
 	var loggingErr error
@@ -585,7 +585,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removal
 }
 
 // WalkWithPrefix visits each kv with input prefix and apply given fn to it.
-func (kv *txnTiKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
+func (kv *txnTiKV) WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error {
 	start := time.Now()
 	prefix = path.Join(kv.rootPath, prefix)
 
@@ -746,7 +746,7 @@ func (kv *txnTiKV) removeTiKVMeta(ctx context.Context, key string) error {
 	return err
 }
 
-func (kv *txnTiKV) CompareVersionAndSwap(key string, version int64, target string) (bool, error) {
+func (kv *txnTiKV) CompareVersionAndSwap(ctx context.Context, key string, version int64, target string) (bool, error) {
 	err := fmt.Errorf("Unimplemented! CompareVersionAndSwap is under deprecation")
 	logWarnOnFailure(&err, "Unimplemented")
 	return false, err

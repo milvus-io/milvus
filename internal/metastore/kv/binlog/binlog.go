@@ -167,12 +167,34 @@ func DecompressBinLog(binlogType storage.BinlogType, collectionID, partitionID,
 	return nil
 }
 
+func DecompressBinLogWithRootPath(rootPath string, binlogType storage.BinlogType, collectionID, partitionID,
+	segmentID typeutil.UniqueID, fieldBinlogs []*datapb.FieldBinlog,
+) error {
+	for _, fieldBinlog := range fieldBinlogs {
+		for _, binlog := range fieldBinlog.Binlogs {
+			if binlog.GetLogPath() == "" {
+				path, err := BuildLogPathWithRootPath(rootPath, binlogType, collectionID, partitionID,
+					segmentID, fieldBinlog.GetFieldID(), binlog.GetLogID())
+				if err != nil {
+					return err
+				}
+				binlog.LogPath = path
+			}
+		}
+	}
+	return nil
+}
+
 // build a binlog path on the storage by metadata
 func BuildLogPath(binlogType storage.BinlogType, collectionID, partitionID, segmentID, fieldID, logID typeutil.UniqueID) (string, error) {
 	chunkManagerRootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
 	if paramtable.Get().CommonCfg.StorageType.GetValue() == "local" {
 		chunkManagerRootPath = paramtable.Get().LocalStorageCfg.Path.GetValue()
 	}
+	return BuildLogPathWithRootPath(chunkManagerRootPath, binlogType, collectionID, partitionID, segmentID, fieldID, logID)
+}
+
+func BuildLogPathWithRootPath(chunkManagerRootPath string, binlogType storage.BinlogType, collectionID, partitionID, segmentID, fieldID, logID typeutil.UniqueID) (string, error) {
 	switch binlogType {
 	case storage.InsertBinlog:
 		return metautil.BuildInsertLogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, fieldID, logID), nil

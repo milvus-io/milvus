@@ -261,17 +261,28 @@ func (s *Server) getSystemInfoMetrics(
 
 // getDataCoordMetrics composes datacoord infos
 func (s *Server) getDataCoordMetrics(ctx context.Context) metricsinfo.DataCoordInfos {
+	used, total, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
+	if err != nil {
+		log.Ctx(ctx).Warn("get disk usage failed", zap.Error(err))
+	}
+
+	ioWait, err := hardware.GetIOWait()
+	if err != nil {
+		log.Ctx(ctx).Warn("get iowait failed", zap.Error(err))
+	}
+
 	ret := metricsinfo.DataCoordInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, paramtable.GetNodeID()),
 			HardwareInfos: metricsinfo.HardwareMetrics{
-				IP:           s.session.GetAddress(),
-				CPUCoreCount: hardware.GetCPUNum(),
-				CPUCoreUsage: hardware.GetCPUUsage(),
-				Memory:       hardware.GetMemoryCount(),
-				MemoryUsage:  hardware.GetUsedMemoryCount(),
-				Disk:         hardware.GetDiskCount(),
-				DiskUsage:    hardware.GetDiskUsage(),
+				IP:               s.session.GetAddress(),
+				CPUCoreCount:     hardware.GetCPUNum(),
+				CPUCoreUsage:     hardware.GetCPUUsage(),
+				Memory:           hardware.GetMemoryCount(),
+				MemoryUsage:      hardware.GetUsedMemoryCount(),
+				Disk:             total,
+				DiskUsage:        used,
+				IOWaitPercentage: ioWait,
 			},
 			SystemInfo:  metricsinfo.DeployMetrics{},
 			CreatedTime: paramtable.GetCreateTime().String(),

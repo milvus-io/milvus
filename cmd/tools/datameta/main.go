@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"sort"
@@ -37,7 +38,7 @@ func main() {
 
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, *rootPath)
 
-	keys, values, err := etcdkv.LoadWithPrefix("/")
+	keys, values, err := etcdkv.LoadWithPrefix(context.TODO(), "/")
 	if err != nil {
 		log.Fatal("failed to list ", zap.Error(err))
 	}

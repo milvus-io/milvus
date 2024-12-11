@@ -19,7 +19,10 @@ package rootcoord
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -27,18 +30,29 @@ import (
 )
 
 func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
+	used, total, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
+	if err != nil {
+		log.Ctx(ctx).Warn("get disk usage failed", zap.Error(err))
+	}
+
+	ioWait, err := hardware.GetIOWait()
+	if err != nil {
+		log.Ctx(ctx).Warn("get iowait failed", zap.Error(err))
+	}
+
 	rootCoordTopology := metricsinfo.RootCoordTopology{
 		Self: metricsinfo.RootCoordInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
 				Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, c.session.ServerID),
 				HardwareInfos: metricsinfo.HardwareMetrics{
-					IP:           c.session.Address,
-					CPUCoreCount: hardware.GetCPUNum(),
-					CPUCoreUsage: hardware.GetCPUUsage(),
-					Memory:       hardware.GetMemoryCount(),
-					MemoryUsage:  hardware.GetUsedMemoryCount(),
-					Disk:         hardware.GetDiskCount(),
-					DiskUsage:    hardware.GetDiskUsage(),
+					IP:               c.session.Address,
+					CPUCoreCount:     hardware.GetCPUNum(),
+					CPUCoreUsage:     hardware.GetCPUUsage(),
+					Memory:           hardware.GetMemoryCount(),
+					MemoryUsage:      hardware.GetUsedMemoryCount(),
+					Disk:             total,
+					DiskUsage:        used,
+					IOWaitPercentage: ioWait,
 				},
 				SystemInfo:  metricsinfo.DeployMetrics{},
 				CreatedTime: paramtable.GetCreateTime().String(),

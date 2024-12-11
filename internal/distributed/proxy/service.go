@@ -63,6 +63,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/tracer"
@@ -143,6 +144,10 @@ func authenticate(c *gin.Context) {
 		}
 		log.Warn("fail to verify apikey", zap.Error(err))
 	}
+
+	hookutil.GetExtension().ReportRefused(context.Background(), nil, &milvuspb.BoolResponse{
+		Status: merr.Status(merr.ErrNeedAuthenticate),
+	}, nil, c.FullPath())
 	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{mhttp.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 }
 
@@ -689,6 +694,10 @@ func (s *Server) ShowCollections(ctx context.Context, request *milvuspb.ShowColl
 
 func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return s.proxy.AlterCollection(ctx, request)
+}
+
+func (s *Server) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
+	return s.proxy.AlterCollectionField(ctx, request)
 }
 
 // CreatePartition notifies Proxy to create a partition

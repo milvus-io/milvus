@@ -17,6 +17,7 @@
 package segments
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/samber/lo"
@@ -98,6 +99,11 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	collection := NewCollection(collectionID, schema, meta, loadMeta)
 	collection.Ref(1)
 	m.collections[collectionID] = collection
+	m.updateMetric()
+}
+
+func (m *collectionManager) updateMetric() {
+	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(len(m.collections)))
 }
 
 func (m *collectionManager) Ref(collectionID int64, count uint32) bool {
@@ -124,6 +130,7 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 			DeleteCollection(collection)
 
 			metrics.CleanupQueryNodeCollectionMetrics(paramtable.GetNodeID(), collectionID)
+			m.updateMetric()
 			return true
 		}
 		return false

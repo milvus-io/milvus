@@ -21,10 +21,26 @@ namespace milvus {
 std::pair<std::vector<std::string_view>, FixedVector<bool>>
 StringChunk::StringViews() {
     std::vector<std::string_view> ret;
+    ret.reserve(row_nums_);
     for (int i = 0; i < row_nums_; i++) {
         ret.emplace_back(data_ + offsets_[i], offsets_[i + 1] - offsets_[i]);
     }
     return {ret, valid_};
+}
+
+std::pair<std::vector<std::string_view>, FixedVector<bool>>
+StringChunk::ViewsByOffsets(const FixedVector<int32_t>& offsets) {
+    std::vector<std::string_view> ret;
+    FixedVector<bool> valid_res;
+    size_t size = offsets.size();
+    ret.reserve(size);
+    valid_res.reserve(size);
+    for (auto i = 0; i < size; ++i) {
+        ret.emplace_back(data_ + offsets_[offsets[i]],
+                         offsets_[offsets[i] + 1] - offsets_[offsets[i]]);
+        valid_res.emplace_back(isValid(offsets[i]));
+    }
+    return {ret, valid_res};
 }
 
 void

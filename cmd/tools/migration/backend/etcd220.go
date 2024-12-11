@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/configs"
@@ -36,7 +37,7 @@ func printSaves(saves map[string]string) {
 
 func (b etcd220) save(saves map[string]string) error {
 	for k, v := range saves {
-		if err := b.txn.Save(k, v); err != nil {
+		if err := b.txn.Save(context.TODO(), k, v); err != nil {
 			return err
 		}
 	}

@@ -25,6 +25,7 @@ type SegmentIndex struct {
 	WriteHandoff        bool
 	CurrentIndexVersion int32
 	IndexStoreVersion   int64
+	FinishedUTCTime     uint64
 }
 
 func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {

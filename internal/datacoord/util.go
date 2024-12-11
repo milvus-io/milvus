@@ -207,7 +207,7 @@ func isNoTrainIndex(indexType string) bool {
 	return vecindexmgr.GetVecIndexMgrInstance().IsNoTrainIndex(indexType)
 }
 
-func isOptionalScalarFieldSupported(indexType string) bool {
+func isMvSupported(indexType string) bool {
 	return vecindexmgr.GetVecIndexMgrInstance().IsMvSupported(indexType)
 }
 

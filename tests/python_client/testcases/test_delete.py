@@ -108,7 +108,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        error = {ct.err_code: 999, ct.err_msg: "cannot be None"}
+        error = {ct.err_code: 999, ct.err_msg: "Illegal str variables: {'filter': None}, expect non-empty str"}
         collection_w.delete(expr=None, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -121,7 +121,8 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        error = {ct.err_code: 999, ct.err_msg: f"value {expr} is illegal"}
+        error = {ct.err_code: 999, ct.err_msg: "Illegal str variables: {'filter': %s}, expect non-empty str"
+                                               % str(expr)}
         collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -311,7 +312,8 @@ class TestDeleteParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
 
         error = {ct.err_code: 0,
-                 ct.err_msg: f"partition_name value {partition_name} is illegal"}
+                 ct.err_msg: "Illegal nullable str variables: {'partition_name': %s}, "
+                             "expect None or non-empty str" % str(partition_name)}
         collection_w.delete(tmp_expr, partition_name=partition_name,
                             check_task=CheckTasks.err_res, check_items=error)
 
@@ -2152,7 +2154,7 @@ class TestDeleteComplexExpr(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True)[0]
 
         # delete
-        error = {ct.err_code: 1, ct.err_msg: "cannot be empty"}
+        error = {ct.err_code: 1, ct.err_msg: "Illegal str variables: {'filter': ''}, expect non-empty str"}
         collection_w.delete(expr="", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)

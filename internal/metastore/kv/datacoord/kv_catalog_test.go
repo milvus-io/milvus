@@ -148,7 +148,7 @@ var (
 func Test_ListSegments(t *testing.T) {
 	t.Run("load failed", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error"))
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error"))
 
 		catalog := NewCatalog(metakv, rootPath, "")
 		ret, err := catalog.ListSegments(context.TODO())
@@ -190,7 +190,7 @@ func Test_ListSegments(t *testing.T) {
 		assert.NoError(t, err)
 
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(s string, i int, f func([]byte, []byte) error) error {
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string, i int, f func([]byte, []byte) error) error {
 			if strings.HasPrefix(k5, s) {
 				return f([]byte(k5), segBytes)
 			}
@@ -207,7 +207,7 @@ func Test_ListSegments(t *testing.T) {
 
 	t.Run("test compatibility with stats task", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(s string, i int, f func([]byte, []byte) error) error {
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string, i int, f func([]byte, []byte) error) error {
 			if strings.HasPrefix(k9, path.Join(s)) {
 				return f([]byte(k9), nil)
 			}
@@ -225,7 +225,7 @@ func Test_ListSegments(t *testing.T) {
 		var savedKvs map[string]string
 
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().MultiSave(mock.Anything).RunAndReturn(func(m map[string]string) error {
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, m map[string]string) error {
 			savedKvs = m
 			return nil
 		})
@@ -234,7 +234,7 @@ func Test_ListSegments(t *testing.T) {
 		err := catalog.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
 
-		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(s string, i int, f func([]byte, []byte) error) error {
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string, i int, f func([]byte, []byte) error) error {
 			if strings.HasPrefix(k5, s) {
 				return f([]byte(k5), []byte(savedKvs[k5]))
 			}
@@ -267,7 +267,7 @@ func Test_ListSegments(t *testing.T) {
 func Test_AddSegments(t *testing.T) {
 	t.Run("generate binlog kvs failed", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("error")).Maybe()
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("error")).Maybe()
 
 		catalog := NewCatalog(metakv, rootPath, "")
 
@@ -277,7 +277,7 @@ func Test_AddSegments(t *testing.T) {
 
 	t.Run("save error", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("error"))
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("error"))
 
 		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.AddSegment(context.TODO(), segment1)
@@ -287,11 +287,11 @@ func Test_AddSegments(t *testing.T) {
 	t.Run("save successfully", func(t *testing.T) {
 		savedKvs := make(map[string]string)
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().MultiSave(mock.Anything).RunAndReturn(func(m map[string]string) error {
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, m map[string]string) error {
 			savedKvs = m
 			return nil
 		})
-		metakv.EXPECT().Load(mock.Anything).RunAndReturn(func(s string) (string, error) {
+		metakv.EXPECT().Load(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (string, error) {
 			if v, ok := savedKvs[s]; ok {
 				return v, nil
 			}
@@ -301,7 +301,7 @@ func Test_AddSegments(t *testing.T) {
 		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
-		adjustedSeg, err := catalog.LoadFromSegmentPath(segment1.CollectionID, segment1.PartitionID, segment1.ID)
+		adjustedSeg, err := catalog.LoadFromSegmentPath(context.TODO(), segment1.CollectionID, segment1.PartitionID, segment1.ID)
 		assert.NoError(t, err)
 		// Check that num of rows is corrected from 100 to 5.
 		assert.Equal(t, int64(100), segment1.GetNumOfRows())
@@ -364,7 +364,7 @@ func Test_AddSegments(t *testing.T) {
 func Test_AlterSegments(t *testing.T) {
 	t.Run("generate binlog kvs failed", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("error")).Maybe()
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("error")).Maybe()
 
 		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{invalidSegment}, metastore.BinlogsIncrement{
@@ -375,7 +375,7 @@ func Test_AlterSegments(t *testing.T) {
 
 	t.Run("save error", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("error"))
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("error"))
 
 		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segment1})
@@ -386,7 +386,7 @@ func Test_AlterSegments(t *testing.T) {
 	t.Run("save successfully", func(t *testing.T) {
 		var savedKvs map[string]string
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().MultiSave(mock.Anything).RunAndReturn(func(m map[string]string) error {
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, m map[string]string) error {
 			savedKvs = m
 			return nil
 		})
@@ -410,12 +410,12 @@ func Test_AlterSegments(t *testing.T) {
 		savedKvs := make(map[string]string)
 		opGroupCount := 0
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().MultiSave(mock.Anything).RunAndReturn(func(m map[string]string) error {
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, m map[string]string) error {
 			maps.Copy(savedKvs, m)
 			opGroupCount++
 			return nil
 		})
-		metakv.EXPECT().Load(mock.Anything).RunAndReturn(func(s string) (string, error) {
+		metakv.EXPECT().Load(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (string, error) {
 			if v, ok := savedKvs[s]; ok {
 				return v, nil
 			}
@@ -458,7 +458,7 @@ func Test_AlterSegments(t *testing.T) {
 		assert.Equal(t, 255+3, len(savedKvs))
 		assert.Equal(t, 3, opGroupCount)
 
-		adjustedSeg, err := catalog.LoadFromSegmentPath(segmentXL.CollectionID, segmentXL.PartitionID, segmentXL.ID)
+		adjustedSeg, err := catalog.LoadFromSegmentPath(context.TODO(), segmentXL.CollectionID, segmentXL.PartitionID, segmentXL.ID)
 		assert.NoError(t, err)
 		// Check that num of rows is corrected from 100 to 1275.
 		assert.Equal(t, int64(100), segmentXL.GetNumOfRows())
@@ -507,7 +507,7 @@ func Test_AlterSegments(t *testing.T) {
 func Test_DropSegment(t *testing.T) {
 	t.Run("remove failed", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything).Return(errors.New("error"))
+		metakv.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error"))
 
 		catalog := NewCatalog(metakv, rootPath, "")
 		err := catalog.DropSegment(context.TODO(), segment1)
@@ -517,7 +517,7 @@ func Test_DropSegment(t *testing.T) {
 	t.Run("remove successfully", func(t *testing.T) {
 		removedKvs := make(map[string]struct{}, 0)
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything).RunAndReturn(func(m map[string]string, s []string, p ...predicates.Predicate) error {
+		metakv.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, m map[string]string, s []string, p ...predicates.Predicate) error {
 			for _, key := range s {
 				removedKvs[key] = struct{}{}
 			}
@@ -543,7 +543,7 @@ func Test_DropSegment(t *testing.T) {
 
 func Test_SaveDroppedSegmentsInBatch_SaveError(t *testing.T) {
 	txn := mocks.NewMetaKv(t)
-	txn.EXPECT().MultiSave(mock.Anything).Return(errors.New("mock error"))
+	txn.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("mock error"))
 
 	catalog := NewCatalog(txn, rootPath, "")
 	segments := []*datapb.SegmentInfo{
@@ -563,8 +563,8 @@ func Test_SaveDroppedSegmentsInBatch_MultiSave(t *testing.T) {
 	)
 	txn := mocks.NewMetaKv(t)
 	txn.EXPECT().
-		MultiSave(mock.Anything).
-		Run(func(kvs map[string]string) {
+		MultiSave(mock.Anything, mock.Anything).
+		Run(func(ctx context.Context, kvs map[string]string) {
 			count++
 			kvSize += len(kvs)
 		}).
@@ -632,12 +632,12 @@ func TestChannelCP(t *testing.T) {
 
 	t.Run("ListChannelCheckpoint", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		catalog := NewCatalog(txn, rootPath, "")
 		err := catalog.SaveChannelCheckpoint(context.TODO(), mockVChannel, pos)
 		assert.NoError(t, err)
 
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f([]byte(k), v)
 		})
 		res, err := catalog.ListChannelCheckpoint(context.TODO())
@@ -648,14 +648,14 @@ func TestChannelCP(t *testing.T) {
 	t.Run("ListChannelCheckpoint failed", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		catalog := NewCatalog(txn, rootPath, "")
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
 		_, err = catalog.ListChannelCheckpoint(context.TODO())
 		assert.Error(t, err)
 	})
 
 	t.Run("SaveChannelCheckpoint", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		catalog := NewCatalog(txn, rootPath, "")
 		err := catalog.SaveChannelCheckpoint(context.TODO(), mockVChannel, pos)
 		assert.NoError(t, err)
@@ -664,14 +664,14 @@ func TestChannelCP(t *testing.T) {
 	t.Run("SaveChannelCheckpoint failed", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		catalog := NewCatalog(txn, rootPath, "")
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
 		err = catalog.SaveChannelCheckpoint(context.TODO(), mockVChannel, &msgpb.MsgPosition{})
 		assert.Error(t, err)
 	})
 
 	t.Run("SaveChannelCheckpoints", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().MultiSave(mock.Anything).Return(nil)
+		txn.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
 		catalog := NewCatalog(txn, rootPath, "")
 		err := catalog.SaveChannelCheckpoints(context.TODO(), []*msgpb.MsgPosition{pos})
 		assert.NoError(t, err)
@@ -680,20 +680,20 @@ func TestChannelCP(t *testing.T) {
 	t.Run("SaveChannelCheckpoints failed", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		catalog := NewCatalog(txn, rootPath, "")
-		txn.EXPECT().MultiSave(mock.Anything).Return(errors.New("mock error"))
+		txn.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("mock error"))
 		err = catalog.SaveChannelCheckpoints(context.TODO(), []*msgpb.MsgPosition{pos})
 		assert.Error(t, err)
 	})
 
 	t.Run("DropChannelCheckpoint", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		catalog := NewCatalog(txn, rootPath, "")
 		err := catalog.SaveChannelCheckpoint(context.TODO(), mockVChannel, pos)
 		assert.NoError(t, err)
 
-		txn.EXPECT().Remove(mock.Anything).Return(nil)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		err = catalog.DropChannelCheckpoint(context.TODO(), mockVChannel)
 		assert.NoError(t, err)
 		res, err := catalog.ListChannelCheckpoint(context.TODO())
@@ -704,7 +704,7 @@ func TestChannelCP(t *testing.T) {
 	t.Run("DropChannelCheckpoint failed", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		catalog := NewCatalog(txn, rootPath, "")
-		txn.EXPECT().Remove(mock.Anything).Return(errors.New("mock error"))
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("mock error"))
 		err = catalog.DropChannelCheckpoint(context.TODO(), mockVChannel)
 		assert.Error(t, err)
 	})
@@ -713,7 +713,7 @@ func TestChannelCP(t *testing.T) {
 func Test_MarkChannelDeleted_SaveError(t *testing.T) {
 	txn := mocks.NewMetaKv(t)
 	txn.EXPECT().
-		Save(mock.Anything, mock.Anything).
+		Save(mock.Anything, mock.Anything, mock.Anything).
 		Return(errors.New("mock error"))
 
 	catalog := NewCatalog(txn, rootPath, "")
@@ -724,7 +724,7 @@ func Test_MarkChannelDeleted_SaveError(t *testing.T) {
 func Test_MarkChannelAdded_SaveError(t *testing.T) {
 	txn := mocks.NewMetaKv(t)
 	txn.EXPECT().
-		Save(mock.Anything, mock.Anything).
+		Save(mock.Anything, mock.Anything, mock.Anything).
 		Return(errors.New("mock error"))
 
 	catalog := NewCatalog(txn, rootPath, "")
@@ -735,7 +735,7 @@ func Test_MarkChannelAdded_SaveError(t *testing.T) {
 func Test_ChannelExists_SaveError(t *testing.T) {
 	txn := mocks.NewMetaKv(t)
 	txn.EXPECT().
-		Load(mock.Anything).
+		Load(mock.Anything, mock.Anything).
 		Return("", errors.New("mock error"))
 
 	catalog := NewCatalog(txn, rootPath, "")
@@ -854,7 +854,7 @@ func verifySavedKvsForDroppedSegment(t *testing.T, savedKvs map[string]string) {
 func TestCatalog_CreateIndex(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		catalog := &Catalog{
 			MetaKv: metakv,
@@ -866,7 +866,7 @@ func TestCatalog_CreateIndex(t *testing.T) {
 
 	t.Run("failed", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("error"))
+		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error"))
 
 		catalog := &Catalog{
 			MetaKv: metakv,
@@ -880,7 +880,7 @@ func TestCatalog_CreateIndex(t *testing.T) {
 func TestCatalog_ListIndexes(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			i := &indexpb.FieldIndex{
 				IndexInfo: &indexpb.IndexInfo{
 					CollectionID: 0,
@@ -908,7 +908,7 @@ func TestCatalog_ListIndexes(t *testing.T) {
 
 	t.Run("failed", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error"))
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error"))
 		catalog := &Catalog{
 			MetaKv: txn,
 		}
@@ -918,7 +918,7 @@ func TestCatalog_ListIndexes(t *testing.T) {
 
 	t.Run("unmarshal failed", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f([]byte("1"), []byte("invalid"))
 		})
 
@@ -943,7 +943,7 @@ func TestCatalog_AlterIndexes(t *testing.T) {
 	}
 
 	metakv := mocks.NewMetaKv(t)
-	metakv.EXPECT().MultiSave(mock.Anything).Return(nil)
+	metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
 	catalog := &Catalog{
 		MetaKv: metakv,
 	}
@@ -970,14 +970,14 @@ func TestCatalog_AlterSegmentMultiIndexes(t *testing.T) {
 	t.Run("batchAdd", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
 
-		metakv.EXPECT().MultiSave(mock.Anything).RunAndReturn(func(m map[string]string) error {
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, m map[string]string) error {
 			if len(m) > 64 {
 				return errors.New("fail")
 			}
 			return nil
 		})
 
-		metakv.EXPECT().MultiSave(mock.Anything).Return(nil)
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
 		catalog := &Catalog{
 			MetaKv: metakv,
 		}
@@ -990,7 +990,7 @@ func TestCatalog_AlterSegmentMultiIndexes(t *testing.T) {
 func TestCatalog_DropIndex(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().Remove(mock.Anything).Return(nil)
+		metakv.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		catalog := &Catalog{
 			MetaKv: metakv,
 		}
@@ -1001,7 +1001,7 @@ func TestCatalog_DropIndex(t *testing.T) {
 
 	t.Run("failed", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().Remove(mock.Anything).Return(errors.New("error"))
+		metakv.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("error"))
 		catalog := &Catalog{
 			MetaKv: metakv,
 		}
@@ -1031,7 +1031,7 @@ func TestCatalog_CreateSegmentIndex(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		catalog := &Catalog{
 			MetaKv: metakv,
 		}
@@ -1042,7 +1042,7 @@ func TestCatalog_CreateSegmentIndex(t *testing.T) {
 
 	t.Run("failed", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("error"))
+		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error"))
 		catalog := &Catalog{
 			MetaKv: metakv,
 		}
@@ -1074,7 +1074,7 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 		assert.NoError(t, err)
 
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f([]byte("key"), v)
 		})
 		catalog := &Catalog{
@@ -1088,7 +1088,7 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 
 	t.Run("failed", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error"))
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error"))
 		catalog := &Catalog{
 			MetaKv: metakv,
 		}
@@ -1099,7 +1099,7 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 
 	t.Run("unmarshal failed", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f([]byte("key"), []byte("invalid"))
 		})
 		catalog := &Catalog{
@@ -1131,7 +1131,7 @@ func TestCatalog_AlterSegmentIndexes(t *testing.T) {
 
 	t.Run("add", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().MultiSave(mock.Anything).Return(nil)
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
 		catalog := &Catalog{
 			MetaKv: metakv,
 		}
@@ -1144,7 +1144,7 @@ func TestCatalog_AlterSegmentIndexes(t *testing.T) {
 func TestCatalog_DropSegmentIndex(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().Remove(mock.Anything).Return(nil)
+		metakv.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		catalog := &Catalog{
 			MetaKv: metakv,
 		}
@@ -1155,7 +1155,7 @@ func TestCatalog_DropSegmentIndex(t *testing.T) {
 
 	t.Run("fail", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().Remove(mock.Anything).Return(errors.New("error"))
+		metakv.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("error"))
 		catalog := &Catalog{
 			MetaKv: metakv,
 		}
@@ -1336,12 +1336,14 @@ func TestCatalog_GcConfirm(t *testing.T) {
 	kc.MetaKv = txn
 
 	txn.On("LoadWithPrefix",
+		mock.Anything,
 		mock.AnythingOfType("string")).
 		Return(nil, nil, errors.New("error mock LoadWithPrefix")).
 		Once()
 	assert.False(t, kc.GcConfirm(context.TODO(), 100, 10000))
 
 	txn.On("LoadWithPrefix",
+		mock.Anything,
 		mock.AnythingOfType("string")).
 		Return(nil, nil, nil)
 	assert.True(t, kc.GcConfirm(context.TODO(), 100, 10000))
@@ -1365,7 +1367,7 @@ func TestCatalog_Import(t *testing.T) {
 
 	t.Run("SaveImportJob", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
 		err := kc.SaveImportJob(context.TODO(), job)
 		assert.NoError(t, err)
@@ -1374,7 +1376,7 @@ func TestCatalog_Import(t *testing.T) {
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 		err = kc.SaveImportJob(context.TODO(), job)
 		assert.Error(t, err)
@@ -1384,7 +1386,7 @@ func TestCatalog_Import(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		value, err := proto.Marshal(job)
 		assert.NoError(t, err)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f(nil, value)
 		})
 		kc.MetaKv = txn
@@ -1393,7 +1395,7 @@ func TestCatalog_Import(t *testing.T) {
 		assert.Equal(t, 1, len(jobs))
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f(nil, []byte("@#%#^#"))
 		})
 		kc.MetaKv = txn
@@ -1401,7 +1403,7 @@ func TestCatalog_Import(t *testing.T) {
 		assert.Error(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 		_, err = kc.ListImportJobs(context.TODO())
 		assert.Error(t, err)
@@ -1409,13 +1411,13 @@ func TestCatalog_Import(t *testing.T) {
 
 	t.Run("DropImportJob", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything).Return(nil)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
 		err := kc.DropImportJob(context.TODO(), job.GetJobID())
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything).Return(mockErr)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 		err = kc.DropImportJob(context.TODO(), job.GetJobID())
 		assert.Error(t, err)
@@ -1423,7 +1425,7 @@ func TestCatalog_Import(t *testing.T) {
 
 	t.Run("SavePreImportTask", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
 		err := kc.SavePreImportTask(context.TODO(), pit)
 		assert.NoError(t, err)
@@ -1432,7 +1434,7 @@ func TestCatalog_Import(t *testing.T) {
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 		err = kc.SavePreImportTask(context.TODO(), pit)
 		assert.Error(t, err)
@@ -1442,7 +1444,7 @@ func TestCatalog_Import(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		value, err := proto.Marshal(pit)
 		assert.NoError(t, err)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f(nil, value)
 		})
 		kc.MetaKv = txn
@@ -1451,7 +1453,7 @@ func TestCatalog_Import(t *testing.T) {
 		assert.Equal(t, 1, len(tasks))
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f(nil, []byte("@#%#^#"))
 		})
 		kc.MetaKv = txn
@@ -1459,7 +1461,7 @@ func TestCatalog_Import(t *testing.T) {
 		assert.Error(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 		_, err = kc.ListPreImportTasks(context.TODO())
 		assert.Error(t, err)
@@ -1467,13 +1469,13 @@ func TestCatalog_Import(t *testing.T) {
 
 	t.Run("DropPreImportTask", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything).Return(nil)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
 		err := kc.DropPreImportTask(context.TODO(), pit.GetTaskID())
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything).Return(mockErr)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 		err = kc.DropPreImportTask(context.TODO(), pit.GetTaskID())
 		assert.Error(t, err)
@@ -1481,7 +1483,7 @@ func TestCatalog_Import(t *testing.T) {
 
 	t.Run("SaveImportTask", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
 		err := kc.SaveImportTask(context.TODO(), it)
 		assert.NoError(t, err)
@@ -1490,7 +1492,7 @@ func TestCatalog_Import(t *testing.T) {
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 		err = kc.SaveImportTask(context.TODO(), it)
 		assert.Error(t, err)
@@ -1500,7 +1502,7 @@ func TestCatalog_Import(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		value, err := proto.Marshal(it)
 		assert.NoError(t, err)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f(nil, value)
 		})
 		kc.MetaKv = txn
@@ -1509,7 +1511,7 @@ func TestCatalog_Import(t *testing.T) {
 		assert.Equal(t, 1, len(tasks))
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f(nil, []byte("@#%#^#"))
 		})
 		kc.MetaKv = txn
@@ -1517,7 +1519,7 @@ func TestCatalog_Import(t *testing.T) {
 		assert.Error(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 		_, err = kc.ListImportTasks(context.TODO())
 		assert.Error(t, err)
@@ -1525,13 +1527,13 @@ func TestCatalog_Import(t *testing.T) {
 
 	t.Run("DropImportTask", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything).Return(nil)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
 		err := kc.DropImportTask(context.TODO(), it.GetTaskID())
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything).Return(mockErr)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 		err = kc.DropImportTask(context.TODO(), it.GetTaskID())
 		assert.Error(t, err)
@@ -1544,7 +1546,7 @@ func TestCatalog_AnalyzeTask(t *testing.T) {
 
 	t.Run("ListAnalyzeTasks", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 
 		tasks, err := kc.ListAnalyzeTasks(context.Background())
@@ -1570,7 +1572,7 @@ func TestCatalog_AnalyzeTask(t *testing.T) {
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f([]byte("key1"), value)
 		})
 		kc.MetaKv = txn
@@ -1580,7 +1582,7 @@ func TestCatalog_AnalyzeTask(t *testing.T) {
 		assert.Equal(t, 1, len(tasks))
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f([]byte("key1"), []byte("1234"))
 		})
 		kc.MetaKv = txn
@@ -1608,14 +1610,14 @@ func TestCatalog_AnalyzeTask(t *testing.T) {
 		}
 
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
 
 		err := kc.SaveAnalyzeTask(context.Background(), task)
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 
 		err = kc.SaveAnalyzeTask(context.Background(), task)
@@ -1624,14 +1626,14 @@ func TestCatalog_AnalyzeTask(t *testing.T) {
 
 	t.Run("DropAnalyzeTask", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything).Return(nil)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
 
 		err := kc.DropAnalyzeTask(context.Background(), 1)
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything).Return(mockErr)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 
 		err = kc.DropAnalyzeTask(context.Background(), 1)
@@ -1645,7 +1647,7 @@ func Test_PartitionStatsInfo(t *testing.T) {
 
 	t.Run("ListPartitionStatsInfo", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 
 		infos, err := kc.ListPartitionStatsInfos(context.Background())
@@ -1665,7 +1667,7 @@ func Test_PartitionStatsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f([]byte("key1"), value)
 		})
 		kc.MetaKv = txn
@@ -1675,7 +1677,7 @@ func Test_PartitionStatsInfo(t *testing.T) {
 		assert.Equal(t, 1, len(infos))
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f([]byte("key1"), []byte("1234"))
 		})
 		kc.MetaKv = txn
@@ -1687,7 +1689,7 @@ func Test_PartitionStatsInfo(t *testing.T) {
 
 	t.Run("SavePartitionStatsInfo", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().MultiSave(mock.Anything).Return(mockErr)
+		txn.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 
 		info := &datapb.PartitionStatsInfo{
@@ -1704,7 +1706,7 @@ func Test_PartitionStatsInfo(t *testing.T) {
 		assert.Error(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().MultiSave(mock.Anything).Return(nil)
+		txn.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
 
 		err = kc.SavePartitionStatsInfo(context.Background(), info)
@@ -1713,7 +1715,7 @@ func Test_PartitionStatsInfo(t *testing.T) {
 
 	t.Run("DropPartitionStatsInfo", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything).Return(mockErr)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 
 		info := &datapb.PartitionStatsInfo{
@@ -1730,7 +1732,7 @@ func Test_PartitionStatsInfo(t *testing.T) {
 		assert.Error(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything).Return(nil)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
 
 		err = kc.DropPartitionStatsInfo(context.Background(), info)
@@ -1748,14 +1750,14 @@ func Test_CurrentPartitionStatsVersion(t *testing.T) {
 
 	t.Run("SaveCurrentPartitionStatsVersion", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 
 		err := kc.SaveCurrentPartitionStatsVersion(context.Background(), collID, partID, vChannel, currentVersion)
 		assert.Error(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
 
 		err = kc.SaveCurrentPartitionStatsVersion(context.Background(), collID, partID, vChannel, currentVersion)
@@ -1764,7 +1766,7 @@ func Test_CurrentPartitionStatsVersion(t *testing.T) {
 
 	t.Run("GetCurrentPartitionStatsVersion", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Load(mock.Anything).Return("", mockErr)
+		txn.EXPECT().Load(mock.Anything, mock.Anything).Return("", mockErr)
 		kc.MetaKv = txn
 
 		version, err := kc.GetCurrentPartitionStatsVersion(context.Background(), collID, partID, vChannel)
@@ -1772,7 +1774,7 @@ func Test_CurrentPartitionStatsVersion(t *testing.T) {
 		assert.Equal(t, int64(0), version)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Load(mock.Anything).Return("1", nil)
+		txn.EXPECT().Load(mock.Anything, mock.Anything).Return("1", nil)
 		kc.MetaKv = txn
 
 		version, err = kc.GetCurrentPartitionStatsVersion(context.Background(), collID, partID, vChannel)
@@ -1782,14 +1784,14 @@ func Test_CurrentPartitionStatsVersion(t *testing.T) {
 
 	t.Run("DropCurrentPartitionStatsVersion", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything).Return(mockErr)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 
 		err := kc.DropCurrentPartitionStatsVersion(context.Background(), collID, partID, vChannel)
 		assert.Error(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything).Return(nil)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
 
 		err = kc.DropCurrentPartitionStatsVersion(context.Background(), collID, partID, vChannel)
@@ -1803,7 +1805,7 @@ func Test_StatsTasks(t *testing.T) {
 
 	t.Run("ListStatsTasks", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 
 		tasks, err := kc.ListStatsTasks(context.Background())
@@ -1825,7 +1827,7 @@ func Test_StatsTasks(t *testing.T) {
 		assert.NoError(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f([]byte("key1"), value)
 		})
 		kc.MetaKv = txn
@@ -1835,7 +1837,7 @@ func Test_StatsTasks(t *testing.T) {
 		assert.Equal(t, 1, len(tasks))
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ string, _ int, f func([]byte, []byte) error) error {
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
 			return f([]byte("key1"), []byte("1234"))
 		})
 		kc.MetaKv = txn
@@ -1847,7 +1849,7 @@ func Test_StatsTasks(t *testing.T) {
 
 	t.Run("SaveStatsTask", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 
 		task := &indexpb.StatsTask{
@@ -1866,7 +1868,7 @@ func Test_StatsTasks(t *testing.T) {
 		assert.Error(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
 
 		err = kc.SaveStatsTask(context.Background(), task)
@@ -1875,14 +1877,14 @@ func Test_StatsTasks(t *testing.T) {
 
 	t.Run("DropStatsTask", func(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything).Return(mockErr)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 
 		err := kc.DropStatsTask(context.Background(), 1)
 		assert.Error(t, err)
 
 		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Remove(mock.Anything).Return(nil)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		kc.MetaKv = txn
 
 		err = kc.DropStatsTask(context.Background(), 1)

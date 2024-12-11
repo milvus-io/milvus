@@ -17,6 +17,7 @@
 package rocksdbkv
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/cockroachdb/errors"
@@ -97,7 +98,7 @@ func (kv *RocksdbKV) GetName() string {
 }
 
 // Load returns the value of specified key
-func (kv *RocksdbKV) Load(key string) (string, error) {
+func (kv *RocksdbKV) Load(ctx context.Context, key string) (string, error) {
 	if kv.DB == nil {
 		return "", fmt.Errorf("rocksdb instance is nil when load %s", key)
 	}
@@ -114,7 +115,7 @@ func (kv *RocksdbKV) Load(key string) (string, error) {
 	return string(value.Data()), nil
 }
 
-func (kv *RocksdbKV) LoadBytes(key string) ([]byte, error) {
+func (kv *RocksdbKV) LoadBytes(ctx context.Context, key string) ([]byte, error) {
 	if kv.DB == nil {
 		return nil, fmt.Errorf("rocksdb instance is nil when load %s", key)
 	}
@@ -139,7 +140,7 @@ func (kv *RocksdbKV) LoadBytes(key string) ([]byte, error) {
 
 // LoadWithPrefix returns a batch values of keys with a prefix
 // if prefix is "", then load every thing from the database
-func (kv *RocksdbKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
+func (kv *RocksdbKV) LoadWithPrefix(ctx context.Context, prefix string) ([]string, []string, error) {
 	if kv.DB == nil {
 		return nil, nil, fmt.Errorf("rocksdb instance is nil when load %s", prefix)
 	}
@@ -164,7 +165,7 @@ func (kv *RocksdbKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
 	return keys, values, nil
 }
 
-func (kv *RocksdbKV) Has(key string) (bool, error) {
+func (kv *RocksdbKV) Has(ctx context.Context, key string) (bool, error) {
 	if kv.DB == nil {
 		return false, fmt.Errorf("rocksdb instance is nil when check if has %s", key)
 	}
@@ -180,7 +181,7 @@ func (kv *RocksdbKV) Has(key string) (bool, error) {
 	return value.Size() != 0, nil
 }
 
-func (kv *RocksdbKV) HasPrefix(prefix string) (bool, error) {
+func (kv *RocksdbKV) HasPrefix(ctx context.Context, prefix string) (bool, error) {
 	if kv.DB == nil {
 		return false, fmt.Errorf("rocksdb instance is nil when check if has prefix %s", prefix)
 	}
@@ -194,7 +195,7 @@ func (kv *RocksdbKV) HasPrefix(prefix string) (bool, error) {
 	return iter.Valid(), nil
 }
 
-func (kv *RocksdbKV) LoadBytesWithPrefix(prefix string) ([]string, [][]byte, error) {
+func (kv *RocksdbKV) LoadBytesWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
 	if kv.DB == nil {
 		return nil, nil, fmt.Errorf("rocksdb instance is nil when load %s", prefix)
 	}
@@ -229,7 +230,7 @@ func (kv *RocksdbKV) LoadBytesWithPrefix(prefix string) ([]string, [][]byte, err
 }
 
 // MultiLoad load a batch of values by keys
-func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
+func (kv *RocksdbKV) MultiLoad(ctx context.Context, keys []string) ([]string, error) {
 	if kv.DB == nil {
 		return nil, errors.New("rocksdb instance is nil when do MultiLoad")
 	}
@@ -253,7 +254,7 @@ func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 	return values, nil
 }
 
-func (kv *RocksdbKV) MultiLoadBytes(keys []string) ([][]byte, error) {
+func (kv *RocksdbKV) MultiLoadBytes(ctx context.Context, keys []string) ([][]byte, error) {
 	if kv.DB == nil {
 		return nil, errors.New("rocksdb instance is nil when do MultiLoad")
 	}
@@ -281,7 +282,7 @@ func (kv *RocksdbKV) MultiLoadBytes(keys []string) ([][]byte, error) {
 }
 
 // Save a pair of key-value
-func (kv *RocksdbKV) Save(key, value string) error {
+func (kv *RocksdbKV) Save(ctx context.Context, key, value string) error {
 	if kv.DB == nil {
 		return errors.New("rocksdb instance is nil when do save")
 	}
@@ -295,7 +296,7 @@ func (kv *RocksdbKV) Save(key, value string) error {
 	return kv.DB.Put(kv.WriteOptions, []byte(key), []byte(value))
 }
 
-func (kv *RocksdbKV) SaveBytes(key string, value []byte) error {
+func (kv *RocksdbKV) SaveBytes(ctx context.Context, key string, value []byte) error {
 	if kv.DB == nil {
 		return errors.New("rocksdb instance is nil when do save")
 	}
@@ -310,7 +311,7 @@ func (kv *RocksdbKV) SaveBytes(key string, value []byte) error {
 }
 
 // MultiSave a batch of key-values
-func (kv *RocksdbKV) MultiSave(kvs map[string]string) error {
+func (kv *RocksdbKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 	if kv.DB == nil {
 		return errors.New("rocksdb instance is nil when do MultiSave")
 	}
@@ -325,7 +326,7 @@ func (kv *RocksdbKV) MultiSave(kvs map[string]string) error {
 	return kv.DB.Write(kv.WriteOptions, writeBatch)
 }
 
-func (kv *RocksdbKV) MultiSaveBytes(kvs map[string][]byte) error {
+func (kv *RocksdbKV) MultiSaveBytes(ctx context.Context, kvs map[string][]byte) error {
 	if kv.DB == nil {
 		return errors.New("rocksdb instance is nil when do MultiSave")
 	}
@@ -342,7 +343,7 @@ func (kv *RocksdbKV) MultiSaveBytes(kvs map[string][]byte) error {
 
 // RemoveWithPrefix removes a batch of key-values with specified prefix
 // If prefix is "", then all data in the rocksdb kv will be deleted
-func (kv *RocksdbKV) RemoveWithPrefix(prefix string) error {
+func (kv *RocksdbKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	if kv.DB == nil {
 		return errors.New("rocksdb instance is nil when do RemoveWithPrefix")
 	}
@@ -355,17 +356,17 @@ func (kv *RocksdbKV) RemoveWithPrefix(prefix string) error {
 		// seek to the last key
 		iter.SeekToLast()
 		if iter.Valid() {
-			return kv.DeleteRange(prefix, typeutil.AddOne(string(iter.Key().Data())))
+			return kv.DeleteRange(ctx, prefix, typeutil.AddOne(string(iter.Key().Data())))
 		}
 		// nothing in the range, skip
 		return nil
 	}
 	prefixEnd := typeutil.AddOne(prefix)
-	return kv.DeleteRange(prefix, prefixEnd)
+	return kv.DeleteRange(ctx, prefix, prefixEnd)
 }
 
 // Remove is used to remove a pair of key-value
-func (kv *RocksdbKV) Remove(key string) error {
+func (kv *RocksdbKV) Remove(ctx context.Context, key string) error {
 	if kv.DB == nil {
 		return errors.New("rocksdb instance is nil when do Remove")
 	}
@@ -377,7 +378,7 @@ func (kv *RocksdbKV) Remove(key string) error {
 }
 
 // MultiRemove is used to remove a batch of key-values
-func (kv *RocksdbKV) MultiRemove(keys []string) error {
+func (kv *RocksdbKV) MultiRemove(ctx context.Context, keys []string) error {
 	if kv.DB == nil {
 		return errors.New("rocksdb instance is nil when do MultiRemove")
 	}
@@ -391,7 +392,7 @@ func (kv *RocksdbKV) MultiRemove(keys []string) error {
 }
 
 // MultiSaveAndRemove provides a transaction to execute a batch of operations
-func (kv *RocksdbKV) MultiSaveAndRemove(saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+func (kv *RocksdbKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	if len(preds) > 0 {
 		return merr.WrapErrServiceUnavailable("predicates not supported")
 	}
@@ -411,7 +412,7 @@ func (kv *RocksdbKV) MultiSaveAndRemove(saves map[string]string, removals []stri
 }
 
 // DeleteRange remove a batch of key-values from startKey to endKey
-func (kv *RocksdbKV) DeleteRange(startKey, endKey string) error {
+func (kv *RocksdbKV) DeleteRange(ctx context.Context, startKey, endKey string) error {
 	if kv.DB == nil {
 		return errors.New("Rocksdb instance is nil when do DeleteRange")
 	}
@@ -426,7 +427,7 @@ func (kv *RocksdbKV) DeleteRange(startKey, endKey string) error {
 }
 
 // MultiSaveAndRemoveWithPrefix is used to execute a batch operators with the same prefix
-func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	if len(preds) > 0 {
 		return merr.WrapErrServiceUnavailable("predicates not supported")
 	}

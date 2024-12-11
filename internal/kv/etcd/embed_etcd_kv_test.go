@@ -17,6 +17,7 @@
 package etcdkv_test
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"sort"
@@ -55,7 +56,7 @@ func TestEmbedEtcd(te *testing.T) {
 		require.NoError(t, err)
 
 		defer metaKv.Close()
-		defer metaKv.RemoveWithPrefix("")
+		defer metaKv.RemoveWithPrefix(context.TODO(), "")
 
 		saveAndLoadTests := []struct {
 			key   string
@@ -69,11 +70,11 @@ func TestEmbedEtcd(te *testing.T) {
 
 		for i, test := range saveAndLoadTests {
 			if i < 4 {
-				err = metaKv.Save(test.key, test.value)
+				err = metaKv.Save(context.TODO(), test.key, test.value)
 				assert.NoError(t, err)
 			}
 
-			val, err := metaKv.Load(test.key)
+			val, err := metaKv.Load(context.TODO(), test.key)
 			assert.NoError(t, err)
 			assert.Equal(t, test.value, val)
 		}
@@ -87,7 +88,7 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range invalidLoadTests {
-			val, err := metaKv.Load(test.invalidKey)
+			val, err := metaKv.Load(context.TODO(), test.invalidKey)
 			assert.Error(t, err)
 			assert.Zero(t, val)
 		}
@@ -124,7 +125,7 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range loadPrefixTests {
-			actualKeys, actualValues, err := metaKv.LoadWithPrefix(test.prefix)
+			actualKeys, actualValues, err := metaKv.LoadWithPrefix(context.TODO(), test.prefix)
 			assert.ElementsMatch(t, test.expectedKeys, actualKeys)
 			assert.ElementsMatch(t, test.expectedValues, actualValues)
 			assert.Equal(t, test.expectedError, err)
@@ -141,15 +142,15 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range removeTests {
-			err = metaKv.Remove(test.validKey)
+			err = metaKv.Remove(context.TODO(), test.validKey)
 			assert.NoError(t, err)
 
-			_, err = metaKv.Load(test.validKey)
+			_, err = metaKv.Load(context.TODO(), test.validKey)
 			assert.Error(t, err)
 
-			err = metaKv.Remove(test.validKey)
+			err = metaKv.Remove(context.TODO(), test.validKey)
 			assert.NoError(t, err)
-			err = metaKv.Remove(test.invalidKey)
+			err = metaKv.Remove(context.TODO(), test.invalidKey)
 			assert.NoError(t, err)
 		}
 	})
@@ -163,7 +164,7 @@ func TestEmbedEtcd(te *testing.T) {
 		require.NoError(t, err)
 
 		defer metaKv.Close()
-		defer metaKv.RemoveWithPrefix("")
+		defer metaKv.RemoveWithPrefix(context.TODO(), "")
 
 		saveAndLoadTests := []struct {
 			key   string
@@ -177,11 +178,11 @@ func TestEmbedEtcd(te *testing.T) {
 
 		for i, test := range saveAndLoadTests {
 			if i < 4 {
-				err = metaKv.SaveBytes(test.key, test.value)
+				err = metaKv.SaveBytes(context.TODO(), test.key, test.value)
 				assert.NoError(t, err)
 			}
 
-			val, err := metaKv.LoadBytes(test.key)
+			val, err := metaKv.LoadBytes(context.TODO(), test.key)
 			assert.NoError(t, err)
 			assert.Equal(t, test.value, val)
 		}
@@ -195,7 +196,7 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range invalidLoadTests {
-			val, err := metaKv.LoadBytes(test.invalidKey)
+			val, err := metaKv.LoadBytes(context.TODO(), test.invalidKey)
 			assert.Error(t, err)
 			assert.Zero(t, val)
 		}
@@ -232,12 +233,12 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range loadPrefixTests {
-			actualKeys, actualValues, err := metaKv.LoadBytesWithPrefix(test.prefix)
+			actualKeys, actualValues, err := metaKv.LoadBytesWithPrefix(context.TODO(), test.prefix)
 			assert.ElementsMatch(t, test.expectedKeys, actualKeys)
 			assert.ElementsMatch(t, test.expectedValues, actualValues)
 			assert.Equal(t, test.expectedError, err)
 
-			actualKeys, actualValues, versions, err := metaKv.LoadBytesWithPrefix2(test.prefix)
+			actualKeys, actualValues, versions, err := metaKv.LoadBytesWithPrefix2(context.TODO(), test.prefix)
 			assert.ElementsMatch(t, test.expectedKeys, actualKeys)
 			assert.ElementsMatch(t, test.expectedValues, actualValues)
 			assert.NotZero(t, versions)
@@ -255,15 +256,15 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range removeTests {
-			err = metaKv.Remove(test.validKey)
+			err = metaKv.Remove(context.TODO(), test.validKey)
 			assert.NoError(t, err)
 
-			_, err = metaKv.Load(test.validKey)
+			_, err = metaKv.Load(context.TODO(), test.validKey)
 			assert.Error(t, err)
 
-			err = metaKv.Remove(test.validKey)
+			err = metaKv.Remove(context.TODO(), test.validKey)
 			assert.NoError(t, err)
-			err = metaKv.Remove(test.invalidKey)
+			err = metaKv.Remove(context.TODO(), test.invalidKey)
 			assert.NoError(t, err)
 		}
 	})
@@ -275,7 +276,7 @@ func TestEmbedEtcd(te *testing.T) {
 		assert.NoError(t, err)
 
 		defer metaKv.Close()
-		defer metaKv.RemoveWithPrefix("")
+		defer metaKv.RemoveWithPrefix(context.TODO(), "")
 
 		prepareKV := []struct {
 			inKey   string
@@ -289,7 +290,7 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range prepareKV {
-			err = metaKv.SaveBytes(test.inKey, test.inValue)
+			err = metaKv.SaveBytes(context.TODO(), test.inKey, test.inValue)
 			require.NoError(t, err)
 		}
 
@@ -305,7 +306,7 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range loadWithRevisionTests {
-			keys, values, revision, err := metaKv.LoadBytesWithRevision(test.inKey)
+			keys, values, revision, err := metaKv.LoadBytesWithRevision(context.TODO(), test.inKey)
 			assert.NoError(t, err)
 			assert.Equal(t, test.expectedKeyNo, len(keys))
 			assert.ElementsMatch(t, test.expectedValues, values)
@@ -319,7 +320,7 @@ func TestEmbedEtcd(te *testing.T) {
 		assert.NoError(t, err)
 
 		defer metaKv.Close()
-		defer metaKv.RemoveWithPrefix("")
+		defer metaKv.RemoveWithPrefix(context.TODO(), "")
 
 		multiSaveTests := map[string]string{
 			"key_1":      "value_1",
@@ -330,10 +331,10 @@ func TestEmbedEtcd(te *testing.T) {
 			"_":          "other",
 		}
 
-		err = metaKv.MultiSave(multiSaveTests)
+		err = metaKv.MultiSave(context.TODO(), multiSaveTests)
 		assert.NoError(t, err)
 		for k, v := range multiSaveTests {
-			actualV, err := metaKv.Load(k)
+			actualV, err := metaKv.Load(context.TODO(), k)
 			assert.NoError(t, err)
 			assert.Equal(t, v, actualV)
 		}
@@ -349,7 +350,7 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range multiLoadTests {
-			vs, err := metaKv.MultiLoad(test.inputKeys)
+			vs, err := metaKv.MultiLoad(context.TODO(), test.inputKeys)
 			assert.NoError(t, err)
 			assert.Equal(t, test.expectedValues, vs)
 		}
@@ -365,7 +366,7 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range invalidMultiLoad {
-			vs, err := metaKv.MultiLoad(test.invalidKeys)
+			vs, err := metaKv.MultiLoad(context.TODO(), test.invalidKeys)
 			assert.Error(t, err)
 			assert.Equal(t, test.expectedValues, vs)
 		}
@@ -376,10 +377,10 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, k := range removeWithPrefixTests {
-			err = metaKv.RemoveWithPrefix(k)
+			err = metaKv.RemoveWithPrefix(context.TODO(), k)
 			assert.NoError(t, err)
 
-			ks, vs, err := metaKv.LoadWithPrefix(k)
+			ks, vs, err := metaKv.LoadWithPrefix(context.TODO(), k)
 			assert.Empty(t, ks)
 			assert.Empty(t, vs)
 			assert.NoError(t, err)
@@ -392,10 +393,10 @@ func TestEmbedEtcd(te *testing.T) {
 			"_",
 		}
 
-		err = metaKv.MultiRemove(multiRemoveTests)
+		err = metaKv.MultiRemove(context.TODO(), multiRemoveTests)
 		assert.NoError(t, err)
 
-		ks, vs, err := metaKv.LoadWithPrefix("")
+		ks, vs, err := metaKv.LoadWithPrefix(context.TODO(), "")
 		assert.NoError(t, err)
 		assert.Empty(t, ks)
 		assert.Empty(t, vs)
@@ -412,11 +413,11 @@ func TestEmbedEtcd(te *testing.T) {
 			{make(map[string]string), []string{"multikey_2"}},
 		}
 		for _, test := range multiSaveAndRemoveTests {
-			err = metaKv.MultiSaveAndRemove(test.multiSaves, test.multiRemoves)
+			err = metaKv.MultiSaveAndRemove(context.TODO(), test.multiSaves, test.multiRemoves)
 			assert.NoError(t, err)
 		}
 
-		ks, vs, err = metaKv.LoadWithPrefix("")
+		ks, vs, err = metaKv.LoadWithPrefix(context.TODO(), "")
 		assert.NoError(t, err)
 		assert.Empty(t, ks)
 		assert.Empty(t, vs)
@@ -429,7 +430,7 @@ func TestEmbedEtcd(te *testing.T) {
 		assert.NoError(t, err)
 
 		defer metaKv.Close()
-		defer metaKv.RemoveWithPrefix("")
+		defer metaKv.RemoveWithPrefix(context.TODO(), "")
 
 		multiSaveTests := map[string][]byte{
 			"key_1":      []byte("value_1"),
@@ -440,10 +441,10 @@ func TestEmbedEtcd(te *testing.T) {
 			"_":          []byte("other"),
 		}
 
-		err = metaKv.MultiSaveBytes(multiSaveTests)
+		err = metaKv.MultiSaveBytes(context.TODO(), multiSaveTests)
 		assert.NoError(t, err)
 		for k, v := range multiSaveTests {
-			actualV, err := metaKv.LoadBytes(k)
+			actualV, err := metaKv.LoadBytes(context.TODO(), k)
 			assert.NoError(t, err)
 			assert.Equal(t, v, actualV)
 		}
@@ -459,7 +460,7 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range multiLoadTests {
-			vs, err := metaKv.MultiLoadBytes(test.inputKeys)
+			vs, err := metaKv.MultiLoadBytes(context.TODO(), test.inputKeys)
 			assert.NoError(t, err)
 			assert.Equal(t, test.expectedValues, vs)
 		}
@@ -475,7 +476,7 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range invalidMultiLoad {
-			vs, err := metaKv.MultiLoadBytes(test.invalidKeys)
+			vs, err := metaKv.MultiLoadBytes(context.TODO(), test.invalidKeys)
 			assert.Error(t, err)
 			assert.Equal(t, test.expectedValues, vs)
 		}
@@ -486,10 +487,10 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, k := range removeWithPrefixTests {
-			err = metaKv.RemoveWithPrefix(k)
+			err = metaKv.RemoveWithPrefix(context.TODO(), k)
 			assert.NoError(t, err)
 
-			ks, vs, err := metaKv.LoadBytesWithPrefix(k)
+			ks, vs, err := metaKv.LoadBytesWithPrefix(context.TODO(), k)
 			assert.Empty(t, ks)
 			assert.Empty(t, vs)
 			assert.NoError(t, err)
@@ -502,10 +503,10 @@ func TestEmbedEtcd(te *testing.T) {
 			"_",
 		}
 
-		err = metaKv.MultiRemove(multiRemoveTests)
+		err = metaKv.MultiRemove(context.TODO(), multiRemoveTests)
 		assert.NoError(t, err)
 
-		ks, vs, err := metaKv.LoadBytesWithPrefix("")
+		ks, vs, err := metaKv.LoadBytesWithPrefix(context.TODO(), "")
 		assert.NoError(t, err)
 		assert.Empty(t, ks)
 		assert.Empty(t, vs)
@@ -522,11 +523,11 @@ func TestEmbedEtcd(te *testing.T) {
 			{map[string][]byte{}, []string{"multikey_2"}},
 		}
 		for _, test := range multiSaveAndRemoveTests {
-			err = metaKv.MultiSaveBytesAndRemove(test.multiSaves, test.multiRemoves)
+			err = metaKv.MultiSaveBytesAndRemove(context.TODO(), test.multiSaves, test.multiRemoves)
 			assert.NoError(t, err)
 		}
 
-		ks, vs, err = metaKv.LoadBytesWithPrefix("")
+		ks, vs, err = metaKv.LoadBytesWithPrefix(context.TODO(), "")
 		assert.NoError(t, err)
 		assert.Empty(t, ks)
 		assert.Empty(t, vs)
@@ -538,7 +539,7 @@ func TestEmbedEtcd(te *testing.T) {
 		require.NoError(t, err)
 
 		defer metaKv.Close()
-		defer metaKv.RemoveWithPrefix("")
+		defer metaKv.RemoveWithPrefix(context.TODO(), "")
 
 		prepareTests := map[string]string{
 			"x/abc/1": "1",
@@ -550,7 +551,7 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		// MultiSaveAndRemoveWithPrefix
-		err = metaKv.MultiSave(prepareTests)
+		err = metaKv.MultiSave(context.TODO(), prepareTests)
 		require.NoError(t, err)
 		multiSaveAndRemoveWithPrefixTests := []struct {
 			multiSave map[string]string
@@ -569,14 +570,14 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range multiSaveAndRemoveWithPrefixTests {
-			k, _, err := metaKv.LoadWithPrefix(test.loadPrefix)
+			k, _, err := metaKv.LoadWithPrefix(context.TODO(), test.loadPrefix)
 			assert.NoError(t, err)
 			assert.Equal(t, test.lengthBeforeRemove, len(k))
 
-			err = metaKv.MultiSaveAndRemoveWithPrefix(test.multiSave, test.prefix)
+			err = metaKv.MultiSaveAndRemoveWithPrefix(context.TODO(), test.multiSave, test.prefix)
 			assert.NoError(t, err)
 
-			k, _, err = metaKv.LoadWithPrefix(test.loadPrefix)
+			k, _, err = metaKv.LoadWithPrefix(context.TODO(), test.loadPrefix)
 			assert.NoError(t, err)
 			assert.Equal(t, test.lengthAfterRemove, len(k))
 		}
@@ -589,7 +590,7 @@ func TestEmbedEtcd(te *testing.T) {
 		require.NoError(t, err)
 
 		defer metaKv.Close()
-		defer metaKv.RemoveWithPrefix("")
+		defer metaKv.RemoveWithPrefix(context.TODO(), "")
 
 		prepareTests := map[string][]byte{
 			"x/abc/1": []byte("1"),
@@ -600,13 +601,13 @@ func TestEmbedEtcd(te *testing.T) {
 			"x/den/2": []byte("200"),
 		}
 
-		k, v, err := metaKv.LoadBytesWithPrefix("/")
+		k, v, err := metaKv.LoadBytesWithPrefix(context.TODO(), "/")
 		assert.NoError(t, err)
 		assert.Zero(t, len(k))
 		assert.Zero(t, len(v))
 
 		// MultiSaveAndRemoveWithPrefix
-		err = metaKv.MultiSaveBytes(prepareTests)
+		err = metaKv.MultiSaveBytes(context.TODO(), prepareTests)
 		require.NoError(t, err)
 		multiSaveAndRemoveWithPrefixTests := []struct {
 			multiSave map[string][]byte
@@ -624,14 +625,14 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range multiSaveAndRemoveWithPrefixTests {
-			k, _, err = metaKv.LoadBytesWithPrefix(test.loadPrefix)
+			k, _, err = metaKv.LoadBytesWithPrefix(context.TODO(), test.loadPrefix)
 			assert.NoError(t, err)
 			assert.Equal(t, test.lengthBeforeRemove, len(k))
 
-			err = metaKv.MultiSaveBytesAndRemoveWithPrefix(test.multiSave, test.prefix)
+			err = metaKv.MultiSaveBytesAndRemoveWithPrefix(context.TODO(), test.multiSave, test.prefix)
 			assert.NoError(t, err)
 
-			k, _, err = metaKv.LoadBytesWithPrefix(test.loadPrefix)
+			k, _, err = metaKv.LoadBytesWithPrefix(context.TODO(), test.loadPrefix)
 			assert.NoError(t, err)
 			assert.Equal(t, test.lengthAfterRemove, len(k))
 		}
@@ -643,13 +644,13 @@ func TestEmbedEtcd(te *testing.T) {
 		assert.NoError(t, err)
 
 		defer watchKv.Close()
-		defer watchKv.RemoveWithPrefix("")
+		defer watchKv.RemoveWithPrefix(context.TODO(), "")
 
-		ch := watchKv.Watch("x")
+		ch := watchKv.Watch(context.TODO(), "x")
 		resp := <-ch
 		assert.True(t, resp.Created)
 
-		ch = watchKv.WatchWithPrefix("x")
+		ch = watchKv.WatchWithPrefix(context.TODO(), "x")
 		resp = <-ch
 		assert.True(t, resp.Created)
 	})
@@ -661,7 +662,7 @@ func TestEmbedEtcd(te *testing.T) {
 		assert.NoError(t, err)
 
 		defer metaKv.Close()
-		defer metaKv.RemoveWithPrefix("")
+		defer metaKv.RemoveWithPrefix(context.TODO(), "")
 
 		revisionTests := []struct {
 			inKey       string
@@ -674,13 +675,13 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for _, test := range revisionTests {
-			err = metaKv.SaveBytes(test.inKey, test.fistValue)
+			err = metaKv.SaveBytes(context.TODO(), test.inKey, test.fistValue)
 			require.NoError(t, err)
 
-			_, _, revision, _ := metaKv.LoadBytesWithRevision(test.inKey)
-			ch := metaKv.WatchWithRevision(test.inKey, revision+1)
+			_, _, revision, _ := metaKv.LoadBytesWithRevision(context.TODO(), test.inKey)
+			ch := metaKv.WatchWithRevision(context.TODO(), test.inKey, revision+1)
 
-			err = metaKv.SaveBytes(test.inKey, test.secondValue)
+			err = metaKv.SaveBytes(context.TODO(), test.inKey, test.secondValue)
 			require.NoError(t, err)
 
 			resp := <-ch
@@ -689,15 +690,15 @@ func TestEmbedEtcd(te *testing.T) {
 			assert.Equal(t, revision+1, resp.Header.Revision)
 		}
 
-		success, err := metaKv.CompareVersionAndSwapBytes("a/b/c", 0, []byte("1"))
+		success, err := metaKv.CompareVersionAndSwapBytes(context.TODO(), "a/b/c", 0, []byte("1"))
 		assert.NoError(t, err)
 		assert.True(t, success)
 
-		value, err := metaKv.LoadBytes("a/b/c")
+		value, err := metaKv.LoadBytes(context.TODO(), "a/b/c")
 		assert.NoError(t, err)
 		assert.Equal(t, value, []byte("1"))
 
-		success, err = metaKv.CompareVersionAndSwapBytes("a/b/c", 0, []byte("1"))
+		success, err = metaKv.CompareVersionAndSwapBytes(context.TODO(), "a/b/c", 0, []byte("1"))
 		assert.NoError(t, err)
 		assert.False(t, success)
 	})
@@ -708,7 +709,7 @@ func TestEmbedEtcd(te *testing.T) {
 		assert.NoError(t, err)
 
 		defer metaKv.Close()
-		defer metaKv.RemoveWithPrefix("")
+		defer metaKv.RemoveWithPrefix(context.TODO(), "")
 
 		kvs := map[string]string{
 			"A/100":    "v1",
@@ -718,23 +719,23 @@ func TestEmbedEtcd(te *testing.T) {
 			"B/100":    "v5",
 		}
 
-		err = metaKv.MultiSave(kvs)
+		err = metaKv.MultiSave(context.TODO(), kvs)
 		assert.NoError(t, err)
 		for k, v := range kvs {
-			actualV, err := metaKv.Load(k)
+			actualV, err := metaKv.Load(context.TODO(), k)
 			assert.NoError(t, err)
 			assert.Equal(t, v, actualV)
 		}
 
 		t.Run("apply function error ", func(t *testing.T) {
-			err = metaKv.WalkWithPrefix("A", 5, func(key []byte, value []byte) error {
+			err = metaKv.WalkWithPrefix(context.TODO(), "A", 5, func(key []byte, value []byte) error {
 				return errors.New("error")
 			})
 			assert.Error(t, err)
 		})
 
 		t.Run("get with non-exist prefix ", func(t *testing.T) {
-			err = metaKv.WalkWithPrefix("non-exist-prefix", 5, func(key []byte, value []byte) error {
+			err = metaKv.WalkWithPrefix(context.TODO(), "non-exist-prefix", 5, func(key []byte, value []byte) error {
 				return nil
 			})
 			assert.NoError(t, err)
@@ -755,7 +756,7 @@ func TestEmbedEtcd(te *testing.T) {
 				ret := make(map[string]string)
 				actualSortedKey := make([]string, 0)
 
-				err = metaKv.WalkWithPrefix("A", pagination, func(key []byte, value []byte) error {
+				err = metaKv.WalkWithPrefix(context.TODO(), "A", pagination, func(key []byte, value []byte) error {
 					k := string(key)
 					k = k[len(rootPath)+1:]
 					ret[k] = string(value)
@@ -783,23 +784,23 @@ func TestEmbedEtcd(te *testing.T) {
 		assert.NoError(t, err)
 
 		defer kv.Close()
-		defer kv.RemoveWithPrefix("")
+		defer kv.RemoveWithPrefix(context.TODO(), "")
 
-		has, err := kv.Has("key1")
+		has, err := kv.Has(context.TODO(), "key1")
 		assert.NoError(t, err)
 		assert.False(t, has)
 
-		err = kv.Save("key1", "value1")
+		err = kv.Save(context.TODO(), "key1", "value1")
 		assert.NoError(t, err)
 
-		has, err = kv.Has("key1")
+		has, err = kv.Has(context.TODO(), "key1")
 		assert.NoError(t, err)
 		assert.True(t, has)
 
-		err = kv.Remove("key1")
+		err = kv.Remove(context.TODO(), "key1")
 		assert.NoError(t, err)
 
-		has, err = kv.Has("key1")
+		has, err = kv.Has(context.TODO(), "key1")
 		assert.NoError(t, err)
 		assert.False(t, has)
 	})
@@ -810,23 +811,23 @@ func TestEmbedEtcd(te *testing.T) {
 		assert.NoError(t, err)
 
 		defer kv.Close()
-		defer kv.RemoveWithPrefix("")
+		defer kv.RemoveWithPrefix(context.TODO(), "")
 
-		has, err := kv.HasPrefix("key")
+		has, err := kv.HasPrefix(context.TODO(), "key")
 		assert.NoError(t, err)
 		assert.False(t, has)
 
-		err = kv.Save("key1", "value1")
+		err = kv.Save(context.TODO(), "key1", "value1")
 		assert.NoError(t, err)
 
-		has, err = kv.HasPrefix("key")
+		has, err = kv.HasPrefix(context.TODO(), "key")
 		assert.NoError(t, err)
 		assert.True(t, has)
 
-		err = kv.Remove("key1")
+		err = kv.Remove(context.TODO(), "key1")
 		assert.NoError(t, err)
 
-		has, err = kv.HasPrefix("key")
+		has, err = kv.HasPrefix(context.TODO(), "key")
 		assert.NoError(t, err)
 		assert.False(t, has)
 	})
@@ -865,7 +866,7 @@ func (s *EmbedEtcdKVSuite) SetupTest() {
 
 func (s *EmbedEtcdKVSuite) TearDownTest() {
 	if s.kv != nil {
-		s.kv.RemoveWithPrefix("")
+		s.kv.RemoveWithPrefix(context.TODO(), "")
 		s.kv.Close()
 		s.kv = nil
 	}
@@ -879,7 +880,7 @@ func (s *EmbedEtcdKVSuite) TestTxnWithPredicates() {
 		"lease2": "2",
 	}
 
-	err := etcdKV.MultiSave(prepareKV)
+	err := etcdKV.MultiSave(context.TODO(), prepareKV)
 	s.Require().NoError(err)
 
 	badPredicate := predicates.NewMockPredicate(s.T())
@@ -899,13 +900,13 @@ func (s *EmbedEtcdKVSuite) TestTxnWithPredicates() {
 
 	for _, test := range multiSaveAndRemovePredTests {
 		s.Run(test.tag, func() {
-			err := etcdKV.MultiSaveAndRemove(test.multiSave, nil, test.preds...)
+			err := etcdKV.MultiSaveAndRemove(context.TODO(), test.multiSave, nil, test.preds...)
 			if test.expectSuccess {
 				s.NoError(err)
 			} else {
 				s.Error(err)
 			}
-			err = etcdKV.MultiSaveAndRemoveWithPrefix(test.multiSave, nil, test.preds...)
+			err = etcdKV.MultiSaveAndRemoveWithPrefix(context.TODO(), test.multiSave, nil, test.preds...)
 			if test.expectSuccess {
 				s.NoError(err)
 			} else {

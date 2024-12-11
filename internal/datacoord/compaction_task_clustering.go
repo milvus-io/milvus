@@ -116,7 +116,7 @@ func (t *clusteringCompactionTask) Process() bool {
 		if t.GetTaskProto().State == datapb.CompactionTaskState_completed || t.GetTaskProto().State == datapb.CompactionTaskState_cleaned {
 			updateOps = append(updateOps, setEndTime(ts))
 			elapse := ts - t.GetTaskProto().StartTime
-			log.Info("clustering compaction task total elapse", zap.Int64("elapse seconds", elapse))
+			log.Info("clustering compaction task total elapse", zap.Duration("costs", time.Duration(elapse)*time.Second))
 			metrics.DataCoordCompactionLatency.
 				WithLabelValues(fmt.Sprint(typeutil.IsVectorType(t.GetTaskProto().GetClusteringKeyField().DataType)), fmt.Sprint(t.GetTaskProto().CollectionID), t.GetTaskProto().Channel, datapb.CompactionType_ClusteringCompaction.String(), "total").
 				Observe(float64(elapse * 1000))

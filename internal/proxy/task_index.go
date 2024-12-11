@@ -612,9 +612,21 @@ func (t *alterIndexTask) OnEnqueue() error {
 }
 
 func (t *alterIndexTask) PreExecute(ctx context.Context) error {
-	for _, param := range t.req.GetExtraParams() {
-		if !indexparams.IsConfigableIndexParam(param.GetKey()) {
-			return merr.WrapErrParameterInvalidMsg("%s is not configable index param", param.GetKey())
+	if len(t.req.GetDeleteKeys()) > 0 && len(t.req.GetExtraParams()) > 0 {
+		return merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
+	}
+
+	if len(t.req.GetExtraParams()) > 0 {
+		for _, param := range t.req.GetExtraParams() {
+			if !indexparams.IsConfigableIndexParam(param.GetKey()) {
+				return merr.WrapErrParameterInvalidMsg("%s is not configable index param in extraParams", param.GetKey())
+			}
+		}
+	} else if len(t.req.GetDeleteKeys()) > 0 {
+		for _, param := range t.req.GetDeleteKeys() {
+			if !indexparams.IsConfigableIndexParam(param) {
+				return merr.WrapErrParameterInvalidMsg("%s is not configable index param in deleteKeys", param)
+			}
 		}
 	}
 
@@ -656,6 +668,7 @@ func (t *alterIndexTask) Execute(ctx context.Context) error {
 		zap.String("collection", t.req.GetCollectionName()),
 		zap.String("indexName", t.req.GetIndexName()),
 		zap.Any("params", t.req.GetExtraParams()),
+		zap.Any("deletekeys", t.req.GetDeleteKeys()),
 	)
 
 	log.Info("alter index")
@@ -665,6 +678,7 @@ func (t *alterIndexTask) Execute(ctx context.Context) error {
 		CollectionID: t.collectionID,
 		IndexName:    t.req.GetIndexName(),
 		Params:       t.req.GetExtraParams(),
+		DeleteKeys:   t.req.GetDeleteKeys(),
 	}
 	t.result, err = t.datacoord.AlterIndex(ctx, req)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
