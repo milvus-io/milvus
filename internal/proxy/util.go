@@ -1414,6 +1414,10 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID in
 		PartitionIDs: partIDs,
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
+		// qc returns error if partition not loaded
+		if errors.Is(err, merr.ErrPartitionNotLoaded) {
+			return false, nil
+		}
 		return false, err
 	}
 
