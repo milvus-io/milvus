@@ -84,6 +84,7 @@ func TestEmbeddingOK(t *testing.T) {
 		c := NewOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
+		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
 		ret, err := c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Data[0].Index, 0)

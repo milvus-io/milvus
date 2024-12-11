@@ -22,10 +22,8 @@ import (
 	"net/http"
 )
 
-func send(client *http.Client, req *http.Request) ([]byte, error) {
-	// call openai
-	resp, err := client.Do(req)
-
+func send(req *http.Request) ([]byte, error) {
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -42,9 +40,9 @@ func send(client *http.Client, req *http.Request) ([]byte, error) {
 	return body, nil
 }
 
-func RetrySend(client *http.Client, req *http.Request, maxRetries int) ([]byte, error) {
+func RetrySend(req *http.Request, maxRetries int) ([]byte, error) {
 	for i := 0; i < maxRetries; i++ {
-		res, err := send(client, req)
+		res, err := send(req)
 		if err == nil {
 			return res, nil
 		}
