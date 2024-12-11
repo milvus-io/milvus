@@ -380,16 +380,8 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
     // TODO :: check dim of search data
     auto final = [&] {
         auto index_type = GetIndexType();
-        if (CheckKeyInConfig(search_conf, RADIUS)) {
-            if (CheckKeyInConfig(search_conf, RANGE_FILTER)) {
-                CheckRangeSearchParam(search_conf[RADIUS],
-                                      search_conf[RANGE_FILTER],
-                                      GetMetricType());
-            }
-            // `range_search_k` is only used as one of the conditions for iterator early termination.
-            // not gurantee to return exactly `range_search_k` results, which may be more or less.
-            // set it to -1 will return all results in the range.
-            search_conf[knowhere::meta::RANGE_SEARCH_K] = topk;
+        if (CheckAndUpdateKnowhereRangeSearchParam(
+                search_info, topk, GetMetricType(), search_conf)) {
             milvus::tracer::AddEvent("start_knowhere_index_range_search");
             auto res = index_.RangeSearch(dataset, search_conf, bitset);
             milvus::tracer::AddEvent("finish_knowhere_index_range_search");
