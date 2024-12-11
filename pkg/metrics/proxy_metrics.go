@@ -414,7 +414,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
-			Name:      "recall_serch_cnt",
+			Name:      "recall_search_cnt",
 			Help:      "counter of recall search",
 		}, []string{nodeIDLabelName, queryTypeLabelName, collectionName})
 )
