@@ -221,11 +221,11 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 			},
 		}
 
-		delete_keys := []string{
+		deleteKeys := []string{
 			common.CollectionAutoCompactionKey,
 		}
 
-		ret := DeleteProperties(oldProps, delete_keys)
+		ret := DeleteProperties(oldProps, deleteKeys)
 
 		assert.Contains(t, ret, &commonpb.KeyValuePair{
 			Key:   common.CollectionTTLConfigKey,
@@ -239,11 +239,11 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 			},
 		}
 
-		delete_keys2 := []string{
+		deleteKeys2 := []string{
 			common.CollectionTTLConfigKey,
 		}
 
-		ret2 := DeleteProperties(oldProps2, delete_keys2)
+		ret2 := DeleteProperties(oldProps2, deleteKeys2)
 
 		assert.Empty(t, ret2)
 	})
