@@ -34,7 +34,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -409,7 +408,6 @@ func (mgr *segmentManager) Put(ctx context.Context, segmentType SegmentType, seg
 			segment.Level().String(),
 		).Inc()
 	}
-	mgr.updateMetric()
 
 	// release replaced segment
 	if len(replacedSegment) > 0 {
@@ -642,7 +640,6 @@ func (mgr *segmentManager) Remove(ctx context.Context, segmentID typeutil.Unique
 			removeSealed = 1
 		}
 	}
-	mgr.updateMetric()
 	mgr.mu.Unlock()
 
 	if growing != nil {
@@ -693,7 +690,6 @@ func (mgr *segmentManager) RemoveBy(ctx context.Context, filters ...SegmentFilte
 		}
 		return true
 	}, filters...)
-	mgr.updateMetric()
 	mgr.mu.Unlock()
 
 	for _, s := range removeSegments {
@@ -716,7 +712,6 @@ func (mgr *segmentManager) Clear(ctx context.Context) {
 	sealedWaitForRelease := mgr.globalSegments.sealedSegments
 	mgr.globalSegments = newSegments()
 	mgr.secondaryIndex = newSecondarySegmentIndex()
-	mgr.updateMetric()
 	mgr.mu.Unlock()
 
 	for _, segment := range growingWaitForRelease {
@@ -731,25 +726,6 @@ func (mgr *segmentManager) Clear(ctx context.Context) {
 // TODO: bad implementation for keep consistency with DiskCache, need to be refactor.
 func (mgr *segmentManager) registerReleaseCallback(callback func(s Segment)) {
 	mgr.releaseCallback = callback
-}
-
-func (mgr *segmentManager) updateMetric() {
-	// update collection and partiation metric
-	collections, partitions := make(typeutil.Set[int64]), make(typeutil.Set[int64])
-	for _, seg := range mgr.globalSegments.growingSegments {
-		collections.Insert(seg.Collection())
-		if seg.Partition() != common.AllPartitionsID {
-			partitions.Insert(seg.Partition())
-		}
-	}
-	for _, seg := range mgr.globalSegments.sealedSegments {
-		collections.Insert(seg.Collection())
-		if seg.Partition() != common.AllPartitionsID {
-			partitions.Insert(seg.Partition())
-		}
-	}
-	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(collections.Len()))
-	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(partitions.Len()))
 }
 
 func (mgr *segmentManager) release(ctx context.Context, segment Segment) {
