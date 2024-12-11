@@ -39,13 +39,12 @@ SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
             };
         }
     }
-    auto chunk_info = segment_->chunk_data<T>(field_id, current_chunk_id);
-    auto chunk_data = chunk_info.data();
-    auto chunk_valid_data = chunk_info.valid_data();
-    auto current_chunk_size = segment_->chunk_size(field_id, current_chunk_id);
-    return [=,
-            &current_chunk_id,
-            &current_chunk_pos]() mutable -> const data_access_type {
+    return [&]() mutable -> const data_access_type {
+        auto chunk_info = segment_->chunk_data<T>(field_id, current_chunk_id);
+        auto chunk_data = chunk_info.data();
+        auto chunk_valid_data = chunk_info.valid_data();
+        auto current_chunk_size =
+            segment_->chunk_size(field_id, current_chunk_id);
         if (current_chunk_pos >= current_chunk_size) {
             current_chunk_id++;
             current_chunk_pos = 0;
@@ -122,15 +121,13 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
             return chunk_data[current_chunk_pos++];
         };
     } else {
-        auto span =
-            segment_->chunk_data<std::string_view>(field_id, current_chunk_id);
-        auto chunk_data = span.data();
-        auto chunk_valid_data = span.valid_data();
-        auto current_chunk_size =
-            segment_->chunk_size(field_id, current_chunk_id);
-        return [=,
-                &current_chunk_id,
-                &current_chunk_pos]() mutable -> const data_access_type {
+        return [&]() mutable -> const data_access_type {
+            auto span = segment_->chunk_data<std::string_view>(
+                field_id, current_chunk_id);
+            auto chunk_data = span.data();
+            auto chunk_valid_data = span.valid_data();
+            auto current_chunk_size =
+                segment_->chunk_size(field_id, current_chunk_id);
             if (current_chunk_pos >= current_chunk_size) {
                 current_chunk_id++;
                 current_chunk_pos = 0;
