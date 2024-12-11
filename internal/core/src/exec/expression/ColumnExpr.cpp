@@ -30,30 +30,32 @@ PhyColumnExpr::GetNextBatchSize() {
 
 void
 PhyColumnExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    auto input = context.get_offset_input();
+    SetHasOffsetInput(input != nullptr);
     switch (this->expr_->type()) {
         case DataType::BOOL:
-            result = DoEval<bool>();
+            result = DoEval<bool>(input);
             break;
         case DataType::INT8:
-            result = DoEval<int8_t>();
+            result = DoEval<int8_t>(input);
             break;
         case DataType::INT16:
-            result = DoEval<int16_t>();
+            result = DoEval<int16_t>(input);
             break;
         case DataType::INT32:
-            result = DoEval<int32_t>();
+            result = DoEval<int32_t>(input);
             break;
         case DataType::INT64:
-            result = DoEval<int64_t>();
+            result = DoEval<int64_t>(input);
             break;
         case DataType::FLOAT:
-            result = DoEval<float>();
+            result = DoEval<float>(input);
             break;
         case DataType::DOUBLE:
-            result = DoEval<double>();
+            result = DoEval<double>(input);
             break;
         case DataType::VARCHAR: {
-            result = DoEval<std::string>();
+            result = DoEval<std::string>(input);
             break;
         }
         default:
@@ -65,8 +67,59 @@ PhyColumnExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
 template <typename T>
 VectorPtr
-PhyColumnExpr::DoEval() {
+PhyColumnExpr::DoEval(OffsetVector* input) {
     // similar to PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op)
+    // take offsets as input
+    if (has_offset_input_) {
+        auto real_batch_size = input->size();
+        if (real_batch_size == 0) {
+            return nullptr;
+        }
+
+        auto res_vec = std::make_shared<ColumnVector>(
+            expr_->GetColumn().data_type_, real_batch_size);
+        T* res_value = res_vec->RawAsValues<T>();
+        TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+        valid_res.set();
+
+        auto data_barrier = segment_chunk_reader_.segment_->num_chunk_data(
+            expr_->GetColumn().field_id_);
+
+        int64_t processed_rows = 0;
+        const auto size_per_chunk = segment_chunk_reader_.SizePerChunk();
+        for (auto i = 0; i < real_batch_size; ++i) {
+            auto offset = (*input)[i];
+            auto [chunk_id,
+                  chunk_offset] = [&]() -> std::pair<int64_t, int64_t> {
+                if (segment_chunk_reader_.segment_->type() ==
+                    SegmentType::Growing) {
+                    return {offset / size_per_chunk, offset % size_per_chunk};
+                } else if (segment_chunk_reader_.segment_->is_chunked() &&
+                           data_barrier > 0) {
+                    return segment_chunk_reader_.segment_->get_chunk_by_offset(
+                        expr_->GetColumn().field_id_, offset);
+                } else {
+                    return {0, offset};
+                }
+            }();
+            auto chunk_data = segment_chunk_reader_.GetChunkDataAccessor(
+                expr_->GetColumn().data_type_,
+                expr_->GetColumn().field_id_,
+                chunk_id,
+                data_barrier);
+            auto chunk_data_by_offset = chunk_data(chunk_offset);
+            if (!chunk_data_by_offset.has_value()) {
+                valid_res[processed_rows] = false;
+            } else {
+                res_value[processed_rows] =
+                    boost::get<T>(chunk_data_by_offset.value());
+            }
+            processed_rows++;
+        }
+        return res_vec;
+    }
+
+    // normal path
     if (segment_chunk_reader_.segment_->is_chunked()) {
         auto real_batch_size = GetNextBatchSize();
         if (real_batch_size == 0) {
