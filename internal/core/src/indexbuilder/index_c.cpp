@@ -583,7 +583,7 @@ NewBuildIndexInfo(CBuildIndexInfo* c_build_index_info,
 
 void
 DeleteBuildIndexInfo(CBuildIndexInfo c_build_index_info) {
-    auto info = (BuildIndexInfo*)c_build_index_info;
+    auto info = static_cast<BuildIndexInfo*>(c_build_index_info);
     delete info;
 }
 
@@ -592,7 +592,8 @@ AppendBuildIndexParam(CBuildIndexInfo c_build_index_info,
                       const uint8_t* serialized_index_params,
                       const uint64_t len) {
     try {
-        auto build_index_info = (BuildIndexInfo*)c_build_index_info;
+        auto build_index_info =
+            static_cast<BuildIndexInfo*>(c_build_index_info);
         auto index_params =
             std::make_unique<milvus::proto::indexcgo::IndexParams>();
         auto res = index_params->ParseFromArray(serialized_index_params, len);
@@ -619,7 +620,8 @@ AppendBuildTypeParam(CBuildIndexInfo c_build_index_info,
                      const uint8_t* serialized_type_params,
                      const uint64_t len) {
     try {
-        auto build_index_info = (BuildIndexInfo*)c_build_index_info;
+        auto build_index_info =
+            static_cast<BuildIndexInfo*>(c_build_index_info);
         auto type_params =
             std::make_unique<milvus::proto::indexcgo::TypeParams>();
         auto res = type_params->ParseFromArray(serialized_type_params, len);
@@ -651,7 +653,8 @@ AppendFieldMetaInfoV2(CBuildIndexInfo c_build_index_info,
                       enum CDataType field_type,
                       int64_t dim) {
     try {
-        auto build_index_info = (BuildIndexInfo*)c_build_index_info;
+        auto build_index_info =
+            static_cast<BuildIndexInfo*>(c_build_index_info);
         build_index_info->collection_id = collection_id;
         build_index_info->partition_id = partition_id;
         build_index_info->segment_id = segment_id;
@@ -674,7 +677,8 @@ AppendFieldMetaInfo(CBuildIndexInfo c_build_index_info,
                     int64_t field_id,
                     enum CDataType field_type) {
     try {
-        auto build_index_info = (BuildIndexInfo*)c_build_index_info;
+        auto build_index_info =
+            static_cast<BuildIndexInfo*>(c_build_index_info);
         build_index_info->collection_id = collection_id;
         build_index_info->partition_id = partition_id;
         build_index_info->segment_id = segment_id;
@@ -700,7 +704,8 @@ AppendIndexMetaInfo(CBuildIndexInfo c_build_index_info,
                     int64_t build_id,
                     int64_t version) {
     try {
-        auto build_index_info = (BuildIndexInfo*)c_build_index_info;
+        auto build_index_info =
+            static_cast<BuildIndexInfo*>(c_build_index_info);
         build_index_info->index_id = index_id;
         build_index_info->index_build_id = build_id;
         build_index_info->index_version = version;
@@ -721,7 +726,8 @@ CStatus
 AppendInsertFilePath(CBuildIndexInfo c_build_index_info,
                      const char* c_file_path) {
     try {
-        auto build_index_info = (BuildIndexInfo*)c_build_index_info;
+        auto build_index_info =
+            static_cast<BuildIndexInfo*>(c_build_index_info);
         std::string insert_file_path(c_file_path);
         build_index_info->insert_files.emplace_back(insert_file_path);
 
@@ -738,7 +744,7 @@ CStatus
 AppendIndexEngineVersionToBuildInfo(CBuildIndexInfo c_load_index_info,
                                     int32_t index_engine_version) {
     try {
-        auto build_index_info = (BuildIndexInfo*)c_load_index_info;
+        auto build_index_info = static_cast<BuildIndexInfo*>(c_load_index_info);
         build_index_info->index_engine_version = index_engine_version;
 
         auto status = CStatus();
@@ -756,7 +762,8 @@ AppendIndexStorageInfo(CBuildIndexInfo c_build_index_info,
                        const char* c_index_store_path,
                        int64_t data_store_version) {
     try {
-        auto build_index_info = (BuildIndexInfo*)c_build_index_info;
+        auto build_index_info =
+            static_cast<BuildIndexInfo*>(c_build_index_info);
         std::string data_store_path(c_data_store_path),
             index_store_path(c_index_store_path);
         build_index_info->data_store_path = data_store_path;
@@ -803,7 +810,8 @@ AppendOptionalFieldDataPath(CBuildIndexInfo c_build_index_info,
                             const int32_t field_type,
                             const char* c_file_path) {
     try {
-        auto build_index_info = (BuildIndexInfo*)c_build_index_info;
+        auto build_index_info =
+            static_cast<BuildIndexInfo*>(c_build_index_info);
         std::string field_name_str(field_name);
         auto& opt_fields_map = build_index_info->opt_fields;
         if (opt_fields_map.find(field_id) == opt_fields_map.end()) {

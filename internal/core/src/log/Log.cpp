@@ -132,7 +132,9 @@ get_thread_starttime() {
         thread_stat, "%lld %s %s ", (long long*)&val, comm, &state);  // NOLINT
 
     for (auto i = 4; i < 23; i++) {
-        ret = fscanf(thread_stat, "%lld ", (long long*)&val);  // NOLINT
+        ret = fscanf(thread_stat,
+                     "%lld ",
+                     reinterpret_cast<long long*>(&val));  // NOLINT
         if (i == 22) {
             break;
         }

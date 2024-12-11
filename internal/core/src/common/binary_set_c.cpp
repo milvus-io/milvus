@@ -37,7 +37,7 @@ NewBinarySet(CBinarySet* c_binary_set) {
 
 void
 DeleteBinarySet(CBinarySet c_binary_set) {
-    auto binary_set = (knowhere::BinarySet*)c_binary_set;
+    auto binary_set = static_cast<knowhere::BinarySet*>(c_binary_set);
     delete binary_set;
 }
 
@@ -48,9 +48,9 @@ AppendIndexBinary(CBinarySet c_binary_set,
                   const char* c_index_key) {
     auto status = CStatus();
     try {
-        auto binary_set = (knowhere::BinarySet*)c_binary_set;
+        auto binary_set = static_cast<knowhere::BinarySet*>(c_binary_set);
         std::string index_key(c_index_key);
-        uint8_t* index = (uint8_t*)index_binary;
+        uint8_t* index = static_cast<uint8_t*>(index_binary);
         uint8_t* dup = new uint8_t[index_size]();
         memcpy(dup, index, index_size);
         std::shared_ptr<uint8_t[]> data(dup);
@@ -67,15 +67,15 @@ AppendIndexBinary(CBinarySet c_binary_set,
 
 int
 GetBinarySetSize(CBinarySet c_binary_set) {
-    auto binary_set = (knowhere::BinarySet*)c_binary_set;
+    auto binary_set = static_cast<knowhere::BinarySet*>(c_binary_set);
     return binary_set->binary_map_.size();
 }
 
 void
 GetBinarySetKeys(CBinarySet c_binary_set, void* data) {
-    auto binary_set = (knowhere::BinarySet*)c_binary_set;
+    auto binary_set = static_cast<knowhere::BinarySet*>(c_binary_set);
     auto& map_ = binary_set->binary_map_;
-    const char** data_ = (const char**)data;
+    const char** data_ = static_cast<const char**>(data);
     std::size_t i = 0;
     for (auto it = map_.begin(); it != map_.end(); ++it, i++) {
         data_[i] = it->first.c_str();
@@ -84,7 +84,7 @@ GetBinarySetKeys(CBinarySet c_binary_set, void* data) {
 
 int
 GetBinarySetValueSize(CBinarySet c_binary_set, const char* key) {
-    auto binary_set = (knowhere::BinarySet*)c_binary_set;
+    auto binary_set = static_cast<knowhere::BinarySet*>(c_binary_set);
     int64_t ret_ = 0;
     try {
         std::string key_(key);
@@ -98,12 +98,12 @@ GetBinarySetValueSize(CBinarySet c_binary_set, const char* key) {
 CStatus
 CopyBinarySetValue(void* data, const char* key, CBinarySet c_binary_set) {
     auto status = CStatus();
-    auto binary_set = (knowhere::BinarySet*)c_binary_set;
+    auto binary_set = static_cast<knowhere::BinarySet*>(c_binary_set);
     try {
         auto binary = binary_set->GetByName(key);
         status.error_code = milvus::ErrorCode::Success;
         status.error_msg = "";
-        memcpy((uint8_t*)data, binary->data.get(), binary->size);
+        memcpy(static_cast<uint8_t*>(data), binary->data.get(), binary->size);
     } catch (std::exception& e) {
         status.error_code = milvus::ErrorCode::UnexpectedError;
         status.error_msg = strdup(e.what());
