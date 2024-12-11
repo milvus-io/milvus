@@ -46,15 +46,15 @@ type TextEmbeddingProvider interface {
 	FieldDim() int64
 }
 
-func getProvider(schema *schemapb.FunctionSchema) (string, error) {
-	for _, param := range schema.Params {
+func getProvider(functionSchema *schemapb.FunctionSchema) (string, error) {
+	for _, param := range functionSchema.Params {
 		switch strings.ToLower(param.Key) {
 		case Provider:
 			return strings.ToLower(param.Value), nil
 		default:
 		}
 	}
-	return "", fmt.Errorf("The provider parameter was not found in the function's parameters")
+	return "", fmt.Errorf("The text embedding service provider parameter:[%s] was not found", Provider)
 }
 
 type TextEmebddingFunction struct {
@@ -68,7 +68,7 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 		return nil, fmt.Errorf("Text function should only have one output field, but now is %d", len(functionSchema.GetOutputFieldIds()))
 	}
 
-	base, err := NewBase(coll, functionSchema)
+	base, err := NewFunctionBase(coll, functionSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 			embProvider:  embP,
 		}, nil
 	default:
-		return nil, fmt.Errorf("Provider: [%s] not exist, only supports [%s, %s, %s]", provider, OpenAIProvider, AzureOpenAIProvider, AliDashScopeProvider)
+		return nil, fmt.Errorf("Unsupported embedding service provider: [%s] , list of supported [%s, %s, %s, %s]", provider, OpenAIProvider, AzureOpenAIProvider, AliDashScopeProvider, BedrockProvider)
 	}
 
 }
