@@ -322,7 +322,7 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 			}
 		}
 
-		result = append(result, wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
+		future, err := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
 			if wb.taskObserverCallback != nil {
 				wb.taskObserverCallback(syncTask, err)
 			}
@@ -342,7 +342,12 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 				}
 			}
 			return nil
-		}))
+		})
+		if err != nil {
+			log.Warn("failed to sync data", zap.Int64("segmentID", segmentID), zap.Error(err))
+			continue
+		}
+		result = append(result, future)
 	}
 	return result
 }
@@ -643,7 +648,7 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 			t.WithDrop()
 		}
 
-		f := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
+		f, err := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
 			if wb.taskObserverCallback != nil {
 				wb.taskObserverCallback(syncTask, err)
 			}
@@ -656,6 +661,10 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 			}
 			return nil
 		})
+		if err != nil {
+			log.Warn("failed to sync segment", zap.Int64("segmentID", id), zap.Error(err))
+			continue
+		}
 		futures = append(futures, f)
 	}
 

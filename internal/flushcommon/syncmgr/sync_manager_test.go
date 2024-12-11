@@ -173,11 +173,18 @@ func (s *SyncManagerSuite) TestSubmit() {
 		Timestamp:   100,
 	})
 
-	f := manager.SyncData(context.Background(), task)
+	f, _ := manager.SyncData(context.Background(), task)
 	s.NotNil(f)
 
 	_, err := f.Await()
 	s.NoError(err)
+
+	err = manager.Close()
+	s.Error(err)
+
+	f, err = manager.SyncData(context.Background(), task)
+	s.Error(err)
+	s.Nil(f)
 }
 
 func (s *SyncManagerSuite) TestCompacted() {
@@ -202,7 +209,7 @@ func (s *SyncManagerSuite) TestCompacted() {
 		Timestamp:   100,
 	})
 
-	f := manager.SyncData(context.Background(), task)
+	f, _ := manager.SyncData(context.Background(), task)
 	s.NotNil(f)
 
 	_, err := f.Await()
@@ -254,7 +261,7 @@ func (s *SyncManagerSuite) TestUnexpectedError() {
 	task.EXPECT().Run(mock.Anything).Return(merr.WrapErrServiceInternal("mocked")).Once()
 	task.EXPECT().HandleError(mock.Anything)
 
-	f := manager.SyncData(context.Background(), task)
+	f, _ := manager.SyncData(context.Background(), task)
 	_, err := f.Await()
 	s.Error(err)
 }
@@ -268,7 +275,7 @@ func (s *SyncManagerSuite) TestTargetUpdateSameID() {
 	task.EXPECT().Run(mock.Anything).Return(errors.New("mock err")).Once()
 	task.EXPECT().HandleError(mock.Anything)
 
-	f := manager.SyncData(context.Background(), task)
+	f, _ := manager.SyncData(context.Background(), task)
 	_, err := f.Await()
 	s.Error(err)
 }
