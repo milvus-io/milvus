@@ -185,6 +185,9 @@ func Test_NewClient(t *testing.T) {
 
 		r39, err := client.CheckQueryNodeDistribution(ctx, nil)
 		retCheck(retNotNil, r39, err)
+
+		r40, err := client.CheckBalanceStatus(ctx, nil)
+		retCheck(retNotNil, r40, err)
 	}
 
 	client.(*Client).grpcClient = &mock.GRPCClientBase[querypb.QueryCoordClient]{
