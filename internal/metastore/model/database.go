@@ -31,8 +31,8 @@ func NewDatabase(id int64, name string, state pb.DatabaseState, properties []*co
 	}
 }
 
-func NewDefaultDatabase() *Database {
-	return NewDatabase(util.DefaultDBID, util.DefaultDBName, pb.DatabaseState_DatabaseCreated, nil)
+func NewDefaultDatabase(prop []*commonpb.KeyValuePair) *Database {
+	return NewDatabase(util.DefaultDBID, util.DefaultDBName, pb.DatabaseState_DatabaseCreated, prop)
 }
 
 func (c *Database) Available() bool {

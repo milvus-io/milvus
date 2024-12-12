@@ -531,9 +531,13 @@ func (c *Core) Init() error {
 func (c *Core) initCredentials() error {
 	credInfo, _ := c.meta.GetCredential(util.UserRoot)
 	if credInfo == nil {
-		log.Debug("RootCoord init user root")
-		encryptedRootPassword, _ := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
-		err := c.meta.AddCredential(&internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
+		encryptedRootPassword, err := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
+		if err != nil {
+			log.Warn("RootCoord init user root failed", zap.Error(err))
+			return err
+		}
+		log.Info("RootCoord init user root")
+		err = c.meta.AddCredential(&internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
 		return err
 	}
 	return nil
