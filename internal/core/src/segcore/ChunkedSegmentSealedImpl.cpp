@@ -89,7 +89,6 @@ void
 ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
-    auto& field_meta = schema_->operator[](field_id);
 
     AssertInfo(info.index_params.count("metric_type"),
                "Can't get metric_type in index_params");
@@ -355,11 +354,6 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         // Don't allow raw data and index exist at the same time
         //        AssertInfo(!get_bit(index_ready_bitset_, field_id),
         //                   "field data can't be loaded when indexing exists");
-        auto get_block_size = [&]() -> size_t {
-            return schema_->get_primary_field_id() == field_id
-                       ? DEFAULT_PK_VRCOL_BLOCK_SIZE
-                       : DEFAULT_MEM_VRCOL_BLOCK_SIZE;
-        };
 
         std::shared_ptr<ChunkedColumnBase> column{};
         if (IsVariableDataType(data_type)) {
@@ -535,7 +529,6 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
     auto data_type = field_meta.get_data_type();
 
     // write the field data to disk
-    uint64_t total_written = 0;
     std::vector<uint64_t> indices{};
     std::vector<std::vector<uint64_t>> element_indices{};
     // FixedVector<bool> valid_data{};
@@ -773,7 +766,6 @@ ChunkedSegmentSealedImpl::get_chunk_buffer(FieldId field_id,
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
-    auto& field_meta = schema_->operator[](field_id);
     if (auto it = fields_.find(field_id); it != fields_.end()) {
         auto& field_data = it->second;
         FixedVector<bool> valid_data;
@@ -1083,8 +1075,8 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
             ReadFromChunkCache, cc, data_path, mmap_descriptor_, field_meta));
     }
 
-    for (int i = 0; i < futures.size(); ++i) {
-        const auto& [data_path, column] = futures[i].get();
+    for (auto& future : futures) {
+        const auto& [data_path, column] = future.get();
         path_to_column[data_path] = column;
     }
 
@@ -1147,7 +1139,6 @@ ChunkedSegmentSealedImpl::DropFieldData(const FieldId field_id) {
         }
         lck.unlock();
     } else {
-        auto& field_meta = schema_->operator[](field_id);
         std::unique_lock lck(mutex_);
         if (get_bit(field_data_ready_bitset_, field_id)) {
             fields_.erase(field_id);
@@ -1833,7 +1824,6 @@ ChunkedSegmentSealedImpl::bulk_subscript(
     int64_t count,
     const std::vector<std::string>& dynamic_field_names) const {
     Assert(!dynamic_field_names.empty());
-    auto& field_meta = schema_->operator[](field_id);
     if (count == 0) {
         return fill_with_empty(field_id, 0);
     }

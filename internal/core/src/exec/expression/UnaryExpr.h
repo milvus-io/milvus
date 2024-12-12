@@ -35,12 +35,27 @@ namespace exec {
 
 template <typename T, FilterType filter_type>
 struct UnaryElementFuncForMatch {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
+    using IndexInnerType =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
 
     void
+    /*************  ✨ Codeium Command ⭐  *************/
+    /**
+     * @brief Apply regex pattern to elements in src.
+     *
+     * @param[in] src Source data.
+     * @param[in] size Size of src.
+     * @param[in] val Regex pattern.
+     * @param[out] res Target bitmap.
+     * @param[in] offsets Optional, offsets array.
+     *
+     * @details
+     * If filter_type is FilterType::random, use offsets to access elements in src.
+     * If filter_type is FilterType::sequential, directly access elements in src.
+     */
+    /******  7bab117f-894f-4f6d-a2fb-bff17427c283  *******/
     operator()(const T* src,
+
                size_t size,
                IndexInnerType val,
                TargetBitmapView res,
@@ -60,9 +75,8 @@ struct UnaryElementFuncForMatch {
 
 template <typename T, proto::plan::OpType op, FilterType filter_type>
 struct UnaryElementFunc {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
+    using IndexInnerType =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
 
     void
     operator()(const T* src,
@@ -235,9 +249,8 @@ struct UnaryElementFuncForArray {
 
 template <typename T>
 struct UnaryIndexFuncForMatch {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
+    using IndexInnerType =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
     operator()(Index* index, IndexInnerType val) {
@@ -275,9 +288,8 @@ struct UnaryIndexFuncForMatch {
 
 template <typename T, proto::plan::OpType op>
 struct UnaryIndexFunc {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
+    using IndexInnerType =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
     operator()(Index* index, IndexInnerType val) {
