@@ -118,6 +118,10 @@ func (c Channel) EqualString(str string) bool {
 	return c.Equal(ac)
 }
 
+func (c Channel) IsZero() bool {
+	return c.ChannelMapper == nil
+}
+
 func ParseChannel(virtualName string, mapper ChannelMapper) (Channel, error) {
 	if !channelNameFormat.MatchString(virtualName) {
 		return Channel{}, merr.WrapErrParameterInvalidMsg("virtual channel name(%s) is not valid", virtualName)

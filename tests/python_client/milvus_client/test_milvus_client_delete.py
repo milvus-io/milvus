@@ -121,7 +121,7 @@ class TestMilvusClientDeleteInvalid(TestcaseBase):
         client_w.delete(client, collection_name,
                         check_task=CheckTasks.err_res,
                         check_items={"err_code": 999,
-                                     "err_msg": "filter or ids cannot be empty"})
+                                     "err_msg": "The type of expr must be string ,but <class 'NoneType'> is given."})
 
 
 class TestMilvusClientDeleteValid(TestcaseBase):
