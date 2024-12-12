@@ -63,7 +63,7 @@ func Test_garbageCollector_basic(t *testing.T) {
 	cli, _, _, _, _, err := initUtOSSEnv(bucketName, rootPath, 0)
 	require.NoError(t, err)
 
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
 	t.Run("normal gc", func(t *testing.T) {
@@ -118,7 +118,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	cli, inserts, stats, delta, others, err := initUtOSSEnv(bucketName, rootPath, 4)
 	require.NoError(t, err)
 
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
 	t.Run("key is reference", func(t *testing.T) {
@@ -1604,7 +1604,7 @@ func (s *GarbageCollectorSuite) SetupTest() {
 	s.cli, s.inserts, s.stats, s.delta, s.others, err = initUtOSSEnv(s.bucketName, s.rootPath, 4)
 	s.Require().NoError(err)
 
-	s.meta, err = newMemoryMeta()
+	s.meta, err = newMemoryMeta(s.T())
 	s.Require().NoError(err)
 }
 

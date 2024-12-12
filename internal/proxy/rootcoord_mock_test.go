@@ -576,6 +576,10 @@ func (coord *RootCoordMock) ShowCollections(ctx context.Context, req *milvuspb.S
 	}, nil
 }
 
+func (coord *RootCoordMock) ShowCollectionsInternal(ctx context.Context, req *rootcoordpb.ShowCollectionsInternalRequest, opts ...grpc.CallOption) (*rootcoordpb.ShowCollectionsInternalResponse, error) {
+	panic("implements me")
+}
+
 func (coord *RootCoordMock) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	code := coord.state.Load().(commonpb.StateCode)
 	if code != commonpb.StateCode_Healthy {

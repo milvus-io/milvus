@@ -57,7 +57,9 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	ctx := context.Background()
 	cm := storage.NewLocalChunkManager(storage.RootPath(""))
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-	meta, err := newMeta(ctx, catalog, cm)
+	broker := broker.NewMockBroker(s.T())
+	broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+	meta, err := newMeta(ctx, catalog, cm, broker)
 	s.NoError(err)
 	s.meta = meta
 
