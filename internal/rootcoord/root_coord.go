@@ -430,7 +430,6 @@ func (c *Core) initTSOAllocator() error {
 }
 
 func (c *Core) initInternal() error {
-	c.UpdateStateCode(commonpb.StateCode_Initializing)
 	c.initKVCreator()
 
 	if err := c.initIDAllocator(); err != nil {
@@ -521,6 +520,7 @@ func (c *Core) Init() error {
 		log.Info("RootCoord enter standby mode successfully")
 	} else {
 		c.initOnce.Do(func() {
+			c.UpdateStateCode(commonpb.StateCode_Initializing)
 			initError = c.initInternal()
 		})
 	}
@@ -1809,7 +1809,7 @@ func (c *Core) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfi
 
 // GetMetrics get metrics
 func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	if err := merr.CheckHealthyStandby(c.GetStateCode()); err != nil {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return &milvuspb.GetMetricsResponse{
 			Status:   merr.Status(err),
 			Response: "",
