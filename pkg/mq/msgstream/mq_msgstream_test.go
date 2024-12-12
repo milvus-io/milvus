@@ -114,6 +114,8 @@ func TestStream_ConfigEvent(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_Insert(t *testing.T) {
+	Params.Save(Params.CommonCfg.TTMsgEnabled.Key, "false")
+	defer Params.Remove(Params.CommonCfg.TTMsgEnabled.Key)
 	pulsarAddress := getPulsarAddress()
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
@@ -187,6 +189,8 @@ func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_BroadCast(t *testing.T) {
+	Params.Save(Params.CommonCfg.TTMsgEnabled.Key, "false")
+	defer Params.Remove(Params.CommonCfg.TTMsgEnabled.Key)
 	pulsarAddress := getPulsarAddress()
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
