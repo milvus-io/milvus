@@ -2460,6 +2460,8 @@ type queryNodeConfig struct {
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 
+	// BF
+	SkipGrowingSegmentBF           ParamItem `refreshable:"true"`
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
 	QueryStreamBatchSize ParamItem `refreshable:"false"`
@@ -3155,6 +3157,14 @@ user-task-polling:
 		Export:       true,
 	}
 	p.QueryStreamBatchSize.Init(base.mgr)
+
+	p.SkipGrowingSegmentBF = ParamItem{
+		Key:          "queryNode.skipGrowingSegmentBF",
+		Version:      "2.5",
+		DefaultValue: "true",
+		Doc:          "indicates whether skipping the creation, maintenance, or checking of Bloom Filters for growing segments",
+	}
+	p.SkipGrowingSegmentBF.Init(base.mgr)
 
 	p.WorkerPoolingSize = ParamItem{
 		Key:          "queryNode.workerPooling.size",
