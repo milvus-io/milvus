@@ -39,9 +39,11 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 func init() {
@@ -146,10 +148,16 @@ func TestFlusher_RegisterPChannel(t *testing.T) {
 	rootcoord.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).
 		Return(&rootcoordpb.GetPChannelInfoResponse{Collections: collectionsInfo}, nil)
 	datacoord := newMockDatacoord(t, maybe)
+
+	fDatacoord := syncutil.NewFuture[types.DataCoordClient]()
+	fDatacoord.Set(datacoord)
+
+	fRootcoord := syncutil.NewFuture[types.RootCoordClient]()
+	fRootcoord.Set(rootcoord)
 	resource.InitForTest(
 		t,
-		resource.OptRootCoordClient(rootcoord),
-		resource.OptDataCoordClient(datacoord),
+		resource.OptRootCoordClient(fRootcoord),
+		resource.OptDataCoordClient(fDatacoord),
 	)
 
 	f := newTestFlusher(t, maybe)
@@ -182,9 +190,11 @@ func TestFlusher_RegisterVChannel(t *testing.T) {
 	}
 
 	datacoord := newMockDatacoord(t, maybe)
+	fDatacoord := syncutil.NewFuture[types.DataCoordClient]()
+	fDatacoord.Set(datacoord)
 	resource.InitForTest(
 		t,
-		resource.OptDataCoordClient(datacoord),
+		resource.OptDataCoordClient(fDatacoord),
 	)
 
 	f := newTestFlusher(t, maybe)
@@ -220,9 +230,11 @@ func TestFlusher_Concurrency(t *testing.T) {
 	}
 
 	datacoord := newMockDatacoord(t, maybe)
+	fDatacoord := syncutil.NewFuture[types.DataCoordClient]()
+	fDatacoord.Set(datacoord)
 	resource.InitForTest(
 		t,
-		resource.OptDataCoordClient(datacoord),
+		resource.OptDataCoordClient(fDatacoord),
 	)
 
 	f := newTestFlusher(t, maybe)

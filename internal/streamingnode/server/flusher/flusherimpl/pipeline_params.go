@@ -19,32 +19,26 @@ package flusherimpl
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // getPipelineParams initializes the pipeline parameters.
 func getPipelineParams(chunkManager storage.ChunkManager) *util.PipelineParams {
 	var (
-		rsc         = resource.Resource()
-		syncMgr     = syncmgr.NewSyncManager(chunkManager)
-		wbMgr       = writebuffer.NewManager(syncMgr)
-		coordBroker = broker.NewCoordBroker(rsc.DataCoordClient(), paramtable.GetNodeID())
-		cpUpdater   = util.NewChannelCheckpointUpdater(coordBroker)
+		rsc     = resource.Resource()
+		syncMgr = syncmgr.NewSyncManager(chunkManager)
+		wbMgr   = writebuffer.NewManager(syncMgr)
 	)
 	return &util.PipelineParams{
 		Ctx:                context.Background(),
-		Broker:             coordBroker,
 		SyncMgr:            syncMgr,
 		ChunkManager:       chunkManager,
 		WriteBufferManager: wbMgr,
-		CheckpointUpdater:  cpUpdater,
 		Allocator:          idalloc.NewMAllocator(rsc.IDAllocator()),
 		MsgHandler:         newMsgHandler(wbMgr),
 	}
