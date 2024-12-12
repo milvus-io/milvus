@@ -143,8 +143,8 @@ void
 AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
                    std::unordered_map<std::string, FieldDataPtr>& result);
 
-// On Linux, read() (and similar system calls) will transfer at most 0x7ffff000 (2,147,479,552) bytes once
+// On Linux, read() (and similar system calls) will transfer at most 0x7fff0000 (2,147,418,112) bytes once
 void
-ReadDataFromFD(int fd, void* buf, size_t size, size_t chunk_size = 0x7ffff000);
+ReadDataFromFD(int fd, void* buf, size_t size, size_t chunk_size = 0x7fff0000);
 
 }  // namespace milvus::index
