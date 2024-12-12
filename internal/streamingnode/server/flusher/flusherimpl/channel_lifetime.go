@@ -86,8 +86,11 @@ func (c *channelLifetime) Run() error {
 	// Get recovery info from datacoord.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
-	resp, err := resource.Resource().DataCoordClient().
-		GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: c.vchannel})
+	dc, err := resource.Resource().DataCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return errors.Wrap(err, "At Get DataCoordClient")
+	}
+	resp, err := dc.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: c.vchannel})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return err
 	}

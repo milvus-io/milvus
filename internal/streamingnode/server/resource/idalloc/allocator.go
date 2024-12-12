@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 // batchAllocateSize is the size of batch allocate from remote allocator.
@@ -30,7 +31,7 @@ const batchAllocateSize = 1000
 var _ Allocator = (*allocatorImpl)(nil)
 
 // NewTSOAllocator creates a new allocator.
-func NewTSOAllocator(rc types.RootCoordClient) Allocator {
+func NewTSOAllocator(rc *syncutil.Future[types.RootCoordClient]) Allocator {
 	return &allocatorImpl{
 		mu:              sync.Mutex{},
 		remoteAllocator: newTSOAllocator(rc),
@@ -39,7 +40,7 @@ func NewTSOAllocator(rc types.RootCoordClient) Allocator {
 }
 
 // NewIDAllocator creates a new allocator.
-func NewIDAllocator(rc types.RootCoordClient) Allocator {
+func NewIDAllocator(rc *syncutil.Future[types.RootCoordClient]) Allocator {
 	return &allocatorImpl{
 		mu:              sync.Mutex{},
 		remoteAllocator: newIDAllocator(rc),
