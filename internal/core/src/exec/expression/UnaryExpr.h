@@ -39,21 +39,6 @@ struct UnaryElementFuncForMatch {
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
 
     void
-    /*************  ✨ Codeium Command ⭐  *************/
-    /**
-     * @brief Apply regex pattern to elements in src.
-     *
-     * @param[in] src Source data.
-     * @param[in] size Size of src.
-     * @param[in] val Regex pattern.
-     * @param[out] res Target bitmap.
-     * @param[in] offsets Optional, offsets array.
-     *
-     * @details
-     * If filter_type is FilterType::random, use offsets to access elements in src.
-     * If filter_type is FilterType::sequential, directly access elements in src.
-     */
-    /******  7bab117f-894f-4f6d-a2fb-bff17427c283  *******/
     operator()(const T* src,
 
                size_t size,

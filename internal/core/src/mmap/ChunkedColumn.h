@@ -263,14 +263,6 @@ class ChunkedSparseFloatColumn : public ChunkedColumnBase {
         : ChunkedColumnBase(field_meta) {
     }
 
-    /*************  ✨ Codeium Command ⭐  *************/
-    /**
- * Constructs a ChunkedSparseFloatColumn using a vector of chunks.
- *
- * @param chunks A vector of shared pointers to Chunk objects that will be added
- *               to the column. Each chunk should contain sparse float data.
- */
-    /******  37facee1-1f6f-4fe8-9638-31aef28eb3d6  *******/
     explicit ChunkedSparseFloatColumn(
         const std::vector<std::shared_ptr<Chunk>>& chunks) {
         for (auto& chunk : chunks) {
