@@ -47,6 +47,7 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 type Client struct {
 	grpcClient grpcclient.GrpcClient[rootcoordpb.RootCoordClient]
 	sess       *sessionutil.Session
+	ctx        context.Context
 }
 
 // NewClient create root coordinator client with specified etcd info and timeout
@@ -58,13 +59,14 @@ func NewClient(ctx context.Context) (types.RootCoordClient, error) {
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("QueryCoordClient NewClient failed", zap.Error(err))
+		log.Ctx(ctx).Debug("New RootCoord Client failed", zap.Error(err))
 		return nil, err
 	}
 	config := &Params.RootCoordGrpcClientCfg
 	client := &Client{
 		grpcClient: grpcclient.NewClientBase[rootcoordpb.RootCoordClient](config, "milvus.proto.rootcoord.RootCoord"),
 		sess:       sess,
+		ctx:        ctx,
 	}
 	client.grpcClient.SetRole(typeutil.RootCoordRole)
 	client.grpcClient.SetGetAddrFunc(client.getRootCoordAddr)
@@ -75,7 +77,7 @@ func NewClient(ctx context.Context) (types.RootCoordClient, error) {
 		client.grpcClient.EnableEncryption()
 		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "RootCoord")
 		if err != nil {
-			log.Error("Failed to create cert pool for RootCoord client")
+			log.Ctx(ctx).Error("Failed to create cert pool for RootCoord client")
 			return nil, err
 		}
 		client.grpcClient.SetInternalTLSCertPool(cp)
@@ -90,6 +92,7 @@ func (c *Client) newGrpcClient(cc *grpc.ClientConn) rootcoordpb.RootCoordClient 
 }
 
 func (c *Client) getRootCoordAddr() (string, error) {
+	log := log.Ctx(c.ctx)
 	key := c.grpcClient.GetRole()
 	msess, _, err := c.sess.GetSessions(key)
 	if err != nil {

@@ -269,7 +269,7 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 		segmentCount := len(segmentsToSearch)
 		targetSegNum := int(math.Sqrt(float64(segmentCount)) * filterRatio)
 		if targetSegNum > segmentCount {
-			log.Debug("Warn! targetSegNum is larger or equal than segmentCount, no prune effect at all",
+			log.Ctx(context.TODO()).Debug("Warn! targetSegNum is larger or equal than segmentCount, no prune effect at all",
 				zap.Int("targetSegNum", targetSegNum),
 				zap.Int("segmentCount", segmentCount),
 				zap.Float64("filterRatio", filterRatio))

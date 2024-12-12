@@ -75,6 +75,7 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqcommon.ProducerMes
 }
 
 func (kp *kafkaProducer) Close() {
+	log := log.Ctx(context.TODO())
 	kp.closeOnce.Do(func() {
 		kp.isClosed = true
 

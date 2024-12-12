@@ -136,7 +136,7 @@ func prepareRootCoordMeta(ctx context.Context, allocator tso.Allocator) rootcoor
 		}
 		catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
 	case util.MetaStoreTypeTiKV:
-		log.Info("Using tikv as meta storage.")
+		log.Ctx(ctx).Info("Using tikv as meta storage.")
 		var metaKV kv.MetaKv
 		var ss *kvmetestore.SuffixSnapshot
 		var err error

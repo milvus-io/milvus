@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pingcap/log"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -29,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -48,7 +48,7 @@ func (t *flushTaskByStreamingService) Execute(ctx context.Context) error {
 	channelCps := make(map[string]*msgpb.MsgPosition)
 
 	flushTs := t.BeginTs()
-	log.Info("flushTaskByStreamingService.Execute", zap.Int("collectionNum", len(t.CollectionNames)), zap.Uint64("flushTs", flushTs))
+	log.Ctx(ctx).Info("flushTaskByStreamingService.Execute", zap.Int("collectionNum", len(t.CollectionNames)), zap.Uint64("flushTs", flushTs))
 	timeOfSeal, _ := tsoutil.ParseTS(flushTs)
 	for _, collName := range t.CollectionNames {
 		collID, err := globalMetaCache.GetCollectionID(t.ctx, t.DbName, collName)
@@ -115,7 +115,7 @@ func (t *flushTaskByStreamingService) Execute(ctx context.Context) error {
 
 // sendManualFlushToWAL sends a manual flush message to WAL.
 func (t *flushTaskByStreamingService) sendManualFlushToWAL(ctx context.Context, collID int64, vchannel string, flushTs uint64) ([]int64, error) {
-	logger := log.With(zap.Int64("collectionID", collID), zap.String("vchannel", vchannel))
+	logger := log.Ctx(ctx).With(zap.Int64("collectionID", collID), zap.String("vchannel", vchannel))
 	flushMsg, err := message.NewManualFlushMessageBuilderV2().
 		WithVChannel(vchannel).
 		WithHeader(&message.ManualFlushMessageHeader{

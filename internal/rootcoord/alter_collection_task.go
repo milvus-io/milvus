@@ -59,7 +59,7 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 
 	oldColl, err := a.core.meta.GetCollectionByName(ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), a.ts)
 	if err != nil {
-		log.Warn("get collection failed during changing collection state",
+		log.Ctx(ctx).Warn("get collection failed during changing collection state",
 			zap.String("collectionName", a.Req.GetCollectionName()), zap.Uint64("ts", a.ts))
 		return err
 	}
@@ -123,7 +123,7 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 				ResourceGroups: newResourceGroups,
 			})
 			if err := merr.CheckRPCCall(resp, err); err != nil {
-				log.Warn("failed to trigger update load config for collection", zap.Int64("collectionID", newColl.CollectionID), zap.Error(err))
+				log.Ctx(ctx).Warn("failed to trigger update load config for collection", zap.Int64("collectionID", newColl.CollectionID), zap.Error(err))
 				return nil, err
 			}
 			return nil, nil

@@ -625,7 +625,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, database, collectio
 			return nil, err
 		}
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("Reload collection from root coordinator ",
+		log.Ctx(ctx).Debug("Reload collection from root coordinator ",
 			zap.String("collectionName", collectionName),
 			zap.Int64("time (milliseconds) take ", tr.ElapseSpan().Milliseconds()))
 		return collInfo.schema, nil
@@ -844,7 +844,7 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 	if dbOk {
 		delete(m.collInfo[database], collectionName)
 	}
-	log.Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName))
+	log.Ctx(ctx).Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName))
 }
 
 func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string {
@@ -868,7 +868,7 @@ func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID Uniq
 	} else if version != 0 {
 		m.collectionCacheVersion[collectionID] = version
 	}
-	log.Debug("remove collection by id", zap.Int64("id", collectionID),
+	log.Ctx(ctx).Debug("remove collection by id", zap.Int64("id", collectionID),
 		zap.Strings("collection", collNames), zap.Uint64("currentVersion", curVersion),
 		zap.Uint64("version", version), zap.Bool("removeVersion", removeVersion))
 	return collNames
@@ -1191,7 +1191,7 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 }
 
 func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
-	log.Debug("remove database", zap.String("name", database))
+	log.Ctx(ctx).Debug("remove database", zap.String("name", database))
 	m.mu.Lock()
 	delete(m.collInfo, database)
 	delete(m.dbInfo, database)

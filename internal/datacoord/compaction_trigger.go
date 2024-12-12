@@ -675,7 +675,7 @@ func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
 	is := float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
 		totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64()
 	if is {
-		log.Info("total delete entities is too much",
+		log.Ctx(context.TODO()).Info("total delete entities is too much",
 			zap.Int64("segmentID", segment.ID),
 			zap.Int64("numRows", segment.GetNumOfRows()),
 			zap.Int("deleted rows", totalDeletedRows),
@@ -687,6 +687,7 @@ func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
 
+	log := log.Ctx(context.TODO())
 	binlogCount := GetBinlogCount(segment.GetBinlogs())
 	deltaLogCount := GetBinlogCount(segment.GetDeltalogs())
 	if isDeltalogTooManySegment(segment) {

@@ -2373,7 +2373,7 @@ func Test_checkTrain(t *testing.T) {
 			"nlist":              "1024",
 			common.MetricTypeKey: "L2",
 		}
-		assert.NoError(t, checkTrain(f, m))
+		assert.NoError(t, checkTrain(context.TODO(), f, m))
 	})
 
 	t.Run("scalar", func(t *testing.T) {
@@ -2383,7 +2383,7 @@ func Test_checkTrain(t *testing.T) {
 		m := map[string]string{
 			common.IndexTypeKey: "scalar",
 		}
-		assert.Error(t, checkTrain(f, m))
+		assert.Error(t, checkTrain(context.TODO(), f, m))
 	})
 
 	t.Run("dimension mismatch", func(t *testing.T) {
@@ -2402,7 +2402,7 @@ func Test_checkTrain(t *testing.T) {
 			common.MetricTypeKey: "L2",
 			common.DimKey:        "8",
 		}
-		assert.Error(t, checkTrain(f, m))
+		assert.Error(t, checkTrain(context.TODO(), f, m))
 	})
 
 	t.Run("nlist test", func(t *testing.T) {
@@ -2419,7 +2419,7 @@ func Test_checkTrain(t *testing.T) {
 			common.IndexTypeKey:  "IVF_FLAT",
 			common.MetricTypeKey: "L2",
 		}
-		assert.NoError(t, checkTrain(f, m))
+		assert.NoError(t, checkTrain(context.TODO(), f, m))
 	})
 }
 
