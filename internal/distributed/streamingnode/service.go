@@ -55,6 +55,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/netutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -80,8 +82,8 @@ type Server struct {
 	// component client
 	etcdCli        *clientv3.Client
 	tikvCli        *txnkv.Client
-	rootCoord      types.RootCoordClient
-	dataCoord      types.DataCoordClient
+	rootCoord      *syncutil.Future[types.RootCoordClient]
+	dataCoord      *syncutil.Future[types.DataCoordClient]
 	chunkManager   storage.ChunkManager
 	componentState *componentutil.ComponentStateService
 }
@@ -91,6 +93,8 @@ func NewServer(f dependency.Factory) (*Server, error) {
 	return &Server{
 		stopOnce:       sync.Once{},
 		factory:        f,
+		dataCoord:      syncutil.NewFuture[types.DataCoordClient](),
+		rootCoord:      syncutil.NewFuture[types.RootCoordClient](),
 		grpcServerChan: make(chan struct{}),
 		componentState: componentutil.NewComponentStateService(typeutil.StreamingNodeRole),
 	}, nil
@@ -163,8 +167,17 @@ func (s *Server) stop() {
 
 	// Stop rootCoord client.
 	log.Info("streamingnode stop rootCoord client...")
-	if err := s.rootCoord.Close(); err != nil {
-		log.Warn("streamingnode stop rootCoord client failed", zap.Error(err))
+	if s.rootCoord.Ready() {
+		if err := s.rootCoord.Get().Close(); err != nil {
+			log.Warn("streamingnode stop rootCoord client failed", zap.Error(err))
+		}
+	}
+
+	log.Info("streamingnode stop dataCoord client...")
+	if s.dataCoord.Ready() {
+		if err := s.dataCoord.Get().Close(); err != nil {
+			log.Warn("streamingnode stop dataCoord client failed", zap.Error(err))
+		}
 	}
 
 	// Stop tikv
@@ -211,12 +224,8 @@ func (s *Server) init(ctx context.Context) (err error) {
 	if err := s.initSession(ctx); err != nil {
 		return err
 	}
-	if err := s.initRootCoord(ctx); err != nil {
-		return err
-	}
-	if err := s.initDataCoord(ctx); err != nil {
-		return err
-	}
+	s.initRootCoord(ctx)
+	s.initDataCoord(ctx)
 	s.initGRPCServer()
 
 	// Create StreamingNode service.
@@ -293,34 +302,46 @@ func (s *Server) initMeta() error {
 	return nil
 }
 
-func (s *Server) initRootCoord(ctx context.Context) (err error) {
-	log.Info("StreamingNode connect to rootCoord...")
-	s.rootCoord, err = rcc.NewClient(ctx)
-	if err != nil {
-		return errors.Wrap(err, "StreamingNode try to new RootCoord client failed")
-	}
+func (s *Server) initRootCoord(ctx context.Context) {
+	go func() {
+		retry.Do(ctx, func() error {
+			log.Info("StreamingNode connect to rootCoord...")
+			rootCoord, err := rcc.NewClient(ctx)
+			if err != nil {
+				return errors.Wrap(err, "StreamingNode try to new RootCoord client failed")
+			}
 
-	log.Info("StreamingNode try to wait for RootCoord ready")
-	err = componentutil.WaitForComponentHealthy(ctx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		return errors.Wrap(err, "StreamingNode wait for RootCoord ready failed")
-	}
-	return nil
+			log.Info("StreamingNode try to wait for RootCoord ready")
+			err = componentutil.WaitForComponentHealthy(ctx, rootCoord, "RootCoord", 1000000, time.Millisecond*200)
+			if err != nil {
+				return errors.Wrap(err, "StreamingNode wait for RootCoord ready failed")
+			}
+			log.Info("StreamingNode wait for RootCoord done")
+			s.rootCoord.Set(rootCoord)
+			return nil
+		}, retry.AttemptAlways())
+	}()
 }
 
-func (s *Server) initDataCoord(ctx context.Context) (err error) {
-	log.Info("StreamingNode connect to dataCoord...")
-	s.dataCoord, err = dcc.NewClient(ctx)
-	if err != nil {
-		return errors.Wrap(err, "StreamingNode try to new DataCoord client failed")
-	}
+func (s *Server) initDataCoord(ctx context.Context) {
+	go func() {
+		retry.Do(ctx, func() error {
+			log.Info("StreamingNode connect to dataCoord...")
+			dataCoord, err := dcc.NewClient(ctx)
+			if err != nil {
+				return errors.Wrap(err, "StreamingNode try to new DataCoord client failed")
+			}
 
-	log.Info("StreamingNode try to wait for DataCoord ready")
-	err = componentutil.WaitForComponentHealthy(ctx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		return errors.Wrap(err, "StreamingNode wait for DataCoord ready failed")
-	}
-	return nil
+			log.Info("StreamingNode try to wait for DataCoord ready")
+			err = componentutil.WaitForComponentHealthy(ctx, dataCoord, "DataCoord", 1000000, time.Millisecond*200)
+			if err != nil {
+				return errors.Wrap(err, "StreamingNode wait for DataCoord ready failed")
+			}
+			log.Info("StreamingNode wait for DataCoord ready")
+			s.dataCoord.Set(dataCoord)
+			return nil
+		})
+	}()
 }
 
 func (s *Server) initChunkManager(ctx context.Context) (err error) {

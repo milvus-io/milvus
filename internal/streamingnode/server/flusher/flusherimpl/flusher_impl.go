@@ -18,7 +18,6 @@ package flusherimpl
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -38,25 +37,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var _ flusher.Flusher = (*flusherImpl)(nil)
 
 type flusherImpl struct {
-	broker    broker.Broker
-	fgMgr     pipeline.FlowgraphManager
-	syncMgr   syncmgr.SyncManager
-	wbMgr     writebuffer.BufferManager
-	cpUpdater *util.ChannelCheckpointUpdater
+	fgMgr   pipeline.FlowgraphManager
+	syncMgr syncmgr.SyncManager
+	wbMgr   writebuffer.BufferManager
 
 	channelLifetimes *typeutil.ConcurrentMap[string, ChannelLifetime]
 
 	notifyCh       chan struct{}
-	stopChan       lifetime.SafeChan
-	stopWg         sync.WaitGroup
+	notifier       *syncutil.AsyncTaskNotifier[struct{}]
 	pipelineParams *util.PipelineParams
 }
 
@@ -68,14 +65,12 @@ func NewFlusher(chunkManager storage.ChunkManager) flusher.Flusher {
 func newFlusherWithParam(params *util.PipelineParams) flusher.Flusher {
 	fgMgr := pipeline.NewFlowgraphManager()
 	return &flusherImpl{
-		broker:           params.Broker,
 		fgMgr:            fgMgr,
 		syncMgr:          params.SyncMgr,
 		wbMgr:            params.WriteBufferManager,
-		cpUpdater:        params.CheckpointUpdater,
 		channelLifetimes: typeutil.NewConcurrentMap[string, ChannelLifetime](),
 		notifyCh:         make(chan struct{}, 1),
-		stopChan:         lifetime.NewSafeChan(),
+		notifier:         syncutil.NewAsyncTaskNotifier[struct{}](),
 		pipelineParams:   params,
 	}
 }
@@ -83,7 +78,11 @@ func newFlusherWithParam(params *util.PipelineParams) flusher.Flusher {
 func (f *flusherImpl) RegisterPChannel(pchannel string, wal wal.WAL) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	resp, err := resource.Resource().RootCoordClient().GetPChannelInfo(ctx, &rootcoordpb.GetPChannelInfoRequest{
+	rc, err := resource.Resource().RootCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return errors.Wrap(err, "At Get RootCoordClient")
+	}
+	resp, err := rc.GetPChannelInfo(ctx, &rootcoordpb.GetPChannelInfoRequest{
 		Pchannel: pchannel,
 	})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
@@ -126,11 +125,19 @@ func (f *flusherImpl) notify() {
 }
 
 func (f *flusherImpl) Start() {
-	f.stopWg.Add(1)
 	f.wbMgr.Start()
-	go f.cpUpdater.Start()
 	go func() {
-		defer f.stopWg.Done()
+		defer f.notifier.Finish(struct{}{})
+		dc, err := resource.Resource().DataCoordClient().GetWithContext(f.notifier.Context())
+		if err != nil {
+			return
+		}
+		broker := broker.NewCoordBroker(dc, paramtable.GetNodeID())
+		cpUpdater := util.NewChannelCheckpointUpdater(broker)
+		go cpUpdater.Start()
+		// When the flusher exits, the cpUpdater should be closed.
+		defer cpUpdater.Close()
+
 		backoff := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
 			Default: 5 * time.Second,
 			Backoff: typeutil.BackoffConfig{
@@ -143,7 +150,7 @@ func (f *flusherImpl) Start() {
 		var nextTimer <-chan time.Time
 		for {
 			select {
-			case <-f.stopChan.CloseCh():
+			case <-f.notifier.Context().Done():
 				log.Info("flusher exited")
 				return
 			case <-f.notifyCh:
@@ -190,13 +197,12 @@ func (f *flusherImpl) handle(backoff *typeutil.BackoffTimer) <-chan time.Time {
 }
 
 func (f *flusherImpl) Stop() {
-	f.stopChan.Close()
-	f.stopWg.Wait()
+	f.notifier.Cancel()
+	f.notifier.BlockUntilFinish()
 	f.channelLifetimes.Range(func(vchannel string, lifetime ChannelLifetime) bool {
 		lifetime.Cancel()
 		return true
 	})
 	f.fgMgr.ClearFlowgraphs()
 	f.wbMgr.Stop()
-	f.cpUpdater.Close()
 }

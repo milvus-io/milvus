@@ -13,7 +13,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 func TestLocalAllocator(t *testing.T) {
@@ -63,8 +65,10 @@ func TestRemoteTSOAllocator(t *testing.T) {
 	paramtable.SetNodeID(1)
 
 	client := NewMockRootCoordClient(t)
+	f := syncutil.NewFuture[types.RootCoordClient]()
+	f.Set(client)
 
-	allocator := newTSOAllocator(client)
+	allocator := newTSOAllocator(f)
 	ts, count, err := allocator.batchAllocate(context.Background(), 100)
 	assert.NoError(t, err)
 	assert.NotZero(t, ts)
@@ -77,7 +81,10 @@ func TestRemoteTSOAllocator(t *testing.T) {
 			return nil, errors.New("test")
 		},
 	)
-	allocator = newTSOAllocator(client)
+	f = syncutil.NewFuture[types.RootCoordClient]()
+	f.Set(client)
+
+	allocator = newTSOAllocator(f)
 	_, _, err = allocator.batchAllocate(context.Background(), 100)
 	assert.Error(t, err)
 
@@ -91,7 +98,10 @@ func TestRemoteTSOAllocator(t *testing.T) {
 			}, nil
 		},
 	)
-	allocator = newTSOAllocator(client)
+	f = syncutil.NewFuture[types.RootCoordClient]()
+	f.Set(client)
+
+	allocator = newTSOAllocator(f)
 	_, _, err = allocator.batchAllocate(context.Background(), 100)
 	assert.Error(t, err)
 }
@@ -101,8 +111,11 @@ func TestRemoteIDAllocator(t *testing.T) {
 	paramtable.SetNodeID(1)
 
 	client := NewMockRootCoordClient(t)
+	f := syncutil.NewFuture[types.RootCoordClient]()
+	f.Set(client)
 
-	allocator := newIDAllocator(client)
+	allocator := newIDAllocator(f)
+
 	ts, count, err := allocator.batchAllocate(context.Background(), 100)
 	assert.NoError(t, err)
 	assert.NotZero(t, ts)
@@ -115,7 +128,10 @@ func TestRemoteIDAllocator(t *testing.T) {
 			return nil, errors.New("test")
 		},
 	)
-	allocator = newIDAllocator(client)
+	f = syncutil.NewFuture[types.RootCoordClient]()
+	f.Set(client)
+
+	allocator = newIDAllocator(f)
 	_, _, err = allocator.batchAllocate(context.Background(), 100)
 	assert.Error(t, err)
 
@@ -129,7 +145,10 @@ func TestRemoteIDAllocator(t *testing.T) {
 			}, nil
 		},
 	)
-	allocator = newIDAllocator(client)
+	f = syncutil.NewFuture[types.RootCoordClient]()
+	f.Set(client)
+
+	allocator = newIDAllocator(f)
 	_, _, err = allocator.batchAllocate(context.Background(), 100)
 	assert.Error(t, err)
 }
