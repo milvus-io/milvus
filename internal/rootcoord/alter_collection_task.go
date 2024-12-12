@@ -171,11 +171,6 @@ func (a *alterCollectionFieldTask) Prepare(ctx context.Context) error {
 		return fmt.Errorf("alter collection field failed, filed name does not exists")
 	}
 
-	err := IsValidateUpdatedFieldProps(a.Req.GetProperties())
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -227,29 +222,6 @@ func (a *alterCollectionFieldTask) Execute(ctx context.Context) error {
 	})
 
 	return redoTask.Execute(ctx)
-}
-
-var allowedProps = []string{
-	common.MaxLengthKey,
-	common.MmapEnabledKey,
-}
-
-func IsKeyAllowed(key string) bool {
-	for _, allowedKey := range allowedProps {
-		if key == allowedKey {
-			return true
-		}
-	}
-	return false
-}
-
-func IsValidateUpdatedFieldProps(updatedProps []*commonpb.KeyValuePair) error {
-	for _, prop := range updatedProps {
-		if !IsKeyAllowed(prop.Key) {
-			return merr.WrapErrParameterInvalidMsg("%s does not allow update in collection field param", prop.Key)
-		}
-	}
-	return nil
 }
 
 func UpdateFieldProperties(coll *model.Collection, fieldName string, updatedProps []*commonpb.KeyValuePair) error {
