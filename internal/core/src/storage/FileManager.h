@@ -48,9 +48,15 @@ struct FileManagerContext {
         return chunkManagerPtr != nullptr;
     }
 
+    void
+    set_for_loading_index(bool value) {
+        for_loading_index = value;
+    }
+
     FieldDataMeta fieldDataMeta;
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
+    bool for_loading_index{false};
 };
 
 #define FILEMANAGER_TRY try {
