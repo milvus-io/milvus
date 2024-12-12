@@ -1204,7 +1204,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
 TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment, true);
+    auto status = NewSegment(collection, Sealed, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto col = (milvus::segcore::Collection*)collection;
 
@@ -1215,6 +1215,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     auto segment_interface = reinterpret_cast<SegmentInterface*>(segment);
     auto sealed_segment = dynamic_cast<SegmentSealed*>(segment_interface);
     SealedLoadFieldData(dataset, *sealed_segment);
+    sealed_segment->get_insert_record().seal_pks();
 
     // delete data pks = {1, 2, 3}, timestamps = {4, 4, 4}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
@@ -3873,7 +3874,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 TEST(CApiTest, SealedSegmentTest) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment, true);
+    auto status = NewSegment(collection, Sealed, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
     int N = 1000;

@@ -104,6 +104,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return stats_.mem_size.load() + deleted_record_.mem_size();
     }
 
+    InsertRecord<true>&
+    get_insert_record() override {
+        return insert_record_;
+    }
+
     int64_t
     get_row_count() const override;
 
@@ -298,6 +303,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         // } else {
         num_rows_ = row_count;
         // }
+        deleted_record_.set_sealed_row_count(row_count);
     }
 
     void
@@ -320,11 +326,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     bool
     is_system_field_ready() const {
         return system_ready_count_ == 2;
-    }
-
-    const DeletedRecord&
-    get_deleted_record() const {
-        return deleted_record_;
     }
 
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
@@ -367,7 +368,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     InsertRecord<true> insert_record_;
 
     // deleted pks
-    mutable DeletedRecord deleted_record_;
+    mutable DeletedRecord<true> deleted_record_;
 
     LoadFieldDataInfo field_data_info_;
 
