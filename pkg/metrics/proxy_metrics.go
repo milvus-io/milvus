@@ -417,6 +417,16 @@ var (
 			Name:      "recall_search_cnt",
 			Help:      "counter of recall search",
 		}, []string{nodeIDLabelName, queryTypeLabelName, collectionName})
+
+	// ProxySearchSparseNumNonZeros records the estimated number of non-zeros in each sparse search task
+	ProxySearchSparseNumNonZeros = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "search_sparse_num_non_zeros",
+			Help:      "the number of non-zeros in each sparse search task",
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, collectionName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -478,6 +488,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyRetrySearchCount)
 	registry.MustRegister(ProxyRetrySearchResultInsufficientCount)
 	registry.MustRegister(ProxyRecallSearchCount)
+
+	registry.MustRegister(ProxySearchSparseNumNonZeros)
 
 	RegisterStreamingServiceClient(registry)
 }
