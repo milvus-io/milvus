@@ -346,26 +346,24 @@ func GetSegmentsChanPart(m *meta, filters ...SegmentFilter) []*chanPartSegments 
 	mDimEntry := make(map[dim]*chanPartSegments)
 
 	candidates := m.SelectSegments(filters...)
-	for _, segmentInfo := range candidates {
-		cloned := segmentInfo.Clone()
-
-		d := dim{cloned.PartitionID, cloned.InsertChannel}
+	for _, si := range candidates {
+		d := dim{si.PartitionID, si.InsertChannel}
 		entry, ok := mDimEntry[d]
 		if !ok {
 			entry = &chanPartSegments{
-				collectionID: cloned.CollectionID,
-				partitionID:  cloned.PartitionID,
-				channelName:  cloned.InsertChannel,
+				collectionID: si.CollectionID,
+				partitionID:  si.PartitionID,
+				channelName:  si.InsertChannel,
 			}
 			mDimEntry[d] = entry
 		}
-		entry.segments = append(entry.segments, cloned)
+		entry.segments = append(entry.segments, si)
 	}
-
 	result := make([]*chanPartSegments, 0, len(mDimEntry))
 	for _, entry := range mDimEntry {
 		result = append(result, entry)
 	}
+	log.Debug("GetSegmentsChanPart", zap.Int("length", len(result)))
 	return result
 }
 
