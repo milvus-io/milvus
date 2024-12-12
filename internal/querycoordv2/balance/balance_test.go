@@ -174,7 +174,7 @@ func (suite *BalanceTestSuite) TestAssignChannel() {
 					suite.mockScheduler.EXPECT().GetChannelTaskDelta(c.nodeIDs[i], int64(-1)).Return(c.deltaCnts[i])
 				}
 			}
-			plans := suite.roundRobinBalancer.AssignChannel(c.assignments, c.nodeIDs, false)
+			plans := suite.roundRobinBalancer.AssignChannel(1, c.assignments, c.nodeIDs, false)
 			suite.ElementsMatch(c.expectPlans, plans)
 		})
 	}
