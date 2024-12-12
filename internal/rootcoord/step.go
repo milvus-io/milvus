@@ -327,25 +327,6 @@ func (s *releasePartitionsStep) Weight() stepPriority {
 	return stepPriorityUrgent
 }
 
-type syncNewCreatedPartitionStep struct {
-	baseStep
-	collectionID UniqueID
-	partitionID  UniqueID
-}
-
-func (s *syncNewCreatedPartitionStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.broker.SyncNewCreatedPartition(ctx, s.collectionID, s.partitionID)
-	return nil, err
-}
-
-func (s *syncNewCreatedPartitionStep) Desc() string {
-	return fmt.Sprintf("sync new partition, collectionID=%d, partitionID=%d", s.partitionID, s.partitionID)
-}
-
-func (s *syncNewCreatedPartitionStep) Weight() stepPriority {
-	return stepPriorityUrgent
-}
-
 type dropIndexStep struct {
 	baseStep
 	collID  UniqueID

@@ -22,9 +22,13 @@ namespace exec {
 
 void
 PhyValueExpr::Eval(EvalCtx& context, VectorPtr& result) {
-    int64_t real_batch_size = current_pos_ + batch_size_ >= active_count_
-                                  ? active_count_ - current_pos_
-                                  : batch_size_;
+    auto input = context.get_offset_input();
+    SetHasOffsetInput((input != nullptr));
+    int64_t real_batch_size = has_offset_input_
+                                  ? input->size()
+                                  : (current_pos_ + batch_size_ >= active_count_
+                                         ? active_count_ - current_pos_
+                                         : batch_size_);
 
     if (real_batch_size == 0) {
         result = nullptr;

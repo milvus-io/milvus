@@ -1780,6 +1780,7 @@ type queryCoordConfig struct {
 	RowCountFactor                      ParamItem `refreshable:"true"`
 	SegmentCountFactor                  ParamItem `refreshable:"true"`
 	GlobalSegmentCountFactor            ParamItem `refreshable:"true"`
+	CollectionChannelCountFactor        ParamItem `refreshable:"true"`
 	SegmentCountMaxSteps                ParamItem `refreshable:"true"`
 	RowCountMaxSteps                    ParamItem `refreshable:"true"`
 	RandomMaxSteps                      ParamItem `refreshable:"true"`
@@ -1827,6 +1828,7 @@ type queryCoordConfig struct {
 	CollectionObserverInterval         ParamItem `refreshable:"false"`
 	CheckExecutedFlagInterval          ParamItem `refreshable:"false"`
 	CollectionBalanceSegmentBatchSize  ParamItem `refreshable:"true"`
+	CollectionBalanceChannelBatchSize  ParamItem `refreshable:"true"`
 	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
 	ClusterLevelLoadReplicaNumber      ParamItem `refreshable:"true"`
 	ClusterLevelLoadResourceGroups     ParamItem `refreshable:"true"`
@@ -1944,6 +1946,17 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.GlobalSegmentCountFactor.Init(base.mgr)
+
+	p.CollectionChannelCountFactor = ParamItem{
+		Key:          "queryCoord.collectionChannelCountFactor",
+		Version:      "2.4.18",
+		DefaultValue: "10",
+		PanicIfEmpty: true,
+		Doc: `the channel count weight used when balancing channels among queryNodes, 
+		A higher value reduces the likelihood of assigning channels from the same collection to the same QueryNode. Set to 1 to disable this feature.`,
+		Export: true,
+	}
+	p.CollectionChannelCountFactor.Init(base.mgr)
 
 	p.SegmentCountMaxSteps = ParamItem{
 		Key:          "queryCoord.segmentCountMaxSteps",
@@ -2366,6 +2379,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.CollectionBalanceSegmentBatchSize.Init(base.mgr)
+
+	p.CollectionBalanceChannelBatchSize = ParamItem{
+		Key:          "queryCoord.collectionBalanceChannelBatchSize",
+		Version:      "2.4.18",
+		DefaultValue: "1",
+		Doc:          "the max balance task number for channel at each round",
+		Export:       false,
+	}
+	p.CollectionBalanceChannelBatchSize.Init(base.mgr)
 
 	p.ClusterLevelLoadReplicaNumber = ParamItem{
 		Key:          "queryCoord.clusterLevelLoadReplicaNumber",
@@ -3262,7 +3284,6 @@ type dataCoordConfig struct {
 	CompactionMaxParallelTasks       ParamItem `refreshable:"true"`
 	CompactionWorkerParalleTasks     ParamItem `refreshable:"true"`
 	MinSegmentToMerge                ParamItem `refreshable:"true"`
-	MaxSegmentToMerge                ParamItem `refreshable:"true"`
 	SegmentSmallProportion           ParamItem `refreshable:"true"`
 	SegmentCompactableProportion     ParamItem `refreshable:"true"`
 	SegmentExpansionRate             ParamItem `refreshable:"true"`
@@ -3591,13 +3612,6 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		DefaultValue: "3",
 	}
 	p.MinSegmentToMerge.Init(base.mgr)
-
-	p.MaxSegmentToMerge = ParamItem{
-		Key:          "dataCoord.compaction.max.segment",
-		Version:      "2.0.0",
-		DefaultValue: "30",
-	}
-	p.MaxSegmentToMerge.Init(base.mgr)
 
 	p.SegmentSmallProportion = ParamItem{
 		Key:          "dataCoord.segment.smallProportion",
@@ -4305,6 +4319,7 @@ type dataNodeConfig struct {
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
 	L0CompactionMaxBatchSize ParamItem `refreshable:"true"`
 	UseMergeSort             ParamItem `refreshable:"true"`
+	MaxSegmentMergeSort      ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -4644,6 +4659,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.UseMergeSort.Init(base.mgr)
+
+	p.MaxSegmentMergeSort = ParamItem{
+		Key:          "dataNode.compaction.maxSegmentMergeSort",
+		Version:      "2.5.0",
+		Doc:          "The maximum number of segments to be merged in mergeSort mode.",
+		DefaultValue: "30",
+		Export:       true,
+	}
+	p.MaxSegmentMergeSort.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",

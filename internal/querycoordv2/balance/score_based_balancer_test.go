@@ -17,6 +17,7 @@ package balance
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/samber/lo"
@@ -608,9 +609,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceWithExecutingTask() {
 
 			// set node delta count
 			suite.mockScheduler.ExpectedCalls = nil
-			for i, node := range c.nodes {
-				suite.mockScheduler.EXPECT().GetSegmentTaskDelta(node, int64(1)).Return(c.deltaCounts[i]).Maybe()
-				suite.mockScheduler.EXPECT().GetSegmentTaskDelta(node, int64(-1)).Return(c.deltaCounts[i]).Maybe()
+			for i := range c.nodes {
+				suite.mockScheduler.EXPECT().GetSegmentTaskDelta(c.nodes[i], mock.Anything).Return(c.deltaCounts[i]).Maybe()
+				suite.mockScheduler.EXPECT().GetChannelTaskDelta(c.nodes[i], mock.Anything).Return(c.deltaCounts[i]).Maybe()
 				suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
 				suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
 			}
@@ -1220,4 +1221,252 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceSegmentAndChannel() {
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	_, channelPlans = suite.getCollectionBalancePlans(balancer, collectionID)
 	suite.Equal(len(channelPlans), 0)
+}
+
+func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnMultiCollections() {
+	ctx := context.Background()
+	balancer := suite.balancer
+
+	// mock 10 collections with each collection has 1 channel
+	collectionNum := 10
+	channelNum := 1
+	for i := 1; i <= collectionNum; i++ {
+		collectionID := int64(i)
+		collection := utils.CreateTestCollection(collectionID, int32(1))
+		collection.LoadPercentage = 100
+		collection.Status = querypb.LoadStatus_Loaded
+		balancer.meta.CollectionManager.PutCollection(ctx, collection)
+		balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, collectionID))
+		balancer.meta.ReplicaManager.Spawn(ctx, collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
+
+		channels := make([]*datapb.VchannelInfo, channelNum)
+		for i := 0; i < channelNum; i++ {
+			channels[i] = &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: fmt.Sprintf("channel-%d-%d", collectionID, i)}
+		}
+		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+			channels, nil, nil)
+		suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
+		balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+		balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+	}
+
+	// mock querynode-1 to node manager
+	nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+		Version:  common.Version,
+	})
+	nodeInfo.SetState(session.NodeStateNormal)
+	suite.balancer.nodeManager.Add(nodeInfo)
+	suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	utils.RecoverAllCollection(balancer.meta)
+
+	// mock channel distribution
+	channelDist := make([]*meta.DmChannel, 0)
+	for i := 1; i <= collectionNum; i++ {
+		collectionID := int64(i)
+		for i := 0; i < channelNum; i++ {
+			channelDist = append(channelDist, &meta.DmChannel{
+				VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: fmt.Sprintf("channel-%d-%d", collectionID, i)}, Node: 1,
+			})
+		}
+	}
+	balancer.dist.ChannelDistManager.Update(1, channelDist...)
+
+	// assert balance channel won't happens on 1 querynode
+	ret := make([]ChannelAssignPlan, 0)
+	for i := 1; i <= collectionNum; i++ {
+		collectionID := int64(i)
+		_, channelPlans := suite.getCollectionBalancePlans(balancer, collectionID)
+		ret = append(ret, channelPlans...)
+	}
+	suite.Len(ret, 0)
+
+	// mock querynode-2 to node manager
+	nodeInfo2 := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+		Version:  common.Version,
+	})
+	suite.balancer.nodeManager.Add(nodeInfo2)
+	suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, 2)
+	utils.RecoverAllCollection(balancer.meta)
+
+	_, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
+	suite.Len(channelPlans, 1)
+
+	// mock 1 channel has been move to querynode-2
+	balancer.dist.ChannelDistManager.Update(1, channelDist[1:]...)
+	balancer.dist.ChannelDistManager.Update(2, channelDist[:1]...)
+	_, channelPlans = suite.getCollectionBalancePlans(balancer, 6)
+	suite.Len(channelPlans, 1)
+
+	// mock 5 channel has been move to querynode-2
+	balancer.dist.ChannelDistManager.Update(1, channelDist[5:]...)
+	balancer.dist.ChannelDistManager.Update(2, channelDist[:5]...)
+	_, channelPlans = suite.getCollectionBalancePlans(balancer, 6)
+	suite.Len(channelPlans, 0)
+}
+
+func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnDifferentQN() {
+	ctx := context.Background()
+	balancer := suite.balancer
+
+	// mock 10 collections with each collection has 1 channel
+	channelNum := 5
+	collectionID := int64(1)
+	collection := utils.CreateTestCollection(collectionID, int32(1))
+	collection.LoadPercentage = 100
+	collection.Status = querypb.LoadStatus_Loaded
+	balancer.meta.CollectionManager.PutCollection(ctx, collection)
+	balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, collectionID))
+	balancer.meta.ReplicaManager.Spawn(ctx, collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
+
+	channels := make([]*datapb.VchannelInfo, channelNum)
+	for i := 0; i < channelNum; i++ {
+		channels[i] = &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: fmt.Sprintf("channel-%d-%d", collectionID, i)}
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		channels, nil, nil)
+	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
+	balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+	balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+
+	// mock querynode-1 to node manager
+	nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+		Version:  common.Version,
+	})
+	nodeInfo.UpdateStats(session.WithMemCapacity(1024))
+	suite.balancer.nodeManager.Add(nodeInfo)
+	suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	utils.RecoverAllCollection(balancer.meta)
+
+	// mock channel distribution
+	channelDist := make([]*meta.DmChannel, 0)
+	for i := 0; i < channelNum; i++ {
+		channelDist = append(channelDist, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: fmt.Sprintf("channel-%d-%d", collectionID, i)}, Node: 1,
+		})
+	}
+	balancer.dist.ChannelDistManager.Update(1, channelDist...)
+
+	// assert balance channel won't happens on 1 querynode
+	_, channelPlans := suite.getCollectionBalancePlans(balancer, collectionID)
+	suite.Len(channelPlans, 0)
+
+	// mock querynode-2 to node manager
+	nodeInfo2 := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+		Version:  common.Version,
+	})
+	suite.balancer.nodeManager.Add(nodeInfo2)
+	suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, 2)
+	utils.RecoverAllCollection(balancer.meta)
+
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.CollectionBalanceChannelBatchSize.Key, "10")
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.CollectionBalanceChannelBatchSize.Key)
+
+	// test balance channel on same query node
+	_, channelPlans = suite.getCollectionBalancePlans(balancer, collectionID)
+	suite.Len(channelPlans, 2)
+
+	// test balance on different query node
+	nodeInfo2.UpdateStats(session.WithMemCapacity(4096))
+	_, channelPlans = suite.getCollectionBalancePlans(balancer, collectionID)
+	suite.Len(channelPlans, 4)
+}
+
+func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnChannelExclusive() {
+	ctx := context.Background()
+	balancer := suite.balancer
+
+	collectionNum := 3
+	channelNum := 3
+	nodeNum := 3
+	// mock 10 collections with each collection has 1 channel
+	for i := 1; i <= collectionNum; i++ {
+		collectionID := int64(i)
+		collection := utils.CreateTestCollection(collectionID, int32(1))
+		collection.LoadPercentage = 100
+		collection.Status = querypb.LoadStatus_Loaded
+		balancer.meta.CollectionManager.PutCollection(ctx, collection)
+		balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, collectionID))
+		balancer.meta.ReplicaManager.Spawn(ctx, collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
+
+		channels := make([]*datapb.VchannelInfo, channelNum)
+		for i := 0; i < channelNum; i++ {
+			channels[i] = &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: fmt.Sprintf("channel-%d-%d", collectionID, i)}
+		}
+		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+			channels, nil, nil)
+		suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
+		balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+		balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+	}
+
+	// mock querynode to node manager
+	for i := 1; i <= nodeNum; i++ {
+		nodeID := int64(i)
+		nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   nodeID,
+			Address:  "127.0.0.1:0",
+			Hostname: "localhost",
+			Version:  common.Version,
+		})
+		nodeInfo.SetState(session.NodeStateNormal)
+		suite.balancer.nodeManager.Add(nodeInfo)
+		suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, nodeID)
+	}
+
+	utils.RecoverAllCollection(balancer.meta)
+
+	// mock channels on collection-a to node 1
+	collectionID := int64(1)
+	channelDist1 := make([]*meta.DmChannel, 0)
+	for i := 0; i < channelNum; i++ {
+		channelDist1 = append(channelDist1, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: fmt.Sprintf("channel-%d-%d", collectionID, i)}, Node: 1,
+		})
+	}
+	balancer.dist.ChannelDistManager.Update(1, channelDist1...)
+
+	collectionID = int64(2)
+	channelDist2 := make([]*meta.DmChannel, 0)
+	for i := 0; i < channelNum; i++ {
+		channelDist2 = append(channelDist2, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: fmt.Sprintf("channel-%d-%d", collectionID, i)}, Node: 1,
+		})
+	}
+	balancer.dist.ChannelDistManager.Update(2, channelDist2...)
+
+	collectionID = int64(3)
+	channelDist3 := make([]*meta.DmChannel, 0)
+	for i := 0; i < channelNum; i++ {
+		channelDist3 = append(channelDist3, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: fmt.Sprintf("channel-%d-%d", collectionID, i)}, Node: 1,
+		})
+	}
+	balancer.dist.ChannelDistManager.Update(3, channelDist3...)
+
+	// test balance on collection 1
+	_, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
+	suite.Len(channelPlans, 2)
+
+	// mock collection 1 has balanced
+	balancer.dist.ChannelDistManager.Update(1, channelDist1[0])
+	balancer.dist.ChannelDistManager.Update(2, channelDist1[1], channelDist2[0], channelDist2[1], channelDist2[2])
+	balancer.dist.ChannelDistManager.Update(3, channelDist1[2], channelDist3[0], channelDist3[1], channelDist3[2])
+	_, channelPlans = suite.getCollectionBalancePlans(balancer, 1)
+	suite.Len(channelPlans, 0)
+	_, channelPlans = suite.getCollectionBalancePlans(balancer, 2)
+	suite.Len(channelPlans, 2)
+	_, channelPlans = suite.getCollectionBalancePlans(balancer, 3)
+	suite.Len(channelPlans, 2)
 }

@@ -409,6 +409,15 @@ SegmentGrowingImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
               "chunk view impl not implement for growing segment");
 }
 
+std::pair<std::vector<std::string_view>, FixedVector<bool>>
+SegmentGrowingImpl::chunk_view_by_offsets(
+    FieldId field_id,
+    int64_t chunk_id,
+    const FixedVector<int32_t>& offsets) const {
+    PanicInfo(ErrorCode::NotImplemented,
+              "chunk view by offsets not implemented for growing segment");
+}
+
 int64_t
 SegmentGrowingImpl::num_chunk(FieldId field_id) const {
     auto size = get_insert_record().ack_responder_.GetAck();
