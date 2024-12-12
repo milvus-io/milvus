@@ -139,9 +139,9 @@ func (_c *QueryCoordCatalog_GetCollections_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
-// GetPartitions provides a mock function with given fields: ctx
-func (_m *QueryCoordCatalog) GetPartitions(ctx context.Context) (map[int64][]*querypb.PartitionLoadInfo, error) {
-	ret := _m.Called(ctx)
+// GetPartitions provides a mock function with given fields: ctx, collectionIDs
+func (_m *QueryCoordCatalog) GetPartitions(ctx context.Context, collectionIDs []int64) (map[int64][]*querypb.PartitionLoadInfo, error) {
+	ret := _m.Called(ctx, collectionIDs)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetPartitions")
@@ -149,19 +149,19 @@ func (_m *QueryCoordCatalog) GetPartitions(ctx context.Context) (map[int64][]*qu
 
 	var r0 map[int64][]*querypb.PartitionLoadInfo
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (map[int64][]*querypb.PartitionLoadInfo, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, []int64) (map[int64][]*querypb.PartitionLoadInfo, error)); ok {
+		return rf(ctx, collectionIDs)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) map[int64][]*querypb.PartitionLoadInfo); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, []int64) map[int64][]*querypb.PartitionLoadInfo); ok {
+		r0 = rf(ctx, collectionIDs)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[int64][]*querypb.PartitionLoadInfo)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, []int64) error); ok {
+		r1 = rf(ctx, collectionIDs)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -176,13 +176,14 @@ type QueryCoordCatalog_GetPartitions_Call struct {
 
 // GetPartitions is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *QueryCoordCatalog_Expecter) GetPartitions(ctx interface{}) *QueryCoordCatalog_GetPartitions_Call {
-	return &QueryCoordCatalog_GetPartitions_Call{Call: _e.mock.On("GetPartitions", ctx)}
+//   - collectionIDs []int64
+func (_e *QueryCoordCatalog_Expecter) GetPartitions(ctx interface{}, collectionIDs interface{}) *QueryCoordCatalog_GetPartitions_Call {
+	return &QueryCoordCatalog_GetPartitions_Call{Call: _e.mock.On("GetPartitions", ctx, collectionIDs)}
 }
 
-func (_c *QueryCoordCatalog_GetPartitions_Call) Run(run func(ctx context.Context)) *QueryCoordCatalog_GetPartitions_Call {
+func (_c *QueryCoordCatalog_GetPartitions_Call) Run(run func(ctx context.Context, collectionIDs []int64)) *QueryCoordCatalog_GetPartitions_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].([]int64))
 	})
 	return _c
 }
@@ -192,7 +193,7 @@ func (_c *QueryCoordCatalog_GetPartitions_Call) Return(_a0 map[int64][]*querypb.
 	return _c
 }
 
-func (_c *QueryCoordCatalog_GetPartitions_Call) RunAndReturn(run func(context.Context) (map[int64][]*querypb.PartitionLoadInfo, error)) *QueryCoordCatalog_GetPartitions_Call {
+func (_c *QueryCoordCatalog_GetPartitions_Call) RunAndReturn(run func(context.Context, []int64) (map[int64][]*querypb.PartitionLoadInfo, error)) *QueryCoordCatalog_GetPartitions_Call {
 	_c.Call.Return(run)
 	return _c
 }

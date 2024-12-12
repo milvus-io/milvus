@@ -158,6 +158,10 @@ func (m *GrpcRootCoordClient) ShowCollections(ctx context.Context, in *milvuspb.
 	return &milvuspb.ShowCollectionsResponse{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) ShowCollectionsInternal(ctx context.Context, in *rootcoordpb.ShowCollectionsInternalRequest, opts ...grpc.CallOption) (*rootcoordpb.ShowCollectionsInternalResponse, error) {
+	return &rootcoordpb.ShowCollectionsInternalResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

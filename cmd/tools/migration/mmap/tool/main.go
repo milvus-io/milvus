@@ -134,7 +134,7 @@ func prepareRootCoordMeta(ctx context.Context, allocator tso.Allocator) rootcoor
 		if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, paramtable.Get().EtcdCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
 			panic(err)
 		}
-		catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
+		catalog = kvmetestore.NewCatalog(metaKV, ss)
 	case util.MetaStoreTypeTiKV:
 		log.Info("Using tikv as meta storage.")
 		var metaKV kv.MetaKv
@@ -148,7 +148,7 @@ func prepareRootCoordMeta(ctx context.Context, allocator tso.Allocator) rootcoor
 		if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, paramtable.Get().TiKVCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
 			panic(err)
 		}
-		catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
+		catalog = kvmetestore.NewCatalog(metaKV, ss)
 	default:
 		panic(fmt.Sprintf("MetaStoreType %s not supported", paramtable.Get().MetaStoreCfg.MetaStoreType.GetValue()))
 	}

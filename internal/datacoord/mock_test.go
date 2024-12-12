@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -88,9 +89,11 @@ func (mm *metaMemoryKV) CompareVersionAndSwap(ctx context.Context, key string, v
 	panic("implement me")
 }
 
-func newMemoryMeta() (*meta, error) {
+func newMemoryMeta(t *testing.T) (*meta, error) {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-	return newMeta(context.TODO(), catalog, nil)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+	return newMeta(context.TODO(), catalog, nil, broker)
 }
 
 func newMockAllocator(t *testing.T) *allocator.MockAllocator {
@@ -425,6 +428,12 @@ func (m *mockRootCoordClient) ShowCollections(ctx context.Context, req *milvuspb
 	return &milvuspb.ShowCollectionsResponse{
 		Status:          merr.Success(),
 		CollectionNames: []string{"test"},
+	}, nil
+}
+
+func (m *mockRootCoordClient) ShowCollectionsInternal(ctx context.Context, req *rootcoordpb.ShowCollectionsInternalRequest, opts ...grpc.CallOption) (*rootcoordpb.ShowCollectionsInternalResponse, error) {
+	return &rootcoordpb.ShowCollectionsInternalResponse{
+		Status: merr.Success(),
 	}, nil
 }
 
