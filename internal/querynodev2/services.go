@@ -254,7 +254,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		req.GetVersion(),
 		node.clusterManager,
 		node.manager,
-		node.tSafeManager,
 		node.loader,
 		node.factory,
 		channel.GetSeekPosition().GetTimestamp(),
@@ -273,12 +272,12 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	}()
 
 	// create tSafe
-	node.tSafeManager.Add(ctx, channel.ChannelName, channel.GetSeekPosition().GetTimestamp())
-	defer func() {
-		if err != nil {
-			node.tSafeManager.Remove(ctx, channel.ChannelName)
-		}
-	}()
+	// node.tSafeManager.Add(ctx, channel.ChannelName, channel.GetSeekPosition().GetTimestamp())
+	// defer func() {
+	// 	if err != nil {
+	// 		node.tSafeManager.Remove(ctx, channel.ChannelName)
+	// 	}
+	// }()
 
 	pipeline, err := node.pipelineManager.Add(req.GetCollectionID(), channel.GetChannelName())
 	if err != nil {
@@ -369,7 +368,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		node.pipelineManager.Remove(req.GetChannelName())
 		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
 		_, sealed := node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
-		node.tSafeManager.Remove(ctx, req.GetChannelName())
+		// node.tSafeManager.Remove(ctx, req.GetChannelName())
 
 		node.manager.Collection.Unref(req.GetCollectionID(), uint32(1+sealed))
 	}
@@ -733,6 +732,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	if req.GetReq().GetIsTopkReduce() {
 		resp.IsTopkReduce = true
 	}
+	resp.IsRecallEvaluation = req.GetReq().GetIsRecallEvaluation()
 	return resp, nil
 }
 

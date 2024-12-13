@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -46,9 +45,6 @@ type PipelineTestSuite struct {
 	channel          string
 	insertSegmentIDs []int64
 	deletePKs        []int64
-
-	// dependencies
-	tSafeManager TSafeManager
 
 	// mocks
 	segmentManager    *segments.MockSegmentManager
@@ -99,11 +95,6 @@ func (suite *PipelineTestSuite) SetupTest() {
 	suite.delegator = delegator.NewMockShardDelegator(suite.T())
 	//	init mq dispatcher
 	suite.msgDispatcher = msgdispatcher.NewMockClient(suite.T())
-
-	// init dependency
-	//	init tsafeManager
-	suite.tSafeManager = tsafe.NewTSafeReplica()
-	suite.tSafeManager.Add(context.Background(), suite.channel, 0)
 }
 
 func (suite *PipelineTestSuite) TestBasic() {
@@ -139,12 +130,13 @@ func (suite *PipelineTestSuite) TestBasic() {
 				}
 			}
 		})
+
 	// build pipleine
 	manager := &segments.Manager{
 		Collection: suite.collectionManager,
 		Segment:    suite.segmentManager,
 	}
-	pipeline, err := NewPipeLine(suite.collectionID, suite.channel, manager, suite.tSafeManager, suite.msgDispatcher, suite.delegator)
+	pipeline, err := NewPipeLine(suite.collectionID, suite.channel, manager, suite.msgDispatcher, suite.delegator)
 	suite.NoError(err)
 
 	// Init Consumer
@@ -155,20 +147,10 @@ func (suite *PipelineTestSuite) TestBasic() {
 	suite.NoError(err)
 	defer pipeline.Close()
 
-	// watch tsafe manager
-	listener := suite.tSafeManager.WatchChannel(suite.channel)
-
 	// build input msg
 	in := suite.buildMsgPack(schema)
+	suite.delegator.EXPECT().UpdateTSafe(in.EndTs).Return()
 	suite.msgChan <- in
-
-	// wait pipeline work
-	<-listener.On()
-
-	// check tsafe
-	tsafe, err := suite.tSafeManager.Get(suite.channel)
-	suite.NoError(err)
-	suite.Equal(in.EndTs, tsafe)
 }
 
 func TestQueryNodePipeline(t *testing.T) {

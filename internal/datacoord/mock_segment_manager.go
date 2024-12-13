@@ -215,8 +215,26 @@ func (_c *MockManager_DropSegmentsOfChannel_Call) RunAndReturn(run func(context.
 }
 
 // ExpireAllocations provides a mock function with given fields: ctx, channel, ts
+<<<<<<< HEAD
 func (_m *MockManager) ExpireAllocations(ctx context.Context, channel string, ts uint64) {
 	_m.Called(ctx, channel, ts)
+=======
+func (_m *MockManager) ExpireAllocations(ctx context.Context, channel string, ts uint64) error {
+	ret := _m.Called(ctx, channel, ts)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ExpireAllocations")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, uint64) error); ok {
+		r0 = rf(ctx, channel, ts)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+>>>>>>> b416ff8c6cc0a26ec69c82cd87c2a446684a1f01
 }
 
 // MockManager_ExpireAllocations_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ExpireAllocations'

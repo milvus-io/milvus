@@ -52,7 +52,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -103,7 +102,6 @@ type QueryNode struct {
 	// internal components
 	manager               *segments.Manager
 	clusterManager        cluster.Manager
-	tSafeManager          tsafe.Manager
 	pipelineManager       pipeline.Manager
 	subscribingChannels   *typeutil.ConcurrentSet[string]
 	unsubscribingChannels *typeutil.ConcurrentSet[string]
@@ -153,7 +151,6 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 		metricsRequest: metricsinfo.NewMetricsRequest(),
 	}
 
-	node.tSafeManager = tsafe.NewTSafeReplica()
 	expr.Register("querynode", node)
 	return node
 }
@@ -375,7 +372,7 @@ func (node *QueryNode) Init() error {
 		node.manager.SetLoader(node.loader)
 		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, node.GetNodeID())
 		// init pipeline manager
-		node.pipelineManager = pipeline.NewManager(node.manager, node.tSafeManager, node.dispClient, node.delegators)
+		node.pipelineManager = pipeline.NewManager(node.manager, node.dispClient, node.delegators)
 
 		err = node.InitSegcore()
 		if err != nil {

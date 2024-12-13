@@ -123,6 +123,7 @@ const (
 	ChannelNumKey   = "channel_num"
 	WithOptimizeKey = "with_optimize"
 	CollectionKey   = "collection"
+	RecallEvalKey   = "recall_eval"
 
 	IndexParamsKey = "params"
 	IndexTypeKey   = "index_type"
@@ -138,6 +139,7 @@ const (
 	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
 	IgnoreGrowing             = "ignore_growing"
 	ConsistencyLevel          = "consistency_level"
+	HintsKey                  = "hints"
 )
 
 // Doc-in-doc-out

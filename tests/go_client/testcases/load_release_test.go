@@ -255,7 +255,6 @@ func TestLoadCollectionSparse(t *testing.T) {
 }
 
 func TestLoadPartialFields(t *testing.T) {
-	t.Skip("https://github.com/milvus-io/milvus/issues/37853")
 	/*
 		1.  verify the collection loaded successfully
 		2.  verify the loaded fields can be searched in expr and output_fields
@@ -294,7 +293,7 @@ func TestLoadPartialFields(t *testing.T) {
 	// search with expr not loaded field -> Error
 	invalidExpr := fmt.Sprintf("%s > 2.0 ", common.DefaultFloatFieldName)
 	_, err = mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithANNSField(common.DefaultFloatVecFieldName).WithFilter(invalidExpr))
-	common.CheckErr(t, err, false, "field fieldID:105 name:\"float\" data_type:Float is not loaded")
+	common.CheckErr(t, err, false, "data_type:Float is not loaded")
 
 	// search with output_fields not loaded field -> Error
 	_, err = mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields(common.DefaultBoolFieldName))
