@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/optimizers"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -87,6 +86,10 @@ type ShardDelegator interface {
 	VerifyExcludedSegments(segmentID int64, ts uint64) bool
 	TryCleanExcludedSegments(ts uint64)
 
+	// tsafe
+	UpdateTSafe(ts uint64)
+	GetTSafe() uint64
+
 	// control
 	Serviceable() bool
 	Start()
@@ -111,7 +114,6 @@ type shardDelegator struct {
 
 	distribution   *distribution
 	segmentManager segments.SegmentManager
-	tsafeManager   tsafe.Manager
 	pkOracle       pkoracle.PkOracle
 	level0Mut      sync.RWMutex
 	// stream delete buffer
@@ -751,41 +753,18 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 	}
 }
 
-// watchTSafe is the worker function to update serviceable timestamp.
-func (sd *shardDelegator) watchTSafe() {
-	defer sd.lifetime.Done()
-	listener := sd.tsafeManager.WatchChannel(sd.vchannelName)
-	sd.updateTSafe()
-	log := sd.getLogger(context.Background())
-	for {
-		select {
-		case _, ok := <-listener.On():
-			if !ok {
-				// listener close
-				log.Warn("tsafe listener closed")
-				return
-			}
-			sd.updateTSafe()
-		case <-sd.lifetime.CloseCh():
-			log.Info("updateTSafe quit")
-			// shard delegator closed
-			return
-		}
-	}
-}
-
 // updateTSafe read current tsafe value from tsafeManager.
-func (sd *shardDelegator) updateTSafe() {
+func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
 	sd.tsCond.L.Lock()
-	tsafe, err := sd.tsafeManager.Get(sd.vchannelName)
-	if err != nil {
-		log.Warn("tsafeManager failed to get lastest", zap.Error(err))
-	}
 	if tsafe > sd.latestTsafe.Load() {
 		sd.latestTsafe.Store(tsafe)
 		sd.tsCond.Broadcast()
 	}
 	sd.tsCond.L.Unlock()
+}
+
+func (sd *shardDelegator) GetTSafe() uint64 {
+	return sd.latestTsafe.Load()
 }
 
 // Close closes the delegator.
@@ -849,7 +828,7 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 
 // NewShardDelegator creates a new ShardDelegator instance with all fields initialized.
 func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
-	workerManager cluster.Manager, manager *segments.Manager, tsafeManager tsafe.Manager, loader segments.Loader,
+	workerManager cluster.Manager, manager *segments.Manager, loader segments.Loader,
 	factory msgstream.Factory, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
 ) (ShardDelegator, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID),
@@ -885,7 +864,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
 		pkOracle:         pkoracle.NewPkOracle(),
-		tsafeManager:     tsafeManager,
 		latestTsafe:      atomic.NewUint64(startTs),
 		loader:           loader,
 		factory:          factory,
@@ -898,9 +876,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	}
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
-	if sd.lifetime.Add(lifetime.NotStopped) == nil {
-		go sd.watchTSafe()
-	}
 	log.Info("finish build new shardDelegator")
 	return sd, nil
 }

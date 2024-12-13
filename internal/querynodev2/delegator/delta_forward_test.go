@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -51,7 +50,6 @@ type StreamingForwardSuite struct {
 	version       int64
 	workerManager *cluster.MockManager
 	manager       *segments.Manager
-	tsafeManager  tsafe.Manager
 	loader        *segments.MockLoader
 	mq            *msgstream.MockMsgStream
 
@@ -73,7 +71,6 @@ func (s *StreamingForwardSuite) SetupTest() {
 	s.version = 2000
 	s.workerManager = &cluster.MockManager{}
 	s.manager = segments.NewManager()
-	s.tsafeManager = tsafe.NewTSafeReplica()
 	s.loader = &segments.MockLoader{}
 	s.loader.EXPECT().
 		Load(mock.Anything, s.collectionID, segments.SegmentTypeGrowing, int64(0), mock.Anything).
@@ -151,7 +148,7 @@ func (s *StreamingForwardSuite) SetupTest() {
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), s.rootPath)
 	s.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
 
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, &msgstream.MockMqFactory{
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},

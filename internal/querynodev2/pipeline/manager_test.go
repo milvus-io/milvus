@@ -17,7 +17,6 @@
 package pipeline
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -26,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -40,8 +38,7 @@ type PipelineManagerTestSuite struct {
 	collectionID int64
 	channel      string
 	// dependencies
-	tSafeManager TSafeManager
-	delegators   *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
+	delegators *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
 
 	// mocks
 	segmentManager    *segments.MockSegmentManager
@@ -59,9 +56,6 @@ func (suite *PipelineManagerTestSuite) SetupSuite() {
 func (suite *PipelineManagerTestSuite) SetupTest() {
 	paramtable.Init()
 	// init dependency
-	//	init tsafeManager
-	suite.tSafeManager = tsafe.NewTSafeReplica()
-	suite.tSafeManager.Add(context.Background(), suite.channel, 0)
 	suite.delegators = typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()
 
 	// init mock
@@ -88,7 +82,7 @@ func (suite *PipelineManagerTestSuite) TestBasic() {
 		Collection: suite.collectionManager,
 		Segment:    suite.segmentManager,
 	}
-	pipelineManager := NewManager(manager, suite.tSafeManager, suite.msgDispatcher, suite.delegators)
+	pipelineManager := NewManager(manager, suite.msgDispatcher, suite.delegators)
 	defer pipelineManager.Close()
 
 	// Add pipeline

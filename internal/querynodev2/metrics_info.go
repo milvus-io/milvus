@@ -19,6 +19,7 @@ package querynodev2
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/samber/lo"
 
@@ -58,7 +59,17 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		return nil, err
 	}
 
-	minTsafeChannel, minTsafe := node.tSafeManager.Min()
+	minTsafeChannel := ""
+	minTsafe := uint64(math.MaxUint64)
+	node.delegators.Range(func(channel string, delegator delegator.ShardDelegator) bool {
+		tsafe := delegator.GetTSafe()
+		if tsafe < minTsafe {
+			minTsafeChannel = channel
+			minTsafe = tsafe
+		}
+		return true
+	})
+
 	collections := node.manager.Collection.ListWithName()
 	nodeID := fmt.Sprint(node.GetNodeID())
 

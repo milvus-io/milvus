@@ -42,7 +42,6 @@ func NewPipeLine(
 	collectionID UniqueID,
 	channel string,
 	manager *DataManager,
-	tSafeManager TSafeManager,
 	dispatcher msgdispatcher.Client,
 	delegator delegator.ShardDelegator,
 ) (Pipeline, error) {
@@ -55,7 +54,7 @@ func NewPipeLine(
 
 	filterNode := newFilterNode(collectionID, channel, manager, delegator, pipelineQueueLength)
 	insertNode := newInsertNode(collectionID, channel, manager, delegator, pipelineQueueLength)
-	deleteNode := newDeleteNode(collectionID, channel, manager, tSafeManager, delegator, pipelineQueueLength)
+	deleteNode := newDeleteNode(collectionID, channel, manager, delegator, pipelineQueueLength)
 	p.Add(filterNode, insertNode, deleteNode)
 	return p, nil
 }
