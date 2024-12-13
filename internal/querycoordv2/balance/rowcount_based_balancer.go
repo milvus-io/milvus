@@ -345,6 +345,16 @@ func (b *RowCountBasedBalancer) genChannelPlan(ctx context.Context, br *balanceR
 			channelsToMove = append(channelsToMove, channels[average:]...)
 		}
 
+		// if the channel are redundant, skip it's balance for now
+		channelsToMove = lo.Filter(channelsToMove, func(ch *meta.DmChannel, _ int) bool {
+			times := len(b.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica), meta.WithChannelName2Channel(ch.GetChannelName())))
+			channelUnique := times == 1
+			if !channelUnique {
+				br.AddRecord(StrRecordf("abort balancing channel %s since it appear multiple times(%d) in distribution", ch.GetChannelName(), times))
+			}
+			return channelUnique
+		})
+
 		if len(nodeWithLessChannel) == 0 || len(channelsToMove) == 0 {
 			return nil
 		}

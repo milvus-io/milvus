@@ -321,6 +321,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	defer ex.removeTask(task, step)
 	startTs := time.Now()
 	action := task.Actions()[step].(*ChannelAction)
+	defer action.rpcReturned.Store(true)
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
@@ -417,6 +418,7 @@ func (ex *Executor) unsubscribeChannel(task *ChannelTask, step int) error {
 	defer ex.removeTask(task, step)
 	startTs := time.Now()
 	action := task.Actions()[step].(*ChannelAction)
+	defer action.rpcReturned.Store(true)
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),

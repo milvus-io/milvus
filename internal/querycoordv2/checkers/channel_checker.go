@@ -201,12 +201,6 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 		}
 
 		if leaderView.UnServiceableError != nil {
-			log.RatedInfo(10, "replica has unavailable shard leader",
-				zap.Int64("collectionID", replica.GetCollectionID()),
-				zap.Int64("replicaID", replicaID),
-				zap.Int64("leaderID", ch.Node),
-				zap.String("channel", ch.GetChannelName()),
-				zap.Error(leaderView.UnServiceableError))
 			continue
 		}
 
@@ -221,6 +215,16 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 		} else {
 			ret = append(ret, ch)
 		}
+	}
+
+	for _, ch := range ret {
+		log.Info("find duplicate shard leaders",
+			zap.Int64("collectionID", replica.GetCollectionID()),
+			zap.Int64("replicaID", replicaID),
+			zap.String("channel", ch.GetChannelName()),
+			zap.Int64("leaderID", versionsMap[ch.GetChannelName()].Node),
+			zap.Any("duplicateLeaderID", ch.Node),
+		)
 	}
 	return ret
 }
