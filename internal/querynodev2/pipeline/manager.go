@@ -47,9 +47,8 @@ type manager struct {
 	dataManager      *DataManager
 	delegators       *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
 
-	tSafeManager TSafeManager
-	dispatcher   msgdispatcher.Client
-	mu           sync.RWMutex
+	dispatcher msgdispatcher.Client
+	mu         sync.RWMutex
 }
 
 func (m *manager) Num() int {
@@ -83,7 +82,7 @@ func (m *manager) Add(collectionID UniqueID, channel string) (Pipeline, error) {
 		return nil, merr.WrapErrChannelNotFound(channel, "delegator not found")
 	}
 
-	newPipeLine, err := NewPipeLine(collectionID, channel, m.dataManager, m.tSafeManager, m.dispatcher, delegator)
+	newPipeLine, err := NewPipeLine(collectionID, channel, m.dataManager, m.dispatcher, delegator)
 	if err != nil {
 		return nil, merr.WrapErrServiceUnavailable(err.Error(), "failed to create new pipeline")
 	}
@@ -156,7 +155,6 @@ func (m *manager) Close() {
 }
 
 func NewManager(dataManager *DataManager,
-	tSafeManager TSafeManager,
 	dispatcher msgdispatcher.Client,
 	delegators *typeutil.ConcurrentMap[string, delegator.ShardDelegator],
 ) Manager {
@@ -164,7 +162,6 @@ func NewManager(dataManager *DataManager,
 		channel2Pipeline: make(map[string]Pipeline),
 		dataManager:      dataManager,
 		delegators:       delegators,
-		tSafeManager:     tSafeManager,
 		dispatcher:       dispatcher,
 	}
 }
