@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
@@ -46,32 +47,30 @@ import (
 var _ flusher.Flusher = (*flusherImpl)(nil)
 
 type flusherImpl struct {
-	fgMgr   pipeline.FlowgraphManager
-	syncMgr syncmgr.SyncManager
-	wbMgr   writebuffer.BufferManager
+	fgMgr        pipeline.FlowgraphManager
+	wbMgr        writebuffer.BufferManager
+	syncMgr      syncmgr.SyncManager
+	cpUpdater    *syncutil.Future[*util.ChannelCheckpointUpdater]
+	chunkManager storage.ChunkManager
 
 	channelLifetimes *typeutil.ConcurrentMap[string, ChannelLifetime]
 
-	notifyCh       chan struct{}
-	notifier       *syncutil.AsyncTaskNotifier[struct{}]
-	pipelineParams *util.PipelineParams
+	notifyCh chan struct{}
+	notifier *syncutil.AsyncTaskNotifier[struct{}]
 }
 
 func NewFlusher(chunkManager storage.ChunkManager) flusher.Flusher {
-	params := getPipelineParams(chunkManager)
-	return newFlusherWithParam(params)
-}
-
-func newFlusherWithParam(params *util.PipelineParams) flusher.Flusher {
-	fgMgr := pipeline.NewFlowgraphManager()
+	syncMgr := syncmgr.NewSyncManager(chunkManager)
+	wbMgr := writebuffer.NewManager(syncMgr)
 	return &flusherImpl{
-		fgMgr:            fgMgr,
-		syncMgr:          params.SyncMgr,
-		wbMgr:            params.WriteBufferManager,
+		fgMgr:            pipeline.NewFlowgraphManager(),
+		wbMgr:            wbMgr,
+		syncMgr:          syncMgr,
+		cpUpdater:        syncutil.NewFuture[*util.ChannelCheckpointUpdater](),
+		chunkManager:     chunkManager,
 		channelLifetimes: typeutil.NewConcurrentMap[string, ChannelLifetime](),
 		notifyCh:         make(chan struct{}, 1),
 		notifier:         syncutil.NewAsyncTaskNotifier[struct{}](),
-		pipelineParams:   params,
 	}
 }
 
@@ -135,8 +134,7 @@ func (f *flusherImpl) Start() {
 		broker := broker.NewCoordBroker(dc, paramtable.GetNodeID())
 		cpUpdater := util.NewChannelCheckpointUpdater(broker)
 		go cpUpdater.Start()
-		// When the flusher exits, the cpUpdater should be closed.
-		defer cpUpdater.Close()
+		f.cpUpdater.Set(cpUpdater)
 
 		backoff := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
 			Default: 5 * time.Second,
@@ -205,4 +203,29 @@ func (f *flusherImpl) Stop() {
 	})
 	f.fgMgr.ClearFlowgraphs()
 	f.wbMgr.Stop()
+	if f.cpUpdater.Ready() {
+		f.cpUpdater.Get().Close()
+	}
+}
+
+func (f *flusherImpl) getPipelineParams(ctx context.Context) (*util.PipelineParams, error) {
+	dc, err := resource.Resource().DataCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	cpUpdater, err := f.cpUpdater.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &util.PipelineParams{
+		Ctx:                context.Background(),
+		Broker:             broker.NewCoordBroker(dc, paramtable.GetNodeID()),
+		SyncMgr:            f.syncMgr,
+		ChunkManager:       f.chunkManager,
+		WriteBufferManager: f.wbMgr,
+		CheckpointUpdater:  cpUpdater,
+		Allocator:          idalloc.NewMAllocator(resource.Resource().IDAllocator()),
+		MsgHandler:         newMsgHandler(f.wbMgr),
+	}, nil
 }

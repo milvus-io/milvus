@@ -309,18 +309,18 @@ func (s *Server) initMeta() error {
 	return nil
 }
 
-func (s *Server) initRootCoord(ctx context.Context) {
+func (s *Server) initRootCoord() {
+	log := log.Ctx(s.ctx)
 	go func() {
-		retry.Do(ctx, func() error {
-			log := log.Ctx(s.ctx)
+		retry.Do(s.ctx, func() error {
 			log.Info("StreamingNode connect to rootCoord...")
-			rootCoord, err := rcc.NewClient(ctx)
+			rootCoord, err := rcc.NewClient(s.ctx)
 			if err != nil {
 				return errors.Wrap(err, "StreamingNode try to new RootCoord client failed")
 			}
 
 			log.Info("StreamingNode try to wait for RootCoord ready")
-			err = componentutil.WaitForComponentHealthy(ctx, rootCoord, "RootCoord", 1000000, time.Millisecond*200)
+			err = componentutil.WaitForComponentHealthy(s.ctx, rootCoord, "RootCoord", 1000000, time.Millisecond*200)
 			if err != nil {
 				return errors.Wrap(err, "StreamingNode wait for RootCoord ready failed")
 			}
@@ -331,25 +331,25 @@ func (s *Server) initRootCoord(ctx context.Context) {
 	}()
 }
 
-func (s *Server) initDataCoord(ctx context.Context) {
+func (s *Server) initDataCoord() {
+	log := log.Ctx(s.ctx)
 	go func() {
-		retry.Do(ctx, func() error {
-			log := log.Ctx(s.ctx)
+		retry.Do(s.ctx, func() error {
 			log.Info("StreamingNode connect to dataCoord...")
-			dataCoord, err := dcc.NewClient(ctx)
+			dataCoord, err := dcc.NewClient(s.ctx)
 			if err != nil {
 				return errors.Wrap(err, "StreamingNode try to new DataCoord client failed")
 			}
 
 			log.Info("StreamingNode try to wait for DataCoord ready")
-			err = componentutil.WaitForComponentHealthy(ctx, dataCoord, "DataCoord", 1000000, time.Millisecond*200)
+			err = componentutil.WaitForComponentHealthy(s.ctx, dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 			if err != nil {
 				return errors.Wrap(err, "StreamingNode wait for DataCoord ready failed")
 			}
 			log.Info("StreamingNode wait for DataCoord ready")
 			s.dataCoord.Set(dataCoord)
 			return nil
-		})
+		}, retry.AttemptAlways())
 	}()
 }
 

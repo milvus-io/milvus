@@ -86,6 +86,12 @@ func (c *channelLifetime) Run() error {
 	// Get recovery info from datacoord.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
+
+	pipelineParams, err := c.f.getPipelineParams(ctx)
+	if err != nil {
+		return err
+	}
+
 	dc, err := resource.Resource().DataCoordClient().GetWithContext(ctx)
 	if err != nil {
 		return errors.Wrap(err, "At Get DataCoordClient")
@@ -118,7 +124,7 @@ func (c *channelLifetime) Run() error {
 	}
 
 	// Build and add pipeline.
-	ds, err := pipeline.NewStreamingNodeDataSyncService(ctx, c.f.pipelineParams,
+	ds, err := pipeline.NewStreamingNodeDataSyncService(ctx, pipelineParams,
 		// TODO fubang add the db properties
 		&datapb.ChannelWatchInfo{Vchan: resp.GetInfo(), Schema: resp.GetSchema()}, handler.Chan(), func(t syncmgr.Task, err error) {
 			if err != nil || t == nil {
