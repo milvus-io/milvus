@@ -1146,6 +1146,10 @@ func (t *alterCollectionFieldTask) OnEnqueue() error {
 	return nil
 }
 
+const (
+	MmapEnabledKey = "mmap_enabled"
+)
+
 var allowedProps = []string{
 	common.MaxLengthKey,
 	common.MmapEnabledKey,
@@ -1160,12 +1164,35 @@ func IsKeyAllowed(key string) bool {
 	return false
 }
 
+func updatePropertiesKeys(oldProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+	props := make(map[string]string)
+	for _, prop := range oldProps {
+		var updatedKey string
+		if prop.Key == MmapEnabledKey {
+			updatedKey = common.MmapEnabledKey
+		} else {
+			updatedKey = prop.Key
+		}
+		props[updatedKey] = prop.Value
+	}
+
+	propKV := make([]*commonpb.KeyValuePair, 0)
+	for key, value := range props {
+		propKV = append(propKV, &commonpb.KeyValuePair{
+			Key:   key,
+			Value: value,
+		})
+	}
+
+	return propKV
+}
+
 func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
 	}
-
+	t.Properties = updatePropertiesKeys(t.Properties)
 	for _, prop := range t.Properties {
 		if !IsKeyAllowed(prop.Key) {
 			return merr.WrapErrParameterInvalidMsg("%s does not allow update in collection field param", prop.Key)
@@ -1184,6 +1211,7 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			if loaded {
 				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter collection field properties if collection loaded")
 			}
+
 		case common.MaxLengthKey:
 			IsStringType := false
 			fieldName := ""
