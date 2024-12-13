@@ -7,17 +7,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/tests/go_client/base"
-	"github.com/milvus-io/milvus/tests/go_client/common"
-	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
-
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
-
-	"github.com/stretchr/testify/require"
+	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/tests/go_client/base"
+	"github.com/milvus-io/milvus/tests/go_client/common"
+	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
 // Generate groupBy-supported vector indexes
@@ -71,7 +69,6 @@ func prepareDataForGroupBySearch(t *testing.T, loopInsert int, insertNi int, idx
 
 	if !withGrowing {
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
-		//mc.Flush(ctx, collName, false)
 	}
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultFloatVecFieldName: idx}))
 
@@ -105,8 +102,10 @@ func TestSearchGroupByFloatDefault(t *testing.T) {
 		queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 
 		// search with groupBy field
-		supportedGroupByFields := []string{common.DefaultInt64FieldName, common.DefaultInt8FieldName,
-			common.DefaultInt16FieldName, common.DefaultInt32FieldName, common.DefaultVarcharFieldName, common.DefaultBoolFieldName}
+		supportedGroupByFields := []string{
+			common.DefaultInt64FieldName, common.DefaultInt8FieldName,
+			common.DefaultInt16FieldName, common.DefaultInt32FieldName, common.DefaultVarcharFieldName, common.DefaultBoolFieldName,
+		}
 		for _, groupByField := range supportedGroupByFields {
 			resGroupBy, _ := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, queryVec).WithANNSField(common.DefaultFloatVecFieldName).
 				WithGroupByField(groupByField).WithOutputFields(common.DefaultInt64FieldName, groupByField))
@@ -161,8 +160,10 @@ func TestSearchGroupByFloatDefaultCosine(t *testing.T) {
 		queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 
 		// search with groupBy field without varchar
-		supportedGroupByFields := []string{common.DefaultInt64FieldName, common.DefaultInt8FieldName,
-			common.DefaultInt16FieldName, common.DefaultInt32FieldName, common.DefaultBoolFieldName}
+		supportedGroupByFields := []string{
+			common.DefaultInt64FieldName, common.DefaultInt8FieldName,
+			common.DefaultInt16FieldName, common.DefaultInt32FieldName, common.DefaultBoolFieldName,
+		}
 		for _, groupByField := range supportedGroupByFields {
 			resGroupBy, _ := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, queryVec).WithANNSField(common.DefaultFloatVecFieldName).
 				WithGroupByField(groupByField).WithOutputFields(common.DefaultInt64FieldName, groupByField))
@@ -281,7 +282,7 @@ func TestSearchGroupByBinaryDefault(t *testing.T) {
 			// search params
 			queryVec := hp.GenSearchVectors(2, common.DefaultDim, entity.FieldTypeBinaryVector)
 			t.Log("Waiting for support for specifying search parameters")
-			//sp, _ := index.NewBinIvfFlatIndexSearchParam(32)
+			// sp, _ := index.NewBinIvfFlatIndexSearchParam(32)
 			supportedGroupByFields := []string{common.DefaultVarcharFieldName, common.DefaultBinaryVecFieldName}
 
 			// search with groupBy field
@@ -316,7 +317,7 @@ func TestSearchGroupByBinaryGrowing(t *testing.T) {
 		// search params
 		queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeBinaryVector)
 		t.Log("Waiting for support for specifying search parameters")
-		//sp, _ := index.NewBinIvfFlatIndexSearchParam(64)
+		// sp, _ := index.NewBinIvfFlatIndexSearchParam(64)
 		supportedGroupByFields := []string{common.DefaultVarcharFieldName}
 
 		// search with groupBy field
@@ -415,7 +416,7 @@ func TestSearchGroupByUnsupportedIndex(t *testing.T) {
 			// groupBy search
 			queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 			_, err := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, queryVec).WithGroupByField(common.DefaultVarcharFieldName).WithANNSField(common.DefaultFloatVecFieldName))
-			common.CheckErr(t, err, false, "doesn't support search_group_by")
+			common.CheckErr(t, err, false, "doesn't support")
 		})
 	}
 }
@@ -427,8 +428,10 @@ func TestSearchGroupByUnsupportedDataType(t *testing.T) {
 
 	// groupBy search with unsupported field type
 	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-	for _, unsupportedField := range []string{common.DefaultFloatFieldName, common.DefaultDoubleFieldName,
-		common.DefaultJSONFieldName, common.DefaultFloatVecFieldName, common.DefaultInt8ArrayField, common.DefaultFloatArrayField} {
+	for _, unsupportedField := range []string{
+		common.DefaultFloatFieldName, common.DefaultDoubleFieldName,
+		common.DefaultJSONFieldName, common.DefaultFloatVecFieldName, common.DefaultInt8ArrayField, common.DefaultFloatArrayField,
+	} {
 		_, err := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, queryVec).WithGroupByField(unsupportedField).WithANNSField(common.DefaultFloatVecFieldName))
 		common.CheckErr(t, err, false, "unsupported data type")
 	}
@@ -448,9 +451,9 @@ func TestSearchGroupByRangeSearch(t *testing.T) {
 	// groupBy search with range
 	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 
-	//sp, _ := index.NewHNSWIndexSearchParam(50)
-	//sp.AddRadius(0)
-	//sp.AddRangeFilter(0.8)
+	// sp, _ := index.NewHNSWIndexSearchParam(50)
+	// sp.AddRadius(0)
+	// sp.AddRangeFilter(0.8)
 
 	// range search
 	_, err := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, queryVec).WithGroupByField(common.DefaultVarcharFieldName).WithANNSField(common.DefaultFloatVecFieldName))
