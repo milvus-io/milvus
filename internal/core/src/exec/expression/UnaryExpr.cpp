@@ -317,7 +317,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray() {
             }
             case proto::plan::Match: {
                 UnaryElementFuncForArray<ValueType, proto::plan::Match> func;
-                func(data, valid_data, size, val, index, res, valid_res);
+                func(data, size, val, index, res);
                 break;
             }
             default:
