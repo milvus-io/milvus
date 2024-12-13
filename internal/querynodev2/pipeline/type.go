@@ -22,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -50,8 +49,6 @@ type (
 	Collection  = segments.Collection
 	DataManager = segments.Manager
 	Segment     = segments.Segment
-
-	TSafeManager = tsafe.Manager
 
 	BaseNode = base.BaseNode
 	Msg      = base.Msg
