@@ -531,9 +531,13 @@ func (c *Core) Init() error {
 func (c *Core) initCredentials() error {
 	credInfo, _ := c.meta.GetCredential(util.UserRoot)
 	if credInfo == nil {
-		log.Debug("RootCoord init user root")
-		encryptedRootPassword, _ := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
-		err := c.meta.AddCredential(&internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
+		encryptedRootPassword, err := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
+		if err != nil {
+			log.Warn("RootCoord init user root failed", zap.Error(err))
+			return err
+		}
+		log.Info("RootCoord init user root")
+		err = c.meta.AddCredential(&internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
 		return err
 	}
 	return nil
@@ -1333,7 +1337,9 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 	log.Ctx(ctx).Info("received request to alter collection",
 		zap.String("role", typeutil.RootCoordRole),
 		zap.String("name", in.GetCollectionName()),
-		zap.Any("props", in.Properties))
+		zap.Any("props", in.Properties),
+		zap.Any("delete_keys", in.DeleteKeys),
+	)
 
 	t := &alterCollectionTask{
 		baseTask: newBaseTask(ctx, c),
@@ -1369,6 +1375,58 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 		zap.String("role", typeutil.RootCoordRole),
 		zap.String("name", in.GetCollectionName()),
 		zap.Uint64("ts", t.GetTs()))
+	return merr.Success(), nil
+}
+
+func (c *Core) AlterCollectionField(ctx context.Context, in *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionField", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("AlterCollectionField")
+
+	log.Ctx(ctx).Info("received request to alter collection field",
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("name", in.GetCollectionName()),
+		zap.String("fieldName", in.GetFieldName()),
+		zap.Any("props", in.Properties),
+	)
+
+	t := &alterCollectionFieldTask{
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
+	}
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Warn("failed to enqueue request to alter collection field",
+			zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()),
+			zap.String("fieldName", in.GetFieldName()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionField", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Warn("failed to alter collection",
+			zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()),
+			zap.Uint64("ts", t.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionField", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionField", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollectionField").Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	log.Info("done to alter collection field",
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("name", in.GetCollectionName()),
+		zap.String("fieldName", in.GetFieldName()))
 	return merr.Success(), nil
 }
 
@@ -2310,7 +2368,8 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 
 	if !in.ForceDrop {
 		grantEntities, err := c.meta.SelectGrant(util.DefaultTenant, &milvuspb.GrantEntity{
-			Role: &milvuspb.RoleEntity{Name: in.RoleName},
+			Role:   &milvuspb.RoleEntity{Name: in.RoleName},
+			DbName: "*",
 		})
 		if len(grantEntities) != 0 {
 			errMsg := "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"

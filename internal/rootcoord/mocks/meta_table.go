@@ -574,10 +574,6 @@ func (_c *IMetaTable_CreateDatabase_Call) RunAndReturn(run func(context.Context,
 func (_m *IMetaTable) CreatePrivilegeGroup(groupName string) error {
 	ret := _m.Called(groupName)
 
-	if len(ret) == 0 {
-		panic("no return value specified for CreatePrivilegeGroup")
-	}
-
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(groupName)
@@ -891,10 +887,6 @@ func (_c *IMetaTable_DropGrant_Call) RunAndReturn(run func(string, *milvuspb.Rol
 // DropPrivilegeGroup provides a mock function with given fields: groupName
 func (_m *IMetaTable) DropPrivilegeGroup(groupName string) error {
 	ret := _m.Called(groupName)
-
-	if len(ret) == 0 {
-		panic("no return value specified for DropPrivilegeGroup")
-	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
@@ -1357,13 +1349,51 @@ func (_c *IMetaTable_GetDatabaseByName_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// GetGeneralCount provides a mock function with given fields: ctx
+func (_m *IMetaTable) GetGeneralCount(ctx context.Context) int {
+	ret := _m.Called(ctx)
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func(context.Context) int); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// IMetaTable_GetGeneralCount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetGeneralCount'
+type IMetaTable_GetGeneralCount_Call struct {
+	*mock.Call
+}
+
+// GetGeneralCount is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *IMetaTable_Expecter) GetGeneralCount(ctx interface{}) *IMetaTable_GetGeneralCount_Call {
+	return &IMetaTable_GetGeneralCount_Call{Call: _e.mock.On("GetGeneralCount", ctx)}
+}
+
+func (_c *IMetaTable_GetGeneralCount_Call) Run(run func(ctx context.Context)) *IMetaTable_GetGeneralCount_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetGeneralCount_Call) Return(_a0 int) *IMetaTable_GetGeneralCount_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_GetGeneralCount_Call) RunAndReturn(run func(context.Context) int) *IMetaTable_GetGeneralCount_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetPrivilegeGroupRoles provides a mock function with given fields: groupName
 func (_m *IMetaTable) GetPrivilegeGroupRoles(groupName string) ([]*milvuspb.RoleEntity, error) {
 	ret := _m.Called(groupName)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetPrivilegeGroupRoles")
-	}
 
 	var r0 []*milvuspb.RoleEntity
 	var r1 error
@@ -1461,10 +1491,6 @@ func (_c *IMetaTable_IsAlias_Call) RunAndReturn(run func(string, string) bool) *
 // IsCustomPrivilegeGroup provides a mock function with given fields: groupName
 func (_m *IMetaTable) IsCustomPrivilegeGroup(groupName string) (bool, error) {
 	ret := _m.Called(groupName)
-
-	if len(ret) == 0 {
-		panic("no return value specified for IsCustomPrivilegeGroup")
-	}
 
 	var r0 bool
 	var r1 error
@@ -1925,10 +1951,6 @@ func (_c *IMetaTable_ListPolicy_Call) RunAndReturn(run func(string) ([]string, e
 func (_m *IMetaTable) ListPrivilegeGroups() ([]*milvuspb.PrivilegeGroupInfo, error) {
 	ret := _m.Called()
 
-	if len(ret) == 0 {
-		panic("no return value specified for ListPrivilegeGroups")
-	}
-
 	var r0 []*milvuspb.PrivilegeGroupInfo
 	var r1 error
 	if rf, ok := ret.Get(0).(func() ([]*milvuspb.PrivilegeGroupInfo, error)); ok {
@@ -2079,10 +2101,6 @@ func (_c *IMetaTable_OperatePrivilege_Call) RunAndReturn(run func(string, *milvu
 // OperatePrivilegeGroup provides a mock function with given fields: groupName, privileges, operateType
 func (_m *IMetaTable) OperatePrivilegeGroup(groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
 	ret := _m.Called(groupName, privileges, operateType)
-
-	if len(ret) == 0 {
-		panic("no return value specified for OperatePrivilegeGroup")
-	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, []*milvuspb.PrivilegeEntity, milvuspb.OperatePrivilegeGroupType) error); ok {

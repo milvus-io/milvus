@@ -538,7 +538,7 @@ func (c *SessionManagerImpl) CheckDNHealth(ctx context.Context) *healthcheck.Res
 				return
 			}
 
-			if len(checkHealthResp.Reasons) > 0 {
+			if checkHealthResp != nil && len(checkHealthResp.Reasons) > 0 {
 				wlock.Lock()
 				result.AppendResult(healthcheck.GetHealthCheckResultFromResp(checkHealthResp))
 				wlock.Unlock()

@@ -58,7 +58,7 @@ func Test_ListDBTask(t *testing.T) {
 	})
 
 	t.Run("ok", func(t *testing.T) {
-		ret := []*model.Database{model.NewDefaultDatabase()}
+		ret := []*model.Database{model.NewDefaultDatabase(nil)}
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("ListDatabases",
 			mock.Anything,
@@ -89,7 +89,7 @@ func Test_ListDBTask(t *testing.T) {
 	t.Run("list db with auth", func(t *testing.T) {
 		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
 		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
-		ret := []*model.Database{model.NewDefaultDatabase()}
+		ret := []*model.Database{model.NewDefaultDatabase(nil)}
 		meta := mockrootcoord.NewIMetaTable(t)
 
 		core := newTestCore(withMeta(meta))

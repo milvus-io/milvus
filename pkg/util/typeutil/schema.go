@@ -527,6 +527,15 @@ func IsStringType(dataType schemapb.DataType) bool {
 	}
 }
 
+func IsArrayContainStringElementType(dataType schemapb.DataType, elementType schemapb.DataType) bool {
+	if IsArrayType(dataType) {
+		if elementType == schemapb.DataType_String || elementType == schemapb.DataType_VarChar {
+			return true
+		}
+	}
+	return false
+}
+
 func IsVariableDataType(dataType schemapb.DataType) bool {
 	return IsStringType(dataType) || IsArrayType(dataType) || IsJSONType(dataType)
 }
@@ -1859,4 +1868,12 @@ func SparseFloatRowDim(row []byte) int64 {
 		return 0
 	}
 	return int64(SparseFloatRowIndexAt(row, SparseFloatRowElementCount(row)-1)) + 1
+}
+
+// placeholderGroup is a serialized PlaceholderGroup, return estimated total
+// number of non-zero elements of all the sparse vectors in the placeholderGroup
+// This is a rough estimate, and should be used only for statistics.
+func EstimateSparseVectorNNZFromPlaceholderGroup(placeholderGroup []byte, nq int) int {
+	overheadBytes := math.Max(10, float64(nq*3))
+	return (len(placeholderGroup) - int(overheadBytes)) / 8
 }

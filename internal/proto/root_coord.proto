@@ -64,7 +64,8 @@ service RootCoord {
     rpc ShowCollections(milvus.ShowCollectionsRequest) returns (milvus.ShowCollectionsResponse) {}
 
     rpc AlterCollection(milvus.AlterCollectionRequest) returns (common.Status) {}
-
+    
+    rpc AlterCollectionField(milvus.AlterCollectionFieldRequest) returns (common.Status) {}
   /**
    * @brief This method is used to create partition
    *

@@ -63,6 +63,7 @@ type searchTask struct {
 	mustUsePartitionKey    bool
 	resultSizeInsufficient bool
 	isTopkReduce           bool
+	isRecallEvaluation     bool
 
 	userOutputFields  []string
 	userDynamicFields []string
@@ -463,6 +464,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		return err
 	}
 
+	metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.PlaceholderGroup, int(t.request.GetNq()))))
 	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
 	t.SearchRequest.Topk = queryInfo.GetTopk()
 	t.SearchRequest.MetricType = queryInfo.GetMetricType()
@@ -620,9 +622,13 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	t.queryChannelsTs = make(map[string]uint64)
 	t.relatedDataSize = 0
 	isTopkReduce := false
+	isRecallEvaluation := false
 	for _, r := range toReduceResults {
 		if r.GetIsTopkReduce() {
 			isTopkReduce = true
+		}
+		if r.GetIsRecallEvaluation() {
+			isRecallEvaluation = true
 		}
 		t.relatedDataSize += r.GetCostAggregation().GetTotalRelatedDataSize()
 		for ch, ts := range r.GetChannelsMvcc() {
@@ -702,6 +708,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	}
 	t.resultSizeInsufficient = resultSizeInsufficient
 	t.isTopkReduce = isTopkReduce
+	t.isRecallEvaluation = isRecallEvaluation
 	t.result.CollectionName = t.collectionName
 	t.fillInFieldInfo()
 

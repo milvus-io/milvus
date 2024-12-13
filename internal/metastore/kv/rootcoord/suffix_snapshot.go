@@ -434,18 +434,20 @@ func (ss *SuffixSnapshot) generateSaveExecute(kvs map[string]string, ts typeutil
 func (ss *SuffixSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 	// ts 0 case shall be treated as fetch latest/current value
 	if ts == 0 || ts == typeutil.MaxTimestamp {
-		keys, values, err := ss.MetaKv.LoadWithPrefix(key)
-		fks := keys[:0]   // make([]string, 0, len(keys))
-		fvs := values[:0] // make([]string, 0, len(values))
+		fks := make([]string, 0)
+		fvs := make([]string, 0)
 		// hide rootPrefix from return value
-		for i, k := range keys {
+		applyFn := func(key []byte, value []byte) error {
 			// filters tombstone
-			if ss.isTombstone(values[i]) {
-				continue
+			if ss.isTombstone(string(value)) {
+				return nil
 			}
-			fks = append(fks, ss.hideRootPrefix(k))
-			fvs = append(fvs, values[i])
+			fks = append(fks, ss.hideRootPrefix(string(key)))
+			fvs = append(fvs, string(value))
+			return nil
 		}
+
+		err := ss.MetaKv.WalkWithPrefix(key, PaginationSize, applyFn)
 		return fks, fvs, err
 	}
 	ss.Lock()
@@ -594,6 +596,10 @@ func (ss *SuffixSnapshot) batchRemoveExpiredKvs(keyGroup []string, originalKey s
 
 	// to protect txn finished with ascend order, reverse the latest kv with tombstone to tail of array
 	sort.Strings(keyGroup)
+	if !includeOriginalKey && len(keyGroup) > 0 {
+		// keep the latest snapshot key for historical version compatibility
+		keyGroup = keyGroup[0 : len(keyGroup)-1]
+	}
 	removeFn := func(partialKeys []string) error {
 		return ss.MetaKv.MultiRemove(partialKeys)
 	}

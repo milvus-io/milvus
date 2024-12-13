@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -200,6 +201,7 @@ func (s *Server) startGrpcLoop() {
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()))
 	indexpb.RegisterIndexCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
+	coordclient.RegisterDataCoordServer(s)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {
 		s.grpcErrChan <- err

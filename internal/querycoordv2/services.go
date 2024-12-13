@@ -1001,7 +1001,7 @@ func (s *Server) broadcastCheckHealth(ctx context.Context) *healthcheck.Result {
 				return
 			}
 
-			if len(checkHealthResp.Reasons) > 0 {
+			if checkHealthResp != nil && len(checkHealthResp.Reasons) > 0 {
 				wlock.Lock()
 				result.AppendResult(healthcheck.GetHealthCheckResultFromResp(checkHealthResp))
 				wlock.Unlock()
