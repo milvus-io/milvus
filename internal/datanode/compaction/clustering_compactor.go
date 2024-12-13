@@ -806,7 +806,7 @@ func (t *clusteringCompactionTask) flushLargestBuffers(ctx context.Context) erro
 		t.clusterBufferLocks.RUnlock(buffer.id)
 	}
 	sort.Slice(bufferIDs, func(i, j int) bool {
-		return bufferRowNums[i] > bufferRowNums[j]
+		return bufferRowNums[bufferIDs[i]] > bufferRowNums[bufferIDs[j]]
 	})
 	log.Info("start flushLargestBuffers", zap.Ints("bufferIDs", bufferIDs), zap.Int64("currentMemorySize", currentMemorySize))
 

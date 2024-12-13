@@ -87,7 +87,7 @@ func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*me
 
 // AssignSegment, when row count based balancer assign segments, it will assign channel to node with least global channel count.
 // try to make every query node has channel count
-func (b *RowCountBasedBalancer) AssignChannel(channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
+func (b *RowCountBasedBalancer) AssignChannel(collectionID int64, channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
 	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
 	if !manualBalance {
 		versionRangeFilter := semver.MustParseRange(">2.3.x")
@@ -311,7 +311,7 @@ func (b *RowCountBasedBalancer) genStoppingChannelPlan(replica *meta.Replica, rw
 	channelPlans := make([]ChannelAssignPlan, 0)
 	for _, nodeID := range roNodes {
 		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(nodeID))
-		plans := b.AssignChannel(dmChannels, rwNodes, false)
+		plans := b.AssignChannel(replica.GetCollectionID(), dmChannels, rwNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].Replica = replica
@@ -349,7 +349,7 @@ func (b *RowCountBasedBalancer) genChannelPlan(br *balanceReport, replica *meta.
 			return nil
 		}
 
-		channelPlans := b.AssignChannel(channelsToMove, nodeWithLessChannel, false)
+		channelPlans := b.AssignChannel(replica.GetCollectionID(), channelsToMove, nodeWithLessChannel, false)
 		for i := range channelPlans {
 			channelPlans[i].From = channelPlans[i].Channel.Node
 			channelPlans[i].Replica = replica

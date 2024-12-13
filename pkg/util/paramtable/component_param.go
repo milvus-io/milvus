@@ -653,8 +653,8 @@ like the old password verification when updating the credential`,
 	p.DefaultRootPassword = ParamItem{
 		Key:          "common.security.defaultRootPassword",
 		Version:      "2.4.7",
-		Doc:          "default password for root user",
-		DefaultValue: "Milvus",
+		Doc:          "default password for root user. The maximum length is 72 characters, and double quotes are required.",
+		DefaultValue: "\"Milvus\"",
 		Export:       true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
@@ -1146,6 +1146,7 @@ type rootCoordConfig struct {
 	MaxGeneralCapacity          ParamItem `refreshable:"true"`
 	GracefulStopTimeout         ParamItem `refreshable:"true"`
 	UseLockScheduler            ParamItem `refreshable:"true"`
+	DefaultDBProperties         ParamItem `refreshable:"false"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -1229,6 +1230,15 @@ Segments with smaller size than this parameter will not be indexed, and will be 
 		Export:       false,
 	}
 	p.UseLockScheduler.Init(base.mgr)
+
+	p.DefaultDBProperties = ParamItem{
+		Key:          "rootCoord.defaultDBProperties",
+		Version:      "2.4.16",
+		DefaultValue: "{}",
+		Doc:          "default db properties, should be a json string",
+		Export:       false,
+	}
+	p.DefaultDBProperties.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1356,8 +1366,15 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.MaxPasswordLength = ParamItem{
 		Key:          "proxy.maxPasswordLength",
-		DefaultValue: "256",
+		DefaultValue: "72", // bcrypt max length
 		Version:      "2.0.0",
+		Formatter: func(v string) string {
+			n := getAsInt(v)
+			if n <= 0 || n > 72 {
+				return "72"
+			}
+			return v
+		},
 		PanicIfEmpty: true,
 	}
 	p.MaxPasswordLength.Init(base.mgr)
@@ -1753,6 +1770,7 @@ type queryCoordConfig struct {
 	RowCountFactor                      ParamItem `refreshable:"true"`
 	SegmentCountFactor                  ParamItem `refreshable:"true"`
 	GlobalSegmentCountFactor            ParamItem `refreshable:"true"`
+	CollectionChannelCountFactor        ParamItem `refreshable:"true"`
 	SegmentCountMaxSteps                ParamItem `refreshable:"true"`
 	RowCountMaxSteps                    ParamItem `refreshable:"true"`
 	RandomMaxSteps                      ParamItem `refreshable:"true"`
@@ -1799,8 +1817,9 @@ type queryCoordConfig struct {
 
 	CollectionObserverInterval         ParamItem `refreshable:"false"`
 	CheckExecutedFlagInterval          ParamItem `refreshable:"false"`
-	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
 	CollectionBalanceSegmentBatchSize  ParamItem `refreshable:"true"`
+	CollectionBalanceChannelBatchSize  ParamItem `refreshable:"true"`
+	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
 	ClusterLevelLoadReplicaNumber      ParamItem `refreshable:"true"`
 	ClusterLevelLoadResourceGroups     ParamItem `refreshable:"true"`
 }
@@ -1917,6 +1936,17 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.GlobalSegmentCountFactor.Init(base.mgr)
+
+	p.CollectionChannelCountFactor = ParamItem{
+		Key:          "queryCoord.collectionChannelCountFactor",
+		Version:      "2.4.18",
+		DefaultValue: "10",
+		PanicIfEmpty: true,
+		Doc: `the channel count weight used when balancing channels among queryNodes, 
+		A higher value reduces the likelihood of assigning channels from the same collection to the same QueryNode. Set to 1 to disable this feature.`,
+		Export: true,
+	}
+	p.CollectionChannelCountFactor.Init(base.mgr)
 
 	p.SegmentCountMaxSteps = ParamItem{
 		Key:          "queryCoord.segmentCountMaxSteps",
@@ -2339,6 +2369,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.CollectionBalanceSegmentBatchSize.Init(base.mgr)
+
+	p.CollectionBalanceChannelBatchSize = ParamItem{
+		Key:          "queryCoord.collectionBalanceChannelBatchSize",
+		Version:      "2.4.18",
+		DefaultValue: "1",
+		Doc:          "the max balance task number for channel at each round",
+		Export:       false,
+	}
+	p.CollectionBalanceChannelBatchSize.Init(base.mgr)
 
 	p.ClusterLevelLoadReplicaNumber = ParamItem{
 		Key:          "queryCoord.clusterLevelLoadReplicaNumber",

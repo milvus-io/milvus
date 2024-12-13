@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -982,7 +983,7 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 			if loaded {
-				return merr.WrapErrCollectionLoaded(" %s %s can not delete mmap properties if collection loaded", t.CollectionName, key)
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not delete mmap properties if collection loaded")
 			}
 		}
 	}
@@ -1108,24 +1109,67 @@ func (t *alterCollectionFieldTask) OnEnqueue() error {
 	return nil
 }
 
+var allowedProps = []string{
+	common.MaxLengthKey,
+	common.MmapEnabledKey,
+}
+
+func IsKeyAllowed(key string) bool {
+	for _, allowedKey := range allowedProps {
+		if key == allowedKey {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
 	}
 
-	IsStringType := false
-	fieldName := ""
-	var dataType int32
-	for _, field := range collSchema.Fields {
-		if field.GetName() == t.FieldName && (typeutil.IsStringType(field.DataType) || typeutil.IsArrayContainStringElementType(field.DataType, field.ElementType)) {
-			IsStringType = true
-			fieldName = field.GetName()
-			dataType = int32(field.DataType)
+	for _, prop := range t.Properties {
+		if !IsKeyAllowed(prop.Key) {
+			return merr.WrapErrParameterInvalidMsg("%s does not allow update in collection field param", prop.Key)
 		}
-	}
-	if !IsStringType {
-		return merr.WrapErrParameterInvalid(fieldName, "%s can not modify the maxlength for non-string types", schemapb.DataType_name[dataType])
+		// Check the value type based on the key
+		switch prop.Key {
+		case common.MmapEnabledKey:
+			collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
+			if err != nil {
+				return err
+			}
+			loaded, err1 := isCollectionLoaded(ctx, t.queryCoord, collectionID)
+			if err1 != nil {
+				return err1
+			}
+			if loaded {
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter collection field properties if collection loaded")
+			}
+		case common.MaxLengthKey:
+			IsStringType := false
+			fieldName := ""
+			var dataType int32
+			for _, field := range collSchema.Fields {
+				if field.GetName() == t.FieldName && (typeutil.IsStringType(field.DataType) || typeutil.IsArrayContainStringElementType(field.DataType, field.ElementType)) {
+					IsStringType = true
+					fieldName = field.GetName()
+					dataType = int32(field.DataType)
+				}
+			}
+			if !IsStringType {
+				return merr.WrapErrParameterInvalid(fieldName, "%s can not modify the maxlength for non-string types", schemapb.DataType_name[dataType])
+			}
+			value, err := strconv.Atoi(prop.Value)
+			if err != nil {
+				return merr.WrapErrParameterInvalid("%s should be an integer, but got %T", prop.Key, prop.Value)
+			}
+
+			if value > defaultMaxVarCharLength {
+				return merr.WrapErrParameterInvalid("%s exceeds the maximum allowed value 65535", prop.Value)
+			}
+		}
 	}
 
 	return nil

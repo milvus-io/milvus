@@ -339,6 +339,9 @@ queryCoord:
   rowCountFactor: 0.4 # the row count weight used when balancing segments among queryNodes
   segmentCountFactor: 0.4 # the segment count weight used when balancing segments among queryNodes
   globalSegmentCountFactor: 0.1 # the segment count weight used when balancing segments among queryNodes
+  # the channel count weight used when balancing channels among queryNodes, 
+  # 		A higher value reduces the likelihood of assigning channels from the same collection to the same QueryNode. Set to 1 to disable this feature.
+  collectionChannelCountFactor: 10
   segmentCountMaxSteps: 50 # segment count based plan generator max steps
   rowCountMaxSteps: 50 # segment count based plan generator max steps
   randomMaxSteps: 10 # segment count based plan generator max steps
@@ -796,17 +799,17 @@ common:
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
-    defaultRootPassword: Milvus # default password for root user
+    defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
     rbac:
       overrideBuiltInPrivilgeGroups:
         enabled: false # Whether to override build-in privilege groups
       cluster:
         readonly:
-          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups # Cluster level readonly privileges
+          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups # Cluster level readonly privileges
         readwrite:
-          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups # Cluster level readwrite privileges
+          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups # Cluster level readwrite privileges
         admin:
-          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups,BackupRBAC,RestoreRBAC,CreateDatabase,DropDatabase,CreateOwnership,DropOwnership,ManageOwnership,CreateResourceGroup,DropResourceGroup,UpdateUser,RenameCollection # Cluster level admin privileges
+          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups,BackupRBAC,RestoreRBAC,CreateDatabase,DropDatabase,CreateOwnership,DropOwnership,ManageOwnership,CreateResourceGroup,DropResourceGroup,UpdateUser,RenameCollection,CreatePrivilegeGroup,DropPrivilegeGroup,OperatePrivilegeGroup # Cluster level admin privileges
       database:
         readonly:
           privileges: ShowCollections,DescribeDatabase # Database level readonly privileges
