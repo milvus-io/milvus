@@ -2,6 +2,7 @@ package log
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -100,4 +101,33 @@ func TestMLoggerRatedLog(t *testing.T) {
 	success = Ctx(ctx).RatedInfo(3.0, "info test")
 	assert.True(t, success)
 	Ctx(ctx).Sync()
+}
+
+func TestNewIntentContext(t *testing.T) {
+	ts := newTestLogSpy(t)
+	conf := &Config{Level: "debug", DisableTimestamp: true}
+	logger, p, _ := InitTestLogger(ts, conf)
+	ReplaceGlobals(logger, p)
+
+	replaceLeveledLoggers(logger)
+	testName := "testRole"
+	testIntent := "testIntent"
+	ctx, span := NewIntentContext(testName, testIntent)
+	traceID := span.SpanContext().TraceID().String()
+	assert.NotNil(t, ctx)
+	assert.NotNil(t, span)
+	assert.NotNil(t, ctx.Value(CtxLogKey))
+	mLogger, ok := ctx.Value(CtxLogKey).(*MLogger)
+	assert.True(t, ok)
+	assert.NotNil(t, mLogger)
+
+	Ctx(ctx).Info("Info Test")
+	Ctx(ctx).Debug("Debug Test")
+	Ctx(ctx).Warn("Warn Test")
+	Ctx(ctx).Error("Error Test")
+	Ctx(ctx).Sync()
+
+	ts.assertLastMessageContains(fmt.Sprintf("role=%s", testName))
+	ts.assertLastMessageContains(fmt.Sprintf("intent=%s", testIntent))
+	ts.assertLastMessageContains(fmt.Sprintf("traceID=%s", traceID))
 }
