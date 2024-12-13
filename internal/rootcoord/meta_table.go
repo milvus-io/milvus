@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
@@ -408,6 +409,9 @@ func (mt *MetaTable) getDatabaseByNameInternal(ctx context.Context, dbName strin
 }
 
 func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) error {
+	ctx, sp := otel.Tracer("MetaTable").Start(ctx, "AddCollection")
+	defer sp.End()
+	sp.AddEvent(fmt.Sprintf("dbID=%d, collectionName=%s", coll.DBID, coll.Name))
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -441,6 +445,9 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 }
 
 func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error {
+	ctx, sp := otel.Tracer("MetaTable").Start(ctx, "ChangeCollectionState")
+	defer sp.End()
+	sp.AddEvent(fmt.Sprintf("state=%s", state.String()))
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 

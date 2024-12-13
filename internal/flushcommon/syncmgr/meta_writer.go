@@ -158,7 +158,7 @@ func (b *brokerMetaWriter) DropChannel(ctx context.Context, channelName string) 
 		return false, nil
 	}, b.opts...)
 	if err != nil {
-		log.Warn("failed to DropChannel",
+		log.Ctx(ctx).Warn("failed to DropChannel",
 			zap.String("channel", channelName),
 			zap.Error(err))
 	}

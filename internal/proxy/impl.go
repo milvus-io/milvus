@@ -843,7 +843,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		zap.Bool("refreshMode", request.Refresh),
 	)
 
-	log.Debug("LoadCollection received")
+	log.Info("LoadCollection received")
 
 	if err := node.sched.ddQueue.Enqueue(lct); err != nil {
 		log.Warn("LoadCollection failed to enqueue",
@@ -854,7 +854,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
+	log.Info(
 		"LoadCollection enqueued",
 		zap.Uint64("BeginTS", lct.BeginTs()),
 		zap.Uint64("EndTS", lct.EndTs()),
@@ -870,7 +870,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
+	log.Info(
 		"LoadCollection done",
 		zap.Uint64("BeginTS", lct.BeginTs()),
 		zap.Uint64("EndTS", lct.EndTs()),
@@ -3142,7 +3142,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		}
 	}()
 
-	log.Debug(rpcReceived(method))
+	log.Info(rpcReceived(method))
 
 	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
 		log.Warn(
@@ -3164,7 +3164,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	}
 	tr.CtxRecord(ctx, "search request enqueue")
 
-	log.Debug(
+	log.Info(
 		rpcEnqueued(method),
 		zap.Uint64("timestamp", qt.Base.Timestamp),
 	)

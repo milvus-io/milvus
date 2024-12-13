@@ -18,8 +18,10 @@ package pulsar
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"go.opentelemetry.io/otel"
 
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/common"
@@ -40,6 +42,10 @@ func (pp *pulsarProducer) Topic() string {
 }
 
 func (pp *pulsarProducer) Send(ctx context.Context, message *common.ProducerMessage) (common.MessageID, error) {
+	ctx, sp := otel.Tracer("pulsarProducer").Start(ctx, "PulsarProducer.Send")
+	defer sp.End()
+	sp.AddEvent(fmt.Sprintf("Topic=%s", pp.p.Topic()))
+	sp.AddEvent(fmt.Sprintf("PayloadSize=%d", len(message.Payload)))
 	start := timerecord.NewTimeRecorder("send msg to stream")
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.TotalLabel).Inc()
 

@@ -317,7 +317,7 @@ func CheckAllChannelsWatched(meta *meta, channelManager ChannelManager) map[int6
 		}
 
 		for _, channelName := range collInfo.VChannelNames {
-			_, err := channelManager.FindWatcher(channelName)
+			_, err := channelManager.FindWatcher(context.TODO(), channelName)
 			if err != nil {
 				checkResult[collID] = fmt.Sprintf("channel:%s is not watched", channelName)
 			}

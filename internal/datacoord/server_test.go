@@ -883,8 +883,8 @@ func TestDropVirtualChannel(t *testing.T) {
 		ctx := context.Background()
 		chanName := "ch1"
 		mockChManager := NewMockChannelManager(t)
-		mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(true).Twice()
-		mockChManager.EXPECT().Release(mock.Anything, chanName).Return(nil).Twice()
+		mockChManager.EXPECT().Match(mock.Anything, mock.Anything, mock.Anything).Return(true).Twice()
+		mockChManager.EXPECT().Release(mock.Anything, mock.Anything, chanName).Return(nil).Twice()
 		svr.channelManager = mockChManager
 
 		req := &datapb.DropVirtualChannelRequest{
@@ -965,7 +965,7 @@ func TestDropVirtualChannel(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		mockChManager := NewMockChannelManager(t)
-		mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(false).Once()
+		mockChManager.EXPECT().Match(mock.Anything, mock.Anything, mock.Anything).Return(false).Once()
 		svr.channelManager = mockChManager
 
 		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
@@ -2267,7 +2267,7 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 
 		datanodeID := int64(1)
 		channelManager := NewMockChannelManager(t)
-		channelManager.EXPECT().Match(datanodeID, mockVChannel).Return(true)
+		channelManager.EXPECT().Match(mock.Anything, datanodeID, mockVChannel).Return(true)
 
 		svr.channelManager = channelManager
 		req := &datapb.UpdateChannelCheckpointRequest{
@@ -2313,7 +2313,7 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 
 		datanodeID := int64(1)
 		channelManager := NewMockChannelManager(t)
-		channelManager.EXPECT().Match(datanodeID, mockVChannel).Return(false)
+		channelManager.EXPECT().Match(mock.Anything, datanodeID, mockVChannel).Return(false)
 
 		svr.channelManager = channelManager
 		req := &datapb.UpdateChannelCheckpointRequest{
@@ -2466,9 +2466,9 @@ func Test_CheckHealth(t *testing.T) {
 	getChannelManager := func(findWatcherOk bool) ChannelManager {
 		channelManager := NewMockChannelManager(t)
 		if findWatcherOk {
-			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, nil).Maybe()
+			channelManager.EXPECT().FindWatcher(mock.Anything, mock.Anything).Return(0, nil).Maybe()
 		} else {
-			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, errors.New("error")).Maybe()
+			channelManager.EXPECT().FindWatcher(mock.Anything, mock.Anything).Return(0, errors.New("error")).Maybe()
 		}
 		return channelManager
 	}

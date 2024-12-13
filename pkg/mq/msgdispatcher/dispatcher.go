@@ -92,7 +92,7 @@ func NewDispatcher(
 	lagTargets *typeutil.ConcurrentMap[string, *target],
 	includeCurrentMsg bool,
 ) (*Dispatcher, error) {
-	log := log.With(zap.String("pchannel", pchannel),
+	log := log.Ctx(ctx).With(zap.String("pchannel", pchannel),
 		zap.String("subName", subName), zap.Bool("isMain", isMain))
 	log.Info("creating dispatcher...")
 

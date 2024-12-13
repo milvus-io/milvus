@@ -9,6 +9,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/klauspost/compress/zstd"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -213,6 +214,8 @@ func (s Catalog) GetResourceGroups(ctx context.Context) ([]*querypb.ResourceGrou
 }
 
 func (s Catalog) ReleaseCollection(ctx context.Context, collection int64) error {
+	ctx, span := otel.Tracer("Catalog").Start(ctx, "ReleaseCollection")
+	defer span.End()
 	// remove collection and obtained partitions
 	collectionKey := EncodeCollectionLoadInfoKey(collection)
 	err := s.cli.Remove(ctx, collectionKey)
@@ -246,6 +249,8 @@ func (s Catalog) ReleasePartition(ctx context.Context, collection int64, partiti
 }
 
 func (s Catalog) ReleaseReplicas(ctx context.Context, collectionID int64) error {
+	ctx, span := otel.Tracer("Catalog").Start(ctx, "ReleaseReplicas")
+	defer span.End()
 	key := encodeCollectionReplicaKey(collectionID)
 	return s.cli.RemoveWithPrefix(ctx, key)
 }
