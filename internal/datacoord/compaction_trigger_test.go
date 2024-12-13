@@ -788,7 +788,8 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 	}
 
 	segmentInfos.secondaryIndexes.coll2Segments[2] = make(map[UniqueID]*SegmentInfo)
-	for i := UniqueID(0); i < 50; i++ {
+	nSegments := 50
+	for i := UniqueID(0); i < UniqueID(nSegments); i++ {
 		info := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:             i,
@@ -951,16 +952,13 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 
-			// should be split into two plans
-			plan := <-spy.spyChan
-			assert.NotEmpty(t, plan)
-
-			// TODO CZS
-			// assert.Equal(t, len(plan.SegmentBinlogs), 30)
-			plan = <-spy.spyChan
-			assert.NotEmpty(t, plan)
-			// TODO CZS
-			// assert.Equal(t, len(plan.SegmentBinlogs), 20)
+			select {
+			case plan := <-spy.spyChan:
+				assert.NotEmpty(t, plan)
+				assert.Equal(t, len(plan.SegmentBinlogs), nSegments)
+			case <-time.After(2 * time.Second):
+				assert.Fail(t, "timeout")
+			}
 		})
 	}
 }

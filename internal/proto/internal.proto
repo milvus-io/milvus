@@ -128,6 +128,7 @@ message SearchRequest {
   int64 group_size = 24;
   int64 field_id = 25;
   bool is_topk_reduce = 26;
+  bool is_recall_evaluation = 27;
 }
 
 message SubSearchResults {
@@ -164,6 +165,7 @@ message SearchResults {
   bool is_advanced = 16;
   int64 all_search_count = 17;
   bool is_topk_reduce = 18;
+  bool is_recall_evaluation = 19;
 }
 
 message CostAggregation {

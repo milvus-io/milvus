@@ -66,7 +66,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "delete_vectors_count",
 			Help:      "counter of vectors successfully deleted",
-		}, []string{nodeIDLabelName, databaseLabelName})
+		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
 
 	// ProxySQLatency record the latency of search successfully.
 	ProxySQLatency = prometheus.NewHistogramVec(
@@ -408,6 +408,25 @@ var (
 			Name:      "retry_search_result_insufficient_cnt",
 			Help:      "counter of retry search which does not have enough results",
 		}, []string{nodeIDLabelName, queryTypeLabelName, collectionName})
+
+	// ProxyRecallSearchCount records the counter that users issue recall evaluation requests, which are cpu-intensive
+	ProxyRecallSearchCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "recall_search_cnt",
+			Help:      "counter of recall search",
+		}, []string{nodeIDLabelName, queryTypeLabelName, collectionName})
+
+	// ProxySearchSparseNumNonZeros records the estimated number of non-zeros in each sparse search task
+	ProxySearchSparseNumNonZeros = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "search_sparse_num_non_zeros",
+			Help:      "the number of non-zeros in each sparse search task",
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, collectionName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -468,6 +487,9 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(MaxInsertRate)
 	registry.MustRegister(ProxyRetrySearchCount)
 	registry.MustRegister(ProxyRetrySearchResultInsufficientCount)
+	registry.MustRegister(ProxyRecallSearchCount)
+
+	registry.MustRegister(ProxySearchSparseNumNonZeros)
 
 	RegisterStreamingServiceClient(registry)
 }
@@ -591,6 +613,11 @@ func CleanupProxyCollectionMetrics(nodeID int64, collection string) {
 	ProxyRetrySearchResultInsufficientCount.Delete(prometheus.Labels{
 		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
 		queryTypeLabelName: HybridSearchLabel,
+		collectionName:     collection,
+	})
+	ProxyRecallSearchCount.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: SearchLabel,
 		collectionName:     collection,
 	})
 }

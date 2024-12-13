@@ -540,7 +540,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 	toMerge := newSegmentPacker("merge", smallCandidates)
 	toPack := newSegmentPacker("pack", nonPlannedSegments)
 
-	maxSegs := Params.DataCoordCfg.MaxSegmentToMerge.GetAsInt64()
+	maxSegs := int64(4096) // Deprecate the max segment limit since it is irrelevant in simple compactions.
 	minSegs := Params.DataCoordCfg.MinSegmentToMerge.GetAsInt64()
 	compactableProportion := Params.DataCoordCfg.SegmentCompactableProportion.GetAsFloat()
 	satisfiedSize := int64(float64(expectedSize) * compactableProportion)
@@ -548,16 +548,18 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 	maxLeftSize := expectedSize - satisfiedSize
 	expectedExpandedSize := int64(float64(expectedSize) * expantionRate)
 	maxExpandedLeftSize := expectedExpandedSize - satisfiedSize
+	reasons := make([]string, 0)
 	// 1. Merge small segments if they can make a full bucket
 	for {
-		pack, _ := toMerge.pack(expectedSize, maxLeftSize, minSegs, maxSegs)
+		pack, left := toMerge.pack(expectedSize, maxLeftSize, minSegs, maxSegs)
 		if len(pack) == 0 {
 			break
 		}
+		reasons = append(reasons, fmt.Sprintf("merging %d small segments with left size %d", len(pack), left))
 		buckets = append(buckets, pack)
 	}
-	// 2. greedy pick from large segment to small, the goal is to fill each segment to reach 512M
-	// we must ensure all prioritized candidates is in a plan
+
+	// 2. Pack prioritized candidates with small segments
 	// TODO the compaction selection policy should consider if compaction workload is high
 	for {
 		// No limit on the remaining size because we want to pack all prioritized candidates
@@ -565,6 +567,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 		if len(pack) == 0 {
 			break
 		}
+		reasons = append(reasons, fmt.Sprintf("packing %d prioritized segments", len(pack)))
 		buckets = append(buckets, pack)
 	}
 
@@ -575,6 +578,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 		if len(pack) == 0 {
 			break
 		}
+		reasons = append(reasons, fmt.Sprintf("packing all %d small segments", len(pack)))
 		buckets = append(buckets, pack)
 	}
 	remaining := t.squeezeSmallSegmentsToBuckets(toMerge.candidates, buckets, expectedSize)
@@ -586,6 +590,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 		if len(pack) == 0 {
 			break
 		}
+		reasons = append(reasons, fmt.Sprintf("packing %d small segments and non-planned segments", len(pack)))
 		buckets = append(buckets, pack)
 	}
 
@@ -600,7 +605,15 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 		pair := typeutil.NewPair(totalRows, segmentIDs)
 		tasks[i] = &pair
 	}
-	log.Info("generatePlans", zap.Int64("collectionID", signal.collectionID), zap.Int("plan_num", len(tasks)))
+
+	if len(tasks) > 0 {
+		log.Info("generated nontrivial compaction tasks",
+			zap.Int64("collectionID", signal.collectionID),
+			zap.Int("prioritizedCandidates", len(prioritizedCandidates)),
+			zap.Int("smallCandidates", len(smallCandidates)),
+			zap.Int("nonPlannedSegments", len(nonPlannedSegments)),
+			zap.Strings("reasons", reasons))
+	}
 	return tasks
 }
 

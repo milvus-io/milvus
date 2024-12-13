@@ -64,7 +64,8 @@ service RootCoord {
     rpc ShowCollections(milvus.ShowCollectionsRequest) returns (milvus.ShowCollectionsResponse) {}
 
     rpc AlterCollection(milvus.AlterCollectionRequest) returns (common.Status) {}
-
+    
+    rpc AlterCollectionField(milvus.AlterCollectionFieldRequest) returns (common.Status) {}
   /**
    * @brief This method is used to create partition
    *
@@ -224,6 +225,7 @@ message AlterDatabaseRequest {
   string db_name = 2;
   string db_id = 3;
   repeated common.KeyValuePair properties = 4;
+  repeated string delete_keys = 5;
 }
 
 message GetPChannelInfoRequest {
@@ -245,4 +247,3 @@ message CollectionInfoOnPChannel {
 message PartitionInfoOnPChannel {
   int64 partition_id = 1;
 }
-

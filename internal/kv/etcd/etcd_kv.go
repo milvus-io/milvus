@@ -89,23 +89,26 @@ func (kv *etcdKV) WalkWithPrefix(ctx context.Context, prefix string, paginationS
 	key := prefix
 	for {
 		ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
-		defer cancel()
 		resp, err := kv.getEtcdMeta(ctx, key, opts...)
 		if err != nil {
+			cancel()
 			return err
 		}
 
 		for _, kv := range resp.Kvs {
 			if err = fn(kv.Key, kv.Value); err != nil {
+				cancel()
 				return err
 			}
 		}
 
 		if !resp.More {
+			cancel()
 			break
 		}
 		// move to next key
 		key = string(append(resp.Kvs[len(resp.Kvs)-1].Key, 0))
+		cancel()
 	}
 
 	CheckElapseAndWarn(start, "Slow etcd operation(WalkWithPagination)", zap.String("prefix", prefix))
