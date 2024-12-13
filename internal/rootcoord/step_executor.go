@@ -40,7 +40,8 @@ type StepExecutor interface {
 }
 
 type stepStack struct {
-	steps []nestedStep
+	steps    []nestedStep
+	stepsCtx context.Context
 }
 
 func (s *stepStack) totalPriority() int {
@@ -74,7 +75,7 @@ func (s *stepStack) Execute(ctx context.Context) *stepStack {
 			if !skipLog {
 				log.Ctx(ctx).Warn("failed to execute step, wait for reschedule", zap.Error(err), zap.String("step", todo.Desc()))
 			}
-			return &stepStack{steps: steps}
+			return &stepStack{steps: steps, stepsCtx: ctx}
 		}
 		// this step is done.
 		steps = steps[:l-1]
@@ -198,7 +199,7 @@ func (bg *bgStepExecutor) process(steps []*stepStack) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			child := s.Execute(bg.ctx)
+			child := s.Execute(s.stepsCtx)
 			if child != nil {
 				// don't notify, wait for reschedule.
 				bg.addStepsInternal(child)

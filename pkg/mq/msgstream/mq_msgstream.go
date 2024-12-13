@@ -27,6 +27,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
 	uatomic "go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
@@ -128,6 +129,8 @@ func NewMqMsgStream(initCtx context.Context,
 
 // AsProducer create producer to send message to channels
 func (ms *mqMsgStream) AsProducer(ctx context.Context, channels []string) {
+	ctx, sp := otel.Tracer("MqMsgStream").Start(ctx, "AsProducer")
+	defer sp.End()
 	for _, channel := range channels {
 		if len(channel) == 0 {
 			log.Ctx(ctx).Error("MsgStream asProducer's channel is an empty string")
@@ -142,6 +145,8 @@ func (ms *mqMsgStream) AsProducer(ctx context.Context, channels []string) {
 			if pp == nil {
 				return errors.New("Producer is nil")
 			}
+			sp.AddEvent(fmt.Sprintf("CreateProducer:%s", channel))
+			log.Ctx(ctx).Debug("Producer created", zap.String("channel", channel))
 
 			ms.producerLock.Lock()
 			defer ms.producerLock.Unlock()
@@ -149,7 +154,8 @@ func (ms *mqMsgStream) AsProducer(ctx context.Context, channels []string) {
 			ms.producerChannels = append(ms.producerChannels, channel)
 			return nil
 		}
-		err := retry.Do(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+		err := retry.Do(log.WithFields(ctx, zap.String("action", "CreateProducer"), zap.String("channel", channel)),
+			fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
 			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
 			panic(errMsg)
@@ -177,6 +183,8 @@ func (ms *mqMsgStream) CheckTopicValid(channel string) error {
 // AsConsumerWithPosition Create consumer to receive message from channels, with initial position
 // if initial position is set to latest, last message in the channel is exclusive
 func (ms *mqMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position common.SubscriptionInitialPosition) error {
+	ctx, sp := otel.Tracer("MqMsgStream").Start(ctx, "AsConsumer")
+	defer sp.End()
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
 			continue
@@ -194,6 +202,8 @@ func (ms *mqMsgStream) AsConsumer(ctx context.Context, channels []string, subNam
 			if pc == nil {
 				return errors.New("Consumer is nil")
 			}
+			sp.AddEvent(fmt.Sprintf("Subscribe %s at Position:%d", channel, position))
+			log.Ctx(ctx).Debug("Subscribed at channel", zap.String("channel", channel))
 
 			ms.consumerLock.Lock()
 			defer ms.consumerLock.Unlock()
@@ -202,7 +212,8 @@ func (ms *mqMsgStream) AsConsumer(ctx context.Context, channels []string, subNam
 			return nil
 		}
 
-		err := retry.Do(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+		err := retry.Do(log.WithFields(ctx, zap.String("action", "Subscribe"), zap.String("channel", channel)),
+			fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
 			errMsg := fmt.Sprintf("Failed to create consumer %s", channel)
 			if merr.IsCanceledOrTimeout(err) {
@@ -211,7 +222,7 @@ func (ms *mqMsgStream) AsConsumer(ctx context.Context, channels []string, subNam
 
 			panic(fmt.Sprintf("%s, errors = %s", errMsg, err.Error()))
 		}
-		log.Ctx(ms.ctx).Info("Successfully create consumer", zap.String("channel", channel), zap.String("subname", subName))
+		log.Ctx(ctx).Info("Successfully create consumer", zap.String("channel", channel), zap.String("subname", subName))
 	}
 	return nil
 }
@@ -297,6 +308,8 @@ func (ms *mqMsgStream) checkReplicateID(msg TsMsg) (bool, bool) {
 }
 
 func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
+	ctx, sp := otel.Tracer("mqMsgStream").Start(ctx, "Produce")
+	defer sp.End()
 	if !ms.isEnabledProduce() {
 		log.Ctx(ms.ctx).Warn("can't produce the msg in the backup instance", zap.Stack("stack"))
 		return merr.ErrDenyProduceMsg
@@ -305,6 +318,7 @@ func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
 		log.Ctx(ms.ctx).Debug("Warning: Receive empty msgPack")
 		return nil
 	}
+	sp.AddEvent(fmt.Sprintf("%d msgs", len(msgPack.Msgs)))
 	if len(ms.producers) <= 0 {
 		return errors.New("nil producer in msg stream")
 	}
@@ -342,8 +356,7 @@ func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
 			}
 
 			for i := 0; i < len(v.Msgs); i++ {
-				spanCtx, sp := MsgSpanFromCtx(v.Msgs[i].TraceCtx(), v.Msgs[i])
-				defer sp.End()
+				spanCtx, _ := MsgSpanFromCtx(v.Msgs[i].TraceCtx(), v.Msgs[i])
 
 				mb, err := v.Msgs[i].Marshal(v.Msgs[i])
 				if err != nil {
@@ -360,7 +373,7 @@ func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
 				}}
 				InjectCtx(spanCtx, msg.Properties)
 
-				if _, err := producer.Send(spanCtx, msg); err != nil {
+				if _, err := producer.Send(ctx, msg); err != nil {
 					sp.RecordError(err)
 					return err
 				}
@@ -374,10 +387,13 @@ func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
 // BroadcastMark broadcast msg pack to all producers and returns corresponding msg id
 // the returned message id serves as marking
 func (ms *mqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) (map[string][]MessageID, error) {
+	ctx1, span := otel.Tracer("mqMsgStream").Start(ctx, "Broadcast")
+	defer span.End()
 	ids := make(map[string][]MessageID)
 	if msgPack == nil || len(msgPack.Msgs) <= 0 {
 		return ids, errors.New("empty msgs")
 	}
+	span.AddEvent(fmt.Sprintf("%d msgs", len(msgPack.Msgs)))
 	// Only allow to create collection msg in backup instance
 	// However, there may be a problem of ts disorder here, but because the start position of the collection only uses offsets, not time, there is no problem for the time being
 	isCreateCollectionMsg := len(msgPack.Msgs) == 1 && msgPack.Msgs[0].Type() == commonpb.MsgType_CreateCollection
@@ -387,7 +403,7 @@ func (ms *mqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) (map[str
 		return ids, merr.ErrDenyProduceMsg
 	}
 	for _, v := range msgPack.Msgs {
-		spanCtx, sp := MsgSpanFromCtx(v.TraceCtx(), v)
+		spanCtx, _ := MsgSpanFromCtx(v.TraceCtx(), v)
 
 		mb, err := v.Marshal(v)
 		if err != nil {
@@ -408,15 +424,12 @@ func (ms *mqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) (map[str
 		ms.producerLock.RUnlock()
 
 		for channel, producer := range producers {
-			id, err := producer.Send(spanCtx, msg)
+			id, err := producer.Send(ctx1, msg)
 			if err != nil {
-				sp.RecordError(err)
-				sp.End()
 				return ids, err
 			}
 			ids[channel] = append(ids[channel], id)
 		}
-		sp.End()
 	}
 	return ids, nil
 }
@@ -605,6 +618,8 @@ func (ms *MqTtMsgStream) addConsumer(consumer mqwrapper.Consumer, channel string
 
 // AsConsumerWithPosition subscribes channels as consumer for a MsgStream and seeks to a certain position.
 func (ms *MqTtMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position common.SubscriptionInitialPosition) error {
+	ctx, sp := otel.Tracer("MqTtMsgStream").Start(ctx, "AsConsumer")
+	defer sp.End()
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
 			continue
@@ -622,6 +637,8 @@ func (ms *MqTtMsgStream) AsConsumer(ctx context.Context, channels []string, subN
 			if pc == nil {
 				return errors.New("Consumer is nil")
 			}
+			sp.AddEvent(fmt.Sprintf("Subscribe %s at Position:%d", channel, position))
+			log.Ctx(ctx).Debug("Subscribed at channel", zap.String("channel", channel))
 
 			ms.consumerLock.Lock()
 			defer ms.consumerLock.Unlock()
@@ -629,7 +646,8 @@ func (ms *MqTtMsgStream) AsConsumer(ctx context.Context, channels []string, subN
 			return nil
 		}
 
-		err := retry.Do(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+		err := retry.Do(log.WithFields(ctx, zap.String("action", "Subscribe"), zap.String("channel", channel)),
+			fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
 			errMsg := fmt.Sprintf("Failed to create consumer %s", channel)
 			if merr.IsCanceledOrTimeout(err) {

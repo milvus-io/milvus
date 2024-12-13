@@ -20,6 +20,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"go.opentelemetry.io/otel"
 	"math"
 	"path"
 	"strconv"
@@ -1709,7 +1710,8 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 	if pos == nil || pos.GetMsgID() == nil {
 		return fmt.Errorf("channelCP is nil, vChannel=%s", vChannel)
 	}
-
+	ctx, sp := otel.Tracer("Meta").Start(ctx, "UpdateChannelCheckpoint")
+	defer sp.End()
 	m.channelCPs.Lock()
 	defer m.channelCPs.Unlock()
 

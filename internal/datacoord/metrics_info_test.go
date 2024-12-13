@@ -629,7 +629,7 @@ func TestGetDistJSON(t *testing.T) {
 		}
 
 		cm := NewMockChannelManager(t)
-		cm.EXPECT().GetChannelWatchInfos().Return(map[int64]map[string]*datapb.ChannelWatchInfo{
+		cm.EXPECT().GetChannelWatchInfos(ctx).Return(map[int64]map[string]*datapb.ChannelWatchInfo{
 			1: {
 				"channel1": {
 					State: datapb.ChannelWatchState_ToWatch,
@@ -678,7 +678,7 @@ func TestGetDistJSON(t *testing.T) {
 
 		svr.meta = &meta{segments: &SegmentsInfo{segments: map[int64]*SegmentInfo{}}}
 		cm := NewMockChannelManager(t)
-		cm.EXPECT().GetChannelWatchInfos().Return(map[int64]map[string]*datapb.ChannelWatchInfo{})
+		cm.EXPECT().GetChannelWatchInfos(ctx).Return(map[int64]map[string]*datapb.ChannelWatchInfo{})
 
 		svr.channelManager = cm
 		expectedJSON := "{}"
