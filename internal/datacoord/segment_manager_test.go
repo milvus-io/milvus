@@ -23,6 +23,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -186,19 +189,28 @@ func TestLastExpireReset(t *testing.T) {
 	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	metaKV.RemoveWithPrefix(ctx, "")
 	catalog := datacoord.NewCatalog(metaKV, "", "")
+	collID, err := mockAllocator.AllocID(ctx)
+	assert.Nil(t, err)
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+	broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(&rootcoordpb.ShowCollectionsInternalResponse{
+		Status: merr.Success(),
+		DbCollections: []*rootcoordpb.DBCollections{
+			{
+				DbName:        "db_1",
+				CollectionIDs: []int64{collID},
+			},
+		},
+	}, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.Nil(t, err)
 	// add collection
 	channelName := "c1"
 	schema := newTestSchema()
-	collID, err := mockAllocator.AllocID(ctx)
-	assert.Nil(t, err)
 	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 	initSegment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:            1,
+			CollectionID:  collID,
 			InsertChannel: "ch1",
 			State:         commonpb.SegmentState_Growing,
 		},

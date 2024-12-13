@@ -45,7 +45,7 @@ type Catalog struct {
 func NewCatalog(cli kv.MetaKv) Catalog {
 	ioPool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
 	return Catalog{
-		cli:  			cli,
+		cli:            cli,
 		paginationSize: paramtable.Get().MetaStoreCfg.PaginationSize.GetAsInt(),
 		pool:           ioPool,
 	}
