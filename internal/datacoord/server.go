@@ -1116,7 +1116,9 @@ func (s *Server) initRootCoordClient() error {
 //
 //	stop message stream client and stop server loops
 func (s *Server) Stop() error {
-	s.UpdateStateCode(commonpb.StateCode_Abnormal)
+	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
+		return nil
+	}
 	if s.healthChecker != nil {
 		s.healthChecker.Close()
 	}
