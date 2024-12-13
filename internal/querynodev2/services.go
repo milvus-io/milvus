@@ -324,7 +324,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		MsgID:       channel.SeekPosition.MsgID,
 		Timestamp:   channel.SeekPosition.Timestamp,
 	}
-	err = pipeline.ConsumeMsgStream(position)
+	err = pipeline.ConsumeMsgStream(ctx, position)
 	if err != nil {
 		err = merr.WrapErrServiceUnavailable(err.Error(), "InitPipelineFailed")
 		log.Warn(err.Error(),

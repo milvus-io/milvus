@@ -17,6 +17,7 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -63,7 +64,7 @@ func (suite *StreamPipelineSuite) TestBasic() {
 		})
 	}
 
-	err := suite.pipeline.ConsumeMsgStream(&msgpb.MsgPosition{})
+	err := suite.pipeline.ConsumeMsgStream(context.TODO(), &msgpb.MsgPosition{})
 	suite.NoError(err)
 
 	suite.pipeline.Start()

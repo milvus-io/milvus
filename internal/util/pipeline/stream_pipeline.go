@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -28,12 +29,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 type StreamPipeline interface {
 	Pipeline
-	ConsumeMsgStream(position *msgpb.MsgPosition) error
+	ConsumeMsgStream(ctx context.Context, position *msgpb.MsgPosition) error
 }
 
 type streamPipeline struct {
@@ -63,7 +66,7 @@ func (p *streamPipeline) work() {
 	}
 }
 
-func (p *streamPipeline) ConsumeMsgStream(position *msgpb.MsgPosition) error {
+func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.MsgPosition) error {
 	var err error
 	if position == nil {
 		log.Error("seek stream to nil position")
@@ -71,11 +74,20 @@ func (p *streamPipeline) ConsumeMsgStream(position *msgpb.MsgPosition) error {
 	}
 
 	start := time.Now()
-	p.input, err = p.dispatcher.Register(context.TODO(), p.vChannel, position, common.SubscriptionPositionUnknown)
+	err = retry.Handle(ctx, func() (bool, error) {
+		p.input, err = p.dispatcher.Register(ctx, p.vChannel, position, common.SubscriptionPositionUnknown)
+		if err != nil {
+			log.Warn("dispatcher register failed", zap.String("channel", position.ChannelName), zap.Error(err))
+			return errors.Is(err, msgdispatcher.ErrTooManyConsumers), err
+		}
+		return false, nil
+	}, retry.Sleep(paramtable.Get().MQCfg.RetrySleep.GetAsDuration(time.Second)), // 5 seconds
+		retry.MaxSleepTime(paramtable.Get().MQCfg.RetryTimeout.GetAsDuration(time.Second))) // 5 minutes
 	if err != nil {
-		log.Error("dispatcher register failed", zap.String("channel", position.ChannelName))
+		log.Error("dispatcher register failed after retried", zap.String("channel", position.ChannelName), zap.Error(err))
 		return WrapErrRegDispather(err)
 	}
+
 	ts, _ := tsoutil.ParseTS(position.GetTimestamp())
 	log.Info("stream pipeline seeks from position with msgDispatcher",
 		zap.String("pchannel", position.ChannelName),
