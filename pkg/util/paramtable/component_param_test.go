@@ -153,6 +153,10 @@ func TestComponentParam(t *testing.T) {
 		params.Save("rootCoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 
+		assert.Equal(t, "{}", Params.DefaultDBProperties.GetValue())
+		params.Save("rootCoord.defaultDBProperties", "{\"key\":\"value\"}")
+		assert.Equal(t, "{\"key\":\"value\"}", Params.DefaultDBProperties.GetValue())
+
 		SetCreateTime(time.Now())
 		SetUpdateTime(time.Now())
 	})
@@ -215,6 +219,12 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, int64(10), Params.CheckWorkloadRequestNum.GetAsInt64())
 		assert.Equal(t, float64(0.1), Params.WorkloadToleranceFactor.GetAsFloat())
+
+		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
+		params.Save("proxy.maxPasswordLength", "100")
+		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
+		params.Save("proxy.maxPasswordLength", "-10")
+		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {

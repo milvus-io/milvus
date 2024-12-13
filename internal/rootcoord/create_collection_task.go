@@ -567,6 +567,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 func (t *createCollectionTask) GetLockerKey() LockerKey {
 	return NewLockerKeyChain(
 		NewClusterLockerKey(false),
-		NewDatabaseLockerKey(t.Req.GetDbName(), true),
+		NewDatabaseLockerKey(t.Req.GetDbName(), false),
+		NewCollectionLockerKey(t.Req.GetCollectionName(), true),
 	)
 }
