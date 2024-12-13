@@ -6,7 +6,7 @@ import (
 	"google.golang.org/grpc/resolver"
 
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var _ resolver.Resolver = (*watchBasedGRPCResolver)(nil)
@@ -14,7 +14,7 @@ var _ resolver.Resolver = (*watchBasedGRPCResolver)(nil)
 // newWatchBasedGRPCResolver creates a new watch based grpc resolver.
 func newWatchBasedGRPCResolver(cc resolver.ClientConn, logger *log.MLogger) *watchBasedGRPCResolver {
 	return &watchBasedGRPCResolver{
-		lifetime: lifetime.NewLifetime(lifetime.Working),
+		lifetime: typeutil.NewLifetime(),
 		cc:       cc,
 		logger:   logger,
 	}
@@ -22,7 +22,7 @@ func newWatchBasedGRPCResolver(cc resolver.ClientConn, logger *log.MLogger) *wat
 
 // watchBasedGRPCResolver is a watch based grpc resolver.
 type watchBasedGRPCResolver struct {
-	lifetime lifetime.Lifetime[lifetime.State]
+	lifetime *typeutil.Lifetime
 
 	cc     resolver.ClientConn
 	logger *log.MLogger
@@ -38,15 +38,14 @@ func (r *watchBasedGRPCResolver) ResolveNow(_ resolver.ResolveNowOptions) {
 // Close closes the resolver.
 // Do nothing.
 func (r *watchBasedGRPCResolver) Close() {
-	r.lifetime.SetState(lifetime.Stopped)
+	r.lifetime.SetState(typeutil.LifetimeStateStopped)
 	r.lifetime.Wait()
-	r.lifetime.Close()
 }
 
 // Update updates the state of the resolver.
 // Return error if the resolver is closed.
 func (r *watchBasedGRPCResolver) Update(state VersionedState) error {
-	if r.lifetime.Add(lifetime.IsWorking) != nil {
+	if !r.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return errors.New("resolver is closed")
 	}
 	defer r.lifetime.Done()
@@ -61,6 +60,6 @@ func (r *watchBasedGRPCResolver) Update(state VersionedState) error {
 }
 
 // State returns the state of the resolver.
-func (r *watchBasedGRPCResolver) State() lifetime.State {
+func (r *watchBasedGRPCResolver) State() typeutil.LifetimeState {
 	return r.lifetime.GetState()
 }
