@@ -148,6 +148,14 @@ var (
 			Name:      "resource_group_replica_total",
 			Help:      "total replica number of resource group",
 		}, []string{ResourceGroupLabelName})
+
+	QueryCoordReplicaRONodeTotal = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "replica_ro_node_total",
+			Help:      "total read only node number of replica",
+		})
 )
 
 // RegisterQueryCoord registers QueryCoord metrics
@@ -164,6 +172,7 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordTaskLatency)
 	registry.MustRegister(QueryCoordResourceGroupInfo)
 	registry.MustRegister(QueryCoordResourceGroupReplicaTotal)
+	registry.MustRegister(QueryCoordReplicaRONodeTotal)
 }
 
 func CleanQueryCoordMetricsWithCollectionID(collectionID int64) {

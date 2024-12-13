@@ -187,10 +187,12 @@ func (m *ReplicaManager) putReplicaInMemory(replicas ...*Replica) {
 	for _, replica := range replicas {
 		if oldReplica, ok := m.replicas[replica.GetID()]; ok {
 			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(oldReplica.GetResourceGroup()).Dec()
+			metrics.QueryCoordReplicaRONodeTotal.Add(-float64(oldReplica.RONodesCount()))
 		}
 		// update in-memory replicas.
 		m.replicas[replica.GetID()] = replica
 		metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Inc()
+		metrics.QueryCoordReplicaRONodeTotal.Add(float64(replica.RONodesCount()))
 
 		// update collIDToReplicaIDs.
 		if m.coll2Replicas[replica.GetCollectionID()] == nil {
@@ -283,6 +285,7 @@ func (m *ReplicaManager) RemoveCollection(collectionID typeutil.UniqueID) error 
 		// Remove all replica of collection and remove collection from collIDToReplicaIDs.
 		for _, replica := range collReplicas.replicas {
 			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
+			metrics.QueryCoordReplicaRONodeTotal.Add(-float64(replica.RONodesCount()))
 			delete(m.replicas, replica.GetID())
 		}
 		delete(m.coll2Replicas, collectionID)
@@ -308,6 +311,7 @@ func (m *ReplicaManager) removeReplicas(collectionID typeutil.UniqueID, replicas
 	for _, replicaID := range replicas {
 		if replica, ok := m.replicas[replicaID]; ok {
 			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
+			metrics.QueryCoordReplicaRONodeTotal.Add(float64(-replica.RONodesCount()))
 			delete(m.replicas, replicaID)
 		}
 	}
