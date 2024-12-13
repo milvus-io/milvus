@@ -315,7 +315,7 @@ func CheckAllChannelsWatched(meta *meta, channelManager ChannelManager) error {
 		}
 
 		for _, channelName := range collInfo.VChannelNames {
-			_, err := channelManager.FindWatcher(channelName)
+			_, err := channelManager.FindWatcher(context.TODO(), channelName)
 			if err != nil {
 				log.Warn("find watcher for channel failed", zap.Int64("collectionID", collID),
 					zap.String("channelName", channelName), zap.Error(err))

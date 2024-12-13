@@ -67,7 +67,7 @@ func createNewInputFromDispatcher(initCtx context.Context,
 	schema *schemapb.CollectionSchema,
 	dbProperties []*commonpb.KeyValuePair,
 ) (<-chan *msgstream.MsgPack, error) {
-	log := log.With(zap.Int64("nodeID", paramtable.GetNodeID()),
+	log := log.Ctx(initCtx).With(zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("vchannel", vchannel))
 	replicateID, _ := pkgcommon.GetReplicateID(schema.GetProperties())
 	if replicateID == "" {

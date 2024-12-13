@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -40,7 +41,8 @@ func getChannel(name string, collID int64) *StateChannel {
 		Info: &datapb.ChannelWatchInfo{
 			Vchan: &datapb.VchannelInfo{ChannelName: name, CollectionID: collID},
 		},
-		Schema: &schemapb.CollectionSchema{Name: "coll1"},
+		Schema:     &schemapb.CollectionSchema{Name: "coll1"},
+		currentCtx: context.TODO(),
 	}
 }
 
@@ -126,7 +128,7 @@ func (s *AssignByCountPolicySuite) SetupSubTest() {
 
 func (s *AssignByCountPolicySuite) TestWithoutUnassignedChannels() {
 	s.Run("balance without exclusive", func() {
-		opSet := AvgAssignByCountPolicy(s.curCluster, nil, nil)
+		opSet := AvgAssignByCountPolicy(context.TODO(), s.curCluster, nil, nil)
 		s.NotNil(opSet)
 
 		s.Equal(2, opSet.GetChannelNumber())
@@ -136,7 +138,7 @@ func (s *AssignByCountPolicySuite) TestWithoutUnassignedChannels() {
 	})
 	s.Run("balance with exclusive", func() {
 		execlusiveNodes := []int64{1, 2}
-		opSet := AvgAssignByCountPolicy(s.curCluster, nil, execlusiveNodes)
+		opSet := AvgAssignByCountPolicy(context.TODO(), s.curCluster, nil, execlusiveNodes)
 		s.NotNil(opSet)
 
 		s.Equal(2, opSet.GetChannelNumber())
@@ -163,7 +165,7 @@ func (s *AssignByCountPolicySuite) TestWithoutUnassignedChannels() {
 		}
 
 		execlusiveNodes := []int64{4, 5}
-		opSet := AvgAssignByCountPolicy(s.curCluster, nil, execlusiveNodes)
+		opSet := AvgAssignByCountPolicy(context.TODO(), s.curCluster, nil, execlusiveNodes)
 		s.NotNil(opSet)
 	})
 }
@@ -172,7 +174,7 @@ func (s *AssignByCountPolicySuite) TestWithUnassignedChannels() {
 	s.Run("one unassigned channel", func() {
 		unassigned := NewNodeChannelInfo(bufferID, getChannel("new-ch-1", 1))
 
-		opSet := AvgAssignByCountPolicy(s.curCluster, unassigned, nil)
+		opSet := AvgAssignByCountPolicy(context.TODO(), s.curCluster, unassigned, nil)
 		s.NotNil(opSet)
 
 		s.Equal(1, opSet.GetChannelNumber())
@@ -192,7 +194,7 @@ func (s *AssignByCountPolicySuite) TestWithUnassignedChannels() {
 			getChannel("new-ch-3", 1),
 		)
 
-		opSet := AvgAssignByCountPolicy(s.curCluster, unassigned, nil)
+		opSet := AvgAssignByCountPolicy(context.TODO(), s.curCluster, unassigned, nil)
 		s.NotNil(opSet)
 
 		s.Equal(3, opSet.GetChannelNumber())
@@ -216,7 +218,7 @@ func (s *AssignByCountPolicySuite) TestWithUnassignedChannels() {
 			getChannel("new-ch-3", 1),
 		)
 
-		opSet := AvgAssignByCountPolicy(s.curCluster, unassigned, []int64{1, 2})
+		opSet := AvgAssignByCountPolicy(context.TODO(), s.curCluster, unassigned, []int64{1, 2})
 		s.NotNil(opSet)
 
 		s.Equal(3, opSet.GetChannelNumber())
@@ -248,7 +250,7 @@ func (s *AssignByCountPolicySuite) TestWithUnassignedChannels() {
 		}
 
 		unassigned := NewNodeChannelInfo(bufferID, unassignedChannels...)
-		opSet := AvgAssignByCountPolicy(s.curCluster, unassigned, nil)
+		opSet := AvgAssignByCountPolicy(context.TODO(), s.curCluster, unassigned, nil)
 		s.NotNil(opSet)
 
 		s.Equal(67, opSet.GetChannelNumber())
@@ -274,7 +276,7 @@ func (s *AssignByCountPolicySuite) TestWithUnassignedChannels() {
 		}
 		s.Require().NotNil(unassigned)
 
-		opSet := AvgAssignByCountPolicy(s.curCluster, unassigned, []int64{1, 2})
+		opSet := AvgAssignByCountPolicy(context.TODO(), s.curCluster, unassigned, []int64{1, 2})
 		s.NotNil(opSet)
 
 		s.Equal(3, opSet.GetChannelNumber())
@@ -302,7 +304,7 @@ func (s *AssignByCountPolicySuite) TestWithUnassignedChannels() {
 			getChannel("new-ch-3", 1),
 		)
 
-		opSet := AvgAssignByCountPolicy(curCluster, unassigned, nil)
+		opSet := AvgAssignByCountPolicy(context.TODO(), curCluster, unassigned, nil)
 		s.NotNil(opSet)
 
 		s.Equal(3, opSet.GetChannelNumber())

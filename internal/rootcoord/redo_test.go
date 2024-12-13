@@ -77,7 +77,7 @@ func Test_baseRedoTask_redoAsyncSteps(t *testing.T) {
 		for _, step := range steps {
 			redo.AddAsyncStep(step)
 		}
-		redo.redoAsyncSteps()
+		redo.redoAsyncSteps(context.TODO())
 		assert.True(t, steps[0].(*mockNormalStep).called)
 		assert.False(t, steps[2].(*mockNormalStep).called)
 	})
@@ -92,7 +92,7 @@ func Test_baseRedoTask_redoAsyncSteps(t *testing.T) {
 		for _, step := range steps {
 			redo.AddAsyncStep(step)
 		}
-		redo.redoAsyncSteps()
+		redo.redoAsyncSteps(context.TODO())
 		for _, step := range steps {
 			assert.True(t, step.(*mockNormalStep).called)
 		}

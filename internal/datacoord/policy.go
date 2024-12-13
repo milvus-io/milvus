@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"sort"
 
 	"github.com/samber/lo"
@@ -143,13 +144,13 @@ func AvgBalanceChannelPolicy(cluster Assignments) *ChannelOpSet {
 //	if empty, this policy will balance the currentCluster
 //
 // ExclusiveNodes means donot assign channels to these nodes.
-type AssignPolicy func(currentCluster Assignments, toAssign *NodeChannelInfo, exclusiveNodes []int64) *ChannelOpSet
+type AssignPolicy func(ctx context.Context, currentCluster Assignments, toAssign *NodeChannelInfo, exclusiveNodes []int64) *ChannelOpSet
 
-func EmptyAssignPolicy(currentCluster Assignments, toAssign *NodeChannelInfo, execlusiveNodes []int64) *ChannelOpSet {
+func EmptyAssignPolicy(ctx context.Context, currentCluster Assignments, toAssign *NodeChannelInfo, execlusiveNodes []int64) *ChannelOpSet {
 	return nil
 }
 
-func AvgAssignByCountPolicy(currentCluster Assignments, toAssign *NodeChannelInfo, execlusiveNodes []int64) *ChannelOpSet {
+func AvgAssignByCountPolicy(ctx context.Context, currentCluster Assignments, toAssign *NodeChannelInfo, execlusiveNodes []int64) *ChannelOpSet {
 	var (
 		toCluster   Assignments
 		fromCluster Assignments
@@ -210,7 +211,7 @@ func AvgAssignByCountPolicy(currentCluster Assignments, toAssign *NodeChannelInf
 			opSet.Delete(toAssign.NodeID, chs...)
 		}
 
-		log.Info("Assign channels to nodes by channel count",
+		log.Ctx(ctx).Info("Assign channels to nodes by channel count",
 			zap.Int("toAssign channel count", len(toAssign.Channels)),
 			zap.Any("original nodeID", toAssign.NodeID),
 			zap.Int64s("exclusive nodes", execlusiveNodes),

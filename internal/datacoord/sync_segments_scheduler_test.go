@@ -321,7 +321,7 @@ func (s *SyncSegmentsSchedulerSuite) SetupTest() {
 
 func (s *SyncSegmentsSchedulerSuite) Test_newSyncSegmentsScheduler() {
 	cm := NewMockChannelManager(s.T())
-	cm.EXPECT().FindWatcher(mock.Anything).Return(100, nil)
+	cm.EXPECT().FindWatcher(mock.Anything, mock.Anything).Return(100, nil)
 
 	sm := session.NewMockDataNodeManager(s.T())
 	sm.EXPECT().SyncSegments(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, i int64, request *datapb.SyncSegmentsRequest) error {
@@ -362,12 +362,12 @@ func (s *SyncSegmentsSchedulerSuite) Test_SyncSegmentsFail() {
 	})
 
 	s.Run("find watcher failed", func() {
-		cm.EXPECT().FindWatcher(mock.Anything).Return(0, errors.New("mock error")).Twice()
+		cm.EXPECT().FindWatcher(mock.Anything, mock.Anything).Return(0, errors.New("mock error")).Twice()
 		sss.SyncSegmentsForCollections(ctx)
 	})
 
 	s.Run("sync segment failed", func() {
-		cm.EXPECT().FindWatcher(mock.Anything).Return(100, nil)
+		cm.EXPECT().FindWatcher(mock.Anything, mock.Anything).Return(100, nil)
 		sm.EXPECT().SyncSegments(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
 		sss.SyncSegmentsForCollections(ctx)
 	})

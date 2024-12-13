@@ -96,7 +96,7 @@ func (s *OpRunnerSuite) TestWatchWithTimer() {
 		log.Info("mock release func")
 	}
 
-	runner := NewOpRunner(channel, s.pipelineParams, mockReleaseFunc, executeWatch, commuCh)
+	runner := NewOpRunner(context.TODO(), channel, s.pipelineParams, mockReleaseFunc, executeWatch, commuCh)
 	err := runner.Enqueue(info)
 	s.Require().NoError(err)
 
@@ -123,7 +123,7 @@ func (s *OpRunnerSuite) TestWatchTimeout() {
 		return nil, errors.New("timeout")
 	}
 
-	runner := NewOpRunner(channel, s.pipelineParams, mockReleaseFunc, mockWatchFunc, commuCh)
+	runner := NewOpRunner(context.TODO(), channel, s.pipelineParams, mockReleaseFunc, mockWatchFunc, commuCh)
 	runner.Start()
 	defer runner.Close()
 	err := runner.Enqueue(info)
@@ -188,7 +188,7 @@ func (s *ChannelManagerSuite) TestReleaseStuck() {
 
 	info := GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
 	s.Require().Equal(0, s.manager.opRunners.Len())
-	err := s.manager.Submit(info)
+	err := s.manager.Submit(context.TODO(), info)
 	s.Require().NoError(err)
 
 	opState := <-s.manager.communicateCh
@@ -200,7 +200,7 @@ func (s *ChannelManagerSuite) TestReleaseStuck() {
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.WatchTimeoutInterval.Key, "0.1")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.WatchTimeoutInterval.Key)
 
-	err = s.manager.Submit(releaseInfo)
+	err = s.manager.Submit(context.TODO(), releaseInfo)
 	s.NoError(err)
 
 	opState = <-s.manager.communicateCh
@@ -224,7 +224,7 @@ func (s *ChannelManagerSuite) TestSubmitIdempotent() {
 	s.Require().Equal(0, s.manager.opRunners.Len())
 
 	for i := 0; i < 10; i++ {
-		err := s.manager.Submit(info)
+		err := s.manager.Submit(context.TODO(), info)
 		s.NoError(err)
 	}
 
@@ -242,7 +242,7 @@ func (s *ChannelManagerSuite) TestSubmitSkip() {
 	info := GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
 	s.Require().Equal(0, s.manager.opRunners.Len())
 
-	err := s.manager.Submit(info)
+	err := s.manager.Submit(context.TODO(), info)
 	s.NoError(err)
 
 	s.Equal(1, s.manager.opRunners.Len())
@@ -254,7 +254,7 @@ func (s *ChannelManagerSuite) TestSubmitSkip() {
 	s.Equal(info.GetOpID(), opState.fg.GetOpID())
 	s.manager.handleOpState(opState)
 
-	err = s.manager.Submit(info)
+	err = s.manager.Submit(context.TODO(), info)
 	s.NoError(err)
 
 	runner, ok := s.manager.opRunners.Get(channel)
@@ -272,7 +272,7 @@ func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 
 	// watch
 	info := GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
-	err = s.manager.Submit(info)
+	err = s.manager.Submit(context.TODO(), info)
 	s.NoError(err)
 
 	// wait for result
@@ -297,7 +297,7 @@ func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 
 	// release
 	info = GetWatchInfoByOpID(101, channel, datapb.ChannelWatchState_ToRelease)
-	err = s.manager.Submit(info)
+	err = s.manager.Submit(context.TODO(), info)
 	s.NoError(err)
 
 	// wait for result
@@ -314,7 +314,7 @@ func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 	s.False(s.manager.opRunners.Contain(info.GetVchan().GetChannelName()))
 	s.Equal(0, s.manager.opRunners.Len())
 
-	err = s.manager.Submit(info)
+	err = s.manager.Submit(context.TODO(), info)
 	s.NoError(err)
 	runner, ok := s.manager.opRunners.Get(channel)
 	s.False(ok)

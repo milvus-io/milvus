@@ -365,7 +365,7 @@ func (node *DataNode) NotifyChannelOperation(ctx context.Context, req *datapb.Ch
 	}
 
 	for _, info := range req.GetInfos() {
-		err := node.channelManager.Submit(info)
+		err := node.channelManager.Submit(ctx, info)
 		if err != nil {
 			log.Warn("Submit error", zap.Error(err))
 			return merr.Status(err), nil

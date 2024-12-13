@@ -138,7 +138,7 @@ func TestDmlChannels(t *testing.T) {
 	dml.addChannels(randStr)
 	assert.Error(t, dml.broadcast([]string{randStr}, nil))
 	{
-		_, err := dml.broadcastMark([]string{randStr}, nil)
+		_, err := dml.broadcastMark(context.TODO(), []string{randStr}, nil)
 		assert.Error(t, err)
 	}
 	dml.removeChannels(randStr)
@@ -189,7 +189,7 @@ func TestDmChannelsFailure(t *testing.T) {
 		err := dml.broadcast([]string{chanName0}, nil)
 		assert.Error(t, err)
 
-		v, err := dml.broadcastMark([]string{chanName0}, nil)
+		v, err := dml.broadcastMark(context.TODO(), []string{chanName0}, nil)
 		assert.Empty(t, v)
 		assert.Error(t, err)
 	})

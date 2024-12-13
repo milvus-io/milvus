@@ -273,11 +273,14 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		zap.Duration("get cache duration", getCacheDur),
 		zap.Duration("get msgStream duration", getMsgStreamDur))
 
+	_, sp1 := otel.Tracer(typeutil.ProxyRole).Start(ctx, "repack Data")
 	// assign segmentID for insert data and repack data by segmentID
 	var msgPack *msgstream.MsgPack
 	if it.partitionKeys == nil {
+		sp1.AddEvent("repackInsertData")
 		msgPack, err = repackInsertData(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.idAllocator, it.segIDAssigner)
 	} else {
+		sp1.AddEvent("repackInsertDataWithPartitionKey")
 		msgPack, err = repackInsertDataWithPartitionKey(it.TraceCtx(), channelNames, it.partitionKeys, it.insertMsg, it.result, it.idAllocator, it.segIDAssigner)
 	}
 	if err != nil {
@@ -285,6 +288,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		it.result.Status = merr.Status(err)
 		return err
 	}
+	sp1.End()
 	assignSegmentIDDur := tr.RecordSpan()
 
 	log.Debug("assign segmentID for insert data success",

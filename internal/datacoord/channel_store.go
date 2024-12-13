@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"go.opentelemetry.io/otel"
 	"math"
 	"strconv"
 	"strings"
@@ -69,7 +70,7 @@ type RWChannelStore interface {
 	// Delete removes nodeID and returns its channels.
 	RemoveNode(nodeID int64)
 	// Update applies the operations in ChannelOpSet.
-	Update(op *ChannelOpSet) error
+	Update(ctx context.Context, op *ChannelOpSet) error
 
 	// UpdateState is used by StateChannelStore only
 	UpdateState(isSuccessful bool, nodeID int64, channel RWChannel, opID int64)
@@ -339,6 +340,7 @@ func (c *StateChannelStore) Reload() error {
 	if err != nil {
 		return err
 	}
+	ctx, _ := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), "channel store reload")
 	for i := 0; i < len(keys); i++ {
 		k := keys[i]
 		v := values[i]
@@ -355,13 +357,13 @@ func (c *StateChannelStore) Reload() error {
 
 		c.AddNode(nodeID)
 
-		channel := NewStateChannelByWatchInfo(nodeID, info)
+		channel := NewStateChannelByWatchInfo(ctx, nodeID, info)
 		c.channelsInfo[nodeID].AddChannel(channel)
-		log.Info("channel store reload channel",
+		log.Ctx(ctx).Info("channel store reload channel",
 			zap.Int64("nodeID", nodeID), zap.String("channel", channel.Name))
 		metrics.DataCoordDmlChannelNum.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(len(c.channelsInfo[nodeID].Channels)))
 	}
-	log.Info("channel store reload done", zap.Duration("duration", record.ElapseSpan()))
+	log.Ctx(ctx).Info("channel store reload done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 
@@ -398,7 +400,7 @@ func (c *StateChannelStore) SetLegacyChannelByNode(nodeIDs ...int64) {
 	})
 }
 
-func (c *StateChannelStore) Update(opSet *ChannelOpSet) error {
+func (c *StateChannelStore) Update(ctx context.Context, opSet *ChannelOpSet) error {
 	// Split opset into multiple txn. Operations on the same channel must be executed in one txn.
 	perChOps := opSet.SplitByChannel()
 
@@ -407,16 +409,16 @@ func (c *StateChannelStore) Update(opSet *ChannelOpSet) error {
 	operations := make([]*ChannelOp, 0, maxOperationsPerTxn)
 	for _, opset := range perChOps {
 		if !c.sanityCheckPerChannelOpSet(opset) {
-			log.Error("unsupported ChannelOpSet", zap.Any("OpSet", opset))
+			log.Ctx(ctx).Error("unsupported ChannelOpSet", zap.Any("OpSet", opset))
 			continue
 		}
 		if opset.Len() > maxOperationsPerTxn {
-			log.Error("Operations for one channel exceeds maxOperationsPerTxn",
+			log.Ctx(ctx).Error("Operations for one channel exceeds maxOperationsPerTxn",
 				zap.Any("opset size", opset.Len()),
 				zap.Int("limit", maxOperationsPerTxn))
 		}
 		if count+opset.Len() > maxOperationsPerTxn {
-			if err := c.updateMeta(NewChannelOpSet(operations...)); err != nil {
+			if err := c.updateMeta(ctx, NewChannelOpSet(operations...)); err != nil {
 				return err
 			}
 			count = 0
@@ -429,7 +431,7 @@ func (c *StateChannelStore) Update(opSet *ChannelOpSet) error {
 		return nil
 	}
 
-	return c.updateMeta(NewChannelOpSet(operations...))
+	return c.updateMeta(ctx, NewChannelOpSet(operations...))
 }
 
 // remove from the assignments
@@ -472,7 +474,7 @@ func (c *StateChannelStore) sanityCheckPerChannelOpSet(opSet *ChannelOpSet) bool
 }
 
 // DELETE + WATCH
-func (c *StateChannelStore) updateMetaMemoryForPairOp(chName string, opSet *ChannelOpSet) error {
+func (c *StateChannelStore) updateMetaMemoryForPairOp(ctx context.Context, chName string, opSet *ChannelOpSet) error {
 	if !c.sanityCheckPerChannelOpSet(opSet) {
 		return errUnknownOpType
 	}
@@ -507,6 +509,7 @@ func (c *StateChannelStore) updateMetaMemoryForPairOp(chName string, opSet *Chan
 		} else {
 			ch.setState(ToWatch)
 		}
+		ch.currentCtx = ctx
 	}
 	return nil
 }
@@ -523,18 +526,19 @@ func (c *StateChannelStore) getChannel(nodeID int64, channelName string) *StateC
 	return nil
 }
 
-func (c *StateChannelStore) updateMetaMemoryForSingleOp(op *ChannelOp) error {
+func (c *StateChannelStore) updateMetaMemoryForSingleOp(ctx context.Context, op *ChannelOp) error {
 	lo.ForEach(op.Channels, func(ch RWChannel, _ int) {
 		switch op.Type {
 		case Release: // release an already exsits storedChannel-node pair
 			if channel := c.getChannel(op.NodeID, ch.GetName()); channel != nil {
 				channel.setState(ToRelease)
+				channel.currentCtx = ctx
 			}
 		case Watch:
 			storedChannel := c.getChannel(op.NodeID, ch.GetName())
 			if storedChannel == nil { // New Channel
 				//  set the correct assigment and state for NEW stateChannel
-				newChannel := NewStateChannel(ch)
+				newChannel := NewStateChannel(ctx, ch)
 				newChannel.Assign(op.NodeID)
 
 				if op.NodeID != bufferID {
@@ -545,6 +549,7 @@ func (c *StateChannelStore) updateMetaMemoryForSingleOp(op *ChannelOp) error {
 				c.addAssignment(op.NodeID, newChannel)
 			} else { // assign to the original nodes
 				storedChannel.setState(ToWatch)
+				storedChannel.currentCtx = ctx
 			}
 		case Delete: // Remove Channel
 			c.removeAssignment(op.NodeID, ch.GetName())
@@ -555,7 +560,7 @@ func (c *StateChannelStore) updateMetaMemoryForSingleOp(op *ChannelOp) error {
 	return nil
 }
 
-func (c *StateChannelStore) updateMeta(opSet *ChannelOpSet) error {
+func (c *StateChannelStore) updateMeta(ctx context.Context, opSet *ChannelOpSet) error {
 	// Update ChannelStore's kv store.
 	if err := c.txn(opSet); err != nil {
 		return err
@@ -566,10 +571,10 @@ func (c *StateChannelStore) updateMeta(opSet *ChannelOpSet) error {
 	for chName, ops := range chOpSet {
 		// DELETE + WATCH
 		if ops.Len() == 2 {
-			c.updateMetaMemoryForPairOp(chName, ops)
+			c.updateMetaMemoryForPairOp(ctx, chName, ops)
 			// RELEASE, DELETE, WATCH
 		} else if ops.Len() == 1 {
-			c.updateMetaMemoryForSingleOp(ops.Collect()[0])
+			c.updateMetaMemoryForSingleOp(ctx, ops.Collect()[0])
 		} else {
 			log.Ctx(context.TODO()).Error("unsupported ChannelOpSet", zap.Any("OpSet", ops))
 		}

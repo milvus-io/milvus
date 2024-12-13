@@ -21,6 +21,7 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
@@ -73,6 +74,7 @@ func (rc *rmqClient) CreateProducer(ctx context.Context, options common.Producer
 	elapsed := start.ElapseSpan()
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateProducerLabel).Observe(float64(elapsed.Milliseconds()))
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.SuccessLabel).Inc()
+	log.Ctx(ctx).Debug("create rmq producer success")
 	return &rp, nil
 }
 
@@ -89,6 +91,8 @@ func (rc *rmqClient) Subscribe(ctx context.Context, options mqwrapper.ConsumerOp
 	}
 	receiveChannel := make(chan common.Message, options.BufSize)
 
+	ctx, sp := otel.Tracer("RmqClient").Start(ctx, "Subscribe")
+	defer sp.End()
 	cli, err := rc.client.Subscribe(client.ConsumerOptions{
 		Topic:                       options.Topic,
 		SubscriptionName:            options.SubscriptionName,
@@ -105,6 +109,7 @@ func (rc *rmqClient) Subscribe(ctx context.Context, options mqwrapper.ConsumerOp
 	elapsed := start.ElapseSpan()
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateConsumerLabel).Observe(float64(elapsed.Milliseconds()))
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.SuccessLabel).Inc()
+	log.Ctx(ctx).Debug("create rmq consumer success")
 	return rConsumer, nil
 }
 

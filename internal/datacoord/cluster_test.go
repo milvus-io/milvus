@@ -85,8 +85,8 @@ func (suite *ClusterSuite) TestRegister() {
 	info := &session.NodeInfo{NodeID: 1, Address: "addr1"}
 
 	suite.mockSession.EXPECT().AddSession(mock.Anything).Return().Once()
-	suite.mockChManager.EXPECT().AddNode(mock.Anything).
-		RunAndReturn(func(nodeID int64) error {
+	suite.mockChManager.EXPECT().AddNode(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, nodeID int64) error {
 			suite.EqualValues(info.NodeID, nodeID)
 			return nil
 		}).Once()
@@ -100,8 +100,8 @@ func (suite *ClusterSuite) TestUnregister() {
 	info := &session.NodeInfo{NodeID: 1, Address: "addr1"}
 
 	suite.mockSession.EXPECT().DeleteSession(mock.Anything).Return().Once()
-	suite.mockChManager.EXPECT().DeleteNode(mock.Anything).
-		RunAndReturn(func(nodeID int64) error {
+	suite.mockChManager.EXPECT().DeleteNode(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, nodeID int64) error {
 			suite.EqualValues(info.NodeID, nodeID)
 			return nil
 		}).Once()
@@ -130,8 +130,8 @@ func (suite *ClusterSuite) TestWatch() {
 }
 
 func (suite *ClusterSuite) TestFlush() {
-	suite.mockChManager.EXPECT().GetChannel(mock.Anything, mock.Anything).
-		RunAndReturn(func(nodeID int64, channel string) (RWChannel, bool) {
+	suite.mockChManager.EXPECT().GetChannel(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, nodeID int64, channel string) (RWChannel, bool) {
 			if nodeID == 1 {
 				return nil, false
 			}
@@ -161,7 +161,7 @@ func (suite *ClusterSuite) TestFlushChannels() {
 	suite.Run("channel not match with node", func() {
 		suite.SetupTest()
 
-		suite.mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(false).Once()
+		suite.mockChManager.EXPECT().Match(mock.Anything, mock.Anything, mock.Anything).Return(false).Once()
 		cluster := NewClusterImpl(suite.mockSession, suite.mockChManager)
 		err := cluster.FlushChannels(context.Background(), 1, 0, []string{"ch-1", "ch-2"})
 		suite.Error(err)
@@ -171,7 +171,7 @@ func (suite *ClusterSuite) TestFlushChannels() {
 		suite.SetupTest()
 
 		channels := []string{"ch-1", "ch-2"}
-		suite.mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(true).Times(len(channels))
+		suite.mockChManager.EXPECT().Match(mock.Anything, mock.Anything, mock.Anything).Return(true).Times(len(channels))
 		suite.mockSession.EXPECT().FlushChannels(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 		cluster := NewClusterImpl(suite.mockSession, suite.mockChManager)
 		err := cluster.FlushChannels(context.Background(), 1, 0, channels)

@@ -37,7 +37,7 @@ import (
 
 func TestManager(t *testing.T) {
 	t.Run("test add and remove dispatcher", func(t *testing.T) {
-		c := NewDispatcherManager("mock_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
+		c := NewDispatcherManager(context.TODO(), "mock_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
 		assert.NotNil(t, c)
 		assert.Equal(t, 0, c.Num())
 
@@ -65,7 +65,7 @@ func TestManager(t *testing.T) {
 	t.Run("test merge and split", func(t *testing.T) {
 		prefix := fmt.Sprintf("mock%d", time.Now().UnixNano())
 		ctx := context.Background()
-		c := NewDispatcherManager(prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
+		c := NewDispatcherManager(context.TODO(), prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
 		assert.NotNil(t, c)
 		_, err := c.Add(ctx, NewStreamConfig("mock_vchannel_0", nil, common.SubscriptionPositionUnknown))
 		assert.NoError(t, err)
@@ -96,7 +96,7 @@ func TestManager(t *testing.T) {
 	t.Run("test run and close", func(t *testing.T) {
 		prefix := fmt.Sprintf("mock%d", time.Now().UnixNano())
 		ctx := context.Background()
-		c := NewDispatcherManager(prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
+		c := NewDispatcherManager(context.TODO(), prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
 		assert.NotNil(t, c)
 		_, err := c.Add(ctx, NewStreamConfig("mock_vchannel_0", nil, common.SubscriptionPositionUnknown))
 		assert.NoError(t, err)
@@ -131,7 +131,7 @@ func TestManager(t *testing.T) {
 		ctx, cancel := context.WithTimeout(ctx, time.Millisecond*2)
 		defer cancel()
 		time.Sleep(time.Millisecond * 2)
-		c := NewDispatcherManager(prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
+		c := NewDispatcherManager(context.TODO(), prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
 		go c.Run()
 		assert.NotNil(t, c)
 		_, err := c.Add(ctx, NewStreamConfig("mock_vchannel_0", nil, common.SubscriptionPositionUnknown))
@@ -149,7 +149,7 @@ func TestManager(t *testing.T) {
 
 	t.Run("test_repeated_vchannel", func(t *testing.T) {
 		prefix := fmt.Sprintf("mock%d", time.Now().UnixNano())
-		c := NewDispatcherManager(prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
+		c := NewDispatcherManager(context.TODO(), prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
 		go c.Run()
 		assert.NotNil(t, c)
 		ctx := context.Background()
@@ -210,7 +210,7 @@ func (suite *SimulationSuite) SetupTest() {
 	assert.NoError(suite.T(), err)
 	suite.producer = producer
 
-	suite.manager = NewDispatcherManager(suite.pchannel, typeutil.DataNodeRole, 0, suite.factory)
+	suite.manager = NewDispatcherManager(context.TODO(), suite.pchannel, typeutil.DataNodeRole, 0, suite.factory)
 	go suite.manager.Run()
 }
 

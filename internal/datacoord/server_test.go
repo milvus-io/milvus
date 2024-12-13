@@ -576,7 +576,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 		defer closeTestServer(t, svr)
 		channelManager := NewMockChannelManager(t)
 		channelName := "ch"
-		channelManager.EXPECT().GetChannelsByCollectionID(mock.Anything).RunAndReturn(func(id int64) []RWChannel {
+		channelManager.EXPECT().GetChannelsByCollectionID(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, id int64) []RWChannel {
 			return []RWChannel{
 				&channelMeta{
 					Name:         channelName + fmt.Sprint(id),
@@ -955,8 +955,8 @@ func TestDropVirtualChannel(t *testing.T) {
 		ctx := context.Background()
 		chanName := "ch1"
 		mockChManager := NewMockChannelManager(t)
-		mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(true).Twice()
-		mockChManager.EXPECT().Release(mock.Anything, chanName).Return(nil).Twice()
+		mockChManager.EXPECT().Match(mock.Anything, mock.Anything, mock.Anything).Return(true).Twice()
+		mockChManager.EXPECT().Release(mock.Anything, mock.Anything, chanName).Return(nil).Twice()
 		svr.channelManager = mockChManager
 
 		req := &datapb.DropVirtualChannelRequest{
@@ -1037,7 +1037,7 @@ func TestDropVirtualChannel(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		mockChManager := NewMockChannelManager(t)
-		mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(false).Once()
+		mockChManager.EXPECT().Match(mock.Anything, mock.Anything, mock.Anything).Return(false).Once()
 		svr.channelManager = mockChManager
 
 		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
@@ -2339,7 +2339,7 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 
 		datanodeID := int64(1)
 		channelManager := NewMockChannelManager(t)
-		channelManager.EXPECT().Match(datanodeID, mockVChannel).Return(true)
+		channelManager.EXPECT().Match(mock.Anything, datanodeID, mockVChannel).Return(true)
 
 		svr.channelManager = channelManager
 		req := &datapb.UpdateChannelCheckpointRequest{
@@ -2385,7 +2385,7 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 
 		datanodeID := int64(1)
 		channelManager := NewMockChannelManager(t)
-		channelManager.EXPECT().Match(datanodeID, mockVChannel).Return(false)
+		channelManager.EXPECT().Match(mock.Anything, datanodeID, mockVChannel).Return(false)
 
 		svr.channelManager = channelManager
 		req := &datapb.UpdateChannelCheckpointRequest{
@@ -2538,9 +2538,9 @@ func Test_CheckHealth(t *testing.T) {
 	getChannelManager := func(t *testing.T, findWatcherOk bool) ChannelManager {
 		channelManager := NewMockChannelManager(t)
 		if findWatcherOk {
-			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, nil)
+			channelManager.EXPECT().FindWatcher(mock.Anything, mock.Anything).Return(0, nil)
 		} else {
-			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, errors.New("error"))
+			channelManager.EXPECT().FindWatcher(mock.Anything, mock.Anything).Return(0, errors.New("error"))
 		}
 		return channelManager
 	}

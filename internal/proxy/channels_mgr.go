@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"sync"
 
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // channelsMgr manages the pchans, vchans and related message stream of collections.
@@ -173,6 +175,8 @@ func (mgr *singleTypeChannelsMgr) streamExistPrivate(collectionID UniqueID) bool
 }
 
 func createStream(ctx context.Context, factory msgstream.Factory, pchans []pChan, repack repackFuncType) (msgstream.MsgStream, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "createStream")
+	defer sp.End()
 	var stream msgstream.MsgStream
 	var err error
 
@@ -254,6 +258,8 @@ func (mgr *singleTypeChannelsMgr) lockGetStream(collectionID UniqueID) (msgstrea
 // getOrCreateStream get message stream of specified collection.
 // If stream doesn't exist, call createMsgStream to create for it.
 func (mgr *singleTypeChannelsMgr) getOrCreateStream(ctx context.Context, collectionID UniqueID) (msgstream.MsgStream, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "getOrCreateStream")
+	defer sp.End()
 	if stream, err := mgr.lockGetStream(collectionID); err == nil {
 		return stream, nil
 	}

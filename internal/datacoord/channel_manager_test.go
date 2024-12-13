@@ -69,7 +69,7 @@ func (s *ChannelManagerSuite) prepareMeta(chNodes map[string]int64, state datapb
 }
 
 func (s *ChannelManagerSuite) checkAssignment(m *ChannelManagerImpl, nodeID int64, channel string, state ChannelState) {
-	rwChannel, found := m.GetChannel(nodeID, channel)
+	rwChannel, found := m.GetChannel(context.TODO(), nodeID, channel)
 	s.True(found)
 	s.NotNil(rwChannel)
 	s.Equal(channel, rwChannel.GetName())
@@ -77,20 +77,20 @@ func (s *ChannelManagerSuite) checkAssignment(m *ChannelManagerImpl, nodeID int6
 	s.True(ok)
 	s.Equal(state, sChannel.currentState)
 	s.EqualValues(nodeID, sChannel.assignedNode)
-	s.True(m.Match(nodeID, channel))
+	s.True(m.Match(context.TODO(), nodeID, channel))
 
 	if nodeID != bufferID {
-		gotNode, err := m.FindWatcher(channel)
+		gotNode, err := m.FindWatcher(context.TODO(), channel)
 		s.NoError(err)
 		s.EqualValues(gotNode, nodeID)
 	}
 }
 
 func (s *ChannelManagerSuite) checkNoAssignment(m *ChannelManagerImpl, nodeID int64, channel string) {
-	rwChannel, found := m.GetChannel(nodeID, channel)
+	rwChannel, found := m.GetChannel(context.TODO(), nodeID, channel)
 	s.False(found)
 	s.Nil(rwChannel)
-	s.False(m.Match(nodeID, channel))
+	s.False(m.Match(context.TODO(), nodeID, channel))
 }
 
 func (s *ChannelManagerSuite) SetupTest() {
@@ -122,7 +122,7 @@ func (s *ChannelManagerSuite) TestAddNode() {
 		s.Require().NoError(err)
 
 		var testNode int64 = 1
-		err = m.AddNode(testNode)
+		err = m.AddNode(context.TODO(), testNode)
 		s.NoError(err)
 
 		info := m.store.GetNode(testNode)
@@ -147,7 +147,7 @@ func (s *ChannelManagerSuite) TestAddNode() {
 			s.checkAssignment(m, bufferID, ch, Standby)
 		})
 
-		err = m.AddNode(testNodeID)
+		err = m.AddNode(context.TODO(), testNodeID)
 		s.NoError(err)
 
 		lo.ForEach(testChannels, func(ch string, _ int) {
@@ -169,7 +169,7 @@ func (s *ChannelManagerSuite) TestAddNode() {
 
 		s.checkAssignment(m, storedNodeID, testChannel, Watched)
 
-		err = m.AddNode(testNodeID)
+		err = m.AddNode(context.TODO(), testNodeID)
 		s.NoError(err)
 		s.ElementsMatch([]int64{100, 1}, m.store.GetNodes())
 		s.checkNoAssignment(m, testNodeID, testChannel)
@@ -178,7 +178,7 @@ func (s *ChannelManagerSuite) TestAddNode() {
 		paramtable.Get().Save(paramtable.Get().DataCoordCfg.AutoBalance.Key, "true")
 		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.AutoBalance.Key)
 
-		err = m.AddNode(testNodeID)
+		err = m.AddNode(context.TODO(), testNodeID)
 		s.NoError(err)
 		s.ElementsMatch([]int64{100, 101, 1}, m.store.GetNodes())
 		s.checkNoAssignment(m, testNodeID, testChannel)
@@ -198,7 +198,7 @@ func (s *ChannelManagerSuite) TestAddNode() {
 		paramtable.Get().Save(paramtable.Get().DataCoordCfg.AutoBalance.Key, "true")
 		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.AutoBalance.Key)
 
-		err = m.AddNode(testNodeID)
+		err = m.AddNode(context.TODO(), testNodeID)
 		s.NoError(err)
 		s.ElementsMatch([]int64{testNodeID, 1}, m.store.GetNodes())
 	})
@@ -226,7 +226,7 @@ func (s *ChannelManagerSuite) TestWatch() {
 			testCh     string = "ch1"
 			testNodeID int64  = 1
 		)
-		err = m.AddNode(testNodeID)
+		err = m.AddNode(context.TODO(), testNodeID)
 		s.NoError(err)
 		s.checkNoAssignment(m, testNodeID, testCh)
 
@@ -243,12 +243,12 @@ func (s *ChannelManagerSuite) TestRelease() {
 		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 
-		err = m.Release(1, "ch1")
+		err = m.Release(context.TODO(), 1, "ch1")
 		s.Error(err)
 		log.Info("error", zap.String("msg", err.Error()))
 
-		m.AddNode(1)
-		err = m.Release(1, "ch1")
+		m.AddNode(context.TODO(), 1)
+		err = m.Release(context.TODO(), 1, "ch1")
 		s.Error(err)
 		log.Info("error", zap.String("msg", err.Error()))
 	})
@@ -261,7 +261,7 @@ func (s *ChannelManagerSuite) TestRelease() {
 		m.Watch(context.TODO(), getChannel("ch1", 1))
 		s.checkAssignment(m, bufferID, "ch1", Standby)
 
-		err = m.Release(bufferID, "ch1")
+		err = m.Release(context.TODO(), bufferID, "ch1")
 		s.NoError(err)
 		s.checkAssignment(m, bufferID, "ch1", Standby)
 	})
@@ -275,7 +275,7 @@ func (s *ChannelManagerSuite) TestDeleteNode() {
 		info := m.store.GetNode(1)
 		s.Require().Nil(info)
 
-		err = m.DeleteNode(1)
+		err = m.DeleteNode(context.TODO(), 1)
 		s.NoError(err)
 	})
 	s.Run("delete bufferID", func() {
@@ -285,7 +285,7 @@ func (s *ChannelManagerSuite) TestDeleteNode() {
 		info := m.store.GetNode(bufferID)
 		s.Require().NotNil(info)
 
-		err = m.DeleteNode(bufferID)
+		err = m.DeleteNode(context.TODO(), bufferID)
 		s.NoError(err)
 	})
 
@@ -294,12 +294,12 @@ func (s *ChannelManagerSuite) TestDeleteNode() {
 		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 
-		err = m.AddNode(1)
+		err = m.AddNode(context.TODO(), 1)
 		s.NoError(err)
 		info := m.store.GetNode(bufferID)
 		s.Require().NotNil(info)
 
-		err = m.DeleteNode(1)
+		err = m.DeleteNode(context.TODO(), 1)
 		s.NoError(err)
 		info = m.store.GetNode(1)
 		s.Nil(info)
@@ -317,10 +317,10 @@ func (s *ChannelManagerSuite) TestDeleteNode() {
 		s.checkAssignment(m, 1, "ch2", Watched)
 		s.checkAssignment(m, 1, "ch3", Watched)
 
-		err = m.AddNode(2)
+		err = m.AddNode(context.TODO(), 2)
 		s.NoError(err)
 
-		err = m.DeleteNode(1)
+		err = m.DeleteNode(context.TODO(), 1)
 		s.NoError(err)
 		info := m.store.GetNode(bufferID)
 		s.NotNil(info)
@@ -363,7 +363,7 @@ func (s *ChannelManagerSuite) TestFindWatcher() {
 
 	for _, test := range tests {
 		s.Run(test.description, func() {
-			gotID, gotErr := m.FindWatcher(test.testCh)
+			gotID, gotErr := m.FindWatcher(context.TODO(), test.testCh)
 			s.EqualValues(test.outNodeID, gotID)
 			if test.outError {
 				s.Error(gotErr)
@@ -477,9 +477,9 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		// Release belfore check return
 		s.mockCluster.EXPECT().CheckChannelOperationProgress(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
 			if info.GetVchan().GetChannelName() == "ch1" {
-				m.Release(1, "ch1")
+				m.Release(context.TODO(), 1, "ch1")
 				s.checkAssignment(m, 1, "ch1", ToRelease)
-				rwChannel, found := m.GetChannel(nodeID, "ch1")
+				rwChannel, found := m.GetChannel(context.TODO(), nodeID, "ch1")
 				s.True(found)
 				metaInfo := rwChannel.GetWatchInfo()
 				s.Require().EqualValues(metaInfo.GetOpID(), 19531)
@@ -739,13 +739,13 @@ func (s *ChannelManagerSuite) TestStartup() {
 	s.checkAssignment(m, 1, "ch2", Legacy)
 	s.checkAssignment(m, bufferID, "ch3", Standby)
 
-	err = m.DeleteNode(1)
+	err = m.DeleteNode(context.TODO(), 1)
 	s.NoError(err)
 
 	s.checkAssignment(m, bufferID, "ch1", Standby)
 	s.checkAssignment(m, bufferID, "ch2", Standby)
 
-	err = m.AddNode(2)
+	err = m.AddNode(context.TODO(), 2)
 	s.NoError(err)
 	s.checkAssignment(m, 2, "ch1", ToWatch)
 	s.checkAssignment(m, 2, "ch2", ToWatch)
@@ -775,7 +775,7 @@ func (s *ChannelManagerSuite) TestStartupNilSchema() {
 	s.Require().NoError(err)
 
 	for ch, node := range chNodes {
-		channel, got := m.GetChannel(node, ch)
+		channel, got := m.GetChannel(context.TODO(), node, ch)
 		s.Require().True(got)
 		s.Nil(channel.GetSchema())
 		s.Equal(ch, channel.GetName())
@@ -787,10 +787,10 @@ func (s *ChannelManagerSuite) TestStartupNilSchema() {
 		nil,
 	)
 
-	err = m.DeleteNode(1)
+	err = m.DeleteNode(context.TODO(), 1)
 	s.Require().NoError(err)
 
-	err = m.DeleteNode(3)
+	err = m.DeleteNode(context.TODO(), 3)
 	s.Require().NoError(err)
 
 	s.checkAssignment(m, bufferID, "ch1", Standby)
@@ -798,7 +798,7 @@ func (s *ChannelManagerSuite) TestStartupNilSchema() {
 	s.checkAssignment(m, bufferID, "ch3", Standby)
 
 	for ch := range chNodes {
-		channel, got := m.GetChannel(bufferID, ch)
+		channel, got := m.GetChannel(context.TODO(), bufferID, ch)
 		s.Require().True(got)
 		s.NotNil(channel.GetSchema())
 		s.Equal(ch, channel.GetName())
@@ -808,14 +808,14 @@ func (s *ChannelManagerSuite) TestStartupNilSchema() {
 		log.Info("Recovered non-nil schema channel", zap.Any("channel", channel))
 	}
 
-	err = m.AddNode(7)
+	err = m.AddNode(context.TODO(), 7)
 	s.Require().NoError(err)
 	s.checkAssignment(m, 7, "ch1", ToWatch)
 	s.checkAssignment(m, 7, "ch2", ToWatch)
 	s.checkAssignment(m, 7, "ch3", ToWatch)
 
 	for ch := range chNodes {
-		channel, got := m.GetChannel(7, ch)
+		channel, got := m.GetChannel(context.TODO(), 7, ch)
 		s.Require().True(got)
 		s.NotNil(channel.GetSchema())
 		s.Equal(ch, channel.GetName())
@@ -886,7 +886,7 @@ func (s *ChannelManagerSuite) TestGetChannelWatchInfos() {
 	})
 
 	cm := &ChannelManagerImpl{store: store}
-	infos := cm.GetChannelWatchInfos()
+	infos := cm.GetChannelWatchInfos(context.TODO())
 	s.Equal(2, len(infos))
 	s.Equal("ch1", infos[1]["ch1"].GetVchan().ChannelName)
 	s.Equal("ch2", infos[2]["ch2"].GetVchan().ChannelName)
@@ -894,6 +894,6 @@ func (s *ChannelManagerSuite) TestGetChannelWatchInfos() {
 	// test empty value
 	store.EXPECT().GetNodesChannels().Unset()
 	store.EXPECT().GetNodesChannels().Return([]*NodeChannelInfo{})
-	infos = cm.GetChannelWatchInfos()
+	infos = cm.GetChannelWatchInfos(context.TODO())
 	s.Equal(0, len(infos))
 }

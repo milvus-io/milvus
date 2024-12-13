@@ -46,14 +46,17 @@ func (b *baseRedoTask) AddAsyncStep(step nestedStep) {
 	b.asyncTodoStep = append(b.asyncTodoStep, step)
 }
 
-func (b *baseRedoTask) redoAsyncSteps() {
+func (b *baseRedoTask) redoAsyncSteps(ctx context.Context) {
 	l := len(b.asyncTodoStep)
 	steps := make([]nestedStep, 0, l)
 	for i := l - 1; i >= 0; i-- {
 		steps = append(steps, b.asyncTodoStep[i])
 	}
 	b.asyncTodoStep = nil // make baseRedoTask can be collected.
-	b.stepExecutor.AddSteps(&stepStack{steps: steps})
+	b.stepExecutor.AddSteps(&stepStack{
+		steps:    steps,
+		stepsCtx: context.WithoutCancel(ctx),
+	})
 }
 
 func (b *baseRedoTask) Execute(ctx context.Context) error {
@@ -61,10 +64,10 @@ func (b *baseRedoTask) Execute(ctx context.Context) error {
 		todo := b.syncTodoStep[i]
 		// no children step in sync steps.
 		if _, err := todo.Execute(ctx); err != nil {
-			log.Error("failed to execute step", zap.Error(err), zap.String("desc", todo.Desc()))
+			log.Ctx(ctx).Error("failed to execute step", zap.Error(err), zap.String("desc", todo.Desc()))
 			return err
 		}
 	}
-	go b.redoAsyncSteps()
+	go b.redoAsyncSteps(ctx)
 	return nil
 }

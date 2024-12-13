@@ -92,10 +92,10 @@ func genMsg(msgType commonpb.MsgType, ch string, t Timestamp, sourceID int64) *m
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
-	s.mockChMgr.EXPECT().GetChannelsByCollectionID(int64(0)).
+	s.mockChMgr.EXPECT().GetChannelsByCollectionID(context.TODO(), int64(0)).
 		Return([]RWChannel{&channelMeta{Name: "ch1", CollectionID: 0}}).Times(3)
 
-	s.mockChMgr.EXPECT().GetChannelsByCollectionID(int64(1)).Return(nil).Times(1)
+	s.mockChMgr.EXPECT().GetChannelsByCollectionID(context.TODO(), int64(1)).Return(nil).Times(1)
 	tests := []struct {
 		description string
 		inTs        Timestamp
@@ -132,7 +132,7 @@ func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
 }
 
 func (s *ServerSuite) TestGetFlushState_BySegment() {
-	s.mockChMgr.EXPECT().GetChannelsByCollectionID(mock.Anything).
+	s.mockChMgr.EXPECT().GetChannelsByCollectionID(mock.Anything, mock.Anything).
 		Return([]RWChannel{&channelMeta{Name: "ch1", CollectionID: 0}}).Times(3)
 
 	tests := []struct {
@@ -185,7 +185,7 @@ func (s *ServerSuite) TestSaveBinlogPath_ClosedServer() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_ChannelNotMatch() {
-	s.mockChMgr.EXPECT().Match(mock.Anything, mock.Anything).Return(false)
+	s.mockChMgr.EXPECT().Match(mock.Anything, mock.Anything, mock.Anything).Return(false)
 	resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
 		SegmentID: 1,
 		Channel:   "test",
@@ -195,7 +195,7 @@ func (s *ServerSuite) TestSaveBinlogPath_ChannelNotMatch() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_SaveUnhealthySegment() {
-	s.mockChMgr.EXPECT().Match(int64(0), "ch1").Return(true)
+	s.mockChMgr.EXPECT().Match(mock.Anything, int64(0), "ch1").Return(true)
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 
 	segments := map[int64]commonpb.SegmentState{
@@ -240,7 +240,7 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveUnhealthySegment() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
-	s.mockChMgr.EXPECT().Match(int64(0), "ch1").Return(true)
+	s.mockChMgr.EXPECT().Match(mock.Anything, int64(0), "ch1").Return(true)
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 
 	segments := map[int64]commonpb.SegmentState{
@@ -312,7 +312,7 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
-	s.mockChMgr.EXPECT().Match(int64(0), "ch1").Return(true)
+	s.mockChMgr.EXPECT().Match(mock.Anything, int64(0), "ch1").Return(true)
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 
 	segment := s.testServer.meta.GetHealthySegment(context.TODO(), 1)
@@ -365,7 +365,7 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
-	s.mockChMgr.EXPECT().Match(int64(0), "ch1").Return(true)
+	s.mockChMgr.EXPECT().Match(mock.Anything, int64(0), "ch1").Return(true)
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 
 	segments := map[int64]int64{
@@ -488,7 +488,7 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 		CollectionID: 0,
 	}
 
-	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything).Return(map[int64][]string{
+	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything, mock.Anything).Return(map[int64][]string{
 		1: {"channel-1"},
 	})
 
@@ -581,7 +581,7 @@ func (s *ServerSuite) TestFlush_RollingUpgrade() {
 	mockCluster.EXPECT().Close().Maybe()
 	s.testServer.cluster = mockCluster
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
-	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything).Return(map[int64][]string{
+	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything, mock.Anything).Return(map[int64][]string{
 		1: {"channel-1"},
 	}).Once()
 
@@ -923,7 +923,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 
 		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
-		svr.channelManager.AddNode(0)
+		svr.channelManager.AddNode(context.TODO(), 0)
 		svr.channelManager.Watch(context.Background(), ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
@@ -1003,7 +1003,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 
 		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
-		svr.channelManager.AddNode(0)
+		svr.channelManager.AddNode(context.TODO(), 0)
 		svr.channelManager.Watch(context.Background(), ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
@@ -1096,7 +1096,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = svr.channelManager.AddNode(0)
+		err = svr.channelManager.AddNode(context.TODO(), 0)
 		assert.NoError(t, err)
 		err = svr.channelManager.Watch(context.Background(), &channelMeta{Name: "vchan1", CollectionID: 0})
 		assert.NoError(t, err)
@@ -1145,7 +1145,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 
 		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
-		svr.channelManager.AddNode(0)
+		svr.channelManager.AddNode(context.TODO(), 0)
 		svr.channelManager.Watch(context.Background(), ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
@@ -1191,7 +1191,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 
 		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
-		svr.channelManager.AddNode(0)
+		svr.channelManager.AddNode(context.TODO(), 0)
 		svr.channelManager.Watch(context.Background(), ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
@@ -1275,7 +1275,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 
 		ch := &channelMeta{Name: "vchan1", CollectionID: 0}
-		svr.channelManager.AddNode(0)
+		svr.channelManager.AddNode(context.TODO(), 0)
 		svr.channelManager.Watch(context.Background(), ch)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
