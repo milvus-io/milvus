@@ -360,6 +360,51 @@ func (_c *MockShardDelegator_GetStatistics_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// GetTSafe provides a mock function with given fields:
+func (_m *MockShardDelegator) GetTSafe() uint64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTSafe")
+	}
+
+	var r0 uint64
+	if rf, ok := ret.Get(0).(func() uint64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_GetTSafe_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTSafe'
+type MockShardDelegator_GetTSafe_Call struct {
+	*mock.Call
+}
+
+// GetTSafe is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) GetTSafe() *MockShardDelegator_GetTSafe_Call {
+	return &MockShardDelegator_GetTSafe_Call{Call: _e.mock.On("GetTSafe")}
+}
+
+func (_c *MockShardDelegator_GetTSafe_Call) Run(run func()) *MockShardDelegator_GetTSafe_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_GetTSafe_Call) Return(_a0 uint64) *MockShardDelegator_GetTSafe_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_GetTSafe_Call) RunAndReturn(run func() uint64) *MockShardDelegator_GetTSafe_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetTargetVersion provides a mock function with given fields:
 func (_m *MockShardDelegator) GetTargetVersion() int64 {
 	ret := _m.Called()
@@ -1007,6 +1052,39 @@ func (_c *MockShardDelegator_TryCleanExcludedSegments_Call) Return() *MockShardD
 }
 
 func (_c *MockShardDelegator_TryCleanExcludedSegments_Call) RunAndReturn(run func(uint64)) *MockShardDelegator_TryCleanExcludedSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateTSafe provides a mock function with given fields: ts
+func (_m *MockShardDelegator) UpdateTSafe(ts uint64) {
+	_m.Called(ts)
+}
+
+// MockShardDelegator_UpdateTSafe_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateTSafe'
+type MockShardDelegator_UpdateTSafe_Call struct {
+	*mock.Call
+}
+
+// UpdateTSafe is a helper method to define mock.On call
+//   - ts uint64
+func (_e *MockShardDelegator_Expecter) UpdateTSafe(ts interface{}) *MockShardDelegator_UpdateTSafe_Call {
+	return &MockShardDelegator_UpdateTSafe_Call{Call: _e.mock.On("UpdateTSafe", ts)}
+}
+
+func (_c *MockShardDelegator_UpdateTSafe_Call) Run(run func(ts uint64)) *MockShardDelegator_UpdateTSafe_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_UpdateTSafe_Call) Return() *MockShardDelegator_UpdateTSafe_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_UpdateTSafe_Call) RunAndReturn(run func(uint64)) *MockShardDelegator_UpdateTSafe_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -23,12 +23,10 @@ add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/te
 # TODO: better to use ls/find pattern
 set(MILVUS_TEST_FILES
         init_gtest.cpp
-
         test_always_true_expr.cpp
         test_array_bitmap_index.cpp
         test_array_inverted_index.cpp
         test_bf.cpp
-        test_bf_sparse.cpp
         test_binary.cpp
         test_binlog_index.cpp
         test_bitmap_index.cpp
@@ -110,6 +108,12 @@ if (LINUX OR APPLE)
             test_scalar_index_creator.cpp
             test_string_index.cpp
             test_array.cpp test_array_expr.cpp)
+endif()
+
+if (LINUX)
+    set(MILVUS_TEST_FILES
+            ${MILVUS_TEST_FILES}
+            test_bf_sparse.cpp)
 endif()
 
 if (DEFINED AZURE_BUILD_DIR)

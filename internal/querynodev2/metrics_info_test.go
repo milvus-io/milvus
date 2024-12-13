@@ -17,7 +17,6 @@
 package querynodev2
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -40,10 +38,9 @@ func TestGetPipelineJSON(t *testing.T) {
 	paramtable.Init()
 
 	ch := "ch"
-	tSafeManager := tsafe.NewTSafeReplica()
-	tSafeManager.Add(context.Background(), ch, 0)
 	delegators := typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()
 	d := delegator.NewMockShardDelegator(t)
+	d.EXPECT().GetTSafe().Return(0)
 	delegators.Insert(ch, d)
 	msgDispatcher := msgdispatcher.NewMockClient(t)
 
@@ -55,7 +52,7 @@ func TestGetPipelineJSON(t *testing.T) {
 		Segment:    segmentManager,
 	}
 
-	pipelineManager := pipeline.NewManager(manager, tSafeManager, msgDispatcher, delegators)
+	pipelineManager := pipeline.NewManager(manager, msgDispatcher, delegators)
 
 	_, err := pipelineManager.Add(1, ch)
 	assert.NoError(t, err)

@@ -134,7 +134,7 @@ class ScalarIndex : public IndexBase {
     }
 
     virtual bool
-    IsMmapSupported() const {
+    IsMmapSupported() const override {
         return index_type_ == milvus::index::BITMAP_INDEX_TYPE ||
                index_type_ == milvus::index::HYBRID_INDEX_TYPE;
     }

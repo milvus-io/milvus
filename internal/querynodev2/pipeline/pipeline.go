@@ -48,7 +48,6 @@ func NewPipeLine(
 	collectionID UniqueID,
 	channel string,
 	manager *DataManager,
-	tSafeManager TSafeManager,
 	dispatcher msgdispatcher.Client,
 	delegator delegator.ShardDelegator,
 ) (Pipeline, error) {
@@ -67,7 +66,7 @@ func NewPipeLine(
 	}
 
 	insertNode := newInsertNode(collectionID, channel, manager, delegator, pipelineQueueLength)
-	deleteNode := newDeleteNode(collectionID, channel, manager, tSafeManager, delegator, pipelineQueueLength)
+	deleteNode := newDeleteNode(collectionID, channel, manager, delegator, pipelineQueueLength)
 
 	// skip add embedding node when collection has no function.
 	if embeddingNode != nil {
