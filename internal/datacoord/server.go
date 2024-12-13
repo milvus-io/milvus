@@ -1092,7 +1092,9 @@ func (s *Server) initRootCoordClient() error {
 //
 //	stop message stream client and stop server loops
 func (s *Server) Stop() error {
-	s.UpdateStateCode(commonpb.StateCode_Abnormal)
+	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
+		return nil
+	}
 	logutil.Logger(s.ctx).Info("datacoord server shutdown")
 	s.garbageCollector.close()
 	logutil.Logger(s.ctx).Info("datacoord garbage collector stopped")
