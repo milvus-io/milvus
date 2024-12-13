@@ -114,6 +114,7 @@ if (LINUX)
     set(MILVUS_TEST_FILES
             ${MILVUS_TEST_FILES}
             test_bf_sparse.cpp)
+endif()
 
 if (DEFINED AZURE_BUILD_DIR)
     set(MILVUS_TEST_FILES
