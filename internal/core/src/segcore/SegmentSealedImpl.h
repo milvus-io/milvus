@@ -165,7 +165,14 @@ class SegmentSealedImpl : public SegmentSealed {
 
     std::pair<int64_t, int64_t>
     get_chunk_by_offset(FieldId field_id, int64_t offset) const override {
-        PanicInfo(ErrorCode::Unsupported, "Not implemented");
+        if (fields_.find(field_id) == fields_.end()) {
+            PanicInfo(
+                ErrorCode::FieldIDInvalid,
+                "Failed to get chunk offset towards a non-existing field:{}",
+                field_id.get());
+        }
+        // for sealed segment, chunk id is always zero and input offset is the target offset
+        return std::make_pair(0, offset);
     }
 
     int64_t
