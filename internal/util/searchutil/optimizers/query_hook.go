@@ -28,6 +28,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 	// no hook applied or disabled, just return
 	if queryHook == nil || !paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
 		req.Req.IsTopkReduce = false
+		req.Req.IsRecallEvaluation = false
 		return req, nil
 	}
 
@@ -68,8 +69,9 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			common.SegmentNumKey:   estSegmentNum,
 			common.WithFilterKey:   withFilter,
 			common.DataTypeKey:     int32(plan.GetVectorAnns().GetVectorType()),
-			common.WithOptimizeKey: paramtable.Get().AutoIndexConfig.EnableOptimize.GetAsBool() && req.GetReq().GetIsTopkReduce(),
+			common.WithOptimizeKey: paramtable.Get().AutoIndexConfig.EnableOptimize.GetAsBool() && req.GetReq().GetIsTopkReduce() && queryInfo.GetGroupByFieldId() < 0,
 			common.CollectionKey:   req.GetReq().GetCollectionID(),
+			common.RecallEvalKey:   req.GetReq().GetIsRecallEvaluation(),
 		}
 		if withFilter && channelNum > 1 {
 			params[common.ChannelNumKey] = channelNum
@@ -90,6 +92,11 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		}
 		req.Req.SerializedExprPlan = serializedExprPlan
 		req.Req.IsTopkReduce = isTopkReduce
+		if isRecallEvaluation, ok := params[common.RecallEvalKey]; ok {
+			req.Req.IsRecallEvaluation = isRecallEvaluation.(bool) && queryInfo.GetGroupByFieldId() < 0
+		} else {
+			req.Req.IsRecallEvaluation = false
+		}
 		log.Debug("optimized search params done", zap.Any("queryInfo", queryInfo))
 	default:
 		log.Warn("not supported node type", zap.String("nodeType", fmt.Sprintf("%T", plan.GetNode())))

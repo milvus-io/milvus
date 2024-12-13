@@ -329,17 +329,23 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, errors.New("illegal compaction plan")
 	}
 
-	allSorted := true
-	for _, segment := range t.plan.GetSegmentBinlogs() {
-		if !segment.GetIsSorted() {
-			allSorted = false
-			break
+	sortMergeAppicable := paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool()
+	if sortMergeAppicable {
+		for _, segment := range t.plan.GetSegmentBinlogs() {
+			if !segment.GetIsSorted() {
+				sortMergeAppicable = false
+				break
+			}
+		}
+		if len(insertPaths) <= 1 || len(insertPaths) > paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt() {
+			// sort merge is not applicable if there is only one segment or too many segments
+			sortMergeAppicable = false
 		}
 	}
 
 	var res []*datapb.CompactionSegment
-	if paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool() && allSorted && len(t.plan.GetSegmentBinlogs()) > 1 {
-		log.Info("all segments are sorted, use merge sort")
+	if sortMergeAppicable {
+		log.Info("compact by merge sort")
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
 			t.plan.GetSegmentBinlogs(), t.tr, t.currentTs, t.plan.GetCollectionTtl(), t.bm25FieldIDs)
 		if err != nil {

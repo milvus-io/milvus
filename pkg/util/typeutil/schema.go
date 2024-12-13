@@ -1919,3 +1919,11 @@ func SparseFloatRowDim(row []byte) int64 {
 	}
 	return int64(SparseFloatRowIndexAt(row, SparseFloatRowElementCount(row)-1)) + 1
 }
+
+// placeholderGroup is a serialized PlaceholderGroup, return estimated total
+// number of non-zero elements of all the sparse vectors in the placeholderGroup
+// This is a rough estimate, and should be used only for statistics.
+func EstimateSparseVectorNNZFromPlaceholderGroup(placeholderGroup []byte, nq int) int {
+	overheadBytes := math.Max(10, float64(nq*3))
+	return (len(placeholderGroup) - int(overheadBytes)) / 8
+}

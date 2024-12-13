@@ -21,9 +21,6 @@ import (
 	"sort"
 
 	"github.com/bits-and-blooms/bitset"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type Sizable interface {
@@ -65,11 +62,6 @@ func (c *Knapsack[T]) tryPack(size, maxLeftSize, minSegs, maxSegs int64) (bitset
 
 	nSelections := selection.Count()
 	if left > maxLeftSize || nSelections < uint(minSegs) {
-		log.Debug("tryPack failed",
-			zap.String("name", c.name),
-			zap.Int64("left", left), zap.Int64("maxLeftSize", maxLeftSize),
-			zap.Int64("minSegs", minSegs),
-			zap.Uint("nselections", nSelections))
 		selection.ClearAll()
 		left = size
 	}

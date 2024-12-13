@@ -356,6 +356,24 @@ func TestInsertColumnsDifferentLen(t *testing.T) {
 	common.CheckErr(t, errInsert, false, "column size not match")
 }
 
+func TestInsertAutoIdPkData(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	// create collection
+	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
+	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption().TWithAutoID(true), hp.TNewSchemaOption())
+
+	// insert
+	columnOpt := hp.TNewDataOption().TWithDim(common.DefaultDim)
+	pkColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeInt64, *columnOpt)
+	vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, *columnOpt)
+	insertOpt := client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(vecColumn, pkColumn)
+
+	_, err := mc.Insert(ctx, insertOpt)
+	common.CheckErr(t, err, false, "more fieldData has pass in")
+}
+
 // test insert invalid column: empty column or dim not match
 func TestInsertInvalidColumn(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
@@ -745,22 +763,78 @@ func TestInsertRowMismatchFields(t *testing.T) {
 	common.CheckErr(t, errInsert, true)
 }
 
-func TestInsertAutoIDInvalidRow(t *testing.T) {
-	t.Skip("https://github.com/milvus-io/milvus/issues/33460")
+func TestInsertDisableAutoIDRow(t *testing.T) {
+	/*
+		autoID: false
+		- pass pk value -> insert success
+		- no pk value -> error
+	*/
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
+	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
+	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption().TWithAutoID(false), hp.TNewSchemaOption().TWithAutoID(false))
 
-	for _, autoId := range []bool{false, true} {
-		cp := hp.NewCreateCollectionParams(hp.Int64Vec)
-		_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption().TWithAutoID(autoId), hp.TNewSchemaOption())
+	// pass pk value
+	rowsWithPk := hp.GenInt64VecRows(10, false, false, *hp.TNewDataOption())
+	idsWithPk, err := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rowsWithPk...))
+	common.CheckErr(t, err, true)
+	require.Contains(t, idsWithPk.IDs.(*column.ColumnInt64).Data(), rowsWithPk[0].(*hp.BaseRow).Int64)
 
-		// insert rows: autoId true -> o pk data; autoID false -> has pk data
-		rows := hp.GenInt64VecRows(10, false, !autoId, *hp.TNewDataOption())
-		log.Info("rows data", zap.Any("rows[8]", rows[0]))
-		_, err := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rows...))
-		common.CheckErr(t, err, false, "missing pk data")
+	// no pk value -> now error
+	type tmpRow struct {
+		FloatVec []float32 `json:"floatVec,omitempty" milvus:"name:floatVec"`
 	}
+	rowsWithoutPk := make([]interface{}, 0, 10)
+
+	// BaseRow generate insert rows
+	for i := 0; i < 10; i++ {
+		baseRow := tmpRow{
+			FloatVec: common.GenFloatVector(common.DefaultDim),
+		}
+		rowsWithoutPk = append(rowsWithoutPk, &baseRow)
+	}
+	_, err1 := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rowsWithoutPk...))
+	common.CheckErr(t, err1, false, "row 0 does not has field int64")
+}
+
+func TestInsertEnableAutoIDRow(t *testing.T) {
+	/*
+		autoID: true
+		- pass pk value -> ignore passed value and write back auto-gen pk
+		- no pk value -> insert success
+	*/
+	t.Parallel()
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
+	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption().TWithAutoID(true), hp.TNewSchemaOption().TWithAutoID(true))
+
+	// pass pk value -> ignore passed pks
+	rowsWithPk := hp.GenInt64VecRows(10, false, false, *hp.TNewDataOption())
+	log.Debug("origin first rowsWithPk", zap.Any("rowsWithPk", rowsWithPk[0].(*hp.BaseRow)))
+	idsWithPk, err := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rowsWithPk...))
+	log.Info("write back rowsWithPk", zap.Any("rowsWithPk", rowsWithPk[0].(*hp.BaseRow)))
+	common.CheckErr(t, err, true)
+	require.Contains(t, idsWithPk.IDs.(*column.ColumnInt64).Data(), rowsWithPk[0].(*hp.BaseRow).Int64)
+
+	// no pk value -> now error
+	rowsWithoutPk := make([]interface{}, 0, 10)
+	type tmpRow struct {
+		FloatVec []float32 `json:"floatVec,omitempty" milvus:"name:floatVec"`
+	}
+
+	// BaseRow generate insert rows
+	for i := 0; i < 10; i++ {
+		baseRow := tmpRow{
+			FloatVec: common.GenFloatVector(common.DefaultDim),
+		}
+		rowsWithoutPk = append(rowsWithoutPk, &baseRow)
+	}
+
+	idsWithoutPk, err1 := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rowsWithoutPk...))
+	common.CheckErr(t, err1, true)
+	require.Equal(t, 10, int(idsWithoutPk.InsertCount))
 }
 
 func TestFlushRate(t *testing.T) {

@@ -47,9 +47,13 @@ func (a *alterDatabaseTask) Prepare(ctx context.Context) error {
 }
 
 func (a *alterDatabaseTask) Execute(ctx context.Context) error {
-	// Now we only support alter properties of database
-	if a.Req.GetProperties() == nil {
-		return errors.New("only support alter database properties, but database properties is empty")
+	// Now we support alter and delete properties of database
+	if a.Req.GetProperties() == nil && a.Req.GetDeleteKeys() == nil {
+		return errors.New("alter database requires either properties or deletekeys to modify or delete keys, both cannot be empty")
+	}
+
+	if len(a.Req.GetProperties()) > 0 && len(a.Req.GetDeleteKeys()) > 0 {
+		return errors.New("alter database operation cannot modify properties and delete keys at the same time")
 	}
 
 	oldDB, err := a.core.meta.GetDatabaseByName(ctx, a.Req.GetDbName(), a.ts)
@@ -59,14 +63,18 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	if ContainsKeyPairArray(a.Req.GetProperties(), oldDB.Properties) {
-		log.Info("skip to alter database due to no changes were detected in the properties", zap.String("databaseName", a.Req.GetDbName()))
-		return nil
-	}
-
 	newDB := oldDB.Clone()
-	ret := MergeProperties(oldDB.Properties, a.Req.GetProperties())
-	newDB.Properties = ret
+	if (len(a.Req.GetProperties())) > 0 {
+		if ContainsKeyPairArray(a.Req.GetProperties(), oldDB.Properties) {
+			log.Info("skip to alter database due to no changes were detected in the properties", zap.String("databaseName", a.Req.GetDbName()))
+			return nil
+		}
+		ret := MergeProperties(oldDB.Properties, a.Req.GetProperties())
+		newDB.Properties = ret
+	} else if (len(a.Req.GetDeleteKeys())) > 0 {
+		ret := DeleteProperties(oldDB.Properties, a.Req.GetDeleteKeys())
+		newDB.Properties = ret
+	}
 
 	ts := a.GetTs()
 	redoTask := newBaseRedoTask(a.core.stepExecutor)

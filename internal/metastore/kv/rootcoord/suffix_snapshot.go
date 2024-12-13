@@ -42,11 +42,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var (
-	// SuffixSnapshotTombstone special value for tombstone mark
-	SuffixSnapshotTombstone = []byte{0xE2, 0x9B, 0xBC}
-	PaginationSize          = 5000
-)
+// SuffixSnapshotTombstone special value for tombstone mark
+var SuffixSnapshotTombstone = []byte{0xE2, 0x9B, 0xBC}
 
 // IsTombstone used in migration tool also.
 func IsTombstone(value string) bool {
@@ -84,6 +81,8 @@ type SuffixSnapshot struct {
 	// snapshotLen pre calculated offset when parsing snapshot key
 	snapshotLen int
 
+	paginationSize int
+
 	closeGC chan struct{}
 }
 
@@ -118,6 +117,7 @@ func NewSuffixSnapshot(metaKV kv.MetaKv, sep, root, snapshot string) (*SuffixSna
 		snapshotLen:    snapshotLen,
 		rootPrefix:     root,
 		rootLen:        rootLen,
+		paginationSize: paramtable.Get().MetaStoreCfg.PaginationSize.GetAsInt(),
 		closeGC:        make(chan struct{}, 1),
 	}
 	go ss.startBackgroundGC(context.TODO())
@@ -449,7 +449,7 @@ func (ss *SuffixSnapshot) LoadWithPrefix(ctx context.Context, key string, ts typ
 			return nil
 		}
 
-		err := ss.MetaKv.WalkWithPrefix(ctx, key, PaginationSize, applyFn)
+		err := ss.MetaKv.WalkWithPrefix(ctx, key, ss.paginationSize, applyFn)
 		return fks, fvs, err
 	}
 	ss.Lock()
@@ -472,7 +472,7 @@ func (ss *SuffixSnapshot) LoadWithPrefix(ctx context.Context, key string, ts typ
 		resultValues = append(resultValues, value)
 	}
 
-	err := ss.MetaKv.WalkWithPrefix(ctx, prefix, PaginationSize, func(k []byte, v []byte) error {
+	err := ss.MetaKv.WalkWithPrefix(ctx, prefix, ss.paginationSize, func(k []byte, v []byte) error {
 		sKey := string(k)
 		sValue := string(v)
 
@@ -693,7 +693,7 @@ func (ss *SuffixSnapshot) removeExpiredKvs(ctx context.Context, now time.Time) e
 	}
 
 	// Walk through all keys with the snapshot prefix
-	err := ss.MetaKv.WalkWithPrefix(ctx, ss.snapshotPrefix, PaginationSize, func(k []byte, v []byte) error {
+	err := ss.MetaKv.WalkWithPrefix(ctx, ss.snapshotPrefix, ss.paginationSize, func(k []byte, v []byte) error {
 		key := ss.hideRootPrefix(string(k))
 		ts, ok := ss.isTSKey(key)
 		if !ok {

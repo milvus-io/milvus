@@ -711,8 +711,14 @@ func (q *QuotaCenter) getDenyReadingDBs() map[int64]struct{} {
 	for _, dbID := range lo.Uniq(q.collectionIDToDBID.Values()) {
 		if db, err := q.meta.GetDatabaseByID(q.ctx, dbID, typeutil.MaxTimestamp); err == nil {
 			if v := db.GetProperty(common.DatabaseForceDenyReadingKey); v != "" {
-				if dbForceDenyReadingEnabled, _ := strconv.ParseBool(v); dbForceDenyReadingEnabled {
-					dbIDs[dbID] = struct{}{}
+				if dbForceDenyReadingEnabled, err := strconv.ParseBool(v); err == nil {
+					if dbForceDenyReadingEnabled {
+						dbIDs[dbID] = struct{}{}
+					}
+				} else {
+					log.Warn("invalid configuration for database force deny reading",
+						zap.String("config item", common.DatabaseForceDenyReadingKey),
+						zap.String("config value", v))
 				}
 			}
 		}
@@ -740,8 +746,14 @@ func (q *QuotaCenter) getDenyWritingDBs() map[int64]struct{} {
 	for _, dbID := range lo.Uniq(q.collectionIDToDBID.Values()) {
 		if db, err := q.meta.GetDatabaseByID(q.ctx, dbID, typeutil.MaxTimestamp); err == nil {
 			if v := db.GetProperty(common.DatabaseForceDenyWritingKey); v != "" {
-				if dbForceDenyWritingEnabled, _ := strconv.ParseBool(v); dbForceDenyWritingEnabled {
-					dbIDs[dbID] = struct{}{}
+				if dbForceDenyWritingEnabled, err := strconv.ParseBool(v); err == nil {
+					if dbForceDenyWritingEnabled {
+						dbIDs[dbID] = struct{}{}
+					}
+				} else {
+					log.Warn("invalid configuration for database force deny writing",
+						zap.String("config item", common.DatabaseForceDenyWritingKey),
+						zap.String("config value", v))
 				}
 			}
 		}
@@ -1341,6 +1353,10 @@ func (q *QuotaCenter) checkDBDiskQuota(dbSizeInfo map[int64]int64) []int64 {
 					dbDiskQuotaMB := dbDiskQuotaBytes * 1024 * 1024
 					checkDiskQuota(dbID, binlogSize, dbDiskQuotaMB)
 					continue
+				} else {
+					log.Warn("invalid configuration for diskQuota.mb",
+						zap.String("config item", common.DatabaseDiskQuotaKey),
+						zap.String("config value", dbDiskQuotaStr))
 				}
 			}
 		}
