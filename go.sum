@@ -616,6 +616,8 @@ github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b h1:TfeY0NxYxZz
 github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b/go.mod h1:iwW+9cWfIzzDseEBCCeDSN5SD16Tidvy8cwQ7ZY8Qj4=
 github.com/milvus-io/milvus-proto/go-api/v2 v2.4.18-0.20241204065031-4466aae60fc2 h1:I3lqktgaXm87Lbsj1UmjSttq+APd+b6IdB2GamPB9cg=
 github.com/milvus-io/milvus-proto/go-api/v2 v2.4.18-0.20241204065031-4466aae60fc2/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
+github.com/milvus-io/milvus-proto/go-api/v2 v2.4.18-0.20241212110236-7f744ed2ad11 h1:Mq+jtk/gSU6oMP5DPjMJHuRVBVDwxx61MKLxSCk1osg=
+github.com/milvus-io/milvus-proto/go-api/v2 v2.4.18-0.20241212110236-7f744ed2ad11/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
 github.com/milvus-io/milvus-storage/go v0.0.0-20231227072638-ebd0b8e56d70 h1:Z+sp64fmAOxAG7mU0dfVOXvAXlwRB0c8a96rIM5HevI=
 github.com/milvus-io/milvus-storage/go v0.0.0-20231227072638-ebd0b8e56d70/go.mod h1:GPETMcTZq1gLY1WA6Na5kiNAKnq8SEMMiVKUZrM3sho=
 github.com/milvus-io/pulsar-client-go v0.6.10 h1:eqpJjU+/QX0iIhEo3nhOqMNXL+TyInAs1IAHZCrCM/A=
