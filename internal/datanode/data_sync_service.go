@@ -283,7 +283,7 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 		metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(config.serverID)).Inc()
 		log.Info("datanode AsProducer", zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick.GetValue()))
 
-		m.EnableProduce(true)
+		m.ForceEnableProduce(true)
 
 		updater = newMqStatsUpdater(config, m)
 	}
