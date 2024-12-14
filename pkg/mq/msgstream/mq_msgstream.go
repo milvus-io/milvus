@@ -58,18 +58,19 @@ type mqMsgStream struct {
 	consumers        map[string]mqwrapper.Consumer
 	consumerChannels []string
 
-	repackFunc    RepackFunc
-	unmarshal     UnmarshalDispatcher
-	receiveBuf    chan *MsgPack
-	closeRWMutex  *sync.RWMutex
-	streamCancel  func()
-	bufSize       int64
-	producerLock  *sync.RWMutex
-	consumerLock  *sync.Mutex
-	closed        int32
-	onceChan      sync.Once
-	enableProduce atomic.Value
-	configEvent   config.EventHandler
+	repackFunc         RepackFunc
+	unmarshal          UnmarshalDispatcher
+	receiveBuf         chan *MsgPack
+	closeRWMutex       *sync.RWMutex
+	streamCancel       func()
+	bufSize            int64
+	producerLock       *sync.RWMutex
+	consumerLock       *sync.Mutex
+	closed             int32
+	onceChan           sync.Once
+	ttMsgEnable        atomic.Value
+	forceEnableProduce atomic.Value
+	configEvent        config.EventHandler
 }
 
 // NewMqMsgStream is used to generate a new mqMsgStream object
@@ -104,14 +105,15 @@ func NewMqMsgStream(ctx context.Context,
 		closed:       0,
 	}
 	ctxLog := log.Ctx(ctx)
-	stream.enableProduce.Store(paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool())
+	stream.forceEnableProduce.Store(false)
+	stream.ttMsgEnable.Store(paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool())
 	stream.configEvent = config.NewHandler("enable send tt msg "+fmt.Sprint(streamCounter.Inc()), func(event *config.Event) {
 		value, err := strconv.ParseBool(event.Value)
 		if err != nil {
 			ctxLog.Warn("Failed to parse bool value", zap.String("v", event.Value), zap.Error(err))
 			return
 		}
-		stream.enableProduce.Store(value)
+		stream.ttMsgEnable.Store(value)
 		ctxLog.Info("Msg Stream state updated", zap.Bool("can_produce", stream.isEnabledProduce()))
 	})
 	paramtable.Get().Watch(paramtable.Get().CommonCfg.TTMsgEnabled.Key, stream.configEvent)
@@ -265,12 +267,12 @@ func (ms *mqMsgStream) GetProduceChannels() []string {
 	return ms.producerChannels
 }
 
-func (ms *mqMsgStream) EnableProduce(can bool) {
-	ms.enableProduce.Store(can)
+func (ms *mqMsgStream) ForceEnableProduce(can bool) {
+	ms.forceEnableProduce.Store(can)
 }
 
 func (ms *mqMsgStream) isEnabledProduce() bool {
-	return ms.enableProduce.Load().(bool)
+	return ms.forceEnableProduce.Load().(bool) || ms.ttMsgEnable.Load().(bool)
 }
 
 func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
