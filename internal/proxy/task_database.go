@@ -364,12 +364,12 @@ func (t *describeDatabaseTask) Execute(ctx context.Context) error {
 	}
 	ret, err := t.rootCoord.DescribeDatabase(ctx, req)
 	if err != nil {
-		log.Warn("DescribeDatabase failed", zap.Error(err))
+		log.Ctx(ctx).Warn("DescribeDatabase failed", zap.Error(err))
 		return err
 	}
 
 	if err := merr.CheckRPCCall(ret, err); err != nil {
-		log.Warn("DescribeDatabase failed", zap.Error(err))
+		log.Ctx(ctx).Warn("DescribeDatabase failed", zap.Error(err))
 		return err
 	}
 

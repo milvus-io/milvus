@@ -517,9 +517,9 @@ func (c *StateChannelStore) getChannel(nodeID int64, channelName string) *StateC
 		if storedChannel, ok := cInfo.Channels[channelName]; ok {
 			return storedChannel.(*StateChannel)
 		}
-		log.Debug("Channel doesn't exist in Node", zap.String("channel", channelName), zap.Int64("nodeID", nodeID))
+		log.Ctx(context.TODO()).Debug("Channel doesn't exist in Node", zap.String("channel", channelName), zap.Int64("nodeID", nodeID))
 	} else {
-		log.Error("Node doesn't exist", zap.Int64("NodeID", nodeID))
+		log.Ctx(context.TODO()).Error("Node doesn't exist", zap.Int64("NodeID", nodeID))
 	}
 	return nil
 }
@@ -550,7 +550,7 @@ func (c *StateChannelStore) updateMetaMemoryForSingleOp(op *ChannelOp) error {
 		case Delete: // Remove Channel
 			c.removeAssignment(op.NodeID, ch.GetName())
 		default:
-			log.Error("unknown opType in updateMetaMemoryForSingleOp", zap.Any("type", op.Type))
+			log.Ctx(context.TODO()).Error("unknown opType in updateMetaMemoryForSingleOp", zap.Any("type", op.Type))
 		}
 	})
 	return nil
@@ -572,7 +572,7 @@ func (c *StateChannelStore) updateMeta(opSet *ChannelOpSet) error {
 		} else if ops.Len() == 1 {
 			c.updateMetaMemoryForSingleOp(ops.Collect()[0])
 		} else {
-			log.Error("unsupported ChannelOpSet", zap.Any("OpSet", ops))
+			log.Ctx(context.TODO()).Error("unsupported ChannelOpSet", zap.Any("OpSet", ops))
 		}
 	}
 	return nil

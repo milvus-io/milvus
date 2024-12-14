@@ -78,7 +78,7 @@ func (node *Proxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComp
 		Status: merr.Success(),
 	}
 	code := node.GetStateCode()
-	log.Debug("Proxy current state", zap.String("StateCode", code.String()))
+	log.Ctx(ctx).Debug("Proxy current state", zap.String("StateCode", code.String()))
 	nodeID := common.NotRegisteredID
 	if node.session != nil && node.session.Registered() {
 		nodeID = node.session.ServerID
@@ -257,8 +257,7 @@ func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateD
 		replicateMsgStream:    node.replicateMsgStream,
 	}
 
-	log := log.With(
-		zap.String("traceID", sp.SpanContext().TraceID().String()),
+	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("dbName", request.DbName),
 	)
@@ -326,8 +325,7 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 		replicateMsgStream:  node.replicateMsgStream,
 	}
 
-	log := log.With(
-		zap.String("traceID", sp.SpanContext().TraceID().String()),
+	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("dbName", request.DbName),
 	)
@@ -394,8 +392,7 @@ func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListData
 		rootCoord:            node.rootCoord,
 	}
 
-	log := log.With(
-		zap.String("traceID", sp.SpanContext().TraceID().String()),
+	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 	)
 
@@ -3770,7 +3767,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		return res, err
 	}
 
-	log.Debug(rpcDone(method))
+	log.Ctx(ctx).Debug(rpcDone(method))
 
 	metrics.ProxyFunctionCall.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -5998,14 +5995,14 @@ func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferN
 
 	method := "TransferNode"
 	if err := ValidateResourceGroupName(request.GetSourceResourceGroup()); err != nil {
-		log.Warn("TransferNode failed",
+		log.Ctx(ctx).Warn("TransferNode failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, "", ""), nil
 	}
 
 	if err := ValidateResourceGroupName(request.GetTargetResourceGroup()); err != nil {
-		log.Warn("TransferNode failed",
+		log.Ctx(ctx).Warn("TransferNode failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, "", ""), nil
@@ -6065,14 +6062,14 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 
 	method := "TransferReplica"
 	if err := ValidateResourceGroupName(request.GetSourceResourceGroup()); err != nil {
-		log.Warn("TransferReplica failed",
+		log.Ctx(ctx).Warn("TransferReplica failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, request.GetDbName(), request.GetCollectionName()), nil
 	}
 
 	if err := ValidateResourceGroupName(request.GetTargetResourceGroup()); err != nil {
-		log.Warn("TransferReplica failed",
+		log.Ctx(ctx).Warn("TransferReplica failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, request.GetDbName(), request.GetCollectionName()), nil
@@ -6448,6 +6445,9 @@ func (node *Proxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimest
 		return &milvuspb.AllocTimestampResponse{Status: merr.Status(err)}, nil
 	}
 
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+	)
 	log.Info("AllocTimestamp request receive")
 	ts, err := node.tsoAllocator.AllocOne(ctx)
 	if err != nil {
@@ -6477,10 +6477,10 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
 	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
 		zap.String("collectionName", req.GetCollectionName()),
 		zap.String("partition name", req.GetPartitionName()),
 		zap.Any("files", req.GetFiles()),
-		zap.String("role", typeutil.ProxyRole),
 		zap.Any("options", req.GetOptions()),
 	)
 

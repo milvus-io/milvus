@@ -52,6 +52,7 @@ func isExpiredEntity(ttl int64, now, ts typeutil.Timestamp) bool {
 func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[interface{}]typeutil.Timestamp, error) {
 	pk2ts := make(map[interface{}]typeutil.Timestamp)
 
+	log := log.Ctx(ctx)
 	if len(paths) == 0 {
 		log.Debug("compact with no deltalogs, skip merge deltalogs")
 		return pk2ts, nil

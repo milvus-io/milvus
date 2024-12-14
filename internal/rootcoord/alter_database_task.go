@@ -103,7 +103,7 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 		redoTask.AddAsyncStep(NewSimpleStep("", func(ctx context.Context) ([]nestedStep, error) {
 			colls, err := a.core.meta.ListCollections(ctx, oldDB.Name, a.ts, true)
 			if err != nil {
-				log.Warn("failed to trigger update load config for database", zap.Int64("dbID", oldDB.ID), zap.Error(err))
+				log.Ctx(ctx).Warn("failed to trigger update load config for database", zap.Int64("dbID", oldDB.ID), zap.Error(err))
 				return nil, err
 			}
 			if len(colls) == 0 {
@@ -116,7 +116,7 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 				ResourceGroups: newResourceGroups,
 			})
 			if err := merr.CheckRPCCall(resp, err); err != nil {
-				log.Warn("failed to trigger update load config for database", zap.Int64("dbID", oldDB.ID), zap.Error(err))
+				log.Ctx(ctx).Warn("failed to trigger update load config for database", zap.Int64("dbID", oldDB.ID), zap.Error(err))
 				return nil, err
 			}
 			return nil, nil

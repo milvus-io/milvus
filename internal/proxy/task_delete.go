@@ -171,7 +171,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		}
 	}
 
-	log.Debug("send delete request to virtual channels",
+	log.Ctx(ctx).Debug("send delete request to virtual channels",
 		zap.String("collectionName", dt.req.GetCollectionName()),
 		zap.Int64("collectionID", dt.collectionID),
 		zap.Strings("virtual_channels", dt.vChannels),
@@ -397,7 +397,7 @@ func (dr *deleteRunner) Run(ctx context.Context) error {
 		// need query from querynode before delete
 		err = dr.complexDelete(ctx, plan)
 		if err != nil {
-			log.Warn("complex delete failed,but delete some data", zap.Int64("count", dr.result.DeleteCnt), zap.String("expr", dr.req.GetExpr()))
+			log.Ctx(ctx).Warn("complex delete failed,but delete some data", zap.Int64("count", dr.result.DeleteCnt), zap.String("expr", dr.req.GetExpr()))
 			return err
 		}
 	}
@@ -425,7 +425,7 @@ func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs) 
 	}
 
 	if err := dr.queue.Enqueue(enqueuedTask); err != nil {
-		log.Error("Failed to enqueue delete task: " + err.Error())
+		log.Ctx(ctx).Error("Failed to enqueue delete task: " + err.Error())
 		return nil, err
 	}
 
@@ -539,7 +539,7 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 		result, err := client.Recv()
 		if err != nil {
 			if err == io.EOF {
-				log.Debug("query stream for delete finished", zap.Int64("msgID", dr.msgID))
+				log.Ctx(ctx).Debug("query stream for delete finished", zap.Int64("msgID", dr.msgID))
 				return nil
 			}
 			return err
@@ -547,21 +547,21 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 
 		err = merr.Error(result.GetStatus())
 		if err != nil {
-			log.Warn("query stream for delete get error status", zap.Int64("msgID", dr.msgID), zap.Error(err))
+			log.Ctx(ctx).Warn("query stream for delete get error status", zap.Int64("msgID", dr.msgID), zap.Error(err))
 			return err
 		}
 
 		if dr.limiter != nil {
 			err := dr.limiter.Alloc(ctx, dr.dbID, map[int64][]int64{dr.collectionID: partitionIDs}, internalpb.RateType_DMLDelete, proto.Size(result.GetIds()))
 			if err != nil {
-				log.Warn("query stream for delete failed because rate limiter", zap.Int64("msgID", dr.msgID), zap.Error(err))
+				log.Ctx(ctx).Warn("query stream for delete failed because rate limiter", zap.Int64("msgID", dr.msgID), zap.Error(err))
 				return err
 			}
 		}
 
 		task, err := dr.produce(ctx, result.GetIds())
 		if err != nil {
-			log.Warn("produce delete task failed", zap.Error(err))
+			log.Ctx(ctx).Warn("produce delete task failed", zap.Error(err))
 			return err
 		}
 		task.allQueryCnt = result.GetAllRetrieveCount()
@@ -594,26 +594,26 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	dr.result.DeleteCnt = dr.count.Load()
 	dr.result.Timestamp = dr.sessionTS.Load()
 	if err != nil {
-		log.Warn("fail to execute complex delete",
+		log.Ctx(ctx).Warn("fail to execute complex delete",
 			zap.Int64("deleteCnt", dr.result.GetDeleteCnt()),
 			zap.Duration("interval", rc.ElapseSpan()),
 			zap.Error(err))
 		return err
 	}
 
-	log.Info("complex delete finished", zap.Int64("deleteCnt", dr.result.GetDeleteCnt()), zap.Duration("interval", rc.ElapseSpan()))
+	log.Ctx(ctx).Info("complex delete finished", zap.Int64("deleteCnt", dr.result.GetDeleteCnt()), zap.Duration("interval", rc.ElapseSpan()))
 	return nil
 }
 
 func (dr *deleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numRow int64) error {
-	log.Debug("get primary keys from expr",
+	log.Ctx(ctx).Debug("get primary keys from expr",
 		zap.Int64("len of primary keys", numRow),
 		zap.Int64("collectionID", dr.collectionID),
 		zap.Int64("partitionID", dr.partitionID))
 
 	task, err := dr.produce(ctx, pk)
 	if err != nil {
-		log.Warn("produce delete task failed")
+		log.Ctx(ctx).Warn("produce delete task failed")
 		return err
 	}
 

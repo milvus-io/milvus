@@ -64,11 +64,11 @@ func (p *streamPipeline) work() {
 	for {
 		select {
 		case <-p.closeCh:
-			log.Debug("stream pipeline input closed")
+			log.Ctx(context.TODO()).Debug("stream pipeline input closed")
 			return
 		case msg := <-p.input:
 			p.lastAccessTime.Store(time.Now())
-			log.RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
+			log.Ctx(context.TODO()).RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
 			p.pipeline.inputChannel <- msg
 			p.pipeline.process()
 		}
@@ -86,6 +86,7 @@ func (p *streamPipeline) Status() string {
 }
 
 func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.MsgPosition) error {
+	log := log.Ctx(ctx)
 	var err error
 	if position == nil {
 		log.Error("seek stream to nil position")

@@ -60,7 +60,7 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 		curUser, err := contextutil.GetCurUserFromContext(ctx)
 		if err != nil || curUser == util.UserRoot {
 			if err != nil {
-				log.Warn("get current user from context failed", zap.Error(err))
+				log.Ctx(ctx).Warn("get current user from context failed", zap.Error(err))
 			}
 			privilegeColls.Insert(util.AnyWord)
 			return privilegeColls, nil

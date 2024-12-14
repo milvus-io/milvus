@@ -124,7 +124,7 @@ func newTimeTickSync(ctx context.Context, sourceID int64, factory msgstream.Fact
 	// recover physical channels for all collections
 	for collID, chanNames := range chanMap {
 		dmlChannels.addChannels(chanNames...)
-		log.Info("recover physical channels", zap.Int64("collectionID", collID), zap.Strings("physical channels", chanNames))
+		log.Ctx(ctx).Info("recover physical channels", zap.Int64("collectionID", collID), zap.Strings("physical channels", chanNames))
 	}
 
 	return &timetickSync{
