@@ -43,6 +43,9 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual void
     WarmupChunkCache(const FieldId field_id, bool mmap_enabled) = 0;
 
+    virtual InsertRecord<true>&
+    get_insert_record() = 0;
+
     SegmentType
     type() const override {
         return SegmentType::Sealed;

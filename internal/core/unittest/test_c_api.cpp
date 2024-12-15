@@ -1137,6 +1137,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     auto segment_interface = reinterpret_cast<SegmentInterface*>(segment);
     auto sealed_segment = dynamic_cast<SegmentSealed*>(segment_interface);
     SealedLoadFieldData(dataset, *sealed_segment);
+    sealed_segment->get_insert_record().seal_pks();
 
     // delete data pks = {1, 2, 3}, timestamps = {4, 4, 4}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
