@@ -41,6 +41,7 @@ set(MILVUS_TEST_FILES
         test_c_tokenizer.cpp
         test_loading.cpp
         test_data_codec.cpp
+        test_delete_record.cpp
         test_disk_file_manager_test.cpp
         test_exec.cpp
         test_expr.cpp
