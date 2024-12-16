@@ -545,8 +545,8 @@ func TestDeleteDuplicatedPks(t *testing.T) {
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// delete
-	deleteIds := []int64{0, 0, 0, 0, 0}
-	delRes, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, deleteIds))
+	deleteIDs := []int64{0, 0, 0, 0, 0}
+	delRes, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, deleteIDs))
 	common.CheckErr(t, err, true)
 	require.Equal(t, 5, int(delRes.DeleteCount))
 
