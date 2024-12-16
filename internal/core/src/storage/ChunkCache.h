@@ -27,10 +27,11 @@ extern std::map<std::string, int> ReadAheadPolicy_Map;
 
 class ChunkCache {
  public:
-    explicit ChunkCache(const std::string& read_ahead_policy,
+    explicit ChunkCache(std::string& path_prefix,
+                        const std::string& read_ahead_policy,
                         ChunkManagerPtr cm,
                         MmapChunkManagerPtr mcm)
-        : cm_(cm), mcm_(mcm) {
+        : path_prefix_(path_prefix), cm_(cm), mcm_(mcm) {
         auto iter = ReadAheadPolicy_Map.find(read_ahead_policy);
         AssertInfo(iter != ReadAheadPolicy_Map.end(),
                    "unrecognized read ahead policy: {}, "
@@ -46,9 +47,11 @@ class ChunkCache {
 
  public:
     std::shared_ptr<ColumnBase>
-    Read(const std::string& filepath,
-         const MmapChunkDescriptorPtr& descriptor,
-         const FieldMeta& field_meta);
+    ReadChunked(const std::string& filepath,
+                const MmapChunkDescriptorPtr& descriptor,
+                const FieldMeta& field_meta,
+                bool mmap_enabled,
+                bool mmap_rss_not_need);
 
     std::shared_ptr<ColumnBase>
     Read(const std::string& filepath,
@@ -85,6 +88,8 @@ class ChunkCache {
     ChunkManagerPtr cm_;
     MmapChunkManagerPtr mcm_;
     ColumnTable columns_;
+
+    std::string path_prefix_;
 };
 
 using ChunkCachePtr = std::shared_ptr<milvus::storage::ChunkCache>;
