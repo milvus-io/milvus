@@ -60,3 +60,5 @@ jax==0.4.13
 jaxlib==0.4.13
 tensorflow==2.13.1
 
+# for supporting higher python version
+typing_extensions==4.12.2
