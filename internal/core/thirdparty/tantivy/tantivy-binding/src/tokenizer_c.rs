@@ -1,31 +1,33 @@
-use libc::{c_void,c_char};
+use libc::{c_char, c_void};
 use tantivy::tokenizer::TextAnalyzer;
 
 use crate::{
+    array::RustResult,
+    log::init_log,
     string_c::c_str_to_str,
     tokenizer::create_tokenizer,
     util::{create_binding, free_binding},
-    log::init_log,
 };
 
 #[no_mangle]
-pub extern "C" fn tantivy_create_tokenizer(analyzer_params: *const c_char) -> *mut c_void {
+pub extern "C" fn tantivy_create_tokenizer(analyzer_params: *const c_char) -> RustResult {
     init_log();
-    let params = unsafe{c_str_to_str(analyzer_params).to_string()};
+    let params = unsafe { c_str_to_str(analyzer_params).to_string() };
     let analyzer = create_tokenizer(&params);
     match analyzer {
-        Ok(text_analyzer) => create_binding(text_analyzer),
-        Err(err) => {
-            log::warn!("create tokenizer failed with error: {} param: {}", err.to_string(), params);
-            std::ptr::null_mut()
-        },
+        Ok(text_analyzer) => RustResult::from_ptr(create_binding(text_analyzer)),
+        Err(err) => RustResult::from_error(format!(
+            "create tokenizer failed with error: {} param: {}",
+            err.to_string(),
+            params,
+        )),
     }
 }
 
 #[no_mangle]
 pub extern "C" fn tantivy_clone_tokenizer(ptr: *mut c_void) -> *mut c_void {
-    let analyzer=ptr as *mut TextAnalyzer;
-    let clone = unsafe {(*analyzer).clone()};
+    let analyzer = ptr as *mut TextAnalyzer;
+    let clone = unsafe { (*analyzer).clone() };
     create_binding(clone)
 }
 
