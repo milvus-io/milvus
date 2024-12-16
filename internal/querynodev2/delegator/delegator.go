@@ -113,7 +113,6 @@ type shardDelegator struct {
 	segmentManager segments.SegmentManager
 	tsafeManager   tsafe.Manager
 	pkOracle       pkoracle.PkOracle
-	level0Mut      sync.RWMutex
 	// stream delete buffer
 	deleteMut    sync.RWMutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
