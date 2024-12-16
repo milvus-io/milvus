@@ -157,8 +157,7 @@ ChunkedSegmentSealedImpl::WarmupChunkCache(const FieldId field_id,
 
     auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     for (const auto& data_path : field_info.insert_files) {
-        auto column = cc->Read(
-            data_path, field_meta, mmap_enabled, true);
+        auto column = cc->Read(data_path, field_meta, mmap_enabled, true);
     }
 }
 
