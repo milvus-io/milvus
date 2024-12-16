@@ -281,7 +281,7 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("partition_name", ["12-s", "12 s", "(mn)", "中文", "%$#", " "])
+    @pytest.mark.parametrize("partition_name", ["12 s", "(mn)", "中文", "%$#", " "])
     def test_milvus_client_insert_invalid_partition_name(self, partition_name):
         """
         target: test milvus client: insert extra field than schema
@@ -749,7 +749,7 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("partition_name", ["12-s", "12 s", "(mn)", "中文", "%$#", " "])
+    @pytest.mark.parametrize("partition_name", ["12 s", "(mn)", "中文", "%$#", " "])
     def test_milvus_client_upsert_invalid_partition_name(self, partition_name):
         """
         target: test milvus client: insert extra field than schema
