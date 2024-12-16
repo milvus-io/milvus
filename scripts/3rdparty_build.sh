@@ -72,7 +72,7 @@ case "${unameOut}" in
     if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
       conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
     else
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
+      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -c tools.build:jobs=$(nproc) -s compiler.libcxx=libstdc++11 -u || { echo 'conan install failed'; exit 1; }
     fi
     ;;
   *)

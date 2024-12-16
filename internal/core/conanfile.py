@@ -14,11 +14,11 @@ class MilvusConan(ConanFile):
         "snappy/1.1.9#0519333fef284acd04806243de7d3070",
         "lzo/2.10#9517fc1bcc4d4cc229a79806003a1baa",
         "arrow/15.0.0#0456d916ff25d509e0724c5b219b4c45",
-        "openssl/3.1.2#02594c4c0a6e2b4feb3cd15119993597",
+        "openssl/3.1.6#977e6192420f30b53dd1fe3862835827",
         "aws-sdk-cpp/1.9.234#28d6d2c175975900ce292bafe8022c88",
         "googleapis/cci.20221108#65604e1b3b9a6b363044da625b201a2a",
         "benchmark/1.7.0#459f3bb1a64400a886ba43047576df3c",
-        "gtest/1.13.0#f9548be18a41ccc6367efcb8146e92be",
+        "gtest/1.14.0#25e2a474b4d1aecf5ff4f0555dcdf72c",
         "protobuf/3.21.4#fd372371d994b8585742ca42c12337f9",
         "rapidxml/1.13#10c11a4bfe073e131ed399d5c4f2e075",
         "yaml-cpp/0.7.0#9c87b3998de893cf2e5a08ad09a7a6e0",
@@ -74,6 +74,7 @@ class MilvusConan(ConanFile):
         "boost:without_locale": False,
         "glog:with_gflags": True,
         "glog:shared": True,
+        "libunwind:shared": True,
         "prometheus-cpp:with_pull": False,
         "fmt:header_only": True,
         "onetbb:tbbmalloc": False,
@@ -90,7 +91,7 @@ class MilvusConan(ConanFile):
 
     def requirements(self):
         if self.settings.os != "Macos":
-            self.requires("libunwind/1.7.2")
+            self.requires("libunwind/1.8.1")
 
     def imports(self):
         self.copy("*.dylib", "../lib", "lib")
