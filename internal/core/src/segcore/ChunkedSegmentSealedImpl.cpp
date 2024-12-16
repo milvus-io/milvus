@@ -157,7 +157,7 @@ ChunkedSegmentSealedImpl::WarmupChunkCache(const FieldId field_id,
 
     auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     for (const auto& data_path : field_info.insert_files) {
-        auto column = cc->ReadChunked(
+        auto column = cc->Read(
             data_path, mmap_descriptor_, field_meta, mmap_enabled, true);
     }
 }
@@ -949,7 +949,7 @@ std::tuple<
                                                               descriptor,
                                                       const FieldMeta&
                                                           field_meta) {
-    auto column = cc->ReadChunked(data_path, descriptor, field_meta, true);
+    auto column = cc->Read(data_path, descriptor, field_meta, true);
     cc->Prefetch(data_path);
     return {data_path, std::dynamic_pointer_cast<ChunkedColumnBase>(column)};
 }

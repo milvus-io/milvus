@@ -14,10 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <filesystem>
 #include <future>
 #include <memory>
 
 #include "ChunkCache.h"
+#include "boost/filesystem/operations.hpp"
 #include "boost/filesystem/path.hpp"
 #include "common/Chunk.h"
 #include "common/ChunkWriter.h"
@@ -27,11 +29,10 @@
 
 namespace milvus::storage {
 std::shared_ptr<ColumnBase>
-ChunkCache::ReadChunked(const std::string& filepath,
-                        const MmapChunkDescriptorPtr& descriptor,
-                        const FieldMeta& field_meta,
-                        bool mmap_enabled,
-                        bool mmap_rss_not_need) {
+ChunkCache::Read(const std::string& filepath,
+                 const FieldMeta& field_meta,
+                 bool mmap_enabled,
+                 bool mmap_rss_not_need) {
     // use rlock to get future
     {
         std::shared_lock lck(mutex_);
@@ -71,14 +72,17 @@ ChunkCache::ReadChunked(const std::string& filepath,
             DownloadAndDecodeRemoteFile(cm_.get(), filepath, false);
 
         std::shared_ptr<Chunk> chunk;
+        auto dim = IsSparseFloatVectorDataType(field_meta.get_data_type())
+                       ? 1
+                       : field_meta.get_dim();
         if (mmap_enabled) {
-            auto path = boost::filesystem::path(CachePath(filepath));
+            auto path = std::filesystem::path(CachePath(filepath));
+            auto dir = path.parent_path();
+            std::filesystem::create_directories(dir);
+
             auto file = File::Open(path.string(), O_CREAT | O_TRUNC | O_RDWR);
-            chunk = create_chunk(field_meta,
-                                 field_meta.get_dim(),
-                                 file,
-                                 0,
-                                 field_data->GetReader()->reader);
+            chunk = create_chunk(
+                field_meta, dim, file, 0, field_data->GetReader()->reader);
             // unlink
             auto ok = unlink(path.c_str());
             AssertInfo(ok == 0,
@@ -86,9 +90,8 @@ ChunkCache::ReadChunked(const std::string& filepath,
                        path.c_str(),
                        strerror(errno));
         } else {
-            chunk = create_chunk(field_meta,
-                                 field_meta.get_dim(),
-                                 field_data->GetReader()->reader);
+            chunk =
+                create_chunk(field_meta, dim, field_data->GetReader()->reader);
         }
 
         auto data_type = field_meta.get_data_type();

@@ -16,21 +16,29 @@
 
 #include <gtest/gtest.h>
 
+#include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "common/Consts.h"
+#include "common/FieldMeta.h"
 #include "common/Types.h"
 #include "fmt/format.h"
 #include "common/Schema.h"
+#include "gtest/gtest.h"
 #include "knowhere/sparse_utils.h"
+#include "mmap/Column.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 #include "storage/ChunkCache.h"
 #include "storage/LocalChunkManagerSingleton.h"
 
 #define DEFAULT_READ_AHEAD_POLICY "willneed"
-class ChunkCacheTest : public testing::TestWithParam</*mmap enabled*/ bool> {
- public:
+class ChunkCacheTest
+    : public testing::TestWithParam<
+          /*mmap enabled, is chunked*/ std::tuple<bool, bool>> {
+ protected:
     void
     SetUp() override {
         mcm = milvus::storage::MmapManager::GetInstance().GetMmapChunkManager();
@@ -114,23 +122,34 @@ class ChunkCacheTest : public testing::TestWithParam</*mmap enabled*/ bool> {
 
     int N;
     int dim;
-    milvus::FieldMeta dense_field_meta;
+    milvus::FieldMeta dense_field_meta = milvus::FieldMeta::RowIdMeta;
     milvus::FixedVector<float> dense_data;
-    milvus::FieldMeta sparse_field_meta;
+    milvus::FieldMeta sparse_field_meta = milvus::FieldMeta::RowIdMeta;
     milvus::FixedVector<knowhere::sparse::SparseRow<float>> sparse_data;
     std::shared_ptr<milvus::storage::LocalChunkManager> lcm;
 };
 INSTANTIATE_TEST_SUITE_P(ChunkCacheTestSuite,
                          ChunkCacheTest,
-                         testing::Values(true, false));
+                         testing::Combine(testing::Bool(), testing::Bool()));
 
 TEST_P(ChunkCacheTest, Read) {
     auto cc = milvus::storage::MmapManager::GetInstance().GetChunkCache();
 
     // validate dense data
-    const auto& dense_column =
-        cc->Read(dense_file_name, descriptor, dense_field_meta, GetParam());
-    Assert(dense_column->DataByteSize() == dim * N * 4);
+    std::shared_ptr<milvus::ColumnBase> dense_column;
+
+    auto p = GetParam();
+    auto mmap_enabled = std::get<0>(p);
+    auto is_test_chunked = std::get<1>(p);
+
+    if (is_test_chunked) {
+        dense_column =
+            cc->Read(dense_file_name, dense_field_meta, mmap_enabled);
+    } else {
+        dense_column = cc->Read(
+            dense_file_name, descriptor, dense_field_meta, mmap_enabled);
+        Assert(dense_column->DataByteSize() == dim * N * 4);
+    }
     auto actual_dense = (const float*)(dense_column->Data());
     for (auto i = 0; i < N * dim; i++) {
         AssertInfo(dense_data[i] == actual_dense[i],
@@ -139,8 +158,14 @@ TEST_P(ChunkCacheTest, Read) {
     }
 
     // validate sparse data
-    const auto& sparse_column =
-        cc->Read(sparse_file_name, descriptor, sparse_field_meta, GetParam());
+    std::shared_ptr<milvus::ColumnBase> sparse_column;
+    if (is_test_chunked) {
+        sparse_column =
+            cc->Read(sparse_file_name, sparse_field_meta, mmap_enabled);
+    } else {
+        sparse_column = cc->Read(
+            sparse_file_name, descriptor, sparse_field_meta, mmap_enabled);
+    }
     auto expected_sparse_size = 0;
     auto actual_sparse =
         (const knowhere::sparse::SparseRow<float>*)(sparse_column->Data());
@@ -161,8 +186,9 @@ TEST_P(ChunkCacheTest, Read) {
                         actual_sparse_row.data()));
         expected_sparse_size += bytes;
     }
-
-    ASSERT_EQ(sparse_column->DataByteSize(), expected_sparse_size);
+    if (!is_test_chunked) {
+        Assert(sparse_column->DataByteSize() == expected_sparse_size);
+    }
 
     cc->Remove(dense_file_name);
     cc->Remove(sparse_file_name);
@@ -175,10 +201,19 @@ TEST_P(ChunkCacheTest, TestMultithreads) {
 
     constexpr int threads = 16;
     std::vector<int64_t> total_counts(threads);
+    auto p = GetParam();
+    auto mmap_enabled = std::get<0>(p);
+    auto is_test_chunked = std::get<1>(p);
     auto executor = [&](int thread_id) {
-        const auto& dense_column =
-            cc->Read(dense_file_name, descriptor, dense_field_meta, GetParam());
-        Assert(dense_column->DataByteSize() == dim * N * 4);
+        std::shared_ptr<milvus::ColumnBase> dense_column;
+        if (is_test_chunked) {
+            dense_column =
+                cc->Read(dense_file_name, dense_field_meta, mmap_enabled);
+        } else {
+            dense_column = cc->Read(
+                dense_file_name, descriptor, dense_field_meta, mmap_enabled);
+            Assert(dense_column->DataByteSize() == dim * N * 4);
+        }
 
         auto actual_dense = (const float*)dense_column->Data();
         for (auto i = 0; i < N * dim; i++) {
@@ -188,8 +223,14 @@ TEST_P(ChunkCacheTest, TestMultithreads) {
                     "expect {}, actual {}", dense_data[i], actual_dense[i]));
         }
 
-        const auto& sparse_column = cc->Read(
-            sparse_file_name, descriptor, sparse_field_meta, GetParam());
+        std::shared_ptr<milvus::ColumnBase> sparse_column;
+        if (is_test_chunked) {
+            sparse_column =
+                cc->Read(sparse_file_name, sparse_field_meta, mmap_enabled);
+        } else {
+            sparse_column = cc->Read(
+                sparse_file_name, descriptor, sparse_field_meta, mmap_enabled);
+        }
         auto actual_sparse =
             (const knowhere::sparse::SparseRow<float>*)sparse_column->Data();
         for (auto i = 0; i < N; i++) {

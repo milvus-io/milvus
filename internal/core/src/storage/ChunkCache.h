@@ -47,11 +47,10 @@ class ChunkCache {
 
  public:
     std::shared_ptr<ColumnBase>
-    ReadChunked(const std::string& filepath,
-                const MmapChunkDescriptorPtr& descriptor,
-                const FieldMeta& field_meta,
-                bool mmap_enabled,
-                bool mmap_rss_not_need = false);
+    Read(const std::string& filepath,
+         const FieldMeta& field_meta,
+         bool mmap_enabled,
+         bool mmap_rss_not_need = false);
 
     std::shared_ptr<ColumnBase>
     Read(const std::string& filepath,
