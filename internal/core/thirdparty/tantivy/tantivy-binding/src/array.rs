@@ -9,6 +9,7 @@ use crate::error;
 use crate::error::Result;
 use crate::string_c::create_string;
 use crate::string_c::free_rust_string;
+use crate::util::free_binding;
 
 #[repr(C)]
 pub struct RustArray {
@@ -160,7 +161,6 @@ macro_rules! cstr_to_str {
     };
 }
 
-
 #[no_mangle]
 pub extern "C" fn test_enum_with_array() -> RustResult {
     let array = vec![1, 2, 3];
@@ -169,7 +169,14 @@ pub extern "C" fn test_enum_with_array() -> RustResult {
 
 #[no_mangle]
 pub extern "C" fn test_enum_with_ptr() -> RustResult {
-    let ptr = Box::into_raw(Box::new(1));
+    let ptr = Box::into_raw(Box::new(1 as u32));
     RustResult::from(Result::Ok(ptr as *mut c_void))
 }
 
+#[no_mangle]
+pub extern "C" fn free_test_ptr(ptr: *mut c_void) {
+    if ptr.is_null() {
+        return;
+    }
+    free_binding::<u32>(ptr);
+}

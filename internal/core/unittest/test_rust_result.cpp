@@ -18,7 +18,10 @@ TEST(RustResultTest, TestResult) {
     for (size_t i = 0; i < len; i++) {
         EXPECT_EQ(i + 1, arr.value.rust_array._0.array[i]);
     }
+    free_rust_result(arr);
 
     auto ptr = test_enum_with_ptr();
     EXPECT_EQ(1, *static_cast<uint32_t*>(ptr.value.ptr._0));
+    free_rust_result(ptr);
+    free_test_ptr(ptr.value.ptr._0);
 }
