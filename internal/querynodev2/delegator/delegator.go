@@ -81,14 +81,10 @@ type ShardDelegator interface {
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
-	SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition)
+	SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, checkpoint *msgpb.MsgPosition)
 	GetTargetVersion() int64
 	GetDeleteBufferSize() (entryNum int64, memorySize int64)
-
-	// manage exclude segments
-	AddExcludedSegments(excludeInfo map[int64]uint64)
-	VerifyExcludedSegments(segmentID int64, ts uint64) bool
-	TryCleanExcludedSegments(ts uint64)
+	GetCheckPoint() uint64
 
 	// tsafe
 	UpdateTSafe(ts uint64)
@@ -136,11 +132,7 @@ type shardDelegator struct {
 	partitionStats map[UniqueID]*storage.PartitionStatsSnapshot
 	chunkManager   storage.ChunkManager
 
-	excludedSegments *ExcludedSegments
-	// cause growing segment meta has been stored in segmentManager/distribution/pkOracle/excludeSegments
-	// in order to make add/remove growing be atomic, need lock before modify these meta info
-	growingSegmentLock sync.RWMutex
-	partitionStatsMut  sync.RWMutex
+	partitionStatsMut sync.RWMutex
 
 	// fieldId -> functionRunner map for search function field
 	functionRunners map[UniqueID]function.FunctionRunner
@@ -884,8 +876,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	sizePerBlock := paramtable.Get().QueryNodeCfg.DeleteBufferBlockSize.GetAsInt64()
 	log.Info("Init delete cache with list delete buffer", zap.Int64("sizePerBlock", sizePerBlock), zap.Time("startTime", tsoutil.PhysicalTime(startTs)))
 
-	excludedSegments := NewExcludedSegments(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.GetAsDuration(time.Second))
-
 	policy := paramtable.Get().QueryNodeCfg.LevelZeroForwardPolicy.GetValue()
 	log.Info("shard delegator setup l0 forward policy", zap.String("policy", policy))
 
@@ -898,20 +888,19 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		segmentManager: manager.Segment,
 		workerManager:  workerManager,
 		lifetime:       lifetime.NewLifetime(lifetime.Initializing),
-		distribution:   NewDistribution(),
+		distribution:   NewDistribution(startTs),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
-		pkOracle:         pkoracle.NewPkOracle(),
-		latestTsafe:      atomic.NewUint64(startTs),
-		loader:           loader,
-		factory:          factory,
-		queryHook:        queryHook,
-		chunkManager:     chunkManager,
-		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),
-		excludedSegments: excludedSegments,
-		functionRunners:  make(map[int64]function.FunctionRunner),
-		isBM25Field:      make(map[int64]bool),
-		l0ForwardPolicy:  policy,
+		pkOracle:        pkoracle.NewPkOracle(),
+		latestTsafe:     atomic.NewUint64(startTs),
+		loader:          loader,
+		factory:         factory,
+		queryHook:       queryHook,
+		chunkManager:    chunkManager,
+		partitionStats:  make(map[UniqueID]*storage.PartitionStatsSnapshot),
+		functionRunners: make(map[int64]function.FunctionRunner),
+		isBM25Field:     make(map[int64]bool),
+		l0ForwardPolicy: policy,
 	}
 
 	for _, tf := range collection.Schema().GetFunctions() {

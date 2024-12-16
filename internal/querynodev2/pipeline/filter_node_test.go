@@ -20,7 +20,6 @@ import (
 	"testing"
 
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -64,12 +63,13 @@ func (suite *FilterNodeSuite) SetupSuite() {
 	suite.errSegmentID = 7
 
 	suite.delegator = delegator.NewMockShardDelegator(suite.T())
+	suite.delegator.EXPECT().GetCheckPoint().Return(1)
 }
 
 // test filter node with collection load collection
 func (suite *FilterNodeSuite) TestWithLoadCollection() {
 	// data
-	suite.validSegmentIDs = []int64{2, 3, 4, 5, 6}
+	suite.validSegmentIDs = []int64{3, 4, 5, 6}
 
 	// mock
 	collection := segments.NewCollectionWithoutSchema(suite.collectionID, querypb.LoadType_LoadCollection)
@@ -87,10 +87,6 @@ func (suite *FilterNodeSuite) TestWithLoadCollection() {
 		Segment:    mockSegmentManager,
 	}
 
-	suite.delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).RunAndReturn(func(segmentID int64, ts uint64) bool {
-		return !(lo.Contains(suite.excludedSegmentIDs, segmentID) && ts <= 1)
-	})
-	suite.delegator.EXPECT().TryCleanExcludedSegments(mock.Anything)
 	node := newFilterNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
 	in := suite.buildMsgPack()
 	out := node.Operate(in)
@@ -108,7 +104,7 @@ func (suite *FilterNodeSuite) TestWithLoadCollection() {
 // test filter node with collection load partition
 func (suite *FilterNodeSuite) TestWithLoadPartation() {
 	// data
-	suite.validSegmentIDs = []int64{2, 3, 4, 5, 6}
+	suite.validSegmentIDs = []int64{3, 4, 5, 6}
 
 	// mock
 	collection := segments.NewCollectionWithoutSchema(suite.collectionID, querypb.LoadType_LoadPartition)
@@ -124,10 +120,6 @@ func (suite *FilterNodeSuite) TestWithLoadPartation() {
 		Segment:    mockSegmentManager,
 	}
 
-	suite.delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).RunAndReturn(func(segmentID int64, ts uint64) bool {
-		return !(lo.Contains(suite.excludedSegmentIDs, segmentID) && ts <= 1)
-	})
-	suite.delegator.EXPECT().TryCleanExcludedSegments(mock.Anything)
 	node := newFilterNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
 	in := suite.buildMsgPack()
 	out := node.Operate(in)
@@ -152,22 +144,24 @@ func (suite *FilterNodeSuite) buildMsgPack() *msgstream.MsgPack {
 	// add valid insert
 	for _, id := range suite.insertSegmentIDs {
 		insertMsg := buildInsertMsg(suite.collectionID, suite.partitionIDs[id%2], id, suite.channel, 1)
+		insertMsg.EndTimestamp = 10
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 
 	// add valid delete
 	for i := 0; i < suite.deleteSegmentSum; i++ {
 		deleteMsg := buildDeleteMsg(suite.collectionID, suite.partitionIDs[i%2], suite.channel, 1)
+		deleteMsg.EndTimestamp = 10
 		msgPack.Msgs = append(msgPack.Msgs, deleteMsg)
 	}
 
 	// add invalid msg
 
 	// segment in excludedSegments
-	// some one end timestamp befroe dmlPosition timestamp will be invalid
+	// some one end timestamp before dmlPosition timestamp will be invalid
 	for _, id := range suite.excludedSegmentIDs {
 		insertMsg := buildInsertMsg(suite.collectionID, suite.partitionIDs[id%2], id, suite.channel, 1)
-		insertMsg.EndTimestamp = uint64(id)
+		insertMsg.EndTimestamp = 0
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 

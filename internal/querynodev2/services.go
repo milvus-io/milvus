@@ -271,14 +271,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		}
 	}()
 
-	// create tSafe
-	// node.tSafeManager.Add(ctx, channel.ChannelName, channel.GetSeekPosition().GetTimestamp())
-	// defer func() {
-	// 	if err != nil {
-	// 		node.tSafeManager.Remove(ctx, channel.ChannelName)
-	// 	}
-	// }()
-
 	pipeline, err := node.pipelineManager.Add(req.GetCollectionID(), channel.GetChannelName())
 	if err != nil {
 		msg := "failed to create pipeline"
@@ -290,12 +282,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 			node.pipelineManager.Remove(channel.GetChannelName())
 		}
 	}()
-
-	growingInfo := lo.SliceToMap(channel.GetUnflushedSegmentIds(), func(id int64) (int64, uint64) {
-		info := req.GetSegmentInfos()[id]
-		return id, info.GetDmlPosition().GetTimestamp()
-	})
-	delegator.AddExcludedSegments(growingInfo)
 
 	defer func() {
 		if err != nil {
@@ -1293,22 +1279,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			})
 		case querypb.SyncType_UpdateVersion:
 			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()), zap.Int64s("partitions", req.GetLoadMeta().GetPartitionIDs()))
-			droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
-				if action.GetCheckpoint() == nil {
-					return id, typeutil.MaxTimestamp
-				}
-				return id, action.GetCheckpoint().Timestamp
-			})
-			shardDelegator.AddExcludedSegments(droppedInfos)
-			flushedInfo := lo.SliceToMap(action.GetSealedInTarget(), func(id int64) (int64, uint64) {
-				if action.GetCheckpoint() == nil {
-					return id, typeutil.MaxTimestamp
-				}
-				return id, action.GetCheckpoint().Timestamp
-			})
-			shardDelegator.AddExcludedSegments(flushedInfo)
-			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), req.GetLoadMeta().GetPartitionIDs(), action.GetGrowingInTarget(),
-				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint())
+			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), req.GetLoadMeta().GetPartitionIDs(), action.GetGrowingInTarget(), action.GetSealedInTarget(), action.GetCheckpoint())
 		case querypb.SyncType_UpdatePartitionStats:
 			log.Info("sync update partition stats versions")
 			shardDelegator.SyncPartitionStats(ctx, action.PartitionStatsVersions)

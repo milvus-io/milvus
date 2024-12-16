@@ -93,6 +93,9 @@ func (s *DelegatorSuite) SetupTest() {
 			ms.EXPECT().Indexes().Return(nil)
 			ms.EXPECT().RowNum().Return(info.GetNumOfRows())
 			ms.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			ms.EXPECT().StartPosition().Return(&msgpb.MsgPosition{
+				Timestamp: 10000,
+			})
 			return ms
 		})
 	}, nil)
@@ -325,7 +328,7 @@ func (s *DelegatorSuite) initSegments() {
 			Version:     2001,
 		},
 	)
-	s.delegator.SyncTargetVersion(2001, []int64{500, 501}, []int64{1004}, []int64{1000, 1001, 1002, 1003}, []int64{}, &msgpb.MsgPosition{})
+	s.delegator.SyncTargetVersion(2001, []int64{500, 501}, []int64{1004}, []int64{1000, 1001, 1002, 1003}, &msgpb.MsgPosition{})
 }
 
 func (s *DelegatorSuite) TestSearch() {
