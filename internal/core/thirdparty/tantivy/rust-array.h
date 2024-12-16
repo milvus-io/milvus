@@ -101,7 +101,8 @@ struct RustResultWrapper {
     void
     free() {
         if (result_) {
-            free_rust_result(*result_.release());
+            free_rust_result(*result_);
+            result_.reset();
         }
     }
 };
