@@ -27,6 +27,7 @@ set(MILVUS_TEST_FILES
         test_array_bitmap_index.cpp
         test_array_inverted_index.cpp
         test_bf.cpp
+        test_bf_sparse.cpp
         test_binary.cpp
         test_binlog_index.cpp
         test_bitmap_index.cpp
@@ -111,12 +112,6 @@ if (LINUX OR APPLE)
             test_array.cpp test_array_expr.cpp)
 endif()
 
-if (LINUX)
-    set(MILVUS_TEST_FILES
-            ${MILVUS_TEST_FILES}
-            test_bf_sparse.cpp)
-endif()
-
 if (DEFINED AZURE_BUILD_DIR)
     set(MILVUS_TEST_FILES
                 ${MILVUS_TEST_FILES}
@@ -175,9 +170,7 @@ target_link_libraries(all_tests
 
 install(TARGETS all_tests DESTINATION unittest)
 
-if (LINUX)
-    add_subdirectory(bench)
-endif ()
+add_subdirectory(bench)
 
 # if (USE_DYNAMIC_SIMD)
 # add_executable(dynamic_simd_test

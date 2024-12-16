@@ -149,6 +149,7 @@ if ( APPLE )
             "-fopenmp"
             "-pedantic"
             "-Wall"
+            "-D_DARWIN_C_SOURCE"
             "-Wno-gnu-zero-variadic-macro-arguments"
             "-Wno-variadic-macros"
             "-DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED=1"
