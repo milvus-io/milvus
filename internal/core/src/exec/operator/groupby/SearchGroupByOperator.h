@@ -118,11 +118,11 @@ template <typename T>
 static const std::shared_ptr<DataGetter<T>>
 GetDataGetter(const segcore::SegmentInternalInterface& segment,
               FieldId fieldId) {
-    if (const segcore::SegmentGrowingImpl* growing_segment =
+    if (const auto* growing_segment =
             dynamic_cast<const segcore::SegmentGrowingImpl*>(&segment)) {
         return std::make_shared<GrowingDataGetter<T>>(*growing_segment,
                                                       fieldId);
-    } else if (const segcore::SegmentSealed* sealed_segment =
+    } else if (const auto* sealed_segment =
                    dynamic_cast<const segcore::SegmentSealed*>(&segment)) {
         return std::make_shared<SealedDataGetter<T>>(*sealed_segment, fieldId);
     } else {
