@@ -107,6 +107,8 @@ func (r *annRequest) searchRequest() (*milvuspb.SearchRequest, error) {
 	if r.annParam != nil {
 		bs, _ := json.Marshal(r.annParam.Params())
 		params[spParams] = string(bs)
+	} else {
+		params[spParams] = "{}"
 	}
 	// use custom search param to overwrite
 	for k, v := range r.searchParam {
