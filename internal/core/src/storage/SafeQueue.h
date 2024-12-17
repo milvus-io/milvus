@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma
+#pragma once
 
 #include <queue>
 #include <shared_mutex>
@@ -25,10 +25,8 @@ namespace milvus {
 template <typename T>
 class SafeQueue {
  public:
-    SafeQueue(void) {
-    }
-    ~SafeQueue() {
-    }
+    SafeQueue() = default;
+    ~SafeQueue() = default;
 
     bool
     empty() {

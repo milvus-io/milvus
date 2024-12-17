@@ -449,8 +449,8 @@ class ArrayView {
               DataType element_type,
               std::vector<uint64_t>&& element_offsets)
         : size_(size),
-          element_type_(element_type),
-          offsets_(std::move(element_offsets)) {
+          offsets_(std::move(element_offsets)),
+          element_type_(element_type) {
         data_ = data;
         if (IsVariableDataType(element_type_)) {
             length_ = offsets_.size();
