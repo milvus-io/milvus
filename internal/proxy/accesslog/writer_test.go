@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -112,28 +113,41 @@ func TestRotateWriter_SizeRotate(t *testing.T) {
 	Params.Save(Params.ProxyCfg.AccessLog.RemotePath.Key, "access_log/")
 	Params.Save(Params.ProxyCfg.AccessLog.MaxSize.Key, "1")
 	defer os.RemoveAll(testPath)
+	fileNum := 5
 
 	logger, err := NewRotateWriter(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer logger.handler.Clean()
 	defer logger.Close()
 
+	// return error when write text large than file maxsize
 	num := 1024 * 1024
 	text := getText(num + 1)
 	_, err = logger.Write(text)
 	assert.Error(t, err)
 
-	for i := 1; i <= 2; i++ {
+	for i := 1; i <= fileNum+1; i++ {
 		text = getText(num)
 		n, err := logger.Write(text)
 		assert.Equal(t, num, n)
 		assert.NoError(t, err)
 	}
 
+	// assert minio files
 	time.Sleep(time.Duration(1) * time.Second)
-	logfiles, err := logger.handler.listAll()
+	remoteFiles, err := logger.handler.listAll()
 	assert.NoError(t, err)
-	assert.Equal(t, 1, len(logfiles))
+	assert.Equal(t, fileNum, len(remoteFiles))
+
+	// assert local sealed files num
+	localFields, err := logger.oldLogFiles()
+	assert.NoError(t, err)
+	assert.Equal(t, fileNum, len(localFields))
+
+	// old files should in order
+	for i := 0; i < fileNum-1; i++ {
+		assert.True(t, localFields[i].timestamp.Before(localFields[i+1].timestamp))
+	}
 }
 
 func TestRotateWriter_LocalRetention(t *testing.T) {
@@ -150,9 +164,13 @@ func TestRotateWriter_LocalRetention(t *testing.T) {
 	assert.NoError(t, err)
 	defer logger.Close()
 
+	// write two sealed files
+	logger.Write([]byte("Test"))
 	logger.Rotate()
+	logger.Write([]byte("Test"))
 	logger.Rotate()
 	time.Sleep(time.Duration(1) * time.Second)
+
 	logFiles, err := logger.oldLogFiles()
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(logFiles))
