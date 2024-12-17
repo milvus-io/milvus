@@ -59,7 +59,7 @@ func TestCheckGeneralCapacity(t *testing.T) {
 
 	catalog.EXPECT().CreateCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	err = meta.CreateDatabase(ctx, &model.Database{}, typeutil.MaxTimestamp)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 	err = meta.AddCollection(ctx, &model.Collection{
 		CollectionID: 1,
 		State:        pb.CollectionState_CollectionCreating,
@@ -83,7 +83,7 @@ func TestCheckGeneralCapacity(t *testing.T) {
 	err = checkGeneralCapacity(ctx, 1, 1, 1, core)
 	assert.Error(t, err)
 
-	err = meta.ChangeCollectionState(ctx, 1, pb.CollectionState_CollectionDropped, typeutil.MaxTimestamp)
+	err = meta.ChangeCollectionState(ctx, 1, pb.CollectionState_CollectionDropping, typeutil.MaxTimestamp)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 0, meta.GetGeneralCount(ctx))
