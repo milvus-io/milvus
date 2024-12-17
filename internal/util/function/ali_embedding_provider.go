@@ -36,6 +36,7 @@ type AliEmbeddingProvider struct {
 	client        *ali.AliDashScopeEmbedding
 	modelName     string
 	embedDimParam int64
+	outputType    string
 
 	maxBatch   int
 	timeoutSec int
@@ -43,19 +44,15 @@ type AliEmbeddingProvider struct {
 
 func createAliEmbeddingClient(apiKey string, url string) (*ali.AliDashScopeEmbedding, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv("DASHSCOPE_API_KEY")
+		apiKey = os.Getenv(dashscopeApiKey)
 	}
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the DASHSCOPE_API_KEY environment variable in the Milvus service.")
+		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service.", dashscopeApiKey)
 	}
 
 	if url == "" {
 		url = "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
 	}
-	if url == "" {
-		return nil, fmt.Errorf("Must provide `url` arguments or configure the DASHSCOPE_ENDPOINT environment variable in the Milvus service")
-	}
-
 	c := ali.NewAliDashScopeEmbeddingClient(apiKey, url)
 	return c, nil
 }
@@ -93,6 +90,7 @@ func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functio
 		return nil, fmt.Errorf("Unsupported model: %s, only support [%s, %s, %s]",
 			modelName, TextEmbeddingV1, TextEmbeddingV2, TextEmbeddingV3)
 	}
+
 	c, err := createAliEmbeddingClient(apiKey, url)
 	if err != nil {
 		return nil, err
@@ -102,8 +100,10 @@ func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functio
 		fieldDim:      fieldDim,
 		modelName:     modelName,
 		embedDimParam: dim,
-		maxBatch:      25,
-		timeoutSec:    30,
+		// TextEmbedding only supports dense embedding
+		outputType: "dense",
+		maxBatch:   25,
+		timeoutSec: 30,
 	}
 	return &provider, nil
 }
@@ -116,19 +116,24 @@ func (provider *AliEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *AliEmbeddingProvider) CallEmbedding(texts []string, batchLimit bool) ([][]float32, error) {
+func (provider *AliEmbeddingProvider) CallEmbedding(texts []string, batchLimit bool, mode string) ([][]float32, error) {
 	numRows := len(texts)
 	if batchLimit && numRows > provider.MaxBatch() {
 		return nil, fmt.Errorf("Ali text embedding supports up to [%d] pieces of data at a time, got [%d]", provider.MaxBatch(), numRows)
 	}
-
+	var textType string
+	if mode == SearchMode {
+		textType = "query"
+	} else {
+		textType = "document"
+	}
 	data := make([][]float32, 0, numRows)
 	for i := 0; i < numRows; i += provider.maxBatch {
 		end := i + provider.maxBatch
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), "query", "dense", time.Duration(provider.timeoutSec))
+		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, time.Duration(provider.timeoutSec))
 		if err != nil {
 			return nil, err
 		}

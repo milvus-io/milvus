@@ -53,17 +53,17 @@ type BedrockEmbeddingProvider struct {
 
 func createBedRockEmbeddingClient(awsAccessKeyId string, awsSecretAccessKey string, region string) (*bedrockruntime.Client, error) {
 	if awsAccessKeyId == "" {
-		awsAccessKeyId = os.Getenv("BEDROCK_ACCESS_KEY_ID")
+		awsAccessKeyId = os.Getenv(bedrockAccessKeyId)
 	}
 	if awsAccessKeyId == "" {
-		return nil, fmt.Errorf("Missing credentials. Please pass `aws_access_key_id`, or configure the BEDROCK_ACCESS_KEY_ID environment variable in the Milvus service.")
+		return nil, fmt.Errorf("Missing credentials. Please pass `aws_access_key_id`, or configure the %s environment variable in the Milvus service.", bedrockAccessKeyId)
 	}
 
 	if awsSecretAccessKey == "" {
-		awsSecretAccessKey = os.Getenv("BEDROCK_SECRET_ACCESS_KEY")
+		awsSecretAccessKey = os.Getenv(bedrockSecretAccessKey)
 	}
 	if awsSecretAccessKey == "" {
-		return nil, fmt.Errorf("Missing credentials. Please pass `aws_secret_access_key`, or configure the BEDROCK_SECRET_ACCESS_KEY environment variable in the Milvus service.")
+		return nil, fmt.Errorf("Missing credentials. Please pass `aws_secret_access_key`, or configure the %s environment variable in the Milvus service.", bedrockSecretAccessKey)
 	}
 	if region == "" {
 		return nil, fmt.Errorf("Missing region. Please pass `region` param.")
@@ -154,7 +154,7 @@ func (provider *BedrockEmbeddingProvider) FieldDim() int64 {
 	return 5 * provider.fieldDim
 }
 
-func (provider *BedrockEmbeddingProvider) CallEmbedding(texts []string, batchLimit bool) ([][]float32, error) {
+func (provider *BedrockEmbeddingProvider) CallEmbedding(texts []string, batchLimit bool, _ string) ([][]float32, error) {
 	numRows := len(texts)
 	if batchLimit && numRows > provider.MaxBatch() {
 		return nil, fmt.Errorf("Bedrock text embedding supports up to [%d] pieces of data at a time, got [%d]", provider.MaxBatch(), numRows)

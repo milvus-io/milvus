@@ -28,6 +28,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/milvus-io/milvus/internal/models/ali"
 	"github.com/milvus-io/milvus/internal/models/openai"
+	"github.com/milvus-io/milvus/internal/models/vertexai"
 )
 
 func mockEmbedding(texts []string, dim int) [][]float32 {
@@ -90,6 +91,40 @@ func CreateAliEmbeddingServer() *httptest.Server {
 
 		res.Usage = ali.Usage{
 			TotalTokens: 100,
+		}
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(res)
+		w.Write(data)
+	}))
+	return ts
+}
+
+func CreateVertexAIEmbeddingServer() *httptest.Server {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req vertexai.EmbeddingRequest
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		json.Unmarshal(body, &req)
+		var texts []string
+		for _, item := range req.Instances {
+			texts = append(texts, item.Content)
+		}
+		embs := mockEmbedding(texts, int(req.Parameters.OutputDimensionality))
+		var res vertexai.EmbeddingResponse
+		for i := 0; i < len(req.Instances); i++ {
+			res.Predictions = append(res.Predictions, vertexai.Prediction{
+				Embeddings: vertexai.Embeddings{
+					Statistics: vertexai.Statistics{
+						Truncated:  false,
+						TokenCount: 10,
+					},
+					Values: embs[i],
+				},
+			})
+		}
+
+		res.Metadata = vertexai.Metadata{
+			BillableCharacterCount: 100,
 		}
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)

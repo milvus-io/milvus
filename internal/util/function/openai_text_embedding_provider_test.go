@@ -90,7 +90,7 @@ func (s *OpenAITextEmbeddingProviderSuite) TestEmbedding() {
 		s.NoError(err)
 		{
 			data := []string{"sentence"}
-			ret, err2 := provder.CallEmbedding(data, false)
+			ret, err2 := provder.CallEmbedding(data, false, InsertMode)
 			s.NoError(err2)
 			s.Equal(1, len(ret))
 			s.Equal(4, len(ret[0]))
@@ -98,7 +98,7 @@ func (s *OpenAITextEmbeddingProviderSuite) TestEmbedding() {
 		}
 		{
 			data := []string{"sentence 1", "sentence 2", "sentence 3"}
-			ret, _ := provder.CallEmbedding(data, false)
+			ret, _ := provder.CallEmbedding(data, false, SearchMode)
 			s.Equal([][]float32{{0.0, 0.1, 0.2, 0.3}, {1.0, 1.1, 1.2, 1.3}, {2.0, 2.1, 2.2, 2.3}}, ret)
 		}
 
@@ -137,7 +137,7 @@ func (s *OpenAITextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence"}
-		_, err2 := provder.CallEmbedding(data, false)
+		_, err2 := provder.CallEmbedding(data, false, InsertMode)
 		s.Error(err2)
 
 	}
@@ -170,7 +170,7 @@ func (s *OpenAITextEmbeddingProviderSuite) TestEmbeddingNubmerNotMatch() {
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence2"}
-		_, err2 := provder.CallEmbedding(data, false)
+		_, err2 := provder.CallEmbedding(data, false, InsertMode)
 		s.Error(err2)
 
 	}

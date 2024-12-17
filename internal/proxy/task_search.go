@@ -439,7 +439,6 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.SearchRequest.PartitionIDs = t.partitionIDsSet.Collect()
 	}
 
-	var err error
 	t.reScorers, err = NewReScorers(ctx, len(t.request.GetSubReqs()), t.request.GetSearchParams())
 	if err != nil {
 		log.Info("generate reScorer failed", zap.Any("params", t.request.GetSearchParams()), zap.Error(err))
