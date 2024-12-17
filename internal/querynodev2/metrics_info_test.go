@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
@@ -46,7 +47,7 @@ func TestGetPipelineJSON(t *testing.T) {
 
 	collectionManager := segments.NewMockCollectionManager(t)
 	segmentManager := segments.NewMockSegmentManager(t)
-	collectionManager.EXPECT().Get(mock.Anything).Return(&segments.Collection{})
+	collectionManager.EXPECT().Get(mock.Anything).Return(segments.NewTestCollection(1, querypb.LoadType_UnKnownType, &schemapb.CollectionSchema{}))
 	manager := &segments.Manager{
 		Collection: collectionManager,
 		Segment:    segmentManager,

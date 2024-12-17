@@ -107,7 +107,6 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(rand.Uint64(), nil)
 
 	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
@@ -161,7 +160,6 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	}
 
 	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
@@ -249,7 +247,6 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -431,7 +428,6 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)

@@ -148,6 +148,7 @@ service RootCoord {
 message AllocTimestampRequest {
   common.MsgBase base = 1;
   uint32 count = 3;
+  uint64 blockTimestamp = 4;
 }
 
 message AllocTimestampResponse {

@@ -242,7 +242,7 @@ func (scheduler *taskScheduler) AddExecutor(nodeID int64) {
 
 	scheduler.executors[nodeID] = executor
 	executor.Start(scheduler.ctx)
-	log.Info("add executor for new QueryNode", zap.Int64("nodeID", nodeID))
+	log.Ctx(scheduler.ctx).Info("add executor for new QueryNode", zap.Int64("nodeID", nodeID))
 }
 
 func (scheduler *taskScheduler) RemoveExecutor(nodeID int64) {
@@ -253,7 +253,7 @@ func (scheduler *taskScheduler) RemoveExecutor(nodeID int64) {
 	if ok {
 		executor.Stop()
 		delete(scheduler.executors, nodeID)
-		log.Info("remove executor of offline QueryNode", zap.Int64("nodeID", nodeID))
+		log.Ctx(scheduler.ctx).Info("remove executor of offline QueryNode", zap.Int64("nodeID", nodeID))
 	}
 }
 
@@ -334,7 +334,7 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		index := NewReplicaSegmentIndex(task)
 		if old, ok := scheduler.segmentTasks[index]; ok {
 			if task.Priority() > old.Priority() {
-				log.Info("replace old task, the new one with higher priority",
+				log.Ctx(scheduler.ctx).Info("replace old task, the new one with higher priority",
 					zap.Int64("oldID", old.ID()),
 					zap.String("oldPriority", old.Priority().String()),
 					zap.Int64("newID", task.ID()),
@@ -367,7 +367,7 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
 		if old, ok := scheduler.channelTasks[index]; ok {
 			if task.Priority() > old.Priority() {
-				log.Info("replace old task, the new one with higher priority",
+				log.Ctx(scheduler.ctx).Info("replace old task, the new one with higher priority",
 					zap.Int64("oldID", old.ID()),
 					zap.String("oldPriority", old.Priority().String()),
 					zap.Int64("newID", task.ID()),
@@ -400,7 +400,7 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		index := NewReplicaLeaderIndex(task)
 		if old, ok := scheduler.segmentTasks[index]; ok {
 			if task.Priority() > old.Priority() {
-				log.Info("replace old task, the new one with higher priority",
+				log.Ctx(scheduler.ctx).Info("replace old task, the new one with higher priority",
 					zap.Int64("oldID", old.ID()),
 					zap.String("oldPriority", old.Priority().String()),
 					zap.Int64("newID", task.ID()),
@@ -428,7 +428,7 @@ func (scheduler *taskScheduler) tryPromoteAll() {
 		if err != nil {
 			task.Cancel(err)
 			toRemove = append(toRemove, task)
-			log.Warn("failed to promote task",
+			log.Ctx(scheduler.ctx).Warn("failed to promote task",
 				zap.Int64("taskID", task.ID()),
 				zap.Error(err),
 			)
@@ -447,14 +447,14 @@ func (scheduler *taskScheduler) tryPromoteAll() {
 	}
 
 	if len(toPromote) > 0 || len(toRemove) > 0 {
-		log.Debug("promoted tasks",
+		log.Ctx(scheduler.ctx).Debug("promoted tasks",
 			zap.Int("promotedNum", len(toPromote)),
 			zap.Int("toRemoveNum", len(toRemove)))
 	}
 }
 
 func (scheduler *taskScheduler) promote(task Task) error {
-	log := log.With(
+	log := log.Ctx(scheduler.ctx).With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
@@ -474,7 +474,7 @@ func (scheduler *taskScheduler) promote(task Task) error {
 func (scheduler *taskScheduler) Dispatch(node int64) {
 	select {
 	case <-scheduler.ctx.Done():
-		log.Info("scheduler stopped")
+		log.Ctx(scheduler.ctx).Info("scheduler stopped")
 
 	default:
 		scheduler.rwmutex.Lock()
@@ -629,7 +629,7 @@ func (scheduler *taskScheduler) GetTasksJSON() string {
 	tasks := scheduler.taskStats.Values()
 	ret, err := json.Marshal(tasks)
 	if err != nil {
-		log.Warn("marshal tasks fail", zap.Error(err))
+		log.Ctx(scheduler.ctx).Warn("marshal tasks fail", zap.Error(err))
 		return ""
 	}
 	return string(ret)
@@ -644,7 +644,7 @@ func (scheduler *taskScheduler) schedule(node int64) {
 		return
 	}
 
-	log := log.With(
+	log := log.Ctx(scheduler.ctx).With(
 		zap.Int64("nodeID", node),
 	)
 
@@ -784,7 +784,7 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 // process processes the given task,
 // return true if the task is started and succeeds to commit the current action
 func (scheduler *taskScheduler) process(task Task) bool {
-	log := log.With(
+	log := log.Ctx(scheduler.ctx).With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
@@ -830,7 +830,7 @@ func (scheduler *taskScheduler) RemoveByNode(node int64) {
 }
 
 func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
-	log.Warn("task scheduler recordSegmentTaskError",
+	log.Ctx(scheduler.ctx).Warn("task scheduler recordSegmentTaskError",
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
@@ -928,7 +928,7 @@ func (scheduler *taskScheduler) getTaskMetricsLabel(task Task) string {
 }
 
 func (scheduler *taskScheduler) checkStale(task Task) error {
-	log := log.With(
+	log := log.Ctx(task.Context()).With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
@@ -970,7 +970,7 @@ func (scheduler *taskScheduler) checkStale(task Task) error {
 }
 
 func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
-	log := log.With(
+	log := log.Ctx(task.Context()).With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
@@ -1013,7 +1013,7 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 }
 
 func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) error {
-	log := log.With(
+	log := log.Ctx(task.Context()).With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
@@ -1041,7 +1041,7 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) error {
 }
 
 func (scheduler *taskScheduler) checkLeaderTaskStale(task *LeaderTask) error {
-	log := log.With(
+	log := log.Ctx(task.Context()).With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),

@@ -68,6 +68,9 @@ type Server struct {
 	session *sessionutil.Session
 	metaKV  kv.MetaKv
 
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	// server
 	streamingnode *streamingnodeserver.Server
 
@@ -87,12 +90,15 @@ type Server struct {
 }
 
 // NewServer create a new StreamingNode server.
-func NewServer(f dependency.Factory) (*Server, error) {
+func NewServer(ctx context.Context, f dependency.Factory) (*Server, error) {
+	ctx1, cancel := context.WithCancel(ctx)
 	return &Server{
 		stopOnce:       sync.Once{},
 		factory:        f,
 		grpcServerChan: make(chan struct{}),
 		componentState: componentutil.NewComponentStateService(typeutil.StreamingNodeRole),
+		ctx:            ctx1,
+		cancel:         cancel,
 	}, nil
 }
 
@@ -102,11 +108,11 @@ func (s *Server) Prepare() error {
 		netutil.OptHighPriorityToUsePort(paramtable.Get().StreamingNodeGrpcServerCfg.Port.GetAsInt()),
 	)
 	if err != nil {
-		log.Warn("StreamingNode fail to create net listener", zap.Error(err))
+		log.Ctx(s.ctx).Warn("StreamingNode fail to create net listener", zap.Error(err))
 		return err
 	}
 	s.listener = listener
-	log.Info("StreamingNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	log.Ctx(s.ctx).Info("StreamingNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
 	paramtable.Get().Save(
 		paramtable.Get().StreamingNodeGrpcServerCfg.Port.Key,
 		strconv.FormatInt(int64(listener.Port()), 10))
@@ -115,19 +121,15 @@ func (s *Server) Prepare() error {
 
 // Run runs the server.
 func (s *Server) Run() error {
-	// TODO: We should set a timeout for the process startup.
-	// But currently, we don't implement.
-	ctx := context.Background()
-
-	if err := s.init(ctx); err != nil {
+	if err := s.init(); err != nil {
 		return err
 	}
-	log.Info("streamingnode init done ...")
+	log.Ctx(s.ctx).Info("streamingnode init done ...")
 
-	if err := s.start(ctx); err != nil {
+	if err := s.start(); err != nil {
 		return err
 	}
-	log.Info("streamingnode start done ...")
+	log.Ctx(s.ctx).Info("streamingnode start done ...")
 	return nil
 }
 
@@ -140,6 +142,7 @@ func (s *Server) Stop() (err error) {
 // stop stops the server.
 func (s *Server) stop() {
 	s.componentState.OnStopping()
+	log := log.Ctx(s.ctx)
 
 	log.Info("streamingnode stop", zap.String("Address", s.listener.Address()))
 
@@ -179,6 +182,7 @@ func (s *Server) stop() {
 	<-s.grpcServerChan
 	log.Info("streamingnode stop done")
 
+	s.cancel()
 	if err := s.listener.Close(); err != nil {
 		log.Warn("streamingnode stop listener failed", zap.Error(err))
 	}
@@ -190,7 +194,8 @@ func (s *Server) Health(ctx context.Context) commonpb.StateCode {
 	return resp.GetState().StateCode
 }
 
-func (s *Server) init(ctx context.Context) (err error) {
+func (s *Server) init() (err error) {
+	log := log.Ctx(s.ctx)
 	defer func() {
 		if err != nil {
 			log.Error("StreamingNode init failed", zap.Error(err))
@@ -205,16 +210,16 @@ func (s *Server) init(ctx context.Context) (err error) {
 	if err := s.initMeta(); err != nil {
 		return err
 	}
-	if err := s.initChunkManager(ctx); err != nil {
+	if err := s.initChunkManager(); err != nil {
 		return err
 	}
-	if err := s.initSession(ctx); err != nil {
+	if err := s.initSession(); err != nil {
 		return err
 	}
-	if err := s.initRootCoord(ctx); err != nil {
+	if err := s.initRootCoord(); err != nil {
 		return err
 	}
-	if err := s.initDataCoord(ctx); err != nil {
+	if err := s.initDataCoord(); err != nil {
 		return err
 	}
 	s.initGRPCServer()
@@ -230,13 +235,14 @@ func (s *Server) init(ctx context.Context) (err error) {
 		WithMetaKV(s.metaKV).
 		WithChunkManager(s.chunkManager).
 		Build()
-	if err := s.streamingnode.Init(ctx); err != nil {
+	if err := s.streamingnode.Init(s.ctx); err != nil {
 		return errors.Wrap(err, "StreamingNode service init failed")
 	}
 	return nil
 }
 
-func (s *Server) start(ctx context.Context) (err error) {
+func (s *Server) start() (err error) {
+	log := log.Ctx(s.ctx)
 	defer func() {
 		if err != nil {
 			log.Error("StreamingNode start failed", zap.Error(err))
@@ -249,7 +255,7 @@ func (s *Server) start(ctx context.Context) (err error) {
 	s.streamingnode.Start()
 
 	// Start grpc server.
-	if err := s.startGPRCServer(ctx); err != nil {
+	if err := s.startGPRCServer(s.ctx); err != nil {
 		return errors.Wrap(err, "StreamingNode start gRPC server fail")
 	}
 	// Register current server to etcd.
@@ -259,20 +265,21 @@ func (s *Server) start(ctx context.Context) (err error) {
 	return nil
 }
 
-func (s *Server) initSession(ctx context.Context) error {
-	s.session = sessionutil.NewSession(ctx)
+func (s *Server) initSession() error {
+	s.session = sessionutil.NewSession(s.ctx)
 	if s.session == nil {
 		return errors.New("session is nil, the etcd client connection may have failed")
 	}
 	s.session.Init(typeutil.StreamingNodeRole, s.listener.Address(), false, true)
 	paramtable.SetNodeID(s.session.ServerID)
-	log.Info("StreamingNode init session", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("node address", s.listener.Address()))
+	log.Ctx(s.ctx).Info("StreamingNode init session", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("node address", s.listener.Address()))
 	return nil
 }
 
 func (s *Server) initMeta() error {
 	params := paramtable.Get()
 	metaType := params.MetaStoreCfg.MetaStoreType.GetValue()
+	log := log.Ctx(s.ctx)
 	log.Info("data coordinator connecting to metadata store", zap.String("metaType", metaType))
 	metaRootPath := ""
 	if metaType == util.MetaStoreTypeTiKV {
@@ -293,40 +300,42 @@ func (s *Server) initMeta() error {
 	return nil
 }
 
-func (s *Server) initRootCoord(ctx context.Context) (err error) {
+func (s *Server) initRootCoord() (err error) {
+	log := log.Ctx(s.ctx)
 	log.Info("StreamingNode connect to rootCoord...")
-	s.rootCoord, err = rcc.NewClient(ctx)
+	s.rootCoord, err = rcc.NewClient(s.ctx)
 	if err != nil {
 		return errors.Wrap(err, "StreamingNode try to new RootCoord client failed")
 	}
 
 	log.Info("StreamingNode try to wait for RootCoord ready")
-	err = componentutil.WaitForComponentHealthy(ctx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
+	err = componentutil.WaitForComponentHealthy(s.ctx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
 	if err != nil {
 		return errors.Wrap(err, "StreamingNode wait for RootCoord ready failed")
 	}
 	return nil
 }
 
-func (s *Server) initDataCoord(ctx context.Context) (err error) {
+func (s *Server) initDataCoord() (err error) {
+	log := log.Ctx(s.ctx)
 	log.Info("StreamingNode connect to dataCoord...")
-	s.dataCoord, err = dcc.NewClient(ctx)
+	s.dataCoord, err = dcc.NewClient(s.ctx)
 	if err != nil {
 		return errors.Wrap(err, "StreamingNode try to new DataCoord client failed")
 	}
 
 	log.Info("StreamingNode try to wait for DataCoord ready")
-	err = componentutil.WaitForComponentHealthy(ctx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
+	err = componentutil.WaitForComponentHealthy(s.ctx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 	if err != nil {
 		return errors.Wrap(err, "StreamingNode wait for DataCoord ready failed")
 	}
 	return nil
 }
 
-func (s *Server) initChunkManager(ctx context.Context) (err error) {
-	log.Info("StreamingNode init chunk manager...")
+func (s *Server) initChunkManager() (err error) {
+	log.Ctx(s.ctx).Info("StreamingNode init chunk manager...")
 	s.factory.Init(paramtable.Get())
-	manager, err := s.factory.NewPersistentStorageChunkManager(ctx)
+	manager, err := s.factory.NewPersistentStorageChunkManager(s.ctx)
 	if err != nil {
 		return errors.Wrap(err, "StreamingNode try to new chunk manager failed")
 	}
@@ -335,7 +344,7 @@ func (s *Server) initChunkManager(ctx context.Context) (err error) {
 }
 
 func (s *Server) initGRPCServer() {
-	log.Info("create StreamingNode server...")
+	log.Ctx(s.ctx).Info("create StreamingNode server...")
 	cfg := &paramtable.Get().StreamingNodeGrpcServerCfg
 	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
@@ -396,7 +405,7 @@ func (s *Server) registerSessionToETCD() {
 	s.session.Register()
 	// start liveness check
 	s.session.LivenessCheck(context.Background(), func() {
-		log.Error("StreamingNode disconnected from etcd, process will exit", zap.Int64("Server Id", paramtable.GetNodeID()))
+		log.Ctx(s.ctx).Error("StreamingNode disconnected from etcd, process will exit", zap.Int64("Server Id", paramtable.GetNodeID()))
 		os.Exit(1)
 	})
 }

@@ -57,7 +57,6 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	s.catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)

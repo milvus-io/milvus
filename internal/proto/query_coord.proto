@@ -175,7 +175,9 @@ service QueryNode {
     // DeleteBatch is the API to apply same delete data into multiple segments.
     // it's basically same as `Delete` but cost less memory pressure.
     rpc DeleteBatch(DeleteBatchRequest) returns (DeleteBatchResponse) {
-    } 
+    }
+
+    rpc CheckHealth(milvus.CheckHealthRequest)returns (milvus.CheckHealthResponse) {}
 }
 
 // --------------------QueryCoord grpc request and response proto------------------
@@ -323,6 +325,7 @@ message LoadMetaInfo {
     string db_name = 5; // Only used for metrics label.
     string resource_group = 6; // Only used for metrics label.
     repeated int64 load_fields = 7;
+    repeated common.KeyValuePair db_properties = 8;
 }
 
 message WatchDmChannelsRequest {

@@ -382,7 +382,7 @@ queryCoord:
   channelExclusiveNodeFactor: 4 # the least node number for enable channel's exclusive mode
   collectionObserverInterval: 200 # the interval of collection observer
   checkExecutedFlagInterval: 100 # the interval of check executed flag to force to pull dist
-  updateCollectionLoadStatusInterval: 5 # 5m, max interval of updating collection loaded status for check health
+  updateCollectionLoadStatusInterval: 300 # 300s, max interval of updating collection loaded status for check health
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord
@@ -873,6 +873,7 @@ common:
   bloomFilterType: BlockedBloomFilter # bloom filter type, support BasicBloomFilter and BlockedBloomFilter
   maxBloomFalsePositive: 0.001 # max false positive rate for bloom filter
   bloomFilterApplyBatchSize: 1000 # batch size when to apply pk to bloom filter
+  collectionReplicateEnable: false # Whether to enable collection replication.
   usePartitionKeyAsClusteringKey: false # if true, do clustering compaction and segment prune on partition key field
   useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
   enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction

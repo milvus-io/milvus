@@ -41,6 +41,7 @@ set(MILVUS_TEST_FILES
         test_c_tokenizer.cpp
         test_loading.cpp
         test_data_codec.cpp
+        test_delete_record.cpp
         test_disk_file_manager_test.cpp
         test_exec.cpp
         test_expr.cpp
@@ -86,6 +87,7 @@ set(MILVUS_TEST_FILES
         test_utils.cpp
         test_chunked_segment.cpp
         test_chunked_column.cpp
+        test_rust_result.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )

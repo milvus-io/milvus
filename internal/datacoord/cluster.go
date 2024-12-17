@@ -191,7 +191,7 @@ func (c *ClusterImpl) QuerySlots() map[int64]int64 {
 			defer wg.Done()
 			resp, err := c.sessionManager.QuerySlot(nodeID)
 			if err != nil {
-				log.Warn("query slot failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+				log.Ctx(context.TODO()).Warn("query slot failed", zap.Int64("nodeID", nodeID), zap.Error(err))
 				return
 			}
 			mu.Lock()
@@ -200,7 +200,7 @@ func (c *ClusterImpl) QuerySlots() map[int64]int64 {
 		}(nodeID)
 	}
 	wg.Wait()
-	log.Debug("query slot done", zap.Any("nodeSlots", nodeSlots))
+	log.Ctx(context.TODO()).Debug("query slot done", zap.Any("nodeSlots", nodeSlots))
 	return nodeSlots
 }
 

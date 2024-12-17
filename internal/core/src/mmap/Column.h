@@ -698,7 +698,7 @@ class SingleChunkVariableColumn : public SingleChunkColumnBase {
             uint32_t size;
             size = *reinterpret_cast<uint32_t*>(pos);
             pos += sizeof(uint32_t);
-            res.emplace_back(std::string_view(pos, size));
+            res.emplace_back(pos, size);
             pos += size;
         }
         return std::make_pair(res, valid_data_);
@@ -710,9 +710,9 @@ class SingleChunkVariableColumn : public SingleChunkColumnBase {
         FixedVector<bool> valid;
         res.reserve(offsets.size());
         valid.reserve(offsets.size());
-        for (size_t i = 0; i < offsets.size(); ++i) {
-            res.emplace_back(RawAt(offsets[i]));
-            valid.emplace_back(IsValid(offsets[i]));
+        for (int offset : offsets) {
+            res.emplace_back(RawAt(offset));
+            valid.emplace_back(IsValid(offset));
         }
         return {res, valid};
     }

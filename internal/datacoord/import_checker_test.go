@@ -52,7 +52,6 @@ func (s *ImportCheckerSuite) SetupTest() {
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)

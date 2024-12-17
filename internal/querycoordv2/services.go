@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -35,7 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/componentutil"
+	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -56,8 +57,7 @@ var (
 )
 
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	log.Ctx(ctx).Info("show collections request received", zap.Int64s("collections", req.GetCollectionIDs()))
-
+	log.Ctx(ctx).Debug("show collections request received", zap.Int64s("collections", req.GetCollectionIDs()))
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to show collections"
 		log.Warn(msg, zap.Error(err))
@@ -683,15 +683,15 @@ func (s *Server) refreshCollection(ctx context.Context, collectionID int64) erro
 // 	}
 // }
 
-func (s *Server) isStoppingNode(nodeID int64) error {
+func (s *Server) isStoppingNode(ctx context.Context, nodeID int64) error {
 	isStopping, err := s.nodeMgr.IsStoppingNode(nodeID)
 	if err != nil {
-		log.Warn("fail to check whether the node is stopping", zap.Int64("node_id", nodeID), zap.Error(err))
+		log.Ctx(ctx).Warn("fail to check whether the node is stopping", zap.Int64("node_id", nodeID), zap.Error(err))
 		return err
 	}
 	if isStopping {
 		msg := fmt.Sprintf("failed to balance due to the source/destination node[%d] is stopping", nodeID)
-		log.Warn(msg)
+		log.Ctx(ctx).Warn(msg)
 		return errors.New(msg)
 	}
 	return nil
@@ -734,7 +734,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		log.Warn(msg)
 		return merr.Status(err), nil
 	}
-	if err := s.isStoppingNode(srcNode); err != nil {
+	if err := s.isStoppingNode(ctx, srcNode); err != nil {
 		return merr.Status(errors.Wrap(err,
 			fmt.Sprintf("can't balance, because the source node[%d] is invalid", srcNode))), nil
 	}
@@ -756,7 +756,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 
 	// check whether dstNode is healthy
 	for dstNode := range dstNodeSet {
-		if err := s.isStoppingNode(dstNode); err != nil {
+		if err := s.isStoppingNode(ctx, dstNode); err != nil {
 			return merr.Status(errors.Wrap(err,
 				fmt.Sprintf("can't balance, because the destination node[%d] is invalid", dstNode))), nil
 		}
@@ -914,16 +914,20 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 		return &milvuspb.CheckHealthResponse{Status: merr.Status(err), IsHealthy: false, Reasons: []string{err.Error()}}, nil
 	}
 
-	errReasons, err := s.checkNodeHealth(ctx)
-	if err != nil || len(errReasons) != 0 {
-		return componentutil.CheckHealthRespWithErrMsg(errReasons...), nil
-	}
+	latestCheckResult := s.healthChecker.GetLatestCheckResult()
+	return healthcheck.GetCheckHealthResponseFromResult(latestCheckResult), nil
+}
 
-	if err := utils.CheckCollectionsQueryable(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr); err != nil {
-		log.Warn("some collection is not queryable during health check", zap.Error(err))
-	}
+func (s *Server) healthCheckFn() *healthcheck.Result {
+	timeout := Params.CommonCfg.HealthCheckRPCTimeout.GetAsDuration(time.Second)
+	ctx, cancel := context.WithTimeout(s.ctx, timeout)
+	defer cancel()
 
-	return componentutil.CheckHealthRespWithErr(nil), nil
+	checkResults := s.broadcastCheckHealth(ctx)
+	for collectionID, failReason := range utils.CheckCollectionsQueryable(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr) {
+		checkResults.AppendUnhealthyCollectionMsgs(healthcheck.NewUnhealthyCollectionMsg(collectionID, failReason, healthcheck.CollectionQueryable))
+	}
+	return checkResults
 }
 
 func (s *Server) checkNodeHealth(ctx context.Context) ([]string, error) {
@@ -952,6 +956,39 @@ func (s *Server) checkNodeHealth(ctx context.Context) ([]string, error) {
 	err := group.Wait()
 
 	return errReasons, err
+}
+
+func (s *Server) broadcastCheckHealth(ctx context.Context) *healthcheck.Result {
+	result := healthcheck.NewResult()
+	wg := sync.WaitGroup{}
+	wlock := sync.Mutex{}
+
+	for _, node := range s.nodeMgr.GetAll() {
+		node := node
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			checkHealthResp, err := s.cluster.CheckHealth(ctx, node.ID())
+			if err = merr.CheckRPCCall(checkHealthResp, err); err != nil && !errors.Is(err, merr.ErrServiceUnimplemented) {
+				err = fmt.Errorf("CheckHealth fails for querynode:%d, %w", node.ID(), err)
+				wlock.Lock()
+				result.AppendUnhealthyClusterMsg(
+					healthcheck.NewUnhealthyClusterMsg(typeutil.QueryNodeRole, node.ID(), err.Error(), healthcheck.NodeHealthCheck))
+				wlock.Unlock()
+				return
+			}
+
+			if checkHealthResp != nil && len(checkHealthResp.Reasons) > 0 {
+				wlock.Lock()
+				result.AppendResult(healthcheck.GetHealthCheckResultFromResp(checkHealthResp))
+				wlock.Unlock()
+			}
+		}()
+	}
+
+	wg.Wait()
+	return result
 }
 
 func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {

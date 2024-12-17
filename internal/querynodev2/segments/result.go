@@ -266,7 +266,8 @@ func EncodeSearchResultData(ctx context.Context, searchResultData *schemapb.Sear
 }
 
 func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, param *mergeParam) (*internalpb.RetrieveResults, error) {
-	log.Ctx(ctx).Debug("mergeInternelRetrieveResults",
+	log := log.Ctx(ctx)
+	log.Debug("mergeInternelRetrieveResults",
 		zap.Int64("limit", param.limit),
 		zap.Int("resultNum", len(retrieveResults)),
 	)
@@ -391,7 +392,8 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	ctx, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults")
 	defer span.End()
 
-	log.Ctx(ctx).Debug("mergeSegcoreRetrieveResults",
+	log := log.Ctx(ctx)
+	log.Debug("mergeSegcoreRetrieveResults",
 		zap.Int64("limit", param.limit),
 		zap.Int("resultNum", len(retrieveResults)),
 	)

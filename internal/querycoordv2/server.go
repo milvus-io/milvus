@@ -55,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
+	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -138,6 +139,8 @@ type Server struct {
 	proxyClientManager proxyutil.ProxyClientManagerInterface
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	healthChecker *healthcheck.Checker
 }
 
 func NewQueryCoord(ctx context.Context) (*Server, error) {
@@ -157,6 +160,7 @@ func NewQueryCoord(ctx context.Context) (*Server, error) {
 }
 
 func (s *Server) Register() error {
+	log := log.Ctx(s.ctx)
 	s.session.Register()
 	afterRegister := func() {
 		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.QueryCoordRole).Inc()
@@ -240,10 +244,11 @@ func (s *Server) registerMetricsRequest() {
 	// register actions that requests are processed in querynode
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey, QuerySegmentsAction)
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ChannelKey, QueryChannelsAction)
-	log.Info("register metrics actions finished")
+	log.Ctx(s.ctx).Info("register metrics actions finished")
 }
 
 func (s *Server) Init() error {
+	log := log.Ctx(s.ctx)
 	log.Info("QueryCoord start init",
 		zap.String("meta-root-path", Params.EtcdCfg.MetaRootPath.GetValue()),
 		zap.String("address", s.address))
@@ -277,6 +282,7 @@ func (s *Server) Init() error {
 }
 
 func (s *Server) initQueryCoord() error {
+	log := log.Ctx(s.ctx)
 	// wait for master init or healthy
 	log.Info("QueryCoord try to wait for RootCoord ready")
 	if err := componentutil.WaitForComponentHealthy(s.ctx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200); err != nil {
@@ -421,11 +427,14 @@ func (s *Server) initQueryCoord() error {
 	// Init load status cache
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 
+	interval := Params.CommonCfg.HealthCheckInterval.GetAsDuration(time.Second)
+	s.healthChecker = healthcheck.NewChecker(interval, s.healthCheckFn)
 	log.Info("init querycoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
 	return err
 }
 
 func (s *Server) initMeta() error {
+	log := log.Ctx(s.ctx)
 	record := timerecord.NewTimeRecorder("querycoord")
 
 	log.Info("init meta")
@@ -479,7 +488,7 @@ func (s *Server) initMeta() error {
 }
 
 func (s *Server) initObserver() {
-	log.Info("init observers")
+	log.Ctx(s.ctx).Info("init observers")
 	s.targetObserver = observers.NewTargetObserver(
 		s.meta,
 		s.targetMgr,
@@ -517,13 +526,13 @@ func (s *Server) Start() error {
 		if err := s.startQueryCoord(); err != nil {
 			return err
 		}
-		log.Info("QueryCoord started")
+		log.Ctx(s.ctx).Info("QueryCoord started")
 	}
 	return nil
 }
 
 func (s *Server) startQueryCoord() error {
-	log.Info("start watcher...")
+	log.Ctx(s.ctx).Info("start watcher...")
 	sessions, revision, err := s.session.GetSessions(typeutil.QueryNodeRole)
 	if err != nil {
 		return err
@@ -558,17 +567,19 @@ func (s *Server) startQueryCoord() error {
 	s.updateBalanceConfigLoop(s.ctx)
 
 	if err := s.proxyWatcher.WatchProxy(s.ctx); err != nil {
-		log.Warn("querycoord failed to watch proxy", zap.Error(err))
+		log.Ctx(s.ctx).Warn("querycoord failed to watch proxy", zap.Error(err))
 	}
 
 	s.startServerLoop()
 	s.afterStart()
+	s.healthChecker.Start()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.QueryCoordRole, s.session.GetServerID())
 	return nil
 }
 
 func (s *Server) startServerLoop() {
+	log := log.Ctx(s.ctx)
 	// leader cache observer shall be started before `SyncAll` call
 	s.leaderCacheObserver.Start(s.ctx)
 	// Recover dist, to avoid generate too much task when dist not ready after restart
@@ -596,10 +607,13 @@ func (s *Server) startServerLoop() {
 }
 
 func (s *Server) Stop() error {
+	log := log.Ctx(s.ctx)
 	// FOLLOW the dependence graph:
 	// job scheduler -> checker controller -> task scheduler -> dist controller -> cluster -> session
 	// observers -> dist controller
-
+	if s.healthChecker != nil {
+		s.healthChecker.Close()
+	}
 	if s.jobScheduler != nil {
 		log.Info("stop job scheduler...")
 		s.jobScheduler.Stop()
@@ -669,7 +683,7 @@ func (s *Server) State() commonpb.StateCode {
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	log.Debug("QueryCoord current state", zap.String("StateCode", s.State().String()))
+	log.Ctx(ctx).Debug("QueryCoord current state", zap.String("StateCode", s.State().String()))
 	nodeID := common.NotRegisteredID
 	if s.session != nil && s.session.Registered() {
 		nodeID = s.session.GetServerID()
@@ -738,6 +752,7 @@ func (s *Server) SetQueryNodeCreator(f func(ctx context.Context, addr string, no
 }
 
 func (s *Server) watchNodes(revision int64) {
+	log := log.Ctx(s.ctx)
 	defer s.wg.Done()
 
 	eventChan := s.session.WatchServices(typeutil.QueryNodeRole, revision+1, nil)
@@ -804,6 +819,7 @@ func (s *Server) watchNodes(revision int64) {
 }
 
 func (s *Server) handleNodeUpLoop() {
+	log := log.Ctx(s.ctx)
 	defer s.wg.Done()
 	ticker := time.NewTicker(Params.QueryCoordCfg.CheckHealthInterval.GetAsDuration(time.Millisecond))
 	defer ticker.Stop()
@@ -883,6 +899,7 @@ func (s *Server) checkNodeStateInRG() {
 }
 
 func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
+	log := log.Ctx(s.ctx)
 	success := s.updateBalanceConfig()
 	if success {
 		return
@@ -931,6 +948,7 @@ func (s *Server) updateBalanceConfig() bool {
 }
 
 func (s *Server) watchLoadConfigChanges() {
+	log := log.Ctx(s.ctx)
 	replicaNumHandler := config.NewHandler("watchReplicaNumberChanges", func(e *config.Event) {
 		log.Info("watch load config changes", zap.String("key", e.Key), zap.String("value", e.Value), zap.String("type", e.EventType))
 

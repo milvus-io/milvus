@@ -36,6 +36,7 @@ type ROChannel interface {
 	GetSchema() *schemapb.CollectionSchema
 	GetCreateTimestamp() Timestamp
 	GetWatchInfo() *datapb.ChannelWatchInfo
+	GetDBProperties() []*commonpb.KeyValuePair
 }
 
 type RWChannel interface {
@@ -48,6 +49,7 @@ func NewRWChannel(name string,
 	startPos []*commonpb.KeyDataPair,
 	schema *schemapb.CollectionSchema,
 	createTs uint64,
+	dbProperties []*commonpb.KeyValuePair,
 ) RWChannel {
 	return &StateChannel{
 		Name:            name,
@@ -55,9 +57,11 @@ func NewRWChannel(name string,
 		StartPositions:  startPos,
 		Schema:          schema,
 		CreateTimestamp: createTs,
+		DBProperties:    dbProperties,
 	}
 }
 
+// TODO fubang same as StateChannel
 type channelMeta struct {
 	Name            string
 	CollectionID    UniqueID
@@ -109,6 +113,10 @@ func (ch *channelMeta) String() string {
 	return fmt.Sprintf("Name: %s, CollectionID: %d, StartPositions: %v", ch.Name, ch.CollectionID, ch.StartPositions)
 }
 
+func (ch *channelMeta) GetDBProperties() []*commonpb.KeyValuePair {
+	return nil
+}
+
 type ChannelState string
 
 const (
@@ -126,6 +134,7 @@ type StateChannel struct {
 	CollectionID    UniqueID
 	StartPositions  []*commonpb.KeyDataPair
 	Schema          *schemapb.CollectionSchema
+	DBProperties    []*commonpb.KeyValuePair
 	CreateTimestamp uint64
 	Info            *datapb.ChannelWatchInfo
 
@@ -143,6 +152,7 @@ func NewStateChannel(ch RWChannel) *StateChannel {
 		Schema:          ch.GetSchema(),
 		CreateTimestamp: ch.GetCreateTimestamp(),
 		Info:            ch.GetWatchInfo(),
+		DBProperties:    ch.GetDBProperties(),
 
 		assignedNode: bufferID,
 	}
@@ -156,6 +166,7 @@ func NewStateChannelByWatchInfo(nodeID int64, info *datapb.ChannelWatchInfo) *St
 		Name:         info.GetVchan().GetChannelName(),
 		CollectionID: info.GetVchan().GetCollectionID(),
 		Schema:       info.GetSchema(),
+		DBProperties: info.GetDbProperties(),
 		Info:         info,
 		assignedNode: nodeID,
 	}
@@ -276,4 +287,8 @@ func (c *StateChannel) Assign(nodeID int64) {
 
 func (c *StateChannel) setState(state ChannelState) {
 	c.currentState = state
+}
+
+func (c *StateChannel) GetDBProperties() []*commonpb.KeyValuePair {
+	return c.DBProperties
 }
