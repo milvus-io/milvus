@@ -153,7 +153,6 @@ if ( APPLE )
             "-Wno-gnu-zero-variadic-macro-arguments"
             "-Wno-variadic-macros"
             "-Wno-reorder-ctor"
-            "-Wno-google-readability"
             "-DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED=1"
             )
 endif ()

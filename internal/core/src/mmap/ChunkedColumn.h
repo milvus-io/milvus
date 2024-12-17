@@ -60,7 +60,6 @@ class ChunkedColumnBase : public ColumnBase {
     }
 
     virtual ~ChunkedColumnBase() = default;
-    ;
 
     void
     AppendBatch(const FieldDataPtr data) override {
