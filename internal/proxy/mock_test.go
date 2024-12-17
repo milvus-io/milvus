@@ -311,7 +311,7 @@ func (ms *simpleMockMsgStream) CheckTopicValid(topic string) error {
 	return nil
 }
 
-func (ms *simpleMockMsgStream) EnableProduce(enabled bool) {
+func (ms *simpleMockMsgStream) ForceEnableProduce(enabled bool) {
 }
 
 func newSimpleMockMsgStream() *simpleMockMsgStream {

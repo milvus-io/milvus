@@ -494,9 +494,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 }
 
 func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkoracle.Candidate) ([]storage.PrimaryKey, []storage.Timestamp) {
-	sd.level0Mut.Lock()
-	defer sd.level0Mut.Unlock()
-
 	// TODO: this could be large, host all L0 delete on delegator might be a dangerous, consider mmap it on local segment and stream processing it
 	level0Segments := sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0), segments.WithChannel(sd.vchannelName))
 	pks := make([]storage.PrimaryKey, 0)
@@ -529,8 +526,6 @@ func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkorac
 }
 
 func (sd *shardDelegator) RefreshLevel0DeletionStats() {
-	sd.level0Mut.Lock()
-	defer sd.level0Mut.Unlock()
 	level0Segments := sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0), segments.WithChannel(sd.vchannelName))
 	totalSize := int64(0)
 	for _, segment := range level0Segments {

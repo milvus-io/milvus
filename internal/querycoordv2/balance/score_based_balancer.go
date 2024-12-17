@@ -50,14 +50,14 @@ func NewScoreBasedBalancer(scheduler task.Scheduler,
 }
 
 // AssignSegment got a segment list, and try to assign each segment to node's with lowest score
-func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan {
+func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64, forceAssign bool) []SegmentAssignPlan {
 	br := NewBalanceReport()
-	return b.assignSegment(br, collectionID, segments, nodes, manualBalance)
+	return b.assignSegment(br, collectionID, segments, nodes, forceAssign)
 }
 
-func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan {
-	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
-	if !manualBalance {
+func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64, segments []*meta.Segment, nodes []int64, forceAssign bool) []SegmentAssignPlan {
+	balanceBatchSize := math.MaxInt64
+	if !forceAssign {
 		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
 			info := b.nodeManager.Get(node)
 			normalNode := info != nil && info.GetState() == session.NodeStateNormal
@@ -66,6 +66,7 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 			}
 			return normalNode
 		})
+		balanceBatchSize = paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
 	}
 
 	// calculate each node's score
@@ -92,10 +93,6 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 		return segments[i].GetNumOfRows() > segments[j].GetNumOfRows()
 	})
 
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
-	if manualBalance {
-		balanceBatchSize = math.MaxInt64
-	}
 	plans := make([]SegmentAssignPlan, 0, len(segments))
 	for _, s := range segments {
 		func(s *meta.Segment) {
@@ -108,8 +105,8 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 			sourceNode := nodeItemsMap[s.Node]
 			// if segment's node exist, which means this segment comes from balancer. we should consider the benefit
 			// if the segment reassignment doesn't got enough benefit, we should skip this reassignment
-			// notice: we should skip benefit check for manual balance
-			if !manualBalance && sourceNode != nil && !b.hasEnoughBenefit(sourceNode, targetNode, scoreChanges) {
+			// notice: we should skip benefit check for forceAssign
+			if !forceAssign && sourceNode != nil && !b.hasEnoughBenefit(sourceNode, targetNode, scoreChanges) {
 				br.AddRecord(StrRecordf("skip generate balance plan for segment %d since no enough benefit", s.ID))
 				return
 			}
@@ -146,14 +143,14 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 	return plans
 }
 
-func (b *ScoreBasedBalancer) AssignChannel(collectionID int64, channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
+func (b *ScoreBasedBalancer) AssignChannel(collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan {
 	br := NewBalanceReport()
-	return b.assignChannel(br, collectionID, channels, nodes, manualBalance)
+	return b.assignChannel(br, collectionID, channels, nodes, forceAssign)
 }
 
-func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64, channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
-	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
-	if !manualBalance {
+func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan {
+	balanceBatchSize := math.MaxInt64
+	if !forceAssign {
 		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
 			info := b.nodeManager.Get(node)
 			normalNode := info != nil && info.GetState() == session.NodeStateNormal
@@ -162,6 +159,7 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 			}
 			return normalNode
 		})
+		balanceBatchSize = paramtable.Get().QueryCoordCfg.CollectionBalanceChannelBatchSize.GetAsInt()
 	}
 
 	// calculate each node's score
@@ -173,11 +171,6 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 	queue := newPriorityQueue()
 	for _, item := range nodeItemsMap {
 		queue.push(item)
-	}
-
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceChannelBatchSize.GetAsInt()
-	if manualBalance {
-		balanceBatchSize = math.MaxInt64
 	}
 	plans := make([]ChannelAssignPlan, 0, len(channels))
 	for _, ch := range channels {
@@ -191,8 +184,8 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 			sourceNode := nodeItemsMap[ch.Node]
 			// if segment's node exist, which means this segment comes from balancer. we should consider the benefit
 			// if the segment reassignment doesn't got enough benefit, we should skip this reassignment
-			// notice: we should skip benefit check for manual balance
-			if !manualBalance && sourceNode != nil && !b.hasEnoughBenefit(sourceNode, targetNode, scoreChanges) {
+			// notice: we should skip benefit check for forceAssign
+			if !forceAssign && sourceNode != nil && !b.hasEnoughBenefit(sourceNode, targetNode, scoreChanges) {
 				br.AddRecord(StrRecordf("skip generate balance plan for channel %s since no enough benefit", ch.GetChannelName()))
 				return
 			}

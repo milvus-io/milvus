@@ -43,7 +43,7 @@ func (m *ReplicateStreamManager) newMsgStreamResource(channel string) resource.N
 		}
 		msgStream.SetRepackFunc(replicatePackFunc)
 		msgStream.AsProducer([]string{channel})
-		msgStream.EnableProduce(true)
+		msgStream.ForceEnableProduce(true)
 
 		res := resource.NewSimpleResource(msgStream, ReplicateMsgStreamTyp, channel, ReplicateMsgStreamExpireTime, func() {
 			msgStream.Close()

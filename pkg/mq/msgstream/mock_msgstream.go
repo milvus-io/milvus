@@ -274,11 +274,11 @@ func (_c *MockMsgStream_Close_Call) RunAndReturn(run func()) *MockMsgStream_Clos
 }
 
 // EnableProduce provides a mock function with given fields: can
-func (_m *MockMsgStream) EnableProduce(can bool) {
+func (_m *MockMsgStream) ForceEnableProduce(can bool) {
 	_m.Called(can)
 }
 
-// MockMsgStream_EnableProduce_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EnableProduce'
+// MockMsgStream_EnableProduce_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ForceEnableProduce'
 type MockMsgStream_EnableProduce_Call struct {
 	*mock.Call
 }
@@ -286,7 +286,7 @@ type MockMsgStream_EnableProduce_Call struct {
 // EnableProduce is a helper method to define mock.On call
 //   - can bool
 func (_e *MockMsgStream_Expecter) EnableProduce(can interface{}) *MockMsgStream_EnableProduce_Call {
-	return &MockMsgStream_EnableProduce_Call{Call: _e.mock.On("EnableProduce", can)}
+	return &MockMsgStream_EnableProduce_Call{Call: _e.mock.On("ForceEnableProduce", can)}
 }
 
 func (_c *MockMsgStream_EnableProduce_Call) Run(run func(can bool)) *MockMsgStream_EnableProduce_Call {

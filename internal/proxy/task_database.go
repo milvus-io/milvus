@@ -285,6 +285,7 @@ func (t *alterDatabaseTask) Execute(ctx context.Context) error {
 		DbName:     t.AlterDatabaseRequest.GetDbName(),
 		DbId:       t.AlterDatabaseRequest.GetDbId(),
 		Properties: t.AlterDatabaseRequest.GetProperties(),
+		DeleteKeys: t.AlterDatabaseRequest.GetDeleteKeys(),
 	}
 
 	ret, err := t.rootCoord.AlterDatabase(ctx, req)

@@ -232,7 +232,7 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 		if len(rwNodes) == 0 {
 			rwNodes = replica.GetRWNodes()
 		}
-		plan := c.getBalancerFunc().AssignChannel(replica.GetCollectionID(), []*meta.DmChannel{ch}, rwNodes, false)
+		plan := c.getBalancerFunc().AssignChannel(replica.GetCollectionID(), []*meta.DmChannel{ch}, rwNodes, true)
 		plans = append(plans, plan...)
 	}
 

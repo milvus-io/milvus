@@ -233,4 +233,5 @@ message AlterDatabaseRequest {
   string db_name = 2;
   string db_id = 3;
   repeated common.KeyValuePair properties = 4;
+  repeated string delete_keys = 5;
 }
