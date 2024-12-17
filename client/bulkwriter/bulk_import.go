@@ -25,11 +25,13 @@ import (
 	"net/http"
 )
 
+// ResponseBase is the common milvus restful response struct.
 type ResponseBase struct {
 	Status  int    `json:"status"`
 	Message string `json:"message"`
 }
 
+// CheckStatus checks the response status and return error if not ok.
 func (b ResponseBase) CheckStatus() error {
 	if b.Status != 0 {
 		return fmt.Errorf("bulk import return error, status: %d, message: %s", b.Status, b.Message)
@@ -39,9 +41,10 @@ func (b ResponseBase) CheckStatus() error {
 
 type BulkImportOption struct {
 	// milvus params
-	URI            string     `json:"-"`
-	CollectionName string     `json:"collectionName"`
-	Files          [][]string `json:"files"`
+	URL            string `json:"-"`
+	CollectionName string `json:"collectionName"`
+	// optional in cloud api, use object url instead
+	Files [][]string `json:"files,omitempty"`
 	// optional params
 	PartitionName string `json:"partitionName,omitempty"`
 	APIKey        string `json:"-"`
@@ -77,12 +80,13 @@ func (opt *BulkImportOption) WithOption(key, value string) *BulkImportOption {
 	return opt
 }
 
+// NewBulkImportOption returns BulkImportOption for Milvus bulk import API.
 func NewBulkImportOption(uri string,
 	collectionName string,
 	files [][]string,
 ) *BulkImportOption {
 	return &BulkImportOption{
-		URI:            uri,
+		URL:            uri,
 		CollectionName: collectionName,
 		Files:          files,
 	}
@@ -91,7 +95,6 @@ func NewBulkImportOption(uri string,
 // NewCloudBulkImportOption returns import option for cloud import API.
 func NewCloudBulkImportOption(uri string,
 	collectionName string,
-	files [][]string,
 	apiKey string,
 	objectURL string,
 	clusterID string,
@@ -99,9 +102,8 @@ func NewCloudBulkImportOption(uri string,
 	secretKey string,
 ) *BulkImportOption {
 	return &BulkImportOption{
-		URI:            uri,
+		URL:            uri,
 		CollectionName: collectionName,
-		Files:          files,
 		APIKey:         apiKey,
 		ObjectURL:      objectURL,
 		ClusterID:      clusterID,
@@ -119,7 +121,7 @@ type BulkImportResponse struct {
 
 // BulkImport is the API wrapper for restful import API.
 func BulkImport(ctx context.Context, option *BulkImportOption) (*BulkImportResponse, error) {
-	url := option.URI + "/v2/vectordb/jobs/import/create"
+	url := option.URL + "/v2/vectordb/jobs/import/create"
 	bs, err := option.GetRequest()
 	if err != nil {
 		return nil, err
@@ -142,12 +144,17 @@ func BulkImport(ctx context.Context, option *BulkImportOption) (*BulkImportRespo
 }
 
 type ListImportJobsOption struct {
-	URI            string `json:"-"`
+	URL            string `json:"-"`
 	CollectionName string `json:"collectionName"`
 	ClusterID      string `json:"clusterId,omitempty"`
 	APIKey         string `json:"-"`
-	PageSize       int    `json:"pageSize"`
-	CurrentPage    int    `json:"currentPage"`
+	PageSize       int    `json:"pageSize,omitempty"`
+	CurrentPage    int    `json:"currentPage,omitempty"`
+}
+
+func (opt *ListImportJobsOption) WithAPIKey(key string) *ListImportJobsOption {
+	opt.APIKey = key
+	return opt
 }
 
 func (opt *ListImportJobsOption) WithPageSize(pageSize int) *ListImportJobsOption {
@@ -166,7 +173,7 @@ func (opt *ListImportJobsOption) GetRequest() ([]byte, error) {
 
 func NewListImportJobsOption(uri string, collectionName string) *ListImportJobsOption {
 	return &ListImportJobsOption{
-		URI:            uri,
+		URL:            uri,
 		CollectionName: collectionName,
 		CurrentPage:    1,
 		PageSize:       10,
@@ -191,7 +198,7 @@ type ImportJobRecord struct {
 }
 
 func ListImportJobs(ctx context.Context, option *ListImportJobsOption) (*ListImportJobsResponse, error) {
-	url := option.URI + "/v2/vectordb/jobs/import/list"
+	url := option.URL + "/v2/vectordb/jobs/import/list"
 	bs, err := option.GetRequest()
 	if err != nil {
 		return nil, err
@@ -214,7 +221,7 @@ func ListImportJobs(ctx context.Context, option *ListImportJobsOption) (*ListImp
 }
 
 type GetImportProgressOption struct {
-	URI   string `json:"-"`
+	URL   string `json:"-"`
 	JobID string `json:"jobId"`
 	// optional
 	ClusterID string `json:"clusterId"`
@@ -232,14 +239,14 @@ func (opt *GetImportProgressOption) WithAPIKey(key string) *GetImportProgressOpt
 
 func NewGetImportProgressOption(uri string, jobID string) *GetImportProgressOption {
 	return &GetImportProgressOption{
-		URI:   uri,
+		URL:   uri,
 		JobID: jobID,
 	}
 }
 
 func NewCloudGetImportProgressOption(uri string, jobID string, apiKey string, clusterID string) *GetImportProgressOption {
 	return &GetImportProgressOption{
-		URI:       uri,
+		URL:       uri,
 		JobID:     jobID,
 		APIKey:    apiKey,
 		ClusterID: clusterID,
@@ -275,7 +282,7 @@ type ImportProgressDetail struct {
 }
 
 func GetImportProgress(ctx context.Context, option *GetImportProgressOption) (*GetImportProgressResponse, error) {
-	url := option.URI + "/v2/vectordb/jobs/import/describe"
+	url := option.URL + "/v2/vectordb/jobs/import/describe"
 
 	bs, err := option.GetRequest()
 	if err != nil {

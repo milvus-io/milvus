@@ -33,12 +33,19 @@ type BulkImportSuite struct {
 func (s *BulkImportSuite) TestBulkImport() {
 	s.Run("normal_case", func() {
 		svr := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			authHeader := req.Header.Get("Authorization")
+			s.Equal("Bearer root:Milvus", authHeader)
 			s.True(strings.Contains(req.URL.Path, "/v2/vectordb/jobs/import/create"))
 			rw.Write([]byte(`{"status":0, "data":{"jobId": "123"}}`))
 		}))
 		defer svr.Close()
 
-		resp, err := BulkImport(context.Background(), NewBulkImportOption(svr.URL, "hello_milvus", [][]string{{"files/a.json", "files/b.json"}}))
+		resp, err := BulkImport(context.Background(),
+			NewBulkImportOption(svr.URL, "hello_milvus", [][]string{{"files/a.json", "files/b.json"}}).
+				WithPartition("_default").
+				WithOption("backup", "true").
+				WithAPIKey("root:Milvus"),
+		)
 		s.NoError(err)
 		s.EqualValues(0, resp.Status)
 		s.Equal("123", resp.Data.JobID)
@@ -46,6 +53,7 @@ func (s *BulkImportSuite) TestBulkImport() {
 
 	s.Run("svr_error", func() {
 		svr := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			// rw.
 			rw.WriteHeader(http.StatusInternalServerError)
 			rw.Write([]byte(`interal server error`))
 		}))
@@ -58,11 +66,18 @@ func (s *BulkImportSuite) TestBulkImport() {
 	s.Run("status_error", func() {
 		svr := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 			s.True(strings.Contains(req.URL.Path, "/v2/vectordb/jobs/import/create"))
-			rw.Write([]byte(`{"status":1100, "message": "import job failed"`))
+			rw.Write([]byte(`{"status":1100, "message": "import job failed"}`))
 		}))
 		defer svr.Close()
 
 		_, err := BulkImport(context.Background(), NewBulkImportOption(svr.URL, "hello_milvus", [][]string{{"files/a.json", "files/b.json"}}))
+		s.Error(err)
+	})
+
+	s.Run("server_closed", func() {
+		svr2 := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {}))
+		svr2.Close()
+		_, err := BulkImport(context.Background(), NewBulkImportOption(svr2.URL, "hello_milvus", [][]string{{"files/a.json", "files/b.json"}}))
 		s.Error(err)
 	})
 }
@@ -70,12 +85,19 @@ func (s *BulkImportSuite) TestBulkImport() {
 func (s *BulkImportSuite) TestListImportJobs() {
 	s.Run("normal_case", func() {
 		svr := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			authHeader := req.Header.Get("Authorization")
+			s.Equal("Bearer root:Milvus", authHeader)
 			s.True(strings.Contains(req.URL.Path, "/v2/vectordb/jobs/import/list"))
 			rw.Write([]byte(`{"status":0, "data":{"records": [{"jobID": "abc", "collectionName": "hello_milvus", "state":"Importing", "progress": 50}]}}`))
 		}))
 		defer svr.Close()
 
-		resp, err := ListImportJobs(context.Background(), NewListImportJobsOption(svr.URL, "hello_milvus"))
+		resp, err := ListImportJobs(context.Background(),
+			NewListImportJobsOption(svr.URL, "hello_milvus").
+				WithPageSize(10).
+				WithCurrentPage(1).
+				WithAPIKey("root:Milvus"),
+		)
 		s.NoError(err)
 		s.EqualValues(0, resp.Status)
 		if s.Len(resp.Data.Records, 1) {
@@ -101,12 +123,17 @@ func (s *BulkImportSuite) TestListImportJobs() {
 func (s *BulkImportSuite) TestGetImportProgress() {
 	s.Run("normal_case", func() {
 		svr := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			authHeader := req.Header.Get("Authorization")
+			s.Equal("Bearer root:Milvus", authHeader)
 			s.True(strings.Contains(req.URL.Path, "/v2/vectordb/jobs/import/describe"))
 			rw.Write([]byte(`{"status":0, "data":{"collectionName": "hello_milvus","jobId":"abc", "state":"Importing", "progress": 50, "importedRows": 20000,"totalRows": 40000, "details":[{"fileName": "files/a.json", "fileSize": 64312, "progress": 100, "state": "Completed"}, {"fileName":"files/b.json", "fileSize":52912, "progress":0, "state":"Importing"}]}}`))
 		}))
 		defer svr.Close()
 
-		resp, err := GetImportProgress(context.Background(), NewGetImportProgressOption(svr.URL, "abc"))
+		resp, err := GetImportProgress(context.Background(),
+			NewGetImportProgressOption(svr.URL, "abc").
+				WithAPIKey("root:Milvus"),
+		)
 		s.NoError(err)
 		s.EqualValues(0, resp.Status)
 		s.Equal("hello_milvus", resp.Data.CollectionName)
