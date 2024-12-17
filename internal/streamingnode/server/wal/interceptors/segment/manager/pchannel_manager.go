@@ -15,9 +15,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // RecoverPChannelSegmentAllocManager recovers the segment assignment manager at the specified pchannel.
@@ -45,7 +45,7 @@ func RecoverPChannelSegmentAllocManager(
 	logger := log.With(zap.Any("pchannel", pchannel))
 
 	return &PChannelSegmentAllocManager{
-		lifetime: lifetime.NewLifetime(lifetime.Working),
+		lifetime: typeutil.NewLifetime(),
 		logger:   logger,
 		pchannel: pchannel,
 		managers: managers,
@@ -56,7 +56,7 @@ func RecoverPChannelSegmentAllocManager(
 
 // PChannelSegmentAllocManager is a segment assign manager of determined pchannel.
 type PChannelSegmentAllocManager struct {
-	lifetime lifetime.Lifetime[lifetime.State]
+	lifetime *typeutil.Lifetime
 
 	logger   *log.MLogger
 	pchannel types.PChannelInfo
@@ -175,7 +175,7 @@ func (m *PChannelSegmentAllocManager) SealAndFenceSegmentUntil(ctx context.Conte
 
 // TryToSealSegments tries to seal the specified segments.
 func (m *PChannelSegmentAllocManager) TryToSealSegments(ctx context.Context, infos ...stats.SegmentBelongs) {
-	if err := m.lifetime.Add(lifetime.IsWorking); err != nil {
+	if !m.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return
 	}
 	defer m.lifetime.Done()
@@ -197,7 +197,7 @@ func (m *PChannelSegmentAllocManager) TryToSealSegments(ctx context.Context, inf
 }
 
 func (m *PChannelSegmentAllocManager) MustSealSegments(ctx context.Context, infos ...stats.SegmentBelongs) {
-	if err := m.lifetime.Add(lifetime.IsWorking); err != nil {
+	if !m.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return
 	}
 	defer m.lifetime.Done()
@@ -221,7 +221,7 @@ func (m *PChannelSegmentAllocManager) MustSealSegments(ctx context.Context, info
 
 // TryToSealWaitedSegment tries to seal the wait for sealing segment.
 func (m *PChannelSegmentAllocManager) TryToSealWaitedSegment(ctx context.Context) {
-	if err := m.lifetime.Add(lifetime.IsWorking); err != nil {
+	if !m.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return
 	}
 	defer m.lifetime.Done()
@@ -236,7 +236,7 @@ func (m *PChannelSegmentAllocManager) IsNoWaitSeal() bool {
 
 // WaitUntilNoWaitSeal waits until no segment wait for seal.
 func (m *PChannelSegmentAllocManager) WaitUntilNoWaitSeal(ctx context.Context) error {
-	if err := m.lifetime.Add(lifetime.IsWorking); err != nil {
+	if err := m.checkLifetime(); err != nil {
 		return err
 	}
 	defer m.lifetime.Done()
@@ -246,8 +246,8 @@ func (m *PChannelSegmentAllocManager) WaitUntilNoWaitSeal(ctx context.Context) e
 
 // checkLifetime checks the lifetime of the segment manager.
 func (m *PChannelSegmentAllocManager) checkLifetime() error {
-	if err := m.lifetime.Add(lifetime.IsWorking); err != nil {
-		m.logger.Warn("unreachable: segment assignment manager is not working, so the wal is on closing", zap.Error(err))
+	if !m.lifetime.Add(typeutil.LifetimeStateWorking) {
+		m.logger.Warn("unreachable: segment assignment manager is not working, so the wal is on closing")
 		return errors.New("segment assignment manager is not working")
 	}
 	return nil
@@ -256,7 +256,7 @@ func (m *PChannelSegmentAllocManager) checkLifetime() error {
 // Close try to persist all stats and invalid the manager.
 func (m *PChannelSegmentAllocManager) Close(ctx context.Context) {
 	m.logger.Info("segment assignment manager start to close")
-	m.lifetime.SetState(lifetime.Stopped)
+	m.lifetime.SetState(typeutil.LifetimeStateStopped)
 	m.lifetime.Wait()
 
 	// Try to seal all wait

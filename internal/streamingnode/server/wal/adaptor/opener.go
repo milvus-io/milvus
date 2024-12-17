@@ -10,7 +10,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -19,7 +18,7 @@ var _ wal.Opener = (*openerAdaptorImpl)(nil)
 // adaptImplsToOpener creates a new wal opener with opener impls.
 func adaptImplsToOpener(opener walimpls.OpenerImpls, builders []interceptors.InterceptorBuilder) wal.Opener {
 	return &openerAdaptorImpl{
-		lifetime:            lifetime.NewLifetime(lifetime.Working),
+		lifetime:            typeutil.NewLifetime(),
 		opener:              opener,
 		idAllocator:         typeutil.NewIDAllocator(),
 		walInstances:        typeutil.NewConcurrentMap[int64, wal.WAL](),
@@ -29,7 +28,7 @@ func adaptImplsToOpener(opener walimpls.OpenerImpls, builders []interceptors.Int
 
 // openerAdaptorImpl is the wrapper of OpenerImpls to Opener.
 type openerAdaptorImpl struct {
-	lifetime            lifetime.Lifetime[lifetime.State]
+	lifetime            *typeutil.Lifetime
 	opener              walimpls.OpenerImpls
 	idAllocator         *typeutil.IDAllocator
 	walInstances        *typeutil.ConcurrentMap[int64, wal.WAL] // store all wal instances allocated by these allocator.
@@ -38,7 +37,7 @@ type openerAdaptorImpl struct {
 
 // Open opens a wal instance for the channel.
 func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.WAL, error) {
-	if o.lifetime.Add(lifetime.IsWorking) != nil {
+	if !o.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("wal opener is on shutdown")
 	}
 	defer o.lifetime.Done()
@@ -67,9 +66,8 @@ func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.
 
 // Close the wal opener, release the underlying resources.
 func (o *openerAdaptorImpl) Close() {
-	o.lifetime.SetState(lifetime.Stopped)
+	o.lifetime.SetState(typeutil.LifetimeStateStopped)
 	o.lifetime.Wait()
-	o.lifetime.Close()
 
 	// close all wal instances.
 	o.walInstances.Range(func(id int64, l wal.WAL) bool {

@@ -15,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -62,7 +61,7 @@ func CreateProducer(
 			zap.String("pchannel", opts.Assignment.Channel.Name),
 			zap.Int64("term", opts.Assignment.Channel.Term),
 			zap.Int64("streamingNodeID", opts.Assignment.Node.ServerID)),
-		lifetime:         lifetime.NewLifetime[lifetime.State](lifetime.Working),
+		lifetime:         typeutil.NewLifetime(),
 		idAllocator:      typeutil.NewIDAllocator(),
 		grpcStreamClient: produceClient,
 		pendingRequests:  sync.Map{},
@@ -97,7 +96,7 @@ type producerImpl struct {
 	assignment       types.PChannelInfoAssigned
 	walName          string
 	logger           *log.MLogger
-	lifetime         lifetime.Lifetime[lifetime.State]
+	lifetime         *typeutil.Lifetime
 	idAllocator      *typeutil.IDAllocator
 	grpcStreamClient *produceGrpcClient
 
@@ -126,7 +125,7 @@ func (p *producerImpl) Assignment() types.PChannelInfoAssigned {
 
 // Produce sends the produce message to server.
 func (p *producerImpl) Produce(ctx context.Context, msg message.MutableMessage) (*ProduceResult, error) {
-	if p.lifetime.Add(lifetime.IsWorking) != nil {
+	if !p.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("producer client is shutting down")
 	}
 	defer p.lifetime.Done()
@@ -196,7 +195,7 @@ func (p *producerImpl) Available() <-chan struct{} {
 // Close close the producer client.
 func (p *producerImpl) Close() {
 	// Wait for all message has been sent.
-	p.lifetime.SetState(lifetime.Stopped)
+	p.lifetime.SetState(typeutil.LifetimeStateStopped)
 	p.lifetime.Wait()
 	close(p.requestCh)
 

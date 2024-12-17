@@ -10,7 +10,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -115,7 +114,7 @@ func (r *resolverWithDiscoverer) doDiscover() {
 	defer func() {
 		// Check if all grpc resolver is stopped.
 		for r := range grpcResolvers {
-			if err := lifetime.IsWorking(r.State()); err == nil {
+			if r.State() == typeutil.LifetimeStateWorking {
 				r.logger.Warn("resolver is stopped before grpc watcher exist, maybe bug here")
 				break
 			}

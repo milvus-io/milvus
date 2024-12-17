@@ -23,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -100,7 +99,7 @@ func NewHandlerClient(w types.AssignmentDiscoverWatcher) HandlerClient {
 	})
 	watcher := assignment.NewWatcher(rb.Resolver())
 	return &handlerClientImpl{
-		lifetime:         lifetime.NewLifetime(lifetime.Working),
+		lifetime:         typeutil.NewLifetime(),
 		service:          lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeHandlerServiceClient),
 		rb:               rb,
 		watcher:          watcher,
