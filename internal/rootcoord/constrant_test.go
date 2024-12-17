@@ -59,13 +59,16 @@ func TestCheckGeneralCapacity(t *testing.T) {
 
 	catalog.EXPECT().CreateCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	err = meta.CreateDatabase(ctx, &model.Database{}, typeutil.MaxTimestamp)
-	err = meta.AddCollection(ctx, &model.Collection{CollectionID: 1,
-		State:     pb.CollectionState_CollectionCreating,
-		ShardsNum: 256,
+	assert.Error(t, err)
+	err = meta.AddCollection(ctx, &model.Collection{
+		CollectionID: 1,
+		State:        pb.CollectionState_CollectionCreating,
+		ShardsNum:    256,
 		Partitions: []*model.Partition{
 			{PartitionID: 100, State: pb.PartitionState_PartitionCreated},
 			{PartitionID: 200, State: pb.PartitionState_PartitionCreated},
-		}})
+		},
+	})
 	assert.NoError(t, err)
 
 	assert.Equal(t, 0, meta.GetGeneralCount(ctx))
