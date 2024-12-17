@@ -16,48 +16,30 @@
 
 package index
 
-const (
-	diskANNSearchListKey = `search_list`
-)
-
-var _ Index = diskANNIndex{}
-
-type diskANNIndex struct {
-	baseIndex
+type AnnParam interface {
+	Params() map[string]any
 }
 
-func (idx diskANNIndex) Params() map[string]string {
-	return map[string]string{
-		MetricTypeKey: string(idx.metricType),
-		IndexTypeKey:  string(DISKANN),
-	}
+type baseAnnParam struct {
+	params map[string]any
 }
 
-func NewDiskANNIndex(metricType MetricType) Index {
-	return &diskANNIndex{
-		baseIndex: baseIndex{
-			metricType: metricType,
-			indexType:  DISKANN,
-		},
-	}
+func (b baseAnnParam) WithExtraParam(key string, value any) {
+	b.params[key] = value
 }
 
-type diskANNParam struct {
+func (b baseAnnParam) Params() map[string]any {
+	return b.params
+}
+
+type CustomAnnParam struct {
 	baseAnnParam
-	searchList int
 }
 
-func NewDiskAnnParam(searchList int) diskANNParam {
-	return diskANNParam{
+func NewCustomAnnParam() CustomAnnParam {
+	return CustomAnnParam{
 		baseAnnParam: baseAnnParam{
 			params: make(map[string]any),
 		},
-		searchList: searchList,
 	}
-}
-
-func (ap diskANNParam) Params() map[string]any {
-	result := ap.baseAnnParam.params
-	result[diskANNSearchListKey] = ap.searchList
-	return result
 }
