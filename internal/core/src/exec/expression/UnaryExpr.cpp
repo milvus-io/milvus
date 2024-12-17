@@ -259,9 +259,6 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 template <typename ValueType>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
-    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
-                                       std::string_view,
-                                       ValueType>;
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -896,7 +893,7 @@ template <typename T>
 ColumnVectorPtr
 PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
     if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
-        int64_t val = GetValueFromProto<int64_t>(expr_->val_);
+        auto val = GetValueFromProto<int64_t>(expr_->val_);
 
         if (milvus::query::out_of_range<T>(val)) {
             int64_t batch_size;

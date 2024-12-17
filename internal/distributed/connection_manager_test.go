@@ -284,8 +284,8 @@ func initSession(ctx context.Context) *sessionutil.Session {
 	endpoints := baseTable.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
 	etcdEndpoints := strings.Split(endpoints, ",")
 
-	log.Debug("metaRootPath", zap.Any("metaRootPath", metaRootPath))
-	log.Debug("etcdPoints", zap.Any("etcdPoints", etcdEndpoints))
+	log.Ctx(context.TODO()).Debug("metaRootPath", zap.Any("metaRootPath", metaRootPath))
+	log.Ctx(context.TODO()).Debug("etcdPoints", zap.Any("etcdPoints", etcdEndpoints))
 
 	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
 	if err != nil {

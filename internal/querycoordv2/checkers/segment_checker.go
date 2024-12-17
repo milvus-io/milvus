@@ -436,7 +436,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 				SegmentInfo: s,
 			}
 		})
-		shardPlans := c.getBalancerFunc().AssignSegment(ctx, replica.GetCollectionID(), segmentInfos, rwNodes, false)
+		shardPlans := c.getBalancerFunc().AssignSegment(ctx, replica.GetCollectionID(), segmentInfos, rwNodes, true)
 		for i := range shardPlans {
 			shardPlans[i].Replica = replica
 		}

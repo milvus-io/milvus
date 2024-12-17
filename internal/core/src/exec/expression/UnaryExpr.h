@@ -35,12 +35,12 @@ namespace exec {
 
 template <typename T, FilterType filter_type>
 struct UnaryElementFuncForMatch {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
+    using IndexInnerType =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
 
     void
     operator()(const T* src,
+
                size_t size,
                IndexInnerType val,
                TargetBitmapView res,
@@ -60,9 +60,8 @@ struct UnaryElementFuncForMatch {
 
 template <typename T, proto::plan::OpType op, FilterType filter_type>
 struct UnaryElementFunc {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
+    using IndexInnerType =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
 
     void
     operator()(const T* src,
@@ -235,9 +234,8 @@ struct UnaryElementFuncForArray {
 
 template <typename T>
 struct UnaryIndexFuncForMatch {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
+    using IndexInnerType =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
     operator()(Index* index, IndexInnerType val) {
@@ -275,9 +273,8 @@ struct UnaryIndexFuncForMatch {
 
 template <typename T, proto::plan::OpType op>
 struct UnaryIndexFunc {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
+    using IndexInnerType =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
     operator()(Index* index, IndexInnerType val) {

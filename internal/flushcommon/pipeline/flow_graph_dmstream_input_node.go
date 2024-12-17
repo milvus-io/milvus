@@ -24,8 +24,11 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	pkgcommon "github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/common"
@@ -59,7 +62,13 @@ func newDmInputNode(dmNodeConfig *nodeConfig, input <-chan *msgstream.MsgPack) *
 	return node
 }
 
-func createNewInputFromDispatcher(initCtx context.Context, dispatcherClient msgdispatcher.Client, vchannel string, seekPos *msgpb.MsgPosition) (<-chan *msgstream.MsgPack, error) {
+func createNewInputFromDispatcher(initCtx context.Context,
+	dispatcherClient msgdispatcher.Client,
+	vchannel string,
+	seekPos *msgpb.MsgPosition,
+	schema *schemapb.CollectionSchema,
+	dbProperties []*commonpb.KeyValuePair,
+) (<-chan *msgstream.MsgPack, error) {
 	log := log.With(zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("vchannel", vchannel))
 
@@ -69,9 +78,21 @@ func createNewInputFromDispatcher(initCtx context.Context, dispatcherClient msgd
 		start = time.Now()
 	)
 
+	replicateID, _ := pkgcommon.GetReplicateID(schema.GetProperties())
+	if replicateID == "" {
+		log.Info("datanode consume without replicateID, try to get replicateID from dbProperties", zap.Any("dbProperties", dbProperties))
+		replicateID, _ = pkgcommon.GetReplicateID(dbProperties)
+	}
+	replicateConfig := msgstream.GetReplicateConfig(replicateID, schema.GetDbName(), schema.GetName())
+
 	if seekPos != nil && len(seekPos.MsgID) != 0 {
 		err := retry.Handle(initCtx, func() (bool, error) {
-			input, err = dispatcherClient.Register(initCtx, vchannel, seekPos, common.SubscriptionPositionUnknown)
+			input, err = dispatcherClient.Register(initCtx, &msgdispatcher.StreamConfig{
+				VChannel:        vchannel,
+				Pos:             seekPos,
+				SubPos:          common.SubscriptionPositionUnknown,
+				ReplicateConfig: replicateConfig,
+			})
 			if err != nil {
 				log.Warn("datanode consume failed", zap.Error(err))
 				return errors.Is(err, msgdispatcher.ErrTooManyConsumers), err
@@ -93,7 +114,12 @@ func createNewInputFromDispatcher(initCtx context.Context, dispatcherClient msgd
 	}
 
 	err = retry.Handle(initCtx, func() (bool, error) {
-		input, err = dispatcherClient.Register(initCtx, vchannel, nil, common.SubscriptionPositionUnknown)
+		input, err = dispatcherClient.Register(initCtx, &msgdispatcher.StreamConfig{
+			VChannel:        vchannel,
+			Pos:             nil,
+			SubPos:          common.SubscriptionPositionEarliest,
+			ReplicateConfig: replicateConfig,
+		})
 		if err != nil {
 			log.Warn("datanode consume failed", zap.Error(err))
 			return errors.Is(err, msgdispatcher.ErrTooManyConsumers), err

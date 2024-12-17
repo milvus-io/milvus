@@ -28,7 +28,7 @@ func teardown() {
 	defer cancel()
 	mc, err := base.NewMilvusClient(ctx, &defaultCfg)
 	if err != nil {
-		log.Fatal("teardown failed to connect milvus with error", zap.Error(err))
+		log.Error("teardown failed to connect milvus with error", zap.Error(err))
 	}
 	defer mc.Close(ctx)
 

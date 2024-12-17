@@ -165,7 +165,7 @@ func (m *ChannelManagerImpl) Startup(ctx context.Context, legacyNodes, allNodes 
 	}
 
 	if m.balanceCheckLoop != nil {
-		log.Info("starting channel balance loop")
+		log.Ctx(ctx).Info("starting channel balance loop")
 		m.wg.Add(1)
 		go func() {
 			defer m.wg.Done()
@@ -173,7 +173,7 @@ func (m *ChannelManagerImpl) Startup(ctx context.Context, legacyNodes, allNodes 
 		}()
 	}
 
-	log.Info("cluster start up",
+	log.Ctx(ctx).Info("cluster start up",
 		zap.Int64s("allNodes", allNodes),
 		zap.Int64s("legacyNodes", legacyNodes),
 		zap.Int64s("oldNodes", oNodes),
@@ -241,6 +241,7 @@ func (m *ChannelManagerImpl) Watch(ctx context.Context, ch RWChannel) error {
 
 	log.Info("Add channel")
 	updates := NewChannelOpSet(NewChannelOp(bufferID, Watch, ch))
+	// TODO fill in traceID to channelOp's watchInfo
 	err := m.execute(updates)
 	if err != nil {
 		log.Warn("fail to update new channel updates into meta",
@@ -254,6 +255,7 @@ func (m *ChannelManagerImpl) Watch(ctx context.Context, ch RWChannel) error {
 		return nil
 	}
 
+	// TODO fill in traceID to channelOp's watchInfo
 	if err := m.execute(updates); err != nil {
 		log.Warn("fail to assign channel, will retry later", zap.Array("updates", updates), zap.Error(err))
 		return nil
@@ -477,7 +479,7 @@ func (m *ChannelManagerImpl) finishRemoveChannel(nodeID int64, channels ...RWCha
 	}
 }
 
-func (m *ChannelManagerImpl) advanceStandbys(_ context.Context, standbys []*NodeChannelInfo) bool {
+func (m *ChannelManagerImpl) advanceStandbys(ctx context.Context, standbys []*NodeChannelInfo) bool {
 	var advanced bool = false
 	for _, nodeAssign := range standbys {
 		validChannels := make(map[string]RWChannel)
@@ -504,7 +506,7 @@ func (m *ChannelManagerImpl) advanceStandbys(_ context.Context, standbys []*Node
 
 		chNames := lo.Keys(validChannels)
 		if err := m.reassign(nodeAssign); err != nil {
-			log.Warn("Reassign channels fail",
+			log.Ctx(ctx).Warn("Reassign channels fail",
 				zap.Int64("nodeID", nodeAssign.NodeID),
 				zap.Strings("channels", chNames),
 				zap.Error(err),
@@ -512,7 +514,7 @@ func (m *ChannelManagerImpl) advanceStandbys(_ context.Context, standbys []*Node
 			continue
 		}
 
-		log.Info("Reassign standby channels to node",
+		log.Ctx(ctx).Info("Reassign standby channels to node",
 			zap.Int64("nodeID", nodeAssign.NodeID),
 			zap.Strings("channels", chNames),
 		)
@@ -538,7 +540,7 @@ func (m *ChannelManagerImpl) advanceToNotifies(ctx context.Context, toNotifies [
 		)
 
 		chNames := lo.Keys(nodeAssign.Channels)
-		log.Info("Notify channel operations to datanode",
+		log.Ctx(ctx).Info("Notify channel operations to datanode",
 			zap.Int64("assignment", nodeAssign.NodeID),
 			zap.Int("total operation count", len(nodeAssign.Channels)),
 			zap.Strings("channel names", chNames),
@@ -565,7 +567,7 @@ func (m *ChannelManagerImpl) advanceToNotifies(ctx context.Context, toNotifies [
 			}
 		}
 
-		log.Info("Finish to notify channel operations to datanode",
+		log.Ctx(ctx).Info("Finish to notify channel operations to datanode",
 			zap.Int64("assignment", nodeAssign.NodeID),
 			zap.Int("operation count", channelCount),
 			zap.Int("success count", len(succeededChannels)),
@@ -596,7 +598,7 @@ func (m *ChannelManagerImpl) advanceToChecks(ctx context.Context, toChecks []*No
 		futures := make([]*conc.Future[any], 0, len(nodeAssign.Channels))
 
 		chNames := lo.Keys(nodeAssign.Channels)
-		log.Info("Check ToWatch/ToRelease channel operations progress",
+		log.Ctx(ctx).Info("Check ToWatch/ToRelease channel operations progress",
 			zap.Int("channel count", len(nodeAssign.Channels)),
 			zap.Strings("channel names", chNames),
 		)
@@ -629,7 +631,7 @@ func (m *ChannelManagerImpl) advanceToChecks(ctx context.Context, toChecks []*No
 			}
 		}
 
-		log.Info("Finish to Check ToWatch/ToRelease channel operations progress",
+		log.Ctx(ctx).Info("Finish to Check ToWatch/ToRelease channel operations progress",
 			zap.Int("channel count", len(nodeAssign.Channels)),
 			zap.Strings("channel names", chNames),
 		)
@@ -638,7 +640,7 @@ func (m *ChannelManagerImpl) advanceToChecks(ctx context.Context, toChecks []*No
 }
 
 func (m *ChannelManagerImpl) Notify(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) error {
-	log := log.With(
+	log := log.Ctx(ctx).With(
 		zap.String("channel", info.GetVchan().GetChannelName()),
 		zap.Int64("assignment", nodeID),
 		zap.String("operation", info.GetState().String()),
@@ -654,7 +656,7 @@ func (m *ChannelManagerImpl) Notify(ctx context.Context, nodeID int64, info *dat
 }
 
 func (m *ChannelManagerImpl) Check(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (successful bool, got bool) {
-	log := log.With(
+	log := log.Ctx(ctx).With(
 		zap.Int64("opID", info.GetOpID()),
 		zap.Int64("nodeID", nodeID),
 		zap.String("check operation", info.GetState().String()),
@@ -722,20 +724,22 @@ func (m *ChannelManagerImpl) fillChannelWatchInfo(op *ChannelOp) error {
 		schema := ch.GetSchema()
 		if schema == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
 			collInfo, err := m.h.GetCollection(ctx, ch.GetCollectionID())
 			if err != nil {
+				cancel()
 				return err
 			}
+			cancel()
 			schema = collInfo.Schema
 		}
 
 		info := &datapb.ChannelWatchInfo{
-			Vchan:   reduceVChanSize(vcInfo),
-			StartTs: startTs,
-			State:   inferStateByOpType(op.Type),
-			Schema:  schema,
-			OpID:    opID,
+			Vchan:        reduceVChanSize(vcInfo),
+			StartTs:      startTs,
+			State:        inferStateByOpType(op.Type),
+			Schema:       schema,
+			OpID:         opID,
+			DbProperties: ch.GetDBProperties(),
 		}
 		ch.UpdateWatchInfo(info)
 	}

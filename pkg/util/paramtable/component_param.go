@@ -268,6 +268,7 @@ type commonConfig struct {
 	MaxBloomFalsePositive     ParamItem `refreshable:"true"`
 	BloomFilterApplyBatchSize ParamItem `refreshable:"true"`
 	PanicWhenPluginFail       ParamItem `refreshable:"false"`
+	CollectionReplicateEnable ParamItem `refreshable:"true"`
 
 	UsePartitionKeyAsClusteringKey ParamItem `refreshable:"true"`
 	UseVectorAsClusteringKey       ParamItem `refreshable:"true"`
@@ -286,6 +287,9 @@ type commonConfig struct {
 
 	// Local RPC enabled for milvus internal communication when mix or standalone mode.
 	LocalRPCEnabled ParamItem `refreshable:"false"`
+
+	HealthCheckInterval   ParamItem `refreshable:"true"`
+	HealthCheckRPCTimeout ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -784,6 +788,15 @@ This helps Milvus-CDC synchronize incremental data`,
 	}
 	p.TTMsgEnabled.Init(base.mgr)
 
+	p.CollectionReplicateEnable = ParamItem{
+		Key:          "common.collectionReplicateEnable",
+		Version:      "2.4.16",
+		DefaultValue: "false",
+		Doc:          `Whether to enable collection replication.`,
+		Export:       true,
+	}
+	p.CollectionReplicateEnable.Init(base.mgr)
+
 	p.TraceLogMode = ParamItem{
 		Key:          "common.traceLogMode",
 		Version:      "2.3.4",
@@ -936,6 +949,22 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.LocalRPCEnabled.Init(base.mgr)
+
+	p.HealthCheckInterval = ParamItem{
+		Key:          "common.healthcheck.interval.seconds",
+		Version:      "2.4.8",
+		DefaultValue: "30",
+		Doc:          `health check interval in seconds, default 30s`,
+	}
+	p.HealthCheckInterval.Init(base.mgr)
+
+	p.HealthCheckRPCTimeout = ParamItem{
+		Key:          "common.healthcheck.timeout.seconds",
+		Version:      "2.4.8",
+		DefaultValue: "10",
+		Doc:          `RPC timeout for health check request`,
+	}
+	p.HealthCheckRPCTimeout.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -2240,9 +2269,9 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.UpdateCollectionLoadStatusInterval = ParamItem{
 		Key:          "queryCoord.updateCollectionLoadStatusInterval",
 		Version:      "2.4.7",
-		DefaultValue: "5",
+		DefaultValue: "300",
 		PanicIfEmpty: true,
-		Doc:          "5m, max interval of updating collection loaded status for check health",
+		Doc:          "300s, max interval of updating collection loaded status for check health",
 		Export:       true,
 	}
 

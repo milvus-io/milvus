@@ -52,6 +52,7 @@ import (
 	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/kv"
@@ -167,6 +168,8 @@ type Server struct {
 	streamingCoord *streamingcoord.Server
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	healthChecker *healthcheck.Checker
 }
 
 type CollectionNameInfo struct {
@@ -248,6 +251,7 @@ func (s *Server) QuitSignal() <-chan struct{} {
 
 // Register registers data service at etcd
 func (s *Server) Register() error {
+	log := log.Ctx(s.ctx)
 	// first register indexCoord
 	s.icSession.Register()
 	s.session.Register()
@@ -301,6 +305,7 @@ func (s *Server) initSession() error {
 
 // Init change server state to Initializing
 func (s *Server) Init() error {
+	log := log.Ctx(s.ctx)
 	var err error
 	s.registerMetricsRequest()
 	s.factory.Init(Params)
@@ -345,6 +350,7 @@ func (s *Server) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 }
 
 func (s *Server) initDataCoord() error {
+	log := log.Ctx(s.ctx)
 	s.stateCode.Store(commonpb.StateCode_Initializing)
 	var err error
 	if err = s.initRootCoordClient(); err != nil {
@@ -426,6 +432,8 @@ func (s *Server) initDataCoord() error {
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
+	interval := Params.CommonCfg.HealthCheckInterval.GetAsDuration(time.Second)
+	s.healthChecker = healthcheck.NewChecker(interval, s.healthCheckFn)
 	log.Info("init datacoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
 	return nil
 }
@@ -438,6 +446,7 @@ func (s *Server) initDataCoord() error {
 //     datanodes etcd watch, etcd alive check and flush completed status check
 //  4. set server state to Healthy
 func (s *Server) Start() error {
+	log := log.Ctx(s.ctx)
 	if !s.enableActiveStandBy {
 		s.startDataCoord()
 		log.Info("DataCoord startup successfully")
@@ -573,6 +582,7 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 }
 
 func (s *Server) initServiceDiscovery() error {
+	log := log.Ctx(s.ctx)
 	r := semver.MustParseRange(">=2.2.3")
 	sessions, rev, err := s.session.GetSessionsWithVersionRange(typeutil.DataNodeRole, r)
 	if err != nil {
@@ -768,6 +778,8 @@ func (s *Server) startServerLoop() {
 	if !(streamingutil.IsStreamingServiceEnabled() || paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool()) {
 		s.syncSegmentsScheduler.Start()
 	}
+
+	s.healthChecker.Start()
 }
 
 func (s *Server) startTaskScheduler() {
@@ -778,6 +790,7 @@ func (s *Server) startTaskScheduler() {
 }
 
 func (s *Server) updateSegmentStatistics(ctx context.Context, stats []*commonpb.SegmentStats) {
+	log := log.Ctx(ctx)
 	for _, stat := range stats {
 		segment := s.meta.GetSegment(ctx, stat.GetSegmentID())
 		if segment == nil {
@@ -807,6 +820,7 @@ func (s *Server) updateSegmentStatistics(ctx context.Context, stats []*commonpb.
 }
 
 func (s *Server) getFlushableSegmentsInfo(ctx context.Context, flushableIDs []int64) []*SegmentInfo {
+	log := log.Ctx(ctx)
 	res := make([]*SegmentInfo, 0, len(flushableIDs))
 	for _, id := range flushableIDs {
 		sinfo := s.meta.GetHealthySegment(ctx, id)
@@ -832,7 +846,7 @@ func (s *Server) startWatchService(ctx context.Context) {
 
 func (s *Server) stopServiceWatch() {
 	// ErrCompacted is handled inside SessionWatcher, which means there is some other error occurred, closing server.
-	logutil.Logger(s.ctx).Error("watch service channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
+	log.Ctx(s.ctx).Error("watch service channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
 	go s.Stop()
 	if s.session.IsTriggerKill() {
 		if p, err := os.FindProcess(os.Getpid()); err == nil {
@@ -843,6 +857,7 @@ func (s *Server) stopServiceWatch() {
 
 // watchService watches services.
 func (s *Server) watchService(ctx context.Context) {
+	log := log.Ctx(ctx)
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 	for {
@@ -998,11 +1013,11 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				logutil.Logger(s.ctx).Info("flush loop shutdown")
+				log.Ctx(s.ctx).Info("flush loop shutdown")
 				return
 			case segmentID := <-s.flushCh:
 				// Ignore return error
-				log.Info("flush successfully", zap.Any("segmentID", segmentID))
+				log.Ctx(ctx).Info("flush successfully", zap.Any("segmentID", segmentID))
 				err := s.postFlush(ctx, segmentID)
 				if err != nil {
 					log.Warn("failed to do post flush", zap.Int64("segmentID", segmentID), zap.Error(err))
@@ -1086,12 +1101,16 @@ func (s *Server) initRootCoordClient() error {
 //
 //	stop message stream client and stop server loops
 func (s *Server) Stop() error {
+	log := log.Ctx(s.ctx)
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
 		return nil
 	}
-	logutil.Logger(s.ctx).Info("datacoord server shutdown")
+	log.Info("datacoord server shutdown")
+	if s.healthChecker != nil {
+		s.healthChecker.Close()
+	}
 	s.garbageCollector.close()
-	logutil.Logger(s.ctx).Info("datacoord garbage collector stopped")
+	log.Info("datacoord garbage collector stopped")
 
 	if s.streamingCoord != nil {
 		log.Info("StreamingCoord stoping...")
@@ -1106,16 +1125,16 @@ func (s *Server) Stop() error {
 	s.syncSegmentsScheduler.Stop()
 
 	s.stopCompaction()
-	logutil.Logger(s.ctx).Info("datacoord compaction stopped")
+	log.Info("datacoord compaction stopped")
 
 	s.jobManager.Stop()
-	logutil.Logger(s.ctx).Info("datacoord statsJobManager stopped")
+	log.Info("datacoord statsJobManager stopped")
 
 	s.taskScheduler.Stop()
-	logutil.Logger(s.ctx).Info("datacoord index builder stopped")
+	log.Info("datacoord index builder stopped")
 
 	s.cluster.Close()
-	logutil.Logger(s.ctx).Info("datacoord cluster stopped")
+	log.Info("datacoord cluster stopped")
 
 	if s.session != nil {
 		s.session.Stop()
@@ -1126,14 +1145,14 @@ func (s *Server) Stop() error {
 	}
 
 	s.stopServerLoop()
-	logutil.Logger(s.ctx).Info("datacoord serverloop stopped")
-	logutil.Logger(s.ctx).Warn("datacoord stop successful")
+	log.Info("datacoord serverloop stopped")
+	log.Warn("datacoord stop successful")
 	return nil
 }
 
 // CleanMeta only for test
 func (s *Server) CleanMeta() error {
-	log.Debug("clean meta", zap.Any("kv", s.kv))
+	log.Ctx(s.ctx).Debug("clean meta", zap.Any("kv", s.kv))
 	err := s.kv.RemoveWithPrefix(s.ctx, "")
 	err2 := s.watchClient.RemoveWithPrefix(s.ctx, "")
 	if err2 != nil {
@@ -1201,7 +1220,7 @@ func (s *Server) registerMetricsRequest() {
 			}
 			return s.meta.indexMeta.GetIndexJSON(collectionID), nil
 		})
-	log.Info("register metrics actions finished")
+	log.Ctx(s.ctx).Info("register metrics actions finished")
 }
 
 // loadCollectionFromRootCoord communicates with RootCoord and asks for collection information.
@@ -1258,7 +1277,7 @@ func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Info("update balance config loop exit!")
+				log.Ctx(ctx).Info("update balance config loop exit!")
 				return
 
 			case <-ticker.C:
@@ -1272,6 +1291,7 @@ func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
 }
 
 func (s *Server) updateBalanceConfig() bool {
+	log := log.Ctx(s.ctx)
 	r := semver.MustParseRange("<2.3.0")
 	sessions, _, err := s.session.GetSessionsWithVersionRange(typeutil.DataNodeRole, r)
 	if err != nil {

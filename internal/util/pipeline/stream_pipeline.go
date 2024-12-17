@@ -48,12 +48,13 @@ type StreamPipeline interface {
 }
 
 type streamPipeline struct {
-	pipeline   *pipeline
-	input      <-chan *msgstream.MsgPack
-	scanner    streaming.Scanner
-	dispatcher msgdispatcher.Client
-	startOnce  sync.Once
-	vChannel   string
+	pipeline        *pipeline
+	input           <-chan *msgstream.MsgPack
+	scanner         streaming.Scanner
+	dispatcher      msgdispatcher.Client
+	startOnce       sync.Once
+	vChannel        string
+	replicateConfig *msgstream.ReplicateConfig
 
 	closeCh   chan struct{} // notify work to exit
 	closeWg   sync.WaitGroup
@@ -67,11 +68,11 @@ func (p *streamPipeline) work() {
 	for {
 		select {
 		case <-p.closeCh:
-			log.Debug("stream pipeline input closed")
+			log.Ctx(context.TODO()).Debug("stream pipeline input closed")
 			return
 		case msg := <-p.input:
 			p.lastAccessTime.Store(time.Now())
-			log.RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
+			log.Ctx(context.TODO()).RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
 			p.pipeline.inputChannel <- msg
 			p.pipeline.process()
 		}
@@ -89,6 +90,7 @@ func (p *streamPipeline) Status() string {
 }
 
 func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.MsgPosition) error {
+	log := log.Ctx(ctx)
 	var err error
 	if position == nil {
 		log.Error("seek stream to nil position")
@@ -121,7 +123,12 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 
 	start := time.Now()
 	err = retry.Handle(ctx, func() (bool, error) {
-		p.input, err = p.dispatcher.Register(ctx, p.vChannel, position, common.SubscriptionPositionUnknown)
+		p.input, err = p.dispatcher.Register(ctx, &msgdispatcher.StreamConfig{
+			VChannel:        p.vChannel,
+			Pos:             position,
+			SubPos:          common.SubscriptionPositionUnknown,
+			ReplicateConfig: p.replicateConfig,
+		})
 		if err != nil {
 			log.Warn("dispatcher register failed", zap.String("channel", position.ChannelName), zap.Error(err))
 			return errors.Is(err, msgdispatcher.ErrTooManyConsumers), err
@@ -171,18 +178,24 @@ func (p *streamPipeline) Close() {
 	})
 }
 
-func NewPipelineWithStream(dispatcher msgdispatcher.Client, nodeTtInterval time.Duration, enableTtChecker bool, vChannel string) StreamPipeline {
+func NewPipelineWithStream(dispatcher msgdispatcher.Client,
+	nodeTtInterval time.Duration,
+	enableTtChecker bool,
+	vChannel string,
+	replicateConfig *msgstream.ReplicateConfig,
+) StreamPipeline {
 	pipeline := &streamPipeline{
 		pipeline: &pipeline{
 			nodes:           []*nodeCtx{},
 			nodeTtInterval:  nodeTtInterval,
 			enableTtChecker: enableTtChecker,
 		},
-		dispatcher:     dispatcher,
-		vChannel:       vChannel,
-		closeCh:        make(chan struct{}),
-		closeWg:        sync.WaitGroup{},
-		lastAccessTime: atomic.NewTime(time.Now()),
+		dispatcher:      dispatcher,
+		vChannel:        vChannel,
+		replicateConfig: replicateConfig,
+		closeCh:         make(chan struct{}),
+		closeWg:         sync.WaitGroup{},
+		lastAccessTime:  atomic.NewTime(time.Now()),
 	}
 
 	return pipeline

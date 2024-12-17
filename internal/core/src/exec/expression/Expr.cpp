@@ -151,11 +151,11 @@ CompileExpression(const expr::TypedExprPtr& expr,
                   bool enable_constant_folding) {
     ExprPtr result;
 
-    auto result_type = expr->type();
     auto compiled_inputs = CompileInputs(expr, context, flatten_candidates);
 
     auto GetTypes = [](const std::vector<ExprPtr>& exprs) {
         std::vector<DataType> types;
+        types.reserve(exprs.size());
         for (auto& expr : exprs) {
             types.push_back(expr->type());
         }
