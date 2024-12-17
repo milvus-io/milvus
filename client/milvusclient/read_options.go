@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v2/index"
 )
 
 const (
@@ -47,82 +48,137 @@ type SearchOption interface {
 var _ SearchOption = (*searchOption)(nil)
 
 type searchOption struct {
+	annRequest                 *annRequest
 	collectionName             string
 	partitionNames             []string
-	topK                       int
-	offset                     int
 	outputFields               []string
 	consistencyLevel           entity.ConsistencyLevel
 	useDefaultConsistencyLevel bool
-	ignoreGrowing              bool
-	expr                       string
-
-	// normal search request
-	request *annRequest
-	// TODO add sub request when support hybrid search
 }
 
 type annRequest struct {
 	vectors []entity.Vector
 
-	annField     string
-	metricsType  entity.MetricType
-	searchParam  map[string]string
-	groupByField string
+	annField      string
+	metricsType   entity.MetricType
+	searchParam   map[string]string
+	groupByField  string
+	annParam      index.AnnParam
+	ignoreGrowing bool
+	expr          string
+	topK          int
+	offset        int
 }
 
-func (opt *searchOption) Request() (*milvuspb.SearchRequest, error) {
-	// TODO check whether search is hybrid after logic merged
-	return opt.prepareSearchRequest(opt.request)
+func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *annRequest {
+	return &annRequest{
+		annField: annField,
+		vectors:  vectors,
+		topK:     limit,
+	}
 }
 
-func (opt *searchOption) prepareSearchRequest(annRequest *annRequest) (*milvuspb.SearchRequest, error) {
+func (r *annRequest) searchRequest() (*milvuspb.SearchRequest, error) {
 	request := &milvuspb.SearchRequest{
-		CollectionName:   opt.collectionName,
-		PartitionNames:   opt.partitionNames,
-		Dsl:              opt.expr,
-		DslType:          commonpb.DslType_BoolExprV1,
-		ConsistencyLevel: commonpb.ConsistencyLevel(opt.consistencyLevel),
-		OutputFields:     opt.outputFields,
+		Nq:      int64(len(r.vectors)),
+		Dsl:     r.expr,
+		DslType: commonpb.DslType_BoolExprV1,
 	}
-	if annRequest != nil {
-		// nq
-		request.Nq = int64(len(annRequest.vectors))
 
-		// search param
-		bs, _ := json.Marshal(annRequest.searchParam)
-		params := map[string]string{
-			spAnnsField:     annRequest.annField,
-			spTopK:          strconv.Itoa(opt.topK),
-			spOffset:        strconv.Itoa(opt.offset),
-			spParams:        string(bs),
-			spMetricsType:   string(annRequest.metricsType),
-			spRoundDecimal:  "-1",
-			spIgnoreGrowing: strconv.FormatBool(opt.ignoreGrowing),
-		}
-		if annRequest.groupByField != "" {
-			params[spGroupBy] = annRequest.groupByField
-		}
-		request.SearchParams = entity.MapKvPairs(params)
-
-		var err error
-		// placeholder group
-		request.PlaceholderGroup, err = vector2PlaceholderGroupBytes(annRequest.vectors)
-		if err != nil {
-			return nil, err
-		}
+	var err error
+	// placeholder group
+	request.PlaceholderGroup, err = vector2PlaceholderGroupBytes(r.vectors)
+	if err != nil {
+		return nil, err
 	}
+
+	params := map[string]string{
+		spAnnsField:     r.annField,
+		spTopK:          strconv.Itoa(r.topK),
+		spOffset:        strconv.Itoa(r.offset),
+		spMetricsType:   string(r.metricsType),
+		spRoundDecimal:  "-1",
+		spIgnoreGrowing: strconv.FormatBool(r.ignoreGrowing),
+	}
+	if r.groupByField != "" {
+		params[spGroupBy] = r.groupByField
+	}
+	// ann param
+	if r.annParam != nil {
+		bs, _ := json.Marshal(r.annParam.Params())
+		params[spParams] = string(bs)
+	}
+	// use custom search param to overwrite
+	for k, v := range r.searchParam {
+		params[k] = v
+	}
+	request.SearchParams = entity.MapKvPairs(params)
 
 	return request, nil
 }
 
+func (r *annRequest) WithANNSField(annsField string) *annRequest {
+	r.annField = annsField
+	return r
+}
+
+func (r *annRequest) WithGroupByField(groupByField string) *annRequest {
+	r.groupByField = groupByField
+	return r
+}
+
+func (r *annRequest) WithSearchParam(key, value string) *annRequest {
+	r.searchParam[key] = value
+	return r
+}
+
+func (r *annRequest) WithAnnParam(ap index.AnnParam) *annRequest {
+	r.annParam = ap
+	return r
+}
+
+func (r *annRequest) WithFilter(expr string) *annRequest {
+	r.expr = expr
+	return r
+}
+
+func (r *annRequest) WithOffset(offset int) *annRequest {
+	r.offset = offset
+	return r
+}
+
+func (r *annRequest) WithIgnoreGrowing(ignoreGrowing bool) *annRequest {
+	r.ignoreGrowing = ignoreGrowing
+	return r
+}
+
+func (opt *searchOption) Request() (*milvuspb.SearchRequest, error) {
+	request, err := opt.annRequest.searchRequest()
+	if err != nil {
+		return nil, err
+	}
+
+	request.CollectionName = opt.collectionName
+	request.PartitionNames = opt.partitionNames
+	request.ConsistencyLevel = commonpb.ConsistencyLevel(opt.consistencyLevel)
+	request.UseDefaultConsistency = opt.useDefaultConsistencyLevel
+	request.OutputFields = opt.outputFields
+
+	return request, nil
+}
+
+func (opt *searchOption) WithPartitions(partitionNames ...string) *searchOption {
+	opt.partitionNames = partitionNames
+	return opt
+}
+
 func (opt *searchOption) WithFilter(expr string) *searchOption {
-	opt.expr = expr
+	opt.annRequest.WithFilter(expr)
 	return opt
 }
 
 func (opt *searchOption) WithOffset(offset int) *searchOption {
-	opt.offset = offset
+	opt.annRequest.WithOffset(offset)
 	return opt
 }
 
@@ -138,27 +194,38 @@ func (opt *searchOption) WithConsistencyLevel(consistencyLevel entity.Consistenc
 }
 
 func (opt *searchOption) WithANNSField(annsField string) *searchOption {
-	opt.request.annField = annsField
-	return opt
-}
-
-func (opt *searchOption) WithPartitions(partitionNames ...string) *searchOption {
-	opt.partitionNames = partitionNames
+	opt.annRequest.WithANNSField(annsField)
 	return opt
 }
 
 func (opt *searchOption) WithGroupByField(groupByField string) *searchOption {
-	opt.request.groupByField = groupByField
+	opt.annRequest.WithGroupByField(groupByField)
+	return opt
+}
+
+func (opt *searchOption) WithIgnoreGrowing(ignoreGrowing bool) *searchOption {
+	opt.annRequest.WithIgnoreGrowing(ignoreGrowing)
+	return opt
+}
+
+func (opt *searchOption) WithAnnParam(ap index.AnnParam) *searchOption {
+	opt.annRequest.WithAnnParam(ap)
+	return opt
+}
+
+func (opt *searchOption) WithSearchParam(key, value string) *searchOption {
+	opt.annRequest.WithSearchParam(key, value)
 	return opt
 }
 
 func NewSearchOption(collectionName string, limit int, vectors []entity.Vector) *searchOption {
 	return &searchOption{
-		collectionName: collectionName,
-		topK:           limit,
-		request: &annRequest{
-			vectors: vectors,
+		annRequest: &annRequest{
+			vectors:     vectors,
+			searchParam: make(map[string]string),
+			topK:        limit,
 		},
+		collectionName:             collectionName,
 		useDefaultConsistencyLevel: true,
 		consistencyLevel:           entity.ClBounded,
 	}
@@ -209,6 +276,66 @@ func vector2Placeholder(vectors []entity.Vector) (*commonpb.PlaceholderValue, er
 		ph.Values = append(ph.Values, vector.Serialize())
 	}
 	return ph, nil
+}
+
+type HybridSearchOption interface {
+	HybridRequest() (*milvuspb.HybridSearchRequest, error)
+}
+
+type hybridSearchOption struct {
+	collectionName string
+	partitionNames []string
+
+	reqs []*annRequest
+
+	outputFields          []string
+	useDefaultConsistency bool
+	consistencyLevel      entity.ConsistencyLevel
+}
+
+func (opt *hybridSearchOption) WithConsistencyLevel(cl entity.ConsistencyLevel) *hybridSearchOption {
+	opt.consistencyLevel = cl
+	opt.useDefaultConsistency = false
+	return opt
+}
+
+func (opt *hybridSearchOption) WithPartitons(partitions ...string) *hybridSearchOption {
+	opt.partitionNames = partitions
+	return opt
+}
+
+func (opt *hybridSearchOption) WithOutputFields(outputFields ...string) *hybridSearchOption {
+	opt.outputFields = outputFields
+	return opt
+}
+
+func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, error) {
+	requests := make([]*milvuspb.SearchRequest, 0, len(opt.reqs))
+	for _, annRequest := range opt.reqs {
+		req, err := annRequest.searchRequest()
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, req)
+	}
+
+	return &milvuspb.HybridSearchRequest{
+		CollectionName:        opt.collectionName,
+		PartitionNames:        opt.partitionNames,
+		Requests:              requests,
+		UseDefaultConsistency: opt.useDefaultConsistency,
+		ConsistencyLevel:      commonpb.ConsistencyLevel(opt.consistencyLevel),
+		OutputFields:          opt.outputFields,
+	}, nil
+}
+
+func NewHybridSearchOption(collectionName string, annRequests ...*annRequest) *hybridSearchOption {
+	return &hybridSearchOption{
+		collectionName: collectionName,
+
+		reqs:                  annRequests,
+		useDefaultConsistency: true,
+	}
 }
 
 type QueryOption interface {

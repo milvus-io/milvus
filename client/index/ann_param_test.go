@@ -16,48 +16,37 @@
 
 package index
 
-const (
-	autoLevelKey = `level`
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-var _ Index = autoIndex{}
+func TestAnnParams(t *testing.T) {
+	ivfAP := NewIvfAnnParam(16)
+	result := ivfAP.Params()
+	v, ok := result[ivfNprobeKey]
+	assert.True(t, ok)
+	assert.Equal(t, 16, v)
 
-type autoIndex struct {
-	baseIndex
-}
+	hnswAP := NewHNSWAnnParam(16)
+	result = hnswAP.Params()
+	v, ok = result[hnswEfKey]
+	assert.True(t, ok)
+	assert.Equal(t, 16, v)
 
-func (idx autoIndex) Params() map[string]string {
-	return map[string]string{
-		MetricTypeKey: string(idx.metricType),
-		IndexTypeKey:  string(AUTOINDEX),
-	}
-}
+	diskAP := NewDiskAnnParam(10)
+	result = diskAP.Params()
+	v, ok = result[diskANNSearchListKey]
+	assert.True(t, ok)
+	assert.Equal(t, 10, v)
 
-func NewAutoIndex(metricType MetricType) Index {
-	return autoIndex{
-		baseIndex: baseIndex{
-			indexType:  AUTOINDEX,
-			metricType: metricType,
-		},
-	}
-}
-
-type autoAnnParam struct {
-	baseAnnParam
-	level int
-}
-
-func NewAutoAnnParam(level int) autoAnnParam {
-	return autoAnnParam{
-		baseAnnParam: baseAnnParam{
-			params: make(map[string]any),
-		},
-		level: level,
-	}
-}
-
-func (ap autoAnnParam) Params() map[string]any {
-	result := ap.baseAnnParam.params
-	result[autoLevelKey] = ap.level
-	return result
+	scannAP := NewSCANNAnnParam(32, 50)
+	result = scannAP.Params()
+	v, ok = result[scannNProbeKey]
+	assert.True(t, ok)
+	assert.Equal(t, 32, v)
+	v, ok = result[scannReorderKKey]
+	assert.True(t, ok)
+	assert.Equal(t, 50, v)
 }
