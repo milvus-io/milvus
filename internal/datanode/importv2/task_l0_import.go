@@ -213,7 +213,7 @@ func (t *L0ImportTask) importL0(reader binlog.L0Reader) error {
 }
 
 func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {
-	log.Info("start to sync l0 delete data", WrapLogFields(t)...)
+	log.Ctx(context.TODO()).Info("start to sync l0 delete data", WrapLogFields(t)...)
 	futures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for channelIdx, data := range delData {
@@ -231,7 +231,11 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 		if err != nil {
 			return nil, nil, err
 		}
-		future := t.syncMgr.SyncData(t.ctx, syncTask)
+		future, err := t.syncMgr.SyncData(t.ctx, syncTask)
+		if err != nil {
+			log.Ctx(context.TODO()).Error("failed to sync l0 delete data", WrapLogFields(t, zap.Error(err))...)
+			return nil, nil, err
+		}
 		futures = append(futures, future)
 		syncTasks = append(syncTasks, syncTask)
 	}
