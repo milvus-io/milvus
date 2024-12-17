@@ -1172,7 +1172,11 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			IsSorted:           s.IsSorted(),
 			LastDeltaTimestamp: s.LastDeltaTimestamp(),
 			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *segments.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {
-				return info.IndexInfo.FieldID, info.IndexInfo
+				return info.IndexInfo.FieldID, &querypb.FieldIndexInfo{
+					BuildID:     info.IndexInfo.BuildID,
+					IndexID:     info.IndexInfo.IndexID,
+					EnableIndex: info.IndexInfo.EnableIndex,
+				}
 			}),
 		})
 	}
