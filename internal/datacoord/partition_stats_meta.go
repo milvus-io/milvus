@@ -202,3 +202,16 @@ func (psm *partitionStatsMeta) GetPartitionStats(collectionID, partitionID int64
 	}
 	return psm.partitionStatsInfos[vChannel][partitionID].infos[version]
 }
+
+func (psm *partitionStatsMeta) GetChannelPartitionsStatsVersion(collectionID int64, vChannel string) map[int64]int64 {
+	psm.RLock()
+	defer psm.RUnlock()
+
+	result := make(map[int64]int64)
+	partitionsStats := psm.partitionStatsInfos[vChannel]
+	for partitionID, info := range partitionsStats {
+		result[partitionID] = info.currentVersion
+	}
+
+	return result
+}

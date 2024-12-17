@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -574,6 +575,17 @@ func TestGetSegmentsByStates(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
+		channelManager := NewMockChannelManager(t)
+		channelName := "ch"
+		channelManager.EXPECT().GetChannelsByCollectionID(mock.Anything).RunAndReturn(func(id int64) []RWChannel {
+			return []RWChannel{
+				&channelMeta{
+					Name:         channelName + fmt.Sprint(id),
+					CollectionID: id,
+				},
+			}
+		}).Maybe()
+		svr.channelManager = channelManager
 		type testCase struct {
 			collID          int64
 			partID          int64
@@ -622,31 +634,92 @@ func TestGetSegmentsByStates(t *testing.T) {
 				expected:     []int64{9, 10},
 			},
 		}
+		svr.meta.AddCollection(&collectionInfo{
+			ID:         1,
+			Partitions: []int64{1, 2},
+			Schema:     nil,
+			StartPositions: []*commonpb.KeyDataPair{
+				{
+					Key:  "ch1",
+					Data: []byte{8, 9, 10},
+				},
+			},
+		})
+		svr.meta.AddCollection(&collectionInfo{
+			ID:         2,
+			Partitions: []int64{3},
+			Schema:     nil,
+			StartPositions: []*commonpb.KeyDataPair{
+				{
+					Key:  "ch1",
+					Data: []byte{8, 9, 10},
+				},
+			},
+		})
 		for _, tc := range cases {
 			for _, fs := range tc.flushedSegments {
 				segInfo := &datapb.SegmentInfo{
-					ID:           fs,
-					CollectionID: tc.collID,
-					PartitionID:  tc.partID,
-					State:        commonpb.SegmentState_Flushed,
+					ID:            fs,
+					CollectionID:  tc.collID,
+					PartitionID:   tc.partID,
+					InsertChannel: channelName + fmt.Sprint(tc.collID),
+					State:         commonpb.SegmentState_Flushed,
+					NumOfRows:     1024,
+					StartPosition: &msgpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{8, 9, 10},
+						MsgGroup:    "",
+					},
+					DmlPosition: &msgpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{11, 12, 13},
+						MsgGroup:    "",
+						Timestamp:   2,
+					},
 				}
 				assert.Nil(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo)))
 			}
 			for _, us := range tc.sealedSegments {
 				segInfo := &datapb.SegmentInfo{
-					ID:           us,
-					CollectionID: tc.collID,
-					PartitionID:  tc.partID,
-					State:        commonpb.SegmentState_Sealed,
+					ID:            us,
+					CollectionID:  tc.collID,
+					PartitionID:   tc.partID,
+					InsertChannel: channelName + fmt.Sprint(tc.collID),
+					State:         commonpb.SegmentState_Sealed,
+					NumOfRows:     1024,
+					StartPosition: &msgpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{8, 9, 10},
+						MsgGroup:    "",
+					},
+					DmlPosition: &msgpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{11, 12, 13},
+						MsgGroup:    "",
+						Timestamp:   2,
+					},
 				}
 				assert.Nil(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo)))
 			}
 			for _, us := range tc.growingSegments {
 				segInfo := &datapb.SegmentInfo{
-					ID:           us,
-					CollectionID: tc.collID,
-					PartitionID:  tc.partID,
-					State:        commonpb.SegmentState_Growing,
+					ID:            us,
+					CollectionID:  tc.collID,
+					PartitionID:   tc.partID,
+					InsertChannel: channelName + fmt.Sprint(tc.collID),
+					State:         commonpb.SegmentState_Growing,
+					NumOfRows:     1024,
+					StartPosition: &msgpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{8, 9, 10},
+						MsgGroup:    "",
+					},
+					DmlPosition: &msgpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{11, 12, 13},
+						MsgGroup:    "",
+						Timestamp:   2,
+					},
 				}
 				assert.Nil(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo)))
 			}
