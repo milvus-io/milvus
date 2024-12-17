@@ -195,6 +195,9 @@ func (mt *MetaTable) reload() error {
 			return err
 		}
 		for _, collection := range collections {
+			if collection.DBName == "" {
+				collection.DBName = dbName
+			}
 			mt.collID2Meta[collection.CollectionID] = collection
 			mt.generalCnt += len(collection.Partitions) * int(collection.ShardsNum)
 			if collection.Available() {
@@ -559,12 +562,14 @@ func filterUnavailable(coll *model.Collection) *model.Collection {
 func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collectionID UniqueID, allowUnavailable bool) (*model.Collection, error) {
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok || coll == nil {
+		log.Warn("not found collection", zap.Int64("collectionID", collectionID))
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	if allowUnavailable {
 		return coll.Clone(), nil
 	}
 	if !coll.Available() {
+		log.Warn("collection not available", zap.Int64("collectionID", collectionID), zap.Any("state", coll.State))
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	return filterUnavailable(coll), nil

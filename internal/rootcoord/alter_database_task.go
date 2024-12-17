@@ -25,11 +25,14 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -41,6 +44,19 @@ type alterDatabaseTask struct {
 func (a *alterDatabaseTask) Prepare(ctx context.Context) error {
 	if a.Req.GetDbName() == "" {
 		return fmt.Errorf("alter database failed, database name does not exists")
+	}
+
+	// TODO SimFG maybe it will support to alter the replica.id properties in the future when the database has no collections
+	// now it can't be because the latest database properties can't be notified to the querycoord and datacoord
+	replicateID, _ := common.GetReplicateID(a.Req.Properties)
+	if replicateID != "" {
+		colls, err := a.core.meta.ListCollections(ctx, a.Req.DbName, a.ts, true)
+		if err != nil {
+			return err
+		}
+		if len(colls) > 0 {
+			return errors.New("can't set replicate id on database with collections")
+		}
 	}
 
 	return nil
@@ -85,6 +101,18 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 		ts:       ts,
 	})
 
+	redoTask.AddSyncStep(&expireCacheStep{
+		baseStep: baseStep{core: a.core},
+		dbName:   newDB.Name,
+		ts:       ts,
+		// make sure to send the "expire cache" request
+		// because it won't send this request when the length of collection names array is zero
+		collectionNames: []string{""},
+		opts: []proxyutil.ExpireCacheOpt{
+			proxyutil.SetMsgType(commonpb.MsgType_AlterDatabase),
+		},
+	})
+
 	oldReplicaNumber, _ := common.DatabaseLevelReplicaNumber(oldDB.Properties)
 	oldResourceGroups, _ := common.DatabaseLevelResourceGroups(oldDB.Properties)
 	newReplicaNumber, _ := common.DatabaseLevelReplicaNumber(newDB.Properties)
@@ -123,6 +151,39 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 		}))
 	}
 
+	oldReplicateEnable, _ := common.IsReplicateEnabled(oldDB.Properties)
+	newReplicateEnable, ok := common.IsReplicateEnabled(newDB.Properties)
+	if ok && !newReplicateEnable && oldReplicateEnable {
+		replicateID, _ := common.GetReplicateID(oldDB.Properties)
+		redoTask.AddAsyncStep(NewSimpleStep("send replicate end msg for db", func(ctx context.Context) ([]nestedStep, error) {
+			msgPack := &msgstream.MsgPack{}
+			msg := &msgstream.ReplicateMsg{
+				BaseMsg: msgstream.BaseMsg{
+					Ctx:            ctx,
+					BeginTimestamp: ts,
+					EndTimestamp:   ts,
+					HashValues:     []uint32{0},
+				},
+				ReplicateMsg: &msgpb.ReplicateMsg{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_Replicate,
+						Timestamp: ts,
+						ReplicateInfo: &commonpb.ReplicateInfo{
+							IsReplicate: true,
+							ReplicateID: replicateID,
+						},
+					},
+					IsEnd:      true,
+					Database:   newDB.Name,
+					Collection: "",
+				},
+			}
+			msgPack.Msgs = append(msgPack.Msgs, msg)
+			log.Info("send replicate end msg for db", zap.String("db", newDB.Name), zap.String("replicateID", replicateID))
+			return nil, a.core.chanTimeTick.broadcastDmlChannels(a.core.chanTimeTick.listDmlChannels(), msgPack)
+		}))
+	}
+
 	return redoTask.Execute(ctx)
 }
 
@@ -134,6 +195,14 @@ func (a *alterDatabaseTask) GetLockerKey() LockerKey {
 }
 
 func MergeProperties(oldProps []*commonpb.KeyValuePair, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+	_, existEndTS := common.GetReplicateEndTS(updatedProps)
+	if existEndTS {
+		updatedProps = append(updatedProps, &commonpb.KeyValuePair{
+			Key:   common.ReplicateIDKey,
+			Value: "",
+		})
+	}
+
 	props := make(map[string]string)
 	for _, prop := range oldProps {
 		props[prop.Key] = prop.Value

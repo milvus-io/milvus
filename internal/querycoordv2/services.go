@@ -56,9 +56,7 @@ var (
 )
 
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	log := log.Ctx(ctx).With(zap.Int64s("collections", req.GetCollectionIDs()))
-
-	log.Info("show collections request received")
+	log.Ctx(ctx).Debug("show collections request received", zap.Int64s("collections", req.GetCollectionIDs()))
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to show collections"
 		log.Warn(msg, zap.Error(err))

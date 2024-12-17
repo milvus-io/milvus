@@ -40,6 +40,9 @@ func (m *mockMsgStream) ForceEnableProduce(enabled bool) {
 	}
 }
 
+func (m *mockMsgStream) SetReplicate(config *msgstream.ReplicateConfig) {
+}
+
 func newMockMsgStream() *mockMsgStream {
 	return &mockMsgStream{}
 }

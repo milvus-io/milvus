@@ -61,6 +61,7 @@ type createCollectionTask struct {
 	channels       collectionChannels
 	dbID           UniqueID
 	partitionNames []string
+	dbProperties   []*commonpb.KeyValuePair
 }
 
 func (t *createCollectionTask) validate(ctx context.Context) error {
@@ -424,6 +425,18 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 		return err
 	}
 	t.dbID = db.ID
+	dbReplicateID, _ := common.GetReplicateID(db.Properties)
+	if dbReplicateID != "" {
+		reqProperties := make([]*commonpb.KeyValuePair, 0, len(t.Req.Properties))
+		for _, prop := range t.Req.Properties {
+			if prop.Key == common.ReplicateIDKey {
+				continue
+			}
+			reqProperties = append(reqProperties, prop)
+		}
+		t.Req.Properties = reqProperties
+	}
+	t.dbProperties = db.Properties
 
 	if err := t.validate(ctx); err != nil {
 		return err
@@ -565,6 +578,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		CollectionID:         collID,
 		DBID:                 t.dbID,
 		Name:                 t.schema.Name,
+		DBName:               t.Req.GetDbName(),
 		Description:          t.schema.Description,
 		AutoID:               t.schema.AutoID,
 		Fields:               model.UnmarshalFieldModels(t.schema.Fields),
@@ -644,11 +658,14 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 			startPositions: toKeyDataPairs(startPositions),
 			schema: &schemapb.CollectionSchema{
 				Name:        collInfo.Name,
+				DbName:      collInfo.DBName,
 				Description: collInfo.Description,
 				AutoID:      collInfo.AutoID,
 				Fields:      model.MarshalFieldModels(collInfo.Fields),
+				Properties:  collInfo.Properties,
 				Functions:   model.MarshalFunctionModels(collInfo.Functions),
 			},
+			dbProperties: t.dbProperties,
 		},
 	}, &nullStep{})
 	undoTask.AddStep(&changeCollectionStateStep{

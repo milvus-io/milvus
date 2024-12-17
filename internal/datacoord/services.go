@@ -951,7 +951,7 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 		return resp, nil
 	}
 
-	channel := NewRWChannel(req.GetVchannel(), collectionID, nil, collection.Schema, 0) // TODO: remove RWChannel, just use vchannel + collectionID
+	channel := NewRWChannel(req.GetVchannel(), collectionID, nil, collection.Schema, 0, nil) // TODO: remove RWChannel, just use vchannel + collectionID
 	channelInfo := s.handler.GetDataVChanPositions(channel, allPartitionID)
 	if channelInfo.SeekPosition == nil {
 		log.Warn("channel recovery start position is not found, may collection is on creating")
@@ -1230,6 +1230,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Strings("channels", req.GetChannelNames()),
+		zap.Any("dbProperties", req.GetDbProperties()),
 	)
 	log.Info("receive watch channels request")
 	resp := &datapb.WatchChannelsResponse{
@@ -1242,7 +1243,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		}, nil
 	}
 	for _, channelName := range req.GetChannelNames() {
-		ch := NewRWChannel(channelName, req.GetCollectionID(), req.GetStartPositions(), req.GetSchema(), req.GetCreateTimestamp())
+		ch := NewRWChannel(channelName, req.GetCollectionID(), req.GetStartPositions(), req.GetSchema(), req.GetCreateTimestamp(), req.GetDbProperties())
 		err := s.channelManager.Watch(ctx, ch)
 		if err != nil {
 			log.Warn("fail to watch channelName", zap.Error(err))
@@ -1562,6 +1563,7 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 			StartPositions: req.GetStartPositions(),
 			Properties:     properties,
 			DatabaseID:     req.GetDbID(),
+			DatabaseName:   req.GetSchema().GetDbName(),
 			VChannelNames:  req.GetVChannels(),
 		}
 		s.meta.AddCollection(collInfo)

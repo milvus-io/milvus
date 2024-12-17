@@ -45,12 +45,13 @@ type StreamPipeline interface {
 }
 
 type streamPipeline struct {
-	pipeline   *pipeline
-	input      <-chan *msgstream.MsgPack
-	scanner    streaming.Scanner
-	dispatcher msgdispatcher.Client
-	startOnce  sync.Once
-	vChannel   string
+	pipeline        *pipeline
+	input           <-chan *msgstream.MsgPack
+	scanner         streaming.Scanner
+	dispatcher      msgdispatcher.Client
+	startOnce       sync.Once
+	vChannel        string
+	replicateConfig *msgstream.ReplicateConfig
 
 	closeCh   chan struct{} // notify work to exit
 	closeWg   sync.WaitGroup
@@ -118,7 +119,12 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 	}
 
 	start := time.Now()
-	p.input, err = p.dispatcher.Register(ctx, p.vChannel, position, common.SubscriptionPositionUnknown)
+	p.input, err = p.dispatcher.Register(ctx, &msgdispatcher.StreamConfig{
+		VChannel:        p.vChannel,
+		Pos:             position,
+		SubPos:          common.SubscriptionPositionUnknown,
+		ReplicateConfig: p.replicateConfig,
+	})
 	if err != nil {
 		log.Error("dispatcher register failed", zap.String("channel", position.ChannelName))
 		return WrapErrRegDispather(err)
@@ -160,18 +166,24 @@ func (p *streamPipeline) Close() {
 	})
 }
 
-func NewPipelineWithStream(dispatcher msgdispatcher.Client, nodeTtInterval time.Duration, enableTtChecker bool, vChannel string) StreamPipeline {
+func NewPipelineWithStream(dispatcher msgdispatcher.Client,
+	nodeTtInterval time.Duration,
+	enableTtChecker bool,
+	vChannel string,
+	replicateConfig *msgstream.ReplicateConfig,
+) StreamPipeline {
 	pipeline := &streamPipeline{
 		pipeline: &pipeline{
 			nodes:           []*nodeCtx{},
 			nodeTtInterval:  nodeTtInterval,
 			enableTtChecker: enableTtChecker,
 		},
-		dispatcher:     dispatcher,
-		vChannel:       vChannel,
-		closeCh:        make(chan struct{}),
-		closeWg:        sync.WaitGroup{},
-		lastAccessTime: atomic.NewTime(time.Now()),
+		dispatcher:      dispatcher,
+		vChannel:        vChannel,
+		replicateConfig: replicateConfig,
+		closeCh:         make(chan struct{}),
+		closeWg:         sync.WaitGroup{},
+		lastAccessTime:  atomic.NewTime(time.Now()),
 	}
 
 	return pipeline

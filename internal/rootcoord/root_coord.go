@@ -1226,6 +1226,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		Fields:             model.MarshalFieldModels(collInfo.Fields),
 		Functions:          model.MarshalFunctionModels(collInfo.Functions),
 		EnableDynamicField: collInfo.EnableDynamicField,
+		Properties:         collInfo.Properties,
 	}
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
@@ -1743,6 +1744,19 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 		return &rootcoordpb.AllocTimestampResponse{
 			Status: merr.Status(err),
 		}, nil
+	}
+
+	if in.BlockTimestamp > 0 {
+		blockTime, _ := tsoutil.ParseTS(in.BlockTimestamp)
+		lastTime := c.tsoAllocator.GetLastSavedTime()
+		deltaDuration := blockTime.Sub(lastTime)
+		if deltaDuration > 0 {
+			log.Info("wait for block timestamp",
+				zap.Time("blockTime", blockTime),
+				zap.Time("lastTime", lastTime),
+				zap.Duration("delta", deltaDuration))
+			time.Sleep(deltaDuration + time.Millisecond*200)
+		}
 	}
 
 	ts, err := c.tsoAllocator.GenerateTSO(in.GetCount())

@@ -72,6 +72,9 @@ type mqMsgStream struct {
 	ttMsgEnable        atomic.Value
 	forceEnableProduce atomic.Value
 	configEvent        config.EventHandler
+
+	replicateID string
+	checkFunc   CheckReplicateMsgFunc
 }
 
 // NewMqMsgStream is used to generate a new mqMsgStream object
@@ -274,6 +277,23 @@ func (ms *mqMsgStream) ForceEnableProduce(can bool) {
 
 func (ms *mqMsgStream) isEnabledProduce() bool {
 	return ms.forceEnableProduce.Load().(bool) || ms.ttMsgEnable.Load().(bool)
+}
+
+func (ms *mqMsgStream) isSkipSystemTT() bool {
+	return ms.replicateID != ""
+}
+
+// checkReplicateID check the replicate id of the message, return values: isMatch, isReplicate
+func (ms *mqMsgStream) checkReplicateID(msg TsMsg) (bool, bool) {
+	if !ms.isSkipSystemTT() {
+		return true, false
+	}
+	msgBase, ok := msg.(interface{ GetBase() *commonpb.MsgBase })
+	if !ok {
+		log.Warn("fail to get msg base, please check it", zap.Any("type", msg.Type()))
+		return false, false
+	}
+	return msgBase.GetBase().GetReplicateInfo().GetReplicateID() == ms.replicateID, true
 }
 
 func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
@@ -688,9 +708,9 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			startBufTime := time.Now()
 			var endTs uint64
 			var size uint64
-			var containsDropCollectionMsg bool
+			var containsEndBufferMsg bool
 
-			for ms.continueBuffering(endTs, size, startBufTime) && !containsDropCollectionMsg {
+			for ms.continueBuffering(endTs, size, startBufTime) && !containsEndBufferMsg {
 				ms.consumerLock.Lock()
 				// wait all channels get ttMsg
 				for _, consumer := range ms.consumers {
@@ -726,15 +746,16 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 							timeTickMsg = v
 							continue
 						}
-						if v.EndTs() <= currTs {
+						if v.EndTs() <= currTs ||
+							GetReplicateID(v) != "" {
 							size += uint64(v.Size())
 							timeTickBuf = append(timeTickBuf, v)
 						} else {
 							tempBuffer = append(tempBuffer, v)
 						}
 						// when drop collection, force to exit the buffer loop
-						if v.Type() == commonpb.MsgType_DropCollection {
-							containsDropCollectionMsg = true
+						if v.Type() == commonpb.MsgType_DropCollection || v.Type() == commonpb.MsgType_Replicate {
+							containsEndBufferMsg = true
 						}
 					}
 					ms.chanMsgBuf[consumer] = tempBuffer
@@ -860,7 +881,7 @@ func (ms *MqTtMsgStream) allChanReachSameTtMsg(chanTtMsgSync map[mqwrapper.Consu
 	}
 	for consumer := range ms.chanTtMsgTime {
 		ms.chanTtMsgTimeMutex.RLock()
-		chanTtMsgSync[consumer] = (ms.chanTtMsgTime[consumer] == maxTime)
+		chanTtMsgSync[consumer] = ms.chanTtMsgTime[consumer] == maxTime
 		ms.chanTtMsgTimeMutex.RUnlock()
 	}
 
@@ -959,6 +980,10 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 				tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), headerMsg.Base.MsgType)
 				if err != nil {
 					return fmt.Errorf("failed to unmarshal tsMsg, err %s", err.Error())
+				}
+				// skip the replicate msg because it must have been consumed
+				if GetReplicateID(tsMsg) != "" {
+					continue
 				}
 				if tsMsg.Type() == commonpb.MsgType_TimeTick && tsMsg.BeginTs() >= mp.Timestamp {
 					runLoop = false

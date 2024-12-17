@@ -125,6 +125,15 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge("insert request size exceeds maxInsertSize"))
 	}
 
+	replicateID, err := GetReplicateID(it.ctx, it.insertMsg.GetDbName(), collectionName)
+	if err != nil {
+		log.Warn("get replicate id failed", zap.String("collectionName", collectionName), zap.Error(err))
+		return merr.WrapErrAsInputError(err)
+	}
+	if replicateID != "" {
+		return merr.WrapErrCollectionReplicateMode("insert")
+	}
+
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Ctx(ctx).Warn("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
