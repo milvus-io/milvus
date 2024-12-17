@@ -191,19 +191,15 @@ class DeletedRecord {
 
         auto it = start_iter;
         while (it != accessor.end() && it != end_iter) {
-            AssertInfo(it->second <= insert_barrier,
-                       "delete record beyond insert barrier, {} : {}",
-                       it->second,
-                       insert_barrier);
-            bitset.set(it->second);
+            if (it->second < insert_barrier) {
+                bitset.set(it->second);
+            }
             it++;
         }
         while (it != accessor.end() && it->first == query_timestamp) {
-            AssertInfo(it->second <= insert_barrier,
-                       "delete record beyond insert barrier, {} : {}",
-                       it->second,
-                       insert_barrier);
-            bitset.set(it->second);
+            if (it->second < insert_barrier) {
+                bitset.set(it->second);
+            }
             it++;
         }
     }
