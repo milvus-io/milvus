@@ -4,7 +4,7 @@ import os
 import time
 
 import numpy as np
-import jax.numpy as jnp
+from ml_dtypes import bfloat16
 import pandas as pd
 import random
 from pathlib import Path
@@ -130,9 +130,9 @@ def gen_bf16_vectors(num, dim, for_json=False):
         raw_vector = [random.random() for _ in range(dim)]
         raw_vectors.append(raw_vector)
         if for_json:
-            bf16_vector = np.array(jnp.array(raw_vector, dtype=jnp.bfloat16)).tolist()
+            bf16_vector = np.array(raw_vector, dtype=bfloat16).tolist()
         else:
-            bf16_vector = np.array(jnp.array(raw_vector, dtype=jnp.bfloat16)).view(np.uint8).tolist()
+            bf16_vector = np.array(raw_vector, dtype=bfloat16).view(np.uint8).tolist()
         bf16_vectors.append(bf16_vector)
 
     return raw_vectors, bf16_vectors
