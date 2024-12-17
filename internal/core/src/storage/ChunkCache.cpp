@@ -14,10 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <filesystem>
 #include <future>
 #include <memory>
 
 #include "ChunkCache.h"
+#include "boost/filesystem/operations.hpp"
+#include "boost/filesystem/path.hpp"
+#include "common/Chunk.h"
 #include "common/ChunkWriter.h"
 #include "common/FieldMeta.h"
 #include "common/Types.h"
@@ -26,8 +30,9 @@
 namespace milvus::storage {
 std::shared_ptr<ColumnBase>
 ChunkCache::Read(const std::string& filepath,
-                 const MmapChunkDescriptorPtr& descriptor,
-                 const FieldMeta& field_meta) {
+                 const FieldMeta& field_meta,
+                 bool mmap_enabled,
+                 bool mmap_rss_not_need) {
     // use rlock to get future
     {
         std::shared_lock lck(mutex_);
@@ -66,8 +71,28 @@ ChunkCache::Read(const std::string& filepath,
         auto field_data =
             DownloadAndDecodeRemoteFile(cm_.get(), filepath, false);
 
-        auto chunk = create_chunk(
-            field_meta, field_meta.get_dim(), field_data->GetReader()->reader);
+        std::shared_ptr<Chunk> chunk;
+        auto dim = IsSparseFloatVectorDataType(field_meta.get_data_type())
+                       ? 1
+                       : field_meta.get_dim();
+        if (mmap_enabled) {
+            auto path = std::filesystem::path(CachePath(filepath));
+            auto dir = path.parent_path();
+            std::filesystem::create_directories(dir);
+
+            auto file = File::Open(path.string(), O_CREAT | O_TRUNC | O_RDWR);
+            chunk = create_chunk(
+                field_meta, dim, file, 0, field_data->GetReader()->reader);
+            // unlink
+            auto ok = unlink(path.c_str());
+            AssertInfo(ok == 0,
+                       "failed to unlink mmap data file {}, err: {}",
+                       path.c_str(),
+                       strerror(errno));
+        } else {
+            chunk =
+                create_chunk(field_meta, dim, field_data->GetReader()->reader);
+        }
 
         auto data_type = field_meta.get_data_type();
         if (IsSparseFloatVectorDataType(data_type)) {
@@ -82,6 +107,22 @@ ChunkCache::Read(const std::string& filepath,
         } else {
             std::vector<std::shared_ptr<Chunk>> chunks{chunk};
             column = std::make_shared<ChunkedColumn>(chunks);
+        }
+        if (mmap_enabled && mmap_rss_not_need) {
+            auto ok = madvise(reinterpret_cast<void*>(
+                                  const_cast<char*>(column->MmappedData())),
+                              column->DataByteSize(),
+                              ReadAheadPolicy_Map["dontneed"]);
+            if (ok != 0) {
+                LOG_WARN(
+                    "failed to madvise to the data file {}, addr {}, size {}, "
+                    "err: "
+                    "{}",
+                    filepath,
+                    static_cast<const void*>(column->MmappedData()),
+                    column->DataByteSize(),
+                    strerror(errno));
+            }
         }
     } catch (const SegcoreError& e) {
         err_code = e.get_error_code();
@@ -261,4 +302,22 @@ ChunkCache::ConvertToColumn(const FieldDataPtr& field_data,
     column->AppendBatch(field_data);
     return column;
 }
+
+// TODO(sunby): use mmap chunk manager to create chunk
+std::string
+ChunkCache::CachePath(const std::string& filepath) {
+    auto path = std::filesystem::path(filepath);
+    auto prefix = std::filesystem::path(path_prefix_);
+
+    // Cache path shall not use absolute filepath direct, it shall always under path_prefix_
+    if (path.is_absolute()) {
+        return (prefix /
+                filepath.substr(path.root_directory().string().length(),
+                                filepath.length()))
+            .string();
+    }
+
+    return (prefix / filepath).string();
+}
+
 }  // namespace milvus::storage
