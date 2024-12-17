@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -704,6 +705,10 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 		if err := checkFunctionOutputField(function, outputFields); err != nil {
 			return err
 		}
+	}
+
+	if err := function.CheckFunctions(coll); err != nil {
+		return err
 	}
 	return nil
 }

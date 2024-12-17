@@ -61,6 +61,15 @@ func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSc
 	}
 }
 
+func CheckFunctions(schema *schemapb.CollectionSchema) error {
+	for _, f_schema := range schema.Functions {
+		if _, err := createFunction(schema, f_schema); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func NewFunctionExecutor(schema *schemapb.CollectionSchema) (*FunctionExecutor, error) {
 	// If the function's outputs exists in outputIDs, then create the function
 	// when outputIDs is empty, create all functions

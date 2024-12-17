@@ -38,11 +38,13 @@ const (
 	AzureOpenAIProvider  string = "azure_openai"
 	AliDashScopeProvider string = "dashscope"
 	BedrockProvider      string = "bedrock"
+	VertexAIProvider     string = "vertexai"
 )
 
+// Text embedding for retrieval task
 type TextEmbeddingProvider interface {
 	MaxBatch() int
-	CallEmbedding(texts []string, batchLimit bool) ([][]float32, error)
+	CallEmbedding(texts []string, batchLimit bool, mode string) ([][]float32, error)
 	FieldDim() int64
 }
 
@@ -120,6 +122,15 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 			FunctionBase: *base,
 			embProvider:  embP,
 		}, nil
+	case VertexAIProvider:
+		embP, err := NewVertextAIEmbeddingProvider(base.outputFields[0], functionSchema, nil)
+		if err != nil {
+			return nil, err
+		}
+		return &TextEmebddingFunction{
+			FunctionBase: *base,
+			embProvider:  embP,
+		}, nil
 	default:
 		return nil, fmt.Errorf("Unsupported embedding service provider: [%s] , list of supported [%s, %s, %s, %s]", provider, OpenAIProvider, AzureOpenAIProvider, AliDashScopeProvider, BedrockProvider)
 	}
@@ -144,7 +155,7 @@ func (runner *TextEmebddingFunction) ProcessInsert(inputs []*schemapb.FieldData)
 		return nil, fmt.Errorf("Input texts is empty")
 	}
 
-	embds, err := runner.embProvider.CallEmbedding(texts, true)
+	embds, err := runner.embProvider.CallEmbedding(texts, true, InsertMode)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +184,7 @@ func (runner *TextEmebddingFunction) ProcessInsert(inputs []*schemapb.FieldData)
 
 func (runner *TextEmebddingFunction) ProcessSearch(placeholderGroup *commonpb.PlaceholderGroup) (*commonpb.PlaceholderGroup, error) {
 	texts := funcutil.GetVarCharFromPlaceholder(placeholderGroup.Placeholders[0]) // Already checked externally
-	embds, err := runner.embProvider.CallEmbedding(texts, true)
+	embds, err := runner.embProvider.CallEmbedding(texts, true, SearchMode)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +205,7 @@ func (runner *TextEmebddingFunction) ProcessBulkInsert(inputs []storage.FieldDat
 		return nil, fmt.Errorf("Input texts is empty")
 	}
 
-	embds, err := runner.embProvider.CallEmbedding(texts, false)
+	embds, err := runner.embProvider.CallEmbedding(texts, false, InsertMode)
 	if err != nil {
 		return nil, err
 	}

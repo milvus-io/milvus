@@ -29,10 +29,10 @@ type FunctionBase struct {
 	outputFields []*schemapb.FieldSchema
 }
 
-func NewFunctionBase(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (*FunctionBase, error) {
+func NewFunctionBase(coll *schemapb.CollectionSchema, f_schema *schemapb.FunctionSchema) (*FunctionBase, error) {
 	var base FunctionBase
-	base.schema = schema
-	for _, field_id := range schema.GetOutputFieldIds() {
+	base.schema = f_schema
+	for _, field_id := range f_schema.GetOutputFieldIds() {
 		for _, field := range coll.GetFields() {
 			if field.GetFieldID() == field_id {
 				base.outputFields = append(base.outputFields, field)
@@ -41,9 +41,9 @@ func NewFunctionBase(coll *schemapb.CollectionSchema, schema *schemapb.FunctionS
 		}
 	}
 
-	if len(base.outputFields) != len(schema.GetOutputFieldIds()) {
+	if len(base.outputFields) != len(f_schema.GetOutputFieldIds()) {
 		return &base, fmt.Errorf("The collection [%s]'s information is wrong, function [%s]'s outputs does not match the schema",
-			coll.Name, schema.Name)
+			coll.Name, f_schema.Name)
 	}
 	return &base, nil
 }

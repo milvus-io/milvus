@@ -215,14 +215,14 @@ func (c *AzureOpenAIEmbeddingClient) Embedding(modelName string, texts []string,
 	params.Add("api-version", c.apiVersion)
 	base.RawQuery = params.Encode()
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeoutSec)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutSec*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewBuffer(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base.String(), bytes.NewBuffer(data))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
+	req.Header.Set("api-key", c.apiKey)
 	body, err := utils.RetrySend(req, 3)
 	if err != nil {
 		return nil, err

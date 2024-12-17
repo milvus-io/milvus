@@ -44,17 +44,14 @@ type OpenAIEmbeddingProvider struct {
 
 func createOpenAIEmbeddingClient(apiKey string, url string) (*openai.OpenAIEmbeddingClient, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv("OPENAI_API_KEY")
+		apiKey = os.Getenv(openaiApiKey)
 	}
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the OPENAI_API_KEY environment variable in the Milvus service.")
+		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service.", openaiApiKey)
 	}
 
 	if url == "" {
 		url = "https://api.openai.com/v1/embeddings"
-	}
-	if url == "" {
-		return nil, fmt.Errorf("Must provide `url` arguments or configure the OPENAI_ENDPOINT environment variable in the Milvus service")
 	}
 
 	c := openai.NewOpenAIEmbeddingClient(apiKey, url)
@@ -63,17 +60,17 @@ func createOpenAIEmbeddingClient(apiKey string, url string) (*openai.OpenAIEmbed
 
 func createAzureOpenAIEmbeddingClient(apiKey string, url string) (*openai.AzureOpenAIEmbeddingClient, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv("AZURE_OPENAI_API_KEY")
+		apiKey = os.Getenv(azureOpenaiApiKey)
 	}
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the AZURE_OPENAI_API_KEY environment variable in the Milvus service")
+		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service", azureOpenaiApiKey)
 	}
 
 	if url == "" {
-		url = os.Getenv("AZURE_OPENAI_ENDPOINT")
+		url = os.Getenv(azureOpenaiEndpoint)
 	}
 	if url == "" {
-		return nil, fmt.Errorf("Must provide `url` arguments or configure the AZURE_OPENAI_ENDPOINT environment variable in the Milvus service")
+		return nil, fmt.Errorf("Must provide `url` arguments or configure the %s environment variable in the Milvus service", azureOpenaiEndpoint)
 	}
 	c := openai.NewAzureOpenAIEmbeddingClient(apiKey, url)
 	return c, nil
@@ -156,7 +153,7 @@ func (provider *OpenAIEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *OpenAIEmbeddingProvider) CallEmbedding(texts []string, batchLimit bool) ([][]float32, error) {
+func (provider *OpenAIEmbeddingProvider) CallEmbedding(texts []string, batchLimit bool, _ string) ([][]float32, error) {
 	numRows := len(texts)
 	if batchLimit && numRows > provider.MaxBatch() {
 		return nil, fmt.Errorf("OpenAI embedding supports up to [%d] pieces of data at a time, got [%d]", provider.MaxBatch(), numRows)

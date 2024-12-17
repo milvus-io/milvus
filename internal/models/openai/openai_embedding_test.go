@@ -72,7 +72,20 @@ func TestEmbeddingOK(t *testing.T) {
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		if r.URL.Path == "/" {
+			if r.Header["Authorization"][0] != "" {
+				w.WriteHeader(http.StatusOK)
+			} else {
+				w.WriteHeader(http.StatusBadRequest)
+			}
+		} else {
+			if r.Header["Api-Key"][0] != "" {
+				w.WriteHeader(http.StatusOK)
+			} else {
+				w.WriteHeader(http.StatusBadRequest)
+			}
+		}
+
 		data, _ := json.Marshal(res)
 		w.Write(data)
 	}))
@@ -84,7 +97,15 @@ func TestEmbeddingOK(t *testing.T) {
 		c := NewOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
+		ret, err := c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
+		assert.True(t, err == nil)
+		assert.Equal(t, ret.Data[0].Index, 0)
+		assert.Equal(t, ret.Data[1].Index, 1)
+	}
+	{
+		c := NewAzureOpenAIEmbeddingClient("mock_key", url)
+		err := c.Check()
+		assert.True(t, err == nil)
 		ret, err := c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Data[0].Index, 0)
@@ -148,6 +169,20 @@ func TestEmbeddingRetry(t *testing.T) {
 		assert.Equal(t, ret.Data[2], res.Data[0])
 		assert.Equal(t, atomic.LoadInt32(&count), int32(2))
 	}
+	{
+		c := NewAzureOpenAIEmbeddingClient("mock_key", url)
+		err := c.Check()
+		assert.True(t, err == nil)
+		ret, err := c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
+		assert.True(t, err == nil)
+		assert.Equal(t, ret.Usage, res.Usage)
+		assert.Equal(t, ret.Object, res.Object)
+		assert.Equal(t, ret.Model, res.Model)
+		assert.Equal(t, ret.Data[0], res.Data[1])
+		assert.Equal(t, ret.Data[1], res.Data[2])
+		assert.Equal(t, ret.Data[2], res.Data[0])
+		assert.Equal(t, atomic.LoadInt32(&count), int32(2))
+	}
 }
 
 func TestEmbeddingFailed(t *testing.T) {
@@ -161,7 +196,17 @@ func TestEmbeddingFailed(t *testing.T) {
 	url := ts.URL
 
 	{
+		atomic.StoreInt32(&count, 0)
 		c := NewOpenAIEmbeddingClient("mock_key", url)
+		err := c.Check()
+		assert.True(t, err == nil)
+		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
+		assert.True(t, err != nil)
+		assert.Equal(t, atomic.LoadInt32(&count), int32(3))
+	}
+	{
+		atomic.StoreInt32(&count, 0)
+		c := NewAzureOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
 		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 0)
@@ -182,7 +227,20 @@ func TestTimeout(t *testing.T) {
 	url := ts.URL
 
 	{
+		atomic.StoreInt32(&st, 0)
 		c := NewOpenAIEmbeddingClient("mock_key", url)
+		err := c.Check()
+		assert.True(t, err == nil)
+		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 1)
+		assert.True(t, err != nil)
+		assert.Equal(t, atomic.LoadInt32(&st), int32(0))
+		time.Sleep(3 * time.Second)
+		assert.Equal(t, atomic.LoadInt32(&st), int32(1))
+	}
+
+	{
+		atomic.StoreInt32(&st, 0)
+		c := NewAzureOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
 		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 1)

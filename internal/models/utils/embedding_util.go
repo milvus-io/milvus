@@ -41,11 +41,13 @@ func send(req *http.Request) ([]byte, error) {
 }
 
 func RetrySend(req *http.Request, maxRetries int) ([]byte, error) {
+	var err error
+	var res []byte
 	for i := 0; i < maxRetries; i++ {
-		res, err := send(req)
+		res, err = send(req)
 		if err == nil {
 			return res, nil
 		}
 	}
-	return nil, nil
+	return nil, err
 }
