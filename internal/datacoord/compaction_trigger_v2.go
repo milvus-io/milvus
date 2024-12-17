@@ -108,6 +108,7 @@ func (m *CompactionTriggerManager) startLoop() {
 	defer logutil.LogPanic()
 	defer m.closeWg.Done()
 
+	log := log.Ctx(context.TODO())
 	l0Ticker := time.NewTicker(Params.DataCoordCfg.L0CompactionTriggerInterval.GetAsDuration(time.Second))
 	defer l0Ticker.Stop()
 	clusteringTicker := time.NewTicker(Params.DataCoordCfg.ClusteringCompactionTriggerInterval.GetAsDuration(time.Second))
@@ -182,7 +183,7 @@ func (m *CompactionTriggerManager) startLoop() {
 }
 
 func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool) (UniqueID, error) {
-	log.Info("receive manual trigger", zap.Int64("collectionID", collectionID))
+	log.Ctx(ctx).Info("receive manual trigger", zap.Int64("collectionID", collectionID))
 	views, triggerID, err := m.clusteringPolicy.triggerOneCollection(context.Background(), collectionID, true)
 	if err != nil {
 		return 0, err
@@ -198,6 +199,7 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collection
 }
 
 func (m *CompactionTriggerManager) notify(ctx context.Context, eventType CompactionTriggerType, views []CompactionView) {
+	log := log.Ctx(ctx)
 	for _, view := range views {
 		switch eventType {
 		case TriggerTypeLevelZeroViewChange:
@@ -246,7 +248,7 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 }
 
 func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, view CompactionView) {
-	log := log.With(zap.String("view", view.String()))
+	log := log.Ctx(ctx).With(zap.String("view", view.String()))
 	taskID, err := m.allocator.AllocID(ctx)
 	if err != nil {
 		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
@@ -296,7 +298,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 }
 
 func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.Context, view CompactionView) {
-	log := log.With(zap.String("view", view.String()))
+	log := log.Ctx(ctx).With(zap.String("view", view.String()))
 	taskID, _, err := m.allocator.AllocN(2)
 	if err != nil {
 		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
@@ -362,7 +364,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 }
 
 func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, view CompactionView) {
-	log := log.With(zap.String("view", view.String()))
+	log := log.Ctx(ctx).With(zap.String("view", view.String()))
 	// TODO[GOOSE], 11 = 1 planID + 10 segmentID, this is a hack need to be removed.
 	// Any plan that output segment number greater than 10 will be marked as invalid plan for now.
 	startID, endID, err := m.allocator.AllocN(11)

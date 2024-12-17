@@ -20,7 +20,6 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -70,16 +69,6 @@ func TestLockerKey(t *testing.T) {
 		assert.Equal(t, lockerChain.Next(), dbLock)
 		assert.Equal(t, lockerChain.Next().Next(), collectionLock)
 	}
-}
-
-func GetLockerKeyString(k LockerKey) string {
-	key := k.LockKey()
-	level := k.Level()
-	wLock := k.IsWLock()
-	if k.Next() == nil {
-		return fmt.Sprintf("%s-%d-%t", key, level, wLock)
-	}
-	return fmt.Sprintf("%s-%d-%t|%s", key, level, wLock, GetLockerKeyString(k.Next()))
 }
 
 func TestGetLockerKey(t *testing.T) {

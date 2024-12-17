@@ -488,8 +488,8 @@ func TestInsertReadSparseEmptyVector(t *testing.T) {
 	//  sparse vector: empty position and values
 	sparseVec, err := entity.NewSliceSparseEmbedding([]uint32{}, []float32{})
 	common.CheckErr(t, err, true)
-	data2 := append(data, column.NewColumnSparseVectors(common.DefaultSparseVecFieldName, []entity.SparseEmbedding{sparseVec}))
-	insertRes, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, data2...))
+	data = append(data, column.NewColumnSparseVectors(common.DefaultSparseVecFieldName, []entity.SparseEmbedding{sparseVec}))
+	insertRes, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, data...))
 	common.CheckErr(t, err, true)
 	require.EqualValues(t, 1, insertRes.InsertCount)
 
@@ -526,8 +526,8 @@ func TestInsertSparseInvalidVector(t *testing.T) {
 	values = []float32{0.4}
 	sparseVec, err := entity.NewSliceSparseEmbedding(positions, values)
 	common.CheckErr(t, err, true)
-	data1 := append(data, column.NewColumnSparseVectors(common.DefaultSparseVecFieldName, []entity.SparseEmbedding{sparseVec}))
-	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, data1...))
+	data = append(data, column.NewColumnSparseVectors(common.DefaultSparseVecFieldName, []entity.SparseEmbedding{sparseVec}))
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, data...))
 	common.CheckErr(t, err, false, "invalid index in sparse float vector: must be less than 2^32-1")
 }
 

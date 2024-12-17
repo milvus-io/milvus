@@ -93,6 +93,7 @@ func (ob *ResourceObserver) checkAndRecoverResourceGroup(ctx context.Context) {
 	manager := ob.meta.ResourceManager
 	rgNames := manager.ListResourceGroups(ctx)
 	enableRGAutoRecover := params.Params.QueryCoordCfg.EnableRGAutoRecover.GetAsBool()
+	log := log.Ctx(ctx)
 	log.Debug("start to check resource group", zap.Bool("enableRGAutoRecover", enableRGAutoRecover), zap.Int("resourceGroupNum", len(rgNames)))
 
 	// Check if there is any incoming node.

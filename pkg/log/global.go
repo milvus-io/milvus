@@ -26,24 +26,28 @@ var CtxLogKey = ctxLogKeyType{}
 
 // Debug logs a message at DebugLevel. The message includes any fields passed
 // at the log site, as well as any fields accumulated on the logger.
+// Deprecated: Use Ctx(ctx).Debug instead.
 func Debug(msg string, fields ...zap.Field) {
 	L().Debug(msg, fields...)
 }
 
 // Info logs a message at InfoLevel. The message includes any fields passed
 // at the log site, as well as any fields accumulated on the logger.
+// Deprecated: Use Ctx(ctx).Info instead.
 func Info(msg string, fields ...zap.Field) {
 	L().Info(msg, fields...)
 }
 
 // Warn logs a message at WarnLevel. The message includes any fields passed
 // at the log site, as well as any fields accumulated on the logger.
+// Deprecated: Use Ctx(ctx).Warn instead.
 func Warn(msg string, fields ...zap.Field) {
 	L().Warn(msg, fields...)
 }
 
 // Error logs a message at ErrorLevel. The message includes any fields passed
 // at the log site, as well as any fields accumulated on the logger.
+// Deprecated: Use Ctx(ctx).Error instead.
 func Error(msg string, fields ...zap.Field) {
 	L().Error(msg, fields...)
 }
@@ -52,6 +56,7 @@ func Error(msg string, fields ...zap.Field) {
 // at the log site, as well as any fields accumulated on the logger.
 //
 // The logger then panics, even if logging at PanicLevel is disabled.
+// Deprecated: Use Ctx(ctx).Panic instead.
 func Panic(msg string, fields ...zap.Field) {
 	L().Panic(msg, fields...)
 }
@@ -61,6 +66,7 @@ func Panic(msg string, fields ...zap.Field) {
 //
 // The logger then calls os.Exit(1), even if logging at FatalLevel is
 // disabled.
+// Deprecated: Use Ctx(ctx).Fatal instead.
 func Fatal(msg string, fields ...zap.Field) {
 	L().Fatal(msg, fields...)
 }
@@ -68,6 +74,7 @@ func Fatal(msg string, fields ...zap.Field) {
 // RatedDebug print logs at debug level
 // it limit log print to avoid too many logs
 // return true if log successfully
+// Deprecated: Use Ctx(ctx).RatedDebug instead.
 func RatedDebug(cost float64, msg string, fields ...zap.Field) bool {
 	if R().CheckCredit(cost) {
 		L().Debug(msg, fields...)
@@ -79,6 +86,7 @@ func RatedDebug(cost float64, msg string, fields ...zap.Field) bool {
 // RatedInfo print logs at info level
 // it limit log print to avoid too many logs
 // return true if log successfully
+// Deprecated: Use Ctx(ctx).RatedInfo instead.
 func RatedInfo(cost float64, msg string, fields ...zap.Field) bool {
 	if R().CheckCredit(cost) {
 		L().Info(msg, fields...)
@@ -90,6 +98,7 @@ func RatedInfo(cost float64, msg string, fields ...zap.Field) bool {
 // RatedWarn print logs at warn level
 // it limit log print to avoid too many logs
 // return true if log successfully
+// Deprecated: Use Ctx(ctx).RatedWarn instead.
 func RatedWarn(cost float64, msg string, fields ...zap.Field) bool {
 	if R().CheckCredit(cost) {
 		L().Warn(msg, fields...)
@@ -100,6 +109,7 @@ func RatedWarn(cost float64, msg string, fields ...zap.Field) bool {
 
 // With creates a child logger and adds structured context to it.
 // Fields added to the child don't affect the parent, and vice versa.
+// Deprecated: Use Ctx(ctx).With instead.
 func With(fields ...zap.Field) *MLogger {
 	return &MLogger{
 		Logger: L().WithOptions(zap.WrapCore(func(core zapcore.Core) zapcore.Core {

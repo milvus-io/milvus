@@ -17,6 +17,7 @@
 package flowgraph
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -201,7 +202,7 @@ func (nodeCtx *nodeCtx) Close() {
 			if nodeCtx.checker != nil {
 				nodeCtx.checker.Close()
 			}
-			log.Debug("flow graph node closed", zap.String("nodeName", nodeCtx.node.Name()))
+			log.Ctx(context.TODO()).Debug("flow graph node closed", zap.String("nodeName", nodeCtx.node.Name()))
 			nodeCtx = nodeCtx.downstream
 		}
 	}

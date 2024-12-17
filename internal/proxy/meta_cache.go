@@ -102,10 +102,12 @@ type collectionInfo struct {
 	createdUtcTimestamp   uint64
 	consistencyLevel      commonpb.ConsistencyLevel
 	partitionKeyIsolation bool
+	replicateID           string
 }
 
 type databaseInfo struct {
 	dbID             typeutil.UniqueID
+	properties       []*commonpb.KeyValuePair
 	createdTimestamp uint64
 }
 
@@ -478,6 +480,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		m.collInfo[database] = make(map[string]*collectionInfo)
 	}
 
+	replicateID, _ := common.GetReplicateID(collection.Properties)
 	m.collInfo[database][collectionName] = &collectionInfo{
 		collID:                collection.CollectionID,
 		schema:                schemaInfo,
@@ -486,6 +489,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		createdUtcTimestamp:   collection.CreatedUtcTimestamp,
 		consistencyLevel:      collection.ConsistencyLevel,
 		partitionKeyIsolation: isolation,
+		replicateID:           replicateID,
 	}
 
 	log.Ctx(ctx).Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName),
@@ -571,10 +575,19 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, coll
 	method := "GetCollectionInfo"
 	// if collInfo.collID != collectionID, means that the cache is not trustable
 	// try to get collection according to collectionID
-	if !ok || collInfo.collID != collectionID {
+	// Why use collectionID? Because the collectionID is not always provided in the proxy.
+	if !ok || (collectionID != 0 && collInfo.collID != collectionID) {
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
 
+		if collectionID == 0 {
+			collInfo, err := m.UpdateByName(ctx, database, collectionName)
+			if err != nil {
+				return nil, err
+			}
+			metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+			return collInfo, nil
+		}
 		collInfo, err := m.UpdateByID(ctx, database, collectionID)
 		if err != nil {
 			return nil, err
@@ -625,7 +638,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, database, collectio
 			return nil, err
 		}
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("Reload collection from root coordinator ",
+		log.Ctx(ctx).Debug("Reload collection from root coordinator ",
 			zap.String("collectionName", collectionName),
 			zap.Int64("time (milliseconds) take ", tr.ElapseSpan().Milliseconds()))
 		return collInfo.schema, nil
@@ -844,7 +857,7 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 	if dbOk {
 		delete(m.collInfo[database], collectionName)
 	}
-	log.Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName))
+	log.Ctx(ctx).Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName))
 }
 
 func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string {
@@ -868,7 +881,7 @@ func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID Uniq
 	} else if version != 0 {
 		m.collectionCacheVersion[collectionID] = version
 	}
-	log.Debug("remove collection by id", zap.Int64("id", collectionID),
+	log.Ctx(ctx).Debug("remove collection by id", zap.Int64("id", collectionID),
 		zap.Strings("collection", collNames), zap.Uint64("currentVersion", curVersion),
 		zap.Uint64("version", version), zap.Bool("removeVersion", removeVersion))
 	return collNames
@@ -1191,7 +1204,7 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 }
 
 func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
-	log.Debug("remove database", zap.String("name", database))
+	log.Ctx(ctx).Debug("remove database", zap.String("name", database))
 	m.mu.Lock()
 	delete(m.collInfo, database)
 	delete(m.dbInfo, database)
@@ -1225,6 +1238,7 @@ func (m *MetaCache) GetDatabaseInfo(ctx context.Context, database string) (*data
 		defer m.mu.Unlock()
 		dbInfo := &databaseInfo{
 			dbID:             resp.GetDbID(),
+			properties:       resp.Properties,
 			createdTimestamp: resp.GetCreatedTimestamp(),
 		}
 		m.dbInfo[database] = dbInfo

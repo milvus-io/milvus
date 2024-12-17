@@ -17,6 +17,7 @@
 package grpcproxy
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -33,13 +34,14 @@ import (
 )
 
 // newListenerManager creates a new listener
-func newListenerManager() (l *listenerManager, err error) {
+func newListenerManager(ctx context.Context) (l *listenerManager, err error) {
 	defer func() {
 		if err != nil && l != nil {
 			l.Close()
 		}
 	}()
 
+	log := log.Ctx(ctx)
 	externalGrpcListener, err := netutil.NewListener(
 		netutil.OptIP(paramtable.Get().ProxyGrpcServerCfg.IP),
 		netutil.OptPort(paramtable.Get().ProxyGrpcServerCfg.Port.GetAsInt()),
@@ -64,14 +66,15 @@ func newListenerManager() (l *listenerManager, err error) {
 		externalGrpcListener: externalGrpcListener,
 		internalGrpcListener: internalGrpcListener,
 	}
-	if err = newHTTPListner(l); err != nil {
+	if err = newHTTPListner(ctx, l); err != nil {
 		return
 	}
 	return
 }
 
 // newHTTPListner creates a new http listener
-func newHTTPListner(l *listenerManager) error {
+func newHTTPListner(ctx context.Context, l *listenerManager) error {
+	log := log.Ctx(ctx)
 	HTTPParams := &paramtable.Get().HTTPCfg
 	if !HTTPParams.Enabled.GetAsBool() {
 		// http server is disabled
@@ -192,6 +195,7 @@ func (l *listenerManager) HTTPListener() net.Listener {
 }
 
 func (l *listenerManager) Close() {
+	log := log.Ctx(context.TODO())
 	if l.portShareMode {
 		if l.cmux != nil {
 			log.Info("Proxy close cmux grpc listener")

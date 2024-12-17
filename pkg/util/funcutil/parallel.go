@@ -17,6 +17,7 @@
 package funcutil
 
 import (
+	"context"
 	"reflect"
 	"runtime"
 	"sync"
@@ -51,7 +52,7 @@ func ProcessFuncParallel(total, maxParallel int, f ProcessFunc, fname string) er
 
 	t := time.Now()
 	defer func() {
-		log.Debug(fname, zap.Int("total", total), zap.Any("time cost", time.Since(t)))
+		log.Ctx(context.TODO()).Debug(fname, zap.Int("total", total), zap.Any("time cost", time.Since(t)))
 	}()
 
 	nPerBatch := (total + maxParallel - 1) / maxParallel
@@ -134,6 +135,7 @@ func ProcessTaskParallel(maxParallel int, fname string, tasks ...TaskFunc) error
 	// for _, opt := range opts {
 	// 	opt(&option)
 	// }
+	log := log.Ctx(context.TODO())
 
 	if maxParallel <= 0 {
 		maxParallel = 1

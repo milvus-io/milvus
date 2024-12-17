@@ -78,7 +78,7 @@ func (node *Proxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComp
 		Status: merr.Success(),
 	}
 	code := node.GetStateCode()
-	log.Debug("Proxy current state", zap.String("StateCode", code.String()))
+	log.Ctx(ctx).Debug("Proxy current state", zap.String("StateCode", code.String()))
 	nodeID := common.NotRegisteredID
 	if node.session != nil && node.session.Registered() {
 		nodeID = node.session.ServerID
@@ -160,7 +160,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			}
 			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
 			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
-		case commonpb.MsgType_DropDatabase:
+		case commonpb.MsgType_DropDatabase, commonpb.MsgType_AlterDatabase:
 			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
 		case commonpb.MsgType_AlterCollection, commonpb.MsgType_AlterCollectionField:
 			if request.CollectionID != UniqueID(0) {
@@ -257,8 +257,7 @@ func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateD
 		replicateMsgStream:    node.replicateMsgStream,
 	}
 
-	log := log.With(
-		zap.String("traceID", sp.SpanContext().TraceID().String()),
+	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("dbName", request.DbName),
 	)
@@ -326,8 +325,7 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 		replicateMsgStream:  node.replicateMsgStream,
 	}
 
-	log := log.With(
-		zap.String("traceID", sp.SpanContext().TraceID().String()),
+	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("dbName", request.DbName),
 	)
@@ -394,8 +392,7 @@ func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListData
 		rootCoord:            node.rootCoord,
 	}
 
-	log := log.With(
-		zap.String("traceID", sp.SpanContext().TraceID().String()),
+	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 	)
 
@@ -3770,7 +3767,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		return res, err
 	}
 
-	log.Debug(rpcDone(method))
+	log.Ctx(ctx).Debug(rpcDone(method))
 
 	metrics.ProxyFunctionCall.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -5998,14 +5995,14 @@ func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferN
 
 	method := "TransferNode"
 	if err := ValidateResourceGroupName(request.GetSourceResourceGroup()); err != nil {
-		log.Warn("TransferNode failed",
+		log.Ctx(ctx).Warn("TransferNode failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, "", ""), nil
 	}
 
 	if err := ValidateResourceGroupName(request.GetTargetResourceGroup()); err != nil {
-		log.Warn("TransferNode failed",
+		log.Ctx(ctx).Warn("TransferNode failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, "", ""), nil
@@ -6065,14 +6062,14 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 
 	method := "TransferReplica"
 	if err := ValidateResourceGroupName(request.GetSourceResourceGroup()); err != nil {
-		log.Warn("TransferReplica failed",
+		log.Ctx(ctx).Warn("TransferReplica failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, request.GetDbName(), request.GetCollectionName()), nil
 	}
 
 	if err := ValidateResourceGroupName(request.GetTargetResourceGroup()); err != nil {
-		log.Warn("TransferReplica failed",
+		log.Ctx(ctx).Warn("TransferReplica failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, request.GetDbName(), request.GetCollectionName()), nil
@@ -6328,13 +6325,19 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 		return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
 	}
 
-	if paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool() {
+	collectionReplicateEnable := paramtable.Get().CommonCfg.CollectionReplicateEnable.GetAsBool()
+	ttMsgEnabled := paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool()
+
+	// replicate message can be use in two ways, otherwise return error
+	// 1. collectionReplicateEnable is false and ttMsgEnabled is false, active/standby mode
+	// 2. collectionReplicateEnable is true and ttMsgEnabled is true, data migration mode
+	if (!collectionReplicateEnable && ttMsgEnabled) || (collectionReplicateEnable && !ttMsgEnabled) {
 		return &milvuspb.ReplicateMessageResponse{
 			Status: merr.Status(merr.ErrDenyReplicateMessage),
 		}, nil
 	}
-	var err error
 
+	var err error
 	if req.GetChannelName() == "" {
 		log.Ctx(ctx).Warn("channel name is empty")
 		return &milvuspb.ReplicateMessageResponse{
@@ -6372,6 +6375,18 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 		StartPositions: req.StartPositions,
 		EndPositions:   req.EndPositions,
 	}
+	checkCollectionReplicateProperty := func(dbName, collectionName string) bool {
+		if !collectionReplicateEnable {
+			return true
+		}
+		replicateID, err := GetReplicateID(ctx, dbName, collectionName)
+		if err != nil {
+			log.Warn("get replicate id failed", zap.String("collectionName", collectionName), zap.Error(err))
+			return false
+		}
+		return replicateID != ""
+	}
+
 	// getTsMsgFromConsumerMsg
 	for i, msgBytes := range req.Msgs {
 		header := commonpb.MsgHeader{}
@@ -6391,6 +6406,9 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 		}
 		switch realMsg := tsMsg.(type) {
 		case *msgstream.InsertMsg:
+			if !checkCollectionReplicateProperty(realMsg.GetDbName(), realMsg.GetCollectionName()) {
+				return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.WrapErrCollectionReplicateMode("replicate"))}, nil
+			}
 			assignedSegmentInfos, err := node.segAssigner.GetSegmentID(realMsg.GetCollectionID(), realMsg.GetPartitionID(),
 				realMsg.GetShardName(), uint32(realMsg.NumRows), req.EndTs)
 			if err != nil {
@@ -6404,6 +6422,10 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 			for assignSegmentID := range assignedSegmentInfos {
 				realMsg.SegmentID = assignSegmentID
 				break
+			}
+		case *msgstream.DeleteMsg:
+			if !checkCollectionReplicateProperty(realMsg.GetDbName(), realMsg.GetCollectionName()) {
+				return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.WrapErrCollectionReplicateMode("replicate"))}, nil
 			}
 		}
 		msgPack.Msgs = append(msgPack.Msgs, tsMsg)
@@ -6448,6 +6470,9 @@ func (node *Proxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimest
 		return &milvuspb.AllocTimestampResponse{Status: merr.Status(err)}, nil
 	}
 
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+	)
 	log.Info("AllocTimestamp request receive")
 	ts, err := node.tsoAllocator.AllocOne(ctx)
 	if err != nil {
@@ -6477,10 +6502,10 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
 	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
 		zap.String("collectionName", req.GetCollectionName()),
 		zap.String("partition name", req.GetPartitionName()),
 		zap.Any("files", req.GetFiles()),
-		zap.String("role", typeutil.ProxyRole),
 		zap.Any("options", req.GetOptions()),
 	)
 

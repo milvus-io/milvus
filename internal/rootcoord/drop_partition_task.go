@@ -62,7 +62,7 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 		}
 	}
 	if partID == common.InvalidPartitionID {
-		log.Warn("drop an non-existent partition", zap.String("collection", t.Req.GetCollectionName()), zap.String("partition", t.Req.GetPartitionName()))
+		log.Ctx(ctx).Warn("drop an non-existent partition", zap.String("collection", t.Req.GetCollectionName()), zap.String("partition", t.Req.GetPartitionName()))
 		// make dropping partition idempotent.
 		return nil
 	}
