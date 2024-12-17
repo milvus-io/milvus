@@ -161,6 +161,7 @@ class HybridIndexTestV1 : public testing::Test {
 
         config["index_files"] = index_files;
 
+        ctx.set_for_loading_index(true);
         index_ =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
         index_->Load(milvus::tracer::TraceContext{}, config);
@@ -171,6 +172,8 @@ class HybridIndexTestV1 : public testing::Test {
         nb_ = 10000;
         cardinality_ = 30;
         nullable_ = false;
+        index_version_ = 1001;
+        index_build_id_ = 1001;
     }
     void
     SetUp() override {
@@ -191,8 +194,6 @@ class HybridIndexTestV1 : public testing::Test {
         int64_t partition_id = 2;
         int64_t segment_id = 3;
         int64_t field_id = 101;
-        int64_t index_build_id = 1000;
-        int64_t index_version = 10000;
         std::string root_path = "/tmp/test-bitmap-index";
 
         storage::StorageConfig storage_config;
@@ -204,8 +205,8 @@ class HybridIndexTestV1 : public testing::Test {
              partition_id,
              segment_id,
              field_id,
-             index_build_id,
-             index_version);
+             index_build_id_,
+             index_version_);
     }
 
     virtual ~HybridIndexTestV1() override {
@@ -398,6 +399,8 @@ class HybridIndexTestV1 : public testing::Test {
     std::shared_ptr<storage::ChunkManager> chunk_manager_;
     bool nullable_;
     FixedVector<bool> valid_data_;
+    int index_build_id_;
+    int index_version_;
 };
 
 TYPED_TEST_SUITE_P(HybridIndexTestV1);
@@ -455,6 +458,8 @@ class HybridIndexTestV2 : public HybridIndexTestV1<T> {
         this->nb_ = 10000;
         this->cardinality_ = 2000;
         this->nullable_ = false;
+        this->index_version_ = 1002;
+        this->index_build_id_ = 1002;
     }
 
     virtual ~HybridIndexTestV2() {
@@ -500,6 +505,8 @@ class HybridIndexTestNullable : public HybridIndexTestV1<T> {
         this->nb_ = 10000;
         this->cardinality_ = 2000;
         this->nullable_ = true;
+        this->index_version_ = 1003;
+        this->index_build_id_ = 1003;
     }
 
     virtual ~HybridIndexTestNullable() {

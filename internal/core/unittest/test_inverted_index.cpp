@@ -103,8 +103,8 @@ test_run() {
     int64_t partition_id = 2;
     int64_t segment_id = 3;
     int64_t field_id = 101;
-    int64_t index_build_id = 1000;
-    int64_t index_version = 10000;
+    int64_t index_build_id = 4000;
+    int64_t index_version = 4000;
 
     auto field_meta = test::gen_field_meta(collection_id,
                                            partition_id,
@@ -207,6 +207,7 @@ test_run() {
         Config config;
         config["index_files"] = index_files;
 
+        ctx.set_for_loading_index(true);
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
         index->Load(milvus::tracer::TraceContext{}, config);
@@ -384,8 +385,8 @@ test_string() {
     int64_t partition_id = 2;
     int64_t segment_id = 3;
     int64_t field_id = 101;
-    int64_t index_build_id = 1000;
-    int64_t index_version = 10000;
+    int64_t index_build_id = 4001;
+    int64_t index_version = 4001;
 
     auto field_meta = test::gen_field_meta(collection_id,
                                            partition_id,
@@ -479,6 +480,7 @@ test_string() {
         Config config;
         config["index_files"] = index_files;
 
+        ctx.set_for_loading_index(true);
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
         index->Load(milvus::tracer::TraceContext{}, config);
