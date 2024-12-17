@@ -19,7 +19,9 @@ package pipeline
 import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -45,17 +47,23 @@ func (p *pipeline) Close() {
 }
 
 func NewPipeLine(
-	collectionID UniqueID,
+	collection *Collection,
 	channel string,
 	manager *DataManager,
 	dispatcher msgdispatcher.Client,
 	delegator delegator.ShardDelegator,
 ) (Pipeline, error) {
+	collectionID := collection.ID()
+	replicateID, _ := common.GetReplicateID(collection.Schema().GetProperties())
+	if replicateID == "" {
+		replicateID, _ = common.GetReplicateID(collection.GetDBProperties())
+	}
+	replicateConfig := msgstream.GetReplicateConfig(replicateID, collection.GetDBName(), collection.Schema().Name)
 	pipelineQueueLength := paramtable.Get().QueryNodeCfg.FlowGraphMaxQueueLength.GetAsInt32()
 
 	p := &pipeline{
 		collectionID:   collectionID,
-		StreamPipeline: base.NewPipelineWithStream(dispatcher, nodeCtxTtInterval, enableTtChecker, channel),
+		StreamPipeline: base.NewPipelineWithStream(dispatcher, nodeCtxTtInterval, enableTtChecker, channel, replicateConfig),
 	}
 
 	filterNode := newFilterNode(collectionID, channel, manager, delegator, pipelineQueueLength)

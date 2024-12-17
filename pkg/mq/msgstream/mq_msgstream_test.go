@@ -114,6 +114,8 @@ func TestStream_ConfigEvent(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_Insert(t *testing.T) {
+	Params.Save(Params.CommonCfg.TTMsgEnabled.Key, "false")
+	defer Params.Remove(Params.CommonCfg.TTMsgEnabled.Key)
 	pulsarAddress := getPulsarAddress()
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
@@ -129,12 +131,12 @@ func TestStream_PulsarMsgStream_Insert(t *testing.T) {
 	outputStream := getPulsarOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
 
 	{
-		inputStream.EnableProduce(false)
+		inputStream.ForceEnableProduce(false)
 		err := inputStream.Produce(ctx, &msgPack)
 		require.Error(t, err)
 	}
 
-	inputStream.EnableProduce(true)
+	inputStream.ForceEnableProduce(true)
 	err := inputStream.Produce(ctx, &msgPack)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
@@ -187,6 +189,8 @@ func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_BroadCast(t *testing.T) {
+	Params.Save(Params.CommonCfg.TTMsgEnabled.Key, "false")
+	defer Params.Remove(Params.CommonCfg.TTMsgEnabled.Key)
 	pulsarAddress := getPulsarAddress()
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
@@ -202,12 +206,12 @@ func TestStream_PulsarMsgStream_BroadCast(t *testing.T) {
 	outputStream := getPulsarOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
 
 	{
-		inputStream.EnableProduce(false)
+		inputStream.ForceEnableProduce(false)
 		_, err := inputStream.Broadcast(ctx, &msgPack)
 		require.Error(t, err)
 	}
 
-	inputStream.EnableProduce(true)
+	inputStream.ForceEnableProduce(true)
 	_, err := inputStream.Broadcast(ctx, &msgPack)
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
@@ -704,6 +708,21 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 
+	replicatePack := MsgPack{}
+	replicatePack.Msgs = append(replicatePack.Msgs, &ReplicateMsg{
+		BaseMsg: BaseMsg{
+			BeginTimestamp: 0,
+			EndTimestamp:   0,
+			HashValues:     []uint32{100},
+		},
+		ReplicateMsg: &msgpb.ReplicateMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Replicate,
+				Timestamp: 100,
+			},
+		},
+	})
+
 	msgPack2 := MsgPack{}
 	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5))
 
@@ -715,6 +734,9 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
 	err = inputStream.Produce(ctx, &msgPack1)
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
+
+	err = inputStream.Produce(ctx, &replicatePack)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
 	_, err = inputStream.Broadcast(ctx, &msgPack2)

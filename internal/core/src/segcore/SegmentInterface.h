@@ -19,7 +19,6 @@
 #include <vector>
 #include <index/ScalarIndex.h>
 
-#include "DeletedRecord.h"
 #include "FieldIndexing.h"
 #include "common/Common.h"
 #include "common/Schema.h"
@@ -470,6 +469,12 @@ class SegmentInternalInterface : public SegmentInterface {
         const int64_t* seg_offsets,
         int64_t count,
         const std::vector<std::string>& dynamic_field_names) const = 0;
+
+    virtual std::vector<SegOffset>
+    search_pk(const PkType& pk, Timestamp timestamp) const = 0;
+
+    virtual std::vector<SegOffset>
+    search_pk(const PkType& pk, int64_t insert_barrier) const = 0;
 
  protected:
     mutable std::shared_mutex mutex_;

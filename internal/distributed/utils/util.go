@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"crypto/x509"
 	"os"
 	"time"
@@ -18,6 +19,7 @@ func GracefulStopGRPCServer(s *grpc.Server) {
 	if s == nil {
 		return
 	}
+	log := log.Ctx(context.TODO())
 	ch := make(chan struct{})
 	go func() {
 		defer close(ch)
@@ -37,6 +39,7 @@ func GracefulStopGRPCServer(s *grpc.Server) {
 }
 
 func getTLSCreds(certFile string, keyFile string, nodeType string) credentials.TransportCredentials {
+	log := log.Ctx(context.TODO())
 	log.Info("TLS Server PEM Path", zap.String("path", certFile))
 	log.Info("TLS Server Key Path", zap.String("path", keyFile))
 	creds, err := credentials.NewServerTLSFromFile(certFile, keyFile)
@@ -48,6 +51,7 @@ func getTLSCreds(certFile string, keyFile string, nodeType string) credentials.T
 }
 
 func EnableInternalTLS(NodeType string) grpc.ServerOption {
+	log := log.Ctx(context.TODO())
 	var Params *paramtable.ComponentParam = paramtable.Get()
 	certFile := Params.InternalTLSCfg.InternalTLSServerPemPath.GetValue()
 	keyFile := Params.InternalTLSCfg.InternalTLSServerKeyPath.GetValue()
@@ -63,6 +67,7 @@ func EnableInternalTLS(NodeType string) grpc.ServerOption {
 }
 
 func CreateCertPoolforClient(caFile string, nodeType string) (*x509.CertPool, error) {
+	log := log.Ctx(context.TODO())
 	log.Info("Creating cert pool for " + nodeType)
 	log.Info("Cert file path:", zap.String("caFile", caFile))
 	certPool := x509.NewCertPool()

@@ -216,6 +216,7 @@ func (node *Proxy) initRateCollector() error {
 
 // Init initialize proxy.
 func (node *Proxy) Init() error {
+	log := log.Ctx(node.ctx)
 	log.Info("init session for Proxy")
 	if err := node.initSession(); err != nil {
 		log.Warn("failed to init Proxy's session", zap.Error(err))
@@ -277,7 +278,7 @@ func (node *Proxy) Init() error {
 			zap.Error(err))
 		return err
 	}
-	node.replicateMsgStream.EnableProduce(true)
+	node.replicateMsgStream.ForceEnableProduce(true)
 	node.replicateMsgStream.AsProducer(node.ctx, []string{replicateMsgChannel})
 
 	node.sched, err = newTaskScheduler(node.ctx, node.tsoAllocator, node.factory)
@@ -309,6 +310,7 @@ func (node *Proxy) Init() error {
 
 // sendChannelsTimeTickLoop starts a goroutine that synchronizes the time tick information.
 func (node *Proxy) sendChannelsTimeTickLoop() {
+	log := log.Ctx(node.ctx)
 	node.wg.Add(1)
 	go func() {
 		defer node.wg.Done()
@@ -392,6 +394,7 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 
 // Start starts a proxy node.
 func (node *Proxy) Start() error {
+	log := log.Ctx(node.ctx)
 	if err := node.sched.Start(); err != nil {
 		log.Warn("failed to start task scheduler", zap.String("role", typeutil.ProxyRole), zap.Error(err))
 		return err
@@ -441,6 +444,7 @@ func (node *Proxy) Start() error {
 
 // Stop stops a proxy node.
 func (node *Proxy) Stop() error {
+	log := log.Ctx(node.ctx)
 	if node.rowIDAllocator != nil {
 		node.rowIDAllocator.Close()
 		log.Info("close id allocator", zap.String("role", typeutil.ProxyRole))

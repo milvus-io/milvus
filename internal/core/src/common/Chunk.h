@@ -243,7 +243,7 @@ class SparseFloatVectorChunk : public Chunk {
         for (int i = 0; i < row_nums; i++) {
             vec_[i] = {(offsets_ptr[i + 1] - offsets_ptr[i]) /
                            knowhere::sparse::SparseRow<float>::element_size(),
-                       (uint8_t*)(data + offsets_ptr[i]),
+                       reinterpret_cast<uint8_t*>(data + offsets_ptr[i]),
                        false};
             dim_ = std::max(dim_, vec_[i].dim());
         }
