@@ -468,7 +468,7 @@ func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID Uni
 		mt.generalCnt += pn * int(coll.ShardsNum)
 		metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Inc()
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(pn))
-	default:
+	case pb.CollectionState_CollectionDropping:
 		mt.generalCnt -= pn * int(coll.ShardsNum)
 		metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Dec()
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(pn))
@@ -975,7 +975,7 @@ func (mt *MetaTable) ChangePartitionState(ctx context.Context, collectionID Uniq
 				mt.generalCnt += int(coll.ShardsNum) // 1 partition * shardNum
 				// support Dynamic load/release partitions
 				metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
-			default:
+			case pb.PartitionState_PartitionDropping:
 				mt.generalCnt -= int(coll.ShardsNum) // 1 partition * shardNum
 				metrics.RootCoordNumOfPartitions.WithLabelValues().Dec()
 			}
