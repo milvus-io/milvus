@@ -247,6 +247,10 @@ func (l *RotateWriter) Rotate() error {
 }
 
 func (l *RotateWriter) rotate() error {
+	if l.size == 0 {
+		return nil
+	}
+
 	if err := l.closeFile(); err != nil {
 		return err
 	}
@@ -330,7 +334,7 @@ func (l *RotateWriter) millRunOnce() error {
 	}
 
 	if l.maxBackups >= 0 && l.maxBackups < len(files) {
-		for _, f := range files[l.maxBackups:] {
+		for _, f := range files[:len(files)-l.maxBackups] {
 			errRemove := os.Remove(path.Join(l.dir(), f.fileName))
 			if err == nil && errRemove != nil {
 				err = errRemove
@@ -436,7 +440,6 @@ func (l *RotateWriter) oldLogFiles() ([]logInfo, error) {
 		}
 		if t, err := timeFromName(f.Name(), prefix, ext); err == nil {
 			logFiles = append(logFiles, logInfo{t, f.Name()})
-			continue
 		}
 	}
 
