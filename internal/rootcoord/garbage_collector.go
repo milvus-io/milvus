@@ -19,11 +19,14 @@ package rootcoord
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/pkg/log"
 	ms "github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -31,9 +34,9 @@ import (
 
 //go:generate mockery --name=GarbageCollector --outpkg=mockrootcoord --filename=garbage_collector.go --with-expecter --testonly
 type GarbageCollector interface {
-	ReDropCollection(collMeta *model.Collection, ts Timestamp)
+	ReDropCollection(collMeta *model.Collection, dbName string, ts Timestamp)
 	RemoveCreatingCollection(collMeta *model.Collection)
-	ReDropPartition(dbID int64, pChannels, vchannels []string, partition *model.Partition, ts Timestamp)
+	ReDropPartition(collMeta *model.Collection, partition *model.Partition, dbName string, ts Timestamp)
 	RemoveCreatingPartition(dbID int64, partition *model.Partition, ts Timestamp)
 	GcCollectionData(ctx context.Context, coll *model.Collection) (ddlTs Timestamp, err error)
 	GcPartitionData(ctx context.Context, pChannels, vchannels []string, partition *model.Partition) (ddlTs Timestamp, err error)
@@ -47,41 +50,25 @@ func newBgGarbageCollector(s *Core) *bgGarbageCollector {
 	return &bgGarbageCollector{s: s}
 }
 
-func (c *bgGarbageCollector) ReDropCollection(collMeta *model.Collection, ts Timestamp) {
+func (c *bgGarbageCollector) ReDropCollection(collMeta *model.Collection, dbName string, ts Timestamp) {
 	// TODO: remove this after data gc can be notified by rpc.
 	c.s.chanTimeTick.addDmlChannels(collMeta.PhysicalChannelNames...)
 
-	redo := newBaseRedoTask(c.s.stepExecutor)
-	redo.AddAsyncStep(&releaseCollectionStep{
-		baseStep:     baseStep{core: c.s},
-		collectionID: collMeta.CollectionID,
-	})
-	redo.AddAsyncStep(&dropIndexStep{
-		baseStep: baseStep{core: c.s},
-		collID:   collMeta.CollectionID,
-		partIDs:  nil,
-	})
-	redo.AddAsyncStep(&deleteCollectionDataStep{
-		baseStep: baseStep{core: c.s},
-		coll:     collMeta,
-		isSkip:   !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
-	})
-	redo.AddAsyncStep(&removeDmlChannelsStep{
-		baseStep:  baseStep{core: c.s},
-		pChannels: collMeta.PhysicalChannelNames,
-	})
-	redo.AddAsyncStep(newConfirmGCStep(c.s, collMeta.CollectionID, allPartition))
-	redo.AddAsyncStep(&deleteCollectionMetaStep{
-		baseStep:     baseStep{core: c.s},
-		collectionID: collMeta.CollectionID,
-		// This ts is less than the ts when we notify data nodes to drop collection, but it's OK since we have already
-		// marked this collection as deleted. If we want to make this ts greater than the notification's ts, we should
-		// wrap a step who will have these three children and connect them with ts.
-		ts: ts,
-	})
+	// meta cache of all aliases should also be cleaned.
+	aliases := c.s.meta.ListAliasesByID(context.Background(), collMeta.CollectionID)
 
-	// err is ignored since no sync steps will be executed.
-	_ = redo.Execute(context.Background())
+	task := newDropCollectionRedoTask(c.s, collMeta, dbName, aliases, ts, true)
+	if err := task.Execute(context.Background()); err != nil {
+		log.Warn("Redo drop collection failed, but the error is ignored",
+			zap.Int64("collectionID", collMeta.CollectionID),
+			zap.String("collectionName", collMeta.Name),
+			zap.Error(err))
+		return
+	}
+	log.Info("Redo drop collection success",
+		zap.Int64("collectionID", collMeta.CollectionID),
+		zap.String("collectionName", collMeta.Name),
+		zap.Uint64("ts", ts))
 }
 
 func (c *bgGarbageCollector) RemoveCreatingCollection(collMeta *model.Collection) {
@@ -100,8 +87,8 @@ func (c *bgGarbageCollector) RemoveCreatingCollection(collMeta *model.Collection
 		isSkip: !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
 	})
 	redo.AddAsyncStep(&removeDmlChannelsStep{
-		baseStep:  baseStep{core: c.s},
-		pChannels: collMeta.PhysicalChannelNames,
+		baseStep: baseStep{core: c.s},
+		collInfo: collMeta,
 	})
 	redo.AddAsyncStep(&deleteCollectionMetaStep{
 		baseStep:     baseStep{core: c.s},
@@ -113,36 +100,17 @@ func (c *bgGarbageCollector) RemoveCreatingCollection(collMeta *model.Collection
 	_ = redo.Execute(context.Background())
 }
 
-func (c *bgGarbageCollector) ReDropPartition(dbID int64, pChannels, vchannels []string, partition *model.Partition, ts Timestamp) {
+func (c *bgGarbageCollector) ReDropPartition(collMeta *model.Collection, partition *model.Partition, dbName string, ts Timestamp) {
 	// TODO: remove this after data gc can be notified by rpc.
-	c.s.chanTimeTick.addDmlChannels(pChannels...)
+	c.s.chanTimeTick.addDmlChannels(collMeta.PhysicalChannelNames...)
+	logger := log.With(zap.Int64("collectionID", collMeta.CollectionID), zap.Int64("partitionID", partition.PartitionID), zap.Uint64("ts", ts))
 
-	redo := newBaseRedoTask(c.s.stepExecutor)
-	redo.AddAsyncStep(&deletePartitionDataStep{
-		baseStep:  baseStep{core: c.s},
-		pchans:    pChannels,
-		vchans:    vchannels,
-		partition: partition,
-		isSkip:    !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
-	})
-	redo.AddAsyncStep(&removeDmlChannelsStep{
-		baseStep:  baseStep{core: c.s},
-		pChannels: pChannels,
-	})
-	redo.AddAsyncStep(newConfirmGCStep(c.s, partition.CollectionID, partition.PartitionID))
-	redo.AddAsyncStep(&removePartitionMetaStep{
-		baseStep:     baseStep{core: c.s},
-		dbID:         dbID,
-		collectionID: partition.CollectionID,
-		partitionID:  partition.PartitionID,
-		// This ts is less than the ts when we notify data nodes to drop partition, but it's OK since we have already
-		// marked this partition as deleted. If we want to make this ts greater than the notification's ts, we should
-		// wrap a step who will have these children and connect them with ts.
-		ts: ts,
-	})
-
-	// err is ignored since no sync steps will be executed.
-	_ = redo.Execute(context.Background())
+	task := newDropPartitionTask(c.s, collMeta, partition, dbName, ts, true)
+	if err := task.Execute(context.Background()); err != nil {
+		logger.Warn("Redo drop partition failed, but the error is ignored", zap.Error(err))
+		return
+	}
+	logger.Info("Redo drop partition success")
 }
 
 func (c *bgGarbageCollector) RemoveCreatingPartition(dbID int64, partition *model.Partition, ts Timestamp) {
@@ -168,7 +136,7 @@ func (c *bgGarbageCollector) RemoveCreatingPartition(dbID int64, partition *mode
 
 func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model.Collection) (ddlTs Timestamp, err error) {
 	if streamingutil.IsStreamingServiceEnabled() {
-		return c.notifyCollectionGcByStreamingService(ctx, coll)
+		return notifyCollectionGcByStreamingService(ctx, coll, c.s.session.GetServerID())
 	}
 
 	ts, err := c.s.tsoAllocator.GenerateTSO(1)
@@ -184,7 +152,7 @@ func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		DropCollectionRequest: c.generateDropRequest(coll, ts),
+		DropCollectionRequest: generateDropRequest(coll, ts, c.s.session.GetServerID()),
 	}
 	msgPack.Msgs = append(msgPack.Msgs, msg)
 	if err := c.s.chanTimeTick.broadcastDmlChannels(coll.PhysicalChannelNames, &msgPack); err != nil {
@@ -194,20 +162,20 @@ func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model
 	return ts, nil
 }
 
-func (c *bgGarbageCollector) generateDropRequest(coll *model.Collection, ts uint64) *msgpb.DropCollectionRequest {
+func generateDropRequest(coll *model.Collection, ts uint64, serverID int64) *msgpb.DropCollectionRequest {
 	return &msgpb.DropCollectionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DropCollection),
 			commonpbutil.WithTimeStamp(ts),
-			commonpbutil.WithSourceID(c.s.session.ServerID),
+			commonpbutil.WithSourceID(serverID),
 		),
 		CollectionName: coll.Name,
 		CollectionID:   coll.CollectionID,
 	}
 }
 
-func (c *bgGarbageCollector) notifyCollectionGcByStreamingService(ctx context.Context, coll *model.Collection) (uint64, error) {
-	req := c.generateDropRequest(coll, 0) // ts is given by streamingnode.
+func notifyCollectionGcByStreamingService(ctx context.Context, coll *model.Collection, serverID int64) (uint64, error) {
+	req := generateDropRequest(coll, 0, serverID) // ts is given by streamingnode.
 
 	msgs := make([]message.MutableMessage, 0, len(coll.VirtualChannelNames))
 	for _, vchannel := range coll.VirtualChannelNames {

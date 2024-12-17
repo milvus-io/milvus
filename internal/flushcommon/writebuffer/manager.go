@@ -34,8 +34,7 @@ type BufferManager interface {
 	FlushChannel(ctx context.Context, channel string, flushTs uint64) error
 	// RemoveChannel removes a write buffer from manager.
 	RemoveChannel(channel string)
-	// DropChannel remove write buffer and perform drop.
-	DropChannel(channel string)
+	// DropPartitions remove the partitions from write buffer.
 	DropPartitions(channel string, partitionIDs []int64)
 	// BufferData put data into channel write buffer.
 	BufferData(channel string, insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error
@@ -169,7 +168,6 @@ func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, 
 
 	_, loaded := m.buffers.GetOrInsert(channel, buf)
 	if loaded {
-		buf.Close(context.Background(), false)
 		return merr.WrapErrChannelReduplicate(channel)
 	}
 	return nil
@@ -253,25 +251,12 @@ func (m *bufferManager) NotifyCheckpointUpdated(channel string, ts uint64) {
 // RemoveChannel remove channel WriteBuffer from manager.
 // this method discards all buffered data since datanode no longer has the ownership
 func (m *bufferManager) RemoveChannel(channel string) {
-	buf, loaded := m.buffers.GetAndRemove(channel)
-	if !loaded {
-		log.Warn("failed to remove channel, channel not maintained in manager", zap.String("channel", channel))
-		return
-	}
-
-	buf.Close(context.Background(), false)
-}
-
-// DropChannel removes channel WriteBuffer and process `DropChannel`
-// this method will save all buffered data
-func (m *bufferManager) DropChannel(channel string) {
-	buf, loaded := m.buffers.GetAndRemove(channel)
+	_, loaded := m.buffers.GetAndRemove(channel)
 	if !loaded {
 		log.Warn("failed to drop channel, channel not maintained in manager", zap.String("channel", channel))
 		return
 	}
-
-	buf.Close(context.Background(), true)
+	log.Info("remove channel from buffer manager", zap.String("channel", channel))
 }
 
 func (m *bufferManager) DropPartitions(channel string, partitionIDs []int64) {

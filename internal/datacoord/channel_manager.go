@@ -47,6 +47,7 @@ type ChannelManager interface {
 	DeleteNode(nodeID UniqueID) error
 	Watch(ctx context.Context, ch RWChannel) error
 	Release(nodeID UniqueID, channelName string) error
+	ReleaseByCollectionID(collectionID int64) error
 
 	Match(nodeID UniqueID, channel string) bool
 	FindWatcher(channel string) (UniqueID, error)
@@ -233,6 +234,29 @@ func (m *ChannelManagerImpl) Release(nodeID UniqueID, channelName string) error 
 	defer m.mu.Unlock()
 	updates := NewChannelOpSet(NewChannelOp(nodeID, Release, ch))
 	return m.execute(updates)
+}
+
+func (m *ChannelManagerImpl) ReleaseByCollectionID(collectionID int64) error {
+	logger := log.With(zap.Int64("collectionID", collectionID))
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	nodeChannels := m.store.GetNodeChannelsBy(WithAllNodes(), WithCollectionIDV2(collectionID))
+	updates := make([]*ChannelOp, 0)
+	for _, nodeChannel := range nodeChannels {
+		for _, ch := range nodeChannel.Channels {
+			if nodeChannel.NodeID != bufferID {
+				logger.Info("release channel from watched node",
+					zap.Int64("nodeID", nodeChannel.NodeID),
+					zap.String("channel", ch.GetName()))
+				updates = append(updates, NewChannelOp(nodeChannel.NodeID, Release, ch))
+			}
+		}
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	return m.execute(NewChannelOpSet(updates...))
 }
 
 func (m *ChannelManagerImpl) Watch(ctx context.Context, ch RWChannel) error {
@@ -456,7 +480,12 @@ func (m *ChannelManagerImpl) AdvanceChannelState(ctx context.Context) {
 
 	// Processing standby channels
 	updatedStandbys := false
-	updatedStandbys = m.advanceStandbys(ctx, standbys)
+	if !streamingutil.IsStreamingServiceEnabled() {
+		// If streaming service is enabled, the channel manager no longer manages channels.
+		// So the standby channels should be processed by channel manager.
+		// TODO: ChannelManager can be removed in future at 3.0.0.
+		updatedStandbys = m.advanceStandbys(ctx, standbys)
+	}
 	updatedToCheckes := m.advanceToChecks(ctx, toChecks)
 
 	var (

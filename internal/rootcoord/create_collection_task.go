@@ -503,6 +503,26 @@ func (t *createCollectionTask) addChannelsAndGetStartPositions(ctx context.Conte
 	return t.core.chanTimeTick.broadcastMarkDmlChannels(t.channels.physicalChannels, msg)
 }
 
+func removeChannels(
+	ctx context.Context,
+	core *Core,
+	collInfo *model.Collection,
+) {
+	core.chanTimeTick.removeDmlChannels(collInfo.PhysicalChannelNames...)
+	if streamingutil.IsStreamingServiceEnabled() {
+		if _, err := notifyCollectionGcByStreamingService(
+			ctx,
+			collInfo,
+			core.session.GetServerID()); err != nil {
+			log.Warn("broadcast drop collection message into streaming service failed", zap.Error(err))
+		}
+	}
+}
+
+func (t *createCollectionTask) removeChannels(ctx context.Context, collInfo *model.Collection) {
+	removeChannels(ctx, t.core, collInfo)
+}
+
 func (t *createCollectionTask) broadcastCreateCollectionMsgIntoStreamingService(ctx context.Context, ts uint64) (map[string][]byte, error) {
 	req := t.genCreateCollectionRequest()
 	// dispatch the createCollectionMsg into all vchannel.
@@ -559,10 +579,6 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
-	vchanNames := t.channels.virtualChannels
-	chanNames := t.channels.physicalChannels
-
 	partitions := make([]*model.Partition, len(partIDs))
 	for i, partID := range partIDs {
 		partitions[i] = &model.Partition{
@@ -574,7 +590,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	collInfo := model.Collection{
+	collInfo := &model.Collection{
 		CollectionID:         collID,
 		DBID:                 t.dbID,
 		Name:                 t.schema.Name,
@@ -583,8 +599,8 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		AutoID:               t.schema.AutoID,
 		Fields:               model.UnmarshalFieldModels(t.schema.Fields),
 		Functions:            model.UnmarshalFunctionModels(t.schema.Functions),
-		VirtualChannelNames:  vchanNames,
-		PhysicalChannelNames: chanNames,
+		VirtualChannelNames:  t.channels.virtualChannels,
+		PhysicalChannelNames: t.channels.physicalChannels,
 		ShardsNum:            t.Req.ShardsNum,
 		ConsistencyLevel:     t.Req.ConsistencyLevel,
 		CreateTime:           ts,
@@ -593,6 +609,14 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		Properties:           t.Req.Properties,
 		EnableDynamicField:   t.schema.EnableDynamicField,
 	}
+
+	startPositions, err := t.addChannelsAndGetStartPositions(ctx, ts)
+	if err != nil {
+		// ugly here, since we must get start positions first.
+		t.removeChannels(ctx, collInfo)
+		return err
+	}
+	collInfo.StartPositions = toKeyDataPairs(startPositions)
 
 	// We cannot check the idempotency inside meta table when adding collection, since we'll execute duplicate steps
 	// if add collection successfully due to idempotency check. Some steps may be risky to be duplicate executed if they
@@ -603,6 +627,10 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 	if err == nil {
 		equal := existedCollInfo.Equal(*clone)
 		if !equal {
+			// The operation of removeDmlChannels may be lost if the rootcoord crashes.
+			// Because the meta is not written, but the channels are added.
+			// TODO: After 3.0, we should fix this problem by provide a persistent task which can be recovered from wal.
+			t.removeChannels(ctx, collInfo)
 			return fmt.Errorf("create duplicate collection with different parameters, collection: %s", t.Req.GetCollectionName())
 		}
 		// make creating collection idempotent.
@@ -612,7 +640,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 
 	// TODO: The create collection is not idempotent for other component, such as wal.
 	// we need to make the create collection operation must success after some persistent operation, refactor it in future.
-	startPositions, err := t.addChannelsAndGetStartPositions(ctx, ts)
+	startPositions, err = t.addChannelsAndGetStartPositions(ctx, ts)
 	if err != nil {
 		// ugly here, since we must get start positions first.
 		t.core.chanTimeTick.removeDmlChannels(t.channels.physicalChannels...)
@@ -630,12 +658,12 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
 	}, &nullStep{})
 	undoTask.AddStep(&nullStep{}, &removeDmlChannelsStep{
-		baseStep:  baseStep{core: t.core},
-		pChannels: chanNames,
+		baseStep: baseStep{core: t.core},
+		collInfo: collInfo,
 	}) // remove dml channels if any error occurs.
 	undoTask.AddStep(&addCollectionMetaStep{
 		baseStep: baseStep{core: t.core},
-		coll:     &collInfo,
+		coll:     collInfo,
 	}, &deleteCollectionMetaStep{
 		baseStep:     baseStep{core: t.core},
 		collectionID: collID,

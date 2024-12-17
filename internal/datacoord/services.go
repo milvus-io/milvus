@@ -560,6 +560,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 	// Update segment info in memory and meta.
 	if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+		if merr.IsCollectionOrPartitionDrop(err) {
+			log.Warn("SaveBinlogPaths ignored, collection or partition is dropped", zap.Error(err))
+			return merr.Success(), nil
+		}
 		log.Error("save binlog and checkpoints failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -588,6 +592,65 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 
 	return merr.Success(), nil
+}
+
+func (s *Server) DropCollection(ctx context.Context, req *datapb.DropCollectionRequest) (*datapb.DropCollectionResponse, error) {
+	if err := s.dropCollection(ctx, req); err != nil {
+		return &datapb.DropCollectionResponse{Status: merr.Status(err)}, nil
+	}
+	return &datapb.DropCollectionResponse{Status: merr.Success()}, nil
+}
+
+func (s *Server) dropCollection(ctx context.Context, req *datapb.DropCollectionRequest) error {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return err
+	}
+	logger := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionId()), zap.Strings("vchannels", req.GetVchannelNames()))
+	logger.Info("receive DropCollection request")
+
+	// release all channels of the collection.
+	if err := s.channelManager.ReleaseByCollectionID(req.GetCollectionId()); err != nil {
+		logger.Warn("failed to release channels of collection", zap.Error(err))
+		// TODO: why we can ignore the channel release error?
+	}
+
+	// release all segments of the collection.
+	for _, channel := range req.GetVchannelNames() {
+		err := s.meta.UpdateDropChannelSegmentInfo(ctx, channel, nil)
+		if err != nil {
+			log.Error("Update Drop Channel segment info failed", zap.String("channel", channel), zap.Error(err))
+			return err
+		}
+
+		s.segmentManager.DropSegmentsOfChannel(ctx, channel)
+		s.compactionHandler.removeTasksByChannel(channel)
+		metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
+		s.meta.MarkChannelCheckpointDropped(ctx, channel)
+	}
+	return nil
+}
+
+// dropPartition drops partition and all segments in it
+func (s *Server) DropPartition(ctx context.Context, req *datapb.DropPartitionRequest) (*datapb.DropPartitionResponse, error) {
+	if err := s.dropPartition(ctx, req); err != nil {
+		return &datapb.DropPartitionResponse{Status: merr.Status(err)}, nil
+	}
+	return &datapb.DropPartitionResponse{Status: merr.Success()}, nil
+}
+
+func (s *Server) dropPartition(ctx context.Context, req *datapb.DropPartitionRequest) error {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return err
+	}
+	log.Ctx(ctx).Info("receive DropParitition request",
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.Int64("partitionID", req.GetPartitionId()))
+
+	// release all segments of the partition.
+	for _, vchannel := range req.Vchannels {
+		s.segmentManager.DropSegmentsOfPartition(ctx, vchannel, req.GetPartitionId())
+	}
+	return s.meta.DropSegmentsOfPartition(ctx, req.GetPartitionId())
 }
 
 // DropVirtualChannel notifies vchannel dropped
@@ -656,28 +719,6 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 
 	// no compaction triggered in Drop procedure
 	return resp, nil
-}
-
-// SetSegmentState reset the state of the given segment.
-func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest) (*datapb.SetSegmentStateResponse, error) {
-	log := log.Ctx(ctx)
-	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return &datapb.SetSegmentStateResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	err := s.meta.SetState(ctx, req.GetSegmentId(), req.GetNewState())
-	if err != nil {
-		log.Error("failed to updated segment state in dataCoord meta",
-			zap.Int64("segmentID", req.SegmentId),
-			zap.String("newState", req.GetNewState().String()))
-		return &datapb.SetSegmentStateResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	return &datapb.SetSegmentStateResponse{
-		Status: merr.Success(),
-	}, nil
 }
 
 func (s *Server) GetStateCode() commonpb.StateCode {
@@ -1527,22 +1568,6 @@ func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeT
 	}
 
 	return nil
-}
-
-// MarkSegmentsDropped marks the given segments as `Dropped`.
-// An error status will be returned and error will be logged, if we failed to mark *all* segments.
-// Deprecated, do not use it
-func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
-	log.Ctx(ctx).Info("marking segments dropped", zap.Int64s("segments", req.GetSegmentIds()))
-	var err error
-	for _, segID := range req.GetSegmentIds() {
-		if err = s.meta.SetState(ctx, segID, commonpb.SegmentState_Dropped); err != nil {
-			// Fail-open.
-			log.Ctx(ctx).Error("failed to set segment state as dropped", zap.Int64("segmentID", segID))
-			break
-		}
-	}
-	return merr.Status(err), nil
 }
 
 func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {

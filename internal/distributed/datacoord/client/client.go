@@ -782,3 +782,15 @@ func (c *Client) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest
 		return client.ListIndexes(ctx, in)
 	})
 }
+
+func (c *Client) DropCollection(ctx context.Context, in *datapb.DropCollectionRequest, opts ...grpc.CallOption) (*datapb.DropCollectionResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.DropCollectionResponse, error) {
+		return client.DropCollection(ctx, in)
+	})
+}
+
+func (c *Client) DropPartition(ctx context.Context, in *datapb.DropPartitionRequest, opts ...grpc.CallOption) (*datapb.DropPartitionResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.DropPartitionResponse, error) {
+		return client.DropPartition(ctx, in)
+	})
+}
