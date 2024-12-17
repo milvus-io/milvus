@@ -117,10 +117,6 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetFlushState.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadOnly.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadWrite.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreatePrivilegeGroup.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropPrivilegeGroup.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListPrivilegeGroups.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeOperatePrivilegeGroup.String()),
 		},
 		commonpb.ObjectType_Global.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String()),
