@@ -22,8 +22,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestHandlerClient(t *testing.T) {
@@ -50,7 +50,7 @@ func TestHandlerClient(t *testing.T) {
 
 	pK := 0
 	handler := &handlerClientImpl{
-		lifetime:         lifetime.NewLifetime(lifetime.Working),
+		lifetime:         typeutil.NewLifetime(),
 		service:          service,
 		rb:               rb,
 		watcher:          w,
