@@ -242,7 +242,7 @@ func CleanSession(metaPath string, etcdEndpoints []string, sessionSuffix []strin
 	for _, key := range keys {
 		_, _ = etcdCli.Delete(ctx, key)
 	}
-	log.Info("clean sessions from etcd", zap.Any("keys", keys))
+	log.Ctx(ctx).Info("clean sessions from etcd", zap.Any("keys", keys))
 	return nil
 }
 
@@ -259,6 +259,7 @@ func getSessionPaths(ctx context.Context, client *clientv3.Client, metaPath stri
 
 // filterUnmatchedKey skip active keys that don't match completed key, the latest active key may from standby server
 func addActiveKeySuffix(ctx context.Context, client *clientv3.Client, sessionPathPrefix string, sessionSuffix []string) []string {
+	log := log.Ctx(ctx)
 	suffixSet := lo.SliceToMap(sessionSuffix, func(t string) (string, struct{}) {
 		return t, struct{}{}
 	})

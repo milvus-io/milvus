@@ -57,10 +57,10 @@ func (d *DataNode) Prepare() error {
 // Run starts service
 func (d *DataNode) Run() error {
 	if err := d.svr.Run(); err != nil {
-		log.Error("DataNode starts error", zap.Error(err))
+		log.Ctx(d.ctx).Error("DataNode starts error", zap.Error(err))
 		return err
 	}
-	log.Debug("Datanode successfully started")
+	log.Ctx(d.ctx).Info("Datanode successfully started")
 	return nil
 }
 

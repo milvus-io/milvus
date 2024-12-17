@@ -6679,7 +6679,7 @@ class TestQueryTextMatchNegative(TestcaseBase):
         default_schema = CollectionSchema(
             fields=default_fields, description="test collection"
         )
-        error = {ct.err_code: 2000, ct.err_msg: "invalid tokenizer parameters"}
+        error = {ct.err_code: 2000, ct.err_msg: "unsupported tokenizer"}
         self.init_collection_wrap(
             name=cf.gen_unique_str(prefix),
             schema=default_schema,

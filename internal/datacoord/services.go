@@ -690,7 +690,7 @@ func (s *Server) GetStateCode() commonpb.StateCode {
 // GetComponentStates returns DataCoord's current state
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	code := s.GetStateCode()
-	log.Debug("DataCoord current state", zap.String("StateCode", code.String()))
+	log.Ctx(ctx).Debug("DataCoord current state", zap.String("StateCode", code.String()))
 	nodeID := common.NotRegisteredID
 	if s.session != nil && s.session.Registered() {
 		nodeID = s.session.GetServerID() // or Params.NodeID
@@ -951,7 +951,7 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 		return resp, nil
 	}
 
-	channel := NewRWChannel(req.GetVchannel(), collectionID, nil, collection.Schema, 0) // TODO: remove RWChannel, just use vchannel + collectionID
+	channel := NewRWChannel(req.GetVchannel(), collectionID, nil, collection.Schema, 0, nil) // TODO: remove RWChannel, just use vchannel + collectionID
 	channelInfo := s.handler.GetDataVChanPositions(channel, allPartitionID)
 	if channelInfo.SeekPosition == nil {
 		log.Warn("channel recovery start position is not found, may collection is on creating")
@@ -1230,6 +1230,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Strings("channels", req.GetChannelNames()),
+		zap.Any("dbProperties", req.GetDbProperties()),
 	)
 	log.Info("receive watch channels request")
 	resp := &datapb.WatchChannelsResponse{
@@ -1242,7 +1243,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		}, nil
 	}
 	for _, channelName := range req.GetChannelNames() {
-		ch := NewRWChannel(channelName, req.GetCollectionID(), req.GetStartPositions(), req.GetSchema(), req.GetCreateTimestamp())
+		ch := NewRWChannel(channelName, req.GetCollectionID(), req.GetStartPositions(), req.GetSchema(), req.GetCreateTimestamp(), req.GetDbProperties())
 		err := s.channelManager.Watch(ctx, ch)
 		if err != nil {
 			log.Warn("fail to watch channelName", zap.Error(err))
@@ -1528,12 +1529,12 @@ func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeT
 // An error status will be returned and error will be logged, if we failed to mark *all* segments.
 // Deprecated, do not use it
 func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
-	log.Info("marking segments dropped", zap.Int64s("segments", req.GetSegmentIds()))
+	log.Ctx(ctx).Info("marking segments dropped", zap.Int64s("segments", req.GetSegmentIds()))
 	var err error
 	for _, segID := range req.GetSegmentIds() {
 		if err = s.meta.SetState(ctx, segID, commonpb.SegmentState_Dropped); err != nil {
 			// Fail-open.
-			log.Error("failed to set segment state as dropped", zap.Int64("segmentID", segID))
+			log.Ctx(ctx).Error("failed to set segment state as dropped", zap.Int64("segmentID", segID))
 			break
 		}
 	}
@@ -1562,6 +1563,7 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 			StartPositions: req.GetStartPositions(),
 			Properties:     properties,
 			DatabaseID:     req.GetDbID(),
+			DatabaseName:   req.GetSchema().GetDbName(),
 			VChannelNames:  req.GetVChannels(),
 		}
 		s.meta.AddCollection(collInfo)
@@ -1664,7 +1666,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		Status: merr.Success(),
 	}
 
-	log := log.With(zap.Int64("collection", in.GetCollectionID()),
+	log := log.Ctx(ctx).With(zap.Int64("collection", in.GetCollectionID()),
 		zap.Int64s("partitions", in.GetPartitionIDs()),
 		zap.Strings("channels", in.GetChannelNames()))
 	log.Info("receive import request", zap.Any("files", in.GetFiles()), zap.Any("options", in.GetOptions()))
@@ -1749,7 +1751,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 }
 
 func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {
-	log := log.With(zap.String("jobID", in.GetJobID()))
+	log := log.Ctx(ctx).With(zap.String("jobID", in.GetJobID()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.GetImportProgressResponse{
 			Status: merr.Status(err),

@@ -82,11 +82,11 @@ func (s *Server) createIndexForSegment(ctx context.Context, segment *SegmentInfo
 
 func (s *Server) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
 	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() && !segment.GetIsSorted() && !segment.GetIsImporting() {
-		log.Debug("segment is not sorted by pk, skip create indexes", zap.Int64("segmentID", segment.GetID()))
+		log.Ctx(ctx).Debug("segment is not sorted by pk, skip create indexes", zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}
 	if segment.GetLevel() == datapb.SegmentLevel_L0 {
-		log.Debug("segment is level zero, skip create indexes", zap.Int64("segmentID", segment.GetID()))
+		log.Ctx(ctx).Debug("segment is level zero, skip create indexes", zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}
 
@@ -95,7 +95,7 @@ func (s *Server) createIndexesForSegment(ctx context.Context, segment *SegmentIn
 	for _, index := range indexes {
 		if _, ok := indexIDToSegIndexes[index.IndexID]; !ok {
 			if err := s.createIndexForSegment(ctx, segment, index.IndexID); err != nil {
-				log.Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
+				log.Ctx(ctx).Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
 					zap.Int64("indexID", index.IndexID))
 				return err
 			}
@@ -119,6 +119,7 @@ func (s *Server) getUnIndexTaskSegments(ctx context.Context) []*SegmentInfo {
 }
 
 func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
+	log := log.Ctx(ctx)
 	log.Info("start create index for segment loop...")
 	defer s.serverLoopWg.Done()
 

@@ -465,7 +465,7 @@ func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leade
 		Version:       time.Now().UnixNano(),
 		IndexInfoList: indexInfo,
 	}
-	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
 	resp, err := ob.cluster.SyncDistribution(ctx, leaderView.ID, req)

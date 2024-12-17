@@ -70,7 +70,7 @@ func (node *QueryNode) GetComponentStates(ctx context.Context, req *milvuspb.Get
 	if node.session != nil && node.session.Registered() {
 		nodeID = node.GetNodeID()
 	}
-	log.Debug("QueryNode current state", zap.Int64("NodeID", nodeID), zap.String("StateCode", code.String()))
+	log.Ctx(ctx).Debug("QueryNode current state", zap.Int64("NodeID", nodeID), zap.String("StateCode", code.String()))
 
 	info := &milvuspb.ComponentInfo{
 		NodeID:    nodeID,
@@ -162,7 +162,7 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 	return ret, nil
 }
 
-func (node *QueryNode) composeIndexMeta(indexInfos []*indexpb.IndexInfo, schema *schemapb.CollectionSchema) *segcorepb.CollectionIndexMeta {
+func (node *QueryNode) composeIndexMeta(ctx context.Context, indexInfos []*indexpb.IndexInfo, schema *schemapb.CollectionSchema) *segcorepb.CollectionIndexMeta {
 	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0)
 	for _, info := range indexInfos {
 		fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
@@ -178,7 +178,7 @@ func (node *QueryNode) composeIndexMeta(indexInfos []*indexpb.IndexInfo, schema 
 	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
 	maxIndexRecordPerSegment := int64(0)
 	if err != nil || sizePerRecord == 0 {
-		log.Warn("failed to transfer segment size to collection, because failed to estimate size per record", zap.Error(err))
+		log.Ctx(ctx).Warn("failed to transfer segment size to collection, because failed to estimate size per record", zap.Error(err))
 	} else {
 		threshold := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
 		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
@@ -239,7 +239,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	}
 
 	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
-		node.composeIndexMeta(req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
+		node.composeIndexMeta(ctx, req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
 	defer func() {
 		if !merr.Ok(status) {
 			node.manager.Collection.Unref(req.GetCollectionID(), 1)
@@ -475,7 +475,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	}
 
 	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
-		node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
+		node.composeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
 	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
 	if req.GetLoadScope() == querypb.LoadScope_Delta {
@@ -1068,7 +1068,7 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 // ShowConfigurations returns the configurations of queryNode matching req.Pattern
 func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
-		log.Warn("QueryNode.ShowConfigurations failed",
+		log.Ctx(ctx).Warn("QueryNode.ShowConfigurations failed",
 			zap.Int64("nodeId", node.GetNodeID()),
 			zap.String("req", req.Pattern),
 			zap.Error(err))
@@ -1098,7 +1098,7 @@ func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.S
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
-		log.Warn("QueryNode.GetMetrics failed",
+		log.Ctx(ctx).Warn("QueryNode.GetMetrics failed",
 			zap.Int64("nodeId", node.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))

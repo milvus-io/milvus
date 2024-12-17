@@ -382,7 +382,6 @@ class SegmentExpr : public Expr {
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
                 IndexInnerType;
         using Index = index::ScalarIndex<IndexInnerType>;
-        int64_t processed_size = 0;
         const Index& index =
             segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
         auto* index_ptr = const_cast<Index*>(&index);

@@ -67,7 +67,7 @@ func NewEtcdKV(client *clientv3.Client, rootPath string, options ...Option) *etc
 
 // Close closes the connection to etcd.
 func (kv *etcdKV) Close() {
-	log.Debug("etcd kv closed", zap.String("path", kv.rootPath))
+	log.Ctx(context.TODO()).Debug("etcd kv closed", zap.String("path", kv.rootPath))
 }
 
 // GetPath returns the path of the key.

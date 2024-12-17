@@ -134,7 +134,7 @@ func (node *MockQueryNode) Start() error {
 	node.session.Init(typeutil.QueryNodeRole, node.addr, false, true)
 	node.session.ServerID = node.ID
 	node.session.Register()
-	log.Debug("mock QueryNode started",
+	log.Ctx(context.TODO()).Debug("mock QueryNode started",
 		zap.Int64("nodeID", node.ID),
 		zap.String("nodeAddr", node.addr))
 
