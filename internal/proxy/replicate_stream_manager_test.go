@@ -34,7 +34,7 @@ func TestReplicateManager(t *testing.T) {
 		mockMsgStream.asProducer = func(producers []string) {
 			i++
 		}
-		mockMsgStream.enableProduce = func(b bool) {
+		mockMsgStream.forceEnableProduce = func(b bool) {
 			i++
 		}
 		mockMsgStream.close = func() {

@@ -17,6 +17,7 @@
 package nmq
 
 import (
+	"context"
 	"os"
 	"path"
 	"sync"
@@ -103,7 +104,7 @@ func ParseServerOption(params *paramtable.ComponentParam) *NatsMQConfig {
 
 // CloseNatsMQ is used to close global natsmq
 func CloseNatsMQ() {
-	log.Debug("Closing Natsmq!")
+	log.Ctx(context.TODO()).Debug("Closing Natsmq!")
 	if Nmq != nil {
 		// Shut down the server.
 		Nmq.Shutdown()

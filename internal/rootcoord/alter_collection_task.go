@@ -26,11 +26,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -59,7 +61,7 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 
 	oldColl, err := a.core.meta.GetCollectionByName(ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), a.ts)
 	if err != nil {
-		log.Warn("get collection failed during changing collection state",
+		log.Ctx(ctx).Warn("get collection failed during changing collection state",
 			zap.String("collectionName", a.Req.GetCollectionName()), zap.Uint64("ts", a.ts))
 		return err
 	}
@@ -123,10 +125,47 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 				ResourceGroups: newResourceGroups,
 			})
 			if err := merr.CheckRPCCall(resp, err); err != nil {
-				log.Warn("failed to trigger update load config for collection", zap.Int64("collectionID", newColl.CollectionID), zap.Error(err))
+				log.Ctx(ctx).Warn("failed to trigger update load config for collection", zap.Int64("collectionID", newColl.CollectionID), zap.Error(err))
 				return nil, err
 			}
 			return nil, nil
+		}))
+	}
+
+	oldReplicateEnable, _ := common.IsReplicateEnabled(oldColl.Properties)
+	replicateEnable, ok := common.IsReplicateEnabled(newColl.Properties)
+	if ok && !replicateEnable && oldReplicateEnable {
+		replicateID, _ := common.GetReplicateID(oldColl.Properties)
+		redoTask.AddAsyncStep(NewSimpleStep("send replicate end msg for collection", func(ctx context.Context) ([]nestedStep, error) {
+			msgPack := &msgstream.MsgPack{}
+			msg := &msgstream.ReplicateMsg{
+				BaseMsg: msgstream.BaseMsg{
+					Ctx:            ctx,
+					BeginTimestamp: ts,
+					EndTimestamp:   ts,
+					HashValues:     []uint32{0},
+				},
+				ReplicateMsg: &msgpb.ReplicateMsg{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_Replicate,
+						Timestamp: ts,
+						ReplicateInfo: &commonpb.ReplicateInfo{
+							IsReplicate: true,
+							ReplicateID: replicateID,
+						},
+					},
+					IsEnd:      true,
+					Database:   newColl.DBName,
+					Collection: newColl.Name,
+				},
+			}
+			msgPack.Msgs = append(msgPack.Msgs, msg)
+			log.Info("send replicate end msg",
+				zap.String("collection", newColl.Name),
+				zap.String("database", newColl.DBName),
+				zap.String("replicateID", replicateID),
+			)
+			return nil, a.core.chanTimeTick.broadcastDmlChannels(newColl.PhysicalChannelNames, msgPack)
 		}))
 	}
 

@@ -141,6 +141,7 @@ func (kc *kafkaClient) getKafkaProducer() (*kafka.Producer, error) {
 	if p := producer.Load(); p != nil {
 		return p, nil
 	}
+	log := log.Ctx(context.TODO())
 	p, err, _ := sf.Do("kafka_producer", func() (*kafka.Producer, error) {
 		if p := producer.Load(); p != nil {
 			return p, nil

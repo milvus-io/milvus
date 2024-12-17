@@ -53,7 +53,7 @@ func (t *listDatabaseTask) Execute(ctx context.Context) error {
 		// it will fail if the inner node server use the list database API
 		if err != nil || curUser == util.UserRoot {
 			if err != nil {
-				log.Warn("get current user from context failed", zap.Error(err))
+				log.Ctx(ctx).Warn("get current user from context failed", zap.Error(err))
 			}
 			privilegeDBs.Insert(util.AnyWord)
 			return privilegeDBs, nil

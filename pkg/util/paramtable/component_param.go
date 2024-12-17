@@ -268,6 +268,7 @@ type commonConfig struct {
 	MaxBloomFalsePositive     ParamItem `refreshable:"true"`
 	BloomFilterApplyBatchSize ParamItem `refreshable:"true"`
 	PanicWhenPluginFail       ParamItem `refreshable:"false"`
+	CollectionReplicateEnable ParamItem `refreshable:"true"`
 
 	UsePartitionKeyAsClusteringKey ParamItem `refreshable:"true"`
 	UseVectorAsClusteringKey       ParamItem `refreshable:"true"`
@@ -783,6 +784,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export: true,
 	}
 	p.TTMsgEnabled.Init(base.mgr)
+
+	p.CollectionReplicateEnable = ParamItem{
+		Key:          "common.collectionReplicateEnable",
+		Version:      "2.4.16",
+		DefaultValue: "false",
+		Doc:          `Whether to enable collection replication.`,
+		Export:       true,
+	}
+	p.CollectionReplicateEnable.Init(base.mgr)
 
 	p.TraceLogMode = ParamItem{
 		Key:          "common.traceLogMode",

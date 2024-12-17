@@ -116,6 +116,7 @@ func (c *channelLifetime) Run() error {
 
 	// Build and add pipeline.
 	ds, err := pipeline.NewStreamingNodeDataSyncService(ctx, c.f.pipelineParams,
+		// TODO fubang add the db properties
 		&datapb.ChannelWatchInfo{Vchan: resp.GetInfo(), Schema: resp.GetSchema()}, handler.Chan(), func(t syncmgr.Task, err error) {
 			if err != nil || t == nil {
 				return

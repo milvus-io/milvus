@@ -17,6 +17,7 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"time"
@@ -131,7 +132,7 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Tim
 		channelCPTs, _ := tsoutil.ParseTS(channelPos.GetTimestamp())
 		// reset flush ts to prevent frequent flush
 		ttn.writeBufferManager.NotifyCheckpointUpdated(ttn.vChannelName, channelPos.GetTimestamp())
-		log.Debug("UpdateChannelCheckpoint success",
+		log.Ctx(context.TODO()).Debug("UpdateChannelCheckpoint success",
 			zap.String("channel", ttn.vChannelName),
 			zap.Uint64("cpTs", channelPos.GetTimestamp()),
 			zap.Time("cpTime", channelCPTs))

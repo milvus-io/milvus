@@ -89,7 +89,6 @@ void
 ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
-    auto& field_meta = schema_->operator[](field_id);
 
     AssertInfo(info.index_params.count("metric_type"),
                "Can't get metric_type in index_params");
@@ -355,11 +354,6 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         // Don't allow raw data and index exist at the same time
         //        AssertInfo(!get_bit(index_ready_bitset_, field_id),
         //                   "field data can't be loaded when indexing exists");
-        auto get_block_size = [&]() -> size_t {
-            return schema_->get_primary_field_id() == field_id
-                       ? DEFAULT_PK_VRCOL_BLOCK_SIZE
-                       : DEFAULT_MEM_VRCOL_BLOCK_SIZE;
-        };
 
         std::shared_ptr<ChunkedColumnBase> column{};
         if (IsVariableDataType(data_type)) {
@@ -535,7 +529,6 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
     auto data_type = field_meta.get_data_type();
 
     // write the field data to disk
-    uint64_t total_written = 0;
     std::vector<uint64_t> indices{};
     std::vector<std::vector<uint64_t>> element_indices{};
     // FixedVector<bool> valid_data{};
@@ -669,38 +662,8 @@ ChunkedSegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     ParsePksFromIDs(pks, field_meta.get_data_type(), *info.primary_keys);
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
-    std::vector<std::tuple<Timestamp, PkType>> ordering(size);
-    for (int i = 0; i < size; i++) {
-        ordering[i] = std::make_tuple(timestamps[i], pks[i]);
-    }
-
-    if (!insert_record_.empty_pks()) {
-        auto end = std::remove_if(
-            ordering.begin(),
-            ordering.end(),
-            [&](const std::tuple<Timestamp, PkType>& record) {
-                return !insert_record_.contain(std::get<1>(record));
-            });
-        size = end - ordering.begin();
-        ordering.resize(size);
-    }
-
-    // all record filtered
-    if (size == 0) {
-        return;
-    }
-
-    std::sort(ordering.begin(), ordering.end());
-    std::vector<PkType> sort_pks(size);
-    std::vector<Timestamp> sort_timestamps(size);
-
-    for (int i = 0; i < size; i++) {
-        auto [t, pk] = ordering[i];
-        sort_timestamps[i] = t;
-        sort_pks[i] = pk;
-    }
-
-    deleted_record_.push(sort_pks, sort_timestamps.data());
+    // step 2: push delete info to delete_record
+    deleted_record_.LoadPush(pks, timestamps);
 }
 
 void
@@ -773,7 +736,6 @@ ChunkedSegmentSealedImpl::get_chunk_buffer(FieldId field_id,
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
-    auto& field_meta = schema_->operator[](field_id);
     if (auto it = fields_.find(field_id); it != fields_.end()) {
         auto& field_data = it->second;
         FixedVector<bool> valid_data;
@@ -876,35 +838,7 @@ void
 ChunkedSegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
                                            int64_t ins_barrier,
                                            Timestamp timestamp) const {
-    auto del_barrier = get_barrier(get_deleted_record(), timestamp);
-    if (del_barrier == 0) {
-        return;
-    }
-
-    auto bitmap_holder = std::shared_ptr<DeletedRecord::TmpBitmap>();
-
-    auto search_fn = [this](const PkType& pk, int64_t barrier) {
-        return this->search_pk(pk, barrier);
-    };
-    bitmap_holder = get_deleted_bitmap(del_barrier,
-                                       ins_barrier,
-                                       deleted_record_,
-                                       insert_record_,
-                                       timestamp,
-                                       is_sorted_by_pk_,
-                                       search_fn);
-
-    if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
-        return;
-    }
-    auto& delete_bitset = *bitmap_holder->bitmap_ptr;
-    AssertInfo(
-        delete_bitset.size() == bitset.size(),
-        fmt::format(
-            "Deleted bitmap size:{} not equal to filtered bitmap size:{}",
-            delete_bitset.size(),
-            bitset.size()));
-    bitset |= delete_bitset;
+    deleted_record_.Query(bitset, ins_barrier, timestamp);
 }
 
 void
@@ -1083,8 +1017,8 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
             ReadFromChunkCache, cc, data_path, mmap_descriptor_, field_meta));
     }
 
-    for (int i = 0; i < futures.size(); ++i) {
-        const auto& [data_path, column] = futures[i].get();
+    for (auto& future : futures) {
+        const auto& [data_path, column] = future.get();
         path_to_column[data_path] = column;
     }
 
@@ -1147,7 +1081,6 @@ ChunkedSegmentSealedImpl::DropFieldData(const FieldId field_id) {
         }
         lck.unlock();
     } else {
-        auto& field_meta = schema_->operator[](field_id);
         std::unique_lock lck(mutex_);
         if (get_bit(field_data_ready_bitset_, field_id)) {
             fields_.erase(field_id);
@@ -1355,7 +1288,8 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       id_(segment_id),
       col_index_meta_(index_meta),
       TEST_skip_index_for_retrieve_(TEST_skip_index_for_retrieve),
-      is_sorted_by_pk_(is_sorted_by_pk) {
+      is_sorted_by_pk_(is_sorted_by_pk),
+      deleted_record_(&insert_record_, this) {
     mmap_descriptor_ = std::shared_ptr<storage::MmapChunkDescriptor>(
         new storage::MmapChunkDescriptor({segment_id, SegmentType::Sealed}));
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
@@ -1833,7 +1767,6 @@ ChunkedSegmentSealedImpl::bulk_subscript(
     int64_t count,
     const std::vector<std::string>& dynamic_field_names) const {
     Assert(!dynamic_field_names.empty());
-    auto& field_meta = schema_->operator[](field_id);
     if (count == 0) {
         return fill_with_empty(field_id, 0);
     }
@@ -1992,7 +1925,7 @@ ChunkedSegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
         sort_pks[i] = pk;
     }
 
-    deleted_record_.push(sort_pks, sort_timestamps.data());
+    deleted_record_.StreamPush(sort_pks, sort_timestamps.data());
     return SegcoreError::success();
 }
 

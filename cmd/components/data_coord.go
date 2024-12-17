@@ -58,10 +58,10 @@ func (s *DataCoord) Prepare() error {
 // Run starts service
 func (s *DataCoord) Run() error {
 	if err := s.svr.Run(); err != nil {
-		log.Error("DataCoord starts error", zap.Error(err))
+		log.Ctx(s.ctx).Error("DataCoord starts error", zap.Error(err))
 		return err
 	}
-	log.Debug("DataCoord successfully started")
+	log.Ctx(s.ctx).Debug("DataCoord successfully started")
 	return nil
 }
 

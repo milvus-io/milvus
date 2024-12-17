@@ -148,7 +148,9 @@ if ( APPLE )
             "-DELPP_THREAD_SAFE"
             "-fopenmp"
             "-pedantic"
-            "-Wno-all"
+            "-Wall"
+            "-Wno-gnu-zero-variadic-macro-arguments"
+            "-Wno-variadic-macros"
             "-DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED=1"
             )
 endif ()
