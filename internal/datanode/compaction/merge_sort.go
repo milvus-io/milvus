@@ -3,8 +3,10 @@ package compaction
 import (
 	"container/heap"
 	"context"
+	"fmt"
 	sio "io"
 	"math"
+	"time"
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
@@ -15,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -25,7 +28,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	binlogIO io.BinlogIO,
 	binlogs []*datapb.CompactionSegmentBinlogs,
 	tr *timerecord.TimeRecorder,
-	currentTs typeutil.Timestamp,
+	currentTime time.Time,
 	collectionTtl int64,
 	bm25FieldIds []int64,
 ) ([]*datapb.CompactionSegment, error) {
@@ -41,11 +44,6 @@ func mergeSortMultipleSegments(ctx context.Context,
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
 	mWriter := NewMultiSegmentWriter(binlogIO, compAlloc, plan, maxRows, partitionID, collectionID, bm25FieldIds)
 
-	var (
-		expiredRowCount int64 // the number of expired entities
-		deletedRowCount int64
-	)
-
 	pkField, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
 	if err != nil {
 		log.Warn("failed to get pk field from schema")
@@ -54,7 +52,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 
 	// SegmentDeserializeReaderTest(binlogPaths, t.binlogIO, writer.GetPkID())
 	segmentReaders := make([]*SegmentDeserializeReader, len(binlogs))
-	segmentDelta := make([]map[interface{}]storage.Timestamp, len(binlogs))
+	segmentFilters := make([]*EntityFilter, len(binlogs))
 	for i, s := range binlogs {
 		var binlogBatchCount int
 		for _, b := range s.GetFieldBinlogs() {
@@ -84,10 +82,11 @@ func mergeSortMultipleSegments(ctx context.Context,
 				deltalogPaths = append(deltalogPaths, l.GetLogPath())
 			}
 		}
-		segmentDelta[i], err = mergeDeltalogs(ctx, binlogIO, deltalogPaths)
+		delta, err := mergeDeltalogs(ctx, binlogIO, deltalogPaths)
 		if err != nil {
 			return nil, err
 		}
+		segmentFilters[i] = newEntityFilter(delta, collectionTtl, currentTime)
 	}
 
 	advanceRow := func(i int) (*storage.Value, error) {
@@ -97,20 +96,10 @@ func mergeSortMultipleSegments(ctx context.Context,
 				return nil, err
 			}
 
-			ts, ok := segmentDelta[i][v.PK.GetValue()]
-			// insert task and delete task has the same ts when upsert
-			// here should be < instead of <=
-			// to avoid the upsert data to be deleted after compact
-			if ok && uint64(v.Timestamp) < ts {
-				deletedRowCount++
+			if segmentFilters[i].Filtered(v.PK.GetValue(), uint64(v.Timestamp)) {
 				continue
 			}
 
-			// Filtering expired entity
-			if isExpiredEntity(collectionTtl, currentTs, typeutil.Timestamp(v.Timestamp)) {
-				expiredRowCount++
-				continue
-			}
 			return v, nil
 		}
 	}
@@ -119,12 +108,15 @@ func mergeSortMultipleSegments(ctx context.Context,
 	heap.Init(&pq)
 
 	for i := range segmentReaders {
-		if v, err := advanceRow(i); err == nil {
-			heap.Push(&pq, &PQItem{
-				Value: v,
-				Index: i,
-			})
+		v, err := advanceRow(i)
+		if err != nil {
+			log.Warn("compact wrong, failed to advance row", zap.Error(err))
+			return nil, err
 		}
+		heap.Push(&pq, &PQItem{
+			Value: v,
+			Index: i,
+		})
 	}
 
 	for pq.Len() > 0 {
@@ -160,12 +152,30 @@ func mergeSortMultipleSegments(ctx context.Context,
 		seg.IsSorted = true
 	}
 
+	var (
+		deletedRowCount            int
+		expiredRowCount            int
+		missingDeleteCount         int
+		deltalogDeleteEntriesCount int
+	)
+
+	for _, filter := range segmentFilters {
+		deletedRowCount += filter.GetDeletedCount()
+		expiredRowCount += filter.GetExpiredCount()
+		missingDeleteCount += filter.GetMissingDeleteCount()
+		deltalogDeleteEntriesCount += filter.GetDeltalogDeleteCount()
+	}
+
 	totalElapse := tr.RecordSpan()
 	log.Info("compact mergeSortMultipleSegments end",
 		zap.Int64s("mergeSplit to segments", lo.Keys(mWriter.cachedMeta)),
-		zap.Int64("deleted row count", deletedRowCount),
-		zap.Int64("expired entities", expiredRowCount),
+		zap.Int("deleted row count", deletedRowCount),
+		zap.Int("expired entities", expiredRowCount),
+		zap.Int("missing deletes", missingDeleteCount),
 		zap.Duration("total elapse", totalElapse))
+
+	metrics.DataNodeCompactionDeleteCount.WithLabelValues(fmt.Sprint(collectionID)).Add(float64(deltalogDeleteEntriesCount))
+	metrics.DataNodeCompactionMissingDeleteCount.WithLabelValues(fmt.Sprint(collectionID)).Add(float64(missingDeleteCount))
 
 	return res, nil
 }
