@@ -20,8 +20,10 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -32,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -280,4 +283,98 @@ func getProxyMetrics(ctx context.Context, proxies proxyutil.ProxyClientManagerIn
 	}
 
 	return ret, nil
+}
+
+func CheckTimeTickLagExceeded(ctx context.Context, queryCoord types.QueryCoordClient, dataCoord types.DataCoordClient, maxDelay time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, GetMetricsTimeout)
+	defer cancel()
+
+	now := time.Now()
+	group := &errgroup.Group{}
+	queryNodeTTDelay := typeutil.NewConcurrentMap[string, time.Duration]()
+	dataNodeTTDelay := typeutil.NewConcurrentMap[string, time.Duration]()
+
+	group.Go(func() error {
+		queryCoordTopology, err := getQueryCoordMetrics(ctx, queryCoord)
+		if err != nil {
+			return err
+		}
+
+		for _, queryNodeMetric := range queryCoordTopology.Cluster.ConnectedNodes {
+			qm := queryNodeMetric.QuotaMetrics
+			if qm != nil {
+				if qm.Fgm.NumFlowGraph > 0 && qm.Fgm.MinFlowGraphChannel != "" {
+					minTt, _ := tsoutil.ParseTS(qm.Fgm.MinFlowGraphTt)
+					delay := now.Sub(minTt)
+
+					if delay.Milliseconds() >= maxDelay.Milliseconds() {
+						queryNodeTTDelay.Insert(qm.Fgm.MinFlowGraphChannel, delay)
+					}
+				}
+			}
+		}
+		return nil
+	})
+
+	// get Data cluster metrics
+	group.Go(func() error {
+		dataCoordTopology, err := getDataCoordMetrics(ctx, dataCoord)
+		if err != nil {
+			return err
+		}
+
+		for _, dataNodeMetric := range dataCoordTopology.Cluster.ConnectedDataNodes {
+			dm := dataNodeMetric.QuotaMetrics
+			if dm != nil {
+				if dm.Fgm.NumFlowGraph > 0 && dm.Fgm.MinFlowGraphChannel != "" {
+					minTt, _ := tsoutil.ParseTS(dm.Fgm.MinFlowGraphTt)
+					delay := now.Sub(minTt)
+
+					if delay.Milliseconds() >= maxDelay.Milliseconds() {
+						dataNodeTTDelay.Insert(dm.Fgm.MinFlowGraphChannel, delay)
+					}
+				}
+			}
+		}
+		return nil
+	})
+
+	err := group.Wait()
+	if err != nil {
+		return err
+	}
+
+	var maxLagChannel string
+	var maxLag time.Duration
+	findMaxLagChannel := func(params ...*typeutil.ConcurrentMap[string, time.Duration]) {
+		for _, param := range params {
+			param.Range(func(k string, v time.Duration) bool {
+				if v > maxLag {
+					maxLag = v
+					maxLagChannel = k
+				}
+				return true
+			})
+		}
+	}
+
+	var errStr string
+	findMaxLagChannel(queryNodeTTDelay)
+	if maxLag > 0 && len(maxLagChannel) != 0 {
+		errStr = fmt.Sprintf("query max timetick lag:%s on channel:%s", maxLag, maxLagChannel)
+	}
+	maxLagChannel = ""
+	maxLag = 0
+	findMaxLagChannel(dataNodeTTDelay)
+	if maxLag > 0 && len(maxLagChannel) != 0 {
+		if errStr != "" {
+			errStr += ", "
+		}
+		errStr += fmt.Sprintf("data max timetick lag:%s on channel:%s", maxLag, maxLagChannel)
+	}
+	if errStr != "" {
+		return fmt.Errorf("max timetick lag execced threhold: %s", errStr)
+	}
+
+	return nil
 }

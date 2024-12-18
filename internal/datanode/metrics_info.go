@@ -52,7 +52,7 @@ func (node *DataNode) getQuotaMetrics() (*metricsinfo.DataNodeQuotaMetrics, erro
 		return nil, err
 	}
 
-	minFGChannel, minFGTt := node.flowgraphManager.GetMinTTFlowGraph()
+	minFGChannel, minFGTt := util.GetRateCollector().GetMinFlowGraphTt()
 	return &metricsinfo.DataNodeQuotaMetrics{
 		Hms: metricsinfo.HardwareMetrics{},
 		Rms: rms,

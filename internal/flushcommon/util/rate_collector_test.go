@@ -14,17 +14,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ratelimitutil
+package util
 
-import "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+import (
+	"testing"
 
-var QuotaErrorString = map[commonpb.ErrorCode]string{
-	commonpb.ErrorCode_ForceDeny:            "access has been disabled by the administrator",
-	commonpb.ErrorCode_MemoryQuotaExhausted: "memory quota exceeded, please allocate more resources",
-	commonpb.ErrorCode_DiskQuotaExhausted:   "disk quota exceeded, please allocate more resources",
-	commonpb.ErrorCode_TimeTickLongDelay:    "time tick long delay",
-}
+	"github.com/stretchr/testify/assert"
 
-func GetQuotaErrorString(errCode commonpb.ErrorCode) string {
-	return QuotaErrorString[errCode]
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
+)
+
+func TestRateCollector(t *testing.T) {
+	t.Run("test FlowGraphTt", func(t *testing.T) {
+		collector, err := newRateCollector()
+		assert.NoError(t, err)
+
+		c, minTt := collector.GetMinFlowGraphTt()
+		assert.Equal(t, "", c)
+		assert.Equal(t, typeutil.MaxTimestamp, minTt)
+		collector.UpdateFlowGraphTt("channel1", 100)
+		collector.UpdateFlowGraphTt("channel2", 200)
+		collector.UpdateFlowGraphTt("channel3", 50)
+		c, minTt = collector.GetMinFlowGraphTt()
+		assert.Equal(t, "channel3", c)
+		assert.Equal(t, typeutil.Timestamp(50), minTt)
+	})
 }

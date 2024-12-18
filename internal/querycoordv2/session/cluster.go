@@ -52,7 +52,6 @@ type Cluster interface {
 	GetMetrics(ctx context.Context, nodeID int64, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	SyncDistribution(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) (*commonpb.Status, error)
 	GetComponentStates(ctx context.Context, nodeID int64) (*milvuspb.ComponentStates, error)
-	CheckHealth(ctx context.Context, nodeID int64) (*milvuspb.CheckHealthResponse, error)
 	Start()
 	Stop()
 }
@@ -271,20 +270,6 @@ func (c *QueryCluster) send(ctx context.Context, nodeID int64, fn func(cli types
 
 	fn(cli)
 	return nil
-}
-
-func (c *QueryCluster) CheckHealth(ctx context.Context, nodeID int64) (*milvuspb.CheckHealthResponse, error) {
-	var (
-		resp *milvuspb.CheckHealthResponse
-		err  error
-	)
-	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
-		resp, err = cli.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
-	})
-	if err1 != nil {
-		return nil, err1
-	}
-	return resp, err
 }
 
 type clients struct {

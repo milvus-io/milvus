@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // rateCol is global RateCollector in DataNode.
@@ -37,6 +38,7 @@ type RateCollector struct {
 	*ratelimitutil.RateCollector
 
 	flowGraphTtMu sync.Mutex
+	flowGraphTt   map[string]typeutil.Timestamp
 }
 
 func initGlobalRateCollector() {
@@ -73,5 +75,35 @@ func newRateCollector() (*RateCollector, error) {
 	}
 	return &RateCollector{
 		RateCollector: rc,
+		flowGraphTt:   make(map[string]typeutil.Timestamp),
 	}, nil
+}
+
+// UpdateFlowGraphTt updates RateCollector's flow graph time tick.
+func (r *RateCollector) UpdateFlowGraphTt(channel string, t typeutil.Timestamp) {
+	r.flowGraphTtMu.Lock()
+	defer r.flowGraphTtMu.Unlock()
+	r.flowGraphTt[channel] = t
+}
+
+// RemoveFlowGraphChannel removes channel from flowGraphTt.
+func (r *RateCollector) RemoveFlowGraphChannel(channel string) {
+	r.flowGraphTtMu.Lock()
+	defer r.flowGraphTtMu.Unlock()
+	delete(r.flowGraphTt, channel)
+}
+
+// GetMinFlowGraphTt returns the vchannel and minimal time tick of flow graphs.
+func (r *RateCollector) GetMinFlowGraphTt() (string, typeutil.Timestamp) {
+	r.flowGraphTtMu.Lock()
+	defer r.flowGraphTtMu.Unlock()
+	minTt := typeutil.MaxTimestamp
+	var channel string
+	for c, t := range r.flowGraphTt {
+		if minTt > t {
+			minTt = t
+			channel = c
+		}
+	}
+	return channel, minTt
 }

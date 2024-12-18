@@ -54,7 +54,13 @@ func getRateMetric() ([]metricsinfo.RateMetric, error) {
 	return rms, nil
 }
 
-func getMinTSafe(node *QueryNode) (string, uint64) {
+// getQuotaMetrics returns QueryNodeQuotaMetrics.
+func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error) {
+	rms, err := getRateMetric()
+	if err != nil {
+		return nil, err
+	}
+
 	minTsafeChannel := ""
 	minTsafe := uint64(math.MaxUint64)
 	node.delegators.Range(func(channel string, delegator delegator.ShardDelegator) bool {
@@ -65,17 +71,7 @@ func getMinTSafe(node *QueryNode) (string, uint64) {
 		}
 		return true
 	})
-	return minTsafeChannel, minTsafe
-}
 
-// getQuotaMetrics returns QueryNodeQuotaMetrics.
-func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error) {
-	rms, err := getRateMetric()
-	if err != nil {
-		return nil, err
-	}
-
-	minTsafeChannel, minTsafe := getMinTSafe(node)
 	collections := node.manager.Collection.ListWithName()
 	nodeID := fmt.Sprint(node.GetNodeID())
 

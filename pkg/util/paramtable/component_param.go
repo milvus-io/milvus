@@ -288,9 +288,6 @@ type commonConfig struct {
 	// Local RPC enabled for milvus internal communication when mix or standalone mode.
 	LocalRPCEnabled ParamItem `refreshable:"false"`
 
-	HealthCheckInterval   ParamItem `refreshable:"true"`
-	HealthCheckRPCTimeout ParamItem `refreshable:"true"`
-
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
 }
 
@@ -951,22 +948,6 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.LocalRPCEnabled.Init(base.mgr)
-
-	p.HealthCheckInterval = ParamItem{
-		Key:          "common.healthcheck.interval.seconds",
-		Version:      "2.4.8",
-		DefaultValue: "30",
-		Doc:          `health check interval in seconds, default 30s`,
-	}
-	p.HealthCheckInterval.Init(base.mgr)
-
-	p.HealthCheckRPCTimeout = ParamItem{
-		Key:          "common.healthcheck.timeout.seconds",
-		Version:      "2.4.8",
-		DefaultValue: "10",
-		Doc:          `RPC timeout for health check request`,
-	}
-	p.HealthCheckRPCTimeout.Init(base.mgr)
 
 	p.SyncTaskPoolReleaseTimeoutSeconds = ParamItem{
 		Key:          "common.sync.taskPoolReleaseTimeoutSeconds",
@@ -2280,9 +2261,9 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.UpdateCollectionLoadStatusInterval = ParamItem{
 		Key:          "queryCoord.updateCollectionLoadStatusInterval",
 		Version:      "2.4.7",
-		DefaultValue: "300",
+		DefaultValue: "5",
 		PanicIfEmpty: true,
-		Doc:          "300s, max interval of updating collection loaded status for check health",
+		Doc:          "5m, max interval of updating collection loaded status for check health",
 		Export:       true,
 	}
 
