@@ -601,7 +601,7 @@ class TestMilvusClientCollectionValid(TestcaseBase):
         collections = client_w.list_collections(client)[0]
         assert collection_name in collections
         db_name = "new_db"
-        client_w.use_database(client, db_name)
+        client_w.using_database(client, db_name)
         old_name = collection_name
         new_name = collection_name + "new"
         client_w.rename_collection(client, old_name, new_name, target_db=db_name)

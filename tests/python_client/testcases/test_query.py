@@ -431,9 +431,9 @@ class TestQueryParams(TestcaseBase):
         """
         # 1. initialize with data
         nb = 2000
-        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                             enable_dynamic_field=enable_dynamic_field)[
-                                                0:4]
+        collection_w, _vectors, _, insert_ids = \
+            self.init_collection_general(prefix, True, nb,
+                                         enable_dynamic_field=enable_dynamic_field)[0:4]
 
         # filter result with expression in collection
         _vectors = _vectors[0]
