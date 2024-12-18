@@ -139,7 +139,7 @@ func any2TmplValue(val any) (*schemapb.TemplateValue, error) {
 	case int, int8, int16, int32:
 		result.Val = &schemapb.TemplateValue_Int64Val{Int64Val: reflect.ValueOf(v).Int()}
 	case int64:
-		result.Val = &schemapb.TemplateValue_Int64Val{Int64Val: int64(v)}
+		result.Val = &schemapb.TemplateValue_Int64Val{Int64Val: v}
 	case float32:
 		result.Val = &schemapb.TemplateValue_FloatVal{FloatVal: float64(v)}
 	case float64:
