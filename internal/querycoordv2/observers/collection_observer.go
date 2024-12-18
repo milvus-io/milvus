@@ -325,11 +325,6 @@ func (ob *CollectionObserver) observeChannelStatus(collectionID int64) (int, int
 }
 
 func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, partition *meta.Partition, replicaNum int32, channelTargetNum, subChannelCount int) bool {
-	log := log.Ctx(ctx).WithRateGroup("qcv2.observePartitionLoadStatus", 1, 60).With(
-		zap.Int64("collectionID", partition.GetCollectionID()),
-		zap.Int64("partitionID", partition.GetPartitionID()),
-	)
-
 	segmentTargets := ob.targetMgr.GetSealedSegmentsByPartition(partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTarget)
 
 	targetNum := len(segmentTargets) + channelTargetNum
@@ -338,7 +333,9 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 		return false
 	}
 
-	log.RatedInfo(10, "partition targets",
+	log.Ctx(ctx).WithRateGroup("qcv2.observePartitionLoadStatus", 1, 60).RatedInfo(10, "partition targets",
+		zap.Int64("collectionID", partition.GetCollectionID()),
+		zap.Int64("partitionID", partition.GetPartitionID()),
 		zap.Int("segmentTargetNum", len(segmentTargets)),
 		zap.Int("channelTargetNum", channelTargetNum),
 		zap.Int("totalTargetNum", targetNum),
@@ -356,7 +353,9 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 		loadedCount += len(group)
 	}
 	if loadedCount > 0 {
-		log.Info("partition load progress",
+		log.Ctx(ctx).Info("partition load progress",
+			zap.Int64("collectionID", partition.GetCollectionID()),
+			zap.Int64("partitionID", partition.GetPartitionID()),
 			zap.Int("subChannelCount", subChannelCount),
 			zap.Int("loadSegmentCount", loadedCount-subChannelCount))
 	}
@@ -370,16 +369,22 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
 	if loadPercentage == 100 {
 		if !ob.targetObserver.Check(ctx, partition.GetCollectionID(), partition.PartitionID) {
-			log.Warn("failed to manual check current target, skip update load status")
+			log.Ctx(ctx).Warn("failed to manual check current target, skip update load status",
+				zap.Int64("collectionID", partition.GetCollectionID()),
+				zap.Int64("partitionID", partition.GetPartitionID()))
 			return false
 		}
 		delete(ob.partitionLoadedCount, partition.GetPartitionID())
 	}
 	err := ob.meta.CollectionManager.UpdatePartitionLoadPercent(partition.PartitionID, loadPercentage)
 	if err != nil {
-		log.Warn("failed to update partition load percentage")
+		log.Ctx(ctx).Warn("failed to update partition load percentage",
+			zap.Int64("collectionID", partition.GetCollectionID()),
+			zap.Int64("partitionID", partition.GetPartitionID()))
 	}
-	log.Info("partition load status updated",
+	log.Ctx(ctx).Info("partition load status updated",
+		zap.Int64("collectionID", partition.GetCollectionID()),
+		zap.Int64("partitionID", partition.GetPartitionID()),
 		zap.Int32("partitionLoadPercentage", loadPercentage),
 	)
 	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("partition %d load percentage update: %d", partition.PartitionID, loadPercentage)))
@@ -387,13 +392,12 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 }
 
 func (ob *CollectionObserver) observeCollectionLoadStatus(ctx context.Context, collectionID int64) {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
-
 	collectionPercentage, err := ob.meta.CollectionManager.UpdateCollectionLoadPercent(collectionID)
 	if err != nil {
-		log.Warn("failed to update collection load percentage")
+		log.Ctx(ctx).Warn("failed to update collection load percentage", zap.Int64("collectionID", collectionID))
 	}
-	log.Info("collection load status updated",
+	log.Ctx(ctx).Info("collection load status updated",
+		zap.Int64("collectionID", collectionID),
 		zap.Int32("collectionLoadPercentage", collectionPercentage),
 	)
 	if collectionPercentage == 100 {

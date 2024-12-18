@@ -617,6 +617,8 @@ func (scheduler *taskScheduler) schedule(node int64) {
 		scheduler.remove(task)
 	}
 
+	scheduler.updateTaskMetrics()
+
 	log.Info("processed tasks",
 		zap.Int("toProcessNum", len(toProcess)),
 		zap.Int32("committedNum", commmittedNum.Load()),
@@ -668,10 +670,6 @@ func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
 // return true if the task should be executed,
 // false otherwise
 func (scheduler *taskScheduler) preProcess(task Task) bool {
-	log := log.Ctx(scheduler.ctx).WithRateGroup("qcv2.taskScheduler", 1, 60).With(
-		zap.Int64("collectionID", task.CollectionID()),
-		zap.Int64("taskID", task.ID()),
-	)
 	if task.Status() != TaskStatusStarted {
 		return false
 	}
@@ -694,7 +692,9 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 			}
 
 			if !ready {
-				log.RatedInfo(30, "Blocking reduce action in balance channel task")
+				log.Ctx(scheduler.ctx).WithRateGroup("qcv2.taskScheduler", 1, 60).RatedInfo(30, "Blocking reduce action in balance channel task",
+					zap.Int64("collectionID", task.CollectionID()),
+					zap.Int64("taskID", task.ID()))
 				break
 			}
 		}
@@ -813,7 +813,6 @@ func (scheduler *taskScheduler) remove(task Task) {
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
 	}
 
-	scheduler.updateTaskMetrics()
 	log.Info("task removed")
 
 	if scheduler.meta.Exist(task.CollectionID()) {
