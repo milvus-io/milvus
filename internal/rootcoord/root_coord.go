@@ -31,6 +31,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -2740,6 +2741,25 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 		expandGrants, err := c.expandPrivilegeGroups(grants, groups)
 		if err != nil {
 			return nil, err
+		}
+		// if there is same grant in the other privilege groups, the grant should not be removed from the cache
+		if in.Type == milvuspb.OperatePrivilegeType_Revoke {
+			metaGrants, err := c.meta.SelectGrant(util.DefaultTenant, &milvuspb.GrantEntity{
+				Role:   in.Entity.Role,
+				DbName: in.Entity.DbName,
+			})
+			if err != nil {
+				return nil, err
+			}
+			metaExpandGrants, err := c.expandPrivilegeGroups(metaGrants, groups)
+			if err != nil {
+				return nil, err
+			}
+			expandGrants = lo.Filter(expandGrants, func(g1 *milvuspb.GrantEntity, _ int) bool {
+				return !lo.ContainsBy(metaExpandGrants, func(g2 *milvuspb.GrantEntity) bool {
+					return proto.Equal(g1, g2)
+				})
+			})
 		}
 		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 			OpType: opType,
