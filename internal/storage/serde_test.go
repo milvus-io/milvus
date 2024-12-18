@@ -170,3 +170,98 @@ func BenchmarkBinlogIterator(b *testing.B) {
 		assert.False(b, itr.HasNext())
 	}
 }
+
+func TestCalculateArraySize(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	tests := []struct {
+		name         string
+		arrayBuilder func() arrow.Array
+		expectedSize int
+	}{
+		{
+			name: "Empty array",
+			arrayBuilder: func() arrow.Array {
+				b := array.NewInt32Builder(mem)
+				defer b.Release()
+				return b.NewArray()
+			},
+			expectedSize: 0,
+		},
+		{
+			name: "Fixed-length array",
+			arrayBuilder: func() arrow.Array {
+				b := array.NewInt32Builder(mem)
+				defer b.Release()
+				b.AppendValues([]int32{1, 2, 3, 4}, nil)
+				return b.NewArray()
+			},
+			expectedSize: 17, // 4 elements * 4 bytes + bitmap(1bytes)
+		},
+		{
+			name: "Variable-length string array",
+			arrayBuilder: func() arrow.Array {
+				b := array.NewStringBuilder(mem)
+				defer b.Release()
+				b.AppendValues([]string{"hello", "world"}, nil)
+				return b.NewArray()
+			},
+			expectedSize: 11, // "hello" (5 bytes) + "world" (5 bytes) + bitmap(1bytes)
+		},
+		{
+			name: "Nested list array",
+			arrayBuilder: func() arrow.Array {
+				b := array.NewListBuilder(mem, arrow.PrimitiveTypes.Int32)
+				defer b.Release()
+				valueBuilder := b.ValueBuilder().(*array.Int32Builder)
+
+				b.Append(true)
+				valueBuilder.AppendValues([]int32{1, 2, 3}, nil)
+
+				b.Append(true)
+				valueBuilder.AppendValues([]int32{4, 5}, nil)
+
+				b.Append(true)
+				valueBuilder.AppendValues([]int32{}, nil)
+
+				return b.NewArray()
+			},
+			expectedSize: 21, // 3 + 2 elements in data buffer, plus bitmap(1bytes)
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			arr := tt.arrayBuilder()
+			defer arr.Release()
+
+			size := calculateArraySize(arr)
+			if size != tt.expectedSize {
+				t.Errorf("Expected size %d, got %d", tt.expectedSize, size)
+			}
+		})
+	}
+}
+
+func TestCalculateArraySizeWithOffset(t *testing.T) {
+	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer mem.AssertSize(t, 0)
+
+	b := array.NewStringBuilder(mem)
+	defer b.Release()
+
+	b.AppendValues([]string{"zero", "one", "two", "three", "four"}, nil)
+	fullArray := b.NewArray()
+	defer fullArray.Release()
+
+	slicedArray := array.NewSlice(fullArray, 1, 4) // Offset = 1, End = 4
+	defer slicedArray.Release()
+
+	size := calculateArraySize(slicedArray)
+	expectedSize := len("one") + len("two") + len("three") + 1 // "one", "two", "three", bitmap(1 bytes)
+
+	if size != expectedSize {
+		t.Errorf("Expected size %d, got %d", expectedSize, size)
+	}
+}
