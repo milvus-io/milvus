@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
@@ -264,7 +265,7 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 		tagSize := len(partitionTag)
 		for i := 1; i < tagSize; i++ {
 			c := partitionTag[i]
-			if c != '_' && !isAlpha(c) && !isNumber(c) {
+			if c != '_' && !isAlpha(c) && !isNumber(c) && c != '-' {
 				msg := invalidMsg + "Partition name can only contain numbers, letters and underscores."
 				return errors.New(msg)
 			}
@@ -1079,6 +1080,75 @@ func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int
 	return pkNames, fieldIDs
 }
 
+func recallCal[T string | int64](results []T, gts []T) float32 {
+	hit := 0
+	total := 0
+	for _, r := range results {
+		total++
+		for _, gt := range gts {
+			if r == gt {
+				hit++
+				break
+			}
+		}
+	}
+	return float32(hit) / float32(total)
+}
+
+func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResultData) error {
+	if results.GetNumQueries() != gts.GetNumQueries() {
+		return fmt.Errorf("num of queries is inconsistent between search results(%d) and ground truth(%d)", results.GetNumQueries(), gts.GetNumQueries())
+	}
+
+	switch results.GetIds().GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		switch gts.GetIds().GetIdField().(type) {
+		case *schemapb.IDs_IntId:
+			currentResultIndex := int64(0)
+			currentGTIndex := int64(0)
+			recalls := make([]float32, 0, results.GetNumQueries())
+			for i := 0; i < int(results.GetNumQueries()); i++ {
+				currentResultTopk := results.GetTopks()[i]
+				currentGTTopk := gts.GetTopks()[i]
+				recalls = append(recalls, recallCal(results.GetIds().GetIntId().GetData()[currentResultIndex:currentResultIndex+currentResultTopk],
+					gts.GetIds().GetIntId().GetData()[currentGTIndex:currentGTIndex+currentGTTopk]))
+				currentResultIndex += currentResultTopk
+				currentGTIndex += currentGTTopk
+			}
+			results.Recalls = recalls
+			return nil
+		case *schemapb.IDs_StrId:
+			return fmt.Errorf("pk type is inconsistent between search results(int64) and ground truth(string)")
+		default:
+			return fmt.Errorf("unsupported pk type")
+		}
+
+	case *schemapb.IDs_StrId:
+		switch gts.GetIds().GetIdField().(type) {
+		case *schemapb.IDs_StrId:
+			currentResultIndex := int64(0)
+			currentGTIndex := int64(0)
+			recalls := make([]float32, 0, results.GetNumQueries())
+			for i := 0; i < int(results.GetNumQueries()); i++ {
+				currentResultTopk := results.GetTopks()[i]
+				currentGTTopk := gts.GetTopks()[i]
+				recalls = append(recalls, recallCal(results.GetIds().GetStrId().GetData()[currentResultIndex:currentResultIndex+currentResultTopk],
+					gts.GetIds().GetStrId().GetData()[currentGTIndex:currentGTIndex+currentGTTopk]))
+				currentResultIndex += currentResultTopk
+				currentGTIndex += currentGTTopk
+			}
+			results.Recalls = recalls
+			return nil
+		case *schemapb.IDs_IntId:
+			return fmt.Errorf("pk type is inconsistent between search results(string) and ground truth(int64)")
+		default:
+			return fmt.Errorf("unsupported pk type")
+		}
+	default:
+		return fmt.Errorf("unsupported pk type")
+	}
+}
+
 // Support wildcard in output fields:
 //
 //	"*" - all fields
@@ -1233,23 +1303,17 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID in
 	// get all loading collections
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
 		CollectionID: collID,
-		PartitionIDs: nil,
+		PartitionIDs: partIDs,
 	})
-	if err != nil {
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		// qc returns error if partition not loaded
+		if errors.Is(err, merr.ErrPartitionNotLoaded) {
+			return false, nil
+		}
 		return false, err
 	}
-	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return false, merr.Error(resp.GetStatus())
-	}
 
-	for _, loadedPartID := range resp.GetPartitionIDs() {
-		for _, partID := range partIDs {
-			if partID == loadedPartID {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
+	return funcutil.SliceSetEqual(partIDs, resp.GetPartitionIDs()), nil
 }
 
 func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {

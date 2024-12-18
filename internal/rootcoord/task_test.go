@@ -169,7 +169,7 @@ func TestGetLockerKey(t *testing.T) {
 			},
 		}
 		key := tt.GetLockerKey()
-		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-true")
+		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|bar-2-true")
 	})
 	t.Run("create database task locker key", func(t *testing.T) {
 		tt := &createDatabaseTask{
@@ -277,7 +277,7 @@ func TestGetLockerKey(t *testing.T) {
 			},
 		}
 		key := tt.GetLockerKey()
-		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-true")
+		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|bar-2-true")
 	})
 	t.Run("drop database task locker key", func(t *testing.T) {
 		tt := &dropDatabaseTask{

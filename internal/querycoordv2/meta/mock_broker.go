@@ -213,10 +213,6 @@ func (_m *MockBroker) GetIndexInfo(ctx context.Context, collectionID int64, segm
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
-	if len(ret) == 0 {
-		panic("no return value specified for GetIndexInfo")
-	}
-
 	var r0 map[int64][]*querypb.FieldIndexInfo
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, int64, ...int64) (map[int64][]*querypb.FieldIndexInfo, error)); ok {

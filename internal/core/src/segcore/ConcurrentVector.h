@@ -290,6 +290,11 @@ class ConcurrentVectorImpl : public VectorBase {
         chunks_ptr_->clear();
     }
 
+    bool
+    is_mmap() const {
+        return chunks_ptr_->is_mmap();
+    }
+
  private:
     void
     set_data(ssize_t element_offset,

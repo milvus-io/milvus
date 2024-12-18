@@ -865,7 +865,6 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		assert.ElementsMatch(t, []int64{7, 8, 9, 10, 4, 5, 6}, vchan.FlushedSegmentIds)
 		assert.ElementsMatch(t, []int64{1, 2}, vchan.DroppedSegmentIds)
 	})
-
 }
 
 func TestShouldDropChannel(t *testing.T) {

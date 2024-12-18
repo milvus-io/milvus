@@ -56,6 +56,7 @@ func TestDispatcher(t *testing.T) {
 	t.Run("test AsConsumer fail", func(t *testing.T) {
 		ms := msgstream.NewMockMsgStream(t)
 		ms.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		ms.EXPECT().Close().Return()
 		factory := &msgstream.MockMqFactory{
 			NewMsgStreamFunc: func(ctx context.Context) (msgstream.MsgStream, error) {
 				return ms, nil

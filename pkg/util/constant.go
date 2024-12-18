@@ -117,10 +117,6 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetFlushState.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadOnly.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadWrite.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreatePrivilegeGroup.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropPrivilegeGroup.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListPrivilegeGroups.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeOperatePrivilegeGroup.String()),
 		},
 		commonpb.ObjectType_Global.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String()),
@@ -363,6 +359,7 @@ var (
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSelectUser.String()),
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeResourceGroup.String()),
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListResourceGroups.String()),
+		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListPrivilegeGroups.String()),
 	}
 
 	ClusterReadWritePrivilegeGroup = append(ClusterReadOnlyPrivilegeGroup,
@@ -384,6 +381,9 @@ var (
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropResourceGroup.String()),
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),
 		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRenameCollection.String()),
+		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreatePrivilegeGroup.String()),
+		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropPrivilegeGroup.String()),
+		MetaStore2API(commonpb.ObjectPrivilege_PrivilegeOperatePrivilegeGroup.String()),
 	)
 )
 
@@ -407,11 +407,13 @@ func StringList(stringMap map[string]struct{}) []string {
 // MetaStore2API convert meta-store's privilege name to api's
 // example: PrivilegeAll -> All
 func MetaStore2API(name string) string {
-	prefix := PrivilegeWord
-	if strings.Contains(name, PrivilegeGroupWord) {
-		prefix = PrivilegeGroupWord
+	if strings.HasPrefix(name, PrivilegeGroupWord) {
+		return name[len(PrivilegeGroupWord):]
 	}
-	return name[strings.Index(name, prefix)+len(prefix):]
+	if strings.HasPrefix(name, PrivilegeWord) {
+		return name[len(PrivilegeWord):]
+	}
+	return name
 }
 
 func PrivilegeNameForAPI(name string) string {

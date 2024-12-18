@@ -31,6 +31,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -531,9 +532,13 @@ func (c *Core) Init() error {
 func (c *Core) initCredentials() error {
 	credInfo, _ := c.meta.GetCredential(util.UserRoot)
 	if credInfo == nil {
-		log.Debug("RootCoord init user root")
-		encryptedRootPassword, _ := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
-		err := c.meta.AddCredential(&internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
+		encryptedRootPassword, err := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
+		if err != nil {
+			log.Warn("RootCoord init user root failed", zap.Error(err))
+			return err
+		}
+		log.Info("RootCoord init user root")
+		err = c.meta.AddCredential(&internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
 		return err
 	}
 	return nil
@@ -2364,7 +2369,8 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 
 	if !in.ForceDrop {
 		grantEntities, err := c.meta.SelectGrant(util.DefaultTenant, &milvuspb.GrantEntity{
-			Role: &milvuspb.RoleEntity{Name: in.RoleName},
+			Role:   &milvuspb.RoleEntity{Name: in.RoleName},
+			DbName: "*",
 		})
 		if len(grantEntities) != 0 {
 			errMsg := "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"
@@ -2735,6 +2741,25 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 		expandGrants, err := c.expandPrivilegeGroups(grants, groups)
 		if err != nil {
 			return nil, err
+		}
+		// if there is same grant in the other privilege groups, the grant should not be removed from the cache
+		if in.Type == milvuspb.OperatePrivilegeType_Revoke {
+			metaGrants, err := c.meta.SelectGrant(util.DefaultTenant, &milvuspb.GrantEntity{
+				Role:   in.Entity.Role,
+				DbName: in.Entity.DbName,
+			})
+			if err != nil {
+				return nil, err
+			}
+			metaExpandGrants, err := c.expandPrivilegeGroups(metaGrants, groups)
+			if err != nil {
+				return nil, err
+			}
+			expandGrants = lo.Filter(expandGrants, func(g1 *milvuspb.GrantEntity, _ int) bool {
+				return !lo.ContainsBy(metaExpandGrants, func(g2 *milvuspb.GrantEntity) bool {
+					return proto.Equal(g1, g2)
+				})
+			})
 		}
 		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 			OpType: opType,

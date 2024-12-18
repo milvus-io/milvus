@@ -315,6 +315,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray() {
                 func(data, size, val, index, res);
                 break;
             }
+            case proto::plan::Match: {
+                UnaryElementFuncForArray<ValueType, proto::plan::Match> func;
+                func(data, size, val, index, res);
+                break;
+            }
             default:
                 PanicInfo(
                     OpTypeInvalid,

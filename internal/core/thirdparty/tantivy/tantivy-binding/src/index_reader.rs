@@ -185,12 +185,49 @@ impl IndexReaderWrapper {
     }
 
     pub fn prefix_query_keyword(&self, prefix: &str) -> Vec<u32> {
-        let pattern = format!("{}(.|\n)*", prefix);
+        let escaped = regex::escape(prefix);
+        let pattern = format!("{}(.|\n)*", escaped);
         self.regex_query(&pattern)
     }
 
     pub fn regex_query(&self, pattern: &str) -> Vec<u32> {
         let q = RegexQuery::from_pattern(&pattern, self.field).unwrap();
         self.search(&q)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use tantivy::{
+        doc,
+        schema::{self, Schema, STORED, STRING, TEXT},
+        Index, IndexWriter,
+    };
+
+    use super::IndexReaderWrapper;
+
+    #[test]
+    pub fn test_escape_regex() {
+        let mut schema_builder = Schema::builder();
+        schema_builder.add_text_field("title", STRING | STORED);
+
+        let schema = schema_builder.build();
+        let title = schema.get_field("title").unwrap();
+
+        let index = Index::create_in_ram(schema.clone());
+        let mut index_writer = index.writer(50000000).unwrap();
+
+        index_writer.add_document(doc!(title => "^abc")).unwrap();
+        index_writer.add_document(doc!(title => "$abc")).unwrap();
+        index_writer.commit().unwrap();
+
+        let index_shared = Arc::new(index);
+        let index_reader_wrapper = IndexReaderWrapper::from_index(index_shared);
+        let mut res = index_reader_wrapper.prefix_query_keyword("^");
+        assert_eq!(res.len(), 1);
+        res = index_reader_wrapper.prefix_query_keyword("$");
+        assert_eq!(res.len(), 1);
     }
 }

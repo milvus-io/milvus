@@ -326,7 +326,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		MsgID:       channel.SeekPosition.MsgID,
 		Timestamp:   channel.SeekPosition.Timestamp,
 	}
-	err = pipeline.ConsumeMsgStream(position)
+	err = pipeline.ConsumeMsgStream(ctx, position)
 	if err != nil {
 		err = merr.WrapErrServiceUnavailable(err.Error(), "InitPipelineFailed")
 		log.Warn(err.Error(),
@@ -735,6 +735,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	if req.GetReq().GetIsTopkReduce() {
 		resp.IsTopkReduce = true
 	}
+	resp.IsRecallEvaluation = req.GetReq().GetIsRecallEvaluation()
 	return resp, nil
 }
 
