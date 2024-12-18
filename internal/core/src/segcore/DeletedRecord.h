@@ -177,9 +177,10 @@ class DeletedRecord {
                 }
                 if (loc >= 0) {
                     next_iter = snap_next_iter_[loc];
-                    Assert(snapshots_[loc].second.size() <= bitset.size());
+                    auto or_size =
+                        std::min(snapshots_[loc].second.size(), bitset.size());
                     bitset.inplace_or_with_count(snapshots_[loc].second,
-                                                 snapshots_[loc].second.size());
+                                                 or_size);
                     hit_snapshot = true;
                 }
             }
