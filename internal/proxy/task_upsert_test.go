@@ -420,11 +420,12 @@ func TestUpsertTask_Function(t *testing.T) {
 		},
 		Functions: []*schemapb.FunctionSchema{
 			{
-				Name:            "test_function",
-				Type:            schemapb.FunctionType_TextEmbedding,
-				InputFieldIds:   []int64{101},
-				InputFieldNames: []string{"text"},
-				OutputFieldIds:  []int64{102},
+				Name:             "test_function",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldIds:    []int64{101},
+				InputFieldNames:  []string{"text"},
+				OutputFieldIds:   []int64{102},
+				OutputFieldNames: []string{"vector"},
 				Params: []*commonpb.KeyValuePair{
 					{Key: function.Provider, Value: function.OpenAIProvider},
 					{Key: "model_name", Value: "text-embedding-ada-002"},

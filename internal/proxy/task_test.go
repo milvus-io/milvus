@@ -1032,8 +1032,6 @@ func TestCreateCollectionTask(t *testing.T) {
 				Type:             schemapb.FunctionType_TextEmbedding,
 				InputFieldNames:  []string{varCharField},
 				OutputFieldNames: []string{floatVecField},
-				InputFieldIds:    []int64{101},
-				OutputFieldIds:   []int64{102},
 				Params: []*commonpb.KeyValuePair{
 					{Key: "provider", Value: "openai"},
 					{Key: "model_name", Value: "text-embedding-ada-002"},

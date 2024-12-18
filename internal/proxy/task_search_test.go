@@ -361,10 +361,10 @@ func TestSearchTask_PreExecute(t *testing.T) {
 func TestSearchTask_WithFunctions(t *testing.T) {
 	ts := function.CreateOpenAIEmbeddingServer()
 	defer ts.Close()
-	collectionName := "TestInsertTask_function"
+	collectionName := "TestSearchTask_function"
 	schema := &schemapb.CollectionSchema{
 		Name:        collectionName,
-		Description: "TestInsertTask_function",
+		Description: "TestSearchTask_function",
 		AutoID:      true,
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
@@ -383,10 +383,12 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 		},
 		Functions: []*schemapb.FunctionSchema{
 			{
-				Name:           "func1",
-				Type:           schemapb.FunctionType_TextEmbedding,
-				InputFieldIds:  []int64{101},
-				OutputFieldIds: []int64{102},
+				Name:             "func1",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldIds:    []int64{101},
+				InputFieldNames:  []string{"text"},
+				OutputFieldIds:   []int64{102},
+				OutputFieldNames: []string{"vector1"},
 				Params: []*commonpb.KeyValuePair{
 					{Key: function.Provider, Value: function.OpenAIProvider},
 					{Key: "model_name", Value: "text-embedding-ada-002"},
@@ -396,10 +398,12 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 				},
 			},
 			{
-				Name:           "func2",
-				Type:           schemapb.FunctionType_TextEmbedding,
-				InputFieldIds:  []int64{101},
-				OutputFieldIds: []int64{103},
+				Name:             "func2",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldIds:    []int64{101},
+				InputFieldNames:  []string{"text"},
+				OutputFieldIds:   []int64{103},
+				OutputFieldNames: []string{"vector2"},
 				Params: []*commonpb.KeyValuePair{
 					{Key: function.Provider, Value: function.OpenAIProvider},
 					{Key: "model_name", Value: "text-embedding-ada-002"},
