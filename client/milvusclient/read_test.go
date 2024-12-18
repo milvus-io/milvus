@@ -75,6 +75,8 @@ func (s *ReadSuite) TestSearch() {
 				return rand.Float32()
 			})),
 		}).WithPartitions(partitionName).
+			WithFilter("id > {tmpl_id}").
+			WithTemplateParam("tmpl_id", 100).
 			WithGroupByField("group_by").
 			WithSearchParam("ignore_growing", "true").
 			WithAnnParam(ap),
@@ -178,11 +180,11 @@ func (s *ReadSuite) TestHybridSearch() {
 			}, nil
 		}).Once()
 
-		_, err := s.client.HybridSearch(ctx, NewHybridSearchOption(collectionName, NewAnnRequest("vector", 10, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
+		_, err := s.client.HybridSearch(ctx, NewHybridSearchOption(collectionName, 5, NewAnnRequest("vector", 10, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
 			return rand.Float32()
 		}))).WithFilter("ID > 100"), NewAnnRequest("vector", 10, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
 			return rand.Float32()
-		})))).WithConsistencyLevel(entity.ClStrong).WithPartitons(partitionName).WithOutputFields("*"))
+		})))).WithConsistencyLevel(entity.ClStrong).WithPartitons(partitionName).WithReranker(NewRRFReranker()).WithOutputFields("*"))
 		s.NoError(err)
 	})
 
@@ -190,14 +192,14 @@ func (s *ReadSuite) TestHybridSearch() {
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		s.setupCache(collectionName, s.schemaDyn)
 
-		_, err := s.client.HybridSearch(ctx, NewHybridSearchOption(collectionName, NewAnnRequest("vector", 10, nonSupportData{})))
+		_, err := s.client.HybridSearch(ctx, NewHybridSearchOption(collectionName, 5, NewAnnRequest("vector", 10, nonSupportData{})))
 		s.Error(err)
 
 		s.mock.EXPECT().HybridSearch(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, hsr *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
 			return nil, merr.WrapErrServiceInternal("mocked")
 		}).Once()
 
-		_, err = s.client.HybridSearch(ctx, NewHybridSearchOption(collectionName, NewAnnRequest("vector", 10, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
+		_, err = s.client.HybridSearch(ctx, NewHybridSearchOption(collectionName, 5, NewAnnRequest("vector", 10, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
 			return rand.Float32()
 		}))).WithFilter("ID > 100"), NewAnnRequest("vector", 10, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
 			return rand.Float32()
@@ -223,6 +225,14 @@ func (s *ReadSuite) TestQuery() {
 
 		_, err := s.client.Query(ctx, NewQueryOption(collectionName).WithPartitions(partitionName))
 		s.NoError(err)
+	})
+
+	s.Run("bad_request", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		s.setupCache(collectionName, s.schema)
+
+		_, err := s.client.Query(ctx, NewQueryOption(collectionName).WithFilter("id > {tmpl_id}").WithTemplateParam("tmpl_id", struct{}{}))
+		s.Error(err)
 	})
 }
 
