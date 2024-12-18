@@ -392,13 +392,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 }
 
 func (ob *CollectionObserver) observeCollectionLoadStatus(ctx context.Context, collectionID int64) {
-<<<<<<< HEAD
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
-
 	collectionPercentage, err := ob.meta.CollectionManager.UpdateCollectionLoadPercent(collectionID)
-=======
-	collectionPercentage, err := ob.meta.CollectionManager.UpdateCollectionLoadPercent(ctx, collectionID)
->>>>>>> d10908ad09 (fix: Fix slow dist handle and slow observe)
 	if err != nil {
 		log.Ctx(ctx).Warn("failed to update collection load percentage", zap.Int64("collectionID", collectionID))
 	}
