@@ -237,6 +237,22 @@ var (
 			nodeIDLabelName,
 			channelNameLabelName,
 		})
+
+	DataNodeCompactionDeleteCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "compaction_delete_count",
+			Help:      "Number of delete entries in compaction",
+		}, []string{nodeIDLabelName})
+
+	DataNodeCompactionMissingDeleteCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "compaction_missing_delete_count",
+			Help:      "Number of missing deletes in compaction",
+		}, []string{nodeIDLabelName})
 )
 
 // RegisterDataNode registers DataNode metrics
@@ -261,6 +277,8 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	// compaction related
 	registry.MustRegister(DataNodeCompactionLatency)
 	registry.MustRegister(DataNodeCompactionLatencyInQueue)
+	registry.MustRegister(DataNodeCompactionDeleteCount)
+	registry.MustRegister(DataNodeCompactionMissingDeleteCount)
 	// deprecated metrics
 	registry.MustRegister(DataNodeForwardDeleteMsgTimeTaken)
 	registry.MustRegister(DataNodeNumProducers)
