@@ -6,11 +6,7 @@ else
 fi
 CorePath=$1
 
-if command -v clang-format-12 &>/dev/null; then
-    CLANG_FORMAT=clang-format-12
-else
-    CLANG_FORMAT=clang-format
-fi
+CLANG_FORMAT=clang-format-12
 
 formatThis() {
     find "$1" | grep "(\.cpp\|\.h\|\.cc)$" | grep -v "gen_tools/templates" | grep -v "\.pb\." | grep -v "tantivy-binding.h" | xargs $CLANG_FORMAT -i
