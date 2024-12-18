@@ -70,7 +70,7 @@ func Test_stepStack_Execute(t *testing.T) {
 			newMockStepWithChild(),
 			newMockChildStep(),
 		}
-		s := &stepStack{steps: steps}
+		s := &stepStack{steps: steps, stepsCtx: context.TODO()}
 		unfinished := s.Execute(context.Background())
 		assert.Nil(t, unfinished)
 	})
@@ -82,7 +82,7 @@ func Test_stepStack_Execute(t *testing.T) {
 			newMockFailStep(),
 			newMockNormalStep(),
 		}
-		s := &stepStack{steps: steps}
+		s := &stepStack{steps: steps, stepsCtx: context.TODO()}
 		unfinished := s.Execute(context.Background())
 		assert.Equal(t, 3, len(unfinished.steps))
 	})
@@ -93,32 +93,32 @@ func Test_stepStack_Execute(t *testing.T) {
 		steps := []nestedStep{
 			failStep,
 		}
-		s := &stepStack{steps: steps}
+		s := &stepStack{steps: steps, stepsCtx: context.TODO()}
 		unfinished := s.Execute(context.Background())
 		assert.Nil(t, unfinished)
 	})
 }
 
 func Test_randomSelect(t *testing.T) {
-	s0 := &stepStack{steps: []nestedStep{}}
+	s0 := &stepStack{steps: []nestedStep{}, stepsCtx: context.TODO()}
 	s1 := &stepStack{steps: []nestedStep{
 		newMockNormalStep(),
-	}}
+	}, stepsCtx: context.TODO()}
 	s2 := &stepStack{steps: []nestedStep{
 		newMockNormalStep(),
 		newMockNormalStep(),
-	}}
+	}, stepsCtx: context.TODO()}
 	s3 := &stepStack{steps: []nestedStep{
 		newMockNormalStep(),
 		newMockNormalStep(),
 		newMockNormalStep(),
-	}}
+	}, stepsCtx: context.TODO()}
 	s4 := &stepStack{steps: []nestedStep{
 		newMockNormalStep(),
 		newMockNormalStep(),
 		newMockNormalStep(),
 		newMockNormalStep(),
-	}}
+	}, stepsCtx: context.TODO()}
 	m := map[*stepStack]struct{}{
 		s0: {},
 		s1: {},
@@ -162,13 +162,13 @@ func Test_bgStepExecutor_scheduleLoop(t *testing.T) {
 				newMockNormalStep(),
 				failStep,
 				newMockNormalStep(),
-			}}
+			}, stepsCtx: context.TODO()}
 		case 2:
 			s = &stepStack{steps: []nestedStep{
 				newMockNormalStep(),
 				newMockNormalStep(),
 				newMockNormalStep(),
-			}}
+			}, stepsCtx: context.TODO()}
 		default:
 		}
 		steps = append(steps, s)
@@ -208,11 +208,11 @@ func Test_selectByPriorityPolicy(t *testing.T) {
 			&releaseCollectionStep{},
 			&releaseCollectionStep{},
 		}
-		s1 := &stepStack{steps: steps[0:1]}
-		s2 := &stepStack{steps: steps[0:2]}
-		s3 := &stepStack{steps: steps[0:3]}
-		s4 := &stepStack{steps: steps[0:4]}
-		s5 := &stepStack{steps: steps[0:5]}
+		s1 := &stepStack{steps: steps[0:1], stepsCtx: context.TODO()}
+		s2 := &stepStack{steps: steps[0:2], stepsCtx: context.TODO()}
+		s3 := &stepStack{steps: steps[0:3], stepsCtx: context.TODO()}
+		s4 := &stepStack{steps: steps[0:4], stepsCtx: context.TODO()}
+		s5 := &stepStack{steps: steps[0:5], stepsCtx: context.TODO()}
 		m := map[*stepStack]struct{}{
 			s1: {},
 			s2: {},

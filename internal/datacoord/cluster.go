@@ -92,13 +92,13 @@ func (c *ClusterImpl) Startup(ctx context.Context, nodes []*session.NodeInfo) er
 // Register registers a new node in cluster
 func (c *ClusterImpl) Register(node *session.NodeInfo) error {
 	c.sessionManager.AddSession(node)
-	return c.channelManager.AddNode(node.NodeID)
+	return c.channelManager.AddNode(context.TODO(), node.NodeID)
 }
 
 // UnRegister removes a node from cluster
 func (c *ClusterImpl) UnRegister(node *session.NodeInfo) error {
 	c.sessionManager.DeleteSession(node)
-	return c.channelManager.DeleteNode(node.NodeID)
+	return c.channelManager.DeleteNode(context.TODO(), node.NodeID)
 }
 
 // Watch tries to add a channel in datanode cluster
@@ -109,7 +109,7 @@ func (c *ClusterImpl) Watch(ctx context.Context, ch RWChannel) error {
 // Flush sends async FlushSegments requests to dataNodes
 // which also according to channels where segments are assigned to.
 func (c *ClusterImpl) Flush(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error {
-	ch, founded := c.channelManager.GetChannel(nodeID, channel)
+	ch, founded := c.channelManager.GetChannel(ctx, nodeID, channel)
 	if !founded {
 		log.Warn("node is not matched with channel",
 			zap.String("channel", channel),
@@ -143,7 +143,7 @@ func (c *ClusterImpl) FlushChannels(ctx context.Context, nodeID int64, flushTs T
 	}
 
 	for _, channel := range channels {
-		if !c.channelManager.Match(nodeID, channel) {
+		if !c.channelManager.Match(ctx, nodeID, channel) {
 			return fmt.Errorf("channel %s is not watched on node %d", channel, nodeID)
 		}
 	}

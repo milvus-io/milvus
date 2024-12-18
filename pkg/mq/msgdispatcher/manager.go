@@ -62,8 +62,8 @@ type dispatcherManager struct {
 	closeOnce sync.Once
 }
 
-func NewDispatcherManager(pchannel string, role string, nodeID int64, factory msgstream.Factory) DispatcherManager {
-	log.Info("create new dispatcherManager", zap.String("role", role),
+func NewDispatcherManager(ctx context.Context, pchannel string, role string, nodeID int64, factory msgstream.Factory) DispatcherManager {
+	log.Ctx(ctx).Info("create new dispatcherManager", zap.String("role", role),
 		zap.Int64("nodeID", nodeID), zap.String("pchannel", pchannel))
 	c := &dispatcherManager{
 		role:            role,
@@ -84,8 +84,9 @@ func (c *dispatcherManager) constructSubName(vchannel string, isMain bool) strin
 
 func (c *dispatcherManager) Add(ctx context.Context, streamConfig *StreamConfig) (<-chan *MsgPack, error) {
 	vchannel := streamConfig.VChannel
-	log := log.With(zap.String("role", c.role),
+	log := log.Ctx(ctx).With(zap.String("role", c.role),
 		zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
+	log.Info("add new vchannel dispatcher")
 
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -175,7 +175,7 @@ func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 	c.Apply(request)
 
 	if p.proxyClient.Len() == 0 {
-		log.Warn("proxy client is empty, InvalidateCollectionMetaCache will not send to any client")
+		log.Ctx(ctx).Warn("proxy client is empty, InvalidateCollectionMetaCache will not send to any client")
 		return nil
 	}
 
@@ -186,7 +186,7 @@ func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 			sta, err := v.InvalidateCollectionMetaCache(ctx, request)
 			if err != nil {
 				if errors.Is(err, merr.ErrNodeNotFound) {
-					log.Warn("InvalidateCollectionMetaCache failed due to proxy service not found", zap.Error(err))
+					log.Ctx(ctx).Warn("InvalidateCollectionMetaCache failed due to proxy service not found", zap.Error(err))
 					return nil
 				}
 
@@ -209,7 +209,7 @@ func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 // InvalidateCredentialCache TODO: too many codes similar to InvalidateCollectionMetaCache.
 func (p *ProxyClientManager) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) error {
 	if p.proxyClient.Len() == 0 {
-		log.Warn("proxy client is empty, InvalidateCredentialCache will not send to any client")
+		log.Ctx(ctx).Warn("proxy client is empty, InvalidateCredentialCache will not send to any client")
 		return nil
 	}
 

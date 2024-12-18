@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 	pulsarctl "github.com/streamnative/pulsarctl/pkg/pulsar"
 	"github.com/streamnative/pulsarctl/pkg/pulsar/common"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
@@ -68,6 +69,8 @@ func NewClient(tenant string, namespace string, opts pulsar.ClientOptions) (*pul
 
 // CreateProducer create a pulsar producer from options
 func (pc *pulsarClient) CreateProducer(ctx context.Context, options mqcommon.ProducerOptions) (mqwrapper.Producer, error) {
+	ctx, sp := otel.Tracer("PulsarClient").Start(ctx, "CreateProducer")
+	defer sp.End()
 	start := timerecord.NewTimeRecorder("create producer")
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.TotalLabel).Inc()
 
@@ -99,11 +102,14 @@ func (pc *pulsarClient) CreateProducer(ctx context.Context, options mqcommon.Pro
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateProducerLabel).Observe(float64(elapsed.Milliseconds()))
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.SuccessLabel).Inc()
 	producer := &pulsarProducer{p: pp}
+	log.Ctx(ctx).Debug("create pulsar producer successfully")
 	return producer, nil
 }
 
 // Subscribe creates a pulsar consumer instance and subscribe a topic
 func (pc *pulsarClient) Subscribe(ctx context.Context, options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
+	ctx, sp := otel.Tracer("PulsarClient").Start(ctx, "Subscribe")
+	defer sp.End()
 	start := timerecord.NewTimeRecorder("create consumer")
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.TotalLabel).Inc()
 
@@ -113,6 +119,8 @@ func (pc *pulsarClient) Subscribe(ctx context.Context, options mqwrapper.Consume
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
 		return nil, err
 	}
+	sp.AddEvent(fmt.Sprintf("subscribing to topic=%s", fullTopicName))
+	sp.AddEvent(fmt.Sprintf("subscriptionName=%s", options.SubscriptionName))
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       fullTopicName,
 		SubscriptionName:            options.SubscriptionName,
@@ -134,6 +142,7 @@ func (pc *pulsarClient) Subscribe(ctx context.Context, options mqwrapper.Consume
 	elapsed := start.ElapseSpan()
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateConsumerLabel).Observe(float64(elapsed.Milliseconds()))
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.SuccessLabel).Inc()
+	log.Ctx(ctx).Debug("create pulsar consumer successfully")
 	return pConsumer, nil
 }
 

@@ -154,6 +154,7 @@ func (es *EtcdSource) refreshConfigurations() error {
 	log.RatedDebug(10, "etcd refreshConfigurations", zap.String("prefix", prefix), zap.Any("endpoints", es.etcdCli.Endpoints()))
 	response, err := es.etcdCli.Get(ctx, prefix, clientv3.WithPrefix(), clientv3.WithSerializable())
 	if err != nil {
+		log.Error("etcd refreshConfigurations failed", zap.Error(err))
 		return err
 	}
 	newConfig := make(map[string]string, len(response.Kvs))

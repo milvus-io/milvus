@@ -9,6 +9,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -220,6 +221,7 @@ func (kc *kafkaClient) CreateProducer(ctx context.Context, options common.Produc
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateProducerLabel).Observe(float64(elapsed.Milliseconds()))
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.SuccessLabel).Inc()
 
+	log.Ctx(ctx).Debug("create kafka producer success")
 	producer := &kafkaProducer{p: pp, stopCh: make(chan struct{}), topic: options.Topic}
 	return producer, nil
 }
@@ -228,6 +230,8 @@ func (kc *kafkaClient) Subscribe(ctx context.Context, options mqwrapper.Consumer
 	start := timerecord.NewTimeRecorder("create consumer")
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.TotalLabel).Inc()
 
+	ctx, sp := otel.Tracer("KafkaClient").Start(ctx, "NewConsumer")
+	defer sp.End()
 	config := kc.newConsumerConfig(options.SubscriptionName, options.SubscriptionInitialPosition)
 	consumer, err := newKafkaConsumer(config, options.BufSize, options.Topic, options.SubscriptionName, options.SubscriptionInitialPosition)
 	if err != nil {
@@ -237,6 +241,7 @@ func (kc *kafkaClient) Subscribe(ctx context.Context, options mqwrapper.Consumer
 	elapsed := start.ElapseSpan()
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateConsumerLabel).Observe(float64(elapsed.Milliseconds()))
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.SuccessLabel).Inc()
+	log.Ctx(ctx).Debug("create kafka consumer success")
 	return consumer, nil
 }
 
