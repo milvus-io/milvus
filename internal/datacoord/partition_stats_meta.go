@@ -104,11 +104,11 @@ func (psm *partitionStatsMeta) ListPartitionStatsInfos(collectionID int64, parti
 	return res
 }
 
-func (psm *partitionStatsMeta) SavePartitionStatsInfo(info *datapb.PartitionStatsInfo) error {
+func (psm *partitionStatsMeta) SavePartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error {
 	psm.Lock()
 	defer psm.Unlock()
-	if err := psm.catalog.SavePartitionStatsInfo(psm.ctx, info); err != nil {
-		log.Error("meta update: update PartitionStatsInfo info fail", zap.Error(err))
+	if err := psm.catalog.SavePartitionStatsInfo(ctx, info); err != nil {
+		log.Ctx(ctx).Error("meta update: update PartitionStatsInfo info fail", zap.Error(err))
 		return err
 	}
 	if _, ok := psm.partitionStatsInfos[info.GetVChannel()]; !ok {
@@ -127,8 +127,26 @@ func (psm *partitionStatsMeta) SavePartitionStatsInfo(info *datapb.PartitionStat
 func (psm *partitionStatsMeta) DropPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error {
 	psm.Lock()
 	defer psm.Unlock()
+	// if the dropping partitionStats is the current version, should update currentPartitionStats
+	currentVersion := psm.innerGetCurrentPartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel())
+	if currentVersion == info.GetVersion() && currentVersion != emptyPartitionStatsVersion {
+		infos := psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].infos
+		if len(infos) > 0 {
+			var maxVersion int64 = 0
+			for version := range infos {
+				if version > maxVersion && version < currentVersion {
+					maxVersion = version
+				}
+			}
+			err := psm.innerSaveCurrentPartitionStatsVersion(ctx, info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), maxVersion)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	if err := psm.catalog.DropPartitionStatsInfo(ctx, info); err != nil {
-		log.Error("meta update: drop PartitionStatsInfo info fail",
+		log.Ctx(ctx).Error("meta update: drop PartitionStatsInfo info fail",
 			zap.Int64("collectionID", info.GetCollectionID()),
 			zap.Int64("partitionID", info.GetPartitionID()),
 			zap.String("vchannel", info.GetVChannel()),
@@ -149,39 +167,17 @@ func (psm *partitionStatsMeta) DropPartitionStatsInfo(ctx context.Context, info 
 	if len(psm.partitionStatsInfos[info.GetVChannel()]) == 0 {
 		delete(psm.partitionStatsInfos, info.GetVChannel())
 	}
-	// if the dropping partitionStats is the current version, should update currentPartitionStats
-	currentVersion := psm.innerGetCurrentPartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel())
-	if currentVersion == info.GetVersion() && currentVersion != emptyPartitionStatsVersion {
-		err := psm.catalog.DropCurrentPartitionStatsVersion(psm.ctx, info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel())
-		if err != nil {
-			return err
-		}
-		infos := psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].infos
-		delete(infos, currentVersion)
-		if len(infos) > 0 {
-			var maxVersion int64 = 0
-			for version := range infos {
-				if version > maxVersion {
-					maxVersion = version
-				}
-			}
-			err := psm.innerSaveCurrentPartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), maxVersion)
-			if err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
-func (psm *partitionStatsMeta) SaveCurrentPartitionStatsVersion(collectionID, partitionID int64, vChannel string, currentPartitionStatsVersion int64) error {
+func (psm *partitionStatsMeta) SaveCurrentPartitionStatsVersion(ctx context.Context, collectionID, partitionID int64, vChannel string, currentPartitionStatsVersion int64) error {
 	psm.Lock()
 	defer psm.Unlock()
-	return psm.innerSaveCurrentPartitionStatsVersion(collectionID, partitionID, vChannel, currentPartitionStatsVersion)
+	return psm.innerSaveCurrentPartitionStatsVersion(ctx, collectionID, partitionID, vChannel, currentPartitionStatsVersion)
 }
 
-func (psm *partitionStatsMeta) innerSaveCurrentPartitionStatsVersion(collectionID, partitionID int64, vChannel string, currentPartitionStatsVersion int64) error {
-	log.Info("update current partition stats version", zap.Int64("collectionID", collectionID),
+func (psm *partitionStatsMeta) innerSaveCurrentPartitionStatsVersion(ctx context.Context, collectionID, partitionID int64, vChannel string, currentPartitionStatsVersion int64) error {
+	log.Ctx(ctx).Info("update current partition stats version", zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 		zap.String("vChannel", vChannel), zap.Int64("currentPartitionStatsVersion", currentPartitionStatsVersion))
 
