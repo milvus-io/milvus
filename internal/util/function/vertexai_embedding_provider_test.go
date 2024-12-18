@@ -57,10 +57,12 @@ func (s *VertextAITextEmbeddingProviderSuite) SetupTest() {
 
 func createVertextAIProvider(url string, schema *schemapb.FieldSchema) (TextEmbeddingProvider, error) {
 	functionSchema := &schemapb.FunctionSchema{
-		Name:           "test",
-		Type:           schemapb.FunctionType_Unknown,
-		InputFieldIds:  []int64{101},
-		OutputFieldIds: []int64{102},
+		Name:             "test",
+		Type:             schemapb.FunctionType_Unknown,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: modelNameParamKey, Value: textEmbedding005},
 			{Key: locationParamKey, Value: "mock_local"},

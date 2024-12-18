@@ -66,8 +66,8 @@ type TextEmebddingFunction struct {
 }
 
 func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema) (*TextEmebddingFunction, error) {
-	if len(functionSchema.GetOutputFieldIds()) != 1 {
-		return nil, fmt.Errorf("Text function should only have one output field, but now is %d", len(functionSchema.GetOutputFieldIds()))
+	if len(functionSchema.GetOutputFieldNames()) != 1 {
+		return nil, fmt.Errorf("Text function should only have one output field, but now is %d", len(functionSchema.GetOutputFieldNames()))
 	}
 
 	base, err := NewFunctionBase(coll, functionSchema)
@@ -76,7 +76,7 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 	}
 
 	if base.outputFields[0].DataType != schemapb.DataType_FloatVector {
-		return nil, fmt.Errorf("Output field not match, openai embedding needs [%s], got [%s]",
+		return nil, fmt.Errorf("Text embedding function's output field not match, needs [%s], got [%s]",
 			schemapb.DataType_name[int32(schemapb.DataType_FloatVector)],
 			schemapb.DataType_name[int32(base.outputFields[0].DataType)])
 	}

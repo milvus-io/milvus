@@ -87,7 +87,7 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 	}
 	var awsAccessKeyId, awsSecretAccessKey, region, modelName string
 	var dim int64
-	var normalize bool
+	normalize := false
 
 	for _, param := range functionSchema.Params {
 		switch strings.ToLower(param.Key) {
@@ -112,8 +112,6 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 			switch strings.ToLower(param.Value) {
 			case "true":
 				normalize = true
-			case "false":
-				normalize = false
 			default:
 				return nil, fmt.Errorf("Illegal [%s:%s] param, ", normalizeParamKey, param.Value)
 			}
@@ -147,11 +145,11 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 }
 
 func (provider *BedrockEmbeddingProvider) MaxBatch() int {
-	return 5 * provider.maxBatch
+	return 12 * provider.maxBatch
 }
 
 func (provider *BedrockEmbeddingProvider) FieldDim() int64 {
-	return 5 * provider.fieldDim
+	return provider.fieldDim
 }
 
 func (provider *BedrockEmbeddingProvider) CallEmbedding(texts []string, batchLimit bool, _ string) ([][]float32, error) {
@@ -164,6 +162,7 @@ func (provider *BedrockEmbeddingProvider) CallEmbedding(texts []string, batchLim
 	for i := 0; i < numRows; i += 1 {
 		payload := BedRockRequest{
 			InputText: texts[i],
+			Normalize: provider.normalize,
 		}
 		if provider.embedDimParam != 0 {
 			payload.Dimensions = provider.embedDimParam

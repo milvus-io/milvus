@@ -351,11 +351,12 @@ func TestInsertTask_Function(t *testing.T) {
 		},
 		Functions: []*schemapb.FunctionSchema{
 			{
-				Name:            "test_function",
-				Type:            schemapb.FunctionType_TextEmbedding,
-				InputFieldIds:   []int64{101},
-				InputFieldNames: []string{"text"},
-				OutputFieldIds:  []int64{102},
+				Name:             "test_function",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldIds:    []int64{101},
+				InputFieldNames:  []string{"text"},
+				OutputFieldIds:   []int64{102},
+				OutputFieldNames: []string{"vector"},
 				Params: []*commonpb.KeyValuePair{
 					{Key: function.Provider, Value: function.OpenAIProvider},
 					{Key: "model_name", Value: "text-embedding-ada-002"},
@@ -416,6 +417,17 @@ func TestInsertTask_Function(t *testing.T) {
 		createdTimestamp:    10001,
 		createdUtcTimestamp: 10002,
 	}, nil)
+	cache.On("GetCollectionInfo",
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+	).Return(&collectionInfo{schema: info}, nil)
+	cache.On("GetDatabaseInfo",
+		mock.Anything,
+		mock.Anything,
+	).Return(&databaseInfo{properties: []*commonpb.KeyValuePair{}}, nil)
+
 	globalMetaCache = cache
 	err = task.PreExecute(ctx)
 	assert.NoError(t, err)

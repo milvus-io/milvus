@@ -62,11 +62,12 @@ func (s *FunctionExecutorSuite) creataSchema(url string) *schemapb.CollectionSch
 		},
 		Functions: []*schemapb.FunctionSchema{
 			{
-				Name:            "test",
-				Type:            schemapb.FunctionType_TextEmbedding,
-				InputFieldIds:   []int64{101},
-				InputFieldNames: []string{"text"},
-				OutputFieldIds:  []int64{102},
+				Name:             "test",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldIds:    []int64{101},
+				InputFieldNames:  []string{"text"},
+				OutputFieldIds:   []int64{102},
+				OutputFieldNames: []string{"vector"},
 				Params: []*commonpb.KeyValuePair{
 					{Key: Provider, Value: OpenAIProvider},
 					{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
@@ -76,11 +77,12 @@ func (s *FunctionExecutorSuite) creataSchema(url string) *schemapb.CollectionSch
 				},
 			},
 			{
-				Name:            "test",
-				Type:            schemapb.FunctionType_TextEmbedding,
-				InputFieldIds:   []int64{101},
-				InputFieldNames: []string{"text"},
-				OutputFieldIds:  []int64{103},
+				Name:             "test",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldIds:    []int64{101},
+				InputFieldNames:  []string{"text"},
+				OutputFieldIds:   []int64{103},
+				OutputFieldNames: []string{"vector2"},
 				Params: []*commonpb.KeyValuePair{
 					{Key: Provider, Value: OpenAIProvider},
 					{Key: modelNameParamKey, Value: "text-embedding-ada-002"},

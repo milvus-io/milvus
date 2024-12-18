@@ -76,10 +76,12 @@ func (s *TextEmbeddingFunctionSuite) TestOpenAIEmbedding() {
 	{
 
 		runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
-			Name:           "test",
-			Type:           schemapb.FunctionType_Unknown,
-			InputFieldIds:  []int64{101},
-			OutputFieldIds: []int64{102},
+			Name:             "test",
+			Type:             schemapb.FunctionType_Unknown,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vector"},
+			InputFieldIds:    []int64{101},
+			OutputFieldIds:   []int64{102},
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: OpenAIProvider},
 				{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
@@ -108,10 +110,12 @@ func (s *TextEmbeddingFunctionSuite) TestOpenAIEmbedding() {
 	{
 
 		runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
-			Name:           "test",
-			Type:           schemapb.FunctionType_Unknown,
-			InputFieldIds:  []int64{101},
-			OutputFieldIds: []int64{102},
+			Name:             "test",
+			Type:             schemapb.FunctionType_Unknown,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vector"},
+			InputFieldIds:    []int64{101},
+			OutputFieldIds:   []int64{102},
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: AzureOpenAIProvider},
 				{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
@@ -143,10 +147,12 @@ func (s *TextEmbeddingFunctionSuite) TestAliEmbedding() {
 	defer ts.Close()
 
 	runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
-		Name:           "test",
-		Type:           schemapb.FunctionType_Unknown,
-		InputFieldIds:  []int64{101},
-		OutputFieldIds: []int64{102},
+		Name:             "test",
+		Type:             schemapb.FunctionType_Unknown,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: Provider, Value: AliDashScopeProvider},
 			{Key: modelNameParamKey, Value: TextEmbeddingV3},
@@ -189,10 +195,12 @@ func (s *TextEmbeddingFunctionSuite) TestRunnerParamsErr() {
 		}
 
 		_, err := NewTextEmbeddingFunction(schema, &schemapb.FunctionSchema{
-			Name:           "test",
-			Type:           schemapb.FunctionType_Unknown,
-			InputFieldIds:  []int64{101},
-			OutputFieldIds: []int64{102},
+			Name:             "test",
+			Type:             schemapb.FunctionType_Unknown,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vector"},
+			InputFieldIds:    []int64{101},
+			OutputFieldIds:   []int64{102},
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: OpenAIProvider},
 				{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
@@ -215,17 +223,19 @@ func (s *TextEmbeddingFunctionSuite) TestRunnerParamsErr() {
 					TypeParams: []*commonpb.KeyValuePair{
 						{Key: "dim", Value: "4"},
 					}},
-				{FieldID: 103, Name: "vector", DataType: schemapb.DataType_FloatVector,
+				{FieldID: 103, Name: "vector2", DataType: schemapb.DataType_FloatVector,
 					TypeParams: []*commonpb.KeyValuePair{
 						{Key: "dim", Value: "4"},
 					}},
 			},
 		}
 		_, err := NewTextEmbeddingFunction(schema, &schemapb.FunctionSchema{
-			Name:           "test",
-			Type:           schemapb.FunctionType_Unknown,
-			InputFieldIds:  []int64{101},
-			OutputFieldIds: []int64{102, 103},
+			Name:             "test",
+			Type:             schemapb.FunctionType_Unknown,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vector", "vector2"},
+			InputFieldIds:    []int64{101},
+			OutputFieldIds:   []int64{102, 103},
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: OpenAIProvider},
 				{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
@@ -240,10 +250,12 @@ func (s *TextEmbeddingFunctionSuite) TestRunnerParamsErr() {
 	// outputfield miss
 	{
 		_, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
-			Name:           "test",
-			Type:           schemapb.FunctionType_Unknown,
-			InputFieldIds:  []int64{101},
-			OutputFieldIds: []int64{103},
+			Name:             "test",
+			Type:             schemapb.FunctionType_Unknown,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vector2"},
+			InputFieldIds:    []int64{101},
+			OutputFieldIds:   []int64{103},
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: OpenAIProvider},
 				{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
@@ -258,10 +270,12 @@ func (s *TextEmbeddingFunctionSuite) TestRunnerParamsErr() {
 	// error model name
 	{
 		_, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
-			Name:           "test",
-			Type:           schemapb.FunctionType_Unknown,
-			InputFieldIds:  []int64{101},
-			OutputFieldIds: []int64{102},
+			Name:             "test",
+			Type:             schemapb.FunctionType_Unknown,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vector"},
+			InputFieldIds:    []int64{101},
+			OutputFieldIds:   []int64{102},
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: OpenAIProvider},
 				{Key: modelNameParamKey, Value: "text-embedding-ada-004"},
@@ -276,10 +290,12 @@ func (s *TextEmbeddingFunctionSuite) TestRunnerParamsErr() {
 	// no openai api  key
 	{
 		_, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
-			Name:           "test",
-			Type:           schemapb.FunctionType_Unknown,
-			InputFieldIds:  []int64{101},
-			OutputFieldIds: []int64{102},
+			Name:             "test",
+			Type:             schemapb.FunctionType_Unknown,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vector"},
+			InputFieldIds:    []int64{101},
+			OutputFieldIds:   []int64{102},
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: OpenAIProvider},
 				{Key: modelNameParamKey, Value: "text-embedding-ada-003"},

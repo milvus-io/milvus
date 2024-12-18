@@ -55,10 +55,12 @@ func (s *BedrockTextEmbeddingProviderSuite) SetupTest() {
 
 func createBedrockProvider(schema *schemapb.FieldSchema, providerName string, dim int) (TextEmbeddingProvider, error) {
 	functionSchema := &schemapb.FunctionSchema{
-		Name:           "test",
-		Type:           schemapb.FunctionType_Unknown,
-		InputFieldIds:  []int64{101},
-		OutputFieldIds: []int64{102},
+		Name:             "test",
+		Type:             schemapb.FunctionType_Unknown,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: modelNameParamKey, Value: BedRockTitanTextEmbeddingsV2},
 			{Key: apiKeyParamKey, Value: "mock"},
