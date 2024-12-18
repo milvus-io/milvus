@@ -1039,10 +1039,16 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 		}, nil
 	}
 	var segmentIDs []UniqueID
-	if partitionID < 0 {
-		segmentIDs = s.meta.GetSegmentsIDOfCollection(ctx, collectionID)
-	} else {
-		segmentIDs = s.meta.GetSegmentsIDOfPartition(ctx, collectionID, partitionID)
+	channels := s.channelManager.GetChannelsByCollectionID(collectionID)
+	for _, channel := range channels {
+		channelSegmentsView := s.handler.GetCurrentSegmentsView(ctx, channel, partitionID)
+		if channelSegmentsView == nil {
+			continue
+		}
+		segmentIDs = append(segmentIDs, channelSegmentsView.FlushedSegmentIDs...)
+		segmentIDs = append(segmentIDs, channelSegmentsView.GrowingSegmentIDs...)
+		segmentIDs = append(segmentIDs, channelSegmentsView.L0SegmentIDs...)
+		segmentIDs = append(segmentIDs, channelSegmentsView.ImportingSegmentIDs...)
 	}
 	ret := make([]UniqueID, 0, len(segmentIDs))
 
