@@ -73,7 +73,7 @@ func newL0CompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator
 }
 
 // Note: return True means exit this state machine.
-// ONLY return True for processCompleted or processFailed
+// ONLY return True for Completed, Failed
 func (t *l0CompactionTask) Process() bool {
 	switch t.GetTaskProto().GetState() {
 	case datapb.CompactionTaskState_pipelining:
@@ -188,6 +188,11 @@ func (t *l0CompactionTask) processCompleted() bool {
 }
 
 func (t *l0CompactionTask) processFailed() bool {
+	return true
+}
+
+func (t *l0CompactionTask) doClean() error {
+	log := log.With(zap.Int64("planID", t.GetTaskProto().GetPlanID()))
 	if t.hasAssignedWorker() {
 		err := t.sessions.DropCompactionPlan(t.GetTaskProto().GetNodeID(), &datapb.DropCompactionPlanRequest{
 			PlanID: t.GetTaskProto().GetPlanID(),
@@ -197,15 +202,21 @@ func (t *l0CompactionTask) processFailed() bool {
 		}
 	}
 
-	t.resetSegmentCompacting()
 	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
 	if err != nil {
 		log.Warn("l0CompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
-		return false
+		return err
 	}
 
-	log.Info("l0CompactionTask processFailed done", zap.Int64("taskID", t.GetTaskProto().GetTriggerID()), zap.Int64("planID", t.GetTaskProto().GetPlanID()))
-	return true
+	// resetSegmentCompacting must be the last step of Clean, to make sure resetSegmentCompacting only called once
+	// otherwise, it may unlock segments locked by other compaction tasks
+	t.resetSegmentCompacting()
+	log.Info("l0CompactionTask clean done")
+	return nil
+}
+
+func (t *l0CompactionTask) Clean() bool {
+	return t.doClean() == nil
 }
 
 func (t *l0CompactionTask) GetResult() *datapb.CompactionPlanResult {
