@@ -402,10 +402,18 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeBalance() {
 	suite.True(merr.Ok(resp))
 	suite.False(suite.checkerController.IsActive(utils.BalanceChecker))
 
+	resp1, err := suite.server.CheckBalanceStatus(ctx, &querypb.CheckBalanceStatusRequest{})
+	suite.NoError(err)
+	suite.Equal(false, resp1.GetIsActive())
+
 	resp, err = suite.server.ResumeBalance(ctx, &querypb.ResumeBalanceRequest{})
 	suite.NoError(err)
 	suite.True(merr.Ok(resp))
 	suite.True(suite.checkerController.IsActive(utils.BalanceChecker))
+
+	resp2, err := suite.server.CheckBalanceStatus(ctx, &querypb.CheckBalanceStatusRequest{})
+	suite.NoError(err)
+	suite.Equal(true, resp2.GetIsActive())
 }
 
 func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
