@@ -246,12 +246,12 @@ TextMatchIndex::MatchQuery(const std::string& query) {
         Reload();
     }
 
-    auto cnt = wrapper_->count();
+    auto hits = wrapper_->match_query(query);
+    auto cnt = should_allocate_bitset_size(hits);
     TargetBitmap bitset(cnt);
     if (bitset.empty()) {
         return bitset;
     }
-    auto hits = wrapper_->match_query(query);
     apply_hits(bitset, hits, true);
     return bitset;
 }
