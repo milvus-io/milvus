@@ -191,7 +191,15 @@ func NewStateChannelByWatchInfo(nodeID int64, info *datapb.ChannelWatchInfo) *St
 	return c
 }
 
-func (c *StateChannel) TransitionOnSuccess() {
+func (c *StateChannel) TransitionOnSuccess(opID int64) {
+	if opID != c.Info.GetOpID() {
+		log.Warn("Try to transit on success but opID not match, stay original state ",
+			zap.Any("currentState", c.currentState),
+			zap.String("channel", c.Name),
+			zap.Int64("target opID", opID),
+			zap.Int64("channel opID", c.Info.GetOpID()))
+		return
+	}
 	switch c.currentState {
 	case Standby:
 		c.setState(ToWatch)
@@ -208,7 +216,15 @@ func (c *StateChannel) TransitionOnSuccess() {
 	}
 }
 
-func (c *StateChannel) TransitionOnFailure() {
+func (c *StateChannel) TransitionOnFailure(opID int64) {
+	if opID != c.Info.GetOpID() {
+		log.Warn("Try to transit on failure but opID not match, stay original state",
+			zap.Any("currentState", c.currentState),
+			zap.String("channel", c.Name),
+			zap.Int64("target opID", opID),
+			zap.Int64("channel opID", c.Info.GetOpID()))
+		return
+	}
 	switch c.currentState {
 	case Watching:
 		c.setState(Standby)
