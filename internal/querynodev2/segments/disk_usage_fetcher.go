@@ -57,7 +57,7 @@ func (d *diskUsageFetcher) fetch() {
 	d.diskUsage.Store(diskUsage)
 	metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(diskUsage) / 1024 / 1024) // in MB
 	log.Ctx(d.ctx).WithRateGroup("diskUsageFetcher", 1, 300).
-		Info("querynode disk usage", zap.Int64("size", diskUsage), zap.Int64("nodeID", paramtable.GetNodeID()))
+		RatedInfo(300, "querynode disk usage", zap.Int64("size", diskUsage), zap.Int64("nodeID", paramtable.GetNodeID()))
 }
 
 func (d *diskUsageFetcher) Start() {
