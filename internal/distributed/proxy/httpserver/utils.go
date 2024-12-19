@@ -1243,9 +1243,27 @@ func genDynamicFields(fields []string, list []*schemapb.FieldData) []string {
 	return dynamicFields
 }
 
-func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs, scores []float32, enableInt64 bool) ([]map[string]interface{}, error) {
+func buildSearchResp(topks []int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs, scores []float32, enableInt64 bool) ([][]map[string]interface{}, error) {
+	return buildNestedQueryResult(topks, needFields, fieldDataList, ids, scores, enableInt64)
+}
+
+func buildNestedQueryResult(topks []int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs, scores []float32, enableInt64 bool) ([][]map[string]interface{}, error) {
+	start := int64(0)
+	resp := make([][]map[string]interface{}, 0, len(topks))
+	for _, topk := range topks {
+		res, err := buildQueryResp(topk, needFields, fieldDataList, ids, scores, enableInt64, start)
+		if err != nil {
+			return nil, err
+		}
+		resp = append(resp, res)
+		start += topk
+	}
+	return resp, nil
+}
+
+func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs, scores []float32, enableInt64 bool, start int64) ([]map[string]interface{}, error) {
 	columnNum := len(fieldDataList)
-	if rowsNum == int64(0) { // always
+	if rowsNum == int64(0) { // query always
 		if columnNum > 0 {
 			switch fieldDataList[0].Type {
 			case schemapb.DataType_Bool:
@@ -1301,7 +1319,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	}
 	queryResp := make([]map[string]interface{}, 0, rowsNum)
 	dynamicOutputFields := genDynamicFields(needFields, fieldDataList)
-	for i := int64(0); i < rowsNum; i++ {
+	for i := start; i < rowsNum+start; i++ {
 		row := map[string]interface{}{}
 		if columnNum > 0 {
 			for j := 0; j < columnNum; j++ {
