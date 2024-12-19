@@ -77,8 +77,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 SearchResult& search_result) {
     auto& schema = segment.get_schema();
     auto& record = segment.get_insert_record();
-    auto active_count =
-        std::min(int64_t(bitset.size()), segment.get_active_count(timestamp));
+    auto active_count = std::min(static_cast<int64_t>(bitset.size()),
+                                 segment.get_active_count(timestamp));
 
     // step 1.1: get meta
     // step 1.2: get which vector field to search
