@@ -384,7 +384,6 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 		globalMetaCache = s.mockCache
 		s.NoError(dr.Init(context.Background()))
 
-		s.False(dr.partitionKeyMode)
 		s.Equal(0, len(dr.partitionIDs))
 	})
 
@@ -426,7 +425,6 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 		globalMetaCache = s.mockCache
 		s.NoError(dr.Init(context.Background()))
 
-		s.False(dr.partitionKeyMode)
 		s.Equal(1, len(dr.partitionIDs))
 		s.EqualValues(1000, dr.partitionIDs[0])
 	})
@@ -1043,7 +1041,6 @@ func TestDeleteRunner_Run(t *testing.T) {
 			idAllocator:      idAllocator,
 			tsoAllocatorIns:  tsoAllocator,
 			lb:               lb,
-			partitionKeyMode: true,
 			result: &milvuspb.MutationResult{
 				Status: merr.Success(),
 				IDs: &schemapb.IDs{
