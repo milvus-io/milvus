@@ -43,7 +43,7 @@ import (
 )
 
 func generateMetaTable(t *testing.T) *MetaTable {
-	return &MetaTable{catalog: &rootcoord.Catalog{Txn: memkv.NewMemoryKV()}}
+	return &MetaTable{catalog: rootcoord.NewCatalog(memkv.NewMemoryKV(), nil)}
 }
 
 func TestRbacAddCredential(t *testing.T) {

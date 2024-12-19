@@ -2237,7 +2237,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	})
 
 	t.Run("dataCoord meta set state not exists", func(t *testing.T) {
-		meta, err := newMemoryMeta()
+		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 		svr := newTestServer(t, WithMeta(meta))
 		defer closeTestServer(t, svr)
