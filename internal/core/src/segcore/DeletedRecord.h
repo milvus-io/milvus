@@ -80,12 +80,11 @@ class DeletedRecord {
             return;
         }
 
-        InternalPush(pks, timestamps);
+        auto max_deleted_ts = InternalPush(pks, timestamps);
 
-        SortedDeleteList::Accessor accessor(deleted_lists_);
-        auto* last = accessor.last();
-        Assert(last != nullptr);
-        max_load_timestamp_ = last->first;
+        if (max_deleted_ts > max_load_timestamp_) {
+            max_load_timestamp_ = max_deleted_ts;
+        }
 
         //TODO: add support for dump snapshot when load finished
     }
@@ -106,15 +105,19 @@ class DeletedRecord {
         }
     }
 
-    void
+    Timestamp
     InternalPush(const std::vector<PkType>& pks, const Timestamp* timestamps) {
         int64_t removed_num = 0;
         int64_t mem_add = 0;
+        Timestamp max_timestamp = 0;
 
         SortedDeleteList::Accessor accessor(deleted_lists_);
         for (size_t i = 0; i < pks.size(); ++i) {
             auto deleted_pk = pks[i];
             auto deleted_ts = timestamps[i];
+            if (deleted_ts > max_timestamp) {
+                max_timestamp = deleted_ts;
+            }
             std::vector<SegOffset> offsets;
             if (segment_) {
                 offsets =
@@ -151,6 +154,7 @@ class DeletedRecord {
 
         n_.fetch_add(removed_num);
         mem_size_.fetch_add(mem_add);
+        return max_timestamp;
     }
 
     void
