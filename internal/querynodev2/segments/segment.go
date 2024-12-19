@@ -1610,12 +1610,6 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 
 	C.DeleteSegment(ptr)
 
-	localDiskUsage, err := GetLocalUsedSize(context.Background(), paramtable.Get().LocalStorageCfg.Path.GetValue())
-	// ignore error here, shall not block releasing
-	if err == nil {
-		metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(localDiskUsage) / 1024 / 1024) // in MB
-	}
-
 	log.Info("delete segment from memory")
 }
 

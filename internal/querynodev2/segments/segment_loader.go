@@ -150,11 +150,12 @@ type segmentLoaderV2 struct {
 }
 
 func NewLoaderV2(
+	ctx context.Context,
 	manager *Manager,
 	cm storage.ChunkManager,
 ) *segmentLoaderV2 {
 	return &segmentLoaderV2{
-		segmentLoader: NewLoader(manager, cm),
+		segmentLoader: NewLoader(ctx, manager, cm),
 	}
 }
 
@@ -545,6 +546,7 @@ func (loader *segmentLoaderV2) loadSealedSegmentFields(ctx context.Context, segm
 }
 
 func NewLoader(
+	ctx context.Context,
 	manager *Manager,
 	cm storage.ChunkManager,
 ) *segmentLoader {
@@ -564,12 +566,15 @@ func NewLoader(
 	}
 
 	log.Info("SegmentLoader created", zap.Int("ioPoolSize", ioPoolSize))
+	duf := NewDiskUsageFetcher(ctx)
+	go duf.Start()
 
 	loader := &segmentLoader{
 		manager:                   manager,
 		cm:                        cm,
 		loadingSegments:           typeutil.NewConcurrentMap[int64, *loadResult](),
 		committedResourceNotifier: syncutil.NewVersionedNotifier(),
+		duf:                       duf,
 	}
 
 	return loader
@@ -605,11 +610,14 @@ type segmentLoader struct {
 	manager *Manager
 	cm      storage.ChunkManager
 
-	mut sync.Mutex
 	// The channel will be closed as the segment loaded
-	loadingSegments           *typeutil.ConcurrentMap[int64, *loadResult]
+	loadingSegments *typeutil.ConcurrentMap[int64, *loadResult]
+
+	mut                       sync.Mutex // guards committedResource
 	committedResource         LoadResource
 	committedResourceNotifier *syncutil.VersionedNotifier
+
+	duf *diskUsageFetcher
 }
 
 var _ Loader = (*segmentLoader)(nil)
@@ -781,8 +789,6 @@ func (loader *segmentLoader) prepare(ctx context.Context, segmentType SegmentTyp
 	log := log.Ctx(ctx).With(
 		zap.Stringer("segmentType", segmentType),
 	)
-	loader.mut.Lock()
-	defer loader.mut.Unlock()
 
 	// filter out loaded & loading segments
 	infos := make([]*querypb.SegmentLoadInfo, 0, len(segments))
@@ -805,8 +811,6 @@ func (loader *segmentLoader) prepare(ctx context.Context, segmentType SegmentTyp
 }
 
 func (loader *segmentLoader) unregister(segments ...*querypb.SegmentLoadInfo) {
-	loader.mut.Lock()
-	defer loader.mut.Unlock()
 	for i := range segments {
 		result, ok := loader.loadingSegments.GetAndRemove(segments[i].GetSegmentID())
 		if ok {
@@ -841,21 +845,21 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 		zap.Int64s("segmentIDs", segmentIDs),
 	)
 
+	memoryUsage := hardware.GetUsedMemoryCount()
+	totalMemory := hardware.GetMemoryCount()
+
+	diskUsage, err := loader.duf.GetDiskUsage()
+	if err != nil {
+		return requestResourceResult{}, errors.Wrap(err, "get local used size failed")
+	}
+	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
+
 	loader.mut.Lock()
 	defer loader.mut.Unlock()
 
 	result := requestResourceResult{
 		CommittedResource: loader.committedResource,
 	}
-
-	memoryUsage := hardware.GetUsedMemoryCount()
-	totalMemory := hardware.GetMemoryCount()
-
-	diskUsage, err := GetLocalUsedSize(ctx, paramtable.Get().LocalStorageCfg.Path.GetValue())
-	if err != nil {
-		return result, errors.Wrap(err, "get local used size failed")
-	}
-	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
 
 	if loader.committedResource.MemorySize+memoryUsage >= totalMemory {
 		return result, merr.WrapErrServiceMemoryLimitExceeded(float32(loader.committedResource.MemorySize+memoryUsage), float32(totalMemory))
@@ -864,7 +868,7 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	}
 
 	result.ConcurrencyLevel = funcutil.Min(hardware.GetCPUNum(), len(infos))
-	mu, du, err := loader.checkSegmentSize(ctx, infos)
+	mu, du, err := loader.checkSegmentSize(ctx, infos, memoryUsage, totalMemory, diskUsage)
 	if err != nil {
 		log.Warn("no sufficient resource to load segments", zap.Error(err))
 		return result, err
@@ -1527,7 +1531,7 @@ func JoinIDPath(ids ...int64) string {
 // checkSegmentSize checks whether the memory & disk is sufficient to load the segments
 // returns the memory & disk usage while loading if possible to load,
 // otherwise, returns error
-func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadInfos []*querypb.SegmentLoadInfo) (uint64, uint64, error) {
+func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadInfos []*querypb.SegmentLoadInfo, memUsage, totalMem uint64, localDiskUsage int64) (uint64, uint64, error) {
 	if len(segmentLoadInfos) == 0 {
 		return 0, 0, nil
 	}
@@ -1540,18 +1544,11 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		return float64(mem) / 1024 / 1024
 	}
 
-	memUsage := hardware.GetUsedMemoryCount() + loader.committedResource.MemorySize
-	totalMem := hardware.GetMemoryCount()
+	memUsage = memUsage + loader.committedResource.MemorySize
 	if memUsage == 0 || totalMem == 0 {
 		return 0, 0, errors.New("get memory failed when checkSegmentSize")
 	}
 
-	localDiskUsage, err := GetLocalUsedSize(ctx, paramtable.Get().LocalStorageCfg.Path.GetValue())
-	if err != nil {
-		return 0, 0, errors.Wrap(err, "get local used size failed")
-	}
-
-	metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(toMB(uint64(localDiskUsage)))
 	diskUsage := uint64(localDiskUsage) + loader.committedResource.DiskSize
 
 	factor := resourceEstimateFactor{
