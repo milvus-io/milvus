@@ -92,10 +92,11 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 	}
 
 	return &CollectionTarget{
-		segments:   segments,
-		dmChannels: dmChannels,
-		partitions: typeutil.NewSet(partitions...),
-		version:    target.GetVersion(),
+		segments:           segments,
+		partition2Segments: partition2Segments,
+		dmChannels:         dmChannels,
+		partitions:         typeutil.NewSet(partitions...),
+		version:            target.GetVersion(),
 	}
 }
 
