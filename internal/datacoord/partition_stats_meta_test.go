@@ -60,7 +60,7 @@ func (s *PartitionStatsMetaSuite) TestGetPartitionStats() {
 		},
 	}
 	for _, partitionStats := range partitionStats {
-		partitionStatsMeta.SavePartitionStatsInfo(context.TODO(), partitionStats)
+		partitionStatsMeta.SavePartitionStatsInfo(partitionStats)
 	}
 
 	ps1 := partitionStatsMeta.GetPartitionStats(1, 2, "ch-2", 100)
@@ -75,7 +75,7 @@ func (s *PartitionStatsMetaSuite) TestGetPartitionStats() {
 	ps := partitionStatsMeta.GetPartitionStats(1, 2, "ch-1", 100)
 	s.NotNil(ps)
 
-	err = partitionStatsMeta.SaveCurrentPartitionStatsVersion(context.TODO(), 1, 2, "ch-1", 100)
+	err = partitionStatsMeta.SaveCurrentPartitionStatsVersion(1, 2, "ch-1", 100)
 	s.NoError(err)
 
 	currentVersion := partitionStatsMeta.GetCurrentPartitionStatsVersion(1, 2, "ch-1")
@@ -126,9 +126,9 @@ func (s *PartitionStatsMetaSuite) TestDropPartitionStats() {
 		},
 	}
 	for _, partitionStats := range partitionStats {
-		partitionStatsMeta.SavePartitionStatsInfo(context.TODO(), partitionStats)
+		partitionStatsMeta.SavePartitionStatsInfo(partitionStats)
 	}
-	partitionStatsMeta.SaveCurrentPartitionStatsVersion(context.TODO(), collectionID, partitionID, channel, 102)
+	partitionStatsMeta.SaveCurrentPartitionStatsVersion(collectionID, partitionID, channel, 102)
 	version := partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel)
 	s.Equal(int64(102), version)
 

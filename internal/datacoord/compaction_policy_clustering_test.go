@@ -442,7 +442,7 @@ func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {
 			partitionStatsMeta, err := newPartitionStatsMeta(ctx, s.catalog)
 			s.NoError(err)
 			for _, partitionStats := range test.partitionStats {
-				partitionStatsMeta.SavePartitionStatsInfo(context.TODO(), partitionStats)
+				partitionStatsMeta.SavePartitionStatsInfo(partitionStats)
 			}
 			if test.currentVersion != 0 {
 				partitionStatsMeta.partitionStatsInfos[channel][partitionID].currentVersion = test.currentVersion
