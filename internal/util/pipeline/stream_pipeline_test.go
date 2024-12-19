@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -42,6 +44,7 @@ type StreamPipelineSuite struct {
 }
 
 func (suite *StreamPipelineSuite) SetupTest() {
+	paramtable.Init()
 	suite.channel = "test-channel"
 	suite.inChannel = make(chan *msgstream.MsgPack, 1)
 	suite.outChannel = make(chan msgstream.Timestamp)
