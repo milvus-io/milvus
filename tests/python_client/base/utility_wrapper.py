@@ -471,6 +471,18 @@ class ApiUtilityWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
+    def role_grant_v2(self, privilege: str, collection_name: str, db_name: str = None, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.grant_v2, privilege, collection_name, db_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def role_revoke_v2(self, privilege: str, collection_name: str, db_name: str = None, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.revoke_v2, privilege, collection_name, db_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
     def role_list_grant(self, object: str, object_name: str, db_name: str = "", check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.role.list_grant, object, object_name, db_name], **kwargs)
@@ -557,4 +569,34 @@ class ApiUtilityWrapper:
         res, check = api_request([self.ut.list_indexes, collection_name, using, timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        collection_name=collection_name, using=using, timeout=timeout, **kwargs).run()
+        return res, check_result
+
+    def create_privilege_group(self, privilege_group: str, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.create_privilege_group, privilege_group], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def drop_privilege_group(self, privilege_group: str, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.drop_privilege_group, privilege_group], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def list_privilege_groups(self, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.list_privilege_groups], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def add_privileges_to_group(self, privilege_group: str, privileges: list, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.add_privileges_to_group, privilege_group, privileges], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def remove_privileges_from_group(self, privilege_group: str, privileges: list, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.remove_privileges_from_group, privilege_group, privileges], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
