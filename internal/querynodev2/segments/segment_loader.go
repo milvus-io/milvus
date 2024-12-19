@@ -567,7 +567,7 @@ func NewLoader(
 
 	log.Info("SegmentLoader created", zap.Int("ioPoolSize", ioPoolSize))
 	duf := NewDiskUsageFetcher(ctx)
-	duf.Start()
+	go duf.Start()
 
 	loader := &segmentLoader{
 		manager:                   manager,

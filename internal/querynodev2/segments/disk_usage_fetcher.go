@@ -65,14 +65,12 @@ func (d *diskUsageFetcher) Start() {
 	interval := paramtable.Get().QueryNodeCfg.DiskSizeFetchInterval.GetAsDuration(time.Second)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	go func() {
-		for {
-			select {
-			case <-d.ctx.Done():
-				return
-			case <-ticker.C:
-				d.fetch()
-			}
+	for {
+		select {
+		case <-d.ctx.Done():
+			return
+		case <-ticker.C:
+			d.fetch()
 		}
-	}()
+	}
 }
