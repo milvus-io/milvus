@@ -436,14 +436,14 @@ func (s *StateChannelStoreSuite) TestUpdateState() {
 			ch := "ch-1"
 			channel := NewStateChannel(getChannel(ch, 1))
 			channel.setState(test.inChannelState)
-			store.channelsInfo[1] = &NodeChannelInfo{
+			store.channelsInfo[bufferID] = &NodeChannelInfo{
 				NodeID: bufferID,
 				Channels: map[string]RWChannel{
 					ch: channel,
 				},
 			}
 
-			store.UpdateState(test.inSuccess, channel)
+			store.UpdateState(test.inSuccess, bufferID, channel, 0)
 			s.Equal(test.outChannelState, channel.currentState)
 		})
 	}
