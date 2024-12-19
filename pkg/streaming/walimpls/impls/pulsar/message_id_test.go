@@ -4,11 +4,19 @@ import (
 	"testing"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
 )
 
 func TestMessageID(t *testing.T) {
+	pid := message.MessageID(newMessageIDOfPulsar(1, 2, 3)).(interface{ PulsarID() pulsar.MessageID }).PulsarID()
+	assert.Equal(t, walName, newMessageIDOfPulsar(1, 2, 3).WALName())
+
+	assert.Equal(t, int64(1), pid.LedgerID())
+	assert.Equal(t, int64(2), pid.EntryID())
+	assert.Equal(t, int32(3), pid.BatchIdx())
+
 	ids := []pulsarID{
 		newMessageIDOfPulsar(0, 0, 0),
 		newMessageIDOfPulsar(0, 0, 1),
