@@ -53,11 +53,10 @@ type deleteTask struct {
 	idAllocator allocator.Interface
 
 	// delete info
-	primaryKeys      *schemapb.IDs
-	collectionID     UniqueID
-	partitionID      UniqueID
-	dbID             UniqueID
-	partitionKeyMode bool
+	primaryKeys  *schemapb.IDs
+	collectionID UniqueID
+	partitionID  UniqueID
+	dbID         UniqueID
 
 	// set by scheduler
 	ts    Timestamp
@@ -135,7 +134,6 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Delete-Execute")
 	defer sp.End()
-	// log := log.Ctx(ctx)
 
 	if len(dt.req.GetExpr()) == 0 {
 		return merr.WrapErrParameterInvalid("valid expr", "empty expr", "invalid expression")
@@ -232,13 +230,13 @@ func repackDeleteMsgByHash(
 					commonpbutil.WithTimeStamp(ts),
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 				),
-				CollectionID:   collectionID,
-				PartitionID:    partitionID,
+				ShardName:      vchannel,
 				CollectionName: collectionName,
 				PartitionName:  partitionName,
 				DbName:         dbName,
+				CollectionID:   collectionID,
+				PartitionID:    partitionID,
 				PrimaryKeys:    &schemapb.IDs{},
-				ShardName:      vchannel,
 			},
 		}
 	}
@@ -296,11 +294,11 @@ type deleteRunner struct {
 	limiter         types.Limiter
 
 	// delete info
-	schema           *schemaInfo
-	dbID             UniqueID
-	collectionID     UniqueID
-	partitionID      UniqueID
-	partitionKeyMode bool
+	schema       *schemaInfo
+	dbID         UniqueID
+	collectionID UniqueID
+	partitionIDs []UniqueID
+	plan         *planpb.PlanNode
 
 	// for query
 	msgID int64
@@ -349,29 +347,52 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return ErrWithLog(log, "Failed to get collection schema", err)
 	}
 
-	dr.partitionKeyMode = dr.schema.IsPartitionKeyCollection()
-	// get partitionIDs of delete
-	dr.partitionID = common.AllPartitionsID
-	if len(dr.req.PartitionName) > 0 {
-		if dr.partitionKeyMode {
+	dr.plan, err = planparserv2.CreateRetrievePlan(dr.schema.schemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues())
+	if err != nil {
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err))
+	}
+
+	if planparserv2.IsAlwaysTruePlan(dr.plan) {
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
+	}
+
+	// Set partitionIDs, could be empty if no partition name specified and no partition key
+	partName := dr.req.GetPartitionName()
+	if dr.schema.IsPartitionKeyCollection() {
+		if len(partName) > 0 {
 			return errors.New("not support manually specifying the partition names if partition key mode is used")
 		}
-
-		partName := dr.req.GetPartitionName()
+		expr, err := exprutil.ParseExprFromPlan(dr.plan)
+		if err != nil {
+			return err
+		}
+		partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
+		hashedPartitionNames, err := assignPartitionKeys(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), partitionKeys)
+		if err != nil {
+			return err
+		}
+		dr.partitionIDs, err = getPartitionIDs(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
+		if err != nil {
+			return err
+		}
+	} else if len(partName) > 0 {
+		// static validation
 		if err := validatePartitionTag(partName, true); err != nil {
 			return ErrWithLog(log, "Invalid partition name", err)
 		}
+
+		// dynamic validation
 		partID, err := globalMetaCache.GetPartitionID(ctx, dr.req.GetDbName(), collName, partName)
 		if err != nil {
 			return ErrWithLog(log, "Failed to get partition id", err)
 		}
-		dr.partitionID = partID
+		dr.partitionIDs = []UniqueID{partID} // only one partID
 	}
 
-	// hash primary keys to channels
+	// set vchannels
 	channelNames, err := dr.chMgr.getVChannels(dr.collectionID)
 	if err != nil {
-		return ErrWithLog(log, "Failed to get primary keys from expr", err)
+		return ErrWithLog(log, "Failed to get vchannels from collection", err)
 	}
 	dr.vChannels = channelNames
 
@@ -385,16 +406,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 }
 
 func (dr *deleteRunner) Run(ctx context.Context) error {
-	plan, err := planparserv2.CreateRetrievePlan(dr.schema.schemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues())
-	if err != nil {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err))
-	}
-
-	if planparserv2.IsAlwaysTruePlan(plan) {
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
-	}
-
-	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema.CollectionSchema, plan)
+	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema.CollectionSchema, dr.plan)
 	if isSimple {
 		// if could get delete.primaryKeys from delete expr
 		err := dr.simpleDelete(ctx, pk, numRow)
@@ -404,7 +416,7 @@ func (dr *deleteRunner) Run(ctx context.Context) error {
 	} else {
 		// if get complex delete expr
 		// need query from querynode before delete
-		err = dr.complexDelete(ctx, plan)
+		err := dr.complexDelete(ctx, dr.plan)
 		if err != nil {
 			log.Ctx(ctx).Warn("complex delete failed,but delete some data", zap.Int64("count", dr.result.DeleteCnt), zap.String("expr", dr.req.GetExpr()))
 			return err
@@ -413,21 +425,21 @@ func (dr *deleteRunner) Run(ctx context.Context) error {
 	return nil
 }
 
-func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs) (*deleteTask, error) {
+func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, partitionID UniqueID) (*deleteTask, error) {
 	dt := &deleteTask{
-		ctx:              ctx,
-		Condition:        NewTaskCondition(ctx),
-		req:              dr.req,
-		idAllocator:      dr.idAllocator,
-		chMgr:            dr.chMgr,
-		chTicker:         dr.chTicker,
-		collectionID:     dr.collectionID,
-		partitionID:      dr.partitionID,
-		partitionKeyMode: dr.partitionKeyMode,
-		vChannels:        dr.vChannels,
-		primaryKeys:      primaryKeys,
-		dbID:             dr.dbID,
+		ctx:          ctx,
+		Condition:    NewTaskCondition(ctx),
+		req:          dr.req,
+		idAllocator:  dr.idAllocator,
+		chMgr:        dr.chMgr,
+		chTicker:     dr.chTicker,
+		collectionID: dr.collectionID,
+		partitionID:  partitionID,
+		vChannels:    dr.vChannels,
+		primaryKeys:  primaryKeys,
+		dbID:         dr.dbID,
 	}
+
 	var enqueuedTask task = dt
 	if streamingutil.IsStreamingServiceEnabled() {
 		enqueuedTask = &deleteTaskByStreamingService{deleteTask: dt}
@@ -445,30 +457,9 @@ func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs) 
 // make sure it concurrent safe
 func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) executeFunc {
 	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-		var partitionIDs []int64
-
-		// optimize query when partitionKey on
-		if dr.partitionKeyMode {
-			expr, err := exprutil.ParseExprFromPlan(plan)
-			if err != nil {
-				return err
-			}
-			partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-			hashedPartitionNames, err := assignPartitionKeys(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), partitionKeys)
-			if err != nil {
-				return err
-			}
-			partitionIDs, err = getPartitionIDs(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
-			if err != nil {
-				return err
-			}
-		} else if dr.partitionID != common.InvalidFieldID {
-			partitionIDs = []int64{dr.partitionID}
-		}
-
 		log := log.Ctx(ctx).With(
 			zap.Int64("collectionID", dr.collectionID),
-			zap.Int64s("partitionIDs", partitionIDs),
+			zap.Int64s("partitionIDs", dr.partitionIDs),
 			zap.String("channel", channel),
 			zap.Int64("nodeID", nodeID))
 
@@ -494,7 +485,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 				ReqID:              paramtable.GetNodeID(),
 				DbID:               0, // TODO
 				CollectionID:       dr.collectionID,
-				PartitionIDs:       partitionIDs,
+				PartitionIDs:       dr.partitionIDs,
 				SerializedExprPlan: serializedPlan,
 				OutputFieldsId:     outputFieldIDs,
 				GuaranteeTimestamp: parseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
@@ -515,7 +506,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 		taskCh := make(chan *deleteTask, 256)
 		var receiveErr error
 		go func() {
-			receiveErr = dr.receiveQueryResult(ctx, client, taskCh, partitionIDs)
+			receiveErr = dr.receiveQueryResult(ctx, client, taskCh)
 			close(taskCh)
 		}()
 		var allQueryCnt int64
@@ -543,7 +534,15 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 	}
 }
 
-func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.QueryNode_QueryStreamClient, taskCh chan *deleteTask, partitionIDs []int64) error {
+func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.QueryNode_QueryStreamClient, taskCh chan *deleteTask) error {
+	// If a complex delete tries to delete multiple partitions in the filter, use AllPartitionID
+	// otherwise use the target partitionID, which can come from partition name(UDF) or a partition key expression
+	// TODO: Get partitionID from Query results
+	msgPartitionID := common.AllPartitionsID
+	if len(dr.partitionIDs) == 1 {
+		msgPartitionID = dr.partitionIDs[0]
+	}
+
 	for {
 		result, err := client.Recv()
 		if err != nil {
@@ -561,14 +560,14 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 		}
 
 		if dr.limiter != nil {
-			err := dr.limiter.Alloc(ctx, dr.dbID, map[int64][]int64{dr.collectionID: partitionIDs}, internalpb.RateType_DMLDelete, proto.Size(result.GetIds()))
+			err := dr.limiter.Alloc(ctx, dr.dbID, map[int64][]int64{dr.collectionID: dr.partitionIDs}, internalpb.RateType_DMLDelete, proto.Size(result.GetIds()))
 			if err != nil {
 				log.Ctx(ctx).Warn("query stream for delete failed because rate limiter", zap.Int64("msgID", dr.msgID), zap.Error(err))
 				return err
 			}
 		}
 
-		task, err := dr.produce(ctx, result.GetIds())
+		task, err := dr.produce(ctx, result.GetIds(), msgPartitionID)
 		if err != nil {
 			log.Ctx(ctx).Warn("produce delete task failed", zap.Error(err))
 			return err
@@ -615,12 +614,16 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 }
 
 func (dr *deleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numRow int64) error {
+	partitionID := common.AllPartitionsID
+	if len(dr.partitionIDs) == 1 {
+		partitionID = dr.partitionIDs[0]
+	}
 	log.Ctx(ctx).Debug("get primary keys from expr",
 		zap.Int64("len of primary keys", numRow),
 		zap.Int64("collectionID", dr.collectionID),
-		zap.Int64("partitionID", dr.partitionID))
+		zap.Int64("partitionID", partitionID))
 
-	task, err := dr.produce(ctx, pk)
+	task, err := dr.produce(ctx, pk, partitionID)
 	if err != nil {
 		log.Ctx(ctx).Warn("produce delete task failed")
 		return err
@@ -634,70 +637,71 @@ func (dr *deleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numR
 	return err
 }
 
-func getPrimaryKeysFromPlan(schema *schemapb.CollectionSchema, plan *planpb.PlanNode) (bool, *schemapb.IDs, int64) {
-	// simple delete request need expr with "pk in [a, b]"
+func getPrimaryKeysFromPlan(schema *schemapb.CollectionSchema, plan *planpb.PlanNode) (isSimpleDelete bool, pks *schemapb.IDs, pkCount int64) {
+	var err error
+	// simple delete request with "pk in [a, b]"
 	termExpr, ok := plan.Node.(*planpb.PlanNode_Query).Query.Predicates.Expr.(*planpb.Expr_TermExpr)
 	if ok {
 		if !termExpr.TermExpr.GetColumnInfo().GetIsPrimaryKey() {
 			return false, nil, 0
 		}
 
-		ids, rowNum, err := getPrimaryKeysFromTermExpr(schema, termExpr)
+		pks, pkCount, err = getPrimaryKeysFromTermExpr(schema, termExpr)
 		if err != nil {
 			return false, nil, 0
 		}
-		return true, ids, rowNum
+		return true, pks, pkCount
 	}
 
-	// simple delete if expr with "pk == a"
+	// simple delete with "pk == a"
 	unaryRangeExpr, ok := plan.Node.(*planpb.PlanNode_Query).Query.Predicates.Expr.(*planpb.Expr_UnaryRangeExpr)
 	if ok {
 		if unaryRangeExpr.UnaryRangeExpr.GetOp() != planpb.OpType_Equal || !unaryRangeExpr.UnaryRangeExpr.GetColumnInfo().GetIsPrimaryKey() {
 			return false, nil, 0
 		}
 
-		ids, err := getPrimaryKeysFromUnaryRangeExpr(schema, unaryRangeExpr)
+		pks, err = getPrimaryKeysFromUnaryRangeExpr(schema, unaryRangeExpr)
 		if err != nil {
 			return false, nil, 0
 		}
-		return true, ids, 1
+		return true, pks, 1
 	}
 
 	return false, nil, 0
 }
 
-func getPrimaryKeysFromUnaryRangeExpr(schema *schemapb.CollectionSchema, unaryRangeExpr *planpb.Expr_UnaryRangeExpr) (res *schemapb.IDs, err error) {
-	res = &schemapb.IDs{}
+func getPrimaryKeysFromUnaryRangeExpr(schema *schemapb.CollectionSchema, unaryRangeExpr *planpb.Expr_UnaryRangeExpr) (pks *schemapb.IDs, err error) {
+	pks = &schemapb.IDs{}
 	switch unaryRangeExpr.UnaryRangeExpr.GetColumnInfo().GetDataType() {
 	case schemapb.DataType_Int64:
-		res.IdField = &schemapb.IDs_IntId{
+		pks.IdField = &schemapb.IDs_IntId{
 			IntId: &schemapb.LongArray{
 				Data: []int64{unaryRangeExpr.UnaryRangeExpr.GetValue().GetInt64Val()},
 			},
 		}
 	case schemapb.DataType_VarChar:
-		res.IdField = &schemapb.IDs_StrId{
+		pks.IdField = &schemapb.IDs_StrId{
 			StrId: &schemapb.StringArray{
 				Data: []string{unaryRangeExpr.UnaryRangeExpr.GetValue().GetStringVal()},
 			},
 		}
 	default:
-		return res, fmt.Errorf("invalid field data type specifyed in simple delete expr")
+		return pks, fmt.Errorf("invalid field data type specifyed in simple delete expr")
 	}
 
-	return res, nil
+	return pks, nil
 }
 
-func getPrimaryKeysFromTermExpr(schema *schemapb.CollectionSchema, termExpr *planpb.Expr_TermExpr) (res *schemapb.IDs, rowNum int64, err error) {
-	res = &schemapb.IDs{}
-	rowNum = int64(len(termExpr.TermExpr.Values))
+func getPrimaryKeysFromTermExpr(schema *schemapb.CollectionSchema, termExpr *planpb.Expr_TermExpr) (pks *schemapb.IDs, pkCount int64, err error) {
+	pks = &schemapb.IDs{}
+	pkCount = int64(len(termExpr.TermExpr.Values))
 	switch termExpr.TermExpr.ColumnInfo.GetDataType() {
 	case schemapb.DataType_Int64:
 		ids := make([]int64, 0)
 		for _, v := range termExpr.TermExpr.Values {
 			ids = append(ids, v.GetInt64Val())
 		}
-		res.IdField = &schemapb.IDs_IntId{
+		pks.IdField = &schemapb.IDs_IntId{
 			IntId: &schemapb.LongArray{
 				Data: ids,
 			},
@@ -707,14 +711,14 @@ func getPrimaryKeysFromTermExpr(schema *schemapb.CollectionSchema, termExpr *pla
 		for _, v := range termExpr.TermExpr.Values {
 			ids = append(ids, v.GetStringVal())
 		}
-		res.IdField = &schemapb.IDs_StrId{
+		pks.IdField = &schemapb.IDs_StrId{
 			StrId: &schemapb.StringArray{
 				Data: ids,
 			},
 		}
 	default:
-		return res, 0, fmt.Errorf("invalid field data type specifyed in simple delete expr")
+		return pks, 0, fmt.Errorf("invalid field data type specifyed in simple delete expr")
 	}
 
-	return res, rowNum, nil
+	return pks, pkCount, nil
 }

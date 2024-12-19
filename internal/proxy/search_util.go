@@ -273,7 +273,7 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 
 	useRegexp := Params.ProxyCfg.PartitionNameRegexp.GetAsBool()
 
-	partitionsSet := typeutil.NewSet[int64]()
+	partitionsSet := typeutil.NewUniqueSet()
 	for _, partitionName := range partitionNames {
 		if useRegexp {
 			// Legacy feature, use partition name as regexp
@@ -298,9 +298,7 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 				// TODO change after testcase updated: return nil, merr.WrapErrPartitionNotFound(partitionName)
 				return nil, fmt.Errorf("partition name %s not found", partitionName)
 			}
-			if !partitionsSet.Contain(partitionID) {
-				partitionsSet.Insert(partitionID)
-			}
+			partitionsSet.Insert(partitionID)
 		}
 	}
 	return partitionsSet.Collect(), nil
