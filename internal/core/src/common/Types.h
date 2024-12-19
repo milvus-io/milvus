@@ -680,6 +680,9 @@ struct fmt::formatter<milvus::OpType> : formatter<string_view> {
             case milvus::OpType::OpType_INT_MAX_SENTINEL_DO_NOT_USE_:
                 name = "OpType_INT_MAX_SENTINEL_DO_NOT_USE";
                 break;
+            case milvus::OpType::TextMatch:
+                name = "TextMatch";
+                break;
         }
         return formatter<string_view>::format(name, ctx);
     }
