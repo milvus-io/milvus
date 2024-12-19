@@ -6,7 +6,7 @@ require (
 	github.com/blang/semver/v4 v4.0.0
 	github.com/cockroachdb/errors v1.9.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.18-0.20241129073142-d8e5b9597772
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.18
 	github.com/milvus-io/milvus/pkg v0.0.2-0.20240317152703-17b4938985f3
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/samber/lo v1.27.0
