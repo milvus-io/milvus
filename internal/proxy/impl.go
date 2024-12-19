@@ -3738,7 +3738,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		SetCollectionName(request.GetCollectionName())
 	metrics.ProxyReceivedNQ.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.SearchLabel,
+		metrics.QueryLabel,
 		request.GetCollectionName(),
 	).Add(float64(1))
 
