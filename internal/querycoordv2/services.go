@@ -253,7 +253,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 
 	var loadJob job.Job
 	collection := s.meta.GetCollection(ctx, req.GetCollectionID())
-	if collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded {
+	if collection != nil {
 		// if collection is loaded, check if collection is loaded with the same replica number and resource groups
 		// if replica number or resource group changes， switch to update load config
 		collectionUsedRG := s.meta.ReplicaManager.GetResourceGroupByCollection(ctx, collection.GetCollectionID()).Collect()
@@ -1180,7 +1180,7 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 	jobs := make([]job.Job, 0, len(req.GetCollectionIDs()))
 	for _, collectionID := range req.GetCollectionIDs() {
 		collection := s.meta.GetCollection(ctx, collectionID)
-		if collection == nil || collection.GetStatus() != querypb.LoadStatus_Loaded {
+		if collection == nil {
 			err := merr.WrapErrCollectionNotLoaded(collectionID)
 			log.Warn("failed to update load config", zap.Error(err))
 			continue
