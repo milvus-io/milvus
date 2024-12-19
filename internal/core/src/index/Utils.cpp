@@ -362,4 +362,38 @@ ReadDataFromFD(int fd, void* buf, size_t size, size_t chunk_size) {
     }
 }
 
+bool
+CheckAndUpdateKnowhereRangeSearchParam(const SearchInfo& search_info,
+                                       const int64_t topk,
+                                       const MetricType& metric_type,
+                                       knowhere::Json& search_config) {
+    const auto radius =
+        index::GetValueFromConfig<float>(search_info.search_params_, RADIUS);
+    if (!radius.has_value()) {
+        return false;
+    }
+
+    search_config[RADIUS] = radius.value();
+    // `range_search_k` is only used as one of the conditions for iterator early termination.
+    // not gurantee to return exactly `range_search_k` results, which may be more or less.
+    // set it to -1 will return all results in the range.
+    search_config[knowhere::meta::RANGE_SEARCH_K] = topk;
+
+    const auto range_filter =
+        GetValueFromConfig<float>(search_info.search_params_, RANGE_FILTER);
+    if (range_filter.has_value()) {
+        search_config[RANGE_FILTER] = range_filter.value();
+        CheckRangeSearchParam(
+            search_config[RADIUS], search_config[RANGE_FILTER], metric_type);
+    }
+
+    const auto page_retain_order =
+        GetValueFromConfig<bool>(search_info.search_params_, PAGE_RETAIN_ORDER);
+    if (page_retain_order.has_value()) {
+        search_config[knowhere::meta::RETAIN_ITERATOR_ORDER] =
+            page_retain_order.value();
+    }
+    return true;
+}
+
 }  // namespace milvus::index
