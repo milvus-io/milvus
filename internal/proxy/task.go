@@ -1246,11 +1246,14 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			if !IsStringType {
 				return merr.WrapErrParameterInvalid(fieldName, "%s can not modify the maxlength for non-string types", schemapb.DataType_name[dataType])
 			}
-			_, err := strconv.Atoi(prop.Value)
+			value, err := strconv.Atoi(prop.Value)
 			if err != nil {
 				return merr.WrapErrParameterInvalid("%s should be an integer, but got %T", prop.Key, prop.Value)
 			}
 
+			if value > defaultMaxVarCharLength {
+				return merr.WrapErrParameterInvalid("%s exceeds the maximum allowed value 65535", prop.Value)
+			}
 		}
 	}
 
