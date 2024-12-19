@@ -726,6 +726,10 @@ func (c *compactionPlanHandler) checkCompaction() error {
 		if t.GetTaskProto().GetState() == datapb.CompactionTaskState_failed ||
 			t.GetTaskProto().GetState() == datapb.CompactionTaskState_timeout ||
 			t.GetTaskProto().GetState() == datapb.CompactionTaskState_completed {
+			log.Ctx(context.TODO()).Info("task need to clean",
+				zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()),
+				zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+				zap.String("state", t.GetTaskProto().GetState().String()))
 			c.cleaningTasks[t.GetTaskProto().GetPlanID()] = t
 		}
 	}

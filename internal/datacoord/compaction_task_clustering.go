@@ -177,14 +177,8 @@ func (t *clusteringCompactionTask) retryableProcess(ctx context.Context) error {
 }
 
 func (t *clusteringCompactionTask) Clean() bool {
-	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("type", t.GetTaskProto().GetType().String()))
-	log.Info("clean task")
-	err := t.doClean()
-	if err != nil {
-		log.Warn("clean task fail", zap.Error(err))
-		return false
-	}
-	return true
+	log.Ctx(context.TODO()).Info("clean task", zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("type", t.GetTaskProto().GetType().String()))
+	return t.doClean() == nil
 }
 
 func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {

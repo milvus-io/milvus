@@ -216,8 +216,7 @@ func (t *l0CompactionTask) doClean() error {
 }
 
 func (t *l0CompactionTask) Clean() bool {
-	err := t.doClean()
-	return err == nil
+	return t.doClean() == nil
 }
 
 func (t *l0CompactionTask) GetResult() *datapb.CompactionPlanResult {

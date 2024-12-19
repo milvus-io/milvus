@@ -264,8 +264,7 @@ func (t *mixCompactionTask) processFailed() bool {
 }
 
 func (t *mixCompactionTask) Clean() bool {
-	err := t.doClean()
-	return err == nil
+	return t.doClean() == nil
 }
 
 func (t *mixCompactionTask) doClean() error {
