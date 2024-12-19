@@ -18,6 +18,8 @@ package milvusclient
 
 import (
 	"encoding/json"
+	"fmt"
+	"reflect"
 	"strconv"
 
 	"github.com/cockroachdb/errors"
@@ -25,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 )
@@ -59,22 +62,24 @@ type searchOption struct {
 type annRequest struct {
 	vectors []entity.Vector
 
-	annField      string
-	metricsType   entity.MetricType
-	searchParam   map[string]string
-	groupByField  string
-	annParam      index.AnnParam
-	ignoreGrowing bool
-	expr          string
-	topK          int
-	offset        int
+	annField       string
+	metricsType    entity.MetricType
+	searchParam    map[string]string
+	groupByField   string
+	annParam       index.AnnParam
+	ignoreGrowing  bool
+	expr           string
+	topK           int
+	offset         int
+	templateParams map[string]any
 }
 
 func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *annRequest {
 	return &annRequest{
-		annField: annField,
-		vectors:  vectors,
-		topK:     limit,
+		annField:       annField,
+		vectors:        vectors,
+		topK:           limit,
+		templateParams: make(map[string]any),
 	}
 }
 
@@ -116,7 +121,96 @@ func (r *annRequest) searchRequest() (*milvuspb.SearchRequest, error) {
 	}
 	request.SearchParams = entity.MapKvPairs(params)
 
+	request.ExprTemplateValues = make(map[string]*schemapb.TemplateValue)
+	for key, value := range r.templateParams {
+		tmplVal, err := any2TmplValue(value)
+		if err != nil {
+			return nil, err
+		}
+		request.ExprTemplateValues[key] = tmplVal
+	}
+
 	return request, nil
+}
+
+func any2TmplValue(val any) (*schemapb.TemplateValue, error) {
+	result := &schemapb.TemplateValue{}
+	switch v := val.(type) {
+	case int, int8, int16, int32:
+		result.Val = &schemapb.TemplateValue_Int64Val{Int64Val: reflect.ValueOf(v).Int()}
+	case int64:
+		result.Val = &schemapb.TemplateValue_Int64Val{Int64Val: v}
+	case float32:
+		result.Val = &schemapb.TemplateValue_FloatVal{FloatVal: float64(v)}
+	case float64:
+		result.Val = &schemapb.TemplateValue_FloatVal{FloatVal: v}
+	case bool:
+		result.Val = &schemapb.TemplateValue_BoolVal{BoolVal: v}
+	case string:
+		result.Val = &schemapb.TemplateValue_StringVal{StringVal: v}
+	default:
+		if reflect.TypeOf(val).Kind() == reflect.Slice {
+			return slice2TmplValue(val)
+		}
+		return nil, fmt.Errorf("unsupported template value type: %T", val)
+	}
+	return result, nil
+}
+
+func slice2TmplValue(val any) (*schemapb.TemplateValue, error) {
+	arrVal := &schemapb.TemplateValue_ArrayVal{
+		ArrayVal: &schemapb.TemplateArrayValue{},
+	}
+
+	rv := reflect.ValueOf(val)
+	switch t := reflect.TypeOf(val).Elem().Kind(); t {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		data := make([]int64, 0, rv.Len())
+		for i := 0; i < rv.Len(); i++ {
+			data = append(data, rv.Index(i).Int())
+		}
+		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_LongData{
+			LongData: &schemapb.LongArray{
+				Data: data,
+			},
+		}
+	case reflect.Bool:
+		data := make([]bool, 0, rv.Len())
+		for i := 0; i < rv.Len(); i++ {
+			data = append(data, rv.Index(i).Bool())
+		}
+		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_BoolData{
+			BoolData: &schemapb.BoolArray{
+				Data: data,
+			},
+		}
+	case reflect.Float32, reflect.Float64:
+		data := make([]float64, 0, rv.Len())
+		for i := 0; i < rv.Len(); i++ {
+			data = append(data, rv.Index(i).Float())
+		}
+		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_DoubleData{
+			DoubleData: &schemapb.DoubleArray{
+				Data: data,
+			},
+		}
+	case reflect.String:
+		data := make([]string, 0, rv.Len())
+		for i := 0; i < rv.Len(); i++ {
+			data = append(data, rv.Index(i).String())
+		}
+		arrVal.ArrayVal.Data = &schemapb.TemplateArrayValue_StringData{
+			StringData: &schemapb.StringArray{
+				Data: data,
+			},
+		}
+	default:
+		return nil, fmt.Errorf("unsupported template type: slice of %v", t)
+	}
+
+	return &schemapb.TemplateValue{
+		Val: arrVal,
+	}, nil
 }
 
 func (r *annRequest) WithANNSField(annsField string) *annRequest {
@@ -141,6 +235,11 @@ func (r *annRequest) WithAnnParam(ap index.AnnParam) *annRequest {
 
 func (r *annRequest) WithFilter(expr string) *annRequest {
 	r.expr = expr
+	return r
+}
+
+func (r *annRequest) WithTemplateParam(key string, val any) *annRequest {
+	r.templateParams[key] = val
 	return r
 }
 
@@ -176,6 +275,11 @@ func (opt *searchOption) WithPartitions(partitionNames ...string) *searchOption 
 
 func (opt *searchOption) WithFilter(expr string) *searchOption {
 	opt.annRequest.WithFilter(expr)
+	return opt
+}
+
+func (opt *searchOption) WithTemplateParam(key string, val any) *searchOption {
+	opt.annRequest.WithTemplateParam(key, val)
 	return opt
 }
 
@@ -223,9 +327,10 @@ func (opt *searchOption) WithSearchParam(key, value string) *searchOption {
 func NewSearchOption(collectionName string, limit int, vectors []entity.Vector) *searchOption {
 	return &searchOption{
 		annRequest: &annRequest{
-			vectors:     vectors,
-			searchParam: make(map[string]string),
-			topK:        limit,
+			vectors:        vectors,
+			searchParam:    make(map[string]string),
+			topK:           limit,
+			templateParams: make(map[string]any),
 		},
 		collectionName:             collectionName,
 		useDefaultConsistencyLevel: true,
@@ -293,6 +398,10 @@ type hybridSearchOption struct {
 	outputFields          []string
 	useDefaultConsistency bool
 	consistencyLevel      entity.ConsistencyLevel
+
+	limit    int
+	offset   int
+	reranker Reranker
 }
 
 func (opt *hybridSearchOption) WithConsistencyLevel(cl entity.ConsistencyLevel) *hybridSearchOption {
@@ -311,6 +420,16 @@ func (opt *hybridSearchOption) WithOutputFields(outputFields ...string) *hybridS
 	return opt
 }
 
+func (opt *hybridSearchOption) WithReranker(reranker Reranker) *hybridSearchOption {
+	opt.reranker = reranker
+	return opt
+}
+
+func (opt *hybridSearchOption) WithOffset(offset int) *hybridSearchOption {
+	opt.offset = offset
+	return opt
+}
+
 func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, error) {
 	requests := make([]*milvuspb.SearchRequest, 0, len(opt.reqs))
 	for _, annRequest := range opt.reqs {
@@ -321,6 +440,15 @@ func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, e
 		requests = append(requests, req)
 	}
 
+	var params []*commonpb.KeyValuePair
+	if opt.reranker != nil {
+		params = opt.reranker.GetParams()
+	}
+	params = append(params, &commonpb.KeyValuePair{Key: spLimit, Value: strconv.FormatInt(int64(opt.limit), 10)})
+	if opt.offset > 0 {
+		params = append(params, &commonpb.KeyValuePair{Key: spOffset, Value: strconv.FormatInt(int64(opt.offset), 10)})
+	}
+
 	return &milvuspb.HybridSearchRequest{
 		CollectionName:        opt.collectionName,
 		PartitionNames:        opt.partitionNames,
@@ -328,20 +456,22 @@ func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, e
 		UseDefaultConsistency: opt.useDefaultConsistency,
 		ConsistencyLevel:      commonpb.ConsistencyLevel(opt.consistencyLevel),
 		OutputFields:          opt.outputFields,
+		RankParams:            params,
 	}, nil
 }
 
-func NewHybridSearchOption(collectionName string, annRequests ...*annRequest) *hybridSearchOption {
+func NewHybridSearchOption(collectionName string, limit int, annRequests ...*annRequest) *hybridSearchOption {
 	return &hybridSearchOption{
 		collectionName: collectionName,
 
 		reqs:                  annRequests,
 		useDefaultConsistency: true,
+		limit:                 limit,
 	}
 }
 
 type QueryOption interface {
-	Request() *milvuspb.QueryRequest
+	Request() (*milvuspb.QueryRequest, error)
 }
 
 type queryOption struct {
@@ -352,10 +482,11 @@ type queryOption struct {
 	consistencyLevel           entity.ConsistencyLevel
 	useDefaultConsistencyLevel bool
 	expr                       string
+	templateParams             map[string]any
 }
 
-func (opt *queryOption) Request() *milvuspb.QueryRequest {
-	return &milvuspb.QueryRequest{
+func (opt *queryOption) Request() (*milvuspb.QueryRequest, error) {
+	req := &milvuspb.QueryRequest{
 		CollectionName: opt.collectionName,
 		PartitionNames: opt.partitionNames,
 		OutputFields:   opt.outputFields,
@@ -364,10 +495,26 @@ func (opt *queryOption) Request() *milvuspb.QueryRequest {
 		QueryParams:      entity.MapKvPairs(opt.queryParams),
 		ConsistencyLevel: opt.consistencyLevel.CommonConsistencyLevel(),
 	}
+
+	req.ExprTemplateValues = make(map[string]*schemapb.TemplateValue)
+	for key, value := range opt.templateParams {
+		tmplVal, err := any2TmplValue(value)
+		if err != nil {
+			return nil, err
+		}
+		req.ExprTemplateValues[key] = tmplVal
+	}
+
+	return req, nil
 }
 
 func (opt *queryOption) WithFilter(expr string) *queryOption {
 	opt.expr = expr
+	return opt
+}
+
+func (opt *queryOption) WithTemplateParam(key string, val any) *queryOption {
+	opt.templateParams[key] = val
 	return opt
 }
 
@@ -408,5 +555,6 @@ func NewQueryOption(collectionName string) *queryOption {
 		collectionName:             collectionName,
 		useDefaultConsistencyLevel: true,
 		consistencyLevel:           entity.ClBounded,
+		templateParams:             make(map[string]any),
 	}
 }
