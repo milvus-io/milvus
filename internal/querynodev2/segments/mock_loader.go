@@ -355,6 +355,54 @@ func (_c *MockLoader_LoadIndex_Call) RunAndReturn(run func(context.Context, Segm
 	return _c
 }
 
+// LoadJSONIndex provides a mock function with given fields: ctx, segment, info
+func (_m *MockLoader) LoadJSONIndex(ctx context.Context, segment Segment, info *querypb.SegmentLoadInfo) error {
+	ret := _m.Called(ctx, segment, info)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LoadJSONIndex")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, Segment, *querypb.SegmentLoadInfo) error); ok {
+		r0 = rf(ctx, segment, info)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockLoader_LoadJSONIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadJSONIndex'
+type MockLoader_LoadJSONIndex_Call struct {
+	*mock.Call
+}
+
+// LoadJSONIndex is a helper method to define mock.On call
+//   - ctx context.Context
+//   - segment Segment
+//   - info *querypb.SegmentLoadInfo
+func (_e *MockLoader_Expecter) LoadJSONIndex(ctx interface{}, segment interface{}, info interface{}) *MockLoader_LoadJSONIndex_Call {
+	return &MockLoader_LoadJSONIndex_Call{Call: _e.mock.On("LoadJSONIndex", ctx, segment, info)}
+}
+
+func (_c *MockLoader_LoadJSONIndex_Call) Run(run func(ctx context.Context, segment Segment, info *querypb.SegmentLoadInfo)) *MockLoader_LoadJSONIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(Segment), args[2].(*querypb.SegmentLoadInfo))
+	})
+	return _c
+}
+
+func (_c *MockLoader_LoadJSONIndex_Call) Return(_a0 error) *MockLoader_LoadJSONIndex_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockLoader_LoadJSONIndex_Call) RunAndReturn(run func(context.Context, Segment, *querypb.SegmentLoadInfo) error) *MockLoader_LoadJSONIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LoadLazySegment provides a mock function with given fields: ctx, segment, loadInfo
 func (_m *MockLoader) LoadLazySegment(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error {
 	ret := _m.Called(ctx, segment, loadInfo)

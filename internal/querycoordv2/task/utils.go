@@ -95,6 +95,8 @@ func GetTaskType(task Task) Type {
 		return TaskTypeReduce
 	case task.Actions()[0].Type() == ActionTypeUpdate:
 		return TaskTypeUpdate
+	case task.Actions()[0].Type() == ActionTypeStatsUpdate:
+		return TaskTypeStatsUpdate
 	}
 	return 0
 }
@@ -130,6 +132,10 @@ func packLoadSegmentRequest(
 	loadScope := querypb.LoadScope_Full
 	if action.Type() == ActionTypeUpdate {
 		loadScope = querypb.LoadScope_Index
+	}
+
+	if action.Type() == ActionTypeStatsUpdate {
+		loadScope = querypb.LoadScope_Stats
 	}
 
 	if task.Source() == utils.LeaderChecker {
