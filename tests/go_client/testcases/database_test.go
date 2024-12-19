@@ -26,7 +26,7 @@ func teardownTest(t *testing.T) func(t *testing.T) {
 		dbs, _ := mc.ListDatabases(ctx, client.NewListDatabaseOption())
 		for _, db := range dbs {
 			if db != common.DefaultDb {
-				_ = mc.UsingDatabase(ctx, client.NewUsingDatabaseOption(db))
+				_ = mc.UsingDatabase(ctx, client.NewUseDatabaseOption(db))
 				collections, _ := mc.ListCollections(ctx, client.NewListCollectionOption())
 				for _, coll := range collections {
 					_ = mc.DropCollection(ctx, client.NewDropCollectionOption(coll))
@@ -57,7 +57,7 @@ func TestDatabase(t *testing.T) {
 	// new client with db1 -> using db
 	clientDB1 := createMilvusClient(ctx, t, &client.ClientConfig{Address: *addr, DBName: dbName1})
 	t.Log("https://github.com/milvus-io/milvus/issues/34137")
-	err = clientDB1.UsingDatabase(ctx, client.NewUsingDatabaseOption(dbName1))
+	err = clientDB1.UsingDatabase(ctx, client.NewUseDatabaseOption(dbName1))
 	common.CheckErr(t, err, true)
 
 	// create collections -> verify collections contains
@@ -77,14 +77,14 @@ func TestDatabase(t *testing.T) {
 	require.Containsf(t, dbs, dbName2, fmt.Sprintf("%s db not in dbs: %v", dbName2, dbs))
 
 	// using db2 -> create collection -> drop collection
-	err = clientDefault.UsingDatabase(ctx, client.NewUsingDatabaseOption(dbName2))
+	err = clientDefault.UsingDatabase(ctx, client.NewUseDatabaseOption(dbName2))
 	common.CheckErr(t, err, true)
 	_, db2Col1 := hp.CollPrepare.CreateCollection(ctx, t, clientDefault, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	err = clientDefault.DropCollection(ctx, client.NewDropCollectionOption(db2Col1.CollectionName))
 	common.CheckErr(t, err, true)
 
 	// using empty db -> drop db2
-	clientDefault.UsingDatabase(ctx, client.NewUsingDatabaseOption(""))
+	clientDefault.UsingDatabase(ctx, client.NewUseDatabaseOption(""))
 	err = clientDefault.DropDatabase(ctx, client.NewDropDatabaseOption(dbName2))
 	common.CheckErr(t, err, true)
 
@@ -98,7 +98,7 @@ func TestDatabase(t *testing.T) {
 	common.CheckErr(t, err, false, "must drop all collections before drop database")
 
 	// drop all db1's collections -> drop db1
-	clientDB1.UsingDatabase(ctx, client.NewUsingDatabaseOption(dbName1))
+	clientDB1.UsingDatabase(ctx, client.NewUseDatabaseOption(dbName1))
 	err = clientDB1.DropCollection(ctx, client.NewDropCollectionOption(db1Col1.CollectionName))
 	common.CheckErr(t, err, true)
 
@@ -160,7 +160,7 @@ func TestDropDb(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	// using db and drop the db
-	err = mc.UsingDatabase(ctx, client.NewUsingDatabaseOption(dbName))
+	err = mc.UsingDatabase(ctx, client.NewUseDatabaseOption(dbName))
 	common.CheckErr(t, err, true)
 	err = mc.DropDatabase(ctx, client.NewDropDatabaseOption(dbName))
 	common.CheckErr(t, err, true)
@@ -170,7 +170,7 @@ func TestDropDb(t *testing.T) {
 	common.CheckErr(t, err, false, fmt.Sprintf("database not found[database=%s]", dbName))
 
 	// using default db and verify collections
-	err = mc.UsingDatabase(ctx, client.NewUsingDatabaseOption(common.DefaultDb))
+	err = mc.UsingDatabase(ctx, client.NewUseDatabaseOption(common.DefaultDb))
 	common.CheckErr(t, err, true)
 	collections, _ = mc.ListCollections(ctx, listCollOpt)
 	require.Contains(t, collections, defCol.CollectionName)
@@ -205,17 +205,17 @@ func TestUsingDb(t *testing.T) {
 
 	// using not existed db
 	dbName := common.GenRandomString("db", 4)
-	err := mc.UsingDatabase(ctx, client.NewUsingDatabaseOption(dbName))
+	err := mc.UsingDatabase(ctx, client.NewUseDatabaseOption(dbName))
 	common.CheckErr(t, err, false, fmt.Sprintf("database not found[database=%s]", dbName))
 
 	// using empty db
-	err = mc.UsingDatabase(ctx, client.NewUsingDatabaseOption(""))
+	err = mc.UsingDatabase(ctx, client.NewUseDatabaseOption(""))
 	common.CheckErr(t, err, true)
 	collections, _ = mc.ListCollections(ctx, listCollOpt)
 	require.Contains(t, collections, col.CollectionName)
 
 	// using current db
-	err = mc.UsingDatabase(ctx, client.NewUsingDatabaseOption(common.DefaultDb))
+	err = mc.UsingDatabase(ctx, client.NewUseDatabaseOption(common.DefaultDb))
 	common.CheckErr(t, err, true)
 	collections, _ = mc.ListCollections(ctx, listCollOpt)
 	require.Contains(t, collections, col.CollectionName)
@@ -262,7 +262,7 @@ func TestClientWithDb(t *testing.T) {
 	require.Containsf(t, dbCollections, dbCol1.CollectionName, fmt.Sprintf("The collection %s not in: %v", dbCol1.CollectionName, dbCollections))
 
 	// using default db and collection not in
-	_ = mcDb.UsingDatabase(ctx, client.NewUsingDatabaseOption(common.DefaultDb))
+	_ = mcDb.UsingDatabase(ctx, client.NewUseDatabaseOption(common.DefaultDb))
 	defCollections, _ = mcDb.ListCollections(ctx, listCollOpt)
 	require.NotContains(t, defCollections, dbCol1.CollectionName)
 
