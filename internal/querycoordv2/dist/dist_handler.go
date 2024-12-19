@@ -24,6 +24,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -91,7 +93,9 @@ func (dh *distHandler) start(ctx context.Context) {
 }
 
 func (dh *distHandler) pullDist(ctx context.Context, failures *int, dispatchTask bool) {
+	tr := timerecord.NewTimeRecorder("")
 	resp, err := dh.getDistribution(ctx)
+	d1 := tr.RecordSpan()
 	if err != nil {
 		node := dh.nodeManager.Get(dh.nodeID)
 		*failures = *failures + 1
@@ -100,11 +104,15 @@ func (dh *distHandler) pullDist(ctx context.Context, failures *int, dispatchTask
 			fields = append(fields, zap.Time("lastHeartbeat", node.LastHeartbeat()))
 		}
 		fields = append(fields, zap.Error(err))
-		log.RatedWarn(30.0, "failed to get data distribution", fields...)
+		log.Ctx(ctx).WithRateGroup("distHandler.pullDist", 1, 60).
+			RatedWarn(30.0, "failed to get data distribution", fields...)
 	} else {
 		*failures = 0
 		dh.handleDistResp(resp, dispatchTask)
 	}
+	log.Ctx(ctx).WithRateGroup("distHandler.pullDist", 1, 120).
+		RatedInfo(120.0, "pull and handle distribution done",
+			zap.Int("respSize", proto.Size(resp)), zap.Duration("pullDur", d1), zap.Duration("handleDur", tr.RecordSpan()))
 }
 
 func (dh *distHandler) handleDistResp(resp *querypb.GetDataDistributionResponse, dispatchTask bool) {

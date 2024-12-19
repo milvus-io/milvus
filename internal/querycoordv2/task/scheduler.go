@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -576,11 +577,13 @@ func (scheduler *taskScheduler) schedule(node int64) {
 		return
 	}
 
+	tr := timerecord.NewTimeRecorder("")
 	log := log.With(
 		zap.Int64("nodeID", node),
 	)
 
 	scheduler.tryPromoteAll()
+	promoteDur := tr.RecordSpan()
 
 	log.Debug("process tasks related to node",
 		zap.Int("processingTaskNum", scheduler.processQueue.Len()),
@@ -602,6 +605,7 @@ func (scheduler *taskScheduler) schedule(node int64) {
 
 		return true
 	})
+	preprocessDur := tr.RecordSpan()
 
 	// The scheduler doesn't limit the number of tasks,
 	// to commit tasks to executors as soon as possible, to reach higher merge possibility
@@ -612,6 +616,7 @@ func (scheduler *taskScheduler) schedule(node int64) {
 		}
 		return nil
 	}, "process")
+	processDur := tr.RecordSpan()
 
 	for _, task := range toRemove {
 		scheduler.remove(task)
@@ -623,6 +628,10 @@ func (scheduler *taskScheduler) schedule(node int64) {
 		zap.Int("toProcessNum", len(toProcess)),
 		zap.Int32("committedNum", commmittedNum.Load()),
 		zap.Int("toRemoveNum", len(toRemove)),
+		zap.Duration("promoteDur", promoteDur),
+		zap.Duration("preprocessDUr", preprocessDur),
+		zap.Duration("processDUr", processDur),
+		zap.Duration("totalDur", tr.ElapseSpan()),
 	)
 
 	log.Info("process tasks related to node done",

@@ -240,9 +240,13 @@ func (ob *CollectionObserver) readyToObserve(collectionID int64) bool {
 
 func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
 	loading := false
+	observeTaskNum := 0
+	observeStart := time.Now()
 	ob.loadTasks.Range(func(traceID string, task LoadTask) bool {
 		loading = true
+		observeTaskNum++
 
+		start := time.Now()
 		collection := ob.meta.CollectionManager.GetCollection(task.CollectionID)
 		if collection == nil {
 			return true
@@ -296,8 +300,11 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
 			ob.loadTasks.Remove(traceID)
 		}
 
+		log.Info("observe collection done", zap.Int64("collectionID", task.CollectionID), zap.Duration("dur", time.Since(start)))
 		return true
 	})
+
+	log.Info("observe all collections done", zap.Int("num", observeTaskNum), zap.Duration("dur", time.Since(observeStart)))
 
 	// trigger check logic when loading collections/partitions
 	if loading {
@@ -352,13 +359,6 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager, partition.GetCollectionID(), nodes)
 		loadedCount += len(group)
 	}
-	if loadedCount > 0 {
-		log.Ctx(ctx).Info("partition load progress",
-			zap.Int64("collectionID", partition.GetCollectionID()),
-			zap.Int64("partitionID", partition.GetPartitionID()),
-			zap.Int("subChannelCount", subChannelCount),
-			zap.Int("loadSegmentCount", loadedCount-subChannelCount))
-	}
 	loadPercentage = int32(loadedCount * 100 / (targetNum * int(replicaNum)))
 
 	if loadedCount <= ob.partitionLoadedCount[partition.GetPartitionID()] && loadPercentage != 100 {
@@ -386,6 +386,8 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 		zap.Int64("collectionID", partition.GetCollectionID()),
 		zap.Int64("partitionID", partition.GetPartitionID()),
 		zap.Int32("partitionLoadPercentage", loadPercentage),
+		zap.Int("subChannelCount", subChannelCount),
+		zap.Int("loadSegmentCount", loadedCount-subChannelCount),
 	)
 	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("partition %d load percentage update: %d", partition.PartitionID, loadPercentage)))
 	return true
