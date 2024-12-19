@@ -173,12 +173,10 @@ class BufferedWriter {
                 THROW_FILE_WRITE_ERROR
             }
             buffer_pos_ = 0;
-            count_++;
         }
     }
 
  private:
-    int32_t count_{0};
     File& file_;            // File pointer
     size_t buffer_size_;    // Size of the internal buffer
     char* buffer_;          // The buffer itself
