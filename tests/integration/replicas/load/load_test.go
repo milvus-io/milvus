@@ -921,7 +921,6 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_OnLoadingCollection() {
 	}, 30*time.Second, time.Second)
 
 	// trigger collection loading, and modify collection's load config during loading
-	s.loadCollection(collectionName, dbName, 3, rgs[:3])
 	loadStatus, err := s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -930,7 +929,6 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_OnLoadingCollection() {
 	})
 	s.NoError(err)
 	s.True(merr.Ok(loadStatus))
-	s.loadCollection(collectionName, dbName, 3, rgs[:3])
 	loadStatus, err = s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -939,7 +937,6 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_OnLoadingCollection() {
 	})
 	s.NoError(err)
 	s.True(merr.Ok(loadStatus))
-	s.loadCollection(collectionName, dbName, 3, rgs[:3])
 	loadStatus, err = s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
