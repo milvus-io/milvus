@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -75,4 +76,21 @@ func (c *Client) ListPartitions(ctx context.Context, opt ListPartitionsOption, c
 		return nil
 	})
 	return partitionNames, err
+}
+
+func (c *Client) GetPartitionStats(ctx context.Context, opt GetPartitionStatsOption, callOptions ...grpc.CallOption) (map[string]string, error) {
+	req := opt.Request()
+
+	var result map[string]string
+
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.GetPartitionStatistics(ctx, req, callOptions...)
+		err = merr.CheckRPCCall(resp, err)
+		if err != nil {
+			return err
+		}
+		result = entity.KvPairsMap(resp.GetStats())
+		return nil
+	})
+	return result, err
 }

@@ -88,6 +88,26 @@ func (s *DatabaseSuite) TestDropDatabase() {
 	})
 }
 
+func (s *DatabaseSuite) TestUseDatabase() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		dbName := fmt.Sprintf("dt_%s", s.randString(6))
+		s.mock.EXPECT().Connect(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cr *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error) {
+			return &milvuspb.ConnectResponse{
+				Status:     merr.Success(),
+				ServerInfo: &commonpb.ServerInfo{},
+			}, nil
+		}).Once()
+
+		err := s.client.UseDatabase(ctx, NewUseDatabaseOption(dbName))
+		s.NoError(err)
+
+		s.Equal(dbName, s.client.currentDB)
+	})
+}
+
 func TestDatabase(t *testing.T) {
 	suite.Run(t, new(DatabaseSuite))
 }

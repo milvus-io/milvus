@@ -310,3 +310,17 @@ func (opt *alterCollectionOption) Request() *milvuspb.AlterCollectionRequest {
 func NewAlterCollectionOption(collection string) *alterCollectionOption {
 	return &alterCollectionOption{collectionName: collection, properties: make(map[string]string)}
 }
+
+type getCollectionStatsOption struct {
+	collectionName string
+}
+
+func (opt *getCollectionStatsOption) Request() *milvuspb.GetCollectionStatisticsRequest {
+	return &milvuspb.GetCollectionStatisticsRequest{
+		CollectionName: opt.collectionName,
+	}
+}
+
+func NewGetCollectionStatsOption(collectionName string) *getCollectionStatsOption {
+	return &getCollectionStatsOption{collectionName: collectionName}
+}

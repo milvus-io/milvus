@@ -192,6 +192,10 @@ func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...g
 	return resultSet, err
 }
 
+func (c *Client) Get(ctx context.Context, option QueryOption, callOptions ...grpc.CallOption) (ResultSet, error) {
+	return c.Query(ctx, option, callOptions...)
+}
+
 func (c *Client) HybridSearch(ctx context.Context, option HybridSearchOption, callOptions ...grpc.CallOption) ([]ResultSet, error) {
 	req, err := option.HybridRequest()
 	if err != nil {

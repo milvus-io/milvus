@@ -52,8 +52,7 @@ func (s *SearchOptionSuite) TestBasic() {
 	topK := rand.Intn(100) + 1
 	opt := NewSearchOption(collName, topK, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})})
 
-	opt = opt.WithANNSField("test_field").WithOutputFields("ID", "Value").WithConsistencyLevel(entity.ClStrong).WithFilter("ID > 1000")
-
+	opt = opt.WithANNSField("test_field").WithOutputFields("ID", "Value").WithConsistencyLevel(entity.ClStrong).WithFilter("ID > 1000").WithGroupByField("group_field").WithGroupSize(10).WithStrictGroupSize(true)
 	req, err := opt.Request()
 	s.Require().NoError(err)
 
@@ -64,6 +63,15 @@ func (s *SearchOptionSuite) TestBasic() {
 	annField, ok := searchParams[spAnnsField]
 	s.Require().True(ok)
 	s.Equal("test_field", annField)
+	groupField, ok := searchParams[spGroupBy]
+	s.Require().True(ok)
+	s.Equal("group_field", groupField)
+	groupSize, ok := searchParams[spGroupSize]
+	s.Require().True(ok)
+	s.Equal("10", groupSize)
+	spStrictGroupSize, ok := searchParams[spStrictGroupSize]
+	s.Require().True(ok)
+	s.Equal("true", spStrictGroupSize)
 
 	opt = NewSearchOption(collName, topK, []entity.Vector{nonSupportData{}})
 	_, err = opt.Request()

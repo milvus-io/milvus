@@ -147,3 +147,23 @@ func (c *Client) AlterCollection(ctx context.Context, option AlterCollectionOpti
 		return merr.CheckRPCCall(resp, err)
 	})
 }
+
+type GetCollectionOption interface {
+	Request() *milvuspb.GetCollectionStatisticsRequest
+}
+
+func (c *Client) GetCollectionStats(ctx context.Context, opt GetCollectionOption) (map[string]string, error) {
+	var stats map[string]string
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.GetCollectionStatistics(ctx, opt.Request())
+		if err = merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		stats = entity.KvPairsMap(resp.GetStats())
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return stats, nil
+}

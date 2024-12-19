@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -28,20 +29,23 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 )
 
 const (
-	spAnnsField     = `anns_field`
-	spTopK          = `topk`
-	spOffset        = `offset`
-	spLimit         = `limit`
-	spParams        = `params`
-	spMetricsType   = `metric_type`
-	spRoundDecimal  = `round_decimal`
-	spIgnoreGrowing = `ignore_growing`
-	spGroupBy       = `group_by_field`
+	spAnnsField       = `anns_field`
+	spTopK            = `topk`
+	spOffset          = `offset`
+	spLimit           = `limit`
+	spParams          = `params`
+	spMetricsType     = `metric_type`
+	spRoundDecimal    = `round_decimal`
+	spIgnoreGrowing   = `ignore_growing`
+	spGroupBy         = `group_by_field`
+	spGroupSize       = `group_size`
+	spStrictGroupSize = `strict_group_size`
 )
 
 type SearchOption interface {
@@ -62,16 +66,18 @@ type searchOption struct {
 type annRequest struct {
 	vectors []entity.Vector
 
-	annField       string
-	metricsType    entity.MetricType
-	searchParam    map[string]string
-	groupByField   string
-	annParam       index.AnnParam
-	ignoreGrowing  bool
-	expr           string
-	topK           int
-	offset         int
-	templateParams map[string]any
+	annField        string
+	metricsType     entity.MetricType
+	searchParam     map[string]string
+	groupByField    string
+	groupSize       int
+	strictGroupSize bool
+	annParam        index.AnnParam
+	ignoreGrowing   bool
+	expr            string
+	topK            int
+	offset          int
+	templateParams  map[string]any
 }
 
 func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *annRequest {
@@ -107,6 +113,12 @@ func (r *annRequest) searchRequest() (*milvuspb.SearchRequest, error) {
 	}
 	if r.groupByField != "" {
 		params[spGroupBy] = r.groupByField
+	}
+	if r.groupSize != 0 {
+		params[spGroupSize] = strconv.Itoa(r.groupSize)
+	}
+	if r.strictGroupSize {
+		params[spStrictGroupSize] = "true"
 	}
 	// ann param
 	if r.annParam != nil {
@@ -223,6 +235,16 @@ func (r *annRequest) WithGroupByField(groupByField string) *annRequest {
 	return r
 }
 
+func (r *annRequest) WithGroupSize(groupSize int) *annRequest {
+	r.groupSize = groupSize
+	return r
+}
+
+func (r *annRequest) WithStrictGroupSize(strictGroupSize bool) *annRequest {
+	r.strictGroupSize = strictGroupSize
+	return r
+}
+
 func (r *annRequest) WithSearchParam(key, value string) *annRequest {
 	r.searchParam[key] = value
 	return r
@@ -306,6 +328,16 @@ func (opt *searchOption) WithANNSField(annsField string) *searchOption {
 
 func (opt *searchOption) WithGroupByField(groupByField string) *searchOption {
 	opt.annRequest.WithGroupByField(groupByField)
+	return opt
+}
+
+func (opt *searchOption) WithGroupSize(groupSize int) *searchOption {
+	opt.annRequest.WithGroupSize(groupSize)
+	return opt
+}
+
+func (opt *searchOption) WithStrictGroupSize(strictGroupSize bool) *searchOption {
+	opt.annRequest.WithStrictGroupSize(strictGroupSize)
 	return opt
 }
 
@@ -548,6 +580,27 @@ func (opt *queryOption) WithConsistencyLevel(consistencyLevel entity.Consistency
 func (opt *queryOption) WithPartitions(partitionNames ...string) *queryOption {
 	opt.partitionNames = partitionNames
 	return opt
+}
+
+func (opt *queryOption) WithIDs(ids column.Column) *queryOption {
+	opt.expr = pks2Expr(ids)
+	return opt
+}
+
+func pks2Expr(ids column.Column) string {
+	var expr string
+	pkName := ids.Name()
+	switch ids.Type() {
+	case entity.FieldTypeInt64:
+		expr = fmt.Sprintf("%s in %s", pkName, strings.Join(strings.Fields(fmt.Sprint(ids.FieldData().GetScalars().GetLongData().GetData())), ","))
+	case entity.FieldTypeVarChar:
+		data := ids.FieldData().GetScalars().GetData().(*schemapb.ScalarField_StringData).StringData.GetData()
+		for i := range data {
+			data[i] = fmt.Sprintf("\"%s\"", data[i])
+		}
+		expr = fmt.Sprintf("%s in [%s]", pkName, strings.Join(data, ","))
+	}
+	return expr
 }
 
 func NewQueryOption(collectionName string) *queryOption {
