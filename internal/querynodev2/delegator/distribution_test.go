@@ -29,7 +29,7 @@ type DistributionSuite struct {
 }
 
 func (s *DistributionSuite) SetupTest() {
-	s.dist = NewDistribution()
+	s.dist = NewDistribution(0)
 	s.Equal(initialTargetVersion, s.dist.getTargetVersion())
 }
 
@@ -260,7 +260,7 @@ func (s *DistributionSuite) TestAddGrowing() {
 			defer s.TearDownTest()
 
 			s.dist.AddGrowing(tc.input...)
-			s.dist.SyncTargetVersion(1000, tc.workingParts, []int64{1, 2}, nil, nil)
+			s.dist.SyncTargetVersion(1000, tc.workingParts, []int64{1, 2}, nil, nil, 0)
 			_, growing, version, err := s.dist.PinReadableSegments()
 			s.Require().NoError(err)
 			defer s.dist.Unpin(version)
@@ -728,7 +728,7 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 
 	s.dist.AddGrowing(growing...)
 	s.dist.AddDistributions(sealed...)
-	s.dist.SyncTargetVersion(2, []int64{1}, []int64{2, 3}, []int64{6}, []int64{})
+	s.dist.SyncTargetVersion(2, []int64{1}, []int64{2, 3}, []int64{6}, []int64{}, 0)
 
 	s1, s2, _, err := s.dist.PinReadableSegments()
 	s.Require().NoError(err)
@@ -740,13 +740,13 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 	s.Len(s2, 3)
 
 	s.dist.serviceable.Store(true)
-	s.dist.SyncTargetVersion(2, []int64{1}, []int64{222}, []int64{}, []int64{})
+	s.dist.SyncTargetVersion(2, []int64{1}, []int64{222}, []int64{}, []int64{}, 0)
 	s.True(s.dist.Serviceable())
 
-	s.dist.SyncTargetVersion(2, []int64{1}, []int64{}, []int64{333}, []int64{})
+	s.dist.SyncTargetVersion(2, []int64{1}, []int64{}, []int64{333}, []int64{}, 0)
 	s.False(s.dist.Serviceable())
 
-	s.dist.SyncTargetVersion(2, []int64{1}, []int64{}, []int64{333}, []int64{1, 2, 3})
+	s.dist.SyncTargetVersion(2, []int64{1}, []int64{}, []int64{333}, []int64{1, 2, 3}, 0)
 	_, _, _, err = s.dist.PinReadableSegments()
 	s.Error(err)
 }

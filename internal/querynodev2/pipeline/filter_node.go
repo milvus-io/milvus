@@ -99,7 +99,6 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 			out.append(msg)
 		}
 	}
-	fNode.delegator.TryCleanExcludedSegments(streamMsgPack.EndTs)
 	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Inc()
 	return out
 }
@@ -117,10 +116,8 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 			}
 		}
 
-		// check segment whether excluded
-		ok := fNode.delegator.VerifyExcludedSegments(insertMsg.SegmentID, insertMsg.EndTimestamp)
-		if !ok {
-			m := fmt.Sprintf("skip msg due to segment=%d has been excluded", insertMsg.GetSegmentID())
+		if insertMsg.EndTimestamp < fNode.delegator.GetCheckPoint() {
+			m := fmt.Sprintf("skip msg which ts is small than channel's checkpoint, segment=%d, ts=%d", insertMsg.GetSegmentID(), insertMsg.EndTimestamp)
 			return merr.WrapErrServiceInternal(m)
 		}
 		return nil

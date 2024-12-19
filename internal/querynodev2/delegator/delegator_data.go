@@ -96,6 +96,16 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 	tr := timerecord.NewTimeRecorder(method)
 	log := sd.getLogger(context.Background())
 	for segmentID, insertData := range insertRecords {
+		// check delegator's checkpoint, to skip older msg from stream
+		if insertData.StartPosition.GetTimestamp() < sd.GetCheckPoint() {
+			log.Debug("skip insert msg which start position is small than channel's checkpoint",
+				zap.Int64("segmentID", segmentID),
+				zap.Uint64("ts", insertData.StartPosition.GetTimestamp()),
+				zap.Uint64("checkPoint", sd.GetCheckPoint()),
+			)
+			continue
+		}
+
 		growing := sd.segmentManager.GetGrowing(segmentID)
 		newGrowingSegment := false
 		if growing == nil {
@@ -142,15 +152,6 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 		growing.UpdateBloomFilter(insertData.PrimaryKeys)
 
 		if newGrowingSegment {
-			sd.growingSegmentLock.Lock()
-			// check whether segment has been excluded
-			if ok := sd.VerifyExcludedSegments(segmentID, typeutil.MaxTimestamp); !ok {
-				log.Warn("try to insert data into released segment, skip it", zap.Int64("segmentID", segmentID))
-				sd.growingSegmentLock.Unlock()
-				growing.Release(context.Background())
-				continue
-			}
-
 			if !sd.pkOracle.Exists(growing, paramtable.GetNodeID()) {
 				// register created growing segment after insert, avoid to add empty growing to delegator
 				sd.pkOracle.Register(growing, paramtable.GetNodeID())
@@ -164,10 +165,9 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					PartitionID:   insertData.PartitionID,
 					Version:       0,
 					TargetVersion: initialTargetVersion,
+					StartPosition: growing.StartPosition().GetTimestamp(),
 				})
 			}
-
-			sd.growingSegmentLock.Unlock()
 		} else if sd.idfOracle != nil {
 			sd.idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
 		}
@@ -188,6 +188,15 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 	method := "ProcessDelete"
 	tr := timerecord.NewTimeRecorder(method)
+
+	if len(deleteData) == 0 {
+		return
+	}
+	if ts < sd.GetCheckPoint() {
+		log.Debug("skip delete msg which ts is small than checkpoint", zap.Uint64("ts", ts), zap.Uint64("checkPoint", sd.GetCheckPoint()))
+		return
+	}
+
 	// block load segment handle delete buffer
 	sd.deleteMut.Lock()
 	defer sd.deleteMut.Unlock()
@@ -389,6 +398,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 			PartitionID:   segment.Partition(),
 			Version:       version,
 			TargetVersion: sd.distribution.getTargetVersion(),
+			StartPosition: segment.StartPosition().GetTimestamp(),
 		}
 	})...)
 	return nil
@@ -513,11 +523,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 
 	// alter distribution
 	sd.distribution.AddDistributions(entries...)
-
-	partStatsToReload := make([]UniqueID, 0)
-	lo.ForEach(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) {
-		partStatsToReload = append(partStatsToReload, info.PartitionID)
-	})
 
 	return nil
 }
@@ -880,20 +885,6 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	// wait cleared signal
 	<-signal
 
-	if len(growing) > 0 {
-		sd.growingSegmentLock.Lock()
-	}
-	// when we try to release a segment, add it to pipeline's exclude list first
-	// in case of consumed it's growing segment again
-	droppedInfos := lo.SliceToMap(req.GetSegmentIDs(), func(id int64) (int64, uint64) {
-		if req.GetCheckpoint() == nil {
-			return id, typeutil.MaxTimestamp
-		}
-
-		return id, req.GetCheckpoint().GetTimestamp()
-	})
-	sd.AddExcludedSegments(droppedInfos)
-
 	if len(sealed) > 0 {
 		sd.pkOracle.Remove(
 			pkoracle.WithSegmentIDs(lo.Map(sealed, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })...),
@@ -922,9 +913,6 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 			releaseErr = err
 		}
 	}
-	if len(growing) > 0 {
-		sd.growingSegmentLock.Unlock()
-	}
 
 	if releaseErr != nil {
 		return releaseErr
@@ -933,40 +921,28 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	if hasLevel0 {
 		sd.RefreshLevel0DeletionStats()
 	}
-	partitionsToReload := make([]UniqueID, 0)
-	lo.ForEach(req.GetSegmentIDs(), func(segmentID int64, _ int) {
-		segment := sd.segmentManager.Get(segmentID)
-		if segment != nil {
-			partitionsToReload = append(partitionsToReload, segment.Partition())
-		}
-	})
 	return nil
 }
 
-func (sd *shardDelegator) SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64,
-	sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition,
+func (sd *shardDelegator) SyncTargetVersion(
+	newVersion int64,
+	partitions []int64,
+	growingInTarget []int64,
+	sealedInTarget []int64,
+	checkpoint *msgpb.MsgPosition,
 ) {
 	growings := sd.segmentManager.GetBy(
 		segments.WithType(segments.SegmentTypeGrowing),
 		segments.WithChannel(sd.vchannelName),
 	)
 
-	sealedSet := typeutil.NewUniqueSet(sealedInTarget...)
 	growingSet := typeutil.NewUniqueSet(growingInTarget...)
-	droppedSet := typeutil.NewUniqueSet(droppedInTarget...)
 	redundantGrowing := typeutil.NewUniqueSet()
 	for _, s := range growings {
 		if growingSet.Contain(s.ID()) {
 			continue
 		}
-
-		// sealed segment already exists, make growing segment redundant
-		if sealedSet.Contain(s.ID()) {
-			redundantGrowing.Insert(s.ID())
-		}
-
-		// sealed segment already dropped, make growing segment redundant
-		if droppedSet.Contain(s.ID()) {
+		if s.StartPosition().GetTimestamp() <= checkpoint.GetTimestamp() {
 			redundantGrowing.Insert(s.ID())
 		}
 	}
@@ -975,26 +951,12 @@ func (sd *shardDelegator) SyncTargetVersion(newVersion int64, partitions []int64
 		log.Warn("found redundant growing segments",
 			zap.Int64s("growingSegments", redundantGrowingIDs))
 	}
-	sd.distribution.SyncTargetVersion(newVersion, partitions, growingInTarget, sealedInTarget, redundantGrowingIDs)
+	sd.distribution.SyncTargetVersion(newVersion, partitions, growingInTarget, sealedInTarget, redundantGrowingIDs, checkpoint.GetTimestamp())
 	sd.deleteBuffer.TryDiscard(checkpoint.GetTimestamp())
 }
 
 func (sd *shardDelegator) GetTargetVersion() int64 {
 	return sd.distribution.getTargetVersion()
-}
-
-func (sd *shardDelegator) AddExcludedSegments(excludeInfo map[int64]uint64) {
-	sd.excludedSegments.Insert(excludeInfo)
-}
-
-func (sd *shardDelegator) VerifyExcludedSegments(segmentID int64, ts uint64) bool {
-	return sd.excludedSegments.Verify(segmentID, ts)
-}
-
-func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
-	if sd.excludedSegments.ShouldClean() {
-		sd.excludedSegments.CleanInvalid(ts)
-	}
 }
 
 func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, error) {
@@ -1043,4 +1005,8 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 
 	req.PlaceholderGroup = funcutil.SparseVectorDataToPlaceholderGroupBytes(idfSparseVector)
 	return avgdl, nil
+}
+
+func (sd *shardDelegator) GetCheckPoint() uint64 {
+	return sd.distribution.GetCheckPoint()
 }
