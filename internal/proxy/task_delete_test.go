@@ -1032,15 +1032,15 @@ func TestDeleteRunner_Run(t *testing.T) {
 		require.NoError(t, err)
 
 		dr := deleteRunner{
-			queue:            queue.dmQueue,
-			chMgr:            mockMgr,
-			schema:           schema,
-			collectionID:     collectionID,
-			partitionIDs:     []int64{common.AllPartitionsID},
-			vChannels:        channels,
-			idAllocator:      idAllocator,
-			tsoAllocatorIns:  tsoAllocator,
-			lb:               lb,
+			queue:           queue.dmQueue,
+			chMgr:           mockMgr,
+			schema:          schema,
+			collectionID:    collectionID,
+			partitionIDs:    []int64{common.AllPartitionsID},
+			vChannels:       channels,
+			idAllocator:     idAllocator,
+			tsoAllocatorIns: tsoAllocator,
+			lb:              lb,
 			result: &milvuspb.MutationResult{
 				Status: merr.Success(),
 				IDs: &schemapb.IDs{

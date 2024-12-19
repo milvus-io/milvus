@@ -587,7 +587,7 @@ func (dr *deleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numR
 	if len(dr.partitionIDs) == 1 {
 		partitionID = dr.partitionIDs[0]
 	}
-	log.Ctx.Debug("get primary keys from expr",
+	log.Debug("get primary keys from expr",
 		zap.Int64("len of primary keys", numRow),
 		zap.Int64("collectionID", dr.collectionID),
 		zap.Int64("partitionID", partitionID))
