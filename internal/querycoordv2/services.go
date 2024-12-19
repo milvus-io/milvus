@@ -1240,7 +1240,7 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 	jobs := make([]job.Job, 0, len(req.GetCollectionIDs()))
 	for _, collectionID := range req.GetCollectionIDs() {
 		collection := s.meta.GetCollection(collectionID)
-		if collection == nil{
+		if collection == nil {
 			err := merr.WrapErrCollectionNotLoaded(collectionID)
 			log.Warn("failed to update load config", zap.Error(err))
 			continue
