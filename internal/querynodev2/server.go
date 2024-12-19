@@ -322,7 +322,7 @@ func (node *QueryNode) Init() error {
 		node.factory.Init(paramtable.Get())
 
 		localRootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
-		localUsedSize, err := segcore.GetLocalUsedSize(node.ctx, localRootPath)
+		localUsedSize, err := segcore.GetLocalUsedSize(localRootPath)
 		if err != nil {
 			log.Warn("get local used size failed", zap.Error(err))
 			initError = err
@@ -369,7 +369,7 @@ func (node *QueryNode) Init() error {
 		node.subscribingChannels = typeutil.NewConcurrentSet[string]()
 		node.unsubscribingChannels = typeutil.NewConcurrentSet[string]()
 		node.manager = segments.NewManager()
-		node.loader = segments.NewLoader(node.manager, node.chunkManager)
+		node.loader = segments.NewLoader(node.ctx, node.manager, node.chunkManager)
 		node.manager.SetLoader(node.loader)
 		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, node.GetNodeID())
 		// init pipeline manager
