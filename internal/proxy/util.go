@@ -364,8 +364,8 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 		if err != nil {
 			return err
 		}
-		if maxLengthPerRow > defaultMaxVarCharLength || maxLengthPerRow <= 0 {
-			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, 65535]")
+		if maxLengthPerRow <= 0 {
+			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be greater than 0")
 		}
 		exist = true
 	}
