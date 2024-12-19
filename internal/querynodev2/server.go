@@ -24,6 +24,7 @@ package querynodev2
 #include "segcore/segcore_init_c.h"
 #include "common/init_c.h"
 #include "exec/expression/function/init_c.h"
+#include "exec/operator/init_c.h"
 
 */
 import "C"
@@ -258,6 +259,8 @@ func (node *QueryNode) InitSegcore() error {
 
 	initcore.InitTraceConfig(paramtable.Get())
 	C.InitExecExpressionFunctionFactory()
+
+	C.RegisterAggregationFunctions()
 	return nil
 }
 
