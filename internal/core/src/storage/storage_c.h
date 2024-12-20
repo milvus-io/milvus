@@ -25,7 +25,7 @@ CStatus
 GetLocalUsedSize(const char* c_path, int64_t* size);
 
 CStatus
-InitLocalChunkManagerSingleton(const char* path);
+InitLocalChunkManager(const char* c_role, const char* path);
 
 CStatus
 InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config);

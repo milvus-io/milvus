@@ -15,6 +15,7 @@
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "common/type_c.h"
+#include "common/Common.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/Meta.h"
@@ -424,8 +425,8 @@ CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
         auto local_chunk_manager =
-            milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                .GetChunkManager();
+            milvus::storage::LocalChunkManagerFactory::GetInstance()
+                .GetChunkManager(milvus::Role::QueryNode);
         auto index_file_path_prefix =
             milvus::storage::GenIndexPathPrefix(local_chunk_manager,
                                                 load_index_info->index_build_id,
