@@ -3,8 +3,9 @@ package rmq
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
 func TestMessageID(t *testing.T) {

@@ -4,8 +4,9 @@ import (
 	"testing"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
 func TestMessageID(t *testing.T) {

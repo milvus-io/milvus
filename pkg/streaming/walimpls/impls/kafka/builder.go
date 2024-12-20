@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/registry"
@@ -35,10 +36,7 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &openerImpl{
-		p:              p,
-		consumerConfig: consumerConfig,
-	}, nil
+	return newOpenerImpl(p, consumerConfig), nil
 }
 
 // getProducerAndConsumerConfig returns the producer and consumer config.

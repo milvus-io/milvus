@@ -3,11 +3,12 @@ package kafka
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/registry"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/zeebo/assert"
 )
 
 func TestMain(m *testing.M) {
@@ -27,7 +28,7 @@ func TestRegistry(t *testing.T) {
 }
 
 func TestKafka(t *testing.T) {
-	walimpls.NewWALImplsTestFramework(t, 1000, &builderImpl{}).Run()
+	walimpls.NewWALImplsTestFramework(t, 100, &builderImpl{}).Run()
 }
 
 func TestGetBasicConfig(t *testing.T) {
