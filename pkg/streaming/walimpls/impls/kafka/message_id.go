@@ -3,9 +3,10 @@ package kafka
 import (
 	"strconv"
 
+	"github.com/cockroachdb/errors"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/pkg/errors"
 )
 
 func UnmarshalMessageID(data string) (message.MessageID, error) {
@@ -22,6 +23,10 @@ func unmarshalMessageID(data string) (kafkaID, error) {
 		return 0, errors.Wrapf(message.ErrInvalidMessageID, "decode kafkaID fail with err: %s, id: %s", err.Error(), data)
 	}
 	return kafkaID(v), nil
+}
+
+func NewKafkaID(offset kafka.Offset) message.MessageID {
+	return kafkaID(offset)
 }
 
 type kafkaID kafka.Offset

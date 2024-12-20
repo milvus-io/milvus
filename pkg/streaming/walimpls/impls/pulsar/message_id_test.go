@@ -4,9 +4,10 @@ import (
 	"testing"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
 func TestMessageID(t *testing.T) {

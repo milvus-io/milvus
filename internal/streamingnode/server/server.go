@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	_ "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/kafka"
 	_ "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/pulsar"
 	_ "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/rmq"
 )
