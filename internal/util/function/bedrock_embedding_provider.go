@@ -87,7 +87,7 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 	}
 	var awsAccessKeyId, awsSecretAccessKey, region, modelName string
 	var dim int64
-	normalize := false
+	normalize := true
 
 	for _, param := range functionSchema.Params {
 		switch strings.ToLower(param.Key) {
@@ -110,8 +110,8 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 			region = param.Value
 		case normalizeParamKey:
 			switch strings.ToLower(param.Value) {
-			case "true":
-				normalize = true
+			case "false":
+				normalize = false
 			default:
 				return nil, fmt.Errorf("Illegal [%s:%s] param, ", normalizeParamKey, param.Value)
 			}

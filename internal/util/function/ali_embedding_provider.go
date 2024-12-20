@@ -95,6 +95,12 @@ func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functio
 	if err != nil {
 		return nil, err
 	}
+
+	maxBatch := 25
+	if modelName == TextEmbeddingV3 {
+		maxBatch = 6
+	}
+
 	provider := AliEmbeddingProvider{
 		client:        c,
 		fieldDim:      fieldDim,
@@ -102,7 +108,7 @@ func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functio
 		embedDimParam: dim,
 		// TextEmbedding only supports dense embedding
 		outputType: "dense",
-		maxBatch:   25,
+		maxBatch:   maxBatch,
 		timeoutSec: 30,
 	}
 	return &provider, nil
