@@ -592,10 +592,12 @@ struct TantivyIndexWrapper {
     free() {
         if (writer_ != nullptr) {
             tantivy_free_index_writer(writer_);
+            writer_ = nullptr;
         }
 
         if (reader_ != nullptr) {
             tantivy_free_index_reader(reader_);
+            reader_ = nullptr;
         }
     }
 
