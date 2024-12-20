@@ -244,7 +244,7 @@ func (node *QueryNode) InitSegcore() error {
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
 
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
-	initcore.InitLocalChunkManager(localDataRootPath)
+	initcore.InitLocalChunkManager(typeutil.QueryNodeRole, localDataRootPath)
 
 	err := initcore.InitRemoteChunkManager(paramtable.Get())
 	if err != nil {
@@ -323,15 +323,6 @@ func (node *QueryNode) Init() error {
 
 		node.factory.Init(paramtable.Get())
 
-		localRootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
-		localUsedSize, err := segcore.GetLocalUsedSize(node.ctx, localRootPath)
-		if err != nil {
-			log.Warn("get local used size failed", zap.Error(err))
-			initError = err
-			return
-		}
-		metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(localUsedSize / 1024 / 1024))
-
 		node.chunkManager, err = node.factory.NewPersistentStorageChunkManager(node.ctx)
 		if err != nil {
 			log.Error("QueryNode init vector storage failed", zap.Error(err))
@@ -383,6 +374,15 @@ func (node *QueryNode) Init() error {
 			initError = err
 			return
 		}
+
+		localRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+		localUsedSize, err := segcore.GetLocalUsedSize(node.ctx, localRootPath)
+		if err != nil {
+			log.Warn("get local used size failed", zap.Error(err))
+			initError = err
+			return
+		}
+		metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(localUsedSize / 1024 / 1024))
 
 		log.Info("query node init successfully",
 			zap.Int64("queryNodeID", node.GetNodeID()),

@@ -19,6 +19,7 @@ package indexnode
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // IndexBuildTask is used to record the information of the index tasks.
@@ -221,7 +223,8 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		}
 
 		// check load size and size of field data
-		localUsedSize, err := indexcgowrapper.GetLocalUsedSize(paramtable.Get().LocalStorageCfg.Path.GetValue())
+		localInPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.IndexNodeRole)
+		localUsedSize, err := indexcgowrapper.GetLocalUsedSize(localInPath)
 		if err != nil {
 			log.Warn("IndexNode get local used size failed")
 			return err

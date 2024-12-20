@@ -40,10 +40,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-func InitLocalChunkManager(path string) {
+func InitLocalChunkManager(role string, path string) {
+	CRole := C.CString(role)
+	defer C.free(unsafe.Pointer(CRole))
 	CLocalRootPath := C.CString(path)
 	defer C.free(unsafe.Pointer(CLocalRootPath))
-	C.InitLocalChunkManagerSingleton(CLocalRootPath)
+	C.InitLocalChunkManager(CRole, CLocalRootPath)
 }
 
 func InitTraceConfig(params *paramtable.ComponentParam) {

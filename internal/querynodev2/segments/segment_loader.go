@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"sync"
@@ -460,7 +461,8 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	memoryUsage := hardware.GetUsedMemoryCount()
 	totalMemory := hardware.GetMemoryCount()
 
-	diskUsage, err := segcore.GetLocalUsedSize(ctx, paramtable.Get().LocalStorageCfg.Path.GetValue())
+	localQnPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+	diskUsage, err := segcore.GetLocalUsedSize(ctx, localQnPath)
 	if err != nil {
 		return result, errors.Wrap(err, "get local used size failed")
 	}
@@ -1373,7 +1375,8 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		return 0, 0, errors.New("get memory failed when checkSegmentSize")
 	}
 
-	localDiskUsage, err := segcore.GetLocalUsedSize(ctx, paramtable.Get().LocalStorageCfg.Path.GetValue())
+	localQnPaths := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+	localDiskUsage, err := segcore.GetLocalUsedSize(ctx, localQnPaths)
 	if err != nil {
 		return 0, 0, errors.Wrap(err, "get local used size failed")
 	}

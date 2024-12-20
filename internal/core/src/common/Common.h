@@ -30,6 +30,32 @@ extern int64_t LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern int CPU_NUM;
 extern int64_t EXEC_EVAL_EXPR_BATCH_SIZE;
 
+enum class Role { QueryNode, IndexNode };
+
+const std::unordered_map<Role, std::string> RoleToStringMap = {
+    {Role::QueryNode, "querynode"}, {Role::IndexNode, "indexnode"}};
+
+// convert role to string
+inline std::string
+ToString(Role role) {
+    auto it = RoleToStringMap.find(role);
+    if (it != RoleToStringMap.end()) {
+        return it->second;
+    }
+    PanicInfo(UnexpectedError, "role {} not found", int(role));
+}
+
+// convert string to role
+inline Role
+FromString(const std::string& role_str) {
+    for (const auto& pair : RoleToStringMap) {
+        if (pair.second == role_str) {
+            return pair.first;
+        }
+    }
+    PanicInfo(UnexpectedError, "role {} not found", role_str);
+}
+
 void
 SetIndexSliceSize(const int64_t size);
 

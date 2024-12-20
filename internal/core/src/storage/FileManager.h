@@ -43,6 +43,16 @@ struct FileManagerContext {
           chunkManagerPtr(chunkManagerPtr) {
     }
 
+    explicit FileManagerContext(const FieldDataMeta& fieldDataMeta,
+                                const IndexMeta& indexMeta,
+                                const ChunkManagerPtr& chunkManagerPtr,
+                                bool for_loading)
+        : fieldDataMeta(fieldDataMeta),
+          indexMeta(indexMeta),
+          chunkManagerPtr(chunkManagerPtr),
+          for_loading_index(for_loading) {
+    }
+
     bool
     Valid() const {
         return chunkManagerPtr != nullptr;
@@ -74,8 +84,11 @@ struct FileManagerContext {
 class FileManagerImpl : public knowhere::FileManager {
  public:
     explicit FileManagerImpl(const FieldDataMeta& field_mata,
-                             IndexMeta index_meta)
-        : field_meta_(field_mata), index_meta_(std::move(index_meta)) {
+                             IndexMeta index_meta,
+                             bool for_loading_index)
+        : field_meta_(field_mata),
+          index_meta_(std::move(index_meta)),
+          for_loading_index_(for_loading_index) {
     }
 
  public:
@@ -176,6 +189,9 @@ class FileManagerImpl : public knowhere::FileManager {
     // index meta
     IndexMeta index_meta_;
     ChunkManagerPtr rcm_;
+
+    // indicate whether file manager is used for building index or load index
+    bool for_loading_index_{false};
 };
 
 using FileManagerImplPtr = std::shared_ptr<FileManagerImpl>;

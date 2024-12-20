@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "storage/storage_c.h"
+#include "common/Common.h"
 #include "monitor/prometheus_client.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
@@ -24,7 +25,7 @@ CStatus
 GetLocalUsedSize(const char* c_dir, int64_t* size) {
     try {
         auto local_chunk_manager =
-            milvus::storage::LocalChunkManagerSingleton::GetInstance()
+            milvus::storage::LocalChunkManagerFactory::GetInstance()
                 .GetChunkManager();
         std::string dir(c_dir);
         if (local_chunk_manager->DirExist(dir)) {
@@ -39,10 +40,12 @@ GetLocalUsedSize(const char* c_dir, int64_t* size) {
 }
 
 CStatus
-InitLocalChunkManagerSingleton(const char* c_path) {
+InitLocalChunkManager(const char* c_role, const char* c_path) {
     try {
+        std::string role(c_role);
         std::string path(c_path);
-        milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(path);
+        milvus::storage::LocalChunkManagerFactory::GetInstance()
+            .AddChunkManager(milvus::FromString(role), path);
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

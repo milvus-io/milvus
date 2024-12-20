@@ -29,7 +29,8 @@ namespace milvus::storage {
 MemFileManagerImpl::MemFileManagerImpl(
     const FileManagerContext& fileManagerContext)
     : FileManagerImpl(fileManagerContext.fieldDataMeta,
-                      fileManagerContext.indexMeta) {
+                      fileManagerContext.indexMeta,
+                      fileManagerContext.for_loading_index) {
     rcm_ = fileManagerContext.chunkManagerPtr;
 }
 

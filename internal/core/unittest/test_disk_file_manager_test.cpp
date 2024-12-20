@@ -64,7 +64,7 @@ class DiskAnnFileManagerTest : public testing::Test {
 };
 
 TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = LocalChunkManagerFactory::GetInstance().GetChunkManager();
     std::string indexFilePath = "/tmp/diskann/index_files/1000/index";
     auto exist = lcm->Exist(indexFilePath);
     EXPECT_EQ(exist, false);
