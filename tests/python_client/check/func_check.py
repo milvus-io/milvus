@@ -7,8 +7,19 @@ from common import common_func as cf
 from common.common_type import CheckTasks, Connect_Object_Name
 # from common.code_mapping import ErrorCode, ErrorMessage
 from pymilvus import Collection, Partition, ResourceGroupInfo
-from utils.api_request import Error
 import check.param_check as pc
+
+
+class Error:
+    def __init__(self, error):
+        self.code = getattr(error, 'code', -1)
+        self.message = getattr(error, 'message', str(error))
+
+    def __str__(self):
+        return f"Error(code={self.code}, message={self.message})"
+
+    def __repr__(self):
+        return f"Error(code={self.code}, message={self.message})"
 
 
 class ResponseChecker:
