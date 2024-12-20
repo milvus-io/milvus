@@ -28,6 +28,7 @@
 #include "log/Log.h"
 #include "segcore/DeletedRecord.h"
 #include "segcore/InsertRecord.h"
+#include "SegmentInterface.h"
 
 namespace milvus::segcore {
 
@@ -56,6 +57,19 @@ GetRawDataSizeOfDataArray(const DataArray* data,
 // modify bulk script implement to make process more clear
 std::unique_ptr<DataArray>
 CreateScalarDataArray(int64_t count, const FieldMeta& field_meta);
+
+void
+SetUpScalarFieldData(milvus::proto::schema::ScalarField*& scalar_array,
+                     DataType data_type,
+                     DataType element_type,
+                     int64_t count);
+
+void
+CreateScalarDataArray(DataArray& data_array,
+                      int64_t count,
+                      DataType data_type,
+                      DataType element_type,
+                      bool nullable);
 
 std::unique_ptr<DataArray>
 CreateVectorDataArray(int64_t count, const FieldMeta& field_meta);
@@ -136,4 +150,12 @@ upper_bound(const ConcurrentVector<Timestamp>& timestamps,
             int64_t first,
             int64_t last,
             Timestamp value);
+
+FieldDataPtr
+bulk_script_field_data(FieldId fieldId,
+                       DataType dataType,
+                       const int64_t* seg_offsets,
+                       int64_t count,
+                       const segcore::SegmentInternalInterface* segment,
+                       TargetBitmapView& valid_view);
 }  // namespace milvus::segcore

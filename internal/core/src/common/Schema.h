@@ -183,7 +183,9 @@ class Schema {
 
     FieldId
     get_field_id(const FieldName& field_name) const {
-        AssertInfo(name_ids_.count(field_name), "Cannot find field_name");
+        AssertInfo(name_ids_.count(field_name),
+                   "Cannot find field_name:{}",
+                   field_name.get());
         return name_ids_.at(field_name);
     }
 
@@ -230,6 +232,24 @@ class Schema {
 
         fields_.emplace(field_id, field_meta);
         field_ids_.emplace_back(field_id);
+    }
+
+    DataType
+    GetFieldType(const FieldId& field_id) const {
+        AssertInfo(fields_.count(field_id),
+                   "field_id:{} is not existed in the schema",
+                   field_id.get());
+        auto& meta = fields_.at(field_id);
+        return meta.get_data_type();
+    }
+
+    const std::string&
+    GetFieldName(const FieldId& field_id) const {
+        AssertInfo(fields_.count(field_id),
+                   "field_id:{} is not existed in the schema",
+                   field_id.get());
+        auto& meta = fields_.at(field_id);
+        return meta.get_name().get();
     }
 
  private:
