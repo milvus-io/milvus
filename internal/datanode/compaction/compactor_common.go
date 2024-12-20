@@ -19,6 +19,7 @@ package compaction
 import (
 	"context"
 	sio "io"
+	"math"
 	"strconv"
 	"time"
 
@@ -33,29 +34,123 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 )
 
 const compactionBatchSize = 100
 
-func isExpiredEntity(ttl int64, now, ts typeutil.Timestamp) bool {
+type EntityFilter struct {
+	deletedPkTs map[interface{}]*tsHit // pk2ts
+	ttl         int64
+	currentTime time.Time
+
+	expiredCount int
+	deletedCount int
+}
+
+func newEntityFilter(deletedPkTs map[interface{}]*tsHit, ttl int64, currTime time.Time) *EntityFilter {
+	if deletedPkTs == nil {
+		deletedPkTs = make(map[interface{}]*tsHit)
+	}
+	return &EntityFilter{
+		deletedPkTs: deletedPkTs,
+		ttl:         ttl,
+		currentTime: currTime,
+	}
+}
+
+func (filter *EntityFilter) Filtered(pk any, ts typeutil.Timestamp) bool {
+	if filter.isEntityDeleted(pk, ts) {
+		filter.deletedCount++
+		return true
+	}
+
+	// Filtering expired entity
+	if filter.isEntityExpired(ts) {
+		filter.expiredCount++
+		return true
+	}
+	return false
+}
+
+func (filter *EntityFilter) GetExpiredCount() int {
+	return filter.expiredCount
+}
+
+func (filter *EntityFilter) GetDeletedCount() int {
+	return filter.deletedCount
+}
+
+func (filter *EntityFilter) GetDeltalogDeleteCount() int {
+	return len(filter.deletedPkTs)
+}
+
+func (filter *EntityFilter) GetMissingDeleteCount() int {
+	return len(lo.PickBy(filter.deletedPkTs, func(_ any, v *tsHit) bool {
+		return !v.hit
+	}))
+}
+
+func (filter *EntityFilter) isEntityDeleted(pk interface{}, ts typeutil.Timestamp) bool {
+	if pkTsHit, ok := filter.deletedPkTs[pk]; ok {
+		pkTsHit.hit = true
+
+		// insert task and delete task has the same ts when upsert
+		// here should be < instead of <=
+		// to avoid the upsert data to be deleted after compact
+		if ts < pkTsHit.ts {
+			return true
+		}
+	}
+	return false
+}
+
+// Largest TTL is math.MaxInt64
+func (filter *EntityFilter) isEntityExpired(entityTs typeutil.Timestamp) bool {
 	// entity expire is not enabled if duration <= 0
-	if ttl <= 0 {
+	if filter.ttl <= 0 {
 		return false
 	}
 
-	pts, _ := tsoutil.ParseTS(ts)
-	pnow, _ := tsoutil.ParseTS(now)
-	expireTime := pts.Add(time.Duration(ttl))
-	return expireTime.Before(pnow)
+	entityTime, _ := tsoutil.ParseTS(entityTs)
+
+	// Unlikely to happen, but avoid following negative duration
+	if entityTime.After(filter.currentTime) {
+		return false
+	}
+
+	gotDur := filter.currentTime.Sub(entityTime)
+	if gotDur == time.Duration(math.MaxInt64) {
+		// Aviod using time.Duration if duration between
+		// entityTime and currentTime is larger than max dur(~290years)
+		if filter.ttl == math.MaxInt64 {
+			return true
+		}
+		return false
+	}
+
+	return int64(gotDur.Seconds()) >= filter.ttl
 }
 
-func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[interface{}]typeutil.Timestamp, error) {
-	pk2ts := make(map[interface{}]typeutil.Timestamp)
+type tsHit struct {
+	ts  typeutil.Timestamp
+	hit bool
+}
+
+// If pk already exists in pk2ts, record the later one.
+func (h *tsHit) update(ts typeutil.Timestamp) {
+	if ts > h.ts {
+		h.ts = ts
+	}
+}
+
+func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[interface{}]*tsHit, error) {
+	pk2TsHit := make(map[interface{}]*tsHit)
 
 	log := log.Ctx(ctx)
 	if len(paths) == 0 {
 		log.Debug("compact with no deltalogs, skip merge deltalogs")
-		return pk2ts, nil
+		return pk2TsHit, nil
 	}
 
 	blobs := make([]*storage.Blob, 0)
@@ -88,17 +183,17 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[in
 		}
 
 		dl := reader.Value()
-		// If pk already exists in pk2ts, record the later one.
-		if ts, ok := pk2ts[dl.Pk.GetValue()]; ok && ts > dl.Ts {
-			continue
+		if _, ok := pk2TsHit[dl.Pk.GetValue()]; !ok {
+			pk2TsHit[dl.Pk.GetValue()] = &tsHit{ts: dl.Ts}
 		}
-		pk2ts[dl.Pk.GetValue()] = dl.Ts
+		pk2TsHit[dl.Pk.GetValue()].update(dl.Ts)
+
 	}
 
 	log.Info("compact mergeDeltalogs end",
-		zap.Int("deleted pk counts", len(pk2ts)))
+		zap.Int("deleted pk counts", len(pk2TsHit)))
 
-	return pk2ts, nil
+	return pk2TsHit, nil
 }
 
 func composePaths(segments []*datapb.CompactionSegmentBinlogs) (
