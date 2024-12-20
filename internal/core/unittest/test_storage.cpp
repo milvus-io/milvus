@@ -69,14 +69,9 @@ class StorageTest : public testing::Test {
     }
 };
 
-TEST_F(StorageTest, InitLocalChunkManagerSingleton) {
-    auto status = InitLocalChunkManagerSingleton("tmp");
-    EXPECT_EQ(status.error_code, Success);
-}
-
 TEST_F(StorageTest, GetLocalUsedSize) {
     int64_t size = 0;
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = LocalChunkManagerFactory::GetInstance().GetChunkManager();
     EXPECT_EQ(lcm->GetRootPath(), "/tmp/milvus/local_data/");
     string test_dir = lcm->GetRootPath() + "tmp";
     string test_file = test_dir + "/test.txt";

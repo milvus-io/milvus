@@ -25,7 +25,7 @@ using namespace milvus::storage;
 class LocalChunkManagerTest : public testing::Test {};
 
 TEST_F(LocalChunkManagerTest, DirPositive) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = LocalChunkManagerFactory::GetInstance().GetChunkManager();
     string test_dir = lcm->GetRootPath() + "/local-test-dir/";
     lcm->RemoveDir(test_dir);
     lcm->CreateDir(test_dir);
@@ -39,7 +39,7 @@ TEST_F(LocalChunkManagerTest, DirPositive) {
 }
 
 TEST_F(LocalChunkManagerTest, FilePositive) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = LocalChunkManagerFactory::GetInstance().GetChunkManager();
     string test_dir = lcm->GetRootPath() + "/local-test-dir";
 
     string file = test_dir + "/test-file";
@@ -59,7 +59,7 @@ TEST_F(LocalChunkManagerTest, FilePositive) {
 }
 
 TEST_F(LocalChunkManagerTest, WritePositive) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = LocalChunkManagerFactory::GetInstance().GetChunkManager();
     string test_dir = lcm->GetRootPath() + "/local-test-dir";
 
     string file = test_dir + "/test-write-positive";
@@ -92,7 +92,7 @@ TEST_F(LocalChunkManagerTest, WritePositive) {
 }
 
 TEST_F(LocalChunkManagerTest, ReadPositive) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = LocalChunkManagerFactory::GetInstance().GetChunkManager();
     string test_dir = lcm->GetRootPath() + "/local-test-dir";
 
     uint8_t data[5] = {0x17, 0x32, 0x45, 0x34, 0x23};
@@ -139,7 +139,7 @@ TEST_F(LocalChunkManagerTest, ReadPositive) {
 }
 
 TEST_F(LocalChunkManagerTest, WriteOffset) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = LocalChunkManagerFactory::GetInstance().GetChunkManager();
     string test_dir = lcm->GetRootPath() + "/local-test-dir";
 
     string file = test_dir + "/test-write-offset";
@@ -183,7 +183,7 @@ TEST_F(LocalChunkManagerTest, WriteOffset) {
 }
 
 TEST_F(LocalChunkManagerTest, ReadOffset) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = LocalChunkManagerFactory::GetInstance().GetChunkManager();
     string test_dir = lcm->GetRootPath() + "/local-test-dir";
 
     string file = test_dir + "/test-read-offset";
@@ -219,7 +219,7 @@ TEST_F(LocalChunkManagerTest, ReadOffset) {
 }
 
 TEST_F(LocalChunkManagerTest, GetSizeOfDir) {
-    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto lcm = LocalChunkManagerFactory::GetInstance().GetChunkManager();
     auto test_dir = lcm->GetRootPath() + "/local-test-dir";
     EXPECT_EQ(lcm->DirExist(test_dir), false);
     lcm->CreateDir(test_dir);

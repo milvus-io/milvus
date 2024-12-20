@@ -42,7 +42,7 @@ func (s *ManagerSuite) SetupSuite() {
 	s.types = []SegmentType{SegmentTypeSealed, SegmentTypeGrowing, SegmentTypeSealed, SegmentTypeSealed}
 	s.levels = []datapb.SegmentLevel{datapb.SegmentLevel_Legacy, datapb.SegmentLevel_Legacy, datapb.SegmentLevel_L1, datapb.SegmentLevel_L0}
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
-	initcore.InitLocalChunkManager(localDataRootPath)
+	initcore.InitLocalChunkManager(typeutil.QueryNodeRole, localDataRootPath)
 	initcore.InitMmapManager(paramtable.Get())
 }
 

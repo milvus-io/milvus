@@ -1538,7 +1538,7 @@ TEST(Sealed, GetSparseVectorFromChunkCache) {
     auto file_name = std::string(
         "sealed_test_get_vector_from_chunk_cache/insert_log/1/101/1000000");
 
-    auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
+    auto lcm = milvus::storage::LocalChunkManagerFactory::GetInstance()
                    .GetChunkManager();
 
     auto schema = std::make_shared<Schema>();

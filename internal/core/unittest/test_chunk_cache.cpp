@@ -81,7 +81,8 @@ class ChunkCacheTest
                               sparse_metric_type,
                               false);
 
-        lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
+        lcm = milvus::storage::LocalChunkManagerFactory()
+                  .GetInstance()
                   .GetChunkManager();
         dense_data = dataset.get_col<float>(fake_dense_vec_id);
         sparse_data = dataset.get_col<knowhere::sparse::SparseRow<float>>(
