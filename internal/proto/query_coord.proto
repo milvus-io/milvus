@@ -827,6 +827,7 @@ message CheckerInfo {
 message SegmentTarget {
   int64 ID = 1;
   data.SegmentLevel level = 2; 
+  int64 num_of_rows = 3;
 }
 
 message PartitionTarget {
