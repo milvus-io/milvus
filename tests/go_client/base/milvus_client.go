@@ -89,8 +89,8 @@ func (mc *MilvusClient) Close(ctx context.Context) error {
 // -- database --
 
 // UsingDatabase list all database in milvus cluster.
-func (mc *MilvusClient) UsingDatabase(ctx context.Context, option client.UsingDatabaseOption) error {
-	err := mc.mClient.UsingDatabase(ctx, option)
+func (mc *MilvusClient) UsingDatabase(ctx context.Context, option client.UseDatabaseOption) error {
+	err := mc.mClient.UseDatabase(ctx, option)
 	return err
 }
 
