@@ -28,6 +28,8 @@ namespace exec {
 
 void
 PhyCallExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    auto offset_input = context.get_offset_input();
+    SetHasOffsetInput(offset_input != nullptr);
     AssertInfo(inputs_.size() == expr_->inputs().size(),
                "logical call expr needs {} inputs, but {} inputs are provided",
                expr_->inputs().size(),

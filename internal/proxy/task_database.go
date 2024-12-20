@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 
 	"go.uber.org/zap"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -274,6 +276,34 @@ func (t *alterDatabaseTask) OnEnqueue() error {
 }
 
 func (t *alterDatabaseTask) PreExecute(ctx context.Context) error {
+	_, ok := common.GetReplicateID(t.Properties)
+	if ok {
+		return merr.WrapErrParameterInvalidMsg("can't set the replicate id property in alter database request")
+	}
+	endTS, ok := common.GetReplicateEndTS(t.Properties)
+	if !ok { // not exist replicate end ts property
+		return nil
+	}
+	cacheInfo, err := globalMetaCache.GetDatabaseInfo(ctx, t.DbName)
+	if err != nil {
+		return err
+	}
+	oldReplicateEnable, _ := common.IsReplicateEnabled(cacheInfo.properties)
+	if !oldReplicateEnable { // old replicate enable is false
+		return merr.WrapErrParameterInvalidMsg("can't set the replicate end ts property in alter database request when db replicate is disabled")
+	}
+	allocResp, err := t.rootCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
+		Count:          1,
+		BlockTimestamp: endTS,
+	})
+	if err = merr.CheckRPCCall(allocResp, err); err != nil {
+		return merr.WrapErrServiceInternal("alloc timestamp failed", err.Error())
+	}
+	if allocResp.GetTimestamp() <= endTS {
+		return merr.WrapErrServiceInternal("alter database: alloc timestamp failed, timestamp is not greater than endTS",
+			fmt.Sprintf("timestamp = %d, endTS = %d", allocResp.GetTimestamp(), endTS))
+	}
+
 	return nil
 }
 
@@ -285,6 +315,7 @@ func (t *alterDatabaseTask) Execute(ctx context.Context) error {
 		DbName:     t.AlterDatabaseRequest.GetDbName(),
 		DbId:       t.AlterDatabaseRequest.GetDbId(),
 		Properties: t.AlterDatabaseRequest.GetProperties(),
+		DeleteKeys: t.AlterDatabaseRequest.GetDeleteKeys(),
 	}
 
 	ret, err := t.rootCoord.AlterDatabase(ctx, req)
@@ -363,12 +394,12 @@ func (t *describeDatabaseTask) Execute(ctx context.Context) error {
 	}
 	ret, err := t.rootCoord.DescribeDatabase(ctx, req)
 	if err != nil {
-		log.Warn("DescribeDatabase failed", zap.Error(err))
+		log.Ctx(ctx).Warn("DescribeDatabase failed", zap.Error(err))
 		return err
 	}
 
 	if err := merr.CheckRPCCall(ret, err); err != nil {
-		log.Warn("DescribeDatabase failed", zap.Error(err))
+		log.Ctx(ctx).Warn("DescribeDatabase failed", zap.Error(err))
 		return err
 	}
 

@@ -123,7 +123,7 @@ func TestDeleteNotExistName(t *testing.T) {
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
-	_, errDelete = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithPartition("aaa"))
+	_, errDelete = mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithPartition("aaa").WithExpr("int64 < 10"))
 	common.CheckErr(t, errDelete, false, "partition not found[partition=aaa]")
 }
 
@@ -545,8 +545,8 @@ func TestDeleteDuplicatedPks(t *testing.T) {
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// delete
-	deleteIds := []int64{0, 0, 0, 0, 0}
-	delRes, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, deleteIds))
+	deleteIDs := []int64{0, 0, 0, 0, 0}
+	delRes, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, deleteIDs))
 	common.CheckErr(t, err, true)
 	require.Equal(t, 5, int(delRes.DeleteCount))
 

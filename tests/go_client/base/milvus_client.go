@@ -15,43 +15,56 @@ import (
 )
 
 func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
+	// Limit debug logging for these methods
+	rateLogMethods := map[string]struct{}{
+		"GetFlushState":      {},
+		"GetLoadingProgress": {},
+		"DescribeIndex":      {},
+	}
+
+	logWithRateLimit := func(_methodShortName string, logFunc func(msg string, fields ...zap.Field),
+		logRateFunc func(cost float64, msg string, fields ...zap.Field) bool,
+		msg string, fields ...zap.Field,
+	) {
+		if _, exists := rateLogMethods[_methodShortName]; exists {
+			logRateFunc(10, msg, fields...)
+		} else {
+			logFunc(msg, fields...)
+		}
+	}
+
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		maxLogLength := 300
+		const maxLogLength = 300
 		_method := strings.Split(method, "/")
-		_methodShotName := _method[len(_method)-1]
-		// Marshal req to json str
-		reqJSON, err := json.Marshal(req)
-		if err != nil {
-			log.Error("Failed to marshal request", zap.Error(err))
-			reqJSON = []byte("could not marshal request")
-		}
-		reqStr := string(reqJSON)
-		if len(reqStr) > maxLogLength {
-			reqStr = reqStr[:maxLogLength] + "..."
+		_methodShortName := _method[len(_method)-1]
+
+		// Marshal request
+		marshalWithFallback := func(v interface{}, fallbackMsg string) string {
+			dataJSON, err := json.Marshal(v)
+			if err != nil {
+				log.Error("Failed to marshal", zap.Error(err))
+				return fallbackMsg
+			}
+			dataStr := string(dataJSON)
+			if len(dataStr) > maxLogLength {
+				return dataStr[:maxLogLength] + "......"
+			}
+			return dataStr
 		}
 
-		// log before
-		log.Info("Request", zap.String("method", _methodShotName), zap.Any("reqs", reqStr))
+		reqStr := marshalWithFallback(req, "could not marshal request")
+		logWithRateLimit(_methodShortName, log.Info, log.RatedInfo, "Request", zap.String("method", _methodShortName), zap.String("reqs", reqStr))
 
-		// invoker
+		// Ike the actual method
 		start := time.Now()
 		errResp := invoker(ctx, method, req, reply, cc, opts...)
 		cost := time.Since(start)
 
-		// Marshal reply to json str
-		respJSON, err := json.Marshal(reply)
-		if err != nil {
-			log.Error("Failed to marshal response", zap.Error(err))
-			respJSON = []byte("could not marshal response")
-		}
-		respStr := string(respJSON)
-		if len(respStr) > maxLogLength {
-			respStr = respStr[:maxLogLength] + "..."
-		}
+		// Marshal response
+		respStr := marshalWithFallback(reply, "could not marshal response")
+		logWithRateLimit(_methodShortName, log.Info, log.RatedInfo, "Response", zap.String("method", _methodShortName), zap.String("resp", respStr))
+		logWithRateLimit(_methodShortName, log.Debug, log.RatedDebug, "Cost", zap.String("method", _methodShortName), zap.Duration("cost", cost))
 
-		// log after
-		log.Info("Response", zap.String("method", _methodShotName), zap.Any("resp", respStr))
-		log.Debug("Cost", zap.String("method", _methodShotName), zap.Duration("cost", cost))
 		return errResp
 	}
 }
@@ -76,8 +89,8 @@ func (mc *MilvusClient) Close(ctx context.Context) error {
 // -- database --
 
 // UsingDatabase list all database in milvus cluster.
-func (mc *MilvusClient) UsingDatabase(ctx context.Context, option client.UsingDatabaseOption) error {
-	err := mc.mClient.UsingDatabase(ctx, option)
+func (mc *MilvusClient) UsingDatabase(ctx context.Context, option client.UseDatabaseOption) error {
+	err := mc.mClient.UseDatabase(ctx, option)
 	return err
 }
 

@@ -16,21 +16,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var _ ManagerClient = (*managerClientImpl)(nil)
 
 // managerClientImpl implements ManagerClient.
 type managerClientImpl struct {
-	lifetime lifetime.Lifetime[lifetime.State]
+	lifetime *typeutil.Lifetime
+	stopped  chan struct{}
 
 	rb      resolver.Builder
 	service lazygrpc.Service[streamingpb.StreamingNodeManagerServiceClient]
 }
 
 func (c *managerClientImpl) WatchNodeChanged(ctx context.Context) (<-chan struct{}, error) {
-	if c.lifetime.Add(lifetime.IsWorking) != nil {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("manager client is closing")
 	}
 	defer c.lifetime.Done()
@@ -42,7 +43,7 @@ func (c *managerClientImpl) WatchNodeChanged(ctx context.Context) (<-chan struct
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-c.lifetime.CloseCh():
+			case <-c.stopped:
 				return status.NewOnShutdownError("manager client is closing")
 			case resultCh <- struct{}{}:
 			}
@@ -54,7 +55,7 @@ func (c *managerClientImpl) WatchNodeChanged(ctx context.Context) (<-chan struct
 
 // CollectAllStatus collects status in all underlying streamingnode.
 func (c *managerClientImpl) CollectAllStatus(ctx context.Context) (map[int64]*types.StreamingNodeStatus, error) {
-	if c.lifetime.Add(lifetime.IsWorking) != nil {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("manager client is closing")
 	}
 	defer c.lifetime.Done()
@@ -87,6 +88,7 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context) (map[int64]*ty
 }
 
 func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state discoverer.VersionedState) (map[int64]*types.StreamingNodeStatus, error) {
+	log := log.Ctx(ctx)
 	// wait for manager service ready.
 	manager, err := c.service.GetService(ctx)
 	if err != nil {
@@ -128,7 +130,7 @@ func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state
 
 // Assign a wal instance for the channel on log node of given server id.
 func (c *managerClientImpl) Assign(ctx context.Context, pchannel types.PChannelInfoAssigned) error {
-	if c.lifetime.Add(lifetime.IsWorking) != nil {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("manager client is closing")
 	}
 	defer c.lifetime.Done()
@@ -149,7 +151,7 @@ func (c *managerClientImpl) Assign(ctx context.Context, pchannel types.PChannelI
 
 // Remove the wal instance for the channel on log node of given server id.
 func (c *managerClientImpl) Remove(ctx context.Context, pchannel types.PChannelInfoAssigned) error {
-	if c.lifetime.Add(lifetime.IsWorking) != nil {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("manager client is closing")
 	}
 	defer c.lifetime.Done()
@@ -181,9 +183,9 @@ func (c *managerClientImpl) Remove(ctx context.Context, pchannel types.PChannelI
 
 // Close closes the manager client.
 func (c *managerClientImpl) Close() {
-	c.lifetime.SetState(lifetime.Stopped)
+	c.lifetime.SetState(typeutil.LifetimeStateStopped)
+	close(c.stopped)
 	c.lifetime.Wait()
-	c.lifetime.Close()
 
 	c.service.Close()
 	c.rb.Close()

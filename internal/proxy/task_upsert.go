@@ -148,7 +148,7 @@ func (it *upsertTask) OnEnqueue() error {
 func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	collectionName := it.upsertMsg.InsertMsg.CollectionName
 	if err := validateCollectionName(collectionName); err != nil {
-		log.Error("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
+		log.Ctx(ctx).Error("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
 		return err
 	}
 
@@ -290,6 +290,15 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 			IdField: nil,
 		},
 		Timestamp: it.EndTs(),
+	}
+
+	replicateID, err := GetReplicateID(ctx, it.req.GetDbName(), collectionName)
+	if err != nil {
+		log.Warn("get replicate info failed", zap.String("collectionName", collectionName), zap.Error(err))
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+	}
+	if replicateID != "" {
+		return merr.WrapErrCollectionReplicateMode("upsert")
 	}
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.req.GetDbName(), collectionName)

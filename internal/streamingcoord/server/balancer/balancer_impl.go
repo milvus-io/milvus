@@ -13,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -32,7 +31,7 @@ func RecoverBalancer(
 		return nil, errors.Wrap(err, "fail to recover channel manager")
 	}
 	b := &balancerImpl{
-		lifetime:               lifetime.NewLifetime(lifetime.Working),
+		lifetime:               typeutil.NewLifetime(),
 		logger:                 log.With(zap.String("policy", policy)),
 		channelMetaManager:     manager,
 		policy:                 mustGetPolicy(policy),
@@ -45,7 +44,7 @@ func RecoverBalancer(
 
 // balancerImpl is a implementation of Balancer.
 type balancerImpl struct {
-	lifetime               lifetime.Lifetime[lifetime.State]
+	lifetime               *typeutil.Lifetime
 	logger                 *log.MLogger
 	channelMetaManager     *channel.ChannelManager
 	policy                 Policy                                // policy is the balance policy, TODO: should be dynamic in future.
@@ -55,7 +54,7 @@ type balancerImpl struct {
 
 // WatchChannelAssignments watches the balance result.
 func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error) error {
-	if b.lifetime.Add(lifetime.IsWorking) != nil {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("balancer is closing")
 	}
 	defer b.lifetime.Done()
@@ -63,7 +62,7 @@ func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb func(vers
 }
 
 func (b *balancerImpl) MarkAsUnavailable(ctx context.Context, pChannels []types.PChannelInfo) error {
-	if b.lifetime.Add(lifetime.IsWorking) != nil {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("balancer is closing")
 	}
 	defer b.lifetime.Done()
@@ -73,7 +72,7 @@ func (b *balancerImpl) MarkAsUnavailable(ctx context.Context, pChannels []types.
 
 // Trigger trigger a re-balance.
 func (b *balancerImpl) Trigger(ctx context.Context) error {
-	if b.lifetime.Add(lifetime.IsWorking) != nil {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("balancer is closing")
 	}
 	defer b.lifetime.Done()
@@ -93,7 +92,7 @@ func (b *balancerImpl) sendRequestAndWaitFinish(ctx context.Context, newReq *req
 
 // Close close the balancer.
 func (b *balancerImpl) Close() {
-	b.lifetime.SetState(lifetime.Stopped)
+	b.lifetime.SetState(typeutil.LifetimeStateStopped)
 	b.lifetime.Wait()
 
 	b.backgroundTaskNotifier.Cancel()

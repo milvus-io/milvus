@@ -17,6 +17,7 @@
 package gc
 
 import (
+	"context"
 	"math"
 	"os"
 	"runtime"
@@ -87,7 +88,7 @@ func optimizeGOGC() {
 
 	// currently we assume 20 ms as long gc pause
 	if (m.PauseNs[(m.NumGC+255)%256] / uint64(time.Millisecond)) < 20 {
-		log.Debug("GC Tune done", zap.Uint32("previous GOGC", previousGOGC),
+		log.Ctx(context.TODO()).Debug("GC Tune done", zap.Uint32("previous GOGC", previousGOGC),
 			zap.Uint64("heapuse ", toMB(heapuse)),
 			zap.Uint64("total memory", toMB(totaluse)),
 			zap.Uint64("next GC", toMB(m.NextGC)),
@@ -96,7 +97,7 @@ func optimizeGOGC() {
 			zap.Uint64("gc-pause-end", m.PauseEnd[(m.NumGC+255)%256]),
 		)
 	} else {
-		log.Warn("GC Tune done, and the gc is slow", zap.Uint32("previous GOGC", previousGOGC),
+		log.Ctx(context.TODO()).Warn("GC Tune done, and the gc is slow", zap.Uint32("previous GOGC", previousGOGC),
 			zap.Uint64("heapuse ", toMB(heapuse)),
 			zap.Uint64("total memory", toMB(totaluse)),
 			zap.Uint64("next GC", toMB(m.NextGC)),

@@ -19,9 +19,10 @@ package index
 import "strconv"
 
 const (
-	ivfNlistKey = `nlist`
-	ivfPQMKey   = `m`
-	ivfPQNbits  = `nbits`
+	ivfNlistKey  = `nlist`
+	ivfPQMKey    = `m`
+	ivfPQNbits   = `nbits`
+	ivfNprobeKey = `nprobe`
 )
 
 var _ Index = ivfFlatIndex{}
@@ -135,5 +136,25 @@ func NewBinIvfFlatIndex(metricType MetricType, nlist int) Index {
 		},
 
 		nlist: nlist,
+	}
+}
+
+type ivfAnnParam struct {
+	baseAnnParam
+	nprobe int
+}
+
+func (ap ivfAnnParam) Params() map[string]any {
+	result := ap.baseAnnParam.Params()
+	result[ivfNprobeKey] = ap.nprobe
+	return result
+}
+
+func NewIvfAnnParam(nprobe int) ivfAnnParam {
+	return ivfAnnParam{
+		baseAnnParam: baseAnnParam{
+			params: make(map[string]any),
+		},
+		nprobe: nprobe,
 	}
 }

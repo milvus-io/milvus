@@ -78,7 +78,7 @@ func (node *Proxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComp
 		Status: merr.Success(),
 	}
 	code := node.GetStateCode()
-	log.Debug("Proxy current state", zap.String("StateCode", code.String()))
+	log.Ctx(ctx).Debug("Proxy current state", zap.String("StateCode", code.String()))
 	nodeID := common.NotRegisteredID
 	if node.session != nil && node.session.Registered() {
 		nodeID = node.session.ServerID
@@ -160,8 +160,19 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			}
 			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
 			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
-		case commonpb.MsgType_DropDatabase:
+		case commonpb.MsgType_DropDatabase, commonpb.MsgType_AlterDatabase:
 			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
+		case commonpb.MsgType_AlterCollection, commonpb.MsgType_AlterCollectionField:
+			if request.CollectionID != UniqueID(0) {
+				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
+				for _, name := range aliasName {
+					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
+				}
+			}
+			if collectionName != "" {
+				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
+			}
+			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		default:
 			log.Warn("receive unexpected msgType of invalidate collection meta cache", zap.String("msgType", request.GetBase().GetMsgType().String()))
 			if request.CollectionID != UniqueID(0) {
@@ -246,8 +257,7 @@ func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateD
 		replicateMsgStream:    node.replicateMsgStream,
 	}
 
-	log := log.With(
-		zap.String("traceID", sp.SpanContext().TraceID().String()),
+	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("dbName", request.DbName),
 	)
@@ -315,8 +325,7 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 		replicateMsgStream:  node.replicateMsgStream,
 	}
 
-	log := log.With(
-		zap.String("traceID", sp.SpanContext().TraceID().String()),
+	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("dbName", request.DbName),
 	)
@@ -383,8 +392,7 @@ func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListData
 		rootCoord:            node.rootCoord,
 	}
 
-	log := log.With(
-		zap.String("traceID", sp.SpanContext().TraceID().String()),
+	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 	)
 
@@ -1270,6 +1278,72 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 
 	log.Info(
 		rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(act); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+		return merr.Status(err), nil
+	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", act.BeginTs()),
+		zap.Uint64("EndTs", act.EndTs()),
+		zap.Uint64("timestamp", request.Base.Timestamp))
+
+	if err := act.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", act.BeginTs()),
+			zap.Uint64("EndTs", act.EndTs()))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcDone(method),
+		zap.Uint64("BeginTs", act.BeginTs()),
+		zap.Uint64("EndTs", act.EndTs()))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return act.result, nil
+}
+
+func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollectionField")
+	defer sp.End()
+	method := "AlterCollectionField"
+	tr := timerecord.NewTimeRecorder(method)
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+
+	act := &alterCollectionFieldTask{
+		ctx:                         ctx,
+		Condition:                   NewTaskCondition(ctx),
+		AlterCollectionFieldRequest: request,
+		rootCoord:                   node.rootCoord,
+		queryCoord:                  node.queryCoord,
+		dataCoord:                   node.dataCoord,
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("fieldName", request.FieldName),
+		zap.Any("props", request.Properties))
+
+	log.Info(rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(act); err != nil {
 		log.Warn(
@@ -2923,12 +2997,13 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	optimizedSearch := true
 	resultSizeInsufficient := false
 	isTopkReduce := false
+	isRecallEvaluation := false
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeInsufficient, isTopkReduce, err = node.search(ctx, request, optimizedSearch)
+		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false)
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeInsufficient, isTopkReduce, err = node.search(ctx, request, optimizedSearch)
+			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -2946,6 +3021,23 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		if errors.Is(merr.Error(rsp.GetStatus()), merr.ErrInconsistentRequery) {
 			return true, merr.Error(rsp.GetStatus())
 		}
+		// search for ground truth and compute recall
+		if isRecallEvaluation && merr.Ok(rsp.GetStatus()) {
+			var rspGT *milvuspb.SearchResults
+			rspGT, _, _, _, err = node.search(ctx, request, false, true)
+			metrics.ProxyRecallSearchCount.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				metrics.SearchLabel,
+				request.GetCollectionName(),
+			).Inc()
+			if merr.Ok(rspGT.GetStatus()) {
+				return false, computeRecall(rsp.GetResults(), rspGT.GetResults())
+			}
+			if errors.Is(merr.Error(rspGT.GetStatus()), merr.ErrInconsistentRequery) {
+				return true, merr.Error(rspGT.GetStatus())
+			}
+			return false, merr.Error(rspGT.GetStatus())
+		}
 		return false, nil
 	})
 	if err2 != nil {
@@ -2954,13 +3046,11 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	return rsp, err
 }
 
-func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error) {
-	receiveSize := proto.Size(request)
-	metrics.ProxyReceiveBytes.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.SearchLabel,
-		request.GetCollectionName(),
-	).Add(float64(receiveSize))
+func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(metrics.SearchLabel).
+		SetCollectionName(request.GetCollectionName())
 
 	metrics.ProxyReceivedNQ.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -2971,7 +3061,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
-		}, false, false, nil
+		}, false, false, false, nil
 	}
 
 	method := "Search"
@@ -2992,7 +3082,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		if err != nil {
 			return &milvuspb.SearchResults{
 				Status: merr.Status(err),
-			}, false, false, nil
+			}, false, false, false, nil
 		}
 
 		request.PlaceholderGroup = placeholderGroupBytes
@@ -3006,8 +3096,9 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 				commonpbutil.WithMsgType(commonpb.MsgType_Search),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
-			ReqID:        paramtable.GetNodeID(),
-			IsTopkReduce: optimizedSearch,
+			ReqID:              paramtable.GetNodeID(),
+			IsTopkReduce:       optimizedSearch,
+			IsRecallEvaluation: isRecallEvaluation,
 		},
 		request:                request,
 		tr:                     timerecord.NewTimeRecorder("search"),
@@ -3069,7 +3160,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
-		}, false, false, nil
+		}, false, false, false, nil
 	}
 	tr.CtxRecord(ctx, "search request enqueue")
 
@@ -3095,7 +3186,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
-		}, false, false, nil
+		}, false, false, false, nil
 	}
 
 	span := tr.CtxRecord(ctx, "wait search result")
@@ -3152,7 +3243,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
 	}
-	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, nil
+	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, qt.isRecallEvaluation, nil
 }
 
 func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
@@ -3195,12 +3286,10 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 }
 
 func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error) {
-	receiveSize := proto.Size(request)
-	metrics.ProxyReceiveBytes.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.HybridSearchLabel,
-		request.GetCollectionName(),
-	).Add(float64(receiveSize))
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(metrics.HybridSearchLabel).
+		SetCollectionName(request.GetCollectionName())
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
@@ -3678,7 +3767,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		return res, err
 	}
 
-	log.Debug(rpcDone(method))
+	log.Ctx(ctx).Debug(rpcDone(method))
 
 	metrics.ProxyFunctionCall.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -5906,14 +5995,14 @@ func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferN
 
 	method := "TransferNode"
 	if err := ValidateResourceGroupName(request.GetSourceResourceGroup()); err != nil {
-		log.Warn("TransferNode failed",
+		log.Ctx(ctx).Warn("TransferNode failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, "", ""), nil
 	}
 
 	if err := ValidateResourceGroupName(request.GetTargetResourceGroup()); err != nil {
-		log.Warn("TransferNode failed",
+		log.Ctx(ctx).Warn("TransferNode failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, "", ""), nil
@@ -5973,14 +6062,14 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 
 	method := "TransferReplica"
 	if err := ValidateResourceGroupName(request.GetSourceResourceGroup()); err != nil {
-		log.Warn("TransferReplica failed",
+		log.Ctx(ctx).Warn("TransferReplica failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, request.GetDbName(), request.GetCollectionName()), nil
 	}
 
 	if err := ValidateResourceGroupName(request.GetTargetResourceGroup()); err != nil {
-		log.Warn("TransferReplica failed",
+		log.Ctx(ctx).Warn("TransferReplica failed",
 			zap.Error(err),
 		)
 		return getErrResponse(err, method, request.GetDbName(), request.GetCollectionName()), nil
@@ -6236,13 +6325,19 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 		return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
 	}
 
-	if paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool() {
+	collectionReplicateEnable := paramtable.Get().CommonCfg.CollectionReplicateEnable.GetAsBool()
+	ttMsgEnabled := paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool()
+
+	// replicate message can be use in two ways, otherwise return error
+	// 1. collectionReplicateEnable is false and ttMsgEnabled is false, active/standby mode
+	// 2. collectionReplicateEnable is true and ttMsgEnabled is true, data migration mode
+	if (!collectionReplicateEnable && ttMsgEnabled) || (collectionReplicateEnable && !ttMsgEnabled) {
 		return &milvuspb.ReplicateMessageResponse{
 			Status: merr.Status(merr.ErrDenyReplicateMessage),
 		}, nil
 	}
-	var err error
 
+	var err error
 	if req.GetChannelName() == "" {
 		log.Ctx(ctx).Warn("channel name is empty")
 		return &milvuspb.ReplicateMessageResponse{
@@ -6280,6 +6375,18 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 		StartPositions: req.StartPositions,
 		EndPositions:   req.EndPositions,
 	}
+	checkCollectionReplicateProperty := func(dbName, collectionName string) bool {
+		if !collectionReplicateEnable {
+			return true
+		}
+		replicateID, err := GetReplicateID(ctx, dbName, collectionName)
+		if err != nil {
+			log.Warn("get replicate id failed", zap.String("collectionName", collectionName), zap.Error(err))
+			return false
+		}
+		return replicateID != ""
+	}
+
 	// getTsMsgFromConsumerMsg
 	for i, msgBytes := range req.Msgs {
 		header := commonpb.MsgHeader{}
@@ -6299,6 +6406,9 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 		}
 		switch realMsg := tsMsg.(type) {
 		case *msgstream.InsertMsg:
+			if !checkCollectionReplicateProperty(realMsg.GetDbName(), realMsg.GetCollectionName()) {
+				return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.WrapErrCollectionReplicateMode("replicate"))}, nil
+			}
 			assignedSegmentInfos, err := node.segAssigner.GetSegmentID(realMsg.GetCollectionID(), realMsg.GetPartitionID(),
 				realMsg.GetShardName(), uint32(realMsg.NumRows), req.EndTs)
 			if err != nil {
@@ -6312,6 +6422,10 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 			for assignSegmentID := range assignedSegmentInfos {
 				realMsg.SegmentID = assignSegmentID
 				break
+			}
+		case *msgstream.DeleteMsg:
+			if !checkCollectionReplicateProperty(realMsg.GetDbName(), realMsg.GetCollectionName()) {
+				return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.WrapErrCollectionReplicateMode("replicate"))}, nil
 			}
 		}
 		msgPack.Msgs = append(msgPack.Msgs, tsMsg)
@@ -6356,6 +6470,9 @@ func (node *Proxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimest
 		return &milvuspb.AllocTimestampResponse{Status: merr.Status(err)}, nil
 	}
 
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+	)
 	log.Info("AllocTimestamp request receive")
 	ts, err := node.tsoAllocator.AllocOne(ctx)
 	if err != nil {
@@ -6385,10 +6502,10 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
 	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
 		zap.String("collectionName", req.GetCollectionName()),
 		zap.String("partition name", req.GetPartitionName()),
 		zap.Any("files", req.GetFiles()),
-		zap.String("role", typeutil.ProxyRole),
 		zap.Any("options", req.GetOptions()),
 	)
 

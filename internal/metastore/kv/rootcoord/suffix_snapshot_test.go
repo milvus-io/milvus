@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path"
+	"sort"
 	"testing"
 	"time"
 
@@ -486,6 +488,15 @@ func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
 		return cnt
 	}
 
+	getPrefix := func(prefix string) []string {
+		var res []string
+		_ = etcdkv.WalkWithPrefix(context.TODO(), "", 10, func(key []byte, value []byte) error {
+			res = append(res, string(key))
+			return nil
+		})
+		return res
+	}
+
 	t.Run("Mixed test ", func(t *testing.T) {
 		prefix := fmt.Sprintf("prefix%d", rand.Int())
 		keyCnt := 500
@@ -582,7 +593,12 @@ func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
 		assert.NoError(t, err)
 
 		cnt = countPrefix(prefix)
-		assert.Equal(t, 1, cnt)
+		assert.Equal(t, 2, cnt)
+		res := getPrefix(prefix)
+		sort.Strings(res)
+		keepKey := getKey(prefix, 0)
+		keepTs := ftso(100)
+		assert.Equal(t, []string{path.Join(rootPath, keepKey), path.Join(rootPath, ss.composeTSKey(keepKey, keepTs))}, res)
 
 		// clean all data
 		err := etcdkv.RemoveWithPrefix(context.TODO(), "")

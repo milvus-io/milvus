@@ -139,6 +139,11 @@ class SegmentSealedImpl : public SegmentSealed {
         return it->second->IsNullable();
     };
 
+    InsertRecord<true>&
+    get_insert_record() override {
+        return insert_record_;
+    }
+
  public:
     int64_t
     num_chunk_index(FieldId field_id) const override;
@@ -165,7 +170,14 @@ class SegmentSealedImpl : public SegmentSealed {
 
     std::pair<int64_t, int64_t>
     get_chunk_by_offset(FieldId field_id, int64_t offset) const override {
-        PanicInfo(ErrorCode::Unsupported, "Not implemented");
+        if (fields_.find(field_id) == fields_.end()) {
+            PanicInfo(
+                ErrorCode::FieldIDInvalid,
+                "Failed to get chunk offset towards a non-existing field:{}",
+                field_id.get());
+        }
+        // for sealed segment, chunk id is always zero and input offset is the target offset
+        return std::make_pair(0, offset);
     }
 
     int64_t
@@ -211,6 +223,11 @@ class SegmentSealedImpl : public SegmentSealed {
 
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
     chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
+
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    chunk_view_by_offsets(FieldId field_id,
+                          int64_t chunk_id,
+                          const FixedVector<int32_t>& offsets) const override;
 
     std::pair<BufferView, FixedVector<bool>>
     get_chunk_buffer(FieldId field_id,
@@ -292,6 +309,7 @@ class SegmentSealedImpl : public SegmentSealed {
         // } else {
         num_rows_ = row_count;
         // }
+        deleted_record_.set_sealed_row_count(row_count);
     }
 
     void
@@ -314,11 +332,6 @@ class SegmentSealedImpl : public SegmentSealed {
     bool
     is_system_field_ready() const {
         return system_ready_count_ == 2;
-    }
-
-    const DeletedRecord&
-    get_deleted_record() const {
-        return deleted_record_;
     }
 
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
@@ -361,7 +374,7 @@ class SegmentSealedImpl : public SegmentSealed {
     InsertRecord<true> insert_record_;
 
     // deleted pks
-    mutable DeletedRecord deleted_record_;
+    mutable DeletedRecord<true> deleted_record_;
 
     LoadFieldDataInfo field_data_info_;
 

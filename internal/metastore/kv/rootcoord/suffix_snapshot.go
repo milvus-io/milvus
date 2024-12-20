@@ -42,11 +42,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var (
-	// SuffixSnapshotTombstone special value for tombstone mark
-	SuffixSnapshotTombstone = []byte{0xE2, 0x9B, 0xBC}
-	PaginationSize          = 5000
-)
+// SuffixSnapshotTombstone special value for tombstone mark
+var SuffixSnapshotTombstone = []byte{0xE2, 0x9B, 0xBC}
 
 // IsTombstone used in migration tool also.
 func IsTombstone(value string) bool {
@@ -84,6 +81,8 @@ type SuffixSnapshot struct {
 	// snapshotLen pre calculated offset when parsing snapshot key
 	snapshotLen int
 
+	paginationSize int
+
 	closeGC chan struct{}
 }
 
@@ -118,6 +117,7 @@ func NewSuffixSnapshot(metaKV kv.MetaKv, sep, root, snapshot string) (*SuffixSna
 		snapshotLen:    snapshotLen,
 		rootPrefix:     root,
 		rootLen:        rootLen,
+		paginationSize: paramtable.Get().MetaStoreCfg.PaginationSize.GetAsInt(),
 		closeGC:        make(chan struct{}, 1),
 	}
 	go ss.startBackgroundGC(context.TODO())
@@ -449,7 +449,7 @@ func (ss *SuffixSnapshot) LoadWithPrefix(ctx context.Context, key string, ts typ
 			return nil
 		}
 
-		err := ss.MetaKv.WalkWithPrefix(ctx, key, PaginationSize, applyFn)
+		err := ss.MetaKv.WalkWithPrefix(ctx, key, ss.paginationSize, applyFn)
 		return fks, fvs, err
 	}
 	ss.Lock()
@@ -472,7 +472,7 @@ func (ss *SuffixSnapshot) LoadWithPrefix(ctx context.Context, key string, ts typ
 		resultValues = append(resultValues, value)
 	}
 
-	err := ss.MetaKv.WalkWithPrefix(ctx, prefix, PaginationSize, func(k []byte, v []byte) error {
+	err := ss.MetaKv.WalkWithPrefix(ctx, prefix, ss.paginationSize, func(k []byte, v []byte) error {
 		sKey := string(k)
 		sValue := string(v)
 
@@ -607,6 +607,7 @@ func (ss *SuffixSnapshot) Close() {
 
 // startBackgroundGC the data will clean up if key ts!=0 and expired
 func (ss *SuffixSnapshot) startBackgroundGC(ctx context.Context) {
+	log := log.Ctx(ctx)
 	log.Debug("suffix snapshot GC goroutine start!")
 	ticker := time.NewTicker(60 * time.Minute)
 	defer ticker.Stop()
@@ -645,6 +646,10 @@ func (ss *SuffixSnapshot) batchRemoveExpiredKvs(ctx context.Context, keyGroup []
 
 	// to protect txn finished with ascend order, reverse the latest kv with tombstone to tail of array
 	sort.Strings(keyGroup)
+	if !includeOriginalKey && len(keyGroup) > 0 {
+		// keep the latest snapshot key for historical version compatibility
+		keyGroup = keyGroup[0 : len(keyGroup)-1]
+	}
 	removeFn := func(partialKeys []string) error {
 		return ss.MetaKv.MultiRemove(ctx, partialKeys)
 	}
@@ -655,6 +660,7 @@ func (ss *SuffixSnapshot) batchRemoveExpiredKvs(ctx context.Context, keyGroup []
 // It walks through all keys with the snapshot prefix, groups them by original key,
 // and removes expired versions or all versions if the original key has been deleted
 func (ss *SuffixSnapshot) removeExpiredKvs(ctx context.Context, now time.Time) error {
+	log := log.Ctx(ctx)
 	ttlTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotTTLSeconds.GetAsDuration(time.Second)
 	reserveTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotReserveTimeSeconds.GetAsDuration(time.Second)
 
@@ -689,7 +695,7 @@ func (ss *SuffixSnapshot) removeExpiredKvs(ctx context.Context, now time.Time) e
 	}
 
 	// Walk through all keys with the snapshot prefix
-	err := ss.MetaKv.WalkWithPrefix(ctx, ss.snapshotPrefix, PaginationSize, func(k []byte, v []byte) error {
+	err := ss.MetaKv.WalkWithPrefix(ctx, ss.snapshotPrefix, ss.paginationSize, func(k []byte, v []byte) error {
 		key := ss.hideRootPrefix(string(k))
 		ts, ok := ss.isTSKey(key)
 		if !ok {

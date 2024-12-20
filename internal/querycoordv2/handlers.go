@@ -127,7 +127,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 			actions = append(actions, releaseAction)
 		}
 
-		t, err := task.NewSegmentTask(s.ctx,
+		t, err := task.NewSegmentTask(ctx,
 			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 			utils.ManualBalance,
 			collectionID,
@@ -183,7 +183,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 ) error {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 
-	plans := s.getBalancerFunc().AssignChannel(ctx, channels, dstNodes, true)
+	plans := s.getBalancerFunc().AssignChannel(ctx, collectionID, channels, dstNodes, true)
 	for i := range plans {
 		plans[i].From = srcNode
 		plans[i].Replica = replica

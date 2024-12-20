@@ -171,7 +171,7 @@ message SegmentIDRequest {
   int64 partitionID = 4;
   bool isImport = 5;        // deprecated
   int64 importTaskID = 6;   // deprecated
-  SegmentLevel level = 7;
+  SegmentLevel level = 7; // deprecated
 }
 
 message AllocSegmentRequest {
@@ -538,6 +538,7 @@ message ChannelWatchInfo {
     // watch progress, deprecated
     int32 progress = 6;
     int64 opID = 7;
+    repeated common.KeyValuePair dbProperties = 8;
 }
 
 enum CompactionType {
@@ -655,6 +656,7 @@ message WatchChannelsRequest {
   repeated common.KeyDataPair start_positions = 3;
   schema.CollectionSchema schema = 4;
   uint64 create_timestamp = 5;
+  repeated common.KeyValuePair db_properties = 6;
 }
 
 message WatchChannelsResponse {

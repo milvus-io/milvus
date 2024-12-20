@@ -14,42 +14,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package tsafe
+package index
 
 import (
-	"go.uber.org/atomic"
+	"testing"
 
-	. "github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/stretchr/testify/assert"
 )
 
-type tSafe struct {
-	channel string
-	tSafe   atomic.Uint64
-	closed  atomic.Bool
-}
+func TestAnnParams(t *testing.T) {
+	ivfAP := NewIvfAnnParam(16)
+	result := ivfAP.Params()
+	v, ok := result[ivfNprobeKey]
+	assert.True(t, ok)
+	assert.Equal(t, 16, v)
 
-func (ts *tSafe) valid() bool {
-	return !ts.closed.Load()
-}
+	hnswAP := NewHNSWAnnParam(16)
+	result = hnswAP.Params()
+	v, ok = result[hnswEfKey]
+	assert.True(t, ok)
+	assert.Equal(t, 16, v)
 
-func (ts *tSafe) close() {
-	ts.closed.Store(true)
-}
+	diskAP := NewDiskAnnParam(10)
+	result = diskAP.Params()
+	v, ok = result[diskANNSearchListKey]
+	assert.True(t, ok)
+	assert.Equal(t, 10, v)
 
-func (ts *tSafe) get() Timestamp {
-	return ts.tSafe.Load()
-}
-
-func (ts *tSafe) set(t Timestamp) {
-	ts.tSafe.Store(t)
-}
-
-func newTSafe(channel string, timestamp uint64) *tSafe {
-	ts := &tSafe{
-		channel: channel,
-	}
-	ts.tSafe.Store(timestamp)
-	ts.closed.Store(false)
-
-	return ts
+	scannAP := NewSCANNAnnParam(32, 50)
+	result = scannAP.Params()
+	v, ok = result[scannNProbeKey]
+	assert.True(t, ok)
+	assert.Equal(t, 32, v)
+	v, ok = result[scannReorderKKey]
+	assert.True(t, ok)
+	assert.Equal(t, 50, v)
 }

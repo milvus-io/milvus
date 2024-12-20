@@ -248,6 +248,7 @@ class ArrayBitmapIndexTest : public testing::Test {
 
         config["index_files"] = index_files;
 
+        ctx.set_for_loading_index(true);
         index_ =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
         index_->Load(milvus::tracer::TraceContext{}, config);
@@ -258,6 +259,8 @@ class ArrayBitmapIndexTest : public testing::Test {
         nb_ = 10000;
         cardinality_ = 30;
         nullable_ = false;
+        index_build_id_ = 2001;
+        index_version_ = 2001;
     }
 
     void
@@ -278,8 +281,6 @@ class ArrayBitmapIndexTest : public testing::Test {
         int64_t partition_id = 2;
         int64_t segment_id = 3;
         int64_t field_id = 101;
-        int64_t index_build_id = 1000;
-        int64_t index_version = 10000;
         std::string root_path = "/tmp/test-bitmap-index/";
 
         storage::StorageConfig storage_config;
@@ -291,8 +292,8 @@ class ArrayBitmapIndexTest : public testing::Test {
              partition_id,
              segment_id,
              field_id,
-             index_build_id,
-             index_version);
+             index_build_id_,
+             index_version_);
     }
 
     virtual ~ArrayBitmapIndexTest() override {
@@ -340,6 +341,8 @@ class ArrayBitmapIndexTest : public testing::Test {
     bool nullable_;
     std::vector<milvus::Array> data_;
     FixedVector<bool> valid_data_;
+    int index_version_;
+    int index_build_id_;
 };
 
 TYPED_TEST_SUITE_P(ArrayBitmapIndexTest);
@@ -377,6 +380,8 @@ class ArrayBitmapIndexTestV1 : public ArrayBitmapIndexTest<T> {
         this->nb_ = 10000;
         this->cardinality_ = 200;
         this->nullable_ = false;
+        this->index_build_id_ = 2002;
+        this->index_version_ = 2002;
     }
 
     virtual ~ArrayBitmapIndexTestV1() {
@@ -398,6 +403,8 @@ class ArrayBitmapIndexTestNullable : public ArrayBitmapIndexTest<T> {
         this->nb_ = 10000;
         this->cardinality_ = 30;
         this->nullable_ = true;
+        this->index_version_ = 2003;
+        this->index_build_id_ = 2003;
     }
 
     virtual ~ArrayBitmapIndexTestNullable() {

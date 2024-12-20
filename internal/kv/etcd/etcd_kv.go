@@ -67,7 +67,7 @@ func NewEtcdKV(client *clientv3.Client, rootPath string, options ...Option) *etc
 
 // Close closes the connection to etcd.
 func (kv *etcdKV) Close() {
-	log.Debug("etcd kv closed", zap.String("path", kv.rootPath))
+	log.Ctx(context.TODO()).Debug("etcd kv closed", zap.String("path", kv.rootPath))
 }
 
 // GetPath returns the path of the key.
@@ -89,23 +89,26 @@ func (kv *etcdKV) WalkWithPrefix(ctx context.Context, prefix string, paginationS
 	key := prefix
 	for {
 		ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
-		defer cancel()
 		resp, err := kv.getEtcdMeta(ctx, key, opts...)
 		if err != nil {
+			cancel()
 			return err
 		}
 
 		for _, kv := range resp.Kvs {
 			if err = fn(kv.Key, kv.Value); err != nil {
+				cancel()
 				return err
 			}
 		}
 
 		if !resp.More {
+			cancel()
 			break
 		}
 		// move to next key
 		key = string(append(resp.Kvs[len(resp.Kvs)-1].Key, 0))
+		cancel()
 	}
 
 	CheckElapseAndWarn(start, "Slow etcd operation(WalkWithPagination)", zap.String("prefix", prefix))

@@ -228,7 +228,7 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 }
 
 func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {
-	log.Info("start to sync import data", WrapLogFields(t)...)
+	log.Ctx(context.TODO()).Info("start to sync import data", WrapLogFields(t)...)
 	futures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for channelIdx, datas := range hashedData {
@@ -256,7 +256,11 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 			if err != nil {
 				return nil, nil, err
 			}
-			future := t.syncMgr.SyncData(t.ctx, syncTask)
+			future, err := t.syncMgr.SyncData(t.ctx, syncTask)
+			if err != nil {
+				log.Ctx(context.TODO()).Error("sync data failed", WrapLogFields(t, zap.Error(err))...)
+				return nil, nil, err
+			}
 			futures = append(futures, future)
 			syncTasks = append(syncTasks, syncTask)
 		}

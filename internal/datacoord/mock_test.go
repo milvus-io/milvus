@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/pkg/kv"
 	"testing"
 	"time"
 
@@ -38,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -450,6 +450,10 @@ func (m *mockRootCoordClient) AlterCollection(ctx context.Context, request *milv
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockRootCoordClient) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockRootCoordClient) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
@@ -741,6 +745,10 @@ func (h *mockHandler) GetCollection(_ context.Context, collectionID UniqueID) (*
 		return h.meta.GetCollection(collectionID), nil
 	}
 	return &collectionInfo{ID: collectionID}, nil
+}
+
+func (h *mockHandler) GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView {
+	return nil
 }
 
 func newMockHandlerWithMeta(meta *meta) *mockHandler {

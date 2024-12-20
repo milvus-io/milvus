@@ -138,6 +138,10 @@ func TestComponentParam(t *testing.T) {
 		assert.False(t, params.CommonCfg.LocalRPCEnabled.GetAsBool())
 		params.Save("common.localRPCEnabled", "true")
 		assert.True(t, params.CommonCfg.LocalRPCEnabled.GetAsBool())
+
+		assert.Equal(t, 60*time.Second, params.CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second))
+		params.Save("common.sync.taskPoolReleaseTimeoutSeconds", "100")
+		assert.Equal(t, 100*time.Second, params.CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second))
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
@@ -369,9 +373,12 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, 0.1, Params.DelegatorMemoryOverloadFactor.GetAsFloat())
 		assert.Equal(t, 5, Params.CollectionBalanceSegmentBatchSize.GetAsInt())
+		assert.Equal(t, 1, Params.CollectionBalanceChannelBatchSize.GetAsInt())
 
 		assert.Equal(t, 0, Params.ClusterLevelLoadReplicaNumber.GetAsInt())
 		assert.Len(t, Params.ClusterLevelLoadResourceGroups.GetAsStrings(), 0)
+
+		assert.Equal(t, 10, Params.CollectionChannelCountFactor.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {

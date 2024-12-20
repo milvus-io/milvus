@@ -86,7 +86,7 @@ func (s *TaskStatsSuite) Testbm25SerializeWriteError() {
 		s.schema = genCollectionSchemaWithBM25()
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
 		s.GenSegmentWriterWithBM25(0)
-		cnt, binlogs, err := bm25SerializeWrite(context.Background(), s.mockBinlogIO, 0, s.segWriter, 1)
+		cnt, binlogs, err := bm25SerializeWrite(context.Background(), "root_path", s.mockBinlogIO, 0, s.segWriter, 1)
 		s.Require().NoError(err)
 		s.Equal(int64(1), cnt)
 		s.Equal(1, len(binlogs))
@@ -96,7 +96,7 @@ func (s *TaskStatsSuite) Testbm25SerializeWriteError() {
 		s.schema = genCollectionSchemaWithBM25()
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
 		s.GenSegmentWriterWithBM25(0)
-		_, _, err := bm25SerializeWrite(context.Background(), s.mockBinlogIO, 0, s.segWriter, 1)
+		_, _, err := bm25SerializeWrite(context.Background(), "root_path", s.mockBinlogIO, 0, s.segWriter, 1)
 		s.Error(err)
 	})
 }
@@ -105,7 +105,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 	s.Run("normal case", func() {
 		s.schema = genCollectionSchemaWithBM25()
 		s.GenSegmentWriterWithBM25(0)
-		_, kvs, fBinlogs, err := serializeWrite(context.TODO(), 0, s.segWriter)
+		_, kvs, fBinlogs, err := serializeWrite(context.TODO(), "root_path", 0, s.segWriter)
 		s.NoError(err)
 		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, paths []string) ([][]byte, error) {
 			result := make([][]byte, len(paths))
@@ -149,7 +149,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 	s.Run("upload bm25 binlog failed", func() {
 		s.schema = genCollectionSchemaWithBM25()
 		s.GenSegmentWriterWithBM25(0)
-		_, kvs, fBinlogs, err := serializeWrite(context.TODO(), 0, s.segWriter)
+		_, kvs, fBinlogs, err := serializeWrite(context.TODO(), "root_path", 0, s.segWriter)
 		s.NoError(err)
 		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, paths []string) ([][]byte, error) {
 			result := make([][]byte, len(paths))

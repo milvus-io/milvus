@@ -50,6 +50,12 @@ class GrowingDataGetter : public DataGetter<T> {
 
     T
     Get(int64_t idx) const {
+        if constexpr (std::is_same_v<std::string, T>) {
+            if (growing_raw_data_->is_mmap()) {
+                // when scalar data is mapped, it's needed to get the scalar data view and reconstruct string from the view
+                return T(growing_raw_data_->view_element(idx));
+            }
+        }
         return growing_raw_data_->operator[](idx);
     }
 };
@@ -57,50 +63,53 @@ class GrowingDataGetter : public DataGetter<T> {
 template <typename T>
 class SealedDataGetter : public DataGetter<T> {
  private:
-    std::shared_ptr<Span<T>> field_data_;
-    std::shared_ptr<std::vector<std::string_view>> str_field_data_;
-    const index::ScalarIndex<T>* field_index_;
+    const segcore::SegmentSealed& segment_;
+    const FieldId field_id_;
+    bool from_data_;
 
+    mutable std::unordered_map<int64_t, std::vector<std::string_view>>
+        str_view_map_;
+    // Getting str_view from segment is cpu-costly, this map is to cache this view for performance
  public:
-    SealedDataGetter(const segcore::SegmentSealed& segment, FieldId& field_id) {
-        if (segment.HasFieldData(field_id)) {
-            if constexpr (std::is_same_v<T, std::string>) {
-                str_field_data_ =
-                    std::make_shared<std::vector<std::string_view>>(
-                        segment.chunk_view<std::string_view>(field_id, 0)
-                            .first);
-            } else {
-                auto span = segment.chunk_data<T>(field_id, 0);
-                field_data_ = std::make_shared<Span<T>>(
-                    span.data(), span.valid_data(), span.row_count());
-            }
-        } else if (segment.HasIndex(field_id)) {
-            this->field_index_ = &(segment.chunk_scalar_index<T>(field_id, 0));
-        } else {
-            PanicInfo(UnexpectedError,
-                      "The segment used to init data getter has no effective "
-                      "data source, neither"
-                      "index or data");
+    SealedDataGetter(const segcore::SegmentSealed& segment, FieldId& field_id)
+        : segment_(segment), field_id_(field_id) {
+        from_data_ = segment_.HasFieldData(field_id_);
+        if (!from_data_ && !segment_.HasIndex(field_id_)) {
+            PanicInfo(
+                UnexpectedError,
+                "The segment:{} used to init data getter has no effective "
+                "data source, neither"
+                "index or data",
+                segment_.get_segment_id());
         }
-    }
-
-    SealedDataGetter(const SealedDataGetter<T>& other)
-        : field_data_(other.field_data_),
-          str_field_data_(other.str_field_data_),
-          field_index_(other.field_index_) {
     }
 
     T
     Get(int64_t idx) const {
-        if (field_data_ || str_field_data_) {
+        if (from_data_) {
+            auto id_offset_pair = segment_.get_chunk_by_offset(field_id_, idx);
+            auto chunk_id = id_offset_pair.first;
+            auto inner_offset = id_offset_pair.second;
             if constexpr (std::is_same_v<T, std::string>) {
+                if (str_view_map_.find(chunk_id) == str_view_map_.end()) {
+                    // for now, search_group_by does not handle null values
+                    auto [str_chunk_view, _] =
+                        segment_.chunk_view<std::string_view>(field_id_,
+                                                              chunk_id);
+                    str_view_map_[chunk_id] = std::move(str_chunk_view);
+                }
+                auto& str_chunk_view = str_view_map_[chunk_id];
                 std::string_view str_val_view =
-                    str_field_data_->operator[](idx);
+                    str_chunk_view.operator[](inner_offset);
                 return std::string(str_val_view.data(), str_val_view.length());
+            } else {
+                Span<T> span = segment_.chunk_data<T>(field_id_, chunk_id);
+                auto raw = span.operator[](inner_offset);
+                return raw;
             }
-            return field_data_->operator[](idx);
         } else {
-            auto raw = (*field_index_).Reverse_Lookup(idx);
+            auto& chunk_index = segment_.chunk_scalar_index<T>(field_id_, 0);
+            auto raw = chunk_index.Reverse_Lookup(idx);
             AssertInfo(raw.has_value(), "field data not found");
             return raw.value();
         }
@@ -111,11 +120,11 @@ template <typename T>
 static const std::shared_ptr<DataGetter<T>>
 GetDataGetter(const segcore::SegmentInternalInterface& segment,
               FieldId fieldId) {
-    if (const segcore::SegmentGrowingImpl* growing_segment =
+    if (const auto* growing_segment =
             dynamic_cast<const segcore::SegmentGrowingImpl*>(&segment)) {
         return std::make_shared<GrowingDataGetter<T>>(*growing_segment,
                                                       fieldId);
-    } else if (const segcore::SegmentSealed* sealed_segment =
+    } else if (const auto* sealed_segment =
                    dynamic_cast<const segcore::SegmentSealed*>(&segment)) {
         return std::make_shared<SealedDataGetter<T>>(*sealed_segment, fieldId);
     } else {
@@ -123,49 +132,6 @@ GetDataGetter(const segcore::SegmentInternalInterface& segment,
                   "The segment used to init data getter is neither growing or "
                   "sealed, wrong state");
     }
-}
-
-static bool
-PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
-                                int nq,
-                                const DatasetPtr dataset,
-                                SearchResult& search_result,
-                                const BitsetView& bitset,
-                                const index::VectorIndex& index) {
-    if (search_info.group_by_field_id_.has_value()) {
-        try {
-            auto search_conf = index.PrepareSearchParams(search_info);
-            knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
-                iterators_val =
-                    index.VectorIterators(dataset, search_conf, bitset);
-            if (iterators_val.has_value()) {
-                search_result.AssembleChunkVectorIterators(
-                    nq, 1, {0}, iterators_val.value());
-            } else {
-                LOG_ERROR(
-                    "Returned knowhere iterator has non-ready iterators "
-                    "inside, terminate group_by operation:{}",
-                    knowhere::Status2String(iterators_val.error()));
-                PanicInfo(ErrorCode::Unsupported,
-                          "Returned knowhere iterator has non-ready iterators "
-                          "inside, terminate group_by operation");
-            }
-            search_result.total_nq_ = dataset->GetRows();
-            search_result.unity_topK_ = search_info.topk_;
-        } catch (const std::runtime_error& e) {
-            LOG_ERROR(
-                "Caught error:{} when trying to initialize ann iterators for "
-                "group_by: "
-                "group_by operation will be terminated",
-                e.what());
-            PanicInfo(
-                ErrorCode::Unsupported,
-                "Failed to groupBy, current index:" + index.GetIndexType() +
-                    " doesn't support search_group_by");
-        }
-        return true;
-    }
-    return false;
 }
 
 void

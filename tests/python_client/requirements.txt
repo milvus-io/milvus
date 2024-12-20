@@ -27,8 +27,8 @@ pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.5.1rc4
-pymilvus[bulk_writer]==2.5.1rc4
+pymilvus==2.5.1rc14
+pymilvus[bulk_writer]==2.5.1rc14
 
 
 # for customize config test
@@ -72,3 +72,6 @@ Unidecode==1.3.8
 
 # for perf test
 locust==2.25.0
+
+# for supporting higher python version
+typing_extensions==4.12.2

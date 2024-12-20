@@ -330,6 +330,10 @@ func WrapErrAsInputErrorWhen(err error, targets ...milvusError) error {
 	return err
 }
 
+func WrapErrCollectionReplicateMode(operation string) error {
+	return wrapFields(ErrCollectionReplicateMode, value("operation", operation))
+}
+
 func GetErrorType(err error) ErrorType {
 	if merr, ok := err.(milvusError); ok {
 		return merr.errType
@@ -1183,6 +1187,14 @@ func WrapErrClusteringCompactionSubmitTaskFail(taskType string, err error) error
 
 func WrapErrClusteringCompactionMetaError(operation string, err error) error {
 	return wrapFieldsWithDesc(ErrClusteringCompactionMetaError, err.Error(), value("operation", operation))
+}
+
+func WrapErrCleanPartitionStatsFail(msg ...string) error {
+	err := error(ErrCleanPartitionStatsFail)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
 }
 
 func WrapErrAnalyzeTaskNotFound(id int64) error {

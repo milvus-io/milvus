@@ -96,10 +96,10 @@ func (s *Server) Prepare() error {
 		netutil.OptHighPriorityToUsePort(paramtable.Get().DataNodeGrpcServerCfg.Port.GetAsInt()),
 	)
 	if err != nil {
-		log.Warn("DataNode fail to create net listener", zap.Error(err))
+		log.Ctx(s.ctx).Warn("DataNode fail to create net listener", zap.Error(err))
 		return err
 	}
-	log.Info("DataNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	log.Ctx(s.ctx).Info("DataNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
 	s.listener = listener
 	paramtable.Get().Save(
 		paramtable.Get().DataNodeGrpcServerCfg.Port.Key,
@@ -166,7 +166,7 @@ func (s *Server) startGrpcLoop() {
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {
-		log.Warn("DataNode failed to start gRPC")
+		log.Ctx(s.ctx).Warn("DataNode failed to start gRPC")
 		s.grpcErrChan <- err
 	}
 }
@@ -189,20 +189,20 @@ func (s *Server) Run() error {
 		// errors are propagated upstream as panic.
 		return err
 	}
-	log.Info("DataNode gRPC services successfully initialized")
+	log.Ctx(s.ctx).Info("DataNode gRPC services successfully initialized")
 	if err := s.start(); err != nil {
 		// errors are propagated upstream as panic.
 		return err
 	}
-	log.Info("DataNode gRPC services successfully started")
+	log.Ctx(s.ctx).Info("DataNode gRPC services successfully started")
 	return nil
 }
 
 // Stop stops Datanode's grpc service.
 func (s *Server) Stop() (err error) {
-	logger := log.With()
+	logger := log.Ctx(s.ctx)
 	if s.listener != nil {
-		logger = log.With(zap.String("address", s.listener.Address()))
+		logger = logger.With(zap.String("address", s.listener.Address()))
 	}
 	logger.Info("datanode stopping")
 	defer func() {
@@ -220,7 +220,7 @@ func (s *Server) Stop() (err error) {
 	logger.Info("internal server[datanode] start to stop")
 	err = s.datanode.Stop()
 	if err != nil {
-		log.Error("failed to close datanode", zap.Error(err))
+		logger.Error("failed to close datanode", zap.Error(err))
 		return err
 	}
 	s.cancel()
@@ -234,7 +234,7 @@ func (s *Server) Stop() (err error) {
 // init initializes Datanode's grpc service.
 func (s *Server) init() error {
 	etcdConfig := &paramtable.Get().EtcdCfg
-	ctx := context.Background()
+	log := log.Ctx(s.ctx)
 
 	etcdCli, err := etcd.CreateEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -255,7 +255,6 @@ func (s *Server) init() error {
 	s.SetEtcdClient(s.etcdCli)
 	s.datanode.SetAddress(s.listener.Address())
 	log.Info("DataNode address", zap.String("address", s.listener.Address()))
-	log.Info("DataNode serverID", zap.Int64("serverID", s.serverID.Load()))
 
 	err = s.startGrpc()
 	if err != nil {
@@ -271,7 +270,7 @@ func (s *Server) init() error {
 			panic(err)
 		}
 
-		if err = componentutil.WaitForComponentHealthy(ctx, rootCoordClient, "RootCoord", 1000000, time.Millisecond*200); err != nil {
+		if err = componentutil.WaitForComponentHealthy(s.ctx, rootCoordClient, "RootCoord", 1000000, time.Millisecond*200); err != nil {
 			log.Error("failed to wait for RootCoord client to be ready", zap.Error(err))
 			panic(err)
 		}
@@ -290,7 +289,7 @@ func (s *Server) init() error {
 			panic(err)
 		}
 
-		if err = componentutil.WaitForComponentInitOrHealthy(ctx, dataCoordClient, "DataCoord", 1000000, time.Millisecond*200); err != nil {
+		if err = componentutil.WaitForComponentInitOrHealthy(s.ctx, dataCoordClient, "DataCoord", 1000000, time.Millisecond*200); err != nil {
 			log.Error("failed to wait for DataCoord client to be ready", zap.Error(err))
 			panic(err)
 		}
@@ -317,7 +316,7 @@ func (s *Server) start() error {
 	}
 	err := s.datanode.Register()
 	if err != nil {
-		log.Debug("failed to register to Etcd", zap.Error(err))
+		log.Ctx(s.ctx).Debug("failed to register to Etcd", zap.Error(err))
 		return err
 	}
 	return nil

@@ -19,7 +19,6 @@
 #include <vector>
 #include <index/ScalarIndex.h>
 
-#include "DeletedRecord.h"
 #include "FieldIndexing.h"
 #include "common/Common.h"
 #include "common/Schema.h"
@@ -198,6 +197,28 @@ class SegmentInternalInterface : public SegmentInterface {
             }
         }
         return std::make_pair(res, chunk_info.second);
+    }
+
+    template <typename ViewType>
+    std::pair<std::vector<ViewType>, FixedVector<bool>>
+    get_views_by_offsets(FieldId field_id,
+                         int64_t chunk_id,
+                         const FixedVector<int32_t>& offsets) const {
+        if (this->type() == SegmentType::Growing) {
+            PanicInfo(ErrorCode::Unsupported,
+                      "get chunk views not supported for growing segment");
+        }
+        auto chunk_view = chunk_view_by_offsets(field_id, chunk_id, offsets);
+        if constexpr (std::is_same_v<ViewType, std::string_view>) {
+            return chunk_view;
+        } else {
+            std::vector<ViewType> res;
+            res.reserve(chunk_view.first.size());
+            for (const auto& view : chunk_view.first) {
+                res.emplace_back(view);
+            }
+            return {res, chunk_view.second};
+        }
     }
 
     template <typename T>
@@ -414,6 +435,11 @@ class SegmentInternalInterface : public SegmentInterface {
                      int64_t start_offset,
                      int64_t length) const = 0;
 
+    virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    chunk_view_by_offsets(FieldId field_id,
+                          int64_t chunk_id,
+                          const FixedVector<int32_t>& offsets) const = 0;
+
     // internal API: return chunk_index in span, support scalar index only
     virtual const index::IndexBase*
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const = 0;
@@ -443,6 +469,12 @@ class SegmentInternalInterface : public SegmentInterface {
         const int64_t* seg_offsets,
         int64_t count,
         const std::vector<std::string>& dynamic_field_names) const = 0;
+
+    virtual std::vector<SegOffset>
+    search_pk(const PkType& pk, Timestamp timestamp) const = 0;
+
+    virtual std::vector<SegOffset>
+    search_pk(const PkType& pk, int64_t insert_barrier) const = 0;
 
  protected:
     mutable std::shared_mutex mutex_;

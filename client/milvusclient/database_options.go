@@ -18,20 +18,20 @@ package milvusclient
 
 import "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
-type UsingDatabaseOption interface {
+type UseDatabaseOption interface {
 	DbName() string
 }
 
-type usingDatabaseNameOpt struct {
+type useDatabaseNameOpt struct {
 	dbName string
 }
 
-func (opt *usingDatabaseNameOpt) DbName() string {
+func (opt *useDatabaseNameOpt) DbName() string {
 	return opt.dbName
 }
 
-func NewUsingDatabaseOption(dbName string) *usingDatabaseNameOpt {
-	return &usingDatabaseNameOpt{
+func NewUseDatabaseOption(dbName string) *useDatabaseNameOpt {
+	return &useDatabaseNameOpt{
 		dbName: dbName,
 	}
 }

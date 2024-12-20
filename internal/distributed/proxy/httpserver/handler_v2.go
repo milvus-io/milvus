@@ -160,7 +160,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	// privilege group
 	router.POST(PrivilegeGroupCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.createPrivilegeGroup))))
 	router.POST(PrivilegeGroupCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.dropPrivilegeGroup))))
-	router.POST(PrivilegeGroupCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.listPrivilegeGroups))))
+	router.POST(PrivilegeGroupCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.listPrivilegeGroups))))
 	router.POST(PrivilegeGroupCategory+AddPrivilegesToGroupAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.addPrivilegesToGroup))))
 	router.POST(PrivilegeGroupCategory+RemovePrivilegesFromGroupAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.removePrivilegesFromGroup))))
 
@@ -975,6 +975,7 @@ func generateSearchParams(reqSearchParams searchParams) []*commonpb.KeyValuePair
 	bs, _ := json.Marshal(reqSearchParams.Params)
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: Params, Value: string(bs)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.IgnoreGrowing, Value: strconv.FormatBool(reqSearchParams.IgnoreGrowing)})
+	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.HintsKey, Value: reqSearchParams.Hints})
 	// need to exposure ParamRoundDecimal in req?
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
 	return searchParams

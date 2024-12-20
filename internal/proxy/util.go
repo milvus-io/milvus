@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -63,7 +64,7 @@ const (
 	// enableMultipleVectorFields indicates whether to enable multiple vector fields.
 	enableMultipleVectorFields = true
 
-	defaultMaxVarCharLength = 65535
+	defaultMaxVarCharLength = 1048576
 
 	defaultMaxArrayCapacity = 4096
 
@@ -265,7 +266,7 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 		tagSize := len(partitionTag)
 		for i := 1; i < tagSize; i++ {
 			c := partitionTag[i]
-			if c != '_' && !isAlpha(c) && !isNumber(c) {
+			if c != '_' && !isAlpha(c) && !isNumber(c) && c != '-' {
 				msg := invalidMsg + "Partition name can only contain numbers, letters and underscores."
 				return errors.New(msg)
 			}
@@ -364,7 +365,7 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 			return err
 		}
 		if maxLengthPerRow > defaultMaxVarCharLength || maxLengthPerRow <= 0 {
-			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, 65535]")
+			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, 1048576]")
 		}
 		exist = true
 	}
@@ -1218,7 +1219,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCach
 	// meanwhile, generating Sha256Password depends on raw password and encrypted password will not cache.
 	credInfo, err := globalMetaCache.GetCredentialInfo(ctx, username)
 	if err != nil {
-		log.Error("found no credential", zap.String("username", username), zap.Error(err))
+		log.Ctx(ctx).Error("found no credential", zap.String("username", username), zap.Error(err))
 		return false
 	}
 
@@ -1230,13 +1231,13 @@ func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCach
 
 	// miss cache, verify against encrypted password from etcd
 	if err := bcrypt.CompareHashAndPassword([]byte(credInfo.EncryptedPassword), []byte(rawPwd)); err != nil {
-		log.Error("Verify password failed", zap.Error(err))
+		log.Ctx(ctx).Error("Verify password failed", zap.Error(err))
 		return false
 	}
 
 	// update cache after miss cache
 	credInfo.Sha256Password = sha256Pwd
-	log.Debug("get credential miss cache, update cache with", zap.Any("credential", credInfo))
+	log.Ctx(ctx).Debug("get credential miss cache, update cache with", zap.Any("credential", credInfo))
 	globalMetaCache.UpdateCredential(credInfo)
 	return true
 }
@@ -1251,6 +1252,75 @@ func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int
 		}
 	}
 	return pkNames, fieldIDs
+}
+
+func recallCal[T string | int64](results []T, gts []T) float32 {
+	hit := 0
+	total := 0
+	for _, r := range results {
+		total++
+		for _, gt := range gts {
+			if r == gt {
+				hit++
+				break
+			}
+		}
+	}
+	return float32(hit) / float32(total)
+}
+
+func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResultData) error {
+	if results.GetNumQueries() != gts.GetNumQueries() {
+		return fmt.Errorf("num of queries is inconsistent between search results(%d) and ground truth(%d)", results.GetNumQueries(), gts.GetNumQueries())
+	}
+
+	switch results.GetIds().GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		switch gts.GetIds().GetIdField().(type) {
+		case *schemapb.IDs_IntId:
+			currentResultIndex := int64(0)
+			currentGTIndex := int64(0)
+			recalls := make([]float32, 0, results.GetNumQueries())
+			for i := 0; i < int(results.GetNumQueries()); i++ {
+				currentResultTopk := results.GetTopks()[i]
+				currentGTTopk := gts.GetTopks()[i]
+				recalls = append(recalls, recallCal(results.GetIds().GetIntId().GetData()[currentResultIndex:currentResultIndex+currentResultTopk],
+					gts.GetIds().GetIntId().GetData()[currentGTIndex:currentGTIndex+currentGTTopk]))
+				currentResultIndex += currentResultTopk
+				currentGTIndex += currentGTTopk
+			}
+			results.Recalls = recalls
+			return nil
+		case *schemapb.IDs_StrId:
+			return fmt.Errorf("pk type is inconsistent between search results(int64) and ground truth(string)")
+		default:
+			return fmt.Errorf("unsupported pk type")
+		}
+
+	case *schemapb.IDs_StrId:
+		switch gts.GetIds().GetIdField().(type) {
+		case *schemapb.IDs_StrId:
+			currentResultIndex := int64(0)
+			currentGTIndex := int64(0)
+			recalls := make([]float32, 0, results.GetNumQueries())
+			for i := 0; i < int(results.GetNumQueries()); i++ {
+				currentResultTopk := results.GetTopks()[i]
+				currentGTTopk := gts.GetTopks()[i]
+				recalls = append(recalls, recallCal(results.GetIds().GetStrId().GetData()[currentResultIndex:currentResultIndex+currentResultTopk],
+					gts.GetIds().GetStrId().GetData()[currentGTIndex:currentGTIndex+currentGTTopk]))
+				currentResultIndex += currentResultTopk
+				currentGTIndex += currentGTTopk
+			}
+			results.Recalls = recalls
+			return nil
+		case *schemapb.IDs_IntId:
+			return fmt.Errorf("pk type is inconsistent between search results(string) and ground truth(int64)")
+		default:
+			return fmt.Errorf("unsupported pk type")
+		}
+	default:
+		return fmt.Errorf("unsupported pk type")
+	}
 }
 
 // Support wildcard in output fields:
@@ -1410,23 +1480,17 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID in
 	// get all loading collections
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
 		CollectionID: collID,
-		PartitionIDs: nil,
+		PartitionIDs: partIDs,
 	})
-	if err != nil {
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		// qc returns error if partition not loaded
+		if errors.Is(err, merr.ErrPartitionNotLoaded) {
+			return false, nil
+		}
 		return false, err
 	}
-	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return false, merr.Error(resp.GetStatus())
-	}
 
-	for _, loadedPartID := range resp.GetPartitionIDs() {
-		for _, partID := range partIDs {
-			if partID == loadedPartID {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
+	return funcutil.SliceSetEqual(partIDs, resp.GetPartitionIDs()), nil
 }
 
 func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {
@@ -1648,7 +1712,7 @@ func getCollectionProgress(
 		CollectionIDs: []int64{collectionID},
 	})
 	if err != nil {
-		log.Warn("fail to show collections",
+		log.Ctx(ctx).Warn("fail to show collections",
 			zap.Int64("collectionID", collectionID),
 			zap.Error(err),
 		)
@@ -1657,7 +1721,7 @@ func getCollectionProgress(
 
 	err = merr.Error(resp.GetStatus())
 	if err != nil {
-		log.Warn("fail to show collections",
+		log.Ctx(ctx).Warn("fail to show collections",
 			zap.Int64("collectionID", collectionID),
 			zap.Error(err))
 		return
@@ -1702,7 +1766,7 @@ func getPartitionProgress(
 		PartitionIDs: partitionIDs,
 	})
 	if err != nil {
-		log.Warn("fail to show partitions", zap.Int64("collection_id", collectionID),
+		log.Ctx(ctx).Warn("fail to show partitions", zap.Int64("collection_id", collectionID),
 			zap.String("collection_name", collectionName),
 			zap.Strings("partition_names", partitionNames),
 			zap.Error(err))
@@ -1712,7 +1776,7 @@ func getPartitionProgress(
 	err = merr.Error(resp.GetStatus())
 	if err != nil {
 		err = merr.Error(resp.GetStatus())
-		log.Warn("fail to show partitions",
+		log.Ctx(ctx).Warn("fail to show partitions",
 			zap.String("collectionName", collectionName),
 			zap.Strings("partitionNames", partitionNames),
 			zap.Error(err))
@@ -1867,7 +1931,7 @@ func checkDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 
 func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
 	if replicateMsgStream == nil || request == nil {
-		log.Warn("replicate msg stream or request is nil", zap.Any("request", request))
+		log.Ctx(ctx).Warn("replicate msg stream or request is nil", zap.Any("request", request))
 		return
 	}
 	msgBase := request.GetBase()
@@ -2147,4 +2211,23 @@ func GetFailedResponse(req any, err error) any {
 		}
 	}
 	return nil
+}
+
+func GetReplicateID(ctx context.Context, database, collectionName string) (string, error) {
+	if globalMetaCache == nil {
+		return "", merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
+	}
+	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, database, collectionName, 0)
+	if err != nil {
+		return "", err
+	}
+	if colInfo.replicateID != "" {
+		return colInfo.replicateID, nil
+	}
+	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, database)
+	if err != nil {
+		return "", err
+	}
+	replicateID, _ := common.GetReplicateID(dbInfo.properties)
+	return replicateID, nil
 }

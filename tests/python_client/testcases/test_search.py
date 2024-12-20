@@ -10628,7 +10628,7 @@ class TestSearchGroupBy(TestcaseBase):
 
             # search with groupby
             err_code = 999
-            err_msg = "doesn't support search_group_by"
+            err_msg = f"current index:{index} doesn't support"
             collection_w.search(data=search_vectors, anns_field=ct.default_float_vec_field_name,
                                 param=search_params, limit=limit,
                                 group_by_field=ct.default_int8_field_name,

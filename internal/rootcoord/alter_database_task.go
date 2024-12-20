@@ -25,11 +25,14 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -43,13 +46,30 @@ func (a *alterDatabaseTask) Prepare(ctx context.Context) error {
 		return fmt.Errorf("alter database failed, database name does not exists")
 	}
 
+	// TODO SimFG maybe it will support to alter the replica.id properties in the future when the database has no collections
+	// now it can't be because the latest database properties can't be notified to the querycoord and datacoord
+	replicateID, _ := common.GetReplicateID(a.Req.Properties)
+	if replicateID != "" {
+		colls, err := a.core.meta.ListCollections(ctx, a.Req.DbName, a.ts, true)
+		if err != nil {
+			return err
+		}
+		if len(colls) > 0 {
+			return errors.New("can't set replicate id on database with collections")
+		}
+	}
+
 	return nil
 }
 
 func (a *alterDatabaseTask) Execute(ctx context.Context) error {
-	// Now we only support alter properties of database
-	if a.Req.GetProperties() == nil {
-		return errors.New("only support alter database properties, but database properties is empty")
+	// Now we support alter and delete properties of database
+	if a.Req.GetProperties() == nil && a.Req.GetDeleteKeys() == nil {
+		return errors.New("alter database requires either properties or deletekeys to modify or delete keys, both cannot be empty")
+	}
+
+	if len(a.Req.GetProperties()) > 0 && len(a.Req.GetDeleteKeys()) > 0 {
+		return errors.New("alter database operation cannot modify properties and delete keys at the same time")
 	}
 
 	oldDB, err := a.core.meta.GetDatabaseByName(ctx, a.Req.GetDbName(), a.ts)
@@ -59,14 +79,18 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	if ContainsKeyPairArray(a.Req.GetProperties(), oldDB.Properties) {
-		log.Info("skip to alter database due to no changes were detected in the properties", zap.String("databaseName", a.Req.GetDbName()))
-		return nil
-	}
-
 	newDB := oldDB.Clone()
-	ret := MergeProperties(oldDB.Properties, a.Req.GetProperties())
-	newDB.Properties = ret
+	if (len(a.Req.GetProperties())) > 0 {
+		if ContainsKeyPairArray(a.Req.GetProperties(), oldDB.Properties) {
+			log.Info("skip to alter database due to no changes were detected in the properties", zap.String("databaseName", a.Req.GetDbName()))
+			return nil
+		}
+		ret := MergeProperties(oldDB.Properties, a.Req.GetProperties())
+		newDB.Properties = ret
+	} else if (len(a.Req.GetDeleteKeys())) > 0 {
+		ret := DeleteProperties(oldDB.Properties, a.Req.GetDeleteKeys())
+		newDB.Properties = ret
+	}
 
 	ts := a.GetTs()
 	redoTask := newBaseRedoTask(a.core.stepExecutor)
@@ -75,6 +99,18 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 		oldDB:    oldDB,
 		newDB:    newDB,
 		ts:       ts,
+	})
+
+	redoTask.AddSyncStep(&expireCacheStep{
+		baseStep: baseStep{core: a.core},
+		dbName:   newDB.Name,
+		ts:       ts,
+		// make sure to send the "expire cache" request
+		// because it won't send this request when the length of collection names array is zero
+		collectionNames: []string{""},
+		opts: []proxyutil.ExpireCacheOpt{
+			proxyutil.SetMsgType(commonpb.MsgType_AlterDatabase),
+		},
 	})
 
 	oldReplicaNumber, _ := common.DatabaseLevelReplicaNumber(oldDB.Properties)
@@ -95,7 +131,7 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 		redoTask.AddAsyncStep(NewSimpleStep("", func(ctx context.Context) ([]nestedStep, error) {
 			colls, err := a.core.meta.ListCollections(ctx, oldDB.Name, a.ts, true)
 			if err != nil {
-				log.Warn("failed to trigger update load config for database", zap.Int64("dbID", oldDB.ID), zap.Error(err))
+				log.Ctx(ctx).Warn("failed to trigger update load config for database", zap.Int64("dbID", oldDB.ID), zap.Error(err))
 				return nil, err
 			}
 			if len(colls) == 0 {
@@ -108,10 +144,43 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 				ResourceGroups: newResourceGroups,
 			})
 			if err := merr.CheckRPCCall(resp, err); err != nil {
-				log.Warn("failed to trigger update load config for database", zap.Int64("dbID", oldDB.ID), zap.Error(err))
+				log.Ctx(ctx).Warn("failed to trigger update load config for database", zap.Int64("dbID", oldDB.ID), zap.Error(err))
 				return nil, err
 			}
 			return nil, nil
+		}))
+	}
+
+	oldReplicateEnable, _ := common.IsReplicateEnabled(oldDB.Properties)
+	newReplicateEnable, ok := common.IsReplicateEnabled(newDB.Properties)
+	if ok && !newReplicateEnable && oldReplicateEnable {
+		replicateID, _ := common.GetReplicateID(oldDB.Properties)
+		redoTask.AddAsyncStep(NewSimpleStep("send replicate end msg for db", func(ctx context.Context) ([]nestedStep, error) {
+			msgPack := &msgstream.MsgPack{}
+			msg := &msgstream.ReplicateMsg{
+				BaseMsg: msgstream.BaseMsg{
+					Ctx:            ctx,
+					BeginTimestamp: ts,
+					EndTimestamp:   ts,
+					HashValues:     []uint32{0},
+				},
+				ReplicateMsg: &msgpb.ReplicateMsg{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_Replicate,
+						Timestamp: ts,
+						ReplicateInfo: &commonpb.ReplicateInfo{
+							IsReplicate: true,
+							ReplicateID: replicateID,
+						},
+					},
+					IsEnd:      true,
+					Database:   newDB.Name,
+					Collection: "",
+				},
+			}
+			msgPack.Msgs = append(msgPack.Msgs, msg)
+			log.Info("send replicate end msg for db", zap.String("db", newDB.Name), zap.String("replicateID", replicateID))
+			return nil, a.core.chanTimeTick.broadcastDmlChannels(a.core.chanTimeTick.listDmlChannels(), msgPack)
 		}))
 	}
 
@@ -126,6 +195,14 @@ func (a *alterDatabaseTask) GetLockerKey() LockerKey {
 }
 
 func MergeProperties(oldProps []*commonpb.KeyValuePair, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+	_, existEndTS := common.GetReplicateEndTS(updatedProps)
+	if existEndTS {
+		updatedProps = append(updatedProps, &commonpb.KeyValuePair{
+			Key:   common.ReplicateIDKey,
+			Value: "",
+		})
+	}
+
 	props := make(map[string]string)
 	for _, prop := range oldProps {
 		props[prop.Key] = prop.Value

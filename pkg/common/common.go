@@ -123,6 +123,7 @@ const (
 	ChannelNumKey   = "channel_num"
 	WithOptimizeKey = "with_optimize"
 	CollectionKey   = "collection"
+	RecallEvalKey   = "recall_eval"
 
 	IndexParamsKey = "params"
 	IndexTypeKey   = "index_type"
@@ -138,6 +139,7 @@ const (
 	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
 	IgnoreGrowing             = "ignore_growing"
 	ConsistencyLevel          = "consistency_level"
+	HintsKey                  = "hints"
 )
 
 // Doc-in-doc-out
@@ -189,6 +191,8 @@ const (
 	PartitionKeyIsolationKey   = "partitionkey.isolation"
 	FieldSkipLoadKey           = "field.skipLoad"
 	IndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
+	ReplicateIDKey             = "replicate.id"
+	ReplicateEndTSKey          = "replicate.endTS"
 )
 
 const (
@@ -392,4 +396,32 @@ func ShouldFieldBeLoaded(kvs []*commonpb.KeyValuePair) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+func IsReplicateEnabled(kvs []*commonpb.KeyValuePair) (bool, bool) {
+	replicateID, ok := GetReplicateID(kvs)
+	return replicateID != "", ok
+}
+
+func GetReplicateID(kvs []*commonpb.KeyValuePair) (string, bool) {
+	for _, kv := range kvs {
+		if kv.GetKey() == ReplicateIDKey {
+			return kv.GetValue(), true
+		}
+	}
+	return "", false
+}
+
+func GetReplicateEndTS(kvs []*commonpb.KeyValuePair) (uint64, bool) {
+	for _, kv := range kvs {
+		if kv.GetKey() == ReplicateEndTSKey {
+			ts, err := strconv.ParseUint(kv.GetValue(), 10, 64)
+			if err != nil {
+				log.Warn("parse replicate end ts failed", zap.Error(err), zap.Stack("stack"))
+				return 0, false
+			}
+			return ts, true
+		}
+	}
+	return 0, false
 }

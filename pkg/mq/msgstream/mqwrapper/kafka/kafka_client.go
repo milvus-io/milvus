@@ -141,6 +141,7 @@ func (kc *kafkaClient) getKafkaProducer() (*kafka.Producer, error) {
 	if p := producer.Load(); p != nil {
 		return p, nil
 	}
+	log := log.Ctx(context.TODO())
 	p, err, _ := sf.Do("kafka_producer", func() (*kafka.Producer, error) {
 		if p := producer.Load(); p != nil {
 			return p, nil
@@ -219,8 +220,7 @@ func (kc *kafkaClient) CreateProducer(ctx context.Context, options common.Produc
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateProducerLabel).Observe(float64(elapsed.Milliseconds()))
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.SuccessLabel).Inc()
 
-	deliveryChan := make(chan kafka.Event, 128)
-	producer := &kafkaProducer{p: pp, deliveryChan: deliveryChan, topic: options.Topic}
+	producer := &kafkaProducer{p: pp, stopCh: make(chan struct{}), topic: options.Topic}
 	return producer, nil
 }
 

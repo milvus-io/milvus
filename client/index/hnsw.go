@@ -16,11 +16,14 @@
 
 package index
 
-import "strconv"
+import (
+	"strconv"
+)
 
 const (
 	hnswMKey           = `M`
 	hsnwEfConstruction = `efConstruction`
+	hnswEfKey          = `ef`
 )
 
 var _ Index = hnswIndex{}
@@ -50,4 +53,24 @@ func NewHNSWIndex(metricType MetricType, m int, efConstruction int) Index {
 		m:              m,
 		efConstruction: efConstruction,
 	}
+}
+
+type hsnwAnnParam struct {
+	baseAnnParam
+	ef int
+}
+
+func NewHNSWAnnParam(ef int) hsnwAnnParam {
+	return hsnwAnnParam{
+		baseAnnParam: baseAnnParam{
+			params: make(map[string]any),
+		},
+		ef: ef,
+	}
+}
+
+func (ap hsnwAnnParam) Params() map[string]any {
+	result := ap.baseAnnParam.params
+	result[hnswEfKey] = ap.ef
+	return result
 }

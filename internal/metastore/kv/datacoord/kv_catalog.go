@@ -44,19 +44,25 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var paginationSize = 2000
-
 type Catalog struct {
-	MetaKv               kv.MetaKv
+	MetaKv kv.MetaKv
+
+	paginationSize       int
 	ChunkManagerRootPath string
 	metaRootpath         string
 }
 
 func NewCatalog(MetaKv kv.MetaKv, chunkManagerRootPath string, metaRootpath string) *Catalog {
-	return &Catalog{MetaKv: MetaKv, ChunkManagerRootPath: chunkManagerRootPath, metaRootpath: metaRootpath}
+	return &Catalog{
+		MetaKv:               MetaKv,
+		paginationSize:       paramtable.Get().MetaStoreCfg.PaginationSize.GetAsInt(),
+		ChunkManagerRootPath: chunkManagerRootPath,
+		metaRootpath:         metaRootpath,
+	}
 }
 
 func (kc *Catalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, error) {
@@ -130,7 +136,7 @@ func (kc *Catalog) listSegments(ctx context.Context) ([]*datapb.SegmentInfo, err
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, SegmentPrefix+"/", paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, SegmentPrefix+"/", kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +221,7 @@ func (kc *Catalog) listBinlogs(ctx context.Context, binlogType storage.BinlogTyp
 		return nil
 	}
 
-	err = kc.MetaKv.WalkWithPrefix(ctx, logPathPrefix, paginationSize, applyFn)
+	err = kc.MetaKv.WalkWithPrefix(ctx, logPathPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -271,14 +277,14 @@ func (kc *Catalog) AddSegment(ctx context.Context, segment *datapb.SegmentInfo) 
 func (kc *Catalog) LoadFromSegmentPath(ctx context.Context, colID, partID, segID typeutil.UniqueID) (*datapb.SegmentInfo, error) {
 	v, err := kc.MetaKv.Load(ctx, buildSegmentPath(colID, partID, segID))
 	if err != nil {
-		log.Error("(testing only) failed to load segment info by segment path")
+		log.Ctx(context.TODO()).Error("(testing only) failed to load segment info by segment path")
 		return nil, err
 	}
 
 	segInfo := &datapb.SegmentInfo{}
 	err = proto.Unmarshal([]byte(v), segInfo)
 	if err != nil {
-		log.Error("(testing only) failed to unmarshall segment info")
+		log.Ctx(context.TODO()).Error("(testing only) failed to unmarshall segment info")
 		return nil, err
 	}
 
@@ -352,7 +358,7 @@ func (kc *Catalog) SaveByBatch(ctx context.Context, kvs map[string]string) error
 	}
 	err := etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, saveFn)
 	if err != nil {
-		log.Error("failed to save by batch", zap.Error(err))
+		log.Ctx(ctx).Error("failed to save by batch", zap.Error(err))
 		return err
 	}
 	return nil
@@ -428,10 +434,10 @@ func (kc *Catalog) MarkChannelAdded(ctx context.Context, channel string) error {
 	key := buildChannelRemovePath(channel)
 	err := kc.MetaKv.Save(ctx, key, NonRemoveFlagTomestone)
 	if err != nil {
-		log.Error("failed to mark channel added", zap.String("channel", channel), zap.Error(err))
+		log.Ctx(ctx).Error("failed to mark channel added", zap.String("channel", channel), zap.Error(err))
 		return err
 	}
-	log.Info("NON remove flag tombstone added", zap.String("channel", channel))
+	log.Ctx(ctx).Info("NON remove flag tombstone added", zap.String("channel", channel))
 	return nil
 }
 
@@ -439,10 +445,10 @@ func (kc *Catalog) MarkChannelDeleted(ctx context.Context, channel string) error
 	key := buildChannelRemovePath(channel)
 	err := kc.MetaKv.Save(ctx, key, RemoveFlagTomestone)
 	if err != nil {
-		log.Error("Failed to mark channel dropped", zap.String("channel", channel), zap.Error(err))
+		log.Ctx(ctx).Error("Failed to mark channel dropped", zap.String("channel", channel), zap.Error(err))
 		return err
 	}
-	log.Info("remove flag tombstone added", zap.String("channel", channel))
+	log.Ctx(ctx).Info("remove flag tombstone added", zap.String("channel", channel))
 	return nil
 }
 
@@ -464,7 +470,7 @@ func (kc *Catalog) ChannelExists(ctx context.Context, channel string) bool {
 // DropChannel removes channel remove flag after whole procedure is finished
 func (kc *Catalog) DropChannel(ctx context.Context, channel string) error {
 	key := buildChannelRemovePath(channel)
-	log.Info("removing channel remove path", zap.String("channel", channel))
+	log.Ctx(ctx).Info("removing channel remove path", zap.String("channel", channel))
 	return kc.MetaKv.Remove(ctx, key)
 }
 
@@ -474,7 +480,7 @@ func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb
 		channelCP := &msgpb.MsgPosition{}
 		err := proto.Unmarshal(value, channelCP)
 		if err != nil {
-			log.Error("unmarshal channelCP failed when ListChannelCheckpoint", zap.Error(err))
+			log.Ctx(ctx).Error("unmarshal channelCP failed when ListChannelCheckpoint", zap.Error(err))
 			return err
 		}
 		ss := strings.Split(string(key), "/")
@@ -483,7 +489,7 @@ func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, ChannelCheckpointPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, ChannelCheckpointPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -560,7 +566,7 @@ func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
 		meta := &indexpb.FieldIndex{}
 		err := proto.Unmarshal(value, meta)
 		if err != nil {
-			log.Warn("unmarshal index info failed", zap.Error(err))
+			log.Ctx(ctx).Warn("unmarshal index info failed", zap.Error(err))
 			return err
 		}
 
@@ -568,7 +574,7 @@ func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, util.FieldIndexPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, util.FieldIndexPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -606,7 +612,7 @@ func (kc *Catalog) DropIndex(ctx context.Context, collID typeutil.UniqueID, drop
 
 	err := kc.MetaKv.Remove(ctx, key)
 	if err != nil {
-		log.Error("drop collection index meta fail", zap.Int64("collectionID", collID),
+		log.Ctx(ctx).Error("drop collection index meta fail", zap.Int64("collectionID", collID),
 			zap.Int64("indexID", dropIdxID), zap.Error(err))
 		return err
 	}
@@ -623,7 +629,7 @@ func (kc *Catalog) CreateSegmentIndex(ctx context.Context, segIdx *model.Segment
 	}
 	err = kc.MetaKv.Save(ctx, key, string(value))
 	if err != nil {
-		log.Error("failed to save segment index meta in etcd", zap.Int64("buildID", segIdx.BuildID),
+		log.Ctx(ctx).Error("failed to save segment index meta in etcd", zap.Int64("buildID", segIdx.BuildID),
 			zap.Int64("segmentID", segIdx.SegmentID), zap.Error(err))
 		return err
 	}
@@ -636,7 +642,7 @@ func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentInde
 		segmentIndexInfo := &indexpb.SegmentIndex{}
 		err := proto.Unmarshal(value, segmentIndexInfo)
 		if err != nil {
-			log.Warn("unmarshal segment index info failed", zap.Error(err))
+			log.Ctx(ctx).Warn("unmarshal segment index info failed", zap.Error(err))
 			return err
 		}
 
@@ -644,7 +650,7 @@ func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentInde
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, util.SegmentIndexPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, util.SegmentIndexPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -670,7 +676,7 @@ func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, 
 
 	err := kc.MetaKv.Remove(ctx, key)
 	if err != nil {
-		log.Error("drop segment index meta fail", zap.Int64("buildID", buildID), zap.Error(err))
+		log.Ctx(ctx).Error("drop segment index meta fail", zap.Int64("buildID", buildID), zap.Error(err))
 		return err
 	}
 
@@ -698,7 +704,7 @@ func (kc *Catalog) ListImportJobs(ctx context.Context) ([]*datapb.ImportJob, err
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, ImportJobPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, ImportJobPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -732,7 +738,7 @@ func (kc *Catalog) ListPreImportTasks(ctx context.Context) ([]*datapb.PreImportT
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, PreImportTaskPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, PreImportTaskPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -766,7 +772,7 @@ func (kc *Catalog) ListImportTasks(ctx context.Context) ([]*datapb.ImportTaskV2,
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, ImportTaskPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, ImportTaskPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -806,7 +812,7 @@ func (kc *Catalog) ListCompactionTask(ctx context.Context) ([]*datapb.Compaction
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, CompactionTaskPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, CompactionTaskPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -845,7 +851,7 @@ func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, AnalyzeTaskPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, AnalyzeTaskPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -885,7 +891,7 @@ func (kc *Catalog) ListPartitionStatsInfos(ctx context.Context) ([]*datapb.Parti
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, PartitionStatsInfoPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, PartitionStatsInfoPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -948,7 +954,7 @@ func (kc *Catalog) ListStatsTasks(ctx context.Context) ([]*indexpb.StatsTask, er
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, StatsTaskPrefix, paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, StatsTaskPrefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}

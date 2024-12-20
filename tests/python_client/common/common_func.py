@@ -982,13 +982,13 @@ def gen_collection_schema_all_datatype(description=ct.default_desc, primary_fiel
             if ct.append_vector_type[i%3] != ct.sparse_vector:
                 if default_value_fields.get(ct.append_vector_type[i%3]) is None:
                     vector_field = gen_float_vec_field(name=f"multiple_vector_{ct.append_vector_type[i%3]}",
-                                                              dim=multiple_dim_array[i],
-                                                              vector_data_type=ct.append_vector_type[i%3])
+                                                       dim=multiple_dim_array[i],
+                                                       vector_data_type=ct.append_vector_type[i%3])
                 else:
                     vector_field = gen_float_vec_field(name=f"multiple_vector_{ct.append_vector_type[i%3]}",
-                                                              dim=multiple_dim_array[i],
-                                                              vector_data_type=ct.append_vector_type[i%3],
-                                                              default_value=default_value_fields.get(ct.append_vector_type[i%3]))
+                                                       dim=multiple_dim_array[i],
+                                                       vector_data_type=ct.append_vector_type[i%3],
+                                                       default_value=default_value_fields.get(ct.append_vector_type[i%3]))
                 fields.append(vector_field)
             else:
                 # The field of a sparse vector cannot be dimensioned

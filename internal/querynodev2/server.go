@@ -52,7 +52,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -103,7 +102,6 @@ type QueryNode struct {
 	// internal components
 	manager               *segments.Manager
 	clusterManager        cluster.Manager
-	tSafeManager          tsafe.Manager
 	pipelineManager       pipeline.Manager
 	subscribingChannels   *typeutil.ConcurrentSet[string]
 	unsubscribingChannels *typeutil.ConcurrentSet[string]
@@ -153,7 +151,6 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 		metricsRequest: metricsinfo.NewMetricsRequest(),
 	}
 
-	node.tSafeManager = tsafe.NewTSafeReplica()
 	expr.Register("querynode", node)
 	return node
 }
@@ -168,7 +165,7 @@ func (node *QueryNode) initSession() error {
 	sessionutil.SaveServerInfo(typeutil.QueryNodeRole, node.session.ServerID)
 	paramtable.SetNodeID(node.session.ServerID)
 	node.serverID = node.session.ServerID
-	log.Info("QueryNode init session", zap.Int64("nodeID", node.GetNodeID()), zap.String("node address", node.session.Address))
+	log.Ctx(node.ctx).Info("QueryNode init session", zap.Int64("nodeID", node.GetNodeID()), zap.String("node address", node.session.Address))
 	return nil
 }
 
@@ -178,7 +175,7 @@ func (node *QueryNode) Register() error {
 	// start liveness check
 	metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.QueryNodeRole).Inc()
 	node.session.LivenessCheck(node.ctx, func() {
-		log.Error("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", paramtable.GetNodeID()))
+		log.Ctx(node.ctx).Error("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", paramtable.GetNodeID()))
 		os.Exit(1)
 	})
 	return nil
@@ -235,7 +232,7 @@ func (node *QueryNode) InitSegcore() error {
 	if knowhereBuildPoolSize < uint32(1) {
 		knowhereBuildPoolSize = uint32(1)
 	}
-	log.Info("set up knowhere build pool size", zap.Uint32("pool_size", knowhereBuildPoolSize))
+	log.Ctx(node.ctx).Info("set up knowhere build pool size", zap.Uint32("pool_size", knowhereBuildPoolSize))
 	cKnowhereBuildPoolSize := C.uint32_t(knowhereBuildPoolSize)
 	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereBuildPoolSize)
 
@@ -294,11 +291,12 @@ func (node *QueryNode) registerMetricsRequest() {
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return getChannelJSON(node), nil
 		})
-	log.Info("register metrics actions finished")
+	log.Ctx(node.ctx).Info("register metrics actions finished")
 }
 
 // Init function init historical and streaming module to manage segments
 func (node *QueryNode) Init() error {
+	log := log.Ctx(node.ctx)
 	var initError error
 	node.initOnce.Do(func() {
 		node.registerMetricsRequest()
@@ -375,7 +373,7 @@ func (node *QueryNode) Init() error {
 		node.manager.SetLoader(node.loader)
 		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, node.GetNodeID())
 		// init pipeline manager
-		node.pipelineManager = pipeline.NewManager(node.manager, node.tSafeManager, node.dispClient, node.delegators)
+		node.pipelineManager = pipeline.NewManager(node.manager, node.dispClient, node.delegators)
 
 		err = node.InitSegcore()
 		if err != nil {
@@ -395,6 +393,7 @@ func (node *QueryNode) Init() error {
 
 // Start mainly start QueryNode's query service.
 func (node *QueryNode) Start() error {
+	log := log.Ctx(node.ctx)
 	node.startOnce.Do(func() {
 		node.scheduler.Start()
 
@@ -429,6 +428,7 @@ func (node *QueryNode) Start() error {
 
 // Stop mainly stop QueryNode's query service, historical loop and streaming loop.
 func (node *QueryNode) Stop() error {
+	log := log.Ctx(node.ctx)
 	node.stopOnce.Do(func() {
 		log.Info("Query node stop...")
 		err := node.session.GoingStop()
@@ -535,6 +535,7 @@ func (node *QueryNode) SetAddress(address string) {
 
 // initHook initializes parameter tuning hook.
 func (node *QueryNode) initHook() error {
+	log := log.Ctx(node.ctx)
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
 	if path == "" {
 		return fmt.Errorf("fail to set the plugin path")
@@ -570,6 +571,7 @@ func (node *QueryNode) initHook() error {
 }
 
 func (node *QueryNode) handleQueryHookEvent() {
+	log := log.Ctx(node.ctx)
 	onEvent := func(event *config.Event) {
 		if node.queryHook != nil {
 			if err := node.queryHook.Init(event.Value); err != nil {

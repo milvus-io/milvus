@@ -280,7 +280,7 @@ pub(crate) fn create_tokenizer_with_filter(params: &String) -> Result<TextAnalyz
     }
 }
 
-pub(crate) fn create_tokenizer(params: &String) -> Result<TextAnalyzer> {
+pub(crate) fn create_tokenizer(params: &str) -> Result<TextAnalyzer> {
     if params.len() == 0 {
         return Ok(standard_analyzer(vec![]));
     }

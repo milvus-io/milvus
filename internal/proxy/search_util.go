@@ -153,6 +153,11 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		roundDecimalStr = "-1"
 	}
 
+	hints, err := funcutil.GetAttrByKeyFromRepeatedKV(common.HintsKey, searchParamsPair)
+	if err != nil {
+		hints = ""
+	}
+
 	roundDecimal, err := strconv.ParseInt(roundDecimalStr, 0, 64)
 	if err != nil {
 		return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)}
@@ -200,6 +205,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			GroupByFieldId:  groupByFieldId,
 			GroupSize:       groupSize,
 			StrictGroupSize: strictGroupSize,
+			Hints:           hints,
 		},
 		offset:     offset,
 		isIterator: isIterator,
@@ -267,7 +273,7 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 
 	useRegexp := Params.ProxyCfg.PartitionNameRegexp.GetAsBool()
 
-	partitionsSet := typeutil.NewSet[int64]()
+	partitionsSet := typeutil.NewUniqueSet()
 	for _, partitionName := range partitionNames {
 		if useRegexp {
 			// Legacy feature, use partition name as regexp
@@ -292,9 +298,7 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 				// TODO change after testcase updated: return nil, merr.WrapErrPartitionNotFound(partitionName)
 				return nil, fmt.Errorf("partition name %s not found", partitionName)
 			}
-			if !partitionsSet.Contain(partitionID) {
-				partitionsSet.Insert(partitionID)
-			}
+			partitionsSet.Insert(partitionID)
 		}
 	}
 	return partitionsSet.Collect(), nil

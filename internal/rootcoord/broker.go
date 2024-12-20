@@ -43,6 +43,7 @@ type watchInfo struct {
 	vChannels      []string
 	startPositions []*commonpb.KeyDataPair
 	schema         *schemapb.CollectionSchema
+	dbProperties   []*commonpb.KeyValuePair
 }
 
 // Broker communicates with other components.
@@ -165,6 +166,7 @@ func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error
 		StartPositions:  info.startPositions,
 		Schema:          info.schema,
 		CreateTimestamp: info.ts,
+		DbProperties:    info.dbProperties,
 	})
 	if err != nil {
 		return err
@@ -225,7 +227,11 @@ func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID
 }
 
 func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
-	log.Info("broadcasting request to alter collection", zap.String("collectionName", req.GetCollectionName()), zap.Int64("collectionID", req.GetCollectionID()), zap.Any("props", req.GetProperties()))
+	log.Ctx(ctx).Info("broadcasting request to alter collection",
+		zap.String("collectionName", req.GetCollectionName()),
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Any("props", req.GetProperties()),
+		zap.Any("deleteKeys", req.GetDeleteKeys()))
 
 	colMeta, err := b.s.meta.GetCollectionByID(ctx, req.GetDbName(), req.GetCollectionID(), typeutil.MaxTimestamp, false)
 	if err != nil {
@@ -265,7 +271,7 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milv
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(resp.Reason)
 	}
-	log.Info("done to broadcast request to alter collection", zap.String("collectionName", req.GetCollectionName()), zap.Int64("collectionID", req.GetCollectionID()), zap.Any("props", req.GetProperties()))
+	log.Ctx(ctx).Info("done to broadcast request to alter collection", zap.String("collectionName", req.GetCollectionName()), zap.Int64("collectionID", req.GetCollectionID()), zap.Any("props", req.GetProperties()))
 	return nil
 }
 

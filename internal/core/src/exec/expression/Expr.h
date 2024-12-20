@@ -31,6 +31,8 @@
 namespace milvus {
 namespace exec {
 
+enum class FilterType { sequential = 0, random = 1 };
+
 class Expr {
  public:
     Expr(DataType type,
@@ -73,12 +75,26 @@ class Expr {
     MoveCursor() {
     }
 
+    void
+    SetHasOffsetInput(bool has_offset_input) {
+        has_offset_input_ = has_offset_input;
+    }
+
+    virtual bool
+    SupportOffsetInput() {
+        return true;
+    }
+
  protected:
     DataType type_;
     const std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
     // NOTE: unused
     std::shared_ptr<VectorFunction> vector_func_;
+
+    // whether we have offset input and do expr filtering on these data
+    // default is false which means we will do expr filtering on the total segment data
+    bool has_offset_input_ = false;
 };
 
 using ExprPtr = std::shared_ptr<milvus::exec::Expr>;
@@ -204,13 +220,16 @@ class SegmentExpr : public Expr {
 
     void
     MoveCursor() override {
-        if (is_index_mode_) {
-            MoveCursorForIndex();
-            if (segment_->HasFieldData(field_id_)) {
+        // when we specify input, do not maintain states
+        if (!has_offset_input_) {
+            if (is_index_mode_) {
+                MoveCursorForIndex();
+                if (segment_->HasFieldData(field_id_)) {
+                    MoveCursorForData();
+                }
+            } else {
                 MoveCursorForData();
             }
-        } else {
-            MoveCursorForData();
         }
     }
 
@@ -275,6 +294,7 @@ class SegmentExpr : public Expr {
             // use valid_data to see if raw data is null
             func(views_info.first.data(),
                  views_info.second.data(),
+                 nullptr,
                  need_size,
                  res,
                  valid_res,
@@ -284,6 +304,252 @@ class SegmentExpr : public Expr {
         }
         current_data_chunk_pos_ += need_size;
         return need_size;
+    }
+
+    // accept offsets array and process on the scalar data by offsets
+    // stateless! Just check and set bitset as result, does not need to move cursor
+    // used for processing raw data expr for sealed segments.
+    // now only used for std::string_view && json
+    // TODO: support more types
+    template <typename T, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessDataByOffsetsForSealedSeg(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        OffsetVector* input,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        ValTypes... values) {
+        // For non_chunked sealed segment, only single chunk
+        Assert(num_data_chunk_ == 1);
+
+        auto& skip_index = segment_->GetSkipIndex();
+        auto [data_vec, valid_data] =
+            segment_->get_views_by_offsets<T>(field_id_, 0, *input);
+        if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
+            func(data_vec.data(),
+                 valid_data.data(),
+                 nullptr,
+                 input->size(),
+                 res,
+                 valid_res,
+                 values...);
+        } else {
+            ApplyValidData(valid_data.data(), res, valid_res, input->size());
+        }
+        return input->size();
+    }
+
+    template <typename T, typename FUNC, typename... ValTypes>
+    VectorPtr
+    ProcessIndexChunksByOffsets(FUNC func,
+                                OffsetVector* input,
+                                ValTypes... values) {
+        AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
+        typedef std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+                IndexInnerType;
+        using Index = index::ScalarIndex<IndexInnerType>;
+        TargetBitmap valid_res(input->size());
+
+        const Index& index =
+            segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
+        auto* index_ptr = const_cast<Index*>(&index);
+        auto valid_result = index_ptr->IsNotNull();
+        for (auto i = 0; i < input->size(); ++i) {
+            valid_res[i] = valid_result[(*input)[i]];
+        }
+        auto result = std::move(func.template operator()<FilterType::random>(
+            index_ptr, values..., input->data()));
+        return std::make_shared<ColumnVector>(std::move(result),
+                                              std::move(valid_res));
+    }
+
+    // when we have scalar index and index contains raw data, could go with index chunk by offsets
+    template <typename T, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessIndexLookupByOffsets(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        OffsetVector* input,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        ValTypes... values) {
+        AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
+        auto& skip_index = segment_->GetSkipIndex();
+
+        typedef std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+                IndexInnerType;
+        using Index = index::ScalarIndex<IndexInnerType>;
+        const Index& index =
+            segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
+        auto* index_ptr = const_cast<Index*>(&index);
+        auto valid_result = index_ptr->IsNotNull();
+        auto batch_size = input->size();
+
+        if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
+            for (auto i = 0; i < batch_size; ++i) {
+                auto offset = (*input)[i];
+                auto raw = index_ptr->Reverse_Lookup(offset);
+                if (!raw.has_value()) {
+                    res[i] = false;
+                    continue;
+                }
+                T raw_data = raw.value();
+                bool valid_data = valid_result[offset];
+                func.template operator()<FilterType::random>(&raw_data,
+                                                             &valid_data,
+                                                             nullptr,
+                                                             1,
+                                                             res + i,
+                                                             valid_res + i,
+                                                             values...);
+            }
+        } else {
+            for (auto i = 0; i < batch_size; ++i) {
+                auto offset = (*input)[i];
+                res[i] = valid_res[i] = valid_result[offset];
+            }
+        }
+
+        return batch_size;
+    }
+
+    // accept offsets array and process on the scalar data by offsets
+    // stateless! Just check and set bitset as result, does not need to move cursor
+    template <typename T, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessDataByOffsets(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        OffsetVector* input,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        ValTypes... values) {
+        int64_t processed_size = 0;
+
+        // index reverse lookup
+        if (is_index_mode_ && num_data_chunk_ == 0) {
+            return ProcessIndexLookupByOffsets<T>(
+                func, skip_func, input, res, valid_res, values...);
+        }
+
+        auto& skip_index = segment_->GetSkipIndex();
+
+        // raw data scan
+        // sealed segment
+        if (segment_->type() == SegmentType::Sealed) {
+            if (segment_->is_chunked()) {
+                if constexpr (std::is_same_v<T, std::string_view> ||
+                              std::is_same_v<T, Json>) {
+                    for (size_t i = 0; i < input->size(); ++i) {
+                        int64_t offset = (*input)[i];
+                        auto [chunk_id, chunk_offset] =
+                            segment_->get_chunk_by_offset(field_id_, offset);
+                        auto [data_vec, valid_data] =
+                            segment_->get_views_by_offsets<T>(
+                                field_id_, chunk_id, {int32_t(chunk_offset)});
+                        if (!skip_func ||
+                            !skip_func(skip_index, field_id_, chunk_id)) {
+                            func.template operator()<FilterType::random>(
+                                data_vec.data(),
+                                valid_data.data(),
+                                nullptr,
+                                1,
+                                res + processed_size,
+                                valid_res + processed_size,
+                                values...);
+                        } else {
+                            res[processed_size] = valid_res[processed_size] =
+                                (valid_data[0]);
+                        }
+                        processed_size++;
+                    }
+                    return input->size();
+                }
+                for (size_t i = 0; i < input->size(); ++i) {
+                    int64_t offset = (*input)[i];
+                    auto [chunk_id, chunk_offset] =
+                        segment_->get_chunk_by_offset(field_id_, offset);
+                    auto chunk = segment_->chunk_data<T>(field_id_, chunk_id);
+                    const T* data = chunk.data() + chunk_offset;
+                    const bool* valid_data = chunk.valid_data();
+                    if (valid_data != nullptr) {
+                        valid_data += chunk_offset;
+                    }
+                    if (!skip_func ||
+                        !skip_func(skip_index, field_id_, chunk_id)) {
+                        func.template operator()<FilterType::random>(
+                            data,
+                            valid_data,
+                            nullptr,
+                            1,
+                            res + processed_size,
+                            valid_res + processed_size,
+                            values...);
+                    } else {
+                        ApplyValidData(valid_data,
+                                       res + processed_size,
+                                       valid_res + processed_size,
+                                       1);
+                    }
+                    processed_size++;
+                }
+                return input->size();
+            } else {
+                if constexpr (std::is_same_v<T, std::string_view> ||
+                              std::is_same_v<T, Json>) {
+                    return ProcessDataByOffsetsForSealedSeg<T>(
+                        func, skip_func, input, res, valid_res, values...);
+                }
+                auto chunk = segment_->chunk_data<T>(field_id_, 0);
+                const T* data = chunk.data();
+                const bool* valid_data = chunk.valid_data();
+                if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
+                    func.template operator()<FilterType::random>(data,
+                                                                 valid_data,
+                                                                 input->data(),
+                                                                 input->size(),
+                                                                 res,
+                                                                 valid_res,
+                                                                 values...);
+                } else {
+                    ApplyValidData(valid_data, res, valid_res, input->size());
+                }
+                return input->size();
+            }
+        } else {
+            // growing segment
+            for (size_t i = 0; i < input->size(); ++i) {
+                int64_t offset = (*input)[i];
+                auto chunk_id = offset / size_per_chunk_;
+                auto chunk_offset = offset % size_per_chunk_;
+                auto chunk = segment_->chunk_data<T>(field_id_, chunk_id);
+                const T* data = chunk.data() + chunk_offset;
+                const bool* valid_data = chunk.valid_data();
+                if (valid_data != nullptr) {
+                    valid_data += chunk_offset;
+                }
+                if (!skip_func || !skip_func(skip_index, field_id_, chunk_id)) {
+                    func.template operator()<FilterType::random>(
+                        data,
+                        valid_data,
+                        nullptr,
+                        1,
+                        res + processed_size,
+                        valid_res + processed_size,
+                        values...);
+                } else {
+                    ApplyValidData(valid_data,
+                                   res + processed_size,
+                                   valid_res + processed_size,
+                                   1);
+                }
+                processed_size++;
+            }
+        }
+        return input->size();
     }
 
     template <typename T, typename FUNC, typename... ValTypes>
@@ -328,6 +594,7 @@ class SegmentExpr : public Expr {
                 const T* data = chunk.data() + data_pos;
                 func(data,
                      valid_data,
+                     nullptr,
                      size,
                      res + processed_size,
                      valid_res + processed_size,
@@ -384,12 +651,12 @@ class SegmentExpr : public Expr {
                     if (segment_->type() == SegmentType::Sealed) {
                         // first is the raw data, second is valid_data
                         // use valid_data to see if raw data is null
-                        auto fetched_data = segment_->get_batch_views<T>(
-                            field_id_, i, data_pos, size);
-                        auto data_vec = fetched_data.first;
-                        auto valid_data = fetched_data.second;
+                        auto [data_vec, valid_data] =
+                            segment_->get_batch_views<T>(
+                                field_id_, i, data_pos, size);
                         func(data_vec.data(),
                              valid_data.data(),
+                             nullptr,
                              size,
                              res + processed_size,
                              valid_res + processed_size,
@@ -406,6 +673,7 @@ class SegmentExpr : public Expr {
                     }
                     func(data,
                          valid_data,
+                         nullptr,
                          size,
                          res + processed_size,
                          valid_res + processed_size,
@@ -451,13 +719,14 @@ class SegmentExpr : public Expr {
         FUNC func,
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         TargetBitmapView res,
+        TargetBitmapView valid_res,
         ValTypes... values) {
         if (segment_->is_chunked()) {
             return ProcessDataChunksForMultipleChunk<T>(
-                func, skip_func, res, values...);
+                func, skip_func, res, valid_res, values...);
         } else {
             return ProcessDataChunksForSingleChunk<T>(
-                func, skip_func, res, values...);
+                func, skip_func, res, valid_res, values...);
         }
     }
 
@@ -540,6 +809,51 @@ class SegmentExpr : public Expr {
 
     template <typename T>
     TargetBitmap
+    ProcessChunksForValidByOffsets(bool use_index, const OffsetVector& input) {
+        typedef std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+                IndexInnerType;
+        using Index = index::ScalarIndex<IndexInnerType>;
+        auto batch_size = input.size();
+        TargetBitmap valid_result(batch_size);
+        valid_result.set();
+
+        if (use_index) {
+            const Index& index =
+                segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
+            auto* index_ptr = const_cast<Index*>(&index);
+            const auto& res = index_ptr->IsNotNull();
+            for (auto i = 0; i < batch_size; ++i) {
+                valid_result[i] = res[input[i]];
+            }
+        } else {
+            for (auto i = 0; i < batch_size; ++i) {
+                auto offset = input[i];
+                auto [chunk_id,
+                      chunk_offset] = [&]() -> std::pair<int64_t, int64_t> {
+                    if (segment_->type() == SegmentType::Growing) {
+                        return {offset / size_per_chunk_,
+                                offset % size_per_chunk_};
+                    } else if (segment_->is_chunked()) {
+                        return segment_->get_chunk_by_offset(field_id_, offset);
+                    } else {
+                        return {0, offset};
+                    }
+                }();
+                auto chunk = segment_->chunk_data<T>(field_id_, chunk_id);
+                const bool* valid_data = chunk.valid_data();
+                if (valid_data != nullptr) {
+                    valid_result[i] = valid_data[chunk_offset];
+                } else {
+                    break;
+                }
+            }
+        }
+        return valid_result;
+    }
+
+    template <typename T>
+    TargetBitmap
     ProcessDataChunksForValid() {
         TargetBitmap valid_result(GetNextBatchSize());
         valid_result.set();
@@ -569,9 +883,9 @@ class SegmentExpr : public Expr {
                 return valid_result;
             }
             valid_data += data_pos;
-            for (int i = 0; i < size; i++) {
-                if (!valid_data[i]) {
-                    valid_result[i + data_pos] = false;
+            for (int j = 0; j < size; j++) {
+                if (!valid_data[j]) {
+                    valid_result[j + processed_size] = false;
                 }
             }
             processed_size += size;
