@@ -588,12 +588,6 @@ struct TantivyIndexWrapper {
         return reader_;
     }
 
- private:
-    void
-    check_search() {
-        // TODO
-    }
-
     void
     free() {
         if (writer_ != nullptr) {
@@ -603,6 +597,12 @@ struct TantivyIndexWrapper {
         if (reader_ != nullptr) {
             tantivy_free_index_reader(reader_);
         }
+    }
+
+ private:
+    void
+    check_search() {
+        // TODO
     }
 
  private:
