@@ -74,8 +74,7 @@ func (t *QueryStreamTask) Execute() error {
 	srv := streamrpc.NewResultCacheServer(t.srv, t.minMsgSize, t.maxMsgSize)
 	defer srv.Flush()
 
-	segments, err := segments.RetrieveStream(t.ctx, t.segmentManager, retrievePlan, t.req, srv)
-	defer t.segmentManager.Segment.Unpin(segments)
+	err = segments.RetrieveStream(t.ctx, t.segmentManager, retrievePlan, t.req, srv)
 	if err != nil {
 		return err
 	}
