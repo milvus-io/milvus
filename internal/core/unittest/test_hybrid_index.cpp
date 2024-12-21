@@ -210,6 +210,7 @@ class HybridIndexTestV1 : public testing::Test {
     }
 
     virtual ~HybridIndexTestV1() override {
+        this->index_.reset();
         boost::filesystem::remove_all(chunk_manager_->GetRootPath());
     }
 
