@@ -213,11 +213,11 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     }
 
     int64_t offset = 0;
-    auto num = uint32_t(milvus::GetDatasetRows(dataset));
+    auto num = static_cast<uint32_t>(milvus::GetDatasetRows(dataset));
     local_chunk_manager->Write(local_data_path, offset, &num, sizeof(num));
     offset += sizeof(num);
 
-    auto dim = uint32_t(milvus::GetDatasetDim(dataset));
+    auto dim = static_cast<uint32_t>(milvus::GetDatasetDim(dataset));
     local_chunk_manager->Write(local_data_path, offset, &dim, sizeof(dim));
     offset += sizeof(dim);
 
@@ -256,7 +256,8 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                 search_info.search_params_[DISK_ANN_QUERY_LIST];
         }
         // set beamwidth
-        search_config[DISK_ANN_QUERY_BEAMWIDTH] = int(search_beamwidth_);
+        search_config[DISK_ANN_QUERY_BEAMWIDTH] =
+            static_cast<int>(search_beamwidth_);
         // set json reset field, will be removed later
         search_config[DISK_ANN_PQ_CODE_BUDGET] = 0.0;
     }

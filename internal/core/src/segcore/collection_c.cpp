@@ -21,20 +21,20 @@ CCollection
 NewCollection(const void* schema_proto_blob, const int64_t length) {
     auto collection = std::make_unique<milvus::segcore::Collection>(
         schema_proto_blob, length);
-    return (void*)collection.release();
+    return static_cast<void*>(collection.release());
 }
 
 void
 SetIndexMeta(CCollection collection,
              const void* proto_blob,
              const int64_t length) {
-    auto col = (milvus::segcore::Collection*)collection;
+    auto col = static_cast<milvus::segcore::Collection*>(collection);
     col->parseIndexMeta(proto_blob, length);
 }
 
 void
 DeleteCollection(CCollection collection) {
-    auto col = (milvus::segcore::Collection*)collection;
+    auto col = static_cast<milvus::segcore::Collection*>(collection);
     delete col;
 }
 
