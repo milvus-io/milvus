@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -644,11 +645,13 @@ func (scheduler *taskScheduler) schedule(node int64) {
 		return
 	}
 
+	tr := timerecord.NewTimeRecorder("")
 	log := log.Ctx(scheduler.ctx).With(
 		zap.Int64("nodeID", node),
 	)
 
 	scheduler.tryPromoteAll()
+	promoteDur := tr.RecordSpan()
 
 	log.Debug("process tasks related to node",
 		zap.Int("processingTaskNum", scheduler.processQueue.Len()),
@@ -670,6 +673,7 @@ func (scheduler *taskScheduler) schedule(node int64) {
 
 		return true
 	})
+	preprocessDur := tr.RecordSpan()
 
 	// The scheduler doesn't limit the number of tasks,
 	// to commit tasks to executors as soon as possible, to reach higher merge possibility
@@ -680,15 +684,22 @@ func (scheduler *taskScheduler) schedule(node int64) {
 		}
 		return nil
 	}, "process")
+	processDur := tr.RecordSpan()
 
 	for _, task := range toRemove {
 		scheduler.remove(task)
 	}
 
+	scheduler.updateTaskMetrics()
+
 	log.Info("processed tasks",
 		zap.Int("toProcessNum", len(toProcess)),
 		zap.Int32("committedNum", commmittedNum.Load()),
 		zap.Int("toRemoveNum", len(toRemove)),
+		zap.Duration("promoteDur", promoteDur),
+		zap.Duration("preprocessDUr", preprocessDur),
+		zap.Duration("processDUr", processDur),
+		zap.Duration("totalDur", tr.ElapseSpan()),
 	)
 
 	log.Info("process tasks related to node done",
@@ -736,10 +747,6 @@ func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
 // return true if the task should be executed,
 // false otherwise
 func (scheduler *taskScheduler) preProcess(task Task) bool {
-	log := log.Ctx(scheduler.ctx).WithRateGroup("qcv2.taskScheduler", 1, 60).With(
-		zap.Int64("collectionID", task.CollectionID()),
-		zap.Int64("taskID", task.ID()),
-	)
 	if task.Status() != TaskStatusStarted {
 		return false
 	}
@@ -762,7 +769,9 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 			}
 
 			if !ready {
-				log.RatedInfo(30, "Blocking reduce action in balance channel task")
+				log.Ctx(scheduler.ctx).WithRateGroup("qcv2.taskScheduler", 1, 60).RatedInfo(30, "Blocking reduce action in balance channel task",
+					zap.Int64("collectionID", task.CollectionID()),
+					zap.Int64("taskID", task.ID()))
 				break
 			}
 		}
@@ -881,7 +890,6 @@ func (scheduler *taskScheduler) remove(task Task) {
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
 	}
 
-	scheduler.updateTaskMetrics()
 	log.Info("task removed")
 
 	if scheduler.meta.Exist(task.Context(), task.CollectionID()) {

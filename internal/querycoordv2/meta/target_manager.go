@@ -467,10 +467,8 @@ func (mgr *TargetManager) GetSealedSegmentsByPartition(ctx context.Context, coll
 	targets := mgr.getCollectionTarget(scope, collectionID)
 	for _, t := range targets {
 		segments := make(map[int64]*datapb.SegmentInfo)
-		for _, s := range t.GetAllSegments() {
-			if s.GetPartitionID() == partitionID {
-				segments[s.GetID()] = s
-			}
+		for _, s := range t.GetPartitionSegments(partitionID) {
+			segments[s.GetID()] = s
 		}
 
 		if len(segments) > 0 {
