@@ -49,6 +49,7 @@ const char PAGE_RETAIN_ORDER[] = "page_retain_order";
 const char TEXT_LOG_ROOT_PATH[] = "text_log";
 const char ITERATIVE_FILTER[] = "iterative_filter";
 const char HINTS[] = "hints";
+const char JSON_KEY_INDEX_LOG_ROOT_PATH[] = "json_key_index_log";
 
 const char DEFAULT_PLANNODE_ID[] = "0";
 const char DEAFULT_QUERY_ID[] = "0";

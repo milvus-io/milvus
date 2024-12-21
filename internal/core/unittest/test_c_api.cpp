@@ -46,6 +46,7 @@
 #include "segcore/load_index_c.h"
 #include "test_utils/c_api_test_utils.h"
 #include "segcore/vector_index_c.h"
+#include "common/jsmn.h"
 
 namespace chrono = std::chrono;
 
