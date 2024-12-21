@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -71,46 +72,68 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 	aliases := t.core.meta.ListAliasesByID(ctx, collMeta.CollectionID)
 
 	ts := t.GetTs()
+	return executeDropCollectionTaskSteps(ctx,
+		t.core, collMeta, t.Req.GetDbName(), aliases,
+		t.Req.GetBase().GetReplicateInfo().GetIsReplicate(),
+		ts)
+}
 
-	redoTask := newBaseRedoTask(t.core.stepExecutor)
+func (t *dropCollectionTask) GetLockerKey() LockerKey {
+	collection := t.core.getCollectionIDStr(t.ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), 0)
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(t.Req.GetDbName(), false),
+		NewCollectionLockerKey(collection, true),
+	)
+}
+
+func executeDropCollectionTaskSteps(ctx context.Context,
+	core *Core,
+	col *model.Collection,
+	dbName string,
+	alias []string,
+	isReplicate bool,
+	ts Timestamp,
+) error {
+	redoTask := newBaseRedoTask(core.stepExecutor)
 
 	redoTask.AddSyncStep(&expireCacheStep{
-		baseStep:        baseStep{core: t.core},
-		dbName:          t.Req.GetDbName(),
-		collectionNames: append(aliases, collMeta.Name),
-		collectionID:    collMeta.CollectionID,
+		baseStep:        baseStep{core: core},
+		dbName:          dbName,
+		collectionNames: append(alias, col.Name),
+		collectionID:    col.CollectionID,
 		ts:              ts,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
 	})
 	redoTask.AddSyncStep(&changeCollectionStateStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: collMeta.CollectionID,
+		baseStep:     baseStep{core: core},
+		collectionID: col.CollectionID,
 		state:        pb.CollectionState_CollectionDropping,
 		ts:           ts,
 	})
 
 	redoTask.AddAsyncStep(&releaseCollectionStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: collMeta.CollectionID,
+		baseStep:     baseStep{core: core},
+		collectionID: col.CollectionID,
 	})
 	redoTask.AddAsyncStep(&dropIndexStep{
-		baseStep: baseStep{core: t.core},
-		collID:   collMeta.CollectionID,
+		baseStep: baseStep{core: core},
+		collID:   col.CollectionID,
 		partIDs:  nil,
 	})
 	redoTask.AddAsyncStep(&deleteCollectionDataStep{
-		baseStep: baseStep{core: t.core},
-		coll:     collMeta,
-		isSkip:   t.Req.GetBase().GetReplicateInfo().GetIsReplicate(),
+		baseStep: baseStep{core: core},
+		coll:     col,
+		isSkip:   isReplicate,
 	})
 	redoTask.AddAsyncStep(&removeDmlChannelsStep{
-		baseStep:  baseStep{core: t.core},
-		pChannels: collMeta.PhysicalChannelNames,
+		baseStep:  baseStep{core: core},
+		pChannels: col.PhysicalChannelNames,
 	})
-	redoTask.AddAsyncStep(newConfirmGCStep(t.core, collMeta.CollectionID, allPartition))
+	redoTask.AddAsyncStep(newConfirmGCStep(core, col.CollectionID, allPartition))
 	redoTask.AddAsyncStep(&deleteCollectionMetaStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: collMeta.CollectionID,
+		baseStep:     baseStep{core: core},
+		collectionID: col.CollectionID,
 		// This ts is less than the ts when we notify data nodes to drop collection, but it's OK since we have already
 		// marked this collection as deleted. If we want to make this ts greater than the notification's ts, we should
 		// wrap a step who will have these three children and connect them with ts.
@@ -118,12 +141,4 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 	})
 
 	return redoTask.Execute(ctx)
-}
-
-func (t *dropCollectionTask) GetLockerKey() LockerKey {
-	return NewLockerKeyChain(
-		NewClusterLockerKey(false),
-		NewDatabaseLockerKey(t.Req.GetDbName(), false),
-		NewCollectionLockerKey(t.Req.GetCollectionName(), true),
-	)
 }
