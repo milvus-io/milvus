@@ -292,20 +292,39 @@ func generateVectorFieldData(vectorType schemapb.DataType) schemapb.FieldData {
 	}
 }
 
-func generateFieldData() []*schemapb.FieldData {
-	fieldData1 := schemapb.FieldData{
-		Type:      schemapb.DataType_Int64,
-		FieldName: FieldBookID,
-		Field: &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_LongData{
-					LongData: &schemapb.LongArray{
-						Data: []int64{1, 2, 3},
+func generateFieldData(dataType schemapb.DataType) []*schemapb.FieldData {
+	var fieldData1 *schemapb.FieldData
+	switch dataType {
+	case schemapb.DataType_Int64:
+		fieldData1 = &schemapb.FieldData{
+			Type:      schemapb.DataType_Int64,
+			FieldName: FieldBookID,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
 					},
 				},
 			},
-		},
-		IsDynamic: false,
+			IsDynamic: false,
+		}
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		fieldData1 = &schemapb.FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldName: FieldBookID,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"1", "2", "3"},
+						},
+					},
+				},
+			},
+			IsDynamic: false,
+		}
 	}
 
 	fieldData2 := schemapb.FieldData{
@@ -324,7 +343,7 @@ func generateFieldData() []*schemapb.FieldData {
 	}
 
 	fieldData3 := generateVectorFieldData(schemapb.DataType_FloatVector)
-	return []*schemapb.FieldData{&fieldData1, &fieldData2, &fieldData3}
+	return []*schemapb.FieldData{fieldData1, &fieldData2, &fieldData3}
 }
 
 func wrapRequestBody(data []map[string]interface{}) ([]byte, error) {
@@ -383,6 +402,44 @@ func generateSearchResult(dataType schemapb.DataType) []map[string]interface{} {
 		row[HTTPReturnDistance] = DefaultScores[i]
 	}
 	return rows
+}
+
+func generateNestSearchResult(dataType schemapb.DataType) [][]map[string]interface{} {
+	var res [][]map[string]interface{}
+	row1 := map[string]interface{}{
+		FieldBookID:    int64(1),
+		FieldWordCount: int64(1000),
+		FieldBookIntro: []float32{0.1, 0.11},
+	}
+	row1[HTTPReturnDistance] = DefaultScores[0]
+
+	row2 := map[string]interface{}{
+		FieldBookID:    int64(2),
+		FieldWordCount: int64(2000),
+		FieldBookIntro: []float32{0.2, 0.22},
+	}
+	row2[HTTPReturnDistance] = DefaultScores[1]
+
+	row3 := map[string]interface{}{
+		FieldBookID:    int64(3),
+		FieldWordCount: int64(3000),
+		FieldBookIntro: []float32{0.3, 0.33},
+	}
+	row3[HTTPReturnDistance] = DefaultScores[2]
+
+	if dataType == schemapb.DataType_String || dataType == schemapb.DataType_VarChar {
+		row1[FieldBookID] = "1"
+		row2[FieldBookID] = "2"
+		row3[FieldBookID] = "3"
+	}
+	row1[DefaultPrimaryFieldName] = row1[FieldBookID]
+	row2[DefaultPrimaryFieldName] = row2[FieldBookID]
+	row3[DefaultPrimaryFieldName] = row3[FieldBookID]
+
+	res1 := []map[string]interface{}{row1}
+	res2 := []map[string]interface{}{row2, row3}
+	res = append(res, res1, res2)
+	return res
 }
 
 func generateQueryResult64(withDistance bool) []map[string]interface{} {
@@ -1259,9 +1316,48 @@ func compareRows(row1 []map[string]interface{}, row2 []map[string]interface{}, c
 	return true
 }
 
+func TestBuildSearchResp(t *testing.T) {
+	t.Run("with multi nq with int64 type", func(t *testing.T) {
+		outputFields := []string{FieldBookID, FieldWordCount, "author", "date"}
+		resp, err := buildSearchResp([]int64{1, 2}, outputFields, generateFieldData(schemapb.DataType_Int64), generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true) // []*schemapb.FieldData{&fieldData1, &fieldData2, &fieldData3}
+		assert.Equal(t, nil, err)
+		assert.Equal(t, 2, len(resp))
+		expect := generateNestSearchResult(schemapb.DataType_Int64)
+
+		assert.Equal(t, true, compareRows(resp[0], expect[0], compareRow))
+		assert.Equal(t, true, compareRows(resp[1], expect[1], compareRow))
+	})
+
+	t.Run("with one nq with int64 type", func(t *testing.T) {
+		outputFields := []string{FieldBookID, FieldWordCount, "author", "date"}
+		resp, err := buildSearchResp([]int64{3}, outputFields, generateFieldData(schemapb.DataType_Int64), generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true) // []*schemapb.FieldData{&fieldData1, &fieldData2, &fieldData3}
+		assert.Equal(t, nil, err)
+		expect := generateSearchResult(schemapb.DataType_Int64)
+		assert.Equal(t, true, compareRows(resp[0], expect, compareRow))
+	})
+
+	t.Run("with multi nq with string type", func(t *testing.T) {
+		outputFields := []string{FieldBookID, FieldWordCount, "author", "date"}
+		resp, err := buildSearchResp([]int64{1, 2}, outputFields, generateFieldData(schemapb.DataType_VarChar), generateIDs(schemapb.DataType_VarChar, 3), DefaultScores, true) // []*schemapb.FieldData{&fieldData1, &fieldData2, &fieldData3}
+		assert.Equal(t, nil, err)
+		assert.Equal(t, 2, len(resp))
+		expect := generateNestSearchResult(schemapb.DataType_String)
+		assert.Equal(t, true, compareRows(resp[0], expect[0], compareRow))
+		assert.Equal(t, true, compareRows(resp[1], expect[1], compareRow))
+	})
+
+	t.Run("with one nq with string type", func(t *testing.T) {
+		outputFields := []string{FieldBookID, FieldWordCount, "author", "date"}
+		resp, err := buildSearchResp([]int64{3}, outputFields, generateFieldData(schemapb.DataType_VarChar), generateIDs(schemapb.DataType_VarChar, 3), DefaultScores, true) // []*schemapb.FieldData{&fieldData1, &fieldData2, &fieldData3}
+		assert.Equal(t, nil, err)
+		expect := generateSearchResult(schemapb.DataType_String)
+		assert.Equal(t, true, compareRows(resp[0], expect, compareRow))
+	})
+}
+
 func TestBuildQueryResp(t *testing.T) {
 	outputFields := []string{FieldBookID, FieldWordCount, "author", "date"}
-	rows, err := buildQueryResp(int64(0), outputFields, generateFieldData(), generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true) // []*schemapb.FieldData{&fieldData1, &fieldData2, &fieldData3}
+	rows, err := buildQueryResp(int64(0), outputFields, generateFieldData(schemapb.DataType_Int64), generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true, 0) // []*schemapb.FieldData{&fieldData1, &fieldData2, &fieldData3}
 	assert.Equal(t, nil, err)
 	exceptRows := generateSearchResult(schemapb.DataType_Int64)
 	assert.Equal(t, true, compareRows(rows, exceptRows, compareRow))
@@ -2160,7 +2256,7 @@ func TestBuildQueryResps(t *testing.T) {
 	outputFields := []string{"XXX", "YYY"}
 	outputFieldsList := [][]string{outputFields, {"$meta"}, {"$meta", FieldBookID, FieldBookIntro, "YYY"}}
 	for _, theOutputFields := range outputFieldsList {
-		rows, err := buildQueryResp(int64(0), theOutputFields, newFieldData(generateFieldData(), schemapb.DataType_None), generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true)
+		rows, err := buildQueryResp(int64(0), theOutputFields, newFieldData(generateFieldData(schemapb.DataType_Int64), schemapb.DataType_None), generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true, 0)
 		assert.Equal(t, nil, err)
 		exceptRows := newSearchResult(generateSearchResult(schemapb.DataType_Int64))
 		assert.Equal(t, true, compareRows(rows, exceptRows, compareRow))
@@ -2174,30 +2270,30 @@ func TestBuildQueryResps(t *testing.T) {
 		schemapb.DataType_JSON, schemapb.DataType_Array,
 	}
 	for _, dateType := range dataTypes {
-		_, err := buildQueryResp(int64(0), outputFields, newFieldData([]*schemapb.FieldData{}, dateType), generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true)
+		_, err := buildQueryResp(int64(0), outputFields, newFieldData([]*schemapb.FieldData{}, dateType), generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true, 0)
 		assert.Equal(t, nil, err)
 	}
 
-	_, err := buildQueryResp(int64(0), outputFields, newFieldData([]*schemapb.FieldData{}, 1000), generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true)
+	_, err := buildQueryResp(int64(0), outputFields, newFieldData([]*schemapb.FieldData{}, 1000), generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true, 0)
 	assert.Equal(t, "the type(1000) of field(wrong-field-type) is not supported, use other sdk please", err.Error())
 
-	res, err := buildQueryResp(int64(0), outputFields, []*schemapb.FieldData{}, generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true)
+	res, err := buildQueryResp(int64(0), outputFields, []*schemapb.FieldData{}, generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true, 0)
 	assert.Equal(t, 3, len(res))
 	assert.Equal(t, nil, err)
 
-	res, err = buildQueryResp(int64(0), outputFields, []*schemapb.FieldData{}, generateIDs(schemapb.DataType_Int64, 3), DefaultScores, false)
+	res, err = buildQueryResp(int64(0), outputFields, []*schemapb.FieldData{}, generateIDs(schemapb.DataType_Int64, 3), DefaultScores, false, 0)
 	assert.Equal(t, 3, len(res))
 	assert.Equal(t, nil, err)
 
-	res, err = buildQueryResp(int64(0), outputFields, []*schemapb.FieldData{}, generateIDs(schemapb.DataType_VarChar, 3), DefaultScores, true)
+	res, err = buildQueryResp(int64(0), outputFields, []*schemapb.FieldData{}, generateIDs(schemapb.DataType_VarChar, 3), DefaultScores, true, 0)
 	assert.Equal(t, 3, len(res))
 	assert.Equal(t, nil, err)
 
-	_, err = buildQueryResp(int64(0), outputFields, generateFieldData(), generateIDs(schemapb.DataType_Int64, 3), DefaultScores, false)
+	_, err = buildQueryResp(int64(0), outputFields, generateFieldData(schemapb.DataType_Int64), generateIDs(schemapb.DataType_Int64, 3), DefaultScores, false, 0)
 	assert.Equal(t, nil, err)
 
 	// len(rows) != len(scores), didn't show distance
-	_, err = buildQueryResp(int64(0), outputFields, newFieldData(generateFieldData(), schemapb.DataType_None), generateIDs(schemapb.DataType_Int64, 3), []float32{0.01, 0.04}, true)
+	_, err = buildQueryResp(int64(0), outputFields, newFieldData(generateFieldData(schemapb.DataType_Int64), schemapb.DataType_None), generateIDs(schemapb.DataType_Int64, 3), []float32{0.01, 0.04}, true, 0)
 	assert.Equal(t, nil, err)
 }
 

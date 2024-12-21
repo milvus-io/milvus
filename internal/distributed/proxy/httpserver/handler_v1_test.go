@@ -522,7 +522,7 @@ func TestQuery(t *testing.T) {
 	mp5, _ = wrapWithDescribeColl(t, mp5, ReturnSuccess, 1, nil)
 	mp5.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{
 		Status:         &StatusSuccess,
-		FieldsData:     generateFieldData(),
+		FieldsData:     generateFieldData(schemapb.DataType_Int64),
 		CollectionName: DefaultCollectionName,
 		OutputFields:   []string{FieldBookID, FieldWordCount, FieldBookIntro},
 	}, nil).Twice()
@@ -1476,7 +1476,7 @@ func TestSearch(t *testing.T) {
 	mp5.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
 		Status: &StatusSuccess,
 		Results: &schemapb.SearchResultData{
-			FieldsData: generateFieldData(),
+			FieldsData: generateFieldData(schemapb.DataType_Int64),
 			Scores:     []float32{0.01, 0.04, 0.09},
 			TopK:       3,
 		},
@@ -1526,7 +1526,7 @@ func TestSearch(t *testing.T) {
 	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
 		Status: &StatusSuccess,
 		Results: &schemapb.SearchResultData{
-			FieldsData: generateFieldData(),
+			FieldsData: generateFieldData(schemapb.DataType_Int64),
 			Scores:     []float32{0.01, 0.04, 0.09},
 			TopK:       3,
 		},
