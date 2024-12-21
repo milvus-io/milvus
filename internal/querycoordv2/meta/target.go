@@ -59,6 +59,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 					CollectionID:  target.GetCollectionID(),
 					PartitionID:   partition.GetPartitionID(),
 					InsertChannel: t.GetChannelName(),
+					NumOfRows:     segment.GetNumOfRows(),
 				}
 			}
 			partitions = append(partitions, partition.GetPartitionID())
@@ -113,8 +114,9 @@ func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
 				}
 
 				partitionTarget.Segments = append(partitionTarget.Segments, &querypb.SegmentTarget{
-					ID:    info.GetID(),
-					Level: info.GetLevel(),
+					ID:        info.GetID(),
+					Level:     info.GetLevel(),
+					NumOfRows: info.GetNumOfRows(),
 				})
 			}
 		}

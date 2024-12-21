@@ -584,11 +584,13 @@ func (suite *TargetManagerSuite) TestRecover() {
 			ID:            11,
 			PartitionID:   1,
 			InsertChannel: "channel-1",
+			NumOfRows:     100,
 		},
 		{
 			ID:            12,
 			PartitionID:   1,
 			InsertChannel: "channel-2",
+			NumOfRows:     100,
 		},
 	}
 
@@ -609,6 +611,9 @@ func (suite *TargetManagerSuite) TestRecover() {
 	suite.Len(target.GetAllDmChannelNames(), 2)
 	suite.Len(target.GetAllSegmentIDs(), 2)
 	suite.Equal(target.GetTargetVersion(), version)
+	for _, segment := range target.GetAllSegments() {
+		suite.Equal(int64(100), segment.GetNumOfRows())
+	}
 
 	// after recover, target info should be cleaned up
 	targets, err := suite.catalog.GetCollectionTargets(ctx)
