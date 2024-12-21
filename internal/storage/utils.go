@@ -371,7 +371,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 	}
 
 	for _, field := range collSchema.Fields {
-		if skipFunction && field.GetIsFunctionOutput() {
+		if skipFunction && IsBM25FunctionOutputField(field) {
 			continue
 		}
 
@@ -503,7 +503,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 	}
 	length := 0
 	for _, field := range collSchema.Fields {
-		if field.GetIsFunctionOutput() {
+		if IsBM25FunctionOutputField(field) {
 			continue
 		}
 
@@ -1339,4 +1339,9 @@ func (ni NullableInt) GetValue() int {
 // IsNull checks if the NullableInt is null
 func (ni NullableInt) IsNull() bool {
 	return ni.Value == nil
+}
+
+// TODO: unify the function implementation, storage/utils.go & proxy/util.go
+func IsBM25FunctionOutputField(field *schemapb.FieldSchema) bool {
+	return field.GetIsFunctionOutput() && field.GetDataType() == schemapb.DataType_SparseFloatVector
 }
