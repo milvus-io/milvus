@@ -832,7 +832,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	log.RatedDebug(60, "get metrics request received",
 		zap.String("metricType", req.GetRequest()))
 
-	if err := merr.CheckHealthyStandby(s.State()); err != nil {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get metrics"
 		log.Warn(msg, zap.Error(err))
 		return &milvuspb.GetMetricsResponse{
