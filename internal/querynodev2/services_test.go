@@ -897,9 +897,6 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		suite.node.delegators.Insert(suite.vchannel, delegator)
 		defer suite.node.delegators.GetAndRemove(suite.vchannel)
 
-		delegator.EXPECT().AddExcludedSegments(mock.Anything).Maybe()
-		delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).Return(true).Maybe()
-		delegator.EXPECT().TryCleanExcludedSegments(mock.Anything).Maybe()
 		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
 		// data
 		schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
@@ -948,9 +945,6 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		delegator := &delegator.MockShardDelegator{}
 		suite.node.delegators.Insert(suite.vchannel, delegator)
 		defer suite.node.delegators.GetAndRemove(suite.vchannel)
-		delegator.EXPECT().AddExcludedSegments(mock.Anything).Maybe()
-		delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).Return(true).Maybe()
-		delegator.EXPECT().TryCleanExcludedSegments(mock.Anything).Maybe()
 		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 			Return(errors.New("mocked error"))
 		// data
@@ -1110,9 +1104,6 @@ func (suite *ServiceSuite) TestReleaseSegments_Transfer() {
 		suite.node.delegators.Insert(suite.vchannel, delegator)
 		defer suite.node.delegators.GetAndRemove(suite.vchannel)
 
-		delegator.EXPECT().AddExcludedSegments(mock.Anything).Maybe()
-		delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).Return(true).Maybe()
-		delegator.EXPECT().TryCleanExcludedSegments(mock.Anything).Maybe()
 		delegator.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest"), false).
 			Return(errors.New("mocked error"))
 

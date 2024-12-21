@@ -23,7 +23,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/pingcap/log"
@@ -225,11 +224,13 @@ func (s *DelegatorDataSuite) TestProcessInsert() {
 	s.Run("normal_insert", func() {
 		s.delegator.ProcessInsert(map[int64]*InsertData{
 			100: {
-				RowIDs:        []int64{0, 1},
-				PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
-				Timestamps:    []uint64{10, 10},
-				PartitionID:   500,
-				StartPosition: &msgpb.MsgPosition{},
+				RowIDs:      []int64{0, 1},
+				PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
+				Timestamps:  []uint64{10, 10},
+				PartitionID: 500,
+				StartPosition: &msgpb.MsgPosition{
+					Timestamp: 100000,
+				},
 				InsertRecord: &segcorepb.InsertRecord{
 					FieldsData: []*schemapb.FieldData{
 						{
@@ -272,11 +273,13 @@ func (s *DelegatorDataSuite) TestProcessInsert() {
 		s.Panics(func() {
 			s.delegator.ProcessInsert(map[int64]*InsertData{
 				100: {
-					RowIDs:        []int64{0, 1},
-					PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
-					Timestamps:    []uint64{10, 10},
-					PartitionID:   500,
-					StartPosition: &msgpb.MsgPosition{},
+					RowIDs:      []int64{0, 1},
+					PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
+					Timestamps:  []uint64{10, 10},
+					PartitionID: 500,
+					StartPosition: &msgpb.MsgPosition{
+						Timestamp: 100000,
+					},
 					InsertRecord: &segcorepb.InsertRecord{
 						FieldsData: []*schemapb.FieldData{
 							{
@@ -324,6 +327,9 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 					hits[i] = pk.EQ(storage.NewInt64PrimaryKey(10))
 				}
 				return hits
+			})
+			ms.EXPECT().StartPosition().Return(&msgpb.MsgPosition{
+				Timestamp: 100000,
 			})
 			return ms
 		})
@@ -445,10 +451,10 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		{
 			PartitionID: 500,
 			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(10)},
-			Timestamps:  []uint64{10},
+			Timestamps:  []uint64{100000},
 			RowCount:    1,
 		},
-	}, 10)
+	}, 100000)
 
 	s.False(s.delegator.distribution.Serviceable())
 
@@ -480,10 +486,10 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		{
 			PartitionID: 500,
 			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(10)},
-			Timestamps:  []uint64{10},
+			Timestamps:  []uint64{100000},
 			RowCount:    1,
 		},
-	}, 10)
+	}, 100000)
 	s.False(s.delegator.distribution.Serviceable(), "should retry and failed")
 
 	// refresh
@@ -514,10 +520,10 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		{
 			PartitionID: 500,
 			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(10)},
-			Timestamps:  []uint64{10},
+			Timestamps:  []uint64{100000},
 			RowCount:    1,
 		},
-	}, 10)
+	}, 100000)
 	s.Require().NoError(err)
 	s.False(s.delegator.distribution.Serviceable())
 }
@@ -531,6 +537,7 @@ func (s *DelegatorDataSuite) TestLoadGrowingWithBM25() {
 	mockSegment.EXPECT().ID().Return(111)
 	mockSegment.EXPECT().Type().Return(commonpb.SegmentState_Growing)
 	mockSegment.EXPECT().GetBM25Stats().Return(map[int64]*storage.BM25Stats{})
+	mockSegment.EXPECT().StartPosition().Return(&msgpb.MsgPosition{Timestamp: 1})
 
 	err := s.delegator.LoadGrowing(context.Background(), []*querypb.SegmentLoadInfo{{SegmentID: 1}}, 1)
 	s.NoError(err)
@@ -1278,6 +1285,9 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 			ms.EXPECT().MayPkExist(mock.Anything).Call.Return(func(pk storage.PrimaryKey) bool {
 				return pk.EQ(storage.NewInt64PrimaryKey(10))
 			})
+			ms.EXPECT().StartPosition().Return(&msgpb.MsgPosition{
+				Timestamp: 100000,
+			})
 			return ms
 		})
 	}, nil)
@@ -1363,6 +1373,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 			NodeID:        1,
 			PartitionID:   500,
 			TargetVersion: unreadableTargetVersion,
+			StartPosition: 100000,
 		},
 	}, growing)
 
@@ -1500,7 +1511,7 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 		s.manager.Segment.Put(context.Background(), segments.SegmentTypeGrowing, ms)
 	}
 
-	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{1}, []int64{2}, []int64{3, 4}, &msgpb.MsgPosition{})
+	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{1}, []int64{2}, &msgpb.MsgPosition{})
 	s.Equal(int64(5), s.delegator.GetTargetVersion())
 }
 
@@ -1608,20 +1619,6 @@ func (s *DelegatorDataSuite) TestReadDeleteFromMsgstream() {
 	result, err := s.delegator.readDeleteFromMsgstream(ctx, &msgpb.MsgPosition{Timestamp: 0}, 10, oracle)
 	s.NoError(err)
 	s.Equal(2, len(result.Pks))
-}
-
-func (s *DelegatorDataSuite) TestDelegatorData_ExcludeSegments() {
-	s.delegator.AddExcludedSegments(map[int64]uint64{
-		1: 3,
-	})
-
-	s.False(s.delegator.VerifyExcludedSegments(1, 1))
-	s.True(s.delegator.VerifyExcludedSegments(1, 5))
-
-	time.Sleep(time.Second * 1)
-	s.delegator.TryCleanExcludedSegments(4)
-	s.True(s.delegator.VerifyExcludedSegments(1, 1))
-	s.True(s.delegator.VerifyExcludedSegments(1, 5))
 }
 
 func TestDelegatorDataSuite(t *testing.T) {

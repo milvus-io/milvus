@@ -77,7 +77,8 @@ type distribution struct {
 
 	idfOracle IDFOracle
 	// protects current & segments
-	mut sync.RWMutex
+	mut        sync.RWMutex
+	checkpoint *atomic.Uint64
 }
 
 // SegmentEntry stores the segment meta information.
@@ -88,10 +89,11 @@ type SegmentEntry struct {
 	Version       int64
 	TargetVersion int64
 	Level         datapb.SegmentLevel
+	StartPosition uint64
 }
 
 // NewDistribution creates a new distribution instance with all field initialized.
-func NewDistribution() *distribution {
+func NewDistribution(startTs uint64) *distribution {
 	dist := &distribution{
 		serviceable:     atomic.NewBool(false),
 		growingSegments: make(map[UniqueID]SegmentEntry),
@@ -100,6 +102,7 @@ func NewDistribution() *distribution {
 		current:         atomic.NewPointer[snapshot](nil),
 		offlines:        typeutil.NewSet[int64](),
 		targetVersion:   atomic.NewInt64(initialTargetVersion),
+		checkpoint:      atomic.NewUint64(startTs),
 	}
 
 	dist.genSnapshot()
@@ -236,6 +239,13 @@ func (d *distribution) AddGrowing(entries ...SegmentEntry) {
 	defer d.mut.Unlock()
 
 	for _, entry := range entries {
+		if entry.StartPosition < d.checkpoint.Load() {
+			log.Info("add invalid growing segment which start position is small than checkpoint",
+				zap.Int64("segmentID", entry.SegmentID),
+				zap.Uint64("checkpoint", d.checkpoint.Load()),
+				zap.Uint64("startPosition", entry.StartPosition))
+			entry.TargetVersion = redundantTargetVersion
+		}
 		d.growingSegments[entry.SegmentID] = entry
 	}
 
@@ -267,11 +277,23 @@ func (d *distribution) AddOfflines(segmentIDs ...int64) {
 	}
 }
 
+func (d *distribution) GetCheckPoint() uint64 {
+	d.mut.RLock()
+	defer d.mut.RUnlock()
+	return d.checkpoint.Load()
+}
+
 // UpdateTargetVersion update readable segment version
-func (d *distribution) SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, redundantGrowings []int64) {
+func (d *distribution) SyncTargetVersion(
+	newVersion int64,
+	partitions []int64,
+	growingInTarget []int64,
+	sealedInTarget []int64,
+	redundantGrowings []int64,
+	checkpoint uint64,
+) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
-
 	for _, segmentID := range growingInTarget {
 		entry, ok := d.growingSegments[segmentID]
 		if !ok {
@@ -310,12 +332,14 @@ func (d *distribution) SyncTargetVersion(newVersion int64, partitions []int64, g
 	d.genSnapshot(WithPartitions(partitions))
 	// if sealed segment in leader view is less than sealed segment in target, set delegator to unserviceable
 	d.serviceable.Store(available)
+	d.checkpoint.Store(checkpoint)
 	log.Info("Update readable segment version",
 		zap.Int64s("partitions", partitions),
 		zap.Int64("oldVersion", oldValue),
 		zap.Int64("newVersion", newVersion),
 		zap.Int("growingSegmentNum", len(growingInTarget)),
 		zap.Int("sealedSegmentNum", len(sealedInTarget)),
+		zap.Uint64("checkpoint", checkpoint),
 	)
 }
 

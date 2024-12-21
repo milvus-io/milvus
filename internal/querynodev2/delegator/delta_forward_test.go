@@ -185,7 +185,7 @@ func (s *StreamingForwardSuite) TestBFStreamingForward() {
 		PartitionID: 1,
 		SegmentID:   102,
 	})
-	delegator.distribution.SyncTargetVersion(1, []int64{1}, []int64{100}, []int64{101, 102}, nil)
+	delegator.distribution.SyncTargetVersion(1, []int64{1}, []int64{100}, []int64{101, 102}, nil, 0)
 
 	// Setup pk oracle
 	// empty bfs will not match
@@ -238,7 +238,7 @@ func (s *StreamingForwardSuite) TestDirectStreamingForward() {
 		PartitionID: 1,
 		SegmentID:   102,
 	})
-	delegator.distribution.SyncTargetVersion(1, []int64{1}, []int64{100}, []int64{101, 102}, nil)
+	delegator.distribution.SyncTargetVersion(1, []int64{1}, []int64{100}, []int64{101, 102}, nil, 0)
 
 	// Setup pk oracle
 	// empty bfs will not match
