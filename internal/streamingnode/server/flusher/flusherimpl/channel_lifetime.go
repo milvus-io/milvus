@@ -86,8 +86,17 @@ func (c *channelLifetime) Run() error {
 	// Get recovery info from datacoord.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
-	resp, err := resource.Resource().DataCoordClient().
-		GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: c.vchannel})
+
+	pipelineParams, err := c.f.getPipelineParams(ctx)
+	if err != nil {
+		return err
+	}
+
+	dc, err := resource.Resource().DataCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return errors.Wrap(err, "At Get DataCoordClient")
+	}
+	resp, err := dc.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: c.vchannel})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return err
 	}
@@ -115,7 +124,7 @@ func (c *channelLifetime) Run() error {
 	}
 
 	// Build and add pipeline.
-	ds, err := pipeline.NewStreamingNodeDataSyncService(ctx, c.f.pipelineParams,
+	ds, err := pipeline.NewStreamingNodeDataSyncService(ctx, pipelineParams,
 		// TODO fubang add the db properties
 		&datapb.ChannelWatchInfo{Vchan: resp.GetInfo(), Schema: resp.GetSchema()}, handler.Chan(), func(t syncmgr.Task, err error) {
 			if err != nil || t == nil {
