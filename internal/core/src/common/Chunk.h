@@ -36,7 +36,7 @@ class Chunk {
  public:
     Chunk() = default;
     Chunk(int64_t row_nums, char* data, uint64_t size, bool nullable)
-        : row_nums_(row_nums), data_(data), size_(size), nullable_(nullable) {
+        : data_(data), row_nums_(row_nums), size_(size), nullable_(nullable) {
         if (nullable) {
             valid_.reserve(row_nums);
             for (int i = 0; i < row_nums; i++) {

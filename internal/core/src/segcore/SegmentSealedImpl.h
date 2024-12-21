@@ -91,7 +91,7 @@ class SegmentSealedImpl : public SegmentSealed {
     GetFieldDataType(FieldId fieldId) const override;
 
     void
-    RemoveFieldFile(const FieldId field_id);
+    RemoveFieldFile(const FieldId field_id) override;
 
     void
     CreateTextIndex(FieldId field_id) override;
@@ -116,10 +116,10 @@ class SegmentSealedImpl : public SegmentSealed {
     get_schema() const override;
 
     std::vector<SegOffset>
-    search_pk(const PkType& pk, Timestamp timestamp) const;
+    search_pk(const PkType& pk, Timestamp timestamp) const override;
 
     std::vector<SegOffset>
-    search_pk(const PkType& pk, int64_t insert_barrier) const;
+    search_pk(const PkType& pk, int64_t insert_barrier) const override;
 
     template <typename Condition>
     std::vector<SegOffset>
@@ -214,7 +214,7 @@ class SegmentSealedImpl : public SegmentSealed {
     is_mmap_field(FieldId id) const override;
 
     void
-    ClearData();
+    ClearData() override;
 
  protected:
     // blob and row_count

@@ -535,7 +535,7 @@ struct InsertRecord {
             case DataType::INT64: {
                 auto column =
                     std::dynamic_pointer_cast<SingleChunkColumn>(data);
-                auto pks = reinterpret_cast<const int64_t*>(column->Data());
+                auto pks = reinterpret_cast<const int64_t*>(column->Data(0));
                 for (int i = 0; i < column->NumRows(); ++i) {
                     pk2offset_->insert(pks[i], offset++);
                 }
