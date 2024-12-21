@@ -258,6 +258,9 @@ default_diskann_index = {"index_type": "DISKANN", "metric_type": default_L0_metr
 default_diskann_search_params = {"params": {"search_list": 30}}
 default_sparse_search_params = {"metric_type": "IP", "params": {"drop_ratio_search": "0.2"}}
 default_text_sparse_search_params = {"metric_type": "BM25", "params": {}}
+built_in_privilege_groups = ["CollectionReadWrite", "CollectionReadOnly", "CollectionAdmin",
+                             "DatabaseReadWrite", "DatabaseReadOnly", "DatabaseAdmin",
+                             "ClusterReadWrite", "ClusterReadOnly", "ClusterAdmin"]
 
 class CheckTasks:
     """ The name of the method used to check the result """

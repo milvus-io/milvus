@@ -5039,3 +5039,682 @@ class TestUtilityFlushAll(TestcaseBase):
 
             res, _ = cw.query(f'{ct.default_int64_field_name} not in {delete_ids}')
             assert len(res) == ct.default_nb * 2 - delete_num
+
+
+class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
+
+    def teardown_method(self, method):
+        """
+        teardown method: drop role and user
+        """
+        log.info("[utility_teardown_method] Start teardown utility test cases ...")
+
+        self.connection_wrap.connect(host=cf.param_info.param_host, port=cf.param_info.param_port, user=ct.default_user,
+                                     password=ct.default_password, secure=cf.param_info.param_secure)
+
+        # drop users
+        users, _ = self.utility_wrap.list_users(False)
+        for u in users.groups:
+            if u.username != ct.default_user:
+                self.utility_wrap.delete_user(u.username)
+        user_groups, _ = self.utility_wrap.list_users(False)
+        assert len(user_groups.groups) == 1
+
+        role_groups, _ = self.utility_wrap.list_roles(False)
+
+        # drop roles
+        for role_group in role_groups.groups:
+            if role_group.role_name not in ['admin', 'public']:
+                self.utility_wrap.init_role(role_group.role_name)
+                g_list, _ = self.utility_wrap.role_list_grants()
+                for g in g_list.groups:
+                    self.utility_wrap.role_revoke(g.object, g.object_name, g.privilege)
+                privilege_groups = self.utility_wrap.list_privilege_groups()[0]
+                for privilege_group in privilege_groups.groups:
+                    if privilege_group.privilege_group not in ct.built_in_privilege_groups:
+                        self.utility_wrap.drop_privilege_group(privilege_group.privilege_group)
+                self.utility_wrap.role_drop()
+        role_groups, _ = self.utility_wrap.list_roles(False)
+        assert len(role_groups.groups) == 2
+
+        # drop database
+        databases, _ = self.database_wrap.list_database()
+        for db_name in databases:
+            self.database_wrap.using_database(db_name)
+            for c_name in self.utility_wrap.list_collections()[0]:
+                self.utility_wrap.drop_collection(c_name)
+
+            if db_name != ct.default_db:
+                self.database_wrap.drop_database(db_name)
+
+        super().teardown_method(method)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.parametrize("name", [1, 1.0])
+    def test_create_privilege_group_with_privilege_group_name_invalid_type(self, name, host, port):
+        """
+        target: create privilege group with invalid name
+        method: create privilege group with invalid name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.init_role("role_1")
+        error = {"err_code": 1,
+                 "err_msg": f"`privilege_group` value {name} is illegal"}
+        self.utility_wrap.create_privilege_group(privilege_group=name, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.parametrize("name", ["n%$#@!", "test-role", "ff ff"])
+    def test_create_privilege_group_with_privilege_group_name_invalid_value_1(self, name, host, port):
+        """
+        target: create privilege group with invalid name
+        method: create privilege group with invalid name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.init_role("role_1")
+        error = {"err_code": 1100, "err_msg": f"privilege group name {name} can only contain numbers, letters and underscores: invalid parameter"}
+        self.utility_wrap.create_privilege_group(privilege_group=name, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip(reason="issue #37842")
+    @pytest.mark.parametrize("name", ["longlonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglong"
+                                      "longlonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglong"
+                                      "longlonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglong"
+                                      "longlonglonglong", "123n", " ", "''", "中文"])
+    def test_create_privilege_group_with_privilege_group_name_invalid_value_2(self, name, host, port):
+        """
+        target: create privilege group with invalid name
+        method: create privilege group with invalid name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.init_role("role_1")
+        error = {"err_code": 1402, "err_msg": f"{name}: invalid privilege group name[privilegeGroup=the first character "
+                                              f"of a privilege group name %s must be an underscore or letter]"}
+        self.utility_wrap.create_privilege_group(privilege_group=name, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_create_privilege_group_with_built_in_privilege_groups_name(self, host, port):
+        """
+        target: create privilege group with built in privilege groups name
+        method: create privilege group with built in privilege groups name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        for name in ct.built_in_privilege_groups:
+            error = {"err_code": 1100,
+                     "err_msg": f"privilege group name [{name}] is defined by built in privileges or privilege groups in system: invalid parameter"}
+            self.utility_wrap.create_privilege_group(privilege_group=name, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.parametrize("name", [1, 1.0])
+    def test_drop_privilege_group_with_privilege_group_name_invalid_type(self, name, host, port):
+        """
+        target: drop privilege group with invalid name
+        method: drop privilege group with invalid name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.init_role("role_1")
+        error = {"err_code": 1,
+                 "err_msg": f"`privilege_group` value {name} is illegal"}
+        self.utility_wrap.drop_privilege_group(privilege_group=name, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.parametrize("name", ["n%$#@!", "test-role", "ff ff"])
+    def test_drop_privilege_group_with_privilege_group_name_invalid_value_1(self, name, host, port):
+        """
+        target: drop privilege group with invalid name
+        method: drop privilege group with invalid name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.init_role("role_1")
+        error = {"err_code": 1100, "err_msg": f"privilege group name {name} can only contain numbers, letters and underscores: invalid parameter"}
+        self.utility_wrap.drop_privilege_group(privilege_group=name, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.skip(reason="issue #37842")
+    @pytest.mark.parametrize("name", ["longlonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglong"
+                                      "longlonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglong"
+                                      "longlonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglong"
+                                      "longlonglonglong", "123n", " ", "''", "中文"])
+    def test_drop_privilege_group_with_privilege_group_name_invalid_value_2(self, name, host, port):
+        """
+        target: drop privilege group with invalid name
+        method: drop privilege group with invalid name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.init_role("role_1")
+        error = {"err_code": 1402, "err_msg": f"{name}: invalid privilege group name[privilegeGroup=the first character "
+                                              f"of a privilege group name %s must be an underscore or letter]"}
+        self.utility_wrap.drop_privilege_group(privilege_group=name, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_drop_not_exist_privilege_group(self, host, port):
+        """
+        target: drop same privilege group twice
+        method: drop same privilege group twice
+        expected: drop successfully
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        name = "privilege_group_not_exist"
+        self.utility_wrap.drop_privilege_group(privilege_group=name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_drop_same_privilege_group_twice(self, host, port):
+        """
+        target: drop same privilege group twice
+        method: drop same privilege group twice
+        expected: drop successfully
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        name = "privilege_group_1"
+        self.utility_wrap.create_privilege_group(privilege_group=name)
+        privilege_groups = self.utility_wrap.list_privilege_groups()[0]
+        privilege_groups_extracted = []
+        for privilege_group in privilege_groups.groups:
+            privilege_groups_extracted.append(privilege_group.privilege_group)
+        assert name in privilege_groups_extracted
+        self.utility_wrap.drop_privilege_group(privilege_group=name)
+        privilege_groups = self.utility_wrap.list_privilege_groups()[0]
+        privilege_groups_extracted = []
+        for privilege_group in privilege_groups.groups:
+            privilege_groups_extracted.append(privilege_group.privilege_group)
+        assert name not in privilege_groups_extracted
+        self.utility_wrap.drop_privilege_group(privilege_group=name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_drop_privilege_group_with_built_in_privilege_groups_name(self, host, port):
+        """
+        target: drop privilege group with built in privilege groups name
+        method: drop privilege group with built in privilege groups name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        for name in ct.built_in_privilege_groups:
+            self.utility_wrap.drop_privilege_group(privilege_group=name)
+        privilege_groups = self.utility_wrap.list_privilege_groups()[0]
+        privilege_groups_extracted = []
+        for privilege_group in privilege_groups.groups:
+            privilege_groups_extracted.append(privilege_group.privilege_group)
+        assert len(privilege_groups_extracted) == len(ct.built_in_privilege_groups)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_drop_privilege_group_granted(self, host, port):
+        """
+        target: drop the privilege group granted to one role
+        method: drop the privilege group granted to one role
+        expected: 1. raise exception
+                  2. drop successfully after revoke
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        collection_w = self.init_collection_general(prefix)[0]
+        role_name = "role_1"
+        role = self.utility_wrap.init_role(role_name)[0]
+        role.create()
+        name = "privilege_group_1"
+        self.utility_wrap.create_privilege_group(privilege_group=name)
+        self.utility_wrap.role_grant_v2(name, collection_w.name)
+        error = {"err_code": 65535,
+                 "err_msg": f"privilege group [{name}] is used by role [{role_name}], Use REVOKE API to revoke it first"}
+        self.utility_wrap.drop_privilege_group(privilege_group=name, check_task=CheckTasks.err_res, check_items=error)
+        self.utility_wrap.role_revoke_v2(name, collection_w.name)
+        self.utility_wrap.drop_privilege_group(privilege_group=name)
+        privilege_groups = self.utility_wrap.list_privilege_groups()[0]
+        privilege_groups_extracted = []
+        for privilege_group in privilege_groups.groups:
+            privilege_groups_extracted.append(privilege_group.privilege_group)
+        assert name not in privilege_groups_extracted
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.parametrize("name", [1, 1.0])
+    def test_add_privileges_to_group_with_privilege_group_name_invalid_type(self, name, host, port):
+        """
+        target: add privilege group with invalid name
+        method: add privilege group with invalid name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.init_role("role_1")
+        error = {"err_code": 1,
+                 "err_msg": f"`privilege_group` value {name} is illegal"}
+        self.utility_wrap.add_privileges_to_group(privilege_group=name, privileges=["Insert"],
+                                                  check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.parametrize("name", ["n%$#@!", "test-role", "ff ff"])
+    def test_add_privileges_to_group_with_privilege_group_name_invalid_value(self, name, host, port):
+        """
+        target: add privilege group with invalid name
+        method: add privilege group with invalid name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.init_role("role_1")
+        error = {"err_code": 1100, "err_msg": f"privilege group name {name} can only contain numbers, letters and underscores: invalid parameter"}
+        self.utility_wrap.add_privileges_to_group(privilege_group=name, privileges=["Insert"], check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_add_privilege_into_not_exist_privilege_group(self, host, port):
+        """
+        target: add privilege into not exist privilege group
+        method: add privilege into not exist privilege group
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        name = "privilege_group_not_exist"
+        error = {"err_code": 1100,
+                 "err_msg": f"there is no privilege group name [{name}] to operate: invalid parameter"}
+        self.utility_wrap.add_privileges_to_group(privilege_group=name, privileges=["Insert"],
+                                                  check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_add_privilege_into_built_in_privilege_group(self, host, port):
+        """
+        target: add privilege into not exist privilege group
+        method: add privilege into not exist privilege group
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        for name in ct.built_in_privilege_groups:
+            error = {"err_code": 1100,
+                     "err_msg": f"the privilege group name [{name}] is defined "
+                                f"by built in privilege groups in system: invalid parameter"}
+            self.utility_wrap.add_privileges_to_group(privilege_group=name, privileges=["Insert"],
+                                                      check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.parametrize("name", [1, 1.0, "n%$#@!", "test-role", "ff ff"])
+    def test_add_privileges_to_group_with_privilege_invalid_type(self, name, host, port):
+        """
+        target: add privilege group with invalid name
+        method: add privilege group with invalid name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.init_role("role_1")
+        error = {"err_code": 1,
+                 "err_msg": f"`privileges` value {name} is illegal"}
+        self.utility_wrap.add_privileges_to_group(privilege_group="privilege_group_1", privileges=name,
+                                                  check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_add_privileges_to_group_with_privilege_invalid_value(self, host, port):
+        """
+        target: add privilege group with invalid name
+        method: add privilege group with invalid name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        name = "privilege_group_1"
+        self.utility_wrap.create_privilege_group(privilege_group=name)
+        privilege_name = "invalid_privilege"
+        error = {"err_code": 1100, "err_msg": f"there is no privilege name or privielge group name [{privilege_name}] "
+                                              f"defined in system to operate: invalid parameter"}
+        self.utility_wrap.add_privileges_to_group(privilege_group="privilege_group_1", privileges=[privilege_name], check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.parametrize("name", [1, 1.0])
+    def test_remove_privileges_to_group_with_privilege_group_name_invalid_type(self, name, host, port):
+        """
+        target: remove privilege group with invalid name
+        method: remove privilege group with invalid name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.init_role("role_1")
+        error = {"err_code": 1,
+                 "err_msg": f"`privilege_group` value {name} is illegal"}
+        self.utility_wrap.remove_privileges_from_group(privilege_group=name, privileges=["Insert"],
+                                                       check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.parametrize("name", ["n%$#@!", "test-role", "ff ff"])
+    def test_remove_privileges_to_group_with_privilege_group_name_invalid_value(self, name, host, port):
+        """
+        target: remove privilege group with invalid name
+        method: remove privilege group with invalid name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.init_role("role_1")
+        error = {"err_code": 1100, "err_msg": f"privilege group name {name} can only contain numbers, letters and underscores: invalid parameter"}
+        self.utility_wrap.remove_privileges_from_group(privilege_group=name, privileges=["Insert"], check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_remove_privilege_into_not_exist_privilege_group(self, host, port):
+        """
+        target: remove privilege into not exist privilege group
+        method: remove privilege into not exist privilege group
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        name = "privilege_group_not_exist"
+        error = {"err_code": 1100,
+                 "err_msg": f"there is no privilege group name [{name}] to operate: invalid parameter"}
+        self.utility_wrap.remove_privileges_from_group(privilege_group=name, privileges=["Insert"],
+                                                       check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_remove_privilege_into_built_in_privilege_group(self, host, port):
+        """
+        target: remove privilege into not exist privilege group
+        method: remove privilege into not exist privilege group
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        for name in ct.built_in_privilege_groups:
+            error = {"err_code": 1100,
+                     "err_msg": f"the privilege group name [{name}] is defined "
+                                f"by built in privilege groups in system: invalid parameter"}
+            self.utility_wrap.remove_privileges_from_group(privilege_group=name, privileges=["Insert"],
+                                                           check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.parametrize("name", [1, 1.0, "n%$#@!", "test-role", "ff ff"])
+    def test_remove_privileges_to_group_with_privilege_invalid_type(self, name, host, port):
+        """
+        target: remove privilege group with invalid name
+        method: remove privilege group with invalid name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.init_role("role_1")
+        error = {"err_code": 1,
+                 "err_msg": f"`privileges` value {name} is illegal"}
+        self.utility_wrap.remove_privileges_from_group(privilege_group="privilege_group_1", privileges=name,
+                                                  check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_remove_privileges_to_group_with_privilege_invalid_value(self, host, port):
+        """
+        target: remove privilege group with invalid name
+        method: remove privilege group with invalid name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        name = "privilege_group_1"
+        self.utility_wrap.create_privilege_group(privilege_group=name)
+        privilege_name = "invalid_privilege"
+        error = {"err_code": 1100, "err_msg": f"there is no privilege name or privielge group name [{privilege_name}] "
+                                              f"defined in system to operate: invalid parameter"}
+        self.utility_wrap.remove_privileges_from_group(privilege_group="privilege_group_1", privileges=[privilege_name],
+                                                       check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.parametrize("name", [1, 1.0, "n%$#@!", "test-role", "ff ff"])
+    def test_remove_privileges_to_group_with_privilege_invalid_type(self, name, host, port):
+        """
+        target: remove privilege group with invalid name
+        method: remove privilege group with invalid name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.init_role("role_1")
+        error = {"err_code": 1,
+                 "err_msg": f"`privileges` value {name} is illegal"}
+        self.utility_wrap.remove_privileges_from_group(privilege_group="privilege_group_1", privileges=name,
+                                                  check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.parametrize("name", [1, 1.0])
+    def test_grant_v2_privilege_invalid_type(self, name, host, port):
+        """
+        target: grant v2 with invalid privilege name
+        method: grant v2 with invalid privilege name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        collection_w = self.init_collection_general(prefix)[0]
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        error = {"err_code": 1,
+                 "err_msg": f"`privilege` value {name} is illegal"}
+        self.utility_wrap.role_grant_v2(privilege=name, collection_name=collection_w.name,
+                                        check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_grant_v2_privilege_invalid_value(self, host, port):
+        """
+        target: grant v2 with invalid privilege name
+        method: grant v2 with invalid privilege name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        collection_w = self.init_collection_general(prefix)[0]
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        name = "privilege_group_1"
+        self.utility_wrap.create_privilege_group(privilege_group=name)
+        privilege_name = "invalid_privilege"
+        error = {"err_code": 65535, "err_msg": f"not found the privilege name[{privilege_name}]"}
+        self.utility_wrap.role_grant_v2(privilege=privilege_name, collection_name=collection_w.name,
+                                        check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.parametrize("name", [1, 1.0])
+    def test_revoke_v2_privilege_invalid_type(self, name, host, port):
+        """
+        target: grant v2 with invalid privilege name
+        method: grant v2 with invalid privilege name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        collection_w = self.init_collection_general(prefix)[0]
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        error = {"err_code": 1,
+                 "err_msg": f"`privilege` value {name} is illegal"}
+        self.utility_wrap.role_revoke_v2(privilege=name, collection_name=collection_w.name,
+                                         check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_revoke_v2_privilege_invalid_value(self, host, port):
+        """
+        target: grant v2 with invalid privilege name
+        method: grant v2 with invalid privilege name
+        expected: raise exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        collection_w = self.init_collection_general(prefix)[0]
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        name = "privilege_group_1"
+        self.utility_wrap.create_privilege_group(privilege_group=name)
+        privilege_name = "invalid_privilege"
+        error = {"err_code": 65535, "err_msg": f"not found the privilege name[{privilege_name}]"}
+        self.utility_wrap.role_revoke_v2(privilege=privilege_name, collection_name=collection_w.name,
+                                         check_task=CheckTasks.err_res, check_items=error)
+
+
+class TestUtilityPositiveRbacPrivilegeGroup(TestcaseBase):
+
+    def teardown_method(self, method):
+        """
+        teardown method: drop role and user
+        """
+        log.info("[utility_teardown_method] Start teardown utility test cases ...")
+
+        self.connection_wrap.connect(host=cf.param_info.param_host, port=cf.param_info.param_port, user=ct.default_user,
+                                     password=ct.default_password, secure=cf.param_info.param_secure)
+
+        # drop users
+        users, _ = self.utility_wrap.list_users(False)
+        for u in users.groups:
+            if u.username != ct.default_user:
+                self.utility_wrap.delete_user(u.username)
+        user_groups, _ = self.utility_wrap.list_users(False)
+        assert len(user_groups.groups) == 1
+
+        role_groups, _ = self.utility_wrap.list_roles(False)
+
+        # drop roles
+        for role_group in role_groups.groups:
+            if role_group.role_name not in ['admin', 'public']:
+                self.utility_wrap.init_role(role_group.role_name)
+                g_list, _ = self.utility_wrap.role_list_grants()
+                for g in g_list.groups:
+                    self.utility_wrap.role_revoke(g.object, g.object_name, g.privilege)
+                privilege_groups = self.utility_wrap.list_privilege_groups()[0]
+                for privilege_group in privilege_groups.groups:
+                    if privilege_group.privilege_group not in ct.built_in_privilege_groups:
+                        self.utility_wrap.drop_privilege_group(privilege_group.privilege_group)
+                self.utility_wrap.role_drop()
+        role_groups, _ = self.utility_wrap.list_roles(False)
+        assert len(role_groups.groups) == 2
+
+        # drop database
+        databases, _ = self.database_wrap.list_database()
+        for db_name in databases:
+            self.database_wrap.using_database(db_name)
+            for c_name in self.utility_wrap.list_collections()[0]:
+                self.utility_wrap.drop_collection(c_name)
+
+            if db_name != ct.default_db:
+                self.database_wrap.drop_database(db_name)
+
+        super().teardown_method(method)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_create_privilege_groups(self, host, port):
+        """
+        target: create valid privilege groups
+        method: create valid privilege groups
+        expected: create successfully
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        name_1 = "privilege_group_1"
+        self.utility_wrap.create_privilege_group(privilege_group=name_1)
+        name_2 = "privilege_group_2"
+        self.utility_wrap.create_privilege_group(privilege_group=name_2)
+        privilege_groups = self.utility_wrap.list_privilege_groups()[0]
+        privilege_groups_extracted = []
+        for privilege_group in privilege_groups.groups:
+            privilege_groups_extracted.append(privilege_group.privilege_group)
+        assert name_1 in privilege_groups_extracted
+        assert name_2 in privilege_groups_extracted
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_drop_privilege_groups(self, host, port):
+        """
+        target: drop valid privilege groups
+        method: create valid privilege groups
+        expected: drop successfully
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        name_1 = "privilege_group_1"
+        self.utility_wrap.create_privilege_group(privilege_group=name_1)
+        name_2 = "privilege_group_2"
+        self.utility_wrap.create_privilege_group(privilege_group=name_2)
+        self.utility_wrap.drop_privilege_group(privilege_group=name_1)
+        self.utility_wrap.drop_privilege_group(privilege_group=name_2)
+        privilege_groups = self.utility_wrap.list_privilege_groups()[0]
+        privilege_groups_extracted = []
+        for privilege_group in privilege_groups.groups:
+            privilege_groups_extracted.append(privilege_group.privilege_group)
+        assert name_1 not in privilege_groups_extracted
+        assert name_2 not in privilege_groups_extracted
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_add_privileges_to_group(self, host, port):
+        """
+        target: add privilege group with invalid name
+        method: add privilege group with invalid name
+        expected: no exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        name_1 = "privilege_group_1"
+        name_2 = "privilege_group_2"
+        self.utility_wrap.create_privilege_group(privilege_group=name_1)
+        self.utility_wrap.add_privileges_to_group(privilege_group=name_1, privileges=["Insert"])
+        self.utility_wrap.add_privileges_to_group(privilege_group=name_1, privileges=["Insert"])
+        self.utility_wrap.create_privilege_group(privilege_group=name_2)
+        self.utility_wrap.add_privileges_to_group(privilege_group=name_2, privileges=["Insert"])
+        self.utility_wrap.add_privileges_to_group(privilege_group=name_2, privileges=["Insert"])
+        self.utility_wrap.add_privileges_to_group(privilege_group=name_1, privileges=["Search"])
+        self.utility_wrap.add_privileges_to_group(privilege_group=name_2, privileges=["Search"])
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_remove_privileges_to_group(self, host, port):
+        """
+        target: remove privilege group with invalid name
+        method: remove privilege group with invalid name
+        expected: no exception
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        role = self.utility_wrap.init_role("role_1")[0]
+        role.create()
+        name_1 = "privilege_group_1"
+        name_2 = "privilege_group_2"
+        self.utility_wrap.create_privilege_group(privilege_group=name_1)
+        self.utility_wrap.add_privileges_to_group(privilege_group=name_1, privileges=["Insert"])
+        self.utility_wrap.add_privileges_to_group(privilege_group=name_1, privileges=["Insert"])
+        self.utility_wrap.remove_privileges_from_group(privilege_group=name_1, privileges=["Insert"])
+        self.utility_wrap.remove_privileges_from_group(privilege_group=name_1, privileges=["Insert"])
+        self.utility_wrap.create_privilege_group(privilege_group=name_2)
+        self.utility_wrap.add_privileges_to_group(privilege_group=name_2, privileges=["Search"])
+        self.utility_wrap.remove_privileges_from_group(privilege_group=name_2, privileges=["Search"])
+
+
+
+
