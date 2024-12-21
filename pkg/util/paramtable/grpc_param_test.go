@@ -52,6 +52,9 @@ func TestGrpcServerParams(t *testing.T) {
 	base.Remove("grpc.serverMaxRecvSize")
 	assert.Equal(t, serverConfig.ServerMaxRecvSize.GetAsInt(), DefaultServerMaxRecvSize)
 
+	base.Remove("grpc.serverMaxRecvSize")
+	assert.Equal(t, serverConfig.MaxConcurrentStreams.GetAsInt(), DefaultMaxConcurrentStreams)
+
 	base.Save("grpc.serverMaxRecvSize", "a")
 	assert.Equal(t, serverConfig.ServerMaxRecvSize.GetAsInt(), DefaultServerMaxRecvSize)
 
