@@ -7,24 +7,24 @@ import (
 )
 
 func TestKafkaID_Serialize(t *testing.T) {
-	rid := &kafkaID{messageID: 8}
+	rid := &KafkaID{MessageID: 8}
 	bin := rid.Serialize()
 	assert.NotNil(t, bin)
 	assert.NotZero(t, len(bin))
 }
 
 func TestKafkaID_AtEarliestPosition(t *testing.T) {
-	rid := &kafkaID{messageID: 8}
+	rid := &KafkaID{MessageID: 8}
 	assert.False(t, rid.AtEarliestPosition())
 
-	rid = &kafkaID{messageID: 0}
+	rid = &KafkaID{MessageID: 0}
 	assert.True(t, rid.AtEarliestPosition())
 }
 
 func TestKafkaID_LessOrEqualThan(t *testing.T) {
 	{
-		rid1 := &kafkaID{messageID: 8}
-		rid2 := &kafkaID{messageID: 0}
+		rid1 := &KafkaID{MessageID: 8}
+		rid2 := &KafkaID{MessageID: 0}
 		ret, err := rid1.LessOrEqualThan(rid2.Serialize())
 		assert.NoError(t, err)
 		assert.False(t, ret)
@@ -35,8 +35,8 @@ func TestKafkaID_LessOrEqualThan(t *testing.T) {
 	}
 
 	{
-		rid1 := &kafkaID{messageID: 0}
-		rid2 := &kafkaID{messageID: 0}
+		rid1 := &KafkaID{MessageID: 0}
+		rid2 := &KafkaID{MessageID: 0}
 		ret, err := rid1.LessOrEqualThan(rid2.Serialize())
 		assert.NoError(t, err)
 		assert.True(t, ret)
@@ -44,8 +44,8 @@ func TestKafkaID_LessOrEqualThan(t *testing.T) {
 }
 
 func TestKafkaID_Equal(t *testing.T) {
-	rid1 := &kafkaID{messageID: 0}
-	rid2 := &kafkaID{messageID: 1}
+	rid1 := &KafkaID{MessageID: 0}
+	rid2 := &KafkaID{MessageID: 1}
 
 	{
 		ret, err := rid1.Equal(rid1.Serialize())

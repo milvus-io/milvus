@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/client"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/conc"
@@ -52,6 +53,10 @@ type walAccesserImpl struct {
 	producers             map[string]*producer.ResumableProducer
 	appendExecutionPool   *conc.Pool[struct{}]
 	dispatchExecutionPool *conc.Pool[struct{}]
+}
+
+func (w *walAccesserImpl) WALName() string {
+	return util.MustSelectWALName()
 }
 
 // RawAppend writes a record to the log.

@@ -74,7 +74,7 @@ func newKafkaConsumer(config *kafka.ConfigMap, bufSize int64, topic string, grou
 					return nil, err
 				}
 			} else {
-				offset = kafka.Offset(latestMsgID.(*kafkaID).messageID)
+				offset = kafka.Offset(latestMsgID.(*KafkaID).MessageID)
 				kc.skipMsg = true
 			}
 		}
@@ -161,7 +161,7 @@ func (kc *Consumer) Seek(id common.MessageID, inclusive bool) error {
 		return errors.New("kafka consumer is already assigned, can not seek again")
 	}
 
-	offset := kafka.Offset(id.(*kafkaID).messageID)
+	offset := kafka.Offset(id.(*KafkaID).MessageID)
 	return kc.internalSeek(offset, inclusive)
 }
 
@@ -219,7 +219,7 @@ func (kc *Consumer) GetLatestMsgID() (common.MessageID, error) {
 	}
 
 	log.Info("get latest msg ID ", zap.String("topic", kc.topic), zap.Int64("oldest offset", low), zap.Int64("latest offset", high))
-	return &kafkaID{messageID: high}, nil
+	return &KafkaID{MessageID: high}, nil
 }
 
 func (kc *Consumer) CheckTopicValid(topic string) error {

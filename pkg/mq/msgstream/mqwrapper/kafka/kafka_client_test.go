@@ -196,7 +196,7 @@ func TestKafkaClient_ConsumeWithAck(t *testing.T) {
 	Consume1(ctx1, t, kc, topic, subName, c, &total1)
 
 	lastMsgID := <-c
-	log.Info("lastMsgID", zap.Any("lastMsgID", lastMsgID.(*kafkaID).messageID))
+	log.Info("lastMsgID", zap.Any("lastMsgID", lastMsgID.(*KafkaID).MessageID))
 
 	ctx2, cancel2 := context.WithTimeout(ctx, 3*time.Second)
 	Consume2(ctx2, t, kc, topic, subName, lastMsgID, &total2)
