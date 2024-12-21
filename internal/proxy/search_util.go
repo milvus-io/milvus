@@ -488,11 +488,12 @@ func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 
 	for _, sub := range req.GetRequests() {
 		subReq := &milvuspb.SubSearchRequest{
-			Dsl:              sub.GetDsl(),
-			PlaceholderGroup: sub.GetPlaceholderGroup(),
-			DslType:          sub.GetDslType(),
-			SearchParams:     sub.GetSearchParams(),
-			Nq:               sub.GetNq(),
+			Dsl:                sub.GetDsl(),
+			PlaceholderGroup:   sub.GetPlaceholderGroup(),
+			DslType:            sub.GetDslType(),
+			SearchParams:       sub.GetSearchParams(),
+			Nq:                 sub.GetNq(),
+			ExprTemplateValues: sub.GetExprTemplateValues(),
 		}
 		ret.SubReqs = append(ret.SubReqs, subReq)
 	}
