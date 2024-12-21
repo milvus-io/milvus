@@ -47,7 +47,7 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
         std::make_shared<storage::DiskFileManagerImpl>(file_manager_context);
     AssertInfo(file_manager_ != nullptr, "create file manager failed!");
     auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        storage::LocalChunkManagerFactory::GetInstance().GetChunkManager();
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
 
     // As we have guarded dup-load in QueryNode,
@@ -135,7 +135,8 @@ template <typename T>
 void
 VectorDiskAnnIndex<T>::Build(const Config& config) {
     auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        storage::LocalChunkManagerFactory::GetInstance().GetChunkManager(
+            milvus::Role::IndexNode);
     knowhere::Json build_config;
     build_config.update(config);
 
@@ -185,7 +186,8 @@ void
 VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
                                         const Config& config) {
     auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        storage::LocalChunkManagerFactory::GetInstance().GetChunkManager(
+            milvus::Role::IndexNode);
     knowhere::Json build_config;
     build_config.update(config);
     // set data path
@@ -376,7 +378,7 @@ template <typename T>
 void
 VectorDiskAnnIndex<T>::CleanLocalData() {
     auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        storage::LocalChunkManagerFactory::GetInstance().GetChunkManager();
     local_chunk_manager->RemoveDir(file_manager_->GetLocalIndexObjectPrefix());
     local_chunk_manager->RemoveDir(
         file_manager_->GetLocalRawDataObjectPrefix());

@@ -29,6 +29,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unsafe"
@@ -1274,7 +1275,8 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 
 	GetDynamicPool().Submit(func() (any, error) {
 		C.DeleteSegment(ptr)
-		localDiskUsage, err := segcore.GetLocalUsedSize(context.Background(), paramtable.Get().LocalStorageCfg.Path.GetValue())
+		localQnPaths := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+		localDiskUsage, err := segcore.GetLocalUsedSize(context.Background(), localQnPaths)
 		// ignore error here, shall not block releasing
 		if err == nil {
 			metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(localDiskUsage) / 1024 / 1024) // in MB
