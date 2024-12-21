@@ -273,18 +273,6 @@ func CheckHealthy(state commonpb.StateCode) error {
 	return nil
 }
 
-// CheckHealthyStandby checks whether the state is healthy or standby,
-// returns nil if healthy or standby
-// otherwise returns ErrServiceNotReady wrapped with current state
-// this method only used in GetMetrics
-func CheckHealthyStandby(state commonpb.StateCode) error {
-	if state != commonpb.StateCode_Healthy && state != commonpb.StateCode_StandBy {
-		return WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), state.String())
-	}
-
-	return nil
-}
-
 func IsHealthy(stateCode commonpb.StateCode) error {
 	if stateCode == commonpb.StateCode_Healthy {
 		return nil
