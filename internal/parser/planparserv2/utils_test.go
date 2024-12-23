@@ -328,3 +328,10 @@ func Test_getArrayElementType(t *testing.T) {
 		assert.Equal(t, schemapb.DataType_None, getArrayElementType(expr))
 	})
 }
+
+func Test_decodeUnicode(t *testing.T) {
+	s1 := "A[\"\\u5e74\\u4efd\"][\"\\u6708\\u4efd\"]"
+
+	assert.NotEqual(t, `A["年份"]["月份"]`, s1)
+	assert.Equal(t, `A["年份"]["月份"]`, decodeUnicode(s1))
+}
