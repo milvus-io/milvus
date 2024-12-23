@@ -448,9 +448,9 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	memoryUsage := hardware.GetUsedMemoryCount()
 	totalMemory := hardware.GetMemoryCount()
 
-	diskUsage := loader.duf.GetDiskUsage()
-	if diskUsage == 0 {
-		return requestResourceResult{}, errors.New("get local used size failed")
+	diskUsage, err := loader.duf.GetDiskUsage()
+	if err != nil {
+		return requestResourceResult{}, errors.Wrap(err, "get local used size failed")
 	}
 	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
 
@@ -680,10 +680,10 @@ func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*Index
 }
 
 func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) (
-	map[int64]*IndexedFieldInfo, // indexed info
-	[]*datapb.FieldBinlog, // fields info
+	map[int64]*IndexedFieldInfo,      // indexed info
+	[]*datapb.FieldBinlog,            // fields info
 	map[int64]*datapb.TextIndexStats, // text indexed info
-	map[int64]struct{}, // unindexed text fields
+	map[int64]struct{},               // unindexed text fields
 ) {
 	fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 	for _, indexInfo := range loadInfo.IndexInfos {
