@@ -2,9 +2,9 @@ package util
 
 import (
 	"github.com/cockroachdb/errors"
-	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -17,25 +17,16 @@ const (
 
 type walEnable struct {
 	Rocksmq bool
-	Natsmq  bool
 	Pulsar  bool
 	Kafka   bool
 }
 
-var isStandAlone = atomic.NewBool(false)
-
-// EnableStandAlone enable standalone mode.
-func EnableStandAlone(standalone bool) {
-	isStandAlone.Store(standalone)
-}
-
 // MustSelectWALName select wal name.
 func MustSelectWALName() string {
-	standalone := isStandAlone.Load()
 	params := paramtable.Get()
+	standalone := params.RuntimeConfig.Role.GetAsString() == typeutil.StandaloneRole
 	return mustSelectWALName(standalone, params.MQCfg.Type.GetValue(), walEnable{
 		params.RocksmqEnable(),
-		params.NatsmqEnable(),
 		params.PulsarEnable(),
 		params.KafkaEnable(),
 	})
@@ -68,8 +59,8 @@ func validateWALName(standalone bool, mqType string) error {
 	// we may register more mq type by plugin.
 	// so we should not check all mq type here.
 	// only check standalone type.
-	if !standalone && (mqType == walTypeRocksmq || mqType == walTypeNatsmq) {
-		return errors.Newf("mq %s is only valid in standalone mode")
+	if !standalone && mqType == walTypeRocksmq {
+		return errors.Newf("mq %s is only valid in standalone mode", mqType)
 	}
 	return nil
 }

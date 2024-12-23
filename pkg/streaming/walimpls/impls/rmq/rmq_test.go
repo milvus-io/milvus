@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/registry"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -35,5 +36,5 @@ func TestRegistry(t *testing.T) {
 }
 
 func TestWAL(t *testing.T) {
-	// walimpls.NewWALImplsTestFramework(t, 100, &builderImpl{}).Run()
+	walimpls.NewWALImplsTestFramework(t, 1000, &builderImpl{}).Run()
 }

@@ -13,10 +13,12 @@ package client
 
 import (
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
 )
 
 // assertion make sure implementation
@@ -70,6 +72,27 @@ func (p *producer) Send(message *common.ProducerMessage) (UniqueID, error) {
 			Payload: payload,
 		},
 	})
+	if err != nil {
+		return 0, err
+	}
+	return ids[0], nil
+}
+
+func (p *producer) SendForStreamingService(message *common.ProducerMessage) (UniqueID, error) {
+	rmqMessage := &messagespb.RMQMessageLayout{
+		Payload:    message.Payload,
+		Properties: message.Properties,
+	}
+	payload, err := proto.Marshal(rmqMessage)
+	if err != nil {
+		return 0, err
+	}
+	finalPayload := make([]byte, len(payload)+len(magicPrefix))
+	copy(finalPayload, magicPrefix)
+	copy(finalPayload[len(magicPrefix):], payload)
+	ids, err := p.c.server.Produce(p.topic, []server.ProducerMessage{{
+		Payload: finalPayload,
+	}})
 	if err != nil {
 		return 0, err
 	}
