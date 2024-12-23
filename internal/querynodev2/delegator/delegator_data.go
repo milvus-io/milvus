@@ -728,7 +728,15 @@ func (sd *shardDelegator) createStreamFromMsgStream(ctx context.Context, positio
 	if err != nil {
 		return nil, stream.Close, err
 	}
-	return stream.Chan(), stream.Close, nil
+
+	dispatcher := msgstream.NewSimpleMsgDispatcher(stream, func(pm msgstream.PackMsg) bool {
+		if pm.GetType() != commonpb.MsgType_Delete || pm.GetChannel() != vchannelName {
+			return false
+		}
+		return true
+	})
+
+	return dispatcher.Chan(), dispatcher.Close, nil
 }
 
 func (sd *shardDelegator) createDeleteStreamFromStreamingService(ctx context.Context, position *msgpb.MsgPosition) (ch <-chan *msgstream.MsgPack, closer func(), err error) {

@@ -29,21 +29,17 @@ import (
 
 // ExtractCtx extracts trace span from msg.properties.
 // And it will attach some default tags to the span.
-func ExtractCtx(msg TsMsg, properties map[string]string) (context.Context, trace.Span) {
-	ctx := msg.TraceCtx()
-	if ctx == nil {
-		ctx = context.Background()
-	}
+func ExtractCtx(msg PackMsg, properties map[string]string) (context.Context, trace.Span) {
+	ctx := context.Background()
 	if !allowTrace(msg) {
 		return ctx, trace.SpanFromContext(ctx)
 	}
 	ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.MapCarrier(properties))
 	name := "ReceieveMsg"
 	return otel.Tracer(name).Start(ctx, name, trace.WithAttributes(
-		attribute.Int64("ID", msg.ID()),
-		attribute.String("Type", msg.Type().String()),
-		// attribute.Int64Value("HashKeys", msg.HashKeys()),
-		attribute.String("Position", msg.Position().String()),
+		attribute.Int64("ID", msg.GetID()),
+		attribute.String("Type", msg.GetType().String()),
+		attribute.String("Position", msg.GetPosition().String()),
 	))
 }
 

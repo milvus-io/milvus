@@ -74,7 +74,12 @@ const (
 	SubscriptionPositionUnknown
 )
 
-const MsgTypeKey = "msg_type"
+const (
+	MsgTypeKey         = "msg_type"
+	TimestampTypeKey   = "timestamp"
+	ChannelTypeKey     = "vchannel"
+	ReplicateIDTypeKey = "replicate_id"
+)
 
 func GetMsgType(msg Message) (commonpb.MsgType, error) {
 	msgType := commonpb.MsgType_Undefined

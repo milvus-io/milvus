@@ -61,7 +61,7 @@ type mqMsgStream struct {
 
 	repackFunc         RepackFunc
 	unmarshal          UnmarshalDispatcher
-	receiveBuf         chan *MsgPack
+	receiveBuf         chan *ConsumeMsgPack
 	closeRWMutex       *sync.RWMutex
 	streamCancel       func()
 	bufSize            int64
@@ -89,7 +89,7 @@ func NewMqMsgStream(initCtx context.Context,
 	consumers := make(map[string]mqwrapper.Consumer)
 	producerChannels := make([]string, 0)
 	consumerChannels := make([]string, 0)
-	receiveBuf := make(chan *MsgPack, receiveBufSize)
+	receiveBuf := make(chan *ConsumeMsgPack, receiveBufSize)
 
 	stream := &mqMsgStream{
 		ctx:              streamCtx,
@@ -355,9 +355,7 @@ func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
 					return err
 				}
 
-				msg := &common.ProducerMessage{Payload: m, Properties: map[string]string{
-					common.MsgTypeKey: v.Msgs[i].Type().String(),
-				}}
+				msg := &common.ProducerMessage{Payload: m, Properties: GetPorperties(v.Msgs[i])}
 				InjectCtx(spanCtx, msg.Properties)
 
 				if _, err := producer.Send(spanCtx, msg); err != nil {
@@ -399,7 +397,7 @@ func (ms *mqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) (map[str
 			return ids, err
 		}
 
-		msg := &common.ProducerMessage{Payload: m, Properties: map[string]string{}}
+		msg := &common.ProducerMessage{Payload: m, Properties: GetPorperties(v)}
 		InjectCtx(spanCtx, msg.Properties)
 
 		ms.producerLock.RLock()
@@ -419,10 +417,6 @@ func (ms *mqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) (map[str
 		sp.End()
 	}
 	return ids, nil
-}
-
-func (ms *mqMsgStream) getTsMsgFromConsumerMsg(msg common.Message) (TsMsg, error) {
-	return GetTsMsgFromConsumerMsg(ms.unmarshal, msg)
 }
 
 // GetTsMsgFromConsumerMsg get TsMsg from consumer message
@@ -464,31 +458,35 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 				log.Ctx(ms.ctx).Warn("MqMsgStream get msg whose payload is nil")
 				continue
 			}
-			// not need to check the preCreatedTopic is empty, related issue: https://github.com/milvus-io/milvus/issues/27295
-			// if the message not belong to the topic, will skip it
-			tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
+
+			var err error
+			var packMsg PackMsg
+
+			packMsg, err = NewMarshaledMsg(msg, consumer.Subscription())
 			if err != nil {
-				log.Ctx(ms.ctx).Warn("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
-				continue
+				packMsg, err = UnmarshalMsg(msg, ms.unmarshal)
+				if err != nil {
+					log.Ctx(ms.ctx).Warn("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
+					continue
+				}
 			}
-			pos := tsMsg.Position()
-			tsMsg.SetPosition(&MsgPosition{
-				ChannelName: pos.ChannelName,
-				MsgID:       pos.MsgID,
+
+			pos := &msgpb.MsgPosition{
+				ChannelName: packMsg.GetChannel(),
+				MsgID:       packMsg.GetMessageID(),
 				MsgGroup:    consumer.Subscription(),
-				Timestamp:   tsMsg.BeginTs(),
-			})
-
-			ctx, _ := ExtractCtx(tsMsg, msg.Properties())
-			tsMsg.SetTraceCtx(ctx)
-
-			msgPack := MsgPack{
-				Msgs:           []TsMsg{tsMsg},
-				StartPositions: []*msgpb.MsgPosition{tsMsg.Position()},
-				EndPositions:   []*msgpb.MsgPosition{tsMsg.Position()},
-				BeginTs:        tsMsg.BeginTs(),
-				EndTs:          tsMsg.EndTs(),
+				Timestamp:   packMsg.GetTimestamp(),
 			}
+
+			packMsg.SetPosition(pos)
+			msgPack := ConsumeMsgPack{
+				Msgs:           []PackMsg{packMsg},
+				StartPositions: []*msgpb.MsgPosition{pos},
+				EndPositions:   []*msgpb.MsgPosition{pos},
+				BeginTs:        packMsg.GetTimestamp(),
+				EndTs:          packMsg.GetTimestamp(),
+			}
+
 			select {
 			case ms.receiveBuf <- &msgPack:
 			case <-ms.ctx.Done():
@@ -498,7 +496,11 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 	}
 }
 
-func (ms *mqMsgStream) Chan() <-chan *MsgPack {
+func (ms *mqMsgStream) GetUnmarshalDispatcher() UnmarshalDispatcher {
+	return ms.unmarshal
+}
+
+func (ms *mqMsgStream) Chan() <-chan *ConsumeMsgPack {
 	ms.onceChan.Do(func() {
 		for _, c := range ms.consumers {
 			go ms.receiveMsg(c)
@@ -546,7 +548,7 @@ var _ MsgStream = (*MqTtMsgStream)(nil)
 // MqTtMsgStream is a msgstream that contains timeticks
 type MqTtMsgStream struct {
 	*mqMsgStream
-	chanMsgBuf         map[mqwrapper.Consumer][]TsMsg
+	chanMsgBuf         map[mqwrapper.Consumer][]PackMsg
 	chanMsgPos         map[mqwrapper.Consumer]*msgpb.MsgPosition
 	chanStopChan       map[mqwrapper.Consumer]chan bool
 	chanTtMsgTime      map[mqwrapper.Consumer]Timestamp
@@ -568,7 +570,7 @@ func NewMqTtMsgStream(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	chanMsgBuf := make(map[mqwrapper.Consumer][]TsMsg)
+	chanMsgBuf := make(map[mqwrapper.Consumer][]PackMsg)
 	chanMsgPos := make(map[mqwrapper.Consumer]*msgpb.MsgPosition)
 	chanStopChan := make(map[mqwrapper.Consumer]chan bool)
 	chanTtMsgTime := make(map[mqwrapper.Consumer]Timestamp)
@@ -593,7 +595,7 @@ func (ms *MqTtMsgStream) addConsumer(consumer mqwrapper.Consumer, channel string
 	}
 	ms.consumers[channel] = consumer
 	ms.consumerChannels = append(ms.consumerChannels, channel)
-	ms.chanMsgBuf[consumer] = make([]TsMsg, 0)
+	ms.chanMsgBuf[consumer] = make([]PackMsg, 0)
 	ms.chanMsgPos[consumer] = &msgpb.MsgPosition{
 		ChannelName: channel,
 		MsgID:       make([]byte, 0),
@@ -649,8 +651,8 @@ func (ms *MqTtMsgStream) Close() {
 	ms.mqMsgStream.Close()
 }
 
-func isDMLMsg(msg TsMsg) bool {
-	return msg.Type() == commonpb.MsgType_Insert || msg.Type() == commonpb.MsgType_Delete
+func isDMLMsg(msg PackMsg) bool {
+	return msg.GetType() == commonpb.MsgType_Insert || msg.GetType() == commonpb.MsgType_Delete
 }
 
 func (ms *MqTtMsgStream) continueBuffering(endTs, size uint64, startTime time.Time) bool {
@@ -700,7 +702,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 		case <-ms.ctx.Done():
 			return
 		default:
-			timeTickBuf := make([]TsMsg, 0)
+			timeTickBuf := make([]PackMsg, 0)
 			// startMsgPosition := make([]*msgpb.MsgPosition, 0)
 			// endMsgPositions := make([]*msgpb.MsgPosition, 0)
 			startPositions := make(map[string]*msgpb.MsgPosition)
@@ -739,22 +741,22 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 					if _, ok := startPositions[channelName]; !ok {
 						startPositions[channelName] = startPos
 					}
-					tempBuffer := make([]TsMsg, 0)
-					var timeTickMsg TsMsg
+					tempBuffer := make([]PackMsg, 0)
+					var timeTickMsg PackMsg
 					for _, v := range msgs {
-						if v.Type() == commonpb.MsgType_TimeTick {
+						if v.GetType() == commonpb.MsgType_TimeTick {
 							timeTickMsg = v
 							continue
 						}
-						if v.EndTs() <= currTs ||
-							GetReplicateID(v) != "" {
-							size += uint64(v.Size())
+						if v.GetTimestamp() <= currTs ||
+							v.GetReplicateID() != "" {
+							size += uint64(v.GetSize())
 							timeTickBuf = append(timeTickBuf, v)
 						} else {
 							tempBuffer = append(tempBuffer, v)
 						}
 						// when drop collection, force to exit the buffer loop
-						if v.Type() == commonpb.MsgType_DropCollection || v.Type() == commonpb.MsgType_Replicate {
+						if v.GetType() == commonpb.MsgType_DropCollection || v.GetType() == commonpb.MsgType_Replicate {
 							containsEndBufferMsg = true
 						}
 					}
@@ -765,8 +767,8 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 					if len(tempBuffer) > 0 {
 						// if tempBuffer is not empty, use tempBuffer[0] to seek
 						newPos = &msgpb.MsgPosition{
-							ChannelName: tempBuffer[0].Position().ChannelName,
-							MsgID:       tempBuffer[0].Position().MsgID,
+							ChannelName: tempBuffer[0].GetChannel(),
+							MsgID:       tempBuffer[0].GetMessageID(),
 							Timestamp:   currTs,
 							MsgGroup:    consumer.Subscription(),
 						}
@@ -774,8 +776,8 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 					} else if timeTickMsg != nil {
 						// if tempBuffer is empty, use timeTickMsg to seek
 						newPos = &msgpb.MsgPosition{
-							ChannelName: timeTickMsg.Position().ChannelName,
-							MsgID:       timeTickMsg.Position().MsgID,
+							ChannelName: timeTickMsg.GetChannel(),
+							MsgID:       timeTickMsg.GetMessageID(),
 							Timestamp:   currTs,
 							MsgGroup:    consumer.Subscription(),
 						}
@@ -787,20 +789,20 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 				ms.consumerLock.Unlock()
 			}
 
-			idset := make(typeutil.UniqueSet)
-			uniqueMsgs := make([]TsMsg, 0, len(timeTickBuf))
+			idset := make(typeutil.Set[int64])
+			uniqueMsgs := make([]PackMsg, 0, len(timeTickBuf))
 			for _, msg := range timeTickBuf {
-				if isDMLMsg(msg) && idset.Contain(msg.ID()) {
-					log.Ctx(ms.ctx).Warn("mqTtMsgStream, found duplicated msg", zap.Int64("msgID", msg.ID()))
+				if isDMLMsg(msg) && idset.Contain(msg.GetID()) {
+					log.Ctx(ms.ctx).Warn("mqTtMsgStream, found duplicated msg", zap.Int64("msgID", msg.GetID()))
 					continue
 				}
-				idset.Insert(msg.ID())
+				idset.Insert(msg.GetID())
 				uniqueMsgs = append(uniqueMsgs, msg)
 			}
 
 			// skip endTs = 0 (no run for ctx error)
 			if endTs > 0 {
-				msgPack := MsgPack{
+				msgPack := ConsumeMsgPack{
 					BeginTs:        ms.lastTimeStamp,
 					EndTs:          endTs,
 					Msgs:           uniqueMsgs,
@@ -840,21 +842,26 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 				log.Warn("MqTtMsgStream get msg whose payload is nil")
 				continue
 			}
-			// not need to check the preCreatedTopic is empty, related issue: https://github.com/milvus-io/milvus/issues/27295
-			// if the message not belong to the topic, will skip it
-			tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
+
+			var err error
+			var packMsg PackMsg
+
+			packMsg, err = NewMarshaledMsg(msg, consumer.Subscription())
 			if err != nil {
-				log.Warn("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
-				continue
+				packMsg, err = UnmarshalMsg(msg, ms.unmarshal)
+				if err != nil {
+					log.Warn("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
+					continue
+				}
 			}
 
 			ms.chanMsgBufMutex.Lock()
-			ms.chanMsgBuf[consumer] = append(ms.chanMsgBuf[consumer], tsMsg)
+			ms.chanMsgBuf[consumer] = append(ms.chanMsgBuf[consumer], packMsg)
 			ms.chanMsgBufMutex.Unlock()
 
-			if tsMsg.Type() == commonpb.MsgType_TimeTick {
+			if packMsg.GetType() == commonpb.MsgType_TimeTick {
 				ms.chanTtMsgTimeMutex.Lock()
-				ms.chanTtMsgTime[consumer] = tsMsg.(*TimeTickMsg).Base.Timestamp
+				ms.chanTtMsgTime[consumer] = packMsg.GetTimestamp()
 				ms.chanTtMsgTimeMutex.Unlock()
 				return
 			}
@@ -972,20 +979,23 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 				loopMsgCnt++
 				consumer.Ack(msg)
 
-				headerMsg := commonpb.MsgHeader{}
-				err := proto.Unmarshal(msg.Payload(), &headerMsg)
+				var err error
+				var packMsg PackMsg
+
+				packMsg, err = NewMarshaledMsg(msg, consumer.Subscription())
 				if err != nil {
-					return fmt.Errorf("failed to unmarshal message header, err %s", err.Error())
+					packMsg, err = UnmarshalMsg(msg, ms.unmarshal)
+					if err != nil {
+						log.Warn("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
+						continue
+					}
 				}
-				tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), headerMsg.Base.MsgType)
-				if err != nil {
-					return fmt.Errorf("failed to unmarshal tsMsg, err %s", err.Error())
-				}
+
 				// skip the replicate msg because it must have been consumed
-				if GetReplicateID(tsMsg) != "" {
+				if packMsg.GetReplicateID() != "" {
 					continue
 				}
-				if tsMsg.Type() == commonpb.MsgType_TimeTick && tsMsg.BeginTs() >= mp.Timestamp {
+				if packMsg.GetType() == commonpb.MsgType_TimeTick && packMsg.GetTimestamp() >= mp.Timestamp {
 					runLoop = false
 					if time.Since(loopStarTime) > 30*time.Second {
 						log.Info("seek loop finished long time",
@@ -993,21 +1003,21 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 							zap.String("channel", mp.ChannelName),
 							zap.Duration("cost", time.Since(loopStarTime)))
 					}
-				} else if tsMsg.BeginTs() > mp.Timestamp {
-					ctx, _ := ExtractCtx(tsMsg, msg.Properties())
-					tsMsg.SetTraceCtx(ctx)
+				} else if packMsg.GetTimestamp() > mp.Timestamp {
+					ctx, _ := ExtractCtx(packMsg, msg.Properties())
+					packMsg.SetTraceCtx(ctx)
 
-					tsMsg.SetPosition(&MsgPosition{
+					packMsg.SetPosition(&MsgPosition{
 						ChannelName: filepath.Base(msg.Topic()),
 						MsgID:       msg.ID().Serialize(),
 					})
-					ms.chanMsgBuf[consumer] = append(ms.chanMsgBuf[consumer], tsMsg)
+					ms.chanMsgBuf[consumer] = append(ms.chanMsgBuf[consumer], packMsg)
 				} else {
 					log.Info("skip msg",
-						zap.Int64("source", tsMsg.SourceID()),
-						zap.String("type", tsMsg.Type().String()),
-						zap.Int("size", tsMsg.Size()),
-						zap.Uint64("msgTs", tsMsg.BeginTs()),
+						// zap.Int64("source", tsMsg.SourceID()), // TODO AOIASD SOURCE ID ?
+						zap.String("type", packMsg.GetType().String()),
+						zap.Int("size", packMsg.GetSize()),
+						zap.Uint64("msgTs", packMsg.GetTimestamp()),
 						zap.Uint64("posTs", mp.GetTimestamp()),
 					)
 				}
@@ -1017,7 +1027,7 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 	return nil
 }
 
-func (ms *MqTtMsgStream) Chan() <-chan *MsgPack {
+func (ms *MqTtMsgStream) Chan() <-chan *ConsumeMsgPack {
 	ms.onceChan.Do(func() {
 		if ms.consumers != nil {
 			go ms.bufMsgPackToChannel()
