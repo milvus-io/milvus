@@ -41,6 +41,7 @@ func (s *CompactionSuite) TearDownSuite() {
 	s.MiniClusterSuite.TearDownSuite()
 
 	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.L0CompactionTriggerInterval.Key)
+	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.MixCompactionTriggerInterval.Key)
 }
 
 func TestCompaction(t *testing.T) {
