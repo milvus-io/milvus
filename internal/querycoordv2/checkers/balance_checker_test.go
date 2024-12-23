@@ -48,6 +48,7 @@ type BalanceCheckerTestSuite struct {
 	nodeMgr   *session.NodeManager
 	scheduler *task.MockScheduler
 	targetMgr *meta.TargetManager
+	dist      *meta.DistributionManager
 }
 
 func (suite *BalanceCheckerTestSuite) SetupSuite() {
@@ -78,7 +79,8 @@ func (suite *BalanceCheckerTestSuite) SetupTest() {
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 
 	suite.balancer = balance.NewMockBalancer(suite.T())
-	suite.checker = NewBalanceChecker(suite.meta, suite.targetMgr, suite.nodeMgr, suite.scheduler, func() balance.Balance { return suite.balancer })
+	suite.dist = meta.NewDistributionManager()
+	suite.checker = NewBalanceChecker(suite.meta, suite.dist, suite.targetMgr, suite.nodeMgr, suite.scheduler, func() balance.Balance { return suite.balancer })
 }
 
 func (suite *BalanceCheckerTestSuite) TearDownTest() {
@@ -304,6 +306,73 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 	suite.balancer.EXPECT().BalanceReplica(mock.Anything, mock.Anything).Return(segPlans, chanPlans)
 	tasks := suite.checker.Check(context.TODO())
 	suite.Len(tasks, 2)
+}
+
+func (suite *BalanceCheckerTestSuite) TestSkipBalanceOnCollection() {
+	ctx := context.Background()
+
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            1,
+			PartitionID:   1,
+			InsertChannel: "test-insert-channel",
+		},
+	}
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(channels, segments, nil)
+
+	nodeID1, nodeID2 := int64(1), int64(2)
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID1)
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID2)
+
+	cid1, replicaID1, partitionID1 := 1, 1, 1
+	collection1 := utils.CreateTestCollection(int64(cid1), int32(replicaID1))
+	collection1.Status = querypb.LoadStatus_Loaded
+	replica1 := utils.CreateTestReplica(int64(replicaID1), int64(cid1), []int64{nodeID1, nodeID2})
+	partition1 := utils.CreateTestPartition(int64(cid1), int64(partitionID1))
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1, partition1)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
+	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid1))
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid1))
+
+	// test skip balance on collection with zero row count segment
+	suite.dist.SegmentDistManager.Update(1, &meta.Segment{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  int64(cid1),
+			PartitionID:   1,
+			InsertChannel: "test-insert-channel",
+		},
+	})
+	replicas := suite.checker.replicasToBalance(ctx)
+	suite.Len(replicas, 0)
+
+	suite.dist.SegmentDistManager.Update(1, &meta.Segment{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  int64(cid1),
+			PartitionID:   1,
+			InsertChannel: "test-insert-channel",
+			NumOfRows:     1,
+		},
+	})
+	replicas = suite.checker.replicasToBalance(ctx)
+	suite.Len(replicas, 1)
 }
 
 func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {

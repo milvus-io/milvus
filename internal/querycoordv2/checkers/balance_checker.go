@@ -41,6 +41,7 @@ import (
 type BalanceChecker struct {
 	*checkerActivation
 	meta                                 *meta.Meta
+	dist                                 *meta.DistributionManager
 	nodeManager                          *session.NodeManager
 	normalBalanceCollectionsCurrentRound typeutil.UniqueSet
 	scheduler                            task.Scheduler
@@ -49,6 +50,7 @@ type BalanceChecker struct {
 }
 
 func NewBalanceChecker(meta *meta.Meta,
+	dist *meta.DistributionManager,
 	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
@@ -57,6 +59,7 @@ func NewBalanceChecker(meta *meta.Meta,
 	return &BalanceChecker{
 		checkerActivation:                    newCheckerActivation(),
 		meta:                                 meta,
+		dist:                                 dist,
 		targetMgr:                            targetMgr,
 		nodeManager:                          nodeMgr,
 		normalBalanceCollectionsCurrentRound: typeutil.NewUniqueSet(),
@@ -78,6 +81,25 @@ func (b *BalanceChecker) readyToCheck(ctx context.Context, collectionID int64) b
 	targetExist := b.targetMgr.IsNextTargetExist(ctx, collectionID) || b.targetMgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID)
 
 	return metaExist && targetExist
+}
+
+// after qc restart, the recovered current target doesn't contains segment's row number,
+// and dist_handler get segmentInfo from current target to update SegmentDistManager
+// which causes the segment row count in SegmentDistManager is zero, balance based on
+// wrong segment row count shouldn't happens, this patch may introduce some cpu cost,
+// cause we need to check the segment row count before each balance
+func (b *BalanceChecker) checkSegmentRowCount(ctx context.Context, collectionID int64) bool {
+	segments := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID))
+	for _, s := range segments {
+		if s.GetNumOfRows() == 0 {
+			log.Ctx(ctx).RatedDebug(10, "collection has segment with row count zero, skip balancing in this round",
+				zap.Int64("collectionID", collectionID),
+				zap.Int64("segmentID", s.GetID()),
+			)
+			return false
+		}
+	}
+	return true
 }
 
 func (b *BalanceChecker) replicasToBalance(ctx context.Context) []int64 {
@@ -128,8 +150,13 @@ func (b *BalanceChecker) replicasToBalance(ctx context.Context) []int64 {
 				zap.Int64("collectionID", cid))
 			continue
 		}
-		hasUnbalancedCollection = true
+
 		b.normalBalanceCollectionsCurrentRound.Insert(cid)
+		if !b.checkSegmentRowCount(ctx, cid) {
+			continue
+		}
+
+		hasUnbalancedCollection = true
 		for _, replica := range b.meta.ReplicaManager.GetByCollection(ctx, cid) {
 			normalReplicasToBalance = append(normalReplicasToBalance, replica.GetID())
 		}
