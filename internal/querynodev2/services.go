@@ -763,7 +763,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 	collection := node.manager.Collection.Get(req.GetReq().GetCollectionID())
 	if collection == nil {
-		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(req.GetReq().GetCollectionID()))
+		resp.Status = merr.Status(merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID()))
 		return resp, nil
 	}
 
