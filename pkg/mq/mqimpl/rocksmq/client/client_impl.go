@@ -12,7 +12,6 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"reflect"
 	"sync"
@@ -20,12 +19,10 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/server"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
 )
 
 const (
@@ -201,7 +198,7 @@ func (c *client) tryToConsume(consumer *consumer) []*RmqMessage {
 	}
 	rmqMsgs := make([]*RmqMessage, 0, len(msgs))
 	for _, msg := range msgs {
-		rmqMsg, err := c.unmarshalStreamingMessage(consumer.topic, msg)
+		rmqMsg, err := unmarshalStreamingMessage(consumer.topic, msg)
 		if err == nil {
 			rmqMsgs = append(rmqMsgs, rmqMsg)
 			continue
@@ -226,23 +223,6 @@ func (c *client) tryToConsume(consumer *consumer) []*RmqMessage {
 		})
 	}
 	return rmqMsgs
-}
-
-func (c *client) unmarshalStreamingMessage(topic string, msg server.ConsumerMessage) (*RmqMessage, error) {
-	if !bytes.HasPrefix(msg.Payload, magicPrefix) {
-		return nil, errNotStreamingServiceMessage
-	}
-
-	var rmqMessage messagespb.RMQMessageLayout
-	if err := proto.Unmarshal(msg.Payload[len(magicPrefix):], &rmqMessage); err != nil {
-		return nil, err
-	}
-	return &RmqMessage{
-		msgID:      msg.MsgID,
-		payload:    rmqMessage.Payload,
-		properties: rmqMessage.Properties,
-		topic:      topic,
-	}, nil
 }
 
 // Close close the channel to notify rocksmq to stop operation and close rocksmq server

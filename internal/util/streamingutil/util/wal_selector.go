@@ -9,7 +9,6 @@ import (
 
 const (
 	walTypeDefault = "default"
-	walTypeNatsmq  = "natsmq"
 	walTypeRocksmq = "rocksmq"
 	walTypeKafka   = "kafka"
 	walTypePulsar  = "pulsar"
