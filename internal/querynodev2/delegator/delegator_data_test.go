@@ -207,6 +207,8 @@ func (s *DelegatorDataSuite) SetupTest() {
 	// init schema
 	s.genNormalCollection()
 	s.mq = &msgstream.MockMsgStream{}
+	s.mq.EXPECT().GetUnmarshalDispatcher().Return(nil)
+
 	s.rootPath = s.Suite.T().Name()
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), s.rootPath)
 	s.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
@@ -916,8 +918,9 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 
 		s.mq.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		s.mq.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		s.mq.EXPECT().GetUnmarshalDispatcher().Return(nil)
 		s.mq.EXPECT().Close()
-		ch := make(chan *msgstream.MsgPack, 10)
+		ch := make(chan *msgstream.ConsumeMsgPack, 10)
 		close(ch)
 
 		s.mq.EXPECT().Chan().Return(ch)
@@ -1585,7 +1588,7 @@ func (s *DelegatorDataSuite) TestReadDeleteFromMsgstream() {
 	s.mq.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	s.mq.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	s.mq.EXPECT().Close()
-	ch := make(chan *msgstream.MsgPack, 10)
+	ch := make(chan *msgstream.ConsumeMsgPack, 10)
 	s.mq.EXPECT().Chan().Return(ch)
 
 	oracle := pkoracle.NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
@@ -1603,7 +1606,7 @@ func (s *DelegatorDataSuite) TestReadDeleteFromMsgstream() {
 	}
 
 	for _, data := range datas {
-		ch <- data
+		ch <- msgstream.BuildConsumeMsgPack(data)
 	}
 
 	result, err := s.delegator.readDeleteFromMsgstream(ctx, &msgpb.MsgPosition{Timestamp: 0}, 10, oracle)

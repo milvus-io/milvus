@@ -67,13 +67,17 @@ func (mtm *mockTtMsgStream) SetReplicate(config *msgstream.ReplicateConfig) {
 
 func (mtm *mockTtMsgStream) Close() {}
 
-func (mtm *mockTtMsgStream) Chan() <-chan *msgstream.MsgPack {
-	return make(chan *msgstream.MsgPack, 100)
+func (mtm *mockTtMsgStream) Chan() <-chan *msgstream.ConsumeMsgPack {
+	return make(chan *msgstream.ConsumeMsgPack, 100)
 }
 
 func (mtm *mockTtMsgStream) AsProducer(ctx context.Context, channels []string) {}
 
 func (mtm *mockTtMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position common.SubscriptionInitialPosition) error {
+	return nil
+}
+
+func (mtm *mockTtMsgStream) GetUnmarshalDispatcher() msgstream.UnmarshalDispatcher {
 	return nil
 }
 
