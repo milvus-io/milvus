@@ -137,23 +137,17 @@ func mergeChannels(dnChannels []*metricsinfo.Channel, dcChannels map[int64]map[s
 func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 	v := jsonReq.Get(metricsinfo.MetricRequestParamINKey)
 	if !v.Exists() {
-		// default to get all segments from dataanode
+		// default to get all segments from datanode
 		return s.getDataNodeSegmentsJSON(ctx, req)
 	}
 
 	in := v.String()
-	if in == "dn" {
-		// TODO: support filter by collection id
+	if in == metricsinfo.MetricsRequestParamsInDN {
 		return s.getDataNodeSegmentsJSON(ctx, req)
 	}
 
-	if in == "dc" {
-		v = jsonReq.Get(metricsinfo.MetricRequestParamCollectionIDKey)
-		collectionID := int64(0)
-		if v.Exists() {
-			collectionID = v.Int()
-		}
-
+	if in == metricsinfo.MetricsRequestParamsInDC {
+		collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
 		segments := s.meta.getSegmentsMetrics(collectionID)
 		for _, seg := range segments {
 			isIndexed, indexedFields := s.meta.indexMeta.GetSegmentIndexedFields(seg.CollectionID, seg.SegmentID)
@@ -163,7 +157,7 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 
 		bs, err := json.Marshal(segments)
 		if err != nil {
-			log.Warn("marshal segment value failed", zap.Int64("collectionID", collectionID), zap.String("err", err.Error()))
+			log.Ctx(ctx).Warn("marshal segment value failed", zap.Int64("collectionID", collectionID), zap.String("err", err.Error()))
 			return "", nil
 		}
 		return string(bs), nil

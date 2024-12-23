@@ -1203,11 +1203,7 @@ func (s *Server) registerMetricsRequest() {
 
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.IndexKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			v := jsonReq.Get(metricsinfo.MetricRequestParamCollectionIDKey)
-			collectionID := int64(0)
-			if v.Exists() {
-				collectionID = v.Int()
-			}
+			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
 			return s.meta.indexMeta.GetIndexJSON(collectionID), nil
 		})
 	log.Ctx(s.ctx).Info("register metrics actions finished")
