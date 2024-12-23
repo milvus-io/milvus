@@ -68,6 +68,11 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
 		}
 		return ctx, r
+	case *milvuspb.AlterCollectionFieldRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
 	case *milvuspb.CreatePartitionRequest:
 		if r.DbName == "" {
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
