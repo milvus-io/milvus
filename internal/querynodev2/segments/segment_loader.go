@@ -848,9 +848,9 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	memoryUsage := hardware.GetUsedMemoryCount()
 	totalMemory := hardware.GetMemoryCount()
 
-	diskUsage := loader.duf.GetDiskUsage()
-	if diskUsage == 0 {
-		return requestResourceResult{}, errors.New("get local used size failed")
+	diskUsage, err := loader.duf.GetDiskUsage()
+	if err != nil {
+		return requestResourceResult{}, errors.Wrap(err, "get local used size failed")
 	}
 	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
 
