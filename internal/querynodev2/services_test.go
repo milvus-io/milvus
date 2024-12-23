@@ -64,7 +64,7 @@ import (
 type ServiceSuite struct {
 	suite.Suite
 	// Data
-	msgChan        chan *msgstream.MsgPack
+	msgChan        chan *msgstream.ConsumeMsgPack
 	collectionID   int64
 	collectionName string
 	schema         *schemapb.CollectionSchema

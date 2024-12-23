@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -236,7 +237,7 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 			mock.Anything,
 		).Return(nil)
 		// the chan length should larger than 4, because newChanTimeTickSync will send 4 ts messages when execute the `broadcast` step
-		packChan := make(chan *msgstream.MsgPack, 10)
+		packChan := make(chan *msgstream.ConsumeMsgPack, 10)
 		ticker := newChanTimeTickSync(packChan)
 		ticker.addDmlChannels("by-dev-rootcoord-dml_1")
 
@@ -252,13 +253,19 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 			},
 		}
 
+		unmarshalFactory := &msgstream.ProtoUDFactory{}
+		unmarshalDispatcher := unmarshalFactory.NewUnmarshalDispatcher()
+
 		err := task.Execute(context.Background())
 		assert.NoError(t, err)
 		time.Sleep(time.Second)
 		select {
 		case pack := <-packChan:
-			assert.Equal(t, commonpb.MsgType_Replicate, pack.Msgs[0].Type())
-			replicateMsg := pack.Msgs[0].(*msgstream.ReplicateMsg)
+			assert.Equal(t, commonpb.MsgType_Replicate, pack.Msgs[0].GetType())
+
+			tsMsg, err := pack.Msgs[0].Unmarshal(unmarshalDispatcher)
+			require.NoError(t, err)
+			replicateMsg := tsMsg.(*msgstream.ReplicateMsg)
 			assert.Equal(t, "cn", replicateMsg.ReplicateMsg.GetDatabase())
 			assert.True(t, replicateMsg.ReplicateMsg.GetIsEnd())
 		default:

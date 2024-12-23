@@ -19,7 +19,6 @@ package msgdispatcher
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -229,7 +228,7 @@ func (d *Dispatcher) work() {
 			}
 			d.curTs.Store(pack.EndPositions[0].GetTimestamp())
 
-			targetPacks := d.groupingMsgs(pack)
+			targetPacks := d.groupAndParseMsgs(pack, d.stream.GetUnmarshalDispatcher())
 			for vchannel, p := range targetPacks {
 				var err error
 				t := d.targets[vchannel]
@@ -260,7 +259,7 @@ func (d *Dispatcher) work() {
 	}
 }
 
-func (d *Dispatcher) groupingMsgs(pack *MsgPack) map[string]*MsgPack {
+func (d *Dispatcher) groupAndParseMsgs(pack *msgstream.ConsumeMsgPack, unmarshalDispatcher msgstream.UnmarshalDispatcher) map[string]*MsgPack {
 	// init packs for all targets, even though there's no msg in pack,
 	// but we still need to dispatch time ticks to the targets.
 	targetPacks := make(map[string]*MsgPack)
@@ -280,27 +279,24 @@ func (d *Dispatcher) groupingMsgs(pack *MsgPack) map[string]*MsgPack {
 	// group messages by vchannel
 	for _, msg := range pack.Msgs {
 		var vchannel, collectionID string
-		switch msg.Type() {
-		case commonpb.MsgType_Insert:
-			vchannel = msg.(*msgstream.InsertMsg).GetShardName()
-		case commonpb.MsgType_Delete:
-			vchannel = msg.(*msgstream.DeleteMsg).GetShardName()
-		case commonpb.MsgType_CreateCollection:
-			collectionID = strconv.FormatInt(msg.(*msgstream.CreateCollectionMsg).GetCollectionID(), 10)
-		case commonpb.MsgType_DropCollection:
-			collectionID = strconv.FormatInt(msg.(*msgstream.DropCollectionMsg).GetCollectionID(), 10)
-		case commonpb.MsgType_CreatePartition:
-			collectionID = strconv.FormatInt(msg.(*msgstream.CreatePartitionMsg).GetCollectionID(), 10)
-		case commonpb.MsgType_DropPartition:
-			collectionID = strconv.FormatInt(msg.(*msgstream.DropPartitionMsg).GetCollectionID(), 10)
+
+		if msg.GetType() == commonpb.MsgType_Insert || msg.GetType() == commonpb.MsgType_Delete {
+			vchannel = msg.GetChannel()
+		} else if msg.GetType() == commonpb.MsgType_CreateCollection ||
+			msg.GetType() == commonpb.MsgType_DropCollection ||
+			msg.GetType() == commonpb.MsgType_CreatePartition ||
+			msg.GetType() == commonpb.MsgType_DropPartition {
+			collectionID = msg.GetChannel() // TODO AOIASD
 		}
+
 		if vchannel == "" {
 			// we need to dispatch it to the vchannel of this collection
+			targets := []string{}
 			for k := range targetPacks {
-				if msg.Type() == commonpb.MsgType_Replicate {
+				if msg.GetType() == commonpb.MsgType_Replicate {
 					config := replicateConfigs[k]
-					if config != nil && msgstream.MatchReplicateID(msg, config.ReplicateID) {
-						targetPacks[k].Msgs = append(targetPacks[k].Msgs, msg)
+					if config != nil && msg.GetReplicateID() == config.ReplicateID {
+						targets = append(targets, k)
 					}
 					continue
 				}
@@ -308,14 +304,29 @@ func (d *Dispatcher) groupingMsgs(pack *MsgPack) map[string]*MsgPack {
 				if !strings.Contains(k, collectionID) {
 					continue
 				}
+				targets = append(targets, k)
+			}
+			if len(targets) > 0 {
+				tsMsg, err := msg.Unmarshal(unmarshalDispatcher)
+				if err != nil {
+					log.Warn("unmarshl message failed", zap.Error(err))
+					continue
+				}
 				// TODO: There's data race when non-dml msg is sent to different flow graph.
 				// Wrong open-trancing information is generated, Fix in future.
-				targetPacks[k].Msgs = append(targetPacks[k].Msgs, msg)
+				for _, target := range targets {
+					targetPacks[target].Msgs = append(targetPacks[target].Msgs, tsMsg)
+				}
 			}
 			continue
 		}
 		if _, ok := targetPacks[vchannel]; ok {
-			targetPacks[vchannel].Msgs = append(targetPacks[vchannel].Msgs, msg)
+			tsMsg, err := msg.Unmarshal(unmarshalDispatcher) // TODO AOIASD UNMARSHAL
+			if err != nil {
+				log.Warn("unmarshl message failed", zap.Error(err))
+				continue
+			}
+			targetPacks[vchannel].Msgs = append(targetPacks[vchannel].Msgs, tsMsg)
 		}
 	}
 	replicateEndChannels := make(map[string]struct{})
