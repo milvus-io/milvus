@@ -70,7 +70,7 @@ type TargetManagerInterface interface {
 	SaveCurrentTarget(ctx context.Context, catalog metastore.QueryCoordCatalog)
 	Recover(ctx context.Context, catalog metastore.QueryCoordCatalog) error
 	CanSegmentBeMoved(ctx context.Context, collectionID, segmentID int64) bool
-	GetTargetJSON(ctx context.Context, scope TargetScope) string
+	GetTargetJSON(ctx context.Context, scope TargetScope, collectionID int64) string
 	GetPartitions(ctx context.Context, collectionID int64, scope TargetScope) ([]int64, error)
 	IsCurrentTargetReady(ctx context.Context, collectionID int64) bool
 }
@@ -638,7 +638,7 @@ func (mgr *TargetManager) CanSegmentBeMoved(ctx context.Context, collectionID, s
 	return false
 }
 
-func (mgr *TargetManager) GetTargetJSON(ctx context.Context, scope TargetScope) string {
+func (mgr *TargetManager) GetTargetJSON(ctx context.Context, scope TargetScope, collectionID int64) string {
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 
@@ -647,7 +647,7 @@ func (mgr *TargetManager) GetTargetJSON(ctx context.Context, scope TargetScope) 
 		return ""
 	}
 
-	v, err := json.Marshal(ret.toQueryCoordCollectionTargets())
+	v, err := json.Marshal(ret.toQueryCoordCollectionTargets(collectionID))
 	if err != nil {
 		log.Warn("failed to marshal target", zap.Error(err))
 		return ""

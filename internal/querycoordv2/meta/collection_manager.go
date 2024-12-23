@@ -285,7 +285,13 @@ func (m *CollectionManager) upgradeRecover(ctx context.Context, broker Broker) e
 	// we should save it's CollectionLoadInfo to meta store
 	for _, partition := range m.GetAllPartitions(ctx) {
 		// In old version, collection would NOT be stored if the partition existed.
-		if _, ok := m.collections[partition.GetCollectionID()]; !ok {
+		if !m.Exist(ctx, partition.GetCollectionID()) {
+			collectionInfo, err := broker.DescribeCollection(ctx, partition.GetCollectionID())
+			if err != nil {
+				log.Warn("failed to describe collection from RootCoord", zap.Error(err))
+				return err
+			}
+
 			col := &Collection{
 				CollectionLoadInfo: &querypb.CollectionLoadInfo{
 					CollectionID:  partition.GetCollectionID(),
@@ -293,10 +299,11 @@ func (m *CollectionManager) upgradeRecover(ctx context.Context, broker Broker) e
 					Status:        partition.GetStatus(),
 					FieldIndexID:  partition.GetFieldIndexID(),
 					LoadType:      querypb.LoadType_LoadPartition,
+					DbID:          collectionInfo.GetDbId(),
 				},
 				LoadPercentage: 100,
 			}
-			err := m.PutCollection(ctx, col)
+			err = m.PutCollection(ctx, col)
 			if err != nil {
 				return err
 			}

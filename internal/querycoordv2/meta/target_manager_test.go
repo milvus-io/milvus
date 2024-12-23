@@ -669,7 +669,7 @@ func (suite *TargetManagerSuite) TestGetTargetJSON() {
 	suite.NoError(suite.mgr.UpdateCollectionNextTarget(ctx, collectionID))
 	suite.True(suite.mgr.UpdateCollectionCurrentTarget(ctx, collectionID))
 
-	jsonStr := suite.mgr.GetTargetJSON(ctx, CurrentTarget)
+	jsonStr := suite.mgr.GetTargetJSON(ctx, CurrentTarget, 0)
 	assert.NotEmpty(suite.T(), jsonStr)
 
 	var currentTarget []*metricsinfo.QueryCoordTarget
@@ -679,6 +679,14 @@ func (suite *TargetManagerSuite) TestGetTargetJSON() {
 	assert.Equal(suite.T(), collectionID, currentTarget[0].CollectionID)
 	assert.Len(suite.T(), currentTarget[0].DMChannels, 2)
 	assert.Len(suite.T(), currentTarget[0].Segments, 2)
+
+	jsonStr = suite.mgr.GetTargetJSON(ctx, CurrentTarget, 1)
+	assert.NotEmpty(suite.T(), jsonStr)
+
+	var currentTarget2 []*metricsinfo.QueryCoordTarget
+	err = json.Unmarshal([]byte(jsonStr), &currentTarget)
+	suite.NoError(err)
+	assert.Len(suite.T(), currentTarget2, 0)
 }
 
 func BenchmarkTargetManager(b *testing.B) {

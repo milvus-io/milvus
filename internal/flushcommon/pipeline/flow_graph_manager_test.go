@@ -193,8 +193,14 @@ func TestGetChannelsJSON(t *testing.T) {
 	assert.NoError(t, err)
 	expectedJSON := string(expectedBytes)
 
-	jsonResult := fm.GetChannelsJSON()
+	jsonResult := fm.GetChannelsJSON(0)
 	assert.JSONEq(t, expectedJSON, jsonResult)
+
+	jsonResult = fm.GetChannelsJSON(10)
+	var ret []*metricsinfo.Channel
+	err = json.Unmarshal([]byte(jsonResult), &ret)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, len(ret))
 }
 
 func TestGetSegmentJSON(t *testing.T) {
@@ -228,7 +234,12 @@ func TestGetSegmentJSON(t *testing.T) {
 	expectedJSON := string(expectedBytes)
 
 	ds.metacache.AddSegment(segment, pkStatsFactory, metacache.NoneBm25StatsFactory)
-	jsonResult := fm.GetSegmentsJSON()
-	fmt.Println(jsonResult)
+	jsonResult := fm.GetSegmentsJSON(0)
 	assert.JSONEq(t, expectedJSON, jsonResult)
+
+	jsonResult = fm.GetSegmentsJSON(10)
+	var ret []*metricsinfo.Segment
+	err = json.Unmarshal([]byte(jsonResult), &ret)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, len(ret))
 }

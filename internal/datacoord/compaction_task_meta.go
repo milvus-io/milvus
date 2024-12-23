@@ -43,8 +43,8 @@ func newCompactionTaskStats(task *datapb.CompactionTask) *metricsinfo.Compaction
 		Type:         task.Type.String(),
 		State:        task.State.String(),
 		FailReason:   task.FailReason,
-		StartTime:    typeutil.TimestampToString(uint64(task.StartTime)),
-		EndTime:      typeutil.TimestampToString(uint64(task.EndTime)),
+		StartTime:    typeutil.TimestampToString(uint64(task.StartTime) * 1000),
+		EndTime:      typeutil.TimestampToString(uint64(task.EndTime) * 1000),
 		TotalRows:    task.TotalRows,
 		InputSegments: lo.Map(task.InputSegments, func(t int64, i int) string {
 			return strconv.FormatInt(t, 10)

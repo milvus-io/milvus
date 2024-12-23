@@ -301,17 +301,13 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 	}
 
 	in := v.String()
-	if in == "qn" {
+	if in == metricsinfo.MetricsRequestParamsInQN {
 		// TODO: support filter by collection id
 		return s.getSegmentsFromQueryNode(ctx, req)
 	}
 
-	if in == "qc" {
-		v = jsonReq.Get(metricsinfo.MetricRequestParamCollectionIDKey)
-		collectionID := int64(0)
-		if v.Exists() {
-			collectionID = v.Int()
-		}
+	if in == metricsinfo.MetricsRequestParamsInQC {
+		collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
 		filteredSegments := s.dist.SegmentDistManager.GetSegmentDist(collectionID)
 		bs, err := json.Marshal(filteredSegments)
 		if err != nil {

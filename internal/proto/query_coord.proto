@@ -668,6 +668,7 @@ message CollectionLoadInfo {
     LoadType load_type = 6;
     int32 recover_times = 7;
     repeated int64 load_fields = 8;
+    int64 dbID= 9;
 }
 
 message PartitionLoadInfo {
