@@ -57,6 +57,7 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.GetCollectionStatisticsRequest{},
 			&milvuspb.ShowCollectionsRequest{},
 			&milvuspb.AlterCollectionRequest{},
+			&milvuspb.AlterCollectionFieldRequest{},
 			&milvuspb.CreatePartitionRequest{},
 			&milvuspb.DropPartitionRequest{},
 			&milvuspb.HasPartitionRequest{},
