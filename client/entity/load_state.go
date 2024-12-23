@@ -18,27 +18,17 @@ package entity
 
 import "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
-// MetricType metric type
-type MetricType string
+type LoadStateCode commonpb.LoadState
 
-// Metric Constants
 const (
-	L2             MetricType = "L2"
-	IP             MetricType = "IP"
-	COSINE         MetricType = "COSINE"
-	HAMMING        MetricType = "HAMMING"
-	JACCARD        MetricType = "JACCARD"
-	TANIMOTO       MetricType = "TANIMOTO"
-	SUBSTRUCTURE   MetricType = "SUBSTRUCTURE"
-	SUPERSTRUCTURE MetricType = "SUPERSTRUCTURE"
-	BM25           MetricType = "BM25"
+	// LoadStateNone      LoadStateCode = LoadStateCode(commonpb.LoadState)
+	LoadStateLoading   LoadStateCode = LoadStateCode(commonpb.LoadState_LoadStateLoading)
+	LoadStateLoaded    LoadStateCode = LoadStateCode(commonpb.LoadState_LoadStateLoaded)
+	LoadStateUnloading LoadStateCode = LoadStateCode(commonpb.LoadState_LoadStateNotExist)
+	LoadStateNotLoad   LoadStateCode = LoadStateCode(commonpb.LoadState_LoadStateNotLoad)
 )
 
-// CompactionState enum type for compaction state
-type CompactionState commonpb.CompactionState
-
-// CompactionState Constants
-const (
-	CompactionStateRunning   CompactionState = CompactionState(commonpb.CompactionState_Executing)
-	CompactionStateCompleted CompactionState = CompactionState(commonpb.CompactionState_Completed)
-)
+type LoadState struct {
+	State    LoadStateCode
+	Progress int64
+}
