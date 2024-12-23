@@ -320,13 +320,26 @@ func (mgr *LeaderViewManager) GetLatestShardLeaderByFilter(filters ...LeaderView
 // GetLeaderView returns a slice of LeaderView objects, each representing the state of a leader node.
 // It traverses the views map, converts each LeaderView to a metricsinfo.LeaderView, and collects them into a slice.
 // The method locks the views map for reading to ensure thread safety.
-func (mgr *LeaderViewManager) GetLeaderView() []*metricsinfo.LeaderView {
+func (mgr *LeaderViewManager) GetLeaderView(collectionID int64) []*metricsinfo.LeaderView {
 	mgr.rwmutex.RLock()
 	defer mgr.rwmutex.RUnlock()
 
 	var leaderViews []*metricsinfo.LeaderView
 	for _, nodeViews := range mgr.views {
-		for _, lv := range nodeViews.views {
+		var filteredViews []*LeaderView
+		if collectionID > 0 {
+			if lv, ok := nodeViews.collectionViews[collectionID]; ok {
+				filteredViews = lv
+			} else {
+				// if collectionID is not found, return empty leader views
+				return leaderViews
+			}
+		} else {
+			// if collectionID is not set, return all leader views
+			filteredViews = nodeViews.views
+		}
+
+		for _, lv := range filteredViews {
 			errString := ""
 			if lv.UnServiceableError != nil {
 				errString = lv.UnServiceableError.Error()

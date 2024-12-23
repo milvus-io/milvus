@@ -185,8 +185,8 @@ func getCollectionMetrics(node *QueryNode) (*metricsinfo.QueryNodeCollectionMetr
 }
 
 // getChannelJSON returns the JSON string of channels
-func getChannelJSON(node *QueryNode) string {
-	stats := node.pipelineManager.GetChannelStats()
+func getChannelJSON(node *QueryNode, collectionID int64) string {
+	stats := node.pipelineManager.GetChannelStats(collectionID)
 	ret, err := json.Marshal(stats)
 	if err != nil {
 		log.Warn("failed to marshal channels", zap.Error(err))
@@ -196,10 +196,14 @@ func getChannelJSON(node *QueryNode) string {
 }
 
 // getSegmentJSON returns the JSON string of segments
-func getSegmentJSON(node *QueryNode) string {
+func getSegmentJSON(node *QueryNode, collectionID int64) string {
 	allSegments := node.manager.Segment.GetBy()
 	var ms []*metricsinfo.Segment
 	for _, s := range allSegments {
+		if collectionID > 0 && s.Collection() != collectionID {
+			continue
+		}
+
 		indexes := make([]*metricsinfo.IndexedField, 0, len(s.Indexes()))
 		for _, index := range s.Indexes() {
 			indexes = append(indexes, &metricsinfo.IndexedField{
@@ -208,6 +212,7 @@ func getSegmentJSON(node *QueryNode) string {
 				IndexSize:    index.IndexInfo.IndexSize,
 				BuildID:      index.IndexInfo.BuildID,
 				IsLoaded:     index.IsLoaded,
+				HasRawData:   s.HasRawData(index.IndexInfo.FieldID),
 			})
 		}
 

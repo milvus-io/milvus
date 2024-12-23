@@ -506,7 +506,7 @@ func (m *ReplicaManager) GetResourceGroupByCollection(ctx context.Context, colle
 // It locks the ReplicaManager for reading, converts the replicas to their protobuf representation,
 // marshals them into a JSON string, and returns the result.
 // If an error occurs during marshaling, it logs a warning and returns an empty string.
-func (m *ReplicaManager) GetReplicasJSON(ctx context.Context) string {
+func (m *ReplicaManager) GetReplicasJSON(ctx context.Context, meta *Meta) string {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
@@ -515,9 +515,19 @@ func (m *ReplicaManager) GetReplicasJSON(ctx context.Context) string {
 		for k, v := range r.replicaPB.GetChannelNodeInfos() {
 			channelTowRWNodes[k] = v.GetRwNodes()
 		}
+
+		collectionInfo := meta.GetCollection(ctx, r.GetCollectionID())
+		dbID := int64(-1)
+		if collectionInfo == nil {
+			log.Ctx(ctx).Warn("failed to get collection info", zap.Int64("collectionID", r.GetCollectionID()))
+		} else {
+			dbID = collectionInfo.GetDbID()
+		}
+
 		return &metricsinfo.Replica{
 			ID:               r.GetID(),
 			CollectionID:     r.GetCollectionID(),
+			DatabaseID:       dbID,
 			RWNodes:          r.GetNodes(),
 			ResourceGroup:    r.GetResourceGroup(),
 			RONodes:          r.GetRONodes(),

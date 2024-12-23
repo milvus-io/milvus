@@ -50,6 +50,7 @@ func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 		IndexSize:           segIndex.SerializeSize,
 		WriteHandoff:        segIndex.WriteHandoff,
 		CurrentIndexVersion: segIndex.GetCurrentIndexVersion(),
+		FinishedUTCTime:     segIndex.FinishedTime,
 	}
 }
 
@@ -75,6 +76,7 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 		SerializeSize:       segIdx.IndexSize,
 		WriteHandoff:        segIdx.WriteHandoff,
 		CurrentIndexVersion: segIdx.CurrentIndexVersion,
+		FinishedTime:        segIdx.FinishedUTCTime,
 	}
 }
 
@@ -96,5 +98,6 @@ func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 		IndexSize:           segIndex.IndexSize,
 		WriteHandoff:        segIndex.WriteHandoff,
 		CurrentIndexVersion: segIndex.CurrentIndexVersion,
+		FinishedUTCTime:     segIndex.FinishedUTCTime,
 	}
 }
