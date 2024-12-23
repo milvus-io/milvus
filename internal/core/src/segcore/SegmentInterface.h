@@ -20,6 +20,7 @@
 #include <index/ScalarIndex.h>
 
 #include "FieldIndexing.h"
+#include "arrow/type_fwd.h"
 #include "common/Common.h"
 #include "common/Schema.h"
 #include "common/Span.h"
@@ -109,6 +110,9 @@ class SegmentInterface {
            int64_t size,
            const IdArray* pks,
            const Timestamp* timestamps) = 0;
+
+    virtual SegcoreError
+    Delete(arrow::Array* pks, const Timestamp* timestamps) = 0;
 
     virtual void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) = 0;

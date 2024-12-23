@@ -14,6 +14,11 @@
 #include <memory>
 #include <limits>
 
+#include "arrow/api.h"
+#include "arrow/array/array_binary.h"
+#include "arrow/c/bridge.h"
+#include "arrow/array/array_base.h"
+#include "common/EasyAssert.h"
 #include "pb/cgo_msg.pb.h"
 #include "pb/index_cgo_msg.pb.h"
 
@@ -326,6 +331,26 @@ Delete(CSegmentInterface c_segment,
     try {
         auto res =
             segment->Delete(reserved_offset, size, pks.get(), timestamps);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+DeleteArray(CSegmentInterface c_segment,
+            CArrowArray pk_array,
+            CArrowSchema pk_schema,
+            const uint64_t* timestamps) {
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    AssertInfo(pk_array, "pk array cannot be null");
+    AssertInfo(pk_schema, "pk schema cannot be null");
+    auto result = arrow::ImportArray(pk_array, pk_schema);
+    AssertInfo(result.ok(), "failed to convert pk array with arrow bridge");
+    // get internal array ptr, discard the ownership of shared_ptr
+    auto arr = result->get();
+    try {
+        auto res = segment->Delete(arr, timestamps);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

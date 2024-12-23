@@ -284,6 +284,12 @@ add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )
 
 # **************************** Install ****************************
 
+# Install arrow c abi
+install(DIRECTORY ${CONAN_INCLUDE_DIRS_ARROW}/arrow/
+        DESTINATION include/arrow
+        FILES_MATCHING PATTERN "*.h"
+)
+
 # Install storage
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/storage/
         DESTINATION include/storage

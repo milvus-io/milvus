@@ -17,10 +17,15 @@ import (
 	"runtime"
 	"unsafe"
 
+	"github.com/apache/arrow/go/v12/arrow"
+	"github.com/apache/arrow/go/v12/arrow/array"
+	"github.com/apache/arrow/go/v12/arrow/cdata"
+	"github.com/apache/arrow/go/v12/arrow/memory"
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -233,25 +238,39 @@ func (s *cSegmentImpl) preInsert(numOfRecords int) (int64, error) {
 
 // Delete deletes entities from the segment.
 func (s *cSegmentImpl) Delete(ctx context.Context, request *DeleteRequest) (*DeleteResult, error) {
-	cOffset := C.int64_t(0) // depre
-
-	cSize := C.int64_t(request.PrimaryKeys.Len())
 	cTimestampsPtr := (*C.uint64_t)(&(request.Timestamps)[0])
+	primaryKeys := request.PrimaryKeys
+	var pkArr arrow.Array
 
-	ids, err := storage.ParsePrimaryKeysBatch2IDs(request.PrimaryKeys)
-	if err != nil {
-		return nil, err
+	pkType := primaryKeys.Type()
+	switch pkType {
+	case schemapb.DataType_Int64:
+		bldr := array.NewInt64Builder(memory.DefaultAllocator)
+		defer bldr.Release()
+		pks := primaryKeys.(*storage.Int64PrimaryKeys)
+		bldr.AppendValues(pks.GetValues(), nil)
+		pkArr = bldr.NewArray()
+	case schemapb.DataType_VarChar:
+		bldr := array.NewStringBuilder(memory.DefaultAllocator)
+		defer bldr.Release()
+		pks := primaryKeys.(*storage.VarcharPrimaryKeys)
+		bldr.AppendValues(pks.GetValues(), nil)
+		pkArr = bldr.NewArray()
+	default:
+		return nil, fmt.Errorf("invalid data type of primary keys")
 	}
 
-	dataBlob, err := proto.Marshal(ids)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal ids: %s", err)
-	}
-	status := C.Delete(s.ptr,
-		cOffset,
-		cSize,
-		(*C.uint8_t)(unsafe.Pointer(&dataBlob[0])),
-		(C.uint64_t)(len(dataBlob)),
+	defer pkArr.Release()
+
+	var cschema cdata.CArrowSchema
+	var carr cdata.CArrowArray
+	cdata.ExportArrowArray(pkArr, &carr, &cschema)
+	defer cdata.ReleaseCArrowSchema(&cschema)
+	defer cdata.ReleaseCArrowArray(&carr)
+
+	status := C.DeleteArray(s.ptr,
+		(C.CArrowArray)(unsafe.Pointer(&carr)),
+		(C.CArrowSchema)(unsafe.Pointer(&cschema)),
 		cTimestampsPtr,
 	)
 	return &DeleteResult{}, ConsumeCStatusIntoError(&status)

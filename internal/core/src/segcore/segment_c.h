@@ -20,6 +20,7 @@ extern "C" {
 #include <stdint.h>
 
 #include "common/type_c.h"
+#include "arrow/c/abi.h"
 #include "futures/future_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/load_index_c.h"
@@ -27,6 +28,8 @@ extern "C" {
 
 typedef void* CSearchResult;
 typedef CProto CRetrieveResult;
+typedef struct ArrowSchema* CArrowSchema;
+typedef struct ArrowArray* CArrowArray;
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CStatus
@@ -157,6 +160,12 @@ Delete(CSegmentInterface c_segment,
        const uint8_t* ids,
        const uint64_t ids_size,
        const uint64_t* timestamps);
+
+CStatus
+DeleteArray(CSegmentInterface c_segment,
+            CArrowArray pk_array,
+            CArrowSchema pk_schema,
+            const uint64_t* timestamps);
 
 void
 RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id);
