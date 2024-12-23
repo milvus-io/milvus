@@ -114,17 +114,17 @@ func (_c *MockFlowgraphManager_Close_Call) RunAndReturn(run func()) *MockFlowgra
 	return _c
 }
 
-// GetChannelsJSON provides a mock function with given fields:
-func (_m *MockFlowgraphManager) GetChannelsJSON() string {
-	ret := _m.Called()
+// GetChannelsJSON provides a mock function with given fields: collectionID
+func (_m *MockFlowgraphManager) GetChannelsJSON(collectionID int64) string {
+	ret := _m.Called(collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetChannelsJSON")
 	}
 
 	var r0 string
-	if rf, ok := ret.Get(0).(func() string); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(int64) string); ok {
+		r0 = rf(collectionID)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
@@ -138,13 +138,14 @@ type MockFlowgraphManager_GetChannelsJSON_Call struct {
 }
 
 // GetChannelsJSON is a helper method to define mock.On call
-func (_e *MockFlowgraphManager_Expecter) GetChannelsJSON() *MockFlowgraphManager_GetChannelsJSON_Call {
-	return &MockFlowgraphManager_GetChannelsJSON_Call{Call: _e.mock.On("GetChannelsJSON")}
+//   - collectionID int64
+func (_e *MockFlowgraphManager_Expecter) GetChannelsJSON(collectionID interface{}) *MockFlowgraphManager_GetChannelsJSON_Call {
+	return &MockFlowgraphManager_GetChannelsJSON_Call{Call: _e.mock.On("GetChannelsJSON", collectionID)}
 }
 
-func (_c *MockFlowgraphManager_GetChannelsJSON_Call) Run(run func()) *MockFlowgraphManager_GetChannelsJSON_Call {
+func (_c *MockFlowgraphManager_GetChannelsJSON_Call) Run(run func(collectionID int64)) *MockFlowgraphManager_GetChannelsJSON_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		run(args[0].(int64))
 	})
 	return _c
 }
@@ -154,7 +155,7 @@ func (_c *MockFlowgraphManager_GetChannelsJSON_Call) Return(_a0 string) *MockFlo
 	return _c
 }
 
-func (_c *MockFlowgraphManager_GetChannelsJSON_Call) RunAndReturn(run func() string) *MockFlowgraphManager_GetChannelsJSON_Call {
+func (_c *MockFlowgraphManager_GetChannelsJSON_Call) RunAndReturn(run func(int64) string) *MockFlowgraphManager_GetChannelsJSON_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -309,17 +310,17 @@ func (_c *MockFlowgraphManager_GetFlowgraphService_Call) RunAndReturn(run func(s
 	return _c
 }
 
-// GetSegmentsJSON provides a mock function with given fields:
-func (_m *MockFlowgraphManager) GetSegmentsJSON() string {
-	ret := _m.Called()
+// GetSegmentsJSON provides a mock function with given fields: collectionID
+func (_m *MockFlowgraphManager) GetSegmentsJSON(collectionID int64) string {
+	ret := _m.Called(collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetSegmentsJSON")
 	}
 
 	var r0 string
-	if rf, ok := ret.Get(0).(func() string); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(int64) string); ok {
+		r0 = rf(collectionID)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
@@ -333,13 +334,14 @@ type MockFlowgraphManager_GetSegmentsJSON_Call struct {
 }
 
 // GetSegmentsJSON is a helper method to define mock.On call
-func (_e *MockFlowgraphManager_Expecter) GetSegmentsJSON() *MockFlowgraphManager_GetSegmentsJSON_Call {
-	return &MockFlowgraphManager_GetSegmentsJSON_Call{Call: _e.mock.On("GetSegmentsJSON")}
+//   - collectionID int64
+func (_e *MockFlowgraphManager_Expecter) GetSegmentsJSON(collectionID interface{}) *MockFlowgraphManager_GetSegmentsJSON_Call {
+	return &MockFlowgraphManager_GetSegmentsJSON_Call{Call: _e.mock.On("GetSegmentsJSON", collectionID)}
 }
 
-func (_c *MockFlowgraphManager_GetSegmentsJSON_Call) Run(run func()) *MockFlowgraphManager_GetSegmentsJSON_Call {
+func (_c *MockFlowgraphManager_GetSegmentsJSON_Call) Run(run func(collectionID int64)) *MockFlowgraphManager_GetSegmentsJSON_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		run(args[0].(int64))
 	})
 	return _c
 }
@@ -349,7 +351,7 @@ func (_c *MockFlowgraphManager_GetSegmentsJSON_Call) Return(_a0 string) *MockFlo
 	return _c
 }
 
-func (_c *MockFlowgraphManager_GetSegmentsJSON_Call) RunAndReturn(run func() string) *MockFlowgraphManager_GetSegmentsJSON_Call {
+func (_c *MockFlowgraphManager_GetSegmentsJSON_Call) RunAndReturn(run func(int64) string) *MockFlowgraphManager_GetSegmentsJSON_Call {
 	_c.Call.Return(run)
 	return _c
 }

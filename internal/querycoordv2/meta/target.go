@@ -207,8 +207,13 @@ func (t *target) getCollectionTarget(collectionID int64) *CollectionTarget {
 	return t.collectionTargetMap[collectionID]
 }
 
-func (t *target) toQueryCoordCollectionTargets() []*metricsinfo.QueryCoordTarget {
-	return lo.MapToSlice(t.collectionTargetMap, func(k int64, v *CollectionTarget) *metricsinfo.QueryCoordTarget {
+func (t *target) toQueryCoordCollectionTargets(collectionID int64) []*metricsinfo.QueryCoordTarget {
+	var ret []*metricsinfo.QueryCoordTarget
+	for k, v := range t.collectionTargetMap {
+		if collectionID > 0 && collectionID != k {
+			continue
+		}
+
 		segments := lo.MapToSlice(v.GetAllSegments(), func(k int64, s *datapb.SegmentInfo) *metricsinfo.Segment {
 			return metrics.NewSegmentFrom(s)
 		})
@@ -217,10 +222,12 @@ func (t *target) toQueryCoordCollectionTargets() []*metricsinfo.QueryCoordTarget
 			return metrics.NewDMChannelFrom(ch.VchannelInfo)
 		})
 
-		return &metricsinfo.QueryCoordTarget{
+		ret = append(ret, &metricsinfo.QueryCoordTarget{
 			CollectionID: k,
 			Segments:     segments,
 			DMChannels:   dmChannels,
-		}
-	})
+		})
+	}
+
+	return ret
 }
