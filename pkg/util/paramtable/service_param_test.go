@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestServiceParam(t *testing.T) {
@@ -220,4 +221,15 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, 3600*time.Second, Params.SnapshotReserveTimeSeconds.GetAsDuration(time.Second))
 		assert.Equal(t, 10000, Params.PaginationSize.GetAsInt())
 	})
+}
+
+func TestRuntimConfig(t *testing.T) {
+	SetRole(typeutil.StandaloneRole)
+	assert.Equal(t, GetRole(), typeutil.StandaloneRole)
+
+	SetLocalComponentEnabled(typeutil.QueryNodeRole)
+	assert.True(t, IsLocalComponentEnabled(typeutil.QueryNodeRole))
+
+	SetLocalComponentEnabled(typeutil.QueryCoordRole)
+	assert.True(t, IsLocalComponentEnabled(typeutil.QueryCoordRole))
 }
