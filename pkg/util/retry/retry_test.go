@@ -50,6 +50,17 @@ func TestAttempts(t *testing.T) {
 	err := Do(ctx, testFn, Attempts(1))
 	assert.Error(t, err)
 	t.Log(err)
+
+	ctx = context.Background()
+	testOperation := 0
+	testFn = func() error {
+		testOperation++
+		return nil
+	}
+
+	err = Do(ctx, testFn, AttemptAlways())
+	assert.Equal(t, testOperation, 1)
+	assert.NoError(t, err)
 }
 
 func TestMaxSleepTime(t *testing.T) {

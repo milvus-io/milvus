@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 var errExhausted = errors.New("exhausted")
@@ -56,12 +57,12 @@ func (a *localAllocator) exhausted() {
 
 // tsoAllocator allocate timestamp from remote root coordinator.
 type tsoAllocator struct {
-	rc     types.RootCoordClient
+	rc     *syncutil.Future[types.RootCoordClient]
 	nodeID int64
 }
 
 // newTSOAllocator creates a new remote allocator.
-func newTSOAllocator(rc types.RootCoordClient) *tsoAllocator {
+func newTSOAllocator(rc *syncutil.Future[types.RootCoordClient]) *tsoAllocator {
 	a := &tsoAllocator{
 		nodeID: paramtable.GetNodeID(),
 		rc:     rc,
@@ -80,8 +81,12 @@ func (ta *tsoAllocator) batchAllocate(ctx context.Context, count uint32) (uint64
 		),
 		Count: count,
 	}
+	rc, err := ta.rc.GetWithContext(ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("get root coordinator client timeout: %w", err)
+	}
 
-	resp, err := ta.rc.AllocTimestamp(ctx, req)
+	resp, err := rc.AllocTimestamp(ctx, req)
 	if err != nil {
 		return 0, 0, fmt.Errorf("syncTimestamp Failed:%w", err)
 	}
@@ -96,12 +101,12 @@ func (ta *tsoAllocator) batchAllocate(ctx context.Context, count uint32) (uint64
 
 // idAllocator allocate timestamp from remote root coordinator.
 type idAllocator struct {
-	rc     types.RootCoordClient
+	rc     *syncutil.Future[types.RootCoordClient]
 	nodeID int64
 }
 
 // newIDAllocator creates a new remote allocator.
-func newIDAllocator(rc types.RootCoordClient) *idAllocator {
+func newIDAllocator(rc *syncutil.Future[types.RootCoordClient]) *idAllocator {
 	a := &idAllocator{
 		nodeID: paramtable.GetNodeID(),
 		rc:     rc,
@@ -120,8 +125,12 @@ func (ta *idAllocator) batchAllocate(ctx context.Context, count uint32) (uint64,
 		),
 		Count: count,
 	}
+	rc, err := ta.rc.GetWithContext(ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("get root coordinator client timeout: %w", err)
+	}
 
-	resp, err := ta.rc.AllocID(ctx, req)
+	resp, err := rc.AllocID(ctx, req)
 	if err != nil {
 		return 0, 0, fmt.Errorf("AllocID Failed:%w", err)
 	}
