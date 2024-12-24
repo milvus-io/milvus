@@ -30,7 +30,7 @@ func newStreamingNodeManager() *StreamingNodeManager {
 	return snm
 }
 
-// StreamingNodeManager is a manager for manage the querynode that embeded into streaming node.
+// StreamingNodeManager is a manager for manage the querynode that embedded into streaming node.
 // StreamingNodeManager is exclusive with ResourceManager.
 type StreamingNodeManager struct {
 	notifier *syncutil.AsyncTaskNotifier[struct{}]

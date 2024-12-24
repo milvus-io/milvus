@@ -153,7 +153,6 @@ func (ob *ReplicaObserver) checkStreamingQueryNodesInReplica(sqNodeIDs typeutil.
 			}
 			logger.Info("all segment/channel has been removed from ro streaming query node, remove it from replica")
 		}
-
 	}
 }
 

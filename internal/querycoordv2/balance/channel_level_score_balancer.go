@@ -67,6 +67,15 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 		}
 	}()
 
+	// Make a plan to rebalance the channel first.
+	// The Streaming QueryNode doesn't make the channel level score, so just fallback to the ScoreBasedBalancer.
+	stoppingBalance := paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool()
+	channelPlan := b.ScoreBasedBalancer.balanceChannels(ctx, br, replica, stoppingBalance)
+	// If the channelPlan is not empty, do it directly, don't do the segment balance.
+	if len(channelPlan) > 0 {
+		return nil, channelPlan
+	}
+
 	exclusiveMode := true
 	channels := b.targetMgr.GetDmChannelsByCollection(ctx, replica.GetCollectionID(), meta.CurrentTarget)
 	for channelName := range channels {
@@ -82,7 +91,6 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 	}
 
 	// TODO: assign by channel
-	channelPlans = make([]ChannelAssignPlan, 0)
 	segmentPlans = make([]SegmentAssignPlan, 0)
 	for channelName := range channels {
 		if replica.NodesCount() == 0 {
@@ -113,7 +121,7 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 		}
 
 		if len(roNodes) != 0 {
-			if !paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
+			if !stoppingBalance {
 				log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
 				return nil, nil
 			}
@@ -122,26 +130,18 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 				zap.Any("stopping nodes", roNodes),
 				zap.Any("available nodes", rwNodes),
 			)
-			// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-			if b.permitBalanceChannel(replica.GetCollectionID()) {
-				channelPlans = append(channelPlans, b.genStoppingChannelPlan(ctx, replica, channelName, rwNodes, roNodes)...)
-			}
 
-			if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
+			if b.permitBalanceSegment(replica.GetCollectionID()) {
 				segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(ctx, replica, channelName, rwNodes, roNodes)...)
 			}
 		} else {
-			if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && b.permitBalanceChannel(replica.GetCollectionID()) {
-				channelPlans = append(channelPlans, b.genChannelPlan(ctx, replica, channelName, rwNodes)...)
-			}
-
-			if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
+			if b.permitBalanceSegment(replica.GetCollectionID()) {
 				segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, br, replica, channelName, rwNodes)...)
 			}
 		}
 	}
 
-	return segmentPlans, channelPlans
+	return segmentPlans, nil
 }
 
 func (b *ChannelLevelScoreBalancer) genStoppingChannelPlan(ctx context.Context, replica *meta.Replica, channelName string, onlineNodes []int64, offlineNodes []int64) []ChannelAssignPlan {
