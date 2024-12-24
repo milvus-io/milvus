@@ -487,61 +487,69 @@ func (scheduler *taskScheduler) GetSegmentTaskDelta(nodeID, collectionID int64) 
 	scheduler.rwmutex.RLock()
 	defer scheduler.rwmutex.RUnlock()
 
-	targetActions := make([]Action, 0)
+	targetActions := make(map[int64][]Action, 0)
 	for _, t := range scheduler.segmentTasks {
 		if collectionID != -1 && collectionID != t.CollectionID() {
 			continue
 		}
 		for _, action := range t.Actions() {
-			if action.Node() == nodeID {
-				targetActions = append(targetActions, action)
+			if action.Node() == nodeID || nodeID == -1 {
+				if _, ok := targetActions[t.CollectionID()]; !ok {
+					targetActions[t.CollectionID()] = make([]Action, 0)
+				}
+				targetActions[t.CollectionID()] = append(targetActions[t.CollectionID()], action)
 			}
 		}
 	}
 
-	return scheduler.calculateTaskDelta(collectionID, targetActions)
+	return scheduler.calculateTaskDelta(targetActions)
 }
 
 func (scheduler *taskScheduler) GetChannelTaskDelta(nodeID, collectionID int64) int {
 	scheduler.rwmutex.RLock()
 	defer scheduler.rwmutex.RUnlock()
 
-	targetActions := make([]Action, 0)
+	targetActions := make(map[int64][]Action, 0)
 	for _, t := range scheduler.channelTasks {
 		if collectionID != -1 && collectionID != t.CollectionID() {
 			continue
 		}
 		for _, action := range t.Actions() {
-			if action.Node() == nodeID {
-				targetActions = append(targetActions, action)
+			if action.Node() == nodeID || nodeID == -1 {
+				if _, ok := targetActions[t.CollectionID()]; !ok {
+					targetActions[t.CollectionID()] = make([]Action, 0)
+				}
+				targetActions[t.CollectionID()] = append(targetActions[t.CollectionID()], action)
 			}
 		}
 	}
 
-	return scheduler.calculateTaskDelta(collectionID, targetActions)
+	return scheduler.calculateTaskDelta(targetActions)
 }
 
-func (scheduler *taskScheduler) calculateTaskDelta(collectionID int64, targetActions []Action) int {
+func (scheduler *taskScheduler) calculateTaskDelta(targetActions map[int64][]Action) int {
 	sum := 0
-	for _, action := range targetActions {
-		delta := 0
-		if action.Type() == ActionTypeGrow {
-			delta = 1
-		} else if action.Type() == ActionTypeReduce {
-			delta = -1
-		}
-
-		switch action := action.(type) {
-		case *SegmentAction:
-			// skip growing segment's count, cause doesn't know realtime row number of growing segment
-			if action.Scope == querypb.DataScope_Historical {
-				segment := scheduler.targetMgr.GetSealedSegment(scheduler.ctx, collectionID, action.SegmentID, meta.NextTargetFirst)
-				if segment != nil {
-					sum += int(segment.GetNumOfRows()) * delta
-				}
+	for collectionID, actions := range targetActions {
+		for _, action := range actions {
+			delta := 0
+			if action.Type() == ActionTypeGrow {
+				delta = 1
+			} else if action.Type() == ActionTypeReduce {
+				delta = -1
 			}
-		case *ChannelAction:
-			sum += delta
+
+			switch action := action.(type) {
+			case *SegmentAction:
+				// skip growing segment's count, cause doesn't know realtime row number of growing segment
+				if action.Scope == querypb.DataScope_Historical {
+					segment := scheduler.targetMgr.GetSealedSegment(scheduler.ctx, collectionID, action.SegmentID, meta.NextTargetFirst)
+					if segment != nil {
+						sum += int(segment.GetNumOfRows()) * delta
+					}
+				}
+			case *ChannelAction:
+				sum += delta
+			}
 		}
 	}
 	return sum
