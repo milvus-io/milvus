@@ -68,6 +68,7 @@ type TargetManagerInterface interface {
 	SaveCurrentTarget(catalog metastore.QueryCoordCatalog)
 	Recover(catalog metastore.QueryCoordCatalog) error
 	CanSegmentBeMoved(collectionID, segmentID int64) bool
+	IsCurrentTargetReady(collectionID int64) bool
 }
 
 type TargetManager struct {
@@ -630,4 +631,15 @@ func (mgr *TargetManager) CanSegmentBeMoved(collectionID, segmentID int64) bool 
 	}
 
 	return false
+}
+
+func (mgr *TargetManager) IsCurrentTargetReady(collectionID int64) bool {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+	target, ok := mgr.current.collectionTargetMap[collectionID]
+	if !ok {
+		return false
+	}
+
+	return target.Ready()
 }

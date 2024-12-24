@@ -600,6 +600,7 @@ func (suite *TargetManagerSuite) TestRecover() {
 	for _, segment := range target.GetAllSegments() {
 		suite.Equal(int64(100), segment.GetNumOfRows())
 	}
+	suite.True(target.Ready())
 
 	// after recover, target info should be cleaned up
 	targets, err := suite.catalog.GetCollectionTargets()
