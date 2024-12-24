@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v3/disk"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/config"
@@ -104,8 +105,6 @@ type ComponentParam struct {
 	StreamingCoordGrpcClientCfg GrpcClientConfig
 	StreamingNodeGrpcClientCfg  GrpcClientConfig
 	IntegrationTestCfg          integrationTestConfig
-
-	RuntimeConfig runtimeConfig
 }
 
 // Init initialize once
@@ -4850,11 +4849,13 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 	p.TxnDefaultKeepaliveTimeout.Init(base.mgr)
 }
 
+// runtimeConfig is just a private environment value table.
 type runtimeConfig struct {
-	CreateTime RuntimeParamItem
-	UpdateTime RuntimeParamItem
-	Role       RuntimeParamItem
-	NodeID     RuntimeParamItem
+	createTime time.Time
+	updateTime time.Time
+	role       string
+	nodeID     atomic.Int64
+	components map[string]struct{}
 }
 
 type integrationTestConfig struct {

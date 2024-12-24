@@ -23,7 +23,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -171,13 +170,6 @@ func NewMilvusRoles() *MilvusRoles {
 		closed: make(chan struct{}),
 	}
 	return mr
-}
-
-// EnvValue not used now.
-func (mr *MilvusRoles) EnvValue(env string) bool {
-	env = strings.ToLower(env)
-	env = strings.Trim(env, " ")
-	return env == "1" || env == "true"
 }
 
 func (mr *MilvusRoles) printLDPreLoad() {
@@ -449,45 +441,55 @@ func (mr *MilvusRoles) Run() {
 	if mr.EnableRootCoord {
 		rootCoord = mr.runRootCoord(ctx, local, &wg)
 		componentMap[typeutil.RootCoordRole] = rootCoord
+		paramtable.SetLocalComponentEnabled(typeutil.RootCoordRole)
 	}
 
 	if mr.EnableDataCoord {
 		dataCoord = mr.runDataCoord(ctx, local, &wg)
 		componentMap[typeutil.DataCoordRole] = dataCoord
+		paramtable.SetLocalComponentEnabled(typeutil.DataCoordRole)
 	}
 
 	if mr.EnableIndexCoord {
 		indexCoord = mr.runIndexCoord(ctx, local, &wg)
 		componentMap[typeutil.IndexCoordRole] = indexCoord
+		paramtable.SetLocalComponentEnabled(typeutil.IndexCoordRole)
 	}
 
 	if mr.EnableQueryCoord {
 		queryCoord = mr.runQueryCoord(ctx, local, &wg)
 		componentMap[typeutil.QueryCoordRole] = queryCoord
+		paramtable.SetLocalComponentEnabled(typeutil.QueryCoordRole)
 	}
 
 	if mr.EnableQueryNode {
 		queryNode = mr.runQueryNode(ctx, local, &wg)
 		componentMap[typeutil.QueryNodeRole] = queryNode
+		paramtable.SetLocalComponentEnabled(typeutil.QueryNodeRole)
 	}
 
 	if mr.EnableDataNode {
 		dataNode = mr.runDataNode(ctx, local, &wg)
 		componentMap[typeutil.DataNodeRole] = dataNode
+		paramtable.SetLocalComponentEnabled(typeutil.DataNodeRole)
 	}
 	if mr.EnableIndexNode {
 		indexNode = mr.runIndexNode(ctx, local, &wg)
 		componentMap[typeutil.IndexNodeRole] = indexNode
+		paramtable.SetLocalComponentEnabled(typeutil.IndexNodeRole)
 	}
 
 	if mr.EnableProxy {
 		proxy = mr.runProxy(ctx, local, &wg)
 		componentMap[typeutil.ProxyRole] = proxy
+		paramtable.SetLocalComponentEnabled(typeutil.ProxyRole)
 	}
 
 	if mr.EnableStreamingNode {
+		// Before initializing the local streaming node, make sure the local registry is ready.
 		streamingNode = mr.runStreamingNode(ctx, local, &wg)
 		componentMap[typeutil.StreamingNodeRole] = streamingNode
+		paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
 	}
 
 	wg.Wait()
