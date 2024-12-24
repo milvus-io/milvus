@@ -1473,3 +1473,36 @@ func BenchmarkTemplateWithString(b *testing.B) {
 		assert.NotNil(b, plan)
 	}
 }
+
+func TestNestedPathWithChinese(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	expr := `A["姓名"] == "小明"`
+	plan, err := CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil)
+	assert.NoError(t, err, expr)
+	paths := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetColumnInfo().GetNestedPath()
+	assert.NotNil(t, paths)
+	assert.Equal(t, 2, len(paths))
+	assert.Equal(t, "A", paths[0])
+	assert.Equal(t, "姓名", paths[1])
+
+	expr = `A["年份"]["月份"] == "九月"`
+	plan, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil)
+	assert.NoError(t, err, expr)
+	paths = plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetColumnInfo().GetNestedPath()
+	assert.NotNil(t, paths)
+	assert.Equal(t, 3, len(paths))
+	assert.Equal(t, "A", paths[0])
+	assert.Equal(t, "年份", paths[1])
+	assert.Equal(t, "月份", paths[2])
+}
