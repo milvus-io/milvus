@@ -450,6 +450,29 @@ BuildSparseFloatVecIndex(CIndex index,
     return status;
 }
 
+CStatus
+BuildInt8VecIndex(CIndex index, int64_t int8_value_num, const int8_t* vectors) {
+    auto status = CStatus();
+    try {
+        AssertInfo(index,
+                   "failed to build int8 vector index, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex =
+            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
+        auto dim = cIndex->dim();
+        auto row_nums = int8_value_num / dim;
+        auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
+        cIndex->Build(ds);
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
 // field_data:
 //  1, serialized proto::schema::BoolArray, if type is bool;
 //  2, serialized proto::schema::StringArray, if type is string;
