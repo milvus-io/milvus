@@ -59,8 +59,6 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 	// and there's no commit opeartions.
 	consumerConfig := cloneKafkaConfig(w.consumerConfig)
 	consumerConfig.SetKey("group.id", opt.Name)
-	switch opt.DeliverPolicy.GetPolicy().(type) {
-	}
 	c, err := kafka.NewConsumer(&consumerConfig)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create kafka consumer")

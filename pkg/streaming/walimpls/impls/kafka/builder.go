@@ -30,7 +30,7 @@ func (b *builderImpl) Name() string {
 
 // Build build a wal instance.
 func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
-	producerConfig, consumerConfig := b.getProducerAndConsumerConfig()
+	producerConfig, consumerConfig := b.getProducerConfig(), b.getConsumerConfig()
 
 	p, err := kafka.NewProducer(&producerConfig)
 	if err != nil {
@@ -40,10 +40,9 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 }
 
 // getProducerAndConsumerConfig returns the producer and consumer config.
-func (b *builderImpl) getProducerAndConsumerConfig() (producerConfig kafka.ConfigMap, consumerConfig kafka.ConfigMap) {
+func (b *builderImpl) getProducerConfig() kafka.ConfigMap {
 	config := &paramtable.Get().KafkaCfg
-	producerConfig = getBasicConfig(config)
-	consumerConfig = cloneKafkaConfig(producerConfig)
+	producerConfig := getBasicConfig(config)
 
 	producerConfig.SetKey("message.max.bytes", 10485760)
 	producerConfig.SetKey("compression.codec", "zstd")
@@ -52,13 +51,17 @@ func (b *builderImpl) getProducerAndConsumerConfig() (producerConfig kafka.Confi
 	for k, v := range config.ProducerExtraConfig.GetValue() {
 		producerConfig.SetKey(k, v)
 	}
+	return producerConfig
+}
 
+func (b *builderImpl) getConsumerConfig() kafka.ConfigMap {
+	config := &paramtable.Get().KafkaCfg
+	consumerConfig := getBasicConfig(config)
 	consumerConfig.SetKey("allow.auto.create.topics", true)
 	for k, v := range config.ConsumerExtraConfig.GetValue() {
 		consumerConfig.SetKey(k, v)
 	}
-
-	return producerConfig, consumerConfig
+	return consumerConfig
 }
 
 // getBasicConfig returns the basic kafka config.

@@ -60,7 +60,7 @@ func (o *openerImpl) execute() {
 				}
 			default:
 				// ignore other events
-				log.Info("kafka producer incoming non-message, non-error event", zap.String("event", ev.String()))
+				log.Debug("kafka producer incoming non-message, non-error event", zap.String("event", ev.String()))
 			}
 		}
 	}
