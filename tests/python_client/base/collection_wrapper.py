@@ -59,6 +59,10 @@ class ApiCollectionWrapper:
         return self.collection.is_empty
 
     @property
+    def is_empty_without_flush(self):
+        return self.collection.is_empty
+
+    @property
     def num_entities(self):
         self.flush()
         return self.collection.num_entities
