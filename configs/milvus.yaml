@@ -603,6 +603,8 @@ dataCoord:
       maxClusterSizeRatio: 10 # maximum cluster size / avg size in Kmeans train
       maxClusterSize: 5g # maximum cluster size in Kmeans train
   syncSegmentsInterval: 300 # The time interval for regularly syncing segments
+  index:
+    memSizeEstimateMultiplier: 2 # When the memory size is not setup by index procedure, multiplier to estimate the memory size of index data
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.
