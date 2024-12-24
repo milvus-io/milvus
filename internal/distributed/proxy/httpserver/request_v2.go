@@ -66,6 +66,18 @@ func (req *CollectionNameReq) GetPartitionNames() []string {
 	return req.PartitionNames
 }
 
+type CollectionReqWithProperties struct {
+	DbName         string                 `json:"dbName"`
+	CollectionName string                 `json:"collectionName" binding:"required"`
+	Properties     map[string]interface{} `json:"properties"`
+}
+
+func (req *CollectionReqWithProperties) GetDbName() string { return req.DbName }
+
+func (req *CollectionReqWithProperties) GetCollectionName() string {
+	return req.CollectionName
+}
+
 type OptionalCollectionNameReq struct {
 	DbName         string `json:"dbName"`
 	CollectionName string `json:"collectionName"`
@@ -87,6 +99,35 @@ type RenameCollectionReq struct {
 }
 
 func (req *RenameCollectionReq) GetDbName() string { return req.DbName }
+
+type DropCollectionPropertiesReq struct {
+	DbName         string   `json:"dbName"`
+	CollectionName string   `json:"collectionName" binding:"required"`
+	DeleteKeys     []string `json:"deleteKeys"`
+}
+
+func (req *DropCollectionPropertiesReq) GetDbName() string { return req.DbName }
+
+func (req *DropCollectionPropertiesReq) GetCollectionName() string {
+	return req.CollectionName
+}
+
+type CollectionFieldReqWithParams struct {
+	DbName         string                 `json:"dbName"`
+	CollectionName string                 `json:"collectionName" binding:"required"`
+	FieldName      string                 `json:"fieldName" binding:"required"`
+	FieldParams    map[string]interface{} `json:"fieldParams"`
+}
+
+func (req *CollectionFieldReqWithParams) GetDbName() string { return req.DbName }
+
+func (req *CollectionFieldReqWithParams) GetCollectionName() string {
+	return req.CollectionName
+}
+
+func (req *CollectionFieldReqWithParams) GetFieldName() string {
+	return req.FieldName
+}
 
 type PartitionReq struct {
 	// CollectionNameReq
@@ -361,6 +402,40 @@ func (req *IndexReq) GetCollectionName() string {
 }
 
 func (req *IndexReq) GetIndexName() string {
+	return req.IndexName
+}
+
+type IndexReqWithProperties struct {
+	DbName         string                 `json:"dbName"`
+	CollectionName string                 `json:"collectionName" binding:"required"`
+	IndexName      string                 `json:"indexName" binding:"required"`
+	Properties     map[string]interface{} `json:"properties"`
+}
+
+func (req *IndexReqWithProperties) GetDbName() string { return req.DbName }
+
+func (req *IndexReqWithProperties) GetCollectionName() string {
+	return req.CollectionName
+}
+
+func (req *IndexReqWithProperties) GetIndexName() string {
+	return req.IndexName
+}
+
+type DropIndexPropertiesReq struct {
+	DbName         string   `json:"dbName"`
+	CollectionName string   `json:"collectionName" binding:"required"`
+	IndexName      string   `json:"indexName" binding:"required"`
+	DeleteKeys     []string `json:"deleteKeys"`
+}
+
+func (req *DropIndexPropertiesReq) GetDbName() string { return req.DbName }
+
+func (req *DropIndexPropertiesReq) GetCollectionName() string {
+	return req.CollectionName
+}
+
+func (req *DropIndexPropertiesReq) GetIndexName() string {
 	return req.IndexName
 }
 
