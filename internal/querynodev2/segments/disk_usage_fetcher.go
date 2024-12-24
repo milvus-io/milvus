@@ -30,30 +30,34 @@ import (
 )
 
 type diskUsageFetcher struct {
-	ctx       context.Context
-	path      string
-	diskUsage *atomic.Int64
+	ctx   context.Context
+	path  string
+	usage *atomic.Int64
+	err   *atomic.Error
 }
 
 func NewDiskUsageFetcher(ctx context.Context) *diskUsageFetcher {
 	return &diskUsageFetcher{
-		ctx:       ctx,
-		path:      paramtable.Get().LocalStorageCfg.Path.GetValue(),
-		diskUsage: atomic.NewInt64(0),
+		ctx:   ctx,
+		path:  paramtable.Get().LocalStorageCfg.Path.GetValue(),
+		usage: atomic.NewInt64(0),
+		err:   atomic.NewError(nil),
 	}
 }
 
-func (d *diskUsageFetcher) GetDiskUsage() int64 {
-	return d.diskUsage.Load()
+func (d *diskUsageFetcher) GetDiskUsage() (int64, error) {
+	return d.usage.Load(), d.err.Load()
 }
 
 func (d *diskUsageFetcher) fetch() {
 	diskUsage, err := GetLocalUsedSize(d.ctx, d.path)
 	if err != nil {
 		log.Warn("failed to get disk usage", zap.Error(err))
+		d.err.Store(err)
 		return
 	}
-	d.diskUsage.Store(diskUsage)
+	d.usage.Store(diskUsage)
+	d.err.Store(nil)
 	metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(diskUsage) / 1024 / 1024) // in MB
 	log.Ctx(d.ctx).WithRateGroup("diskUsageFetcher", 1, 300).
 		RatedInfo(300, "querynode disk usage", zap.Int64("size", diskUsage), zap.Int64("nodeID", paramtable.GetNodeID()))
