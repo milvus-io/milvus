@@ -195,3 +195,13 @@ func Float32ArrayToBFloat16Bytes(fv []float32) []byte {
 	}
 	return data
 }
+
+// Int8ArrayToBytes serialize vector into byte slice, used in search placeholder
+// LittleEndian is used for convention
+func Int8ArrayToBytes(iv []int8) []byte {
+	data := make([]byte, 0, len(iv))
+	for _, i := range iv {
+		data = append(data, byte(i))
+	}
+	return data
+}

@@ -1270,7 +1270,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": [3.0],
 							"bfloat16Vector": [4.4, 442],
-							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+							"sparseFloatVector": {"1": 0.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						}
 					]
 				}`),
@@ -1289,7 +1290,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": [3, 3.0],
 							"bfloat16Vector": [4.4, 442],
-							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+							"sparseFloatVector": {"1": 0.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						}
 					]
 				}`),
@@ -1308,7 +1310,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": [3, 3],
 							"bfloat16Vector": [4.4, 442],
-							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+							"sparseFloatVector": {"1": 0.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						}
 					]
 				}`),
@@ -1326,7 +1329,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": "AQIDBA==",
 							"bfloat16Vector": "AQIDBA==",
-							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+							"sparseFloatVector": {"1": 0.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						}
 					]
 				}`),
@@ -1344,7 +1348,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": [3, 3.0, 3],
 							"bfloat16Vector": [4.4, 44],
-							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+							"sparseFloatVector": {"1": 0.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						}
 					]
 				}`),
@@ -1363,7 +1368,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": [3, 3.0],
 							"bfloat16Vector": [4.4, 442, 44],
-							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+							"sparseFloatVector": {"1": 0.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						}
 					]
 				}`),
@@ -1382,7 +1388,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": "AQIDBA==",
 							"bfloat16Vector": [4.4, 442],
-							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+							"sparseFloatVector": {"1": 0.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						},
 						{
 							"book_id": 1,
@@ -1391,7 +1398,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": [3.1, 3.1],
 							"bfloat16Vector": "AQIDBA==",
-							"sparseFloatVector": {"3": 1.1, "2": 0.44}
+							"sparseFloatVector": {"3": 1.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						}
 					]
 				}`),
