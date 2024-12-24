@@ -19,6 +19,7 @@ package milvusclient
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"testing"
 
@@ -45,13 +46,15 @@ func (s *WriteSuite) SetupSuite() {
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 		WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(128)).
 		WithField(entity.NewField().WithName("fp16_vector").WithDataType(entity.FieldTypeFloat16Vector).WithDim(128)).
-		WithField(entity.NewField().WithName("bf16_vector").WithDataType(entity.FieldTypeBFloat16Vector).WithDim(128))
+		WithField(entity.NewField().WithName("bf16_vector").WithDataType(entity.FieldTypeBFloat16Vector).WithDim(128)).
+		WithField(entity.NewField().WithName("int8_vector").WithDataType(entity.FieldTypeInt8Vector).WithDim(128))
 
 	s.schemaDyn = entity.NewSchema().WithDynamicFieldEnabled(true).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 		WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(128)).
 		WithField(entity.NewField().WithName("fp16_vector").WithDataType(entity.FieldTypeFloat16Vector).WithDim(128)).
-		WithField(entity.NewField().WithName("bf16_vector").WithDataType(entity.FieldTypeBFloat16Vector).WithDim(128))
+		WithField(entity.NewField().WithName("bf16_vector").WithDataType(entity.FieldTypeBFloat16Vector).WithDim(128)).
+		WithField(entity.NewField().WithName("int8_vector").WithDataType(entity.FieldTypeInt8Vector).WithDim(128))
 }
 
 func (s *WriteSuite) TestInsert() {
@@ -62,44 +65,6 @@ func (s *WriteSuite) TestInsert() {
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		partName := fmt.Sprintf("part_%s", s.randString(6))
 		s.setupCache(collName, s.schema)
-
-		s.mock.EXPECT().Insert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ir *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
-			s.Equal(collName, ir.GetCollectionName())
-			s.Equal(partName, ir.GetPartitionName())
-			s.Require().Len(ir.GetFieldsData(), 4)
-			s.EqualValues(3, ir.GetNumRows())
-			return &milvuspb.MutationResult{
-				Status:    merr.Success(),
-				InsertCnt: 3,
-				IDs: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: []int64{1, 2, 3},
-						},
-					},
-				},
-			}, nil
-		}).Once()
-
-		result, err := s.client.Insert(ctx, NewColumnBasedInsertOption(collName).
-			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
-				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
-			})).
-			WithFloat16VectorColumn("fp16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
-				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
-			})).
-			WithBFloat16VectorColumn("bf16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
-				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
-			})).
-			WithInt64Column("id", []int64{1, 2, 3}).WithPartition(partName))
-		s.NoError(err)
-		s.EqualValues(3, result.InsertCount)
-	})
-
-	s.Run("dynamic_schema", func() {
-		collName := fmt.Sprintf("coll_%s", s.randString(6))
-		partName := fmt.Sprintf("part_%s", s.randString(6))
-		s.setupCache(collName, s.schemaDyn)
 
 		s.mock.EXPECT().Insert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ir *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
 			s.Equal(collName, ir.GetCollectionName())
@@ -128,6 +93,50 @@ func (s *WriteSuite) TestInsert() {
 			})).
 			WithBFloat16VectorColumn("bf16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+			})).
+			WithInt8VectorColumn("int8_vector", 128, lo.RepeatBy(3, func(i int) []int8 {
+				return lo.RepeatBy(128, func(i int) int8 { return int8(rand.Intn(math.MaxUint8) - 128) })
+			})).
+			WithInt64Column("id", []int64{1, 2, 3}).WithPartition(partName))
+		s.NoError(err)
+		s.EqualValues(3, result.InsertCount)
+	})
+
+	s.Run("dynamic_schema", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		partName := fmt.Sprintf("part_%s", s.randString(6))
+		s.setupCache(collName, s.schemaDyn)
+
+		s.mock.EXPECT().Insert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ir *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+			s.Equal(collName, ir.GetCollectionName())
+			s.Equal(partName, ir.GetPartitionName())
+			s.Require().Len(ir.GetFieldsData(), 6)
+			s.EqualValues(3, ir.GetNumRows())
+			return &milvuspb.MutationResult{
+				Status:    merr.Success(),
+				InsertCnt: 3,
+				IDs: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
+			}, nil
+		}).Once()
+
+		result, err := s.client.Insert(ctx, NewColumnBasedInsertOption(collName).
+			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
+				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+			})).
+			WithFloat16VectorColumn("fp16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
+				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+			})).
+			WithBFloat16VectorColumn("bf16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
+				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+			})).
+			WithInt8VectorColumn("int8_vector", 128, lo.RepeatBy(3, func(i int) []int8 {
+				return lo.RepeatBy(128, func(i int) int8 { return int8(rand.Intn(math.MaxUint8) - 128) })
 			})).
 			WithVarcharColumn("extra", []string{"a", "b", "c"}).
 			WithInt64Column("id", []int64{1, 2, 3}).WithPartition(partName))
@@ -165,6 +174,9 @@ func (s *WriteSuite) TestInsert() {
 					})).
 					WithBFloat16VectorColumn("bf16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 						return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+					})).
+					WithInt8VectorColumn("int8_vector", 128, lo.RepeatBy(3, func(i int) []int8 {
+						return lo.RepeatBy(128, func(i int) int8 { return int8(rand.Intn(math.MaxUint8) - 128) })
 					})),
 			},
 			{
@@ -179,6 +191,9 @@ func (s *WriteSuite) TestInsert() {
 					})).
 					WithBFloat16VectorColumn("bf16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 						return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+					})).
+					WithInt8VectorColumn("int8_vector", 128, lo.RepeatBy(3, func(i int) []int8 {
+						return lo.RepeatBy(128, func(i int) int8 { return int8(rand.Intn(math.MaxUint8) - 128) })
 					})),
 			},
 		}
@@ -207,6 +222,9 @@ func (s *WriteSuite) TestInsert() {
 			WithBFloat16VectorColumn("bf16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
 			})).
+			WithInt8VectorColumn("int8_vector", 128, lo.RepeatBy(3, func(i int) []int8 {
+				return lo.RepeatBy(128, func(i int) int8 { return int8(rand.Intn(math.MaxUint8) - 128) })
+			})).
 			WithInt64Column("id", []int64{1, 2, 3}))
 		s.Error(err)
 	})
@@ -220,44 +238,6 @@ func (s *WriteSuite) TestUpsert() {
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		partName := fmt.Sprintf("part_%s", s.randString(6))
 		s.setupCache(collName, s.schema)
-
-		s.mock.EXPECT().Upsert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ur *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
-			s.Equal(collName, ur.GetCollectionName())
-			s.Equal(partName, ur.GetPartitionName())
-			s.Require().Len(ur.GetFieldsData(), 4)
-			s.EqualValues(3, ur.GetNumRows())
-			return &milvuspb.MutationResult{
-				Status:    merr.Success(),
-				UpsertCnt: 3,
-				IDs: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: []int64{1, 2, 3},
-						},
-					},
-				},
-			}, nil
-		}).Once()
-
-		result, err := s.client.Upsert(ctx, NewColumnBasedInsertOption(collName).
-			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
-				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
-			})).
-			WithFloat16VectorColumn("fp16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
-				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
-			})).
-			WithBFloat16VectorColumn("bf16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
-				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
-			})).
-			WithInt64Column("id", []int64{1, 2, 3}).WithPartition(partName))
-		s.NoError(err)
-		s.EqualValues(3, result.UpsertCount)
-	})
-
-	s.Run("dynamic_schema", func() {
-		collName := fmt.Sprintf("coll_%s", s.randString(6))
-		partName := fmt.Sprintf("part_%s", s.randString(6))
-		s.setupCache(collName, s.schemaDyn)
 
 		s.mock.EXPECT().Upsert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ur *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
 			s.Equal(collName, ur.GetCollectionName())
@@ -287,6 +267,50 @@ func (s *WriteSuite) TestUpsert() {
 			WithBFloat16VectorColumn("bf16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
 			})).
+			WithInt8VectorColumn("int8_vector", 128, lo.RepeatBy(3, func(i int) []int8 {
+				return lo.RepeatBy(128, func(i int) int8 { return int8(rand.Intn(math.MaxUint8) - 128) })
+			})).
+			WithInt64Column("id", []int64{1, 2, 3}).WithPartition(partName))
+		s.NoError(err)
+		s.EqualValues(3, result.UpsertCount)
+	})
+
+	s.Run("dynamic_schema", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		partName := fmt.Sprintf("part_%s", s.randString(6))
+		s.setupCache(collName, s.schemaDyn)
+
+		s.mock.EXPECT().Upsert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ur *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
+			s.Equal(collName, ur.GetCollectionName())
+			s.Equal(partName, ur.GetPartitionName())
+			s.Require().Len(ur.GetFieldsData(), 6)
+			s.EqualValues(3, ur.GetNumRows())
+			return &milvuspb.MutationResult{
+				Status:    merr.Success(),
+				UpsertCnt: 3,
+				IDs: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
+			}, nil
+		}).Once()
+
+		result, err := s.client.Upsert(ctx, NewColumnBasedInsertOption(collName).
+			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
+				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+			})).
+			WithFloat16VectorColumn("fp16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
+				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+			})).
+			WithBFloat16VectorColumn("bf16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
+				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+			})).
+			WithInt8VectorColumn("int8_vector", 128, lo.RepeatBy(3, func(i int) []int8 {
+				return lo.RepeatBy(128, func(i int) int8 { return int8(rand.Intn(math.MaxUint8) - 128) })
+			})).
 			WithVarcharColumn("extra", []string{"a", "b", "c"}).
 			WithInt64Column("id", []int64{1, 2, 3}).WithPartition(partName))
 		s.NoError(err)
@@ -314,6 +338,9 @@ func (s *WriteSuite) TestUpsert() {
 					})).
 					WithBFloat16VectorColumn("bf16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 						return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+					})).
+					WithInt8VectorColumn("int8_vector", 128, lo.RepeatBy(3, func(i int) []int8 {
+						return lo.RepeatBy(128, func(i int) int8 { return int8(rand.Intn(math.MaxUint8) - 128) })
 					})),
 			},
 			{
@@ -329,6 +356,9 @@ func (s *WriteSuite) TestUpsert() {
 					})).
 					WithBFloat16VectorColumn("bf16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 						return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+					})).
+					WithInt8VectorColumn("int8_vector", 128, lo.RepeatBy(3, func(i int) []int8 {
+						return lo.RepeatBy(128, func(i int) int8 { return int8(rand.Intn(math.MaxUint8) - 128) })
 					})),
 			},
 			{
@@ -343,6 +373,9 @@ func (s *WriteSuite) TestUpsert() {
 					})).
 					WithBFloat16VectorColumn("bf16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 						return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+					})).
+					WithInt8VectorColumn("int8_vector", 128, lo.RepeatBy(3, func(i int) []int8 {
+						return lo.RepeatBy(128, func(i int) int8 { return int8(rand.Intn(math.MaxUint8) - 128) })
 					})),
 			},
 		}
@@ -370,6 +403,9 @@ func (s *WriteSuite) TestUpsert() {
 			})).
 			WithBFloat16VectorColumn("bf16_vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
+			})).
+			WithInt8VectorColumn("int8_vector", 128, lo.RepeatBy(3, func(i int) []int8 {
+				return lo.RepeatBy(128, func(i int) int8 { return int8(rand.Intn(math.MaxUint8) - 128) })
 			})).
 			WithInt64Column("id", []int64{1, 2, 3}))
 		s.Error(err)
