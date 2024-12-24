@@ -24,10 +24,10 @@ func MustEnableStreamingService() {
 // EnableEmbededQueryNode set server labels for embedded query node.
 func EnableEmbededQueryNode() {
 	MustEnableStreamingService()
-	os.Setenv(sessionutil.SupportedLabelPrefix+sessionutil.LabelStreamingNodeEmbededQueryNode, "1")
+	os.Setenv(sessionutil.SupportedLabelPrefix+sessionutil.LabelStreamingNodeEmbeddedQueryNode, "1")
 }
 
 // IsEmbeddedQueryNode returns whether the current node is an embedded query node in streaming node.
 func IsEmbeddedQueryNode() bool {
-	return os.Getenv(sessionutil.SupportedLabelPrefix+sessionutil.LabelStreamingNodeEmbededQueryNode) == "1"
+	return os.Getenv(sessionutil.SupportedLabelPrefix+sessionutil.LabelStreamingNodeEmbeddedQueryNode) == "1"
 }

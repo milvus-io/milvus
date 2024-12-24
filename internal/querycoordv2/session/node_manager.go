@@ -154,7 +154,7 @@ func (n *NodeInfo) Labels() map[string]string {
 }
 
 func (n *NodeInfo) IsEmbeddedQueryNodeInStreamingNode() bool {
-	return n.immutableInfo.Labels[sessionutil.LabelStreamingNodeEmbededQueryNode] == "1"
+	return n.immutableInfo.Labels[sessionutil.LabelStreamingNodeEmbeddedQueryNode] == "1"
 }
 
 func (n *NodeInfo) SegmentCnt() int {
