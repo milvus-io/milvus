@@ -250,7 +250,7 @@ Reference to cite when you use Milvus in a research paper:
 }
 ```
 <!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-421-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-423-orange"><br>
 <a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
@@ -497,6 +497,7 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/kateshaowanjou"><img src="https://avatars.githubusercontent.com/u/58837504?v=4" width="30px" /></a>
 <a href="https://github.com/klboke"><img src="https://avatars.githubusercontent.com/u/18591662?v=4" width="30px" /></a>
 <a href="https://github.com/laipz8200"><img src="https://avatars.githubusercontent.com/u/16485841?v=4" width="30px" /></a>
+<a href="https://github.com/laurazhao0611"><img src="https://avatars.githubusercontent.com/u/192320184?v=4" width="30px" /></a>
 <a href="https://github.com/lee-eve"><img src="https://avatars.githubusercontent.com/u/9720105?v=4" width="30px" /></a>
 <a href="https://github.com/lentitude2tk"><img src="https://avatars.githubusercontent.com/u/108672767?v=4" width="30px" /></a>
 <a href="https://github.com/leonardokidd"><img src="https://avatars.githubusercontent.com/u/14940941?v=4" width="30px" /></a>
@@ -671,5 +672,6 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/zhoubo0317"><img src="https://avatars.githubusercontent.com/u/51948620?v=4" width="30px" /></a>
 <a href="https://github.com/zhuwenxing"><img src="https://avatars.githubusercontent.com/u/12268675?v=4" width="30px" /></a>
 <a href="https://github.com/zhuyaguang"><img src="https://avatars.githubusercontent.com/u/8857976?v=4" width="30px" /></a>
+<a href="https://github.com/zjjzyl"><img src="https://avatars.githubusercontent.com/u/6939141?v=4" width="30px" /></a>
 <a href="https://github.com/zxf2017"><img src="https://avatars.githubusercontent.com/u/29620478?v=4" width="30px" /></a>
 <!-- Do not remove end of hero-bot -->
