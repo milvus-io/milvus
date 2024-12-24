@@ -665,6 +665,39 @@ class HighLevelApiWrapper:
                                        object_name=object_name, db_name=db_name, **kwargs).run()
         return res, check_result
 
+    def create_privilege_group(self, privilege_group: str, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.create_privilege_group, privilege_group], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def drop_privilege_group(self, privilege_group: str, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.drop_privilege_group, privilege_group], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def list_privilege_groups(self, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.list_privilege_groups], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def add_privileges_to_group(self, privilege_group: str, privileges: list, check_task=None, check_items=None,
+                                **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.add_privileges_to_group, privilege_group, privileges], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def remove_privileges_from_group(self, privilege_group: str, privileges: list, check_task=None, check_items=None,
+                                     **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.remove_privileges_from_group, privilege_group, privileges],
+                                 **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
     @trace()
     def alter_index_properties(self, client, collection_name, index_name, properties, timeout=None,
                                check_task=None, check_items=None, **kwargs):
@@ -784,8 +817,4 @@ class HighLevelApiWrapper:
         res, check = api_request([client.list_databases], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
-
-
-
-
 
