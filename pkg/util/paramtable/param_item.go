@@ -396,39 +396,3 @@ func getAndConvert[T any](v string, converter func(input string) (T, error), def
 	}
 	return t
 }
-
-type RuntimeParamItem struct {
-	value atomic.Value
-}
-
-func (rpi *RuntimeParamItem) GetValue() any {
-	return rpi.value.Load()
-}
-
-func (rpi *RuntimeParamItem) GetAsString() string {
-	value, ok := rpi.value.Load().(string)
-	if !ok {
-		return ""
-	}
-	return value
-}
-
-func (rpi *RuntimeParamItem) GetAsTime() time.Time {
-	value, ok := rpi.value.Load().(time.Time)
-	if !ok {
-		return time.Time{}
-	}
-	return value
-}
-
-func (rpi *RuntimeParamItem) GetAsInt64() int64 {
-	value, ok := rpi.value.Load().(int64)
-	if !ok {
-		return 0
-	}
-	return value
-}
-
-func (rpi *RuntimeParamItem) SetValue(value any) {
-	rpi.value.Store(value)
-}
