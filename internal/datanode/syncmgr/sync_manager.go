@@ -127,6 +127,10 @@ func (mgr *syncManager) safeSubmitTask(task Task, callbacks ...func(error) error
 
 func (mgr *syncManager) submit(key int64, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 	handler := func(err error) error {
+		taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
+		defer func() {
+			mgr.tasks.Remove(taskKey)
+		}()
 		if err == nil {
 			return nil
 		}
