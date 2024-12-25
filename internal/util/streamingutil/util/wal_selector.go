@@ -22,8 +22,8 @@ type walEnable struct {
 
 // MustSelectWALName select wal name.
 func MustSelectWALName() string {
+	standalone := paramtable.GetRole() == typeutil.StandaloneRole
 	params := paramtable.Get()
-	standalone := params.RuntimeConfig.Role.GetAsString() == typeutil.StandaloneRole
 	return mustSelectWALName(standalone, params.MQCfg.Type.GetValue(), walEnable{
 		params.RocksmqEnable(),
 		params.PulsarEnable(),
