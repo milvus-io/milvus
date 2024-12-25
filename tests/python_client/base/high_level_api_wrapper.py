@@ -1,5 +1,7 @@
 import sys
 import time
+from typing import Optional
+
 import timeout_decorator
 from numpy import NaN
 
@@ -38,6 +40,13 @@ class HighLevelApiWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
                                        uri=uri, user=user, password=password, db_name=db_name, token=token,
                                        timeout=timeout, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def close(self, client, check_task=None, check_items=None):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([client.close])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ).run()
         return res, check_result
 
     @trace()
@@ -101,6 +110,17 @@ class HighLevelApiWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        collection_name=collection_name, data=data,
                                        **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def get_collection_stats(self, client, collection_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.get_collection_stats, collection_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       collection_name=collection_name, **kwargs).run()
         return res, check_result
 
     @trace()
@@ -312,6 +332,16 @@ class HighLevelApiWrapper:
                                        check_items, check,
                                        old_name=old_name,
                                        new_name=new_name,
+                                       **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def create_database(self, client, db_name, properties: Optional[dict] = None, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.create_database, db_name, properties], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, check,
+                                       db_name=db_name, properties=properties,
                                        **kwargs).run()
         return res, check_result
 
@@ -665,6 +695,39 @@ class HighLevelApiWrapper:
                                        object_name=object_name, db_name=db_name, **kwargs).run()
         return res, check_result
 
+    def create_privilege_group(self, privilege_group: str, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.create_privilege_group, privilege_group], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def drop_privilege_group(self, privilege_group: str, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.drop_privilege_group, privilege_group], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def list_privilege_groups(self, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.list_privilege_groups], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def add_privileges_to_group(self, privilege_group: str, privileges: list, check_task=None, check_items=None,
+                                **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.add_privileges_to_group, privilege_group, privileges], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def remove_privileges_from_group(self, privilege_group: str, privileges: list, check_task=None, check_items=None,
+                                     **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.milvus_client.remove_privileges_from_group, privilege_group, privileges],
+                                 **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
     @trace()
     def alter_index_properties(self, client, collection_name, index_name, properties, timeout=None,
                                check_task=None, check_items=None, **kwargs):
@@ -784,8 +847,4 @@ class HighLevelApiWrapper:
         res, check = api_request([client.list_databases], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
-
-
-
-
 

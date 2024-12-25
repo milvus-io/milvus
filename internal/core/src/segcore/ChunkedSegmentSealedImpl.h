@@ -119,10 +119,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     get_schema() const override;
 
     std::vector<SegOffset>
-    search_pk(const PkType& pk, Timestamp timestamp) const;
+    search_pk(const PkType& pk, Timestamp timestamp) const override;
 
     std::vector<SegOffset>
-    search_pk(const PkType& pk, int64_t insert_barrier) const;
+    search_pk(const PkType& pk, int64_t insert_barrier) const override;
 
     template <typename Condition>
     std::vector<SegOffset>
@@ -201,7 +201,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     is_mmap_field(FieldId id) const override;
 
     void
-    ClearData();
+    ClearData() override;
 
  protected:
     // blob and row_count
@@ -340,7 +340,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadScalarIndex(const LoadIndexInfo& info);
 
-    virtual void
+    void
     WarmupChunkCache(const FieldId field_id, bool mmap_enabled) override;
 
     bool

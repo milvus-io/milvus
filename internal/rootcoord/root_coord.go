@@ -638,50 +638,6 @@ func (c *Core) initPublicRolePrivilege() error {
 	return nil
 }
 
-func (c *Core) initBuiltinPrivilegeGroups() []*milvuspb.PrivilegeGroupInfo {
-	// init built in privilege groups, override by config if rbac config enabled
-	builtinGroups := make([]*milvuspb.PrivilegeGroupInfo, 0)
-	for groupName, privileges := range util.BuiltinPrivilegeGroups {
-		if Params.RbacConfig.Enabled.GetAsBool() {
-			var confPrivs []string
-			switch groupName {
-			case "ClusterReadOnly":
-				confPrivs = Params.RbacConfig.ClusterReadOnlyPrivileges.GetAsStrings()
-			case "ClusterReadWrite":
-				confPrivs = Params.RbacConfig.ClusterReadWritePrivileges.GetAsStrings()
-			case "ClusterAdmin":
-				confPrivs = Params.RbacConfig.ClusterAdminPrivileges.GetAsStrings()
-			case "DatabaseReadOnly":
-				confPrivs = Params.RbacConfig.DBReadOnlyPrivileges.GetAsStrings()
-			case "DatabaseReadWrite":
-				confPrivs = Params.RbacConfig.DBReadWritePrivileges.GetAsStrings()
-			case "DatabaseAdmin":
-				confPrivs = Params.RbacConfig.DBAdminPrivileges.GetAsStrings()
-			case "CollectionReadOnly":
-				confPrivs = Params.RbacConfig.CollectionReadOnlyPrivileges.GetAsStrings()
-			case "CollectionReadWrite":
-				confPrivs = Params.RbacConfig.CollectionReadWritePrivileges.GetAsStrings()
-			case "CollectionAdmin":
-				confPrivs = Params.RbacConfig.CollectionAdminPrivileges.GetAsStrings()
-			default:
-				return nil
-			}
-			if len(confPrivs) > 0 {
-				privileges = confPrivs
-			}
-		}
-
-		privs := lo.Map(privileges, func(name string, _ int) *milvuspb.PrivilegeEntity {
-			return &milvuspb.PrivilegeEntity{Name: name}
-		})
-		builtinGroups = append(builtinGroups, &milvuspb.PrivilegeGroupInfo{
-			GroupName:  groupName,
-			Privileges: privs,
-		})
-	}
-	return builtinGroups
-}
-
 func (c *Core) initBuiltinRoles() error {
 	log := log.Ctx(c.ctx)
 	rolePrivilegesMap := Params.RoleCfg.Roles.GetAsRoleDetails()
@@ -2648,7 +2604,7 @@ func (c *Core) isValidPrivilege(ctx context.Context, privilegeName string, objec
 	if customPrivGroup {
 		return fmt.Errorf("can not operate the custom privilege group [%s]", privilegeName)
 	}
-	if lo.Contains(lo.Keys(util.BuiltinPrivilegeGroups), privilegeName) {
+	if lo.Contains(Params.RbacConfig.GetDefaultPrivilegeGroupNames(), privilegeName) {
 		return fmt.Errorf("can not operate the built-in privilege group [%s]", privilegeName)
 	}
 	// check object privileges for built-in privileges
@@ -2757,7 +2713,7 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 		grants := []*milvuspb.GrantEntity{in.Entity}
 
 		allGroups, err := c.meta.ListPrivilegeGroups(ctx)
-		allGroups = append(allGroups, c.initBuiltinPrivilegeGroups()...)
+		allGroups = append(allGroups, Params.RbacConfig.GetDefaultPrivilegeGroups()...)
 		if err != nil {
 			return nil, err
 		}
@@ -3243,16 +3199,7 @@ func (c *Core) ListPrivilegeGroups(ctx context.Context, in *milvuspb.ListPrivile
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	// append built in privilege groups
-	for groupName, privileges := range util.BuiltinPrivilegeGroups {
-		privGroups = append(privGroups, &milvuspb.PrivilegeGroupInfo{
-			GroupName: groupName,
-			Privileges: lo.Map(privileges, func(p string, _ int) *milvuspb.PrivilegeEntity {
-				return &milvuspb.PrivilegeEntity{
-					Name: p,
-				}
-			}),
-		})
-	}
+	privGroups = append(privGroups, Params.RbacConfig.GetDefaultPrivilegeGroups()...)
 	return &milvuspb.ListPrivilegeGroupsResponse{
 		Status:          merr.Success(),
 		PrivilegeGroups: privGroups,
