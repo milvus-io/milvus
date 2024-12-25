@@ -18,7 +18,6 @@ package compaction
 
 import (
 	"context"
-	"math"
 	"testing"
 	"time"
 

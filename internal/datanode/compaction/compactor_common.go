@@ -82,7 +82,11 @@ func (filter *EntityFilter) GetDeltalogDeleteCount() int {
 }
 
 func (filter *EntityFilter) GetMissingDeleteCount() int {
-	return filter.GetDeltalogDeleteCount() - filter.GetDeletedCount()
+	diff := filter.GetDeltalogDeleteCount() - filter.GetDeletedCount()
+	if diff < 0 {
+		diff = 0
+	}
+	return diff
 }
 
 func (filter *EntityFilter) isEntityDeleted(pk interface{}, pkTs typeutil.Timestamp) bool {
@@ -148,9 +152,8 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, dpaths map[typeutil.Uni
 		}
 	}
 
-	log.Info("compact mergeDeltalogs end", zap.Int("delete entries counts", len(pk2Ts)))
-
-	return pk2Ts, nil
+	log.Info("compact mergeDeltalogs end", zap.Int("delete entries counts", len(pk2ts)))
+	return pk2ts, nil
 }
 
 func composePaths(segments []*datapb.CompactionSegmentBinlogs) (map[typeutil.UniqueID][]string, [][]string, error) {

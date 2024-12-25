@@ -175,7 +175,7 @@ func (t *mixCompactionTask) mergeSplit(
 				}
 			}
 			v := iter.Value()
-			if entityFilter.Filtered(v, typeutil.Timestamp(v.Timestamp)) {
+			if entityFilter.Filtered(v.PK.GetValue(), typeutil.Timestamp(v.Timestamp)) {
 				continue
 			}
 
