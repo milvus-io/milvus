@@ -2712,8 +2712,7 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 		}
 		grants := []*milvuspb.GrantEntity{in.Entity}
 
-		allGroups, err := c.meta.ListPrivilegeGroups(ctx)
-		allGroups = append(allGroups, Params.RbacConfig.GetDefaultPrivilegeGroups()...)
+		allGroups, err := c.getPrivilegeGroups(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -2901,18 +2900,34 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
-	userRoles, err := c.meta.ListUserRole(ctx, util.DefaultTenant)
+	// expand privilege groups and turn to policies
+	allGroups, err := c.getPrivilegeGroups(ctx)
 	if err != nil {
-		errMsg := "fail to list user-role"
-		ctxLog.Warn(errMsg, zap.Any("in", in), zap.Error(err))
+		errMsg := "fail to get privilege groups"
+		ctxLog.Warn(errMsg, zap.Error(err))
 		return &internalpb.ListPolicyResponse{
 			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
-	privGroups, err := c.meta.ListPrivilegeGroups(ctx)
+	groups := lo.SliceToMap(allGroups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
+		return group.GroupName, group.Privileges
+	})
+	expandGrants, err := c.expandPrivilegeGroups(ctx, policies, groups)
 	if err != nil {
-		errMsg := "fail to list privilege groups"
+		errMsg := "fail to expand privilege groups"
 		ctxLog.Warn(errMsg, zap.Error(err))
+		return &internalpb.ListPolicyResponse{
+			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
+		}, nil
+	}
+	expandPolicies := lo.Map(expandGrants, func(r *milvuspb.GrantEntity, _ int) string {
+		return funcutil.PolicyForPrivilege(r.Role.Name, r.Object.Name, r.ObjectName, r.Grantor.Privilege.Name, r.DbName)
+	})
+
+	userRoles, err := c.meta.ListUserRole(ctx, util.DefaultTenant)
+	if err != nil {
+		errMsg := "fail to list user-role"
+		ctxLog.Warn(errMsg, zap.Any("in", in), zap.Error(err))
 		return &internalpb.ListPolicyResponse{
 			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
@@ -2923,9 +2938,9 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &internalpb.ListPolicyResponse{
 		Status:          merr.Success(),
-		PolicyInfos:     policies,
+		PolicyInfos:     expandPolicies,
 		UserRoles:       userRoles,
-		PrivilegeGroups: privGroups,
+		PrivilegeGroups: allGroups,
 	}, nil
 }
 
@@ -3396,4 +3411,14 @@ func (c *Core) expandPrivilegeGroups(ctx context.Context, grants []*milvuspb.Gra
 	return lo.UniqBy(newGrants, func(g *milvuspb.GrantEntity) string {
 		return fmt.Sprintf("%s-%s-%s-%s-%s-%s", g.Role, g.Object, g.ObjectName, g.Grantor.User, g.Grantor.Privilege.Name, g.DbName)
 	}), nil
+}
+
+// getPrivilegeGroups returns default privilege groups and user-defined privilege groups.
+func (c *Core) getPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
+	allGroups, err := c.meta.ListPrivilegeGroups(ctx)
+	allGroups = append(allGroups, Params.RbacConfig.GetDefaultPrivilegeGroups()...)
+	if err != nil {
+		return nil, err
+	}
+	return allGroups, nil
 }
