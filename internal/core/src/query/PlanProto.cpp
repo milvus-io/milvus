@@ -67,8 +67,14 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             }
             if (!search_info.iterative_filter_execution &&
                 search_info.search_params_.contains(HINTS)) {
-                search_info.iterative_filter_execution =
-                    (search_info.search_params_[HINTS] == ITERATIVE_FILTER);
+                if (search_info.search_params_[HINTS] == ITERATIVE_FILTER) {
+                    search_info.iterative_filter_execution = true;
+                } else {
+                    // check if hints is valid
+                    PanicInfo(ConfigInvalid,
+                              "hints: {} not supported",
+                              search_info.search_params_[HINTS]);
+                }
             }
         }
 
