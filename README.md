@@ -8,11 +8,11 @@
 
 ## What is Milvus?
 
-[Milvus](https://milvus.io/) is a high-performance vector database built for scale. It is used by AI applications to organize and search through large amount of unstructured data, such as text, images, and multi-modal information.
+🐦 [Milvus](https://milvus.io/) is a high-performance vector database built for scalability. It powers AI applications by efficiently organizing and searching vast amounts of unstructured data, such as text, images, and multi-modal information.
 
-Milvus is implemented with Go and C++ and employs CPU/GPU instruction-level optimization for best vector search performance. With [fully-distributed architecture on K8s](https://milvus.io/docs/overview.md#What-Makes-Milvus-so-Scalable), it can handle tens of thousands of search queries on billions of vectors, scale horizontally and maintain data freshness by processing streaming updates in real-time. For smaller use cases, Milvus supports [Standalone mode](https://milvus.io/docs/install_standalone-docker.md) that can run on Docker. In addition, [Milvus Lite](https://milvus.io/docs/milvus_lite.md) is a lightweight version suitable for quickstart in python, with simply `pip install`.
+🧑‍💻 Written in Go and C++, Milvus implements hardware accelaration for CPU/GPU to achieve best-in-class vector search performance. Thanks to its [fully-distributed and K8s-native architecture](https://milvus.io/docs/overview.md#What-Makes-Milvus-so-Scalable), Milvus can scale horizontally, handle tens of thousands of search queries on billions of vectors, and keep data fresh with real-time streaming updates. Milvus also supports [Standalone mode](https://milvus.io/docs/install_standalone-docker.md) for single machine deployment. [Milvus Lite](https://milvus.io/docs/milvus_lite.md) is a lightweight version good for quickstart in python with `pip install`.
 
-The easiest way to try out Milvus is to use [Zilliz Cloud with free trial](https://cloud.zilliz.com/signup). Milvus is available as a fully managed service on [Zilliz Cloud](https://zilliz.com/cloud), with Serverless, Dedicated and BYOC options available.
+Want to use Milvus with zero setup? Try out [Zilliz Cloud ☁️ for free](https://cloud.zilliz.com/signup?utm_source=partner&utm_medium=referral&utm_campaign=2024-11-04_web_github-readme_global). Milvus is available as a fully managed service on Zilliz Cloud, with [Serverless](https://zilliz.com/serverless?utm_source=partner&utm_medium=referral&utm_campaign=2024-11-04_web_github-readme_global), [Dedicated](https://zilliz.com/cloud?utm_source=partner&utm_medium=referral&utm_campaign=2024-11-04_web_github-readme_global) and [BYOC](https://zilliz.com/bring-your-own-cloud?utm_source=partner&utm_medium=referral&utm_campaign=2024-11-04_web_github-readme_global) options available.
 
 The Milvus open-source project is
 under [LF AI & Data Foundation](https://lfaidata.foundation/projects/milvus/), distributed with [Apache 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) License.
@@ -68,7 +68,7 @@ res = client.search(
 
 ## Why Milvus
 
-Milvus is designed to handle vector search at scale. Users can store vectors, which are numerical representations of unstructured data, together with other scalar data types such as integers, strings, and JSON objects, to conduct efficient vector search with metadata filtering or hybrid search. Here are why users choose Milvus as vector database:
+Milvus is designed to handle vector search at scale. It stores vectors, which are learned representations of unstructured data, together with other scalar data types such as integers, strings, and JSON objects. Users can conduct efficient vector search with metadata filtering or hybrid search. Here are why developers choose Milvus as the vector database for AI applications:
 
 **High Performance at Scale and High Availability**  
   * Milvus features a [distributed architecture](https://milvus.io/docs/architecture_overview.md ) that separates [compute](https://milvus.io/docs/data_processing.md#Data-query) and [storage](https://milvus.io/docs/data_processing.md#Data-insertion). Milvus can horizontally scale and adapt to diverse traffic patterns, achieving optimal performance by independently increasing query nodes for read-heavy workload and data node for write-heavy workload. The stateless microservices on K8s allow [quick recovery](https://milvus.io/docs/coordinator_ha.md#Coordinator-HA) from failure, ensuring high availability. The support for [replicas](https://milvus.io/docs/replica.md) further enhances fault tolerance and throughput by loading data segments on multiple query nodes. See [benchmark](https://zilliz.com/vector-database-benchmark-tool) for performance comparison.
@@ -79,10 +79,10 @@ Milvus is designed to handle vector search at scale. Users can store vectors, wh
 
 
 **Flexible Multi-tenancy and Hot/Cold Storage**
-  * Milvus supports [multi-tenancy](https://milvus.io/docs/multi_tenancy.md#Multi-tenancy-strategies) with flexible strategies for organizing data in AI applications such as Retrieval-Augmented Generation (RAG). By using databases, collections, partitions, and partition keys, Milvus can handle hundreds to millions of tenants in a single instance. This helps businesses to save resources while handling many tenant, ensuring data isolation, optimized search performance, and flexible access control. Incorporating hot/cold data storage further enhances cost efficiency and performance. Users can config storing frequently accessed hot data on memory or SSD for better performance while less accessed cold data is kept on cost-effective, slower storage. This separation optimizes resource allocation, reduces costs, and maintains high performance for critical tasks. By combining flexible multi-tenancy with hot/cold storage, Milvus helps businesses scale, optimize resources, and manage data efficiently, leading to significant cost savings while still keep high performance.
+  * Milvus supports [multi-tenancy](https://milvus.io/docs/multi_tenancy.md#Multi-tenancy-strategies) through isolation at database, collection, partition, or partition key level. The flexible strategies allow a single cluster to handle hundreds to millions of tenants, also ensures optimized search performance and flexible access control. Milvus enhances cost-effectiveness with hot/cold storage. Frequently accessed hot data can be stored in memory or on SSDs for better performance, while less-accessed cold data is kept on slower, cost-effective storage. This mechanism can significantly reduce costs while maintaining high performance for critical tasks.
 
 **Sparse Vector for Full Text Search and Hybrid Search**
-  * Milvus supports full text search with [sparse vector](https://milvus.io/docs/sparse_vector.md). Users can combine sparse vector and dense vector in the same collection, and define functions to rerank results from multiple search requests. For details, refer to [Hybrid Search](https://milvus.io/docs/multi-vector-search.md).
+  * In addition to semantic search through dense vector, Milvus also natively supports [full text search](https://milvus.io/docs/full-text-search.md) with BM25 as well as learned sparse embedding such as SPLADE and BGE-M3. Users can store sparse vector and dense vector in the same collection, and define functions to rerank results from multiple search requests. See examples of [Hybrid Search with semantic search + full text search](https://milvus.io/docs/full_text_search_with_milvus.md).
 
 **Data Security and Fine-grain Access Control**
   * Milvus ensures data security by implementing mandatory user authentication, TLS encryption, and Role-Based Access Control (RBAC). User authentication ensures that only authorized users with valid credentials can access the database, while TLS encryption secures all communications within the network. Additionally, RBAC allows for fine-grained access control by assigning specific permissions to users based on their roles. These features make Milvus a robust and secure choice for enterprise applications, protecting sensitive data from unauthorized access and potential breaches.
@@ -210,20 +210,18 @@ For full instructions, see [developer's documentation](https://github.com/milvus
 
 Join the Milvus community on [Discord](https://discord.gg/8uyFbECzPX) to share your suggestions, advice, and questions with our engineering team.
 
-You can also check out our [FAQ page](https://milvus.io/docs/performance_faq.md) to discover solutions or answers to your issues or questions.
-
-Subscribe to Milvus mailing lists:
-
-- [Technical Steering Committee](https://lists.lfai.foundation/g/milvus-tsc)
-- [Technical Discussions](https://lists.lfai.foundation/g/milvus-technical-discuss)
-- [Announcement](https://lists.lfai.foundation/g/milvus-announce)
-
-Follow Milvus on social media:
+To learn latest news about Milvus, follow us on social media:
 
 - [X](https://twitter.com/milvusio)
 - [LinkedIn](https://www.linkedin.com/company/the-milvus-project)
 - [Youtube](https://www.youtube.com/channel/UCMCo_F7pKjMHBlfyxwOPw-g)
 - [Medium](https://medium.com/@milvusio)
+
+You can also check out our [FAQ page](https://milvus.io/docs/performance_faq.md) to discover solutions or answers to your issues or questions, and subscribe to Milvus mailing lists:
+
+- [Technical Steering Committee](https://lists.lfai.foundation/g/milvus-tsc)
+- [Technical Discussions](https://lists.lfai.foundation/g/milvus-technical-discuss)
+- [Announcement](https://lists.lfai.foundation/g/milvus-announce)
 
 ## Reference
 
