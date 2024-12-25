@@ -83,6 +83,10 @@ func (v *BasePlanVisitor) VisitAddSub(ctx *AddSubContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitPhraseMatch(ctx *PhraseMatchContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitRelational(ctx *RelationalContext) interface{} {
 	return v.VisitChildren(ctx)
 }

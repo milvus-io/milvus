@@ -19,6 +19,7 @@ enum OpType {
   In = 11;          // TODO:: used for term expr
   NotIn = 12;
   TextMatch = 13;   // text match
+  PhraseMatch = 14; // phrase match
 };
 
 enum ArithOpType {

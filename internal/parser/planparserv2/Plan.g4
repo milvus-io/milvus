@@ -13,6 +13,7 @@ expr:
 	| EmptyArray                                                                 # EmptyArray
 	| expr LIKE StringLiteral                                                    # Like
 	| TEXTMATCH'('Identifier',' StringLiteral')'                                 # TextMatch
+	| PHRASEMATCH'('Identifier',' StringLiteral')'                               # PhraseMatch
 	| expr POW expr											                     # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                     # Unary
 //	| '(' typeName ')' expr									                     # Cast
@@ -58,6 +59,7 @@ NE: '!=';
 LIKE: 'like' | 'LIKE';
 EXISTS: 'exists' | 'EXISTS';
 TEXTMATCH: 'text_match'|'TEXT_MATCH';
+PHRASEMATCH: 'phrase_match'|'PHRASE_MATCH';
 
 ADD: '+';
 SUB: '-';

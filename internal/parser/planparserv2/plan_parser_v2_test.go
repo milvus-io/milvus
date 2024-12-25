@@ -231,6 +231,28 @@ func TestExpr_TextMatch(t *testing.T) {
 	}
 }
 
+func TestExpr_PhraseMatch(t *testing.T) {
+	schema := newTestSchema()
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	exprStrs := []string{
+		`phrase_match(VarCharField, "phrase")`,
+		`phrase_match(StringField, "phrase")`,
+	}
+	for _, exprStr := range exprStrs {
+		assertValidExpr(t, helper, exprStr)
+	}
+
+	unsupported := []string{
+		`phrase_match(not_exist, "phrase")`,
+		`phrase_match(BoolField, "phrase")`,
+	}
+	for _, exprStr := range unsupported {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
 func TestExpr_BinaryRange(t *testing.T) {
 	schema := newTestSchema()
 	helper, err := typeutil.CreateSchemaHelper(schema)
