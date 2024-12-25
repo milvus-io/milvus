@@ -94,15 +94,25 @@ class OperatorContext {
 class Operator {
  public:
     Operator(DriverContext* ctx,
-             DataType output_type,
+             RowTypePtr output_type,
              int32_t operator_id,
              const std::string& plannode_id,
              const std::string& operator_type = "")
         : operator_context_(std::make_unique<OperatorContext>(
-              ctx, plannode_id, operator_id, operator_type)) {
+              ctx, plannode_id, operator_id, operator_type)),
+          output_type_(output_type) {
     }
 
     virtual ~Operator() = default;
+
+    /// Does initialization work for this operator which requires memory
+    /// allocation from memory pool that can't be done under operator constructor.
+    ///
+    /// NOTE: the default implementation set 'initialized_' to true to ensure we
+    /// never call this more than once. The overload initialize() implementation
+    /// must call this base implementation first.
+    virtual void
+    initialize();
 
     virtual bool
     NeedInput() const = 0;
@@ -122,7 +132,7 @@ class Operator {
     IsFinished() = 0;
 
     virtual bool
-    IsFilter() = 0;
+    IsFilter() const = 0;
 
     virtual BlockingReason
     IsBlocked(ContinueFuture* future) = 0;
@@ -158,10 +168,15 @@ class Operator {
         return "Base Operator";
     }
 
+    virtual const RowTypePtr&
+    OutputType() const {
+        return output_type_;
+    }
+
  protected:
     std::unique_ptr<OperatorContext> operator_context_;
 
-    DataType output_type_;
+    RowTypePtr output_type_;
 
     RowVectorPtr input_;
 
@@ -173,7 +188,7 @@ class Operator {
 class SourceOperator : public Operator {
  public:
     SourceOperator(DriverContext* driver_ctx,
-                   DataType out_type,
+                   RowTypePtr out_type,
                    int32_t operator_id,
                    const std::string& plannode_id,
                    const std::string& operator_type)

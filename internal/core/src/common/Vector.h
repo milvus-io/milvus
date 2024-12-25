@@ -26,6 +26,8 @@
 #include "common/Types.h"
 
 namespace milvus {
+class BaseVector;
+using VectorPtr = std::shared_ptr<BaseVector>;
 
 /**
  * @brief base class for different type vector  
@@ -41,14 +43,39 @@ class BaseVector {
     virtual ~BaseVector() = default;
 
     int64_t
-    size() {
+    size() const {
         return length_;
     }
 
     DataType
-    type() {
+    type() const {
         return type_kind_;
     }
+
+    int32_t
+    elementSize() const {
+        return GetDataTypeSize(type_kind_);
+    };
+
+    size_t
+    nullCount() const {
+        return null_count_.has_value() ? null_count_.value() : 0;
+    }
+
+    virtual void
+    resize(vector_size_t newSize, bool setNotNull = true) {
+        length_ = newSize;
+    }
+
+    static void
+    prepareForReuse(VectorPtr& vector, vector_size_t size);
+
+    /// Resets non-reusable buffers and updates child vectors by calling
+    /// BaseVector::prepareForReuse.
+    /// Base implementation checks and resets nulls buffer if needed. Keeps the
+    /// nulls buffer if singly-referenced, mutable and has at least one null bit set.
+    virtual void
+    prepareForReuse();
 
  protected:
     DataType type_kind_;
@@ -56,8 +83,6 @@ class BaseVector {
     // todo: use null_count to skip some bitset operate
     std::optional<size_t> null_count_;
 };
-
-using VectorPtr = std::shared_ptr<BaseVector>;
 
 /**
  * SimpleVector abstracts over various Columnar Storage Formats,
@@ -110,6 +135,13 @@ class ColumnVector final : public SimpleVector {
                                                              std::move(bitmap));
     }
 
+    ColumnVector(FieldDataPtr&& value, TargetBitmap&& valid_bitmap)
+        : SimpleVector(value->get_data_type(), value->Length()),
+          is_bitmap_(false),
+          valid_values_(std::move(valid_bitmap)) {
+        values_ = std::move(value);
+    }
+
     virtual ~ColumnVector() override {
         values_.reset();
         valid_values_.reset();
@@ -118,6 +150,28 @@ class ColumnVector final : public SimpleVector {
     void*
     RawValueAt(size_t index, size_t size_of_element) override {
         return reinterpret_cast<char*>(GetRawData()) + index * size_of_element;
+    }
+
+    template <typename T>
+    T
+    ValueAt(size_t index) const {
+        return *(reinterpret_cast<T*>(GetRawData()) + index);
+    }
+
+    template <typename T>
+    void
+    SetValueAt(size_t index, const T& value) {
+        *(reinterpret_cast<T*>(values_->Data()) + index) = value;
+    }
+
+    void
+    nullAt(size_t index) {
+        valid_values_.set(index, false);
+    }
+
+    void
+    clearNullAt(size_t index) {
+        valid_values_.set(index, true);
     }
 
     bool
@@ -144,6 +198,19 @@ class ColumnVector final : public SimpleVector {
     bool
     IsBitmap() const {
         return is_bitmap_;
+    }
+
+    void
+    resize(vector_size_t new_size, bool setNotNull = true) override {
+        AssertInfo(!is_bitmap_, "Cannot resize bitmap column vector");
+        BaseVector::resize(new_size, setNotNull);
+        ResizeScalarFieldData(type(), new_size, values_);
+        valid_values_.resize(new_size);
+    }
+
+    void
+    append(const ColumnVector& other) {
+        values_->FillFieldData(other.GetRawData(), other.size());
     }
 
  private:
@@ -226,6 +293,18 @@ class RowVector : public BaseVector {
         }
     }
 
+    RowVector(const RowTypePtr& rowType,
+              size_t size,
+              std::optional<size_t> nullCount = std::nullopt)
+        : BaseVector(DataType::ROW, size, nullCount) {
+        auto column_count = rowType->column_count();
+        for (auto i = 0; i < column_count; i++) {
+            auto column_type = rowType->column_type(i);
+            children_values_.emplace_back(
+                std::make_shared<ColumnVector>(column_type, size));
+        }
+    }
+
     const std::vector<VectorPtr>&
     childrens() const {
         return children_values_;
@@ -236,6 +315,9 @@ class RowVector : public BaseVector {
         assert(index < children_values_.size());
         return children_values_[index];
     }
+
+    void
+    resize(vector_size_t new_size, bool setNotNull = true) override;
 
  private:
     std::vector<VectorPtr> children_values_;
