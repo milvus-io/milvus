@@ -553,7 +553,7 @@ message CompactionPlan {
   CompactionType type = 5;
   uint64 timetravel = 6;
   string channel = 7;
-  int64 collection_ttl = 8;
+  int64 collection_ttl = 8; // nanoseconds
   int64 total_rows = 9;
   schema.CollectionSchema schema = 10;
   int64 clustering_key_field = 11;
