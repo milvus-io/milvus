@@ -774,12 +774,6 @@ func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateO
 			return false
 		}
 
-		if segment.GetState() == status {
-			log.Ctx(context.TODO()).Info("meta update: segment stats already is target state",
-				zap.Int64("segmentID", segmentID), zap.String("status", status.String()))
-			return false
-		}
-
 		updateSegStateAndPrepareMetrics(segment, status, modPack.metricMutation)
 		if status == commonpb.SegmentState_Dropped {
 			segment.DroppedAt = uint64(time.Now().UnixNano())

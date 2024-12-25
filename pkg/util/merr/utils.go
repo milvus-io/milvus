@@ -1179,14 +1179,6 @@ func WrapErrClusteringCompactionMetaError(operation string, err error) error {
 	return wrapFieldsWithDesc(ErrClusteringCompactionMetaError, err.Error(), value("operation", operation))
 }
 
-func WrapErrCleanPartitionStatsFail(msg ...string) error {
-	err := error(ErrCleanPartitionStatsFail)
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "->"))
-	}
-	return err
-}
-
 func WrapErrAnalyzeTaskNotFound(id int64) error {
 	return wrapFields(ErrAnalyzeTaskNotFound, value("analyzeId", id))
 }

@@ -44,7 +44,7 @@ type l0CompactionTask struct {
 }
 
 // Note: return True means exit this state machine.
-// ONLY return True for Completed, Failed
+// ONLY return True for processCompleted or processFailed
 func (t *l0CompactionTask) Process() bool {
 	switch t.GetState() {
 	case datapb.CompactionTaskState_pipelining:
@@ -55,6 +55,8 @@ func (t *l0CompactionTask) Process() bool {
 		return t.processMetaSaved()
 	case datapb.CompactionTaskState_completed:
 		return t.processCompleted()
+	case datapb.CompactionTaskState_failed:
+		return t.processFailed()
 	}
 	return true
 }
@@ -75,7 +77,7 @@ func (t *l0CompactionTask) processPipelining() bool {
 			return false
 		}
 
-		return true
+		return t.processFailed()
 	}
 
 	err = t.sessions.Compaction(context.TODO(), t.GetNodeID(), t.GetPlan())
@@ -117,7 +119,7 @@ func (t *l0CompactionTask) processExecuting() bool {
 			log.Warn("l0CompactionTask failed to set task failed state", zap.Error(err))
 			return false
 		}
-		return true
+		return t.processFailed()
 	}
 	return false
 }
@@ -147,33 +149,25 @@ func (t *l0CompactionTask) processCompleted() bool {
 	return true
 }
 
-func (t *l0CompactionTask) doClean() error {
-	log := log.With(zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", t.GetPlanID()))
+func (t *l0CompactionTask) processFailed() bool {
 	if t.hasAssignedWorker() {
 		err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
 			PlanID: t.GetPlanID(),
 		})
 		if err != nil {
-			log.Warn("l0CompactionTask processFailed unable to drop compaction plan", zap.Error(err))
+			log.Warn("l0CompactionTask processFailed unable to drop compaction plan", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
 		}
 	}
 
+	t.resetSegmentCompacting()
 	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
 	if err != nil {
 		log.Warn("l0CompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
-		return err
+		return false
 	}
 
-	// resetSegmentCompacting must be the last step of Clean, to make sure resetSegmentCompacting only called once
-	// otherwise, it may unlock segments locked by other compaction tasks
-	t.resetSegmentCompacting()
-	UpdateCompactionSegmentSizeMetrics(t.result.GetSegments())
-	log.Info("l0CompactionTask clean done")
-	return nil
-}
-
-func (t *l0CompactionTask) Clean() bool {
-	return t.doClean() == nil
+	log.Info("l0CompactionTask processFailed done", zap.Int64("taskID", t.GetTriggerID()), zap.Int64("planID", t.GetPlanID()))
+	return true
 }
 
 func (t *l0CompactionTask) GetSpan() trace.Span {
