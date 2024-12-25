@@ -487,18 +487,15 @@ func (scheduler *taskScheduler) GetSegmentTaskDelta(nodeID, collectionID int64) 
 	scheduler.rwmutex.RLock()
 	defer scheduler.rwmutex.RUnlock()
 
-	targetActions := make(map[int64][]Action, 0)
-	for _, t := range scheduler.segmentTasks {
-		if collectionID != -1 && collectionID != t.CollectionID() {
+	targetActions := make(map[int64][]Action)
+	for _, task := range scheduler.segmentTasks { // Map key: replicaSegmentIndex
+		taskCollID := task.CollectionID()
+		if collectionID != -1 && collectionID != taskCollID {
 			continue
 		}
-		for _, action := range t.Actions() {
-			if action.Node() == nodeID || nodeID == -1 {
-				if _, ok := targetActions[t.CollectionID()]; !ok {
-					targetActions[t.CollectionID()] = make([]Action, 0)
-				}
-				targetActions[t.CollectionID()] = append(targetActions[t.CollectionID()], action)
-			}
+		actions := filterActions(task.Actions(), nodeID)
+		if len(actions) > 0 {
+			targetActions[taskCollID] = append(targetActions[taskCollID], actions...)
 		}
 	}
 
@@ -509,22 +506,30 @@ func (scheduler *taskScheduler) GetChannelTaskDelta(nodeID, collectionID int64) 
 	scheduler.rwmutex.RLock()
 	defer scheduler.rwmutex.RUnlock()
 
-	targetActions := make(map[int64][]Action, 0)
-	for _, t := range scheduler.channelTasks {
-		if collectionID != -1 && collectionID != t.CollectionID() {
+	targetActions := make(map[int64][]Action)
+	for _, task := range scheduler.channelTasks { // Map key: replicaChannelIndex
+		taskCollID := task.CollectionID()
+		if collectionID != -1 && collectionID != taskCollID {
 			continue
 		}
-		for _, action := range t.Actions() {
-			if action.Node() == nodeID || nodeID == -1 {
-				if _, ok := targetActions[t.CollectionID()]; !ok {
-					targetActions[t.CollectionID()] = make([]Action, 0)
-				}
-				targetActions[t.CollectionID()] = append(targetActions[t.CollectionID()], action)
-			}
+		actions := filterActions(task.Actions(), nodeID)
+		if len(actions) > 0 {
+			targetActions[taskCollID] = append(targetActions[taskCollID], actions...)
 		}
 	}
 
 	return scheduler.calculateTaskDelta(targetActions)
+}
+
+// filter actions by nodeID
+func filterActions(actions []Action, nodeID int64) []Action {
+	filtered := make([]Action, 0, len(actions))
+	for _, action := range actions {
+		if nodeID == -1 || action.Node() == nodeID {
+			filtered = append(filtered, action)
+		}
+	}
+	return filtered
 }
 
 func (scheduler *taskScheduler) calculateTaskDelta(targetActions map[int64][]Action) int {
