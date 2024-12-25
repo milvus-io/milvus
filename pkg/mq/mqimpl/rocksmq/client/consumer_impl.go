@@ -28,6 +28,7 @@ type consumer struct {
 
 	startOnce sync.Once
 
+	stopCh    chan struct{}
 	msgMutex  chan struct{}
 	initCh    chan struct{}
 	messageCh chan common.Message
@@ -58,6 +59,7 @@ func newConsumer(c *client, options ConsumerOptions) (*consumer, error) {
 		client:       c,
 		consumerName: options.SubscriptionName,
 		options:      options,
+		stopCh:       make(chan struct{}),
 		msgMutex:     make(chan struct{}, 1),
 		initCh:       initCh,
 		messageCh:    messageCh,
@@ -134,6 +136,7 @@ func (c *consumer) Close() {
 	if err != nil {
 		log.Warn("Consumer close failed", zap.String("topicName", c.topic), zap.String("groupName", c.consumerName), zap.Error(err))
 	}
+	<-c.stopCh
 }
 
 func (c *consumer) GetLatestMsgID() (int64, error) {
