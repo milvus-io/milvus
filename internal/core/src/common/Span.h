@@ -138,7 +138,7 @@ class Span<
     using embedded_type = typename VectorType::embedded_type;
 
     Span(const embedded_type* data, int64_t row_count, int64_t element_sizeof)
-        : row_count_(row_count), data_(data), element_sizeof_(element_sizeof) {
+        : data_(data), row_count_(row_count), element_sizeof_(element_sizeof) {
     }
 
     explicit Span(const SpanBase& base)
