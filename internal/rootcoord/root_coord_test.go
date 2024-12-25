@@ -1027,6 +1027,34 @@ func TestRootCoord_RenameCollection(t *testing.T) {
 	})
 }
 
+func TestRootCoord_ListPolicy(t *testing.T) {
+	t.Run("expand privilege groups", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		c := newTestCore(withHealthyCode(), withMeta(meta))
+		ctx := context.Background()
+
+		meta.EXPECT().ListPolicy(util.DefaultTenant).Return([]*milvuspb.GrantEntity{
+			{
+				ObjectName: "*",
+				Object: &milvuspb.ObjectEntity{
+					Name: "Global",
+				},
+				Role:    &milvuspb.RoleEntity{Name: "role"},
+				Grantor: &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "CollectionAdmin"}},
+			},
+		}, nil)
+
+		meta.EXPECT().ListPrivilegeGroups().Return([]*milvuspb.PrivilegeGroupInfo{}, nil)
+
+		meta.EXPECT().ListUserRole(util.DefaultTenant).Return([]string{}, nil)
+
+		resp, err := c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
+		assert.Equal(t, len(Params.RbacConfig.GetDefaultPrivilegeGroup("CollectionAdmin").Privileges), len(resp.PolicyInfos))
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+}
+
 func TestRootCoord_ShowConfigurations(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		ctx := context.Background()
@@ -1778,14 +1806,44 @@ func TestRootCoord_RBACError(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
 		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.ListPolicyFunc = func(tenant string) ([]string, error) {
-			return []string{}, nil
+		mockMeta.ListPolicyFunc = func(tenant string) ([]*milvuspb.GrantEntity, error) {
+			return []*milvuspb.GrantEntity{{
+				ObjectName: "*",
+				Object: &milvuspb.ObjectEntity{
+					Name: "Global",
+				},
+				Role:    &milvuspb.RoleEntity{Name: "role"},
+				Grantor: &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "CustomGroup"}},
+			}}, nil
 		}
 		resp, err = c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		mockMeta.ListPolicyFunc = func(tenant string) ([]string, error) {
-			return []string{}, errors.New("mock error")
+		mockMeta.ListPrivilegeGroupsFunc = func() ([]*milvuspb.PrivilegeGroupInfo, error) {
+			return []*milvuspb.PrivilegeGroupInfo{
+				{
+					GroupName:  "CollectionAdmin",
+					Privileges: []*milvuspb.PrivilegeEntity{{Name: "CreateCollection"}},
+				},
+			}, nil
+		}
+		resp, err = c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		mockMeta.IsCustomPrivilegeGroupFunc = func(groupName string) (bool, error) {
+			return true, nil
+		}
+		resp, err = c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		mockMeta.ListPolicyFunc = func(tenant string) ([]*milvuspb.GrantEntity, error) {
+			return []*milvuspb.GrantEntity{}, errors.New("mock error")
+		}
+		mockMeta.ListPrivilegeGroupsFunc = func() ([]*milvuspb.PrivilegeGroupInfo, error) {
+			return []*milvuspb.PrivilegeGroupInfo{}, errors.New("mock error")
+		}
+		mockMeta.IsCustomPrivilegeGroupFunc = func(groupName string) (bool, error) {
+			return false, errors.New("mock error")
 		}
 	})
 }
