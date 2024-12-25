@@ -20,9 +20,11 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -34,6 +36,9 @@ type CollectionTarget struct {
 	dmChannels         map[string]*DmChannel
 	partitions         typeutil.Set[int64] // stores target partitions info
 	version            int64
+
+	// record target status, if target has been save before milvus v2.4.19, then the target will lack of segment info.
+	lackSegmentInfo bool
 }
 
 func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64) *CollectionTarget {
@@ -67,6 +72,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 	partition2Segments := make(map[int64][]*datapb.SegmentInfo)
 	var partitions []int64
 
+	lackSegmentInfo := false
 	for _, t := range target.GetChannelTargets() {
 		if _, ok := channel2Segments[t.GetChannelName()]; !ok {
 			channel2Segments[t.GetChannelName()] = make([]*datapb.SegmentInfo, 0)
@@ -76,12 +82,16 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 				partition2Segments[partition.GetPartitionID()] = make([]*datapb.SegmentInfo, 0, len(partition.GetSegments()))
 			}
 			for _, segment := range partition.GetSegments() {
+				if segment.GetNumOfRows() <= 0 {
+					lackSegmentInfo = true
+				}
 				info := &datapb.SegmentInfo{
 					ID:            segment.GetID(),
 					Level:         segment.GetLevel(),
 					CollectionID:  target.GetCollectionID(),
 					PartitionID:   partition.GetPartitionID(),
 					InsertChannel: t.GetChannelName(),
+					NumOfRows:     segment.GetNumOfRows(),
 				}
 				segments[segment.GetID()] = info
 				channel2Segments[t.GetChannelName()] = append(channel2Segments[t.GetChannelName()], info)
@@ -101,6 +111,10 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 		}
 	}
 
+	if lackSegmentInfo {
+		log.Info("target has lack of segment info", zap.Int64("collectionID", target.GetCollectionID()))
+	}
+
 	return &CollectionTarget{
 		segments:           segments,
 		channel2Segments:   channel2Segments,
@@ -108,6 +122,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 		dmChannels:         dmChannels,
 		partitions:         typeutil.NewSet(partitions...),
 		version:            target.GetVersion(),
+		lackSegmentInfo: lackSegmentInfo,
 	}
 }
 
@@ -141,8 +156,9 @@ func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
 				}
 
 				partitionTarget.Segments = append(partitionTarget.Segments, &querypb.SegmentTarget{
-					ID:    info.GetID(),
-					Level: info.GetLevel(),
+					ID:        info.GetID(),
+					Level:     info.GetLevel(),
+					NumOfRows: info.GetNumOfRows(),
 				})
 			}
 		}
@@ -193,6 +209,11 @@ func (p *CollectionTarget) GetAllDmChannelNames() []string {
 
 func (p *CollectionTarget) IsEmpty() bool {
 	return len(p.dmChannels)+len(p.segments) == 0
+}
+
+// if target is ready, it should have all segment info
+func (p *CollectionTarget) Ready() bool {
+	return !p.lackSegmentInfo
 }
 
 type target struct {
