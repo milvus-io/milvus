@@ -829,7 +829,7 @@ common:
     superUsers: 
     defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
     rbac:
-      overrideBuiltInPrivilgeGroups:
+      overrideBuiltInPrivilegeGroups:
         enabled: false # Whether to override build-in privilege groups
       cluster:
         readonly:
