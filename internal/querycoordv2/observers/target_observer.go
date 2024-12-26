@@ -390,7 +390,7 @@ func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
 	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.TargetObserver", 1, 60).
 		With(zap.Int64("collectionID", collectionID))
 
-	log.RatedInfo(10, "observer trigger update next target")
+	log.Info("observer trigger update next target")
 	err := ob.targetMgr.UpdateCollectionNextTarget(collectionID)
 	if err != nil {
 		log.Warn("failed to update next target for collection",
@@ -422,7 +422,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 	channelNames := ob.targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
 	if len(channelNames) == 0 {
 		// next target is empty, no need to update
-		log.RatedInfo(10, "next target is empty, no need to update")
+		log.Info("next target is empty, no need to update")
 		return false
 	}
 
@@ -434,7 +434,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 
 		// to avoid stuck here in dynamic increase replica case, we just check available delegator number
 		if int32(len(channelReadyLeaders)) < replicaNum {
-			log.RatedInfo(10, "channel not ready",
+			log.Info("channel not ready",
 				zap.Int("readyReplicaNum", len(channelReadyLeaders)),
 				zap.String("channelName", channel),
 			)
@@ -573,7 +573,7 @@ func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, lead
 
 func (ob *TargetObserver) updateCurrentTarget(collectionID int64) {
 	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.TargetObserver", 1, 60)
-	log.RatedInfo(10, "observer trigger update current target", zap.Int64("collectionID", collectionID))
+	log.Info("observer trigger update current target", zap.Int64("collectionID", collectionID))
 	if ob.targetMgr.UpdateCollectionCurrentTarget(collectionID) {
 		ob.mut.Lock()
 		defer ob.mut.Unlock()

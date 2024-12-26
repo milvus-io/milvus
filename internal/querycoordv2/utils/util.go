@@ -48,7 +48,7 @@ func CheckNodeAvailable(nodeID int64, info *session.NodeInfo) error {
 func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.TargetManagerInterface, leader *meta.LeaderView, scope int32) error {
 	log := log.Ctx(context.TODO()).
 		WithRateGroup("utils.CheckLeaderAvailable", 1, 60).
-		With(zap.Int64("leaderID", leader.ID))
+		With(zap.Int64("leaderID", leader.ID), zap.Int64("collectionID", leader.CollectionID))
 	info := nodeMgr.Get(leader.ID)
 
 	// Check whether leader is online
