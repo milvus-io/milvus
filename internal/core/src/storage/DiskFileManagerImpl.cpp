@@ -94,6 +94,7 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
 
     auto fileName = GetFileName(file);
     auto fileSize = local_chunk_manager->Size(file);
+    added_total_file_size_ += fileSize;
 
     std::vector<std::string> batch_remote_files;
     std::vector<int64_t> remote_file_sizes;
@@ -146,6 +147,7 @@ DiskFileManagerImpl::AddTextLog(const std::string& file) noexcept {
 
     auto fileName = GetFileName(file);
     auto fileSize = local_chunk_manager->Size(file);
+    added_total_file_size_ += fileSize;
 
     std::vector<std::string> batch_remote_files;
     std::vector<int64_t> remote_file_sizes;
@@ -283,7 +285,7 @@ DiskFileManagerImpl::CacheIndexToDisk(
                 auto index_size = index_data->DataSize();
                 auto chunk_data = reinterpret_cast<uint8_t*>(
                     const_cast<void*>(index_data->Data()));
-                file.Write(chunk_data, index_size);
+                auto written = file.Write(chunk_data, index_size);
             }
             batch_remote_files.clear();
         };
@@ -351,7 +353,7 @@ DiskFileManagerImpl::CacheTextLogToDisk(
             auto index_size = index_data->Size();
             auto chunk_data = reinterpret_cast<uint8_t*>(
                 const_cast<void*>(index_data->Data()));
-            file.Write(chunk_data, index_size);
+            auto written = file.Write(chunk_data, index_size);
         }
         local_paths_.emplace_back(local_index_file_name);
     }

@@ -64,9 +64,16 @@ class MemFileManagerImpl : public FileManagerImpl {
         return remote_paths_to_size_;
     }
 
+    size_t
+    GetAddedTotalMemSize() const {
+        return added_total_mem_size_;
+    }
+
  private:
     // remote file path
     std::map<std::string, int64_t> remote_paths_to_size_;
+
+    size_t added_total_mem_size_ = 0;
 };
 
 using MemFileManagerImplPtr = std::shared_ptr<MemFileManagerImpl>;
