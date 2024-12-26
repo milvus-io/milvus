@@ -94,7 +94,7 @@ type IMetaTable interface {
 	OperatePrivilege(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
 	SelectGrant(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
 	DropGrant(tenant string, role *milvuspb.RoleEntity) error
-	ListPolicy(tenant string) ([]string, error)
+	ListPolicy(tenant string) ([]*milvuspb.GrantEntity, error)
 	ListUserRole(tenant string) ([]string, error)
 	BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error)
 	RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error
@@ -1430,7 +1430,7 @@ func (mt *MetaTable) DropGrant(tenant string, role *milvuspb.RoleEntity) error {
 	return mt.catalog.DeleteGrant(mt.ctx, tenant, role)
 }
 
-func (mt *MetaTable) ListPolicy(tenant string) ([]string, error) {
+func (mt *MetaTable) ListPolicy(tenant string) ([]*milvuspb.GrantEntity, error) {
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
 

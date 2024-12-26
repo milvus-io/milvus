@@ -76,7 +76,7 @@ type RootCoordCatalog interface {
 	// ListGrant lists all grant infos accoording to entity for the tenant
 	// Please make sure entity valid before calling this API
 	ListGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
-	ListPolicy(ctx context.Context, tenant string) ([]string, error)
+	ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error)
 	// List all user role pair in string for the tenant
 	// For example []string{"user1/role1"}
 	ListUserRole(ctx context.Context, tenant string) ([]string, error)

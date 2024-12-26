@@ -1283,13 +1283,13 @@ func (kc *Catalog) DeleteGrant(ctx context.Context, tenant string, role *milvusp
 	return err
 }
 
-func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]string, error) {
-	var grantInfoStrs []string
+func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
+	var grants []*milvuspb.GrantEntity
 	granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
 	keys, values, err := kc.Txn.LoadWithPrefix(granteeKey)
 	if err != nil {
 		log.Error("fail to load all grant privilege entities", zap.String("key", granteeKey), zap.Error(err))
-		return []string{}, err
+		return []*milvuspb.GrantEntity{}, err
 	}
 
 	for i, key := range keys {
@@ -1302,7 +1302,7 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]string, err
 		idKeys, _, err := kc.Txn.LoadWithPrefix(granteeIDKey)
 		if err != nil {
 			log.Error("fail to load the grantee ids", zap.String("key", granteeIDKey), zap.Error(err))
-			return []string{}, err
+			return []*milvuspb.GrantEntity{}, err
 		}
 		for _, idKey := range idKeys {
 			granteeIDInfos := typeutil.AfterN(idKey, granteeIDKey+"/", "/")
@@ -1311,11 +1311,18 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]string, err
 				continue
 			}
 			dbName, objectName := funcutil.SplitObjectName(grantInfos[2])
-			grantInfoStrs = append(grantInfoStrs,
-				funcutil.PolicyForPrivilege(grantInfos[0], grantInfos[1], objectName, granteeIDInfos[0], dbName))
+			grants = append(grants, &milvuspb.GrantEntity{
+				Role:       &milvuspb.RoleEntity{Name: grantInfos[0]},
+				Object:     &milvuspb.ObjectEntity{Name: grantInfos[1]},
+				ObjectName: objectName,
+				DbName:     dbName,
+				Grantor: &milvuspb.GrantorEntity{
+					Privilege: &milvuspb.PrivilegeEntity{Name: util.PrivilegeNameForAPI(granteeIDInfos[0])},
+				},
+			})
 		}
 	}
-	return grantInfoStrs, nil
+	return grants, nil
 }
 
 func (kc *Catalog) ListUserRole(ctx context.Context, tenant string) ([]string, error) {

@@ -1548,19 +1548,19 @@ func (_c *RootCoordCatalog_ListGrant_Call) RunAndReturn(run func(context.Context
 }
 
 // ListPolicy provides a mock function with given fields: ctx, tenant
-func (_m *RootCoordCatalog) ListPolicy(ctx context.Context, tenant string) ([]string, error) {
+func (_m *RootCoordCatalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
 	ret := _m.Called(ctx, tenant)
 
-	var r0 []string
+	var r0 []*milvuspb.GrantEntity
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) ([]string, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]*milvuspb.GrantEntity, error)); ok {
 		return rf(ctx, tenant)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) []string); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) []*milvuspb.GrantEntity); ok {
 		r0 = rf(ctx, tenant)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
+			r0 = ret.Get(0).([]*milvuspb.GrantEntity)
 		}
 	}
 
@@ -1592,12 +1592,12 @@ func (_c *RootCoordCatalog_ListPolicy_Call) Run(run func(ctx context.Context, te
 	return _c
 }
 
-func (_c *RootCoordCatalog_ListPolicy_Call) Return(_a0 []string, _a1 error) *RootCoordCatalog_ListPolicy_Call {
+func (_c *RootCoordCatalog_ListPolicy_Call) Return(_a0 []*milvuspb.GrantEntity, _a1 error) *RootCoordCatalog_ListPolicy_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *RootCoordCatalog_ListPolicy_Call) RunAndReturn(run func(context.Context, string) ([]string, error)) *RootCoordCatalog_ListPolicy_Call {
+func (_c *RootCoordCatalog_ListPolicy_Call) RunAndReturn(run func(context.Context, string) ([]*milvuspb.GrantEntity, error)) *RootCoordCatalog_ListPolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }
