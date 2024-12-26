@@ -158,8 +158,11 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 }
 
 func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...grpc.CallOption) (ResultSet, error) {
-	req := option.Request()
 	var resultSet ResultSet
+	req, err := option.Request()
+	if err != nil {
+		return resultSet, err
+	}
 
 	collection, err := c.getCollection(ctx, req.GetCollectionName())
 	if err != nil {
@@ -187,6 +190,10 @@ func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...g
 		return nil
 	})
 	return resultSet, err
+}
+
+func (c *Client) Get(ctx context.Context, option QueryOption, callOptions ...grpc.CallOption) (ResultSet, error) {
+	return c.Query(ctx, option, callOptions...)
 }
 
 func (c *Client) HybridSearch(ctx context.Context, option HybridSearchOption, callOptions ...grpc.CallOption) ([]ResultSet, error) {

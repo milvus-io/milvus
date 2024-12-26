@@ -117,3 +117,26 @@ func NewListPartitionOption(collectionName string) *listPartitionsOpt {
 		collectionName: collectionName,
 	}
 }
+
+type GetPartitionStatsOption interface {
+	Request() *milvuspb.GetPartitionStatisticsRequest
+}
+
+type getPartitionStatsOpt struct {
+	collectionName string
+	partitionName  string
+}
+
+func (opt *getPartitionStatsOpt) Request() *milvuspb.GetPartitionStatisticsRequest {
+	return &milvuspb.GetPartitionStatisticsRequest{
+		CollectionName: opt.collectionName,
+		PartitionName:  opt.partitionName,
+	}
+}
+
+func NewGetPartitionStatsOption(collectionName string, partitionName string) *getPartitionStatsOpt {
+	return &getPartitionStatsOpt{
+		collectionName: collectionName,
+		partitionName:  partitionName,
+	}
+}

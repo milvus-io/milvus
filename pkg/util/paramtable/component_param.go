@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v3/disk"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/config"
@@ -104,8 +105,6 @@ type ComponentParam struct {
 	StreamingCoordGrpcClientCfg GrpcClientConfig
 	StreamingNodeGrpcClientCfg  GrpcClientConfig
 	IntegrationTestCfg          integrationTestConfig
-
-	RuntimeConfig runtimeConfig
 }
 
 // Init initialize once
@@ -287,9 +286,6 @@ type commonConfig struct {
 
 	// Local RPC enabled for milvus internal communication when mix or standalone mode.
 	LocalRPCEnabled ParamItem `refreshable:"false"`
-
-	HealthCheckInterval   ParamItem `refreshable:"true"`
-	HealthCheckRPCTimeout ParamItem `refreshable:"true"`
 
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
 }
@@ -951,22 +947,6 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.LocalRPCEnabled.Init(base.mgr)
-
-	p.HealthCheckInterval = ParamItem{
-		Key:          "common.healthcheck.interval.seconds",
-		Version:      "2.4.8",
-		DefaultValue: "30",
-		Doc:          `health check interval in seconds, default 30s`,
-	}
-	p.HealthCheckInterval.Init(base.mgr)
-
-	p.HealthCheckRPCTimeout = ParamItem{
-		Key:          "common.healthcheck.timeout.seconds",
-		Version:      "2.4.8",
-		DefaultValue: "10",
-		Doc:          `RPC timeout for health check request`,
-	}
-	p.HealthCheckRPCTimeout.Init(base.mgr)
 
 	p.SyncTaskPoolReleaseTimeoutSeconds = ParamItem{
 		Key:          "common.sync.taskPoolReleaseTimeoutSeconds",
@@ -2280,9 +2260,9 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.UpdateCollectionLoadStatusInterval = ParamItem{
 		Key:          "queryCoord.updateCollectionLoadStatusInterval",
 		Version:      "2.4.7",
-		DefaultValue: "300",
+		DefaultValue: "5",
 		PanicIfEmpty: true,
-		Doc:          "300s, max interval of updating collection loaded status for check health",
+		Doc:          "5m, max interval of updating collection loaded status for check health",
 		Export:       true,
 	}
 
@@ -3343,6 +3323,9 @@ type dataCoordConfig struct {
 	ChannelCheckpointMaxLag ParamItem `refreshable:"true"`
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
 
+	// Index related configuration
+	IndexMemSizeEstimateMultiplier ParamItem `refreshable:"true"`
+
 	// Clustering Compaction
 	ClusteringCompactionEnable                 ParamItem `refreshable:"true"`
 	ClusteringCompactionAutoEnable             ParamItem `refreshable:"true"`
@@ -3825,6 +3808,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.LevelZeroCompactionTriggerDeltalogMaxNum.Init(base.mgr)
+
+	p.IndexMemSizeEstimateMultiplier = ParamItem{
+		Key:          "dataCoord.index.memSizeEstimateMultiplier",
+		Version:      "2.4.19",
+		DefaultValue: "2",
+		Doc:          "When the memory size is not setup by index procedure, multiplier to estimate the memory size of index data",
+		Export:       true,
+	}
+	p.IndexMemSizeEstimateMultiplier.Init(base.mgr)
 
 	p.ClusteringCompactionEnable = ParamItem{
 		Key:          "dataCoord.compaction.clustering.enable",
@@ -4869,11 +4861,13 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 	p.TxnDefaultKeepaliveTimeout.Init(base.mgr)
 }
 
+// runtimeConfig is just a private environment value table.
 type runtimeConfig struct {
-	CreateTime RuntimeParamItem
-	UpdateTime RuntimeParamItem
-	Role       RuntimeParamItem
-	NodeID     RuntimeParamItem
+	createTime time.Time
+	updateTime time.Time
+	role       string
+	nodeID     atomic.Int64
+	components map[string]struct{}
 }
 
 type integrationTestConfig struct {

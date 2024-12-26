@@ -98,7 +98,7 @@ func (suite *ServiceSuite) SetupSuite() {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.GCEnabled.Key, "false")
 
-	suite.rootPath = path.Join("/tmp/milvus/test", suite.T().Name())
+	suite.rootPath = suite.T().Name()
 	suite.collectionID = 111
 	suite.collectionName = "test-collection"
 	suite.partitionIDs = []int64{222}
@@ -1276,8 +1276,8 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	// collection not exist
 	resp, err := suite.node.Search(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
-	suite.Contains(resp.GetStatus().GetReason(), merr.ErrCollectionNotFound.Error())
+	suite.Equal(merr.Code(merr.ErrCollectionNotLoaded), resp.GetStatus().GetCode())
+	suite.Contains(resp.GetStatus().GetReason(), merr.ErrCollectionNotLoaded.Error())
 
 	// metric type mismatch
 	LoadMeta := &querypb.LoadMetaInfo{
@@ -2220,44 +2220,6 @@ func (suite *ServiceSuite) TestLoadPartition() {
 	status, err = suite.node.LoadPartitions(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
-}
-
-func (suite *ServiceSuite) TestCheckHealth() {
-	suite.Run("node not healthy", func() {
-		suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
-
-		ctx := context.Background()
-		resp, err := suite.node.CheckHealth(ctx, nil)
-		suite.NoError(err)
-		suite.False(merr.Ok(resp.GetStatus()))
-		suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-	})
-
-	suite.Run("exceeded timetick lag on pipeline", func() {
-		sd1 := delegator.NewMockShardDelegator(suite.T())
-		sd1.EXPECT().GetTSafe().Return(100)
-		sd1.EXPECT().Close().Maybe()
-		suite.node.delegators.Insert("timetick-lag-ch", sd1)
-		defer suite.node.delegators.GetAndRemove("timetick-lag-ch")
-
-		ctx := context.Background()
-		suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
-		resp, err := suite.node.CheckHealth(ctx, nil)
-		suite.NoError(err)
-		suite.True(merr.Ok(resp.GetStatus()))
-		suite.False(resp.GetIsHealthy())
-		suite.NotEmpty(resp.Reasons)
-	})
-
-	suite.Run("ok", func() {
-		ctx := context.Background()
-		suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
-		resp, err := suite.node.CheckHealth(ctx, nil)
-		suite.NoError(err)
-		suite.True(merr.Ok(resp.GetStatus()))
-		suite.True(resp.GetIsHealthy())
-		suite.Empty(resp.Reasons)
-	})
 }
 
 func TestQueryNodeService(t *testing.T) {

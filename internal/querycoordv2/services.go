@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -36,7 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/healthcheck"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -254,7 +253,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 
 	var loadJob job.Job
 	collection := s.meta.GetCollection(ctx, req.GetCollectionID())
-	if collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded {
+	if collection != nil {
 		// if collection is loaded, check if collection is loaded with the same replica number and resource groups
 		// if replica number or resource group changes， switch to update load config
 		collectionUsedRG := s.meta.ReplicaManager.GetResourceGroupByCollection(ctx, collection.GetCollectionID()).Collect()
@@ -833,7 +832,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	log.RatedDebug(60, "get metrics request received",
 		zap.String("metricType", req.GetRequest()))
 
-	if err := merr.CheckHealthyStandby(s.State()); err != nil {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get metrics"
 		log.Warn(msg, zap.Error(err))
 		return &milvuspb.GetMetricsResponse{
@@ -914,20 +913,16 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 		return &milvuspb.CheckHealthResponse{Status: merr.Status(err), IsHealthy: false, Reasons: []string{err.Error()}}, nil
 	}
 
-	latestCheckResult := s.healthChecker.GetLatestCheckResult()
-	return healthcheck.GetCheckHealthResponseFromResult(latestCheckResult), nil
-}
-
-func (s *Server) healthCheckFn() *healthcheck.Result {
-	timeout := Params.CommonCfg.HealthCheckRPCTimeout.GetAsDuration(time.Second)
-	ctx, cancel := context.WithTimeout(s.ctx, timeout)
-	defer cancel()
-
-	checkResults := s.broadcastCheckHealth(ctx)
-	for collectionID, failReason := range utils.CheckCollectionsQueryable(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr) {
-		checkResults.AppendUnhealthyCollectionMsgs(healthcheck.NewUnhealthyCollectionMsg(collectionID, failReason, healthcheck.CollectionQueryable))
+	errReasons, err := s.checkNodeHealth(ctx)
+	if err != nil || len(errReasons) != 0 {
+		return componentutil.CheckHealthRespWithErrMsg(errReasons...), nil
 	}
-	return checkResults
+
+	if err := utils.CheckCollectionsQueryable(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr); err != nil {
+		log.Ctx(ctx).Warn("some collection is not queryable during health check", zap.Error(err))
+	}
+
+	return componentutil.CheckHealthRespWithErr(nil), nil
 }
 
 func (s *Server) checkNodeHealth(ctx context.Context) ([]string, error) {
@@ -956,39 +951,6 @@ func (s *Server) checkNodeHealth(ctx context.Context) ([]string, error) {
 	err := group.Wait()
 
 	return errReasons, err
-}
-
-func (s *Server) broadcastCheckHealth(ctx context.Context) *healthcheck.Result {
-	result := healthcheck.NewResult()
-	wg := sync.WaitGroup{}
-	wlock := sync.Mutex{}
-
-	for _, node := range s.nodeMgr.GetAll() {
-		node := node
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			checkHealthResp, err := s.cluster.CheckHealth(ctx, node.ID())
-			if err = merr.CheckRPCCall(checkHealthResp, err); err != nil && !errors.Is(err, merr.ErrServiceUnimplemented) {
-				err = fmt.Errorf("CheckHealth fails for querynode:%d, %w", node.ID(), err)
-				wlock.Lock()
-				result.AppendUnhealthyClusterMsg(
-					healthcheck.NewUnhealthyClusterMsg(typeutil.QueryNodeRole, node.ID(), err.Error(), healthcheck.NodeHealthCheck))
-				wlock.Unlock()
-				return
-			}
-
-			if checkHealthResp != nil && len(checkHealthResp.Reasons) > 0 {
-				wlock.Lock()
-				result.AppendResult(healthcheck.GetHealthCheckResultFromResp(checkHealthResp))
-				wlock.Unlock()
-			}
-		}()
-	}
-
-	wg.Wait()
-	return result
 }
 
 func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
@@ -1218,7 +1180,7 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 	jobs := make([]job.Job, 0, len(req.GetCollectionIDs()))
 	for _, collectionID := range req.GetCollectionIDs() {
 		collection := s.meta.GetCollection(ctx, collectionID)
-		if collection == nil || collection.GetStatus() != querypb.LoadStatus_Loaded {
+		if collection == nil {
 			err := merr.WrapErrCollectionNotLoaded(collectionID)
 			log.Warn("failed to update load config", zap.Error(err))
 			continue

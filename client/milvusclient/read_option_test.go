@@ -17,9 +17,11 @@
 package milvusclient
 
 import (
+	"fmt"
 	"math/rand"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -50,8 +52,7 @@ func (s *SearchOptionSuite) TestBasic() {
 	topK := rand.Intn(100) + 1
 	opt := NewSearchOption(collName, topK, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})})
 
-	opt = opt.WithANNSField("test_field").WithOutputFields("ID", "Value").WithConsistencyLevel(entity.ClStrong).WithFilter("ID > 1000")
-
+	opt = opt.WithANNSField("test_field").WithOutputFields("ID", "Value").WithConsistencyLevel(entity.ClStrong).WithFilter("ID > 1000").WithGroupByField("group_field").WithGroupSize(10).WithStrictGroupSize(true)
 	req, err := opt.Request()
 	s.Require().NoError(err)
 
@@ -62,6 +63,15 @@ func (s *SearchOptionSuite) TestBasic() {
 	annField, ok := searchParams[spAnnsField]
 	s.Require().True(ok)
 	s.Equal("test_field", annField)
+	groupField, ok := searchParams[spGroupBy]
+	s.Require().True(ok)
+	s.Equal("group_field", groupField)
+	groupSize, ok := searchParams[spGroupSize]
+	s.Require().True(ok)
+	s.Equal("10", groupSize)
+	spStrictGroupSize, ok := searchParams[spStrictGroupSize]
+	s.Require().True(ok)
+	s.Equal("true", spStrictGroupSize)
 
 	opt = NewSearchOption(collName, topK, []entity.Vector{nonSupportData{}})
 	_, err = opt.Request()
@@ -136,4 +146,171 @@ func (s *SearchOptionSuite) TestPlaceHolder() {
 
 func TestSearchOption(t *testing.T) {
 	suite.Run(t, new(SearchOptionSuite))
+}
+
+func TestAny2TmplValue(t *testing.T) {
+	t.Run("primitives", func(t *testing.T) {
+		t.Run("int", func(t *testing.T) {
+			v := rand.Int()
+			val, err := any2TmplValue(v)
+			assert.NoError(t, err)
+			assert.EqualValues(t, v, val.GetInt64Val())
+		})
+
+		t.Run("int32", func(t *testing.T) {
+			v := rand.Int31()
+			val, err := any2TmplValue(v)
+			assert.NoError(t, err)
+			assert.EqualValues(t, v, val.GetInt64Val())
+		})
+
+		t.Run("int64", func(t *testing.T) {
+			v := rand.Int63()
+			val, err := any2TmplValue(v)
+			assert.NoError(t, err)
+			assert.EqualValues(t, v, val.GetInt64Val())
+		})
+
+		t.Run("float32", func(t *testing.T) {
+			v := rand.Float32()
+			val, err := any2TmplValue(v)
+			assert.NoError(t, err)
+			assert.EqualValues(t, v, val.GetFloatVal())
+		})
+
+		t.Run("float64", func(t *testing.T) {
+			v := rand.Float64()
+			val, err := any2TmplValue(v)
+			assert.NoError(t, err)
+			assert.EqualValues(t, v, val.GetFloatVal())
+		})
+
+		t.Run("bool", func(t *testing.T) {
+			val, err := any2TmplValue(true)
+			assert.NoError(t, err)
+			assert.True(t, val.GetBoolVal())
+		})
+
+		t.Run("string", func(t *testing.T) {
+			v := fmt.Sprintf("%v", rand.Int())
+			val, err := any2TmplValue(v)
+			assert.NoError(t, err)
+			assert.EqualValues(t, v, val.GetStringVal())
+		})
+	})
+
+	t.Run("slice", func(t *testing.T) {
+		t.Run("int", func(t *testing.T) {
+			l := rand.Intn(10) + 1
+			v := make([]int, 0, l)
+			for i := 0; i < l; i++ {
+				v = append(v, rand.Int())
+			}
+			val, err := any2TmplValue(v)
+			assert.NoError(t, err)
+			data := val.GetArrayVal().GetLongData().GetData()
+			assert.Equal(t, l, len(data))
+			for i, val := range data {
+				assert.EqualValues(t, v[i], val)
+			}
+		})
+
+		t.Run("int32", func(t *testing.T) {
+			l := rand.Intn(10) + 1
+			v := make([]int32, 0, l)
+			for i := 0; i < l; i++ {
+				v = append(v, rand.Int31())
+			}
+			val, err := any2TmplValue(v)
+			assert.NoError(t, err)
+			data := val.GetArrayVal().GetLongData().GetData()
+			assert.Equal(t, l, len(data))
+			for i, val := range data {
+				assert.EqualValues(t, v[i], val)
+			}
+		})
+
+		t.Run("int64", func(t *testing.T) {
+			l := rand.Intn(10) + 1
+			v := make([]int64, 0, l)
+			for i := 0; i < l; i++ {
+				v = append(v, rand.Int63())
+			}
+			val, err := any2TmplValue(v)
+			assert.NoError(t, err)
+			data := val.GetArrayVal().GetLongData().GetData()
+			assert.Equal(t, l, len(data))
+			for i, val := range data {
+				assert.EqualValues(t, v[i], val)
+			}
+		})
+
+		t.Run("float32", func(t *testing.T) {
+			l := rand.Intn(10) + 1
+			v := make([]float32, 0, l)
+			for i := 0; i < l; i++ {
+				v = append(v, rand.Float32())
+			}
+			val, err := any2TmplValue(v)
+			assert.NoError(t, err)
+			data := val.GetArrayVal().GetDoubleData().GetData()
+			assert.Equal(t, l, len(data))
+			for i, val := range data {
+				assert.EqualValues(t, v[i], val)
+			}
+		})
+
+		t.Run("float64", func(t *testing.T) {
+			l := rand.Intn(10) + 1
+			v := make([]float64, 0, l)
+			for i := 0; i < l; i++ {
+				v = append(v, rand.Float64())
+			}
+			val, err := any2TmplValue(v)
+			assert.NoError(t, err)
+			data := val.GetArrayVal().GetDoubleData().GetData()
+			assert.Equal(t, l, len(data))
+			for i, val := range data {
+				assert.EqualValues(t, v[i], val)
+			}
+		})
+
+		t.Run("bool", func(t *testing.T) {
+			l := rand.Intn(10) + 1
+			v := make([]bool, 0, l)
+			for i := 0; i < l; i++ {
+				v = append(v, rand.Int()%2 == 0)
+			}
+			val, err := any2TmplValue(v)
+			assert.NoError(t, err)
+			data := val.GetArrayVal().GetBoolData().GetData()
+			assert.Equal(t, l, len(data))
+			for i, val := range data {
+				assert.EqualValues(t, v[i], val)
+			}
+		})
+
+		t.Run("string", func(t *testing.T) {
+			l := rand.Intn(10) + 1
+			v := make([]string, 0, l)
+			for i := 0; i < l; i++ {
+				v = append(v, fmt.Sprintf("%v", rand.Int()))
+			}
+			val, err := any2TmplValue(v)
+			assert.NoError(t, err)
+			data := val.GetArrayVal().GetStringData().GetData()
+			assert.Equal(t, l, len(data))
+			for i, val := range data {
+				assert.EqualValues(t, v[i], val)
+			}
+		})
+	})
+
+	t.Run("unsupported", func(*testing.T) {
+		_, err := any2TmplValue(struct{}{})
+		assert.Error(t, err)
+
+		_, err = any2TmplValue([]struct{}{})
+		assert.Error(t, err)
+	})
 }

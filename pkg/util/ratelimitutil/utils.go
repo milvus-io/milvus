@@ -16,13 +16,7 @@
 
 package ratelimitutil
 
-import (
-	"fmt"
-	"time"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-)
+import "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
 var QuotaErrorString = map[commonpb.ErrorCode]string{
 	commonpb.ErrorCode_ForceDeny:            "access has been disabled by the administrator",
@@ -33,15 +27,4 @@ var QuotaErrorString = map[commonpb.ErrorCode]string{
 
 func GetQuotaErrorString(errCode commonpb.ErrorCode) string {
 	return QuotaErrorString[errCode]
-}
-
-func CheckTimeTickDelay(channel string, minTT uint64, maxDelay time.Duration) error {
-	if channel != "" && maxDelay > 0 {
-		minTt, _ := tsoutil.ParseTS(minTT)
-		delay := time.Since(minTt)
-		if delay.Milliseconds() >= maxDelay.Milliseconds() {
-			return fmt.Errorf("max timetick lag execced threhold, lag:%s on channel:%s", delay, channel)
-		}
-	}
-	return nil
 }

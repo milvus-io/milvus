@@ -3875,10 +3875,10 @@ class TestCollectionString(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         int_field = cf.gen_int64_field(is_primary=True)
         vec_field = cf.gen_float_vec_field()
-        max_length = 100000
+        max_length = 1048576 + 1
         string_field = cf.gen_string_field(max_length=max_length)
         schema = cf.gen_collection_schema([int_field, string_field, vec_field])
-        error = {ct.err_code: 65535, ct.err_msg: "the maximum length specified for a VarChar should be in (0, 65535]"}
+        error = {ct.err_code: 1048576, ct.err_msg: "the maximum length specified for a VarChar should be in (0, 1048576]"}
         self.collection_wrap.init_collection(name=c_name, schema=schema,
                                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -4117,7 +4117,7 @@ class TestCollectionARRAY(TestcaseBase):
         self.init_collection_wrap(schema=array_schema, check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 65535,
                                                ct.err_msg: "the maximum length specified for a VarChar "
-                                                           "should be in (0, 65535]"})
+                                                           "should be in (0, 1048576]"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_collection_array_field_all_datatype(self):

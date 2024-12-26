@@ -28,6 +28,7 @@ func (v *ParserVisitor) VisitParens(ctx *parser.ParensContext) interface{} {
 }
 
 func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, error) {
+	identifier = decodeUnicode(identifier)
 	field, err := v.schema.GetFieldFromNameDefaultJSON(identifier)
 	if err != nil {
 		return nil, err
@@ -1005,6 +1006,7 @@ func (v *ParserVisitor) VisitBitOr(ctx *parser.BitOrContext) interface{} {
 */
 // More tests refer to plan_parser_v2_test.go::Test_JSONExpr
 func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*planpb.ColumnInfo, error) {
+	identifier = decodeUnicode(identifier)
 	fieldName := strings.Split(identifier, "[")[0]
 	nestedPath := make([]string, 0)
 	field, err := v.schema.GetFieldFromNameDefaultJSON(fieldName)

@@ -47,7 +47,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/kv"
@@ -171,13 +170,6 @@ func (suite *ServiceSuite) SetupTest() {
 		}))
 		suite.meta.ResourceManager.HandleNodeUp(context.TODO(), node)
 	}
-	suite.cluster = session.NewMockCluster(suite.T())
-	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
-	suite.cluster.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{
-		Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-		IsHealthy: true,
-		Reasons:   []string{},
-	}, nil).Maybe()
 	suite.jobScheduler = job.NewScheduler()
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
 	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
@@ -863,58 +855,6 @@ func (suite *ServiceSuite) TestTransferReplica() {
 	})
 	suite.NoError(err)
 	suite.ErrorIs(merr.Error(resp), merr.ErrServiceNotReady)
-}
-
-func (suite *ServiceSuite) TestLoadCollectionFailed() {
-	suite.loadAll()
-	ctx := context.Background()
-	server := suite.server
-
-	// Test load with different replica number
-	for _, collection := range suite.collections {
-		req := &querypb.LoadCollectionRequest{
-			CollectionID:  collection,
-			ReplicaNumber: suite.replicaNumber[collection] + 1,
-		}
-		resp, err := server.LoadCollection(ctx, req)
-		suite.NoError(err)
-		suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
-	}
-
-	req := &querypb.LoadCollectionRequest{
-		CollectionID:   1001,
-		ReplicaNumber:  2,
-		ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
-	}
-	resp, err := server.LoadCollection(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-
-	// Test load with partitions loaded
-	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
-			continue
-		}
-
-		req := &querypb.LoadCollectionRequest{
-			CollectionID: collection,
-		}
-		resp, err := server.LoadCollection(ctx, req)
-		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-	}
-
-	// Test load with wrong rg num
-	for _, collection := range suite.collections {
-		req := &querypb.LoadCollectionRequest{
-			CollectionID:   collection,
-			ReplicaNumber:  suite.replicaNumber[collection] + 1,
-			ResourceGroups: []string{"rg1", "rg2"},
-		}
-		resp, err := server.LoadCollection(ctx, req)
-		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-	}
 }
 
 func (suite *ServiceSuite) TestLoadPartition() {
@@ -1635,9 +1575,6 @@ func (suite *ServiceSuite) TestCheckHealth() {
 	suite.loadAll()
 	ctx := context.Background()
 	server := suite.server
-	server.healthChecker = healthcheck.NewChecker(50*time.Millisecond, suite.server.healthCheckFn)
-	server.healthChecker.Start()
-	defer server.healthChecker.Close()
 
 	assertCheckHealthResult := func(isHealthy bool) {
 		resp, err := server.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -1650,38 +1587,28 @@ func (suite *ServiceSuite) TestCheckHealth() {
 		}
 	}
 
-	setNodeSate := func(isHealthy bool, isRPCFail bool) {
-		var resp *milvuspb.CheckHealthResponse
-		if isHealthy {
-			resp = healthcheck.OK()
-		} else {
-			resp = healthcheck.GetCheckHealthResponseFromClusterMsg(healthcheck.NewUnhealthyClusterMsg("dn", 1, "check fails", healthcheck.NodeHealthCheck))
-		}
-		resp.Status = &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-		if isRPCFail {
-			resp.Status = &commonpb.Status{ErrorCode: commonpb.ErrorCode_ForceDeny}
-		}
-		suite.cluster.EXPECT().CheckHealth(mock.Anything, mock.Anything).Unset()
-		suite.cluster.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(resp, nil).Maybe()
-		time.Sleep(1 * time.Second)
+	setNodeSate := func(state commonpb.StateCode) {
+		// Test for components state fail
+		suite.cluster.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Unset()
+		suite.cluster.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
+			&milvuspb.ComponentStates{
+				State:  &milvuspb.ComponentInfo{StateCode: state},
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			},
+			nil).Maybe()
 	}
 
 	// Test for server is not healthy
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
 	assertCheckHealthResult(false)
 
-	// Test for check health has some error reasons
-	setNodeSate(false, false)
-	server.UpdateStateCode(commonpb.StateCode_Healthy)
-	assertCheckHealthResult(false)
-
-	// Test for check health rpc fail
-	setNodeSate(true, true)
+	// Test for components state fail
+	setNodeSate(commonpb.StateCode_Abnormal)
 	server.UpdateStateCode(commonpb.StateCode_Healthy)
 	assertCheckHealthResult(false)
 
 	// Test for check load percentage fail
-	setNodeSate(true, false)
+	setNodeSate(commonpb.StateCode_Healthy)
 	assertCheckHealthResult(true)
 
 	// Test for check channel ok
@@ -1703,14 +1630,7 @@ func (suite *ServiceSuite) TestCheckHealth() {
 	for _, node := range suite.nodes {
 		suite.nodeMgr.Stopping(node)
 	}
-
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.UpdateCollectionLoadStatusInterval.Key, "1")
-	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.UpdateCollectionLoadStatusInterval.Key)
-	time.Sleep(1500 * time.Millisecond)
-	resp, err := server.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
-	suite.NoError(err)
-	suite.Equal(resp.IsHealthy, true)
-	suite.NotEmpty(resp.Reasons)
+	assertCheckHealthResult(true)
 }
 
 func (suite *ServiceSuite) TestGetShardLeaders() {

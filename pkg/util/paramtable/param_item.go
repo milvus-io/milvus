@@ -101,12 +101,18 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 // SetTempValue set the value for this ParamItem,
 // Once value set, ParamItem will use the value instead of underlying config manager.
 // Usage: should only use for unittest, swap empty string will remove the value.
-func (pi *ParamItem) SwapTempValue(s string) *string {
+func (pi *ParamItem) SwapTempValue(s string) string {
 	if s == "" {
-		return pi.tempValue.Swap(nil)
+		if old := pi.tempValue.Swap(nil); old != nil {
+			return *old
+		}
+		return ""
 	}
 	pi.manager.EvictCachedValue(pi.Key)
-	return pi.tempValue.Swap(&s)
+	if old := pi.tempValue.Swap(&s); old != nil {
+		return *old
+	}
+	return ""
 }
 
 func (pi *ParamItem) GetValue() string {
@@ -395,40 +401,4 @@ func getAndConvert[T any](v string, converter func(input string) (T, error), def
 		return defaultValue
 	}
 	return t
-}
-
-type RuntimeParamItem struct {
-	value atomic.Value
-}
-
-func (rpi *RuntimeParamItem) GetValue() any {
-	return rpi.value.Load()
-}
-
-func (rpi *RuntimeParamItem) GetAsString() string {
-	value, ok := rpi.value.Load().(string)
-	if !ok {
-		return ""
-	}
-	return value
-}
-
-func (rpi *RuntimeParamItem) GetAsTime() time.Time {
-	value, ok := rpi.value.Load().(time.Time)
-	if !ok {
-		return time.Time{}
-	}
-	return value
-}
-
-func (rpi *RuntimeParamItem) GetAsInt64() int64 {
-	value, ok := rpi.value.Load().(int64)
-	if !ok {
-		return 0
-	}
-	return value
-}
-
-func (rpi *RuntimeParamItem) SetValue(value any) {
-	rpi.value.Store(value)
 }

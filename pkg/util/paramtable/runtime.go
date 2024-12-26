@@ -23,8 +23,11 @@ import (
 )
 
 var (
-	once       sync.Once
-	params     ComponentParam
+	once         sync.Once
+	params       ComponentParam
+	runtimeParam = runtimeConfig{
+		components: make(map[string]struct{}, 0),
+	}
 	hookParams hookConfig
 )
 
@@ -58,11 +61,11 @@ func GetHookParams() *hookConfig {
 }
 
 func SetNodeID(newID UniqueID) {
-	params.RuntimeConfig.NodeID.SetValue(newID)
+	runtimeParam.nodeID.Store(newID)
 }
 
 func GetNodeID() UniqueID {
-	return params.RuntimeConfig.NodeID.GetAsInt64()
+	return runtimeParam.nodeID.Load()
 }
 
 func GetStringNodeID() string {
@@ -70,25 +73,34 @@ func GetStringNodeID() string {
 }
 
 func SetRole(role string) {
-	params.RuntimeConfig.Role.SetValue(role)
+	runtimeParam.role = role
 }
 
 func GetRole() string {
-	return params.RuntimeConfig.Role.GetAsString()
+	return runtimeParam.role
 }
 
 func SetCreateTime(d time.Time) {
-	params.RuntimeConfig.CreateTime.SetValue(d)
+	runtimeParam.createTime = d
 }
 
 func GetCreateTime() time.Time {
-	return params.RuntimeConfig.CreateTime.GetAsTime()
+	return runtimeParam.createTime
 }
 
 func SetUpdateTime(d time.Time) {
-	params.RuntimeConfig.UpdateTime.SetValue(d)
+	runtimeParam.updateTime = d
 }
 
 func GetUpdateTime() time.Time {
-	return params.RuntimeConfig.UpdateTime.GetAsTime()
+	return runtimeParam.updateTime
+}
+
+func SetLocalComponentEnabled(component string) {
+	runtimeParam.components[component] = struct{}{}
+}
+
+func IsLocalComponentEnabled(component string) bool {
+	_, ok := runtimeParam.components[component]
+	return ok
 }

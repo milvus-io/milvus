@@ -131,6 +131,7 @@ func BulkImport(ctx context.Context, option *BulkImportOption) (*BulkImportRespo
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Content-Type", "application/json")
 	if option.APIKey != "" {
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", option.APIKey))
 	}
@@ -208,6 +209,7 @@ func ListImportJobs(ctx context.Context, option *ListImportJobsOption) (*ListImp
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Content-Type", "application/json")
 	if option.APIKey != "" {
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", option.APIKey))
 	}
@@ -293,6 +295,7 @@ func GetImportProgress(ctx context.Context, option *GetImportProgressOption) (*G
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Content-Type", "application/json")
 	if option.APIKey != "" {
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", option.APIKey))
 	}

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -311,6 +312,38 @@ func (s *CollectionSuite) TestAlterCollection() {
 		s.mock.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
 
 		err := s.client.AlterCollection(ctx, NewAlterCollectionOption(collName).WithProperty(key, value))
+		s.Error(err)
+	})
+}
+
+func (s *CollectionSuite) TestGetCollectionStats() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		s.mock.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, gcsr *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+			s.Equal(collName, gcsr.GetCollectionName())
+			return &milvuspb.GetCollectionStatisticsResponse{
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				Stats: []*commonpb.KeyValuePair{
+					{Key: "row_count", Value: "1000"},
+				},
+			}, nil
+		}).Once()
+
+		stats, err := s.client.GetCollectionStats(ctx, NewGetCollectionStatsOption(collName))
+		s.NoError(err)
+
+		s.Len(stats, 1)
+		s.Equal("1000", stats["row_count"])
+	})
+
+	s.Run("failure", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		s.mock.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).Return(nil, errors.New("mocked")).Once()
+
+		_, err := s.client.GetCollectionStats(ctx, NewGetCollectionStatsOption(collName))
 		s.Error(err)
 	})
 }

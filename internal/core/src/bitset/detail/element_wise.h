@@ -733,8 +733,6 @@ struct ElementWiseBitsetPolicy {
         const auto start_shift = get_shift(start + starting_idx);
         const auto end_shift = get_shift(start + size);
 
-        size_t extra_offset = 0;
-
         // same element?
         if (start_element == end_element) {
             const data_type existing_v = data[start_element];
@@ -764,7 +762,6 @@ struct ElementWiseBitsetPolicy {
             }
 
             start_element += 1;
-            extra_offset += data_bits - start_shift;
         }
 
         // process the middle

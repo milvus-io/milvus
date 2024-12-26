@@ -72,7 +72,7 @@ type RWChannelStore interface {
 	Update(op *ChannelOpSet) error
 
 	// UpdateState is used by StateChannelStore only
-	UpdateState(isSuccessful bool, channels ...RWChannel)
+	UpdateState(isSuccessful bool, nodeID int64, channel RWChannel, opID int64)
 	// SegLegacyChannelByNode is used by StateChannelStore only
 	SetLegacyChannelByNode(nodeIDs ...int64)
 
@@ -375,18 +375,17 @@ func (c *StateChannelStore) AddNode(nodeID int64) {
 	}
 }
 
-func (c *StateChannelStore) UpdateState(isSuccessful bool, channels ...RWChannel) {
-	lo.ForEach(channels, func(ch RWChannel, _ int) {
-		for _, cInfo := range c.channelsInfo {
-			if stateChannel, ok := cInfo.Channels[ch.GetName()]; ok {
-				if isSuccessful {
-					stateChannel.(*StateChannel).TransitionOnSuccess()
-				} else {
-					stateChannel.(*StateChannel).TransitionOnFailure()
-				}
+func (c *StateChannelStore) UpdateState(isSuccessful bool, nodeID int64, channel RWChannel, opID int64) {
+	channelName := channel.GetName()
+	if cInfo, ok := c.channelsInfo[nodeID]; ok {
+		if stateChannel, ok := cInfo.Channels[channelName]; ok {
+			if isSuccessful {
+				stateChannel.(*StateChannel).TransitionOnSuccess(opID)
+			} else {
+				stateChannel.(*StateChannel).TransitionOnFailure(opID)
 			}
 		}
-	})
+	}
 }
 
 func (c *StateChannelStore) SetLegacyChannelByNode(nodeIDs ...int64) {
