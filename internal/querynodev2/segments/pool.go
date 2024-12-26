@@ -30,7 +30,6 @@ import (
 	"context"
 	"math"
 	"runtime"
-	"strings"
 	"sync"
 
 	"go.uber.org/atomic"
@@ -134,7 +133,6 @@ func initLoadPool() {
 func initWarmupPool() {
 	warmupOnce.Do(func() {
 		pt := paramtable.Get()
-		blocking := strings.ToLower(pt.QueryNodeCfg.ChunkCacheWarmingUp.GetValue()) == "sync"
 		poolSize := hardware.GetCPUNum() * pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt()
 		pool := conc.NewPool[any](
 			poolSize,
@@ -144,7 +142,7 @@ func initWarmupPool() {
 				runtime.LockOSThread()
 				C.SetThreadName(cgoTagWarmup)
 			}), // lock os thread for cgo thread disposal
-			conc.WithNonBlocking(!blocking), // make warming up non blocking
+			conc.WithNonBlocking(false),
 		)
 
 		warmupPool.Store(pool)

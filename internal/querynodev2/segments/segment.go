@@ -1156,26 +1156,28 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64, mmap
 			return nil, nil
 		}).Await()
 	case "async":
-		GetWarmupPool().Submit(func() (any, error) {
-			// bad implemtation, warmup is async at another goroutine and hold the rlock.
-			// the state transition of segment in segment loader will blocked.
-			// add a waiter to avoid it.
-			s.ptrLock.BlockUntilDataLoadedOrReleased()
-			if !s.ptrLock.RLockIf(state.IsNotReleased) {
-				return nil, nil
-			}
-			defer s.ptrLock.RUnlock()
+		go func() {
+			GetWarmupPool().Submit(func() (any, error) {
+				// bad implemtation, warmup is async at another goroutine and hold the rlock.
+				// the state transition of segment in segment loader will blocked.
+				// add a waiter to avoid it.
+				s.ptrLock.BlockUntilDataLoadedOrReleased()
+				if !s.ptrLock.RLockIf(state.IsNotReleased) {
+					return nil, nil
+				}
+				defer s.ptrLock.RUnlock()
 
-			cFieldID := C.int64_t(fieldID)
-			cMmapEnabled := C.bool(mmapEnabled)
-			status = C.WarmupChunkCache(s.ptr, cFieldID, cMmapEnabled)
-			if err := HandleCStatus(ctx, &status, ""); err != nil {
-				log.Warn("warming up chunk cache asynchronously failed", zap.Error(err))
-				return nil, err
-			}
-			log.Info("warming up chunk cache asynchronously done")
-			return nil, nil
-		})
+				cFieldID := C.int64_t(fieldID)
+				cMmapEnabled := C.bool(mmapEnabled)
+				status = C.WarmupChunkCache(s.ptr, cFieldID, cMmapEnabled)
+				if err := HandleCStatus(ctx, &status, ""); err != nil {
+					log.Warn("warming up chunk cache asynchronously failed", zap.Error(err))
+					return nil, err
+				}
+				log.Info("warming up chunk cache asynchronously done")
+				return nil, nil
+			})
+		}()
 	default:
 		// no warming up
 	}
