@@ -149,10 +149,8 @@ class HybridIndexTestV1 : public testing::Test {
                     type_, config, ctx);
             build_index->Build();
 
-            auto binary_set = build_index->Upload();
-            for (const auto& [key, _] : binary_set.binary_map_) {
-                index_files.push_back(key);
-            }
+            auto create_index_result = build_index->Upload();
+            index_files = create_index_result->GetIndexFiles();
         }
 
         index::CreateIndexInfo index_info{};

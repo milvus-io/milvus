@@ -193,10 +193,8 @@ test_run() {
             dtype, config, ctx);
         index->Build();
 
-        auto bs = index->Upload();
-        for (const auto& [key, _] : bs.binary_map_) {
-            index_files.push_back(key);
-        }
+        auto create_index_result = index->Upload();
+        index_files = create_index_result->GetIndexFiles();
     }
 
     {
@@ -466,10 +464,8 @@ test_string() {
             dtype, config, ctx);
         index->Build();
 
-        auto bs = index->Upload();
-        for (const auto& [key, _] : bs.binary_map_) {
-            index_files.push_back(key);
-        }
+        auto create_index_result = index->Upload();
+        auto index_files = create_index_result->GetIndexFiles();
     }
 
     {
