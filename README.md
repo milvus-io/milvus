@@ -12,7 +12,7 @@
 
 ## What is Milvus?
 
-🐦 [Milvus](https://milvus.io/) is a high-performance vector database built for scalability. It powers AI applications by efficiently organizing and searching vast amounts of unstructured data, such as text, images, and multi-modal information.
+🐦 [Milvus](https://milvus.io/) is a high-performance vector database built for scale. It powers AI applications by efficiently organizing and searching vast amounts of unstructured data, such as text, images, and multi-modal information.
 
 🧑‍💻 Written in Go and C++, Milvus implements hardware accelaration for CPU/GPU to achieve best-in-class vector search performance. Thanks to its [fully-distributed and K8s-native architecture](https://milvus.io/docs/overview.md#What-Makes-Milvus-so-Scalable), Milvus can scale horizontally, handle tens of thousands of search queries on billions of vectors, and keep data fresh with real-time streaming updates. Milvus also supports [Standalone mode](https://milvus.io/docs/install_standalone-docker.md) for single machine deployment. [Milvus Lite](https://milvus.io/docs/milvus_lite.md) is a lightweight version good for quickstart in python with `pip install`.
 
