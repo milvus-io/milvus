@@ -27,6 +27,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -64,6 +65,8 @@ type indexMeta struct {
 
 	// segmentID -> indexID -> segmentIndex
 	segmentIndexes map[UniqueID]map[UniqueID]*model.SegmentIndex
+
+	lastUpdateMetricTime atomic.Time
 }
 
 func newIndexTaskStats(s *model.SegmentIndex) *metricsinfo.IndexTaskStats {
@@ -201,6 +204,10 @@ func (m *indexMeta) updateSegIndexMeta(segIdx *model.SegmentIndex, updateFunc fu
 }
 
 func (m *indexMeta) updateIndexTasksMetrics() {
+	if time.Since(m.lastUpdateMetricTime.Load()) < 120*time.Second {
+		return
+	}
+	defer m.lastUpdateMetricTime.Store(time.Now())
 	taskMetrics := make(map[UniqueID]map[commonpb.IndexState]int)
 	for _, segIdx := range m.segmentBuildInfo.List() {
 		if segIdx.IsDeleted {
@@ -229,6 +236,7 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 			}
 		}
 	}
+	log.Ctx(m.ctx).Info("update index metric", zap.Int("collectionNum", len(taskMetrics)))
 }
 
 func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
@@ -868,7 +876,7 @@ func (m *indexMeta) GetAllSegIndexes() map[int64]*model.SegmentIndex {
 	tasks := m.segmentBuildInfo.List()
 	segIndexes := make(map[int64]*model.SegmentIndex, len(tasks))
 	for buildID, segIndex := range tasks {
-		segIndexes[buildID] = model.CloneSegmentIndex(segIndex)
+		segIndexes[buildID] = segIndex
 	}
 	return segIndexes
 }
@@ -963,22 +971,6 @@ func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.Segme
 		return false, model.CloneSegmentIndex(segIndex)
 	}
 	return true, nil
-}
-
-func (m *indexMeta) GetMetasByNodeID(nodeID UniqueID) []*model.SegmentIndex {
-	m.RLock()
-	defer m.RUnlock()
-
-	metas := make([]*model.SegmentIndex, 0)
-	for _, segIndex := range m.segmentBuildInfo.List() {
-		if segIndex.IsDeleted {
-			continue
-		}
-		if nodeID == segIndex.NodeID {
-			metas = append(metas, model.CloneSegmentIndex(segIndex))
-		}
-	}
-	return metas
 }
 
 func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[int64]*indexpb.SegmentIndexState {
