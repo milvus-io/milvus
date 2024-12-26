@@ -18,10 +18,7 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"io"
 	"math"
-	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
