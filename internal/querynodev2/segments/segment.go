@@ -961,8 +961,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 		IndexFiles:         indexInfo.GetIndexFilePaths(),
 		IndexEngineVersion: indexInfo.GetCurrentIndexVersion(),
 		IndexStoreVersion:  indexInfo.GetIndexStoreVersion(),
-		// TODO: For quickly fixing, we add the multiplier here, but those logic should be put at the datacoord after we add the mem size for each index.
-		IndexFileSize: int64(paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsFloat() * float64(indexInfo.GetIndexSize())),
+		IndexFileSize:      indexInfo.GetIndexSize(),
 	}
 
 	// 2.

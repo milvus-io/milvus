@@ -251,21 +251,21 @@ func combineToSegmentIndexesMeta220(segmentIndexes SegmentIndexesMeta210, indexB
 			}
 
 			segmentIndexModel := &model.SegmentIndex{
-				SegmentID:      segID,
-				CollectionID:   record.GetCollectionID(),
-				PartitionID:    record.GetPartitionID(),
-				NumRows:        buildMeta.GetReq().GetNumRows(),
-				IndexID:        indexID,
-				BuildID:        record.GetBuildID(),
-				NodeID:         buildMeta.GetNodeID(),
-				IndexVersion:   buildMeta.GetIndexVersion(),
-				IndexState:     buildMeta.GetState(),
-				FailReason:     buildMeta.GetFailReason(),
-				IsDeleted:      buildMeta.GetMarkDeleted(),
-				CreatedUTCTime: record.GetCreateTime(),
-				IndexFileKeys:  fileKeys,
-				IndexSize:      buildMeta.GetSerializeSize(),
-				WriteHandoff:   buildMeta.GetState() == commonpb.IndexState_Finished,
+				SegmentID:           segID,
+				CollectionID:        record.GetCollectionID(),
+				PartitionID:         record.GetPartitionID(),
+				NumRows:             buildMeta.GetReq().GetNumRows(),
+				IndexID:             indexID,
+				BuildID:             record.GetBuildID(),
+				NodeID:              buildMeta.GetNodeID(),
+				IndexVersion:        buildMeta.GetIndexVersion(),
+				IndexState:          buildMeta.GetState(),
+				FailReason:          buildMeta.GetFailReason(),
+				IsDeleted:           buildMeta.GetMarkDeleted(),
+				CreatedUTCTime:      record.GetCreateTime(),
+				IndexFileKeys:       fileKeys,
+				IndexSerializedSize: buildMeta.GetSerializeSize(),
+				WriteHandoff:        buildMeta.GetState() == commonpb.IndexState_Finished,
 			}
 			segmentIndexModels.AddRecord(segID, indexID, segmentIndexModel)
 		}

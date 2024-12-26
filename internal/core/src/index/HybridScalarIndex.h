@@ -153,7 +153,7 @@ class HybridScalarIndex : public ScalarIndex<T> {
         return internal_index_->HasRawData();
     }
 
-    BinarySet
+    CreateIndexResultPtr
     Upload(const Config& config = {}) override;
 
  private:

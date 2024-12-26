@@ -15,6 +15,7 @@
 #include <boost/filesystem.hpp>
 
 #include "index/InvertedIndexTantivy.h"
+#include "index/CreateIndexResult.h"
 
 namespace milvus::index {
 
@@ -39,7 +40,7 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     explicit TextMatchIndex(const storage::FileManagerContext& ctx);
 
  public:
-    BinarySet
+    CreateIndexResultPtr
     Upload(const Config& config) override;
 
     void
