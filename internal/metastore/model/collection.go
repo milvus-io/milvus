@@ -36,6 +36,29 @@ func (c *Collection) Available() bool {
 	return c.State == pb.CollectionState_CollectionCreated
 }
 
+func (c *Collection) ShadowClone() *Collection {
+	return &Collection{
+		TenantID:             c.TenantID,
+		DBID:                 c.DBID,
+		CollectionID:         c.CollectionID,
+		Name:                 c.Name,
+		Description:          c.Description,
+		AutoID:               c.AutoID,
+		Fields:               c.Fields,
+		Partitions:           c.Partitions,
+		VirtualChannelNames:  c.VirtualChannelNames,
+		PhysicalChannelNames: c.PhysicalChannelNames,
+		ShardsNum:            c.ShardsNum,
+		ConsistencyLevel:     c.ConsistencyLevel,
+		CreateTime:           c.CreateTime,
+		StartPositions:       c.StartPositions,
+		Aliases:              c.Aliases,
+		Properties:           c.Properties,
+		State:                c.State,
+		EnableDynamicField:   c.EnableDynamicField,
+	}
+}
+
 func (c *Collection) Clone() *Collection {
 	return &Collection{
 		TenantID:             c.TenantID,

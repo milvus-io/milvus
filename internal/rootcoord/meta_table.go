@@ -550,12 +550,12 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 }
 
 func filterUnavailable(coll *model.Collection) *model.Collection {
-	clone := coll.Clone()
+	clone := coll.ShadowClone()
 	// pick available partitions.
-	clone.Partitions = nil
+	clone.Partitions = make([]*model.Partition, 0, len(coll.Partitions))
 	for _, partition := range coll.Partitions {
 		if partition.Available() {
-			clone.Partitions = append(clone.Partitions, partition.Clone())
+			clone.Partitions = append(clone.Partitions, partition)
 		}
 	}
 	return clone
