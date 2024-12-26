@@ -1770,7 +1770,7 @@ func (c *Core) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfi
 
 // GetMetrics get metrics
 func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	if err := merr.CheckHealthyStandby(c.GetStateCode()); err != nil {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return &milvuspb.GetMetricsResponse{
 			Status:   merr.Status(err),
 			Response: "",
