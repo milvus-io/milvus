@@ -212,11 +212,13 @@ class Future : public IFuture {
                            ready->setValue(LeakyResult<R>(
                                static_cast<int>(e.get_error_code()), e.what()));
                        })
-            .thenError(folly::tag_t<std::exception>{},
-                       [ready = ready_](const std::exception& e) {
-                           ready->setValue(LeakyResult<R>(
-                               milvus::UnexpectedError, e.what()));
-                       });
+            .thenError(
+                folly::tag_t<std::exception>{},
+                [ready = ready_](const std::exception& e) {
+                    ready->setValue(LeakyResult<R>(
+                        milvus::UnexpectedError,
+                        fmt::format("{} :{}", typeid(e).name(), e.what())));
+                });
     }
 
  private:

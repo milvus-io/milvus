@@ -15,6 +15,7 @@ import (
 	"context"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -139,6 +140,7 @@ func (c *client) consume(consumer *consumer) {
 		var consumerCh chan<- common.Message
 		var waitForSent *RmqMessage
 		var newIncomingMsgCh <-chan struct{}
+		var timerNotify <-chan time.Time
 		if len(pendingMsgs) > 0 {
 			// If there's pending sent messages, we can try to deliver them first.
 			consumerCh = consumer.messageCh
@@ -148,6 +150,9 @@ func (c *client) consume(consumer *consumer) {
 			// !!! TODO: MsgMutex may lost, not sync up with the consumer,
 			// so the tailing message cannot be consumed if no new producing message.
 			newIncomingMsgCh = consumer.MsgMutex()
+			// It's a bad implementation here, for quickly fixing the previous problem.
+			// Every 100ms, wake up and check if the consumer has new incoming data.
+			timerNotify = time.After(100 * time.Millisecond)
 		}
 
 		select {
@@ -162,6 +167,8 @@ func (c *client) consume(consumer *consumer) {
 				log.Info("Consumer MsgMutex closed")
 				return
 			}
+		case <-timerNotify:
+			continue
 		}
 	}
 }
@@ -191,6 +198,17 @@ func (c *client) tryToConsume(consumer *consumer) []*RmqMessage {
 	}
 	rmqMsgs := make([]*RmqMessage, 0, len(msgs))
 	for _, msg := range msgs {
+		rmqMsg, err := unmarshalStreamingMessage(consumer.topic, msg)
+		if err == nil {
+			rmqMsgs = append(rmqMsgs, rmqMsg)
+			continue
+		}
+		if !errors.Is(err, errNotStreamingServiceMessage) {
+			log.Warn("Consumer's goroutine cannot unmarshal streaming message: ", zap.Error(err))
+			continue
+		}
+		// then fallback to the legacy message format.
+
 		// This is the hack, we put property into pl
 		properties := make(map[string]string, 0)
 		pl, err := UnmarshalHeader(msg.Payload)

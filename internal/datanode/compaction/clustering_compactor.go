@@ -56,7 +56,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -93,7 +92,7 @@ type clusteringCompactionTask struct {
 	// inner field
 	collectionID          int64
 	partitionID           int64
-	currentTs             typeutil.Timestamp // for TTL
+	currentTime           time.Time // for TTL
 	isVectorClusteringKey bool
 	clusteringKeyField    *schemapb.FieldSchema
 	primaryKeyField       *schemapb.FieldSchema
@@ -223,7 +222,7 @@ func (t *clusteringCompactionTask) init() error {
 
 	t.primaryKeyField = pkField
 	t.isVectorClusteringKey = typeutil.IsVectorType(t.clusteringKeyField.DataType)
-	t.currentTs = tsoutil.GetCurrentTime()
+	t.currentTime = time.Now()
 	t.memoryBufferSize = t.getMemoryBufferSize()
 	workerPoolSize := t.getWorkerPoolSize()
 	t.mappingPool = conc.NewPool[any](workerPoolSize)
@@ -563,11 +562,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 	log.Info("mapping segment start")
 	processStart := time.Now()
 	fieldBinlogPaths := make([][]string, 0)
-	var (
-		expired  int64 = 0
-		deleted  int64 = 0
-		remained int64 = 0
-	)
+	var remained int64 = 0
 
 	deltaPaths := make([]string, 0)
 	for _, d := range segment.GetDeltalogs() {
@@ -579,17 +574,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 	if err != nil {
 		return err
 	}
-
-	isDeletedValue := func(v *storage.Value) bool {
-		ts, ok := delta[v.PK.GetValue()]
-		// insert task and delete task has the same ts when upsert
-		// here should be < instead of <=
-		// to avoid the upsert data to be deleted after compact
-		if ok && uint64(v.Timestamp) < ts {
-			return true
-		}
-		return false
-	}
+	entityFilter := newEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
 	mappingStats := &clusteringpb.ClusteringCentroidIdMappingStats{}
 	if t.isVectorClusteringKey {
@@ -656,15 +641,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			v := pkIter.Value()
 			offset++
 
-			// Filtering deleted entity
-			if isDeletedValue(v) {
-				deleted++
-				continue
-			}
-			// Filtering expired entity
-			ts := typeutil.Timestamp(v.Timestamp)
-			if isExpiredEntity(t.plan.GetCollectionTtl(), t.currentTs, ts) {
-				expired++
+			if entityFilter.Filtered(v.PK.GetValue(), uint64(v.Timestamp)) {
 				continue
 			}
 
@@ -753,13 +730,19 @@ func (t *clusteringCompactionTask) mappingSegment(
 			}
 		}
 	}
+	missing := entityFilter.GetMissingDeleteCount()
 
 	log.Info("mapping segment end",
 		zap.Int64("remained_entities", remained),
-		zap.Int64("deleted_entities", deleted),
-		zap.Int64("expired_entities", expired),
+		zap.Int("deleted_entities", entityFilter.GetDeletedCount()),
+		zap.Int("expired_entities", entityFilter.GetExpiredCount()),
+		zap.Int("deltalog deletes", entityFilter.GetDeltalogDeleteCount()),
+		zap.Int("missing deletes", missing),
 		zap.Int64("written_row_num", t.writtenRowNum.Load()),
 		zap.Duration("elapse", time.Since(processStart)))
+
+	metrics.DataNodeCompactionDeleteCount.WithLabelValues(fmt.Sprint(t.collectionID)).Add(float64(entityFilter.GetDeltalogDeleteCount()))
+	metrics.DataNodeCompactionMissingDeleteCount.WithLabelValues(fmt.Sprint(t.collectionID)).Add(float64(missing))
 	return nil
 }
 
@@ -1175,8 +1158,6 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	var (
 		timestampTo   int64                 = -1
 		timestampFrom int64                 = -1
-		expired       int64                 = 0
-		deleted       int64                 = 0
 		remained      int64                 = 0
 		analyzeResult map[interface{}]int64 = make(map[interface{}]int64, 0)
 	)
@@ -1203,6 +1184,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 		fieldBinlogPaths = append(fieldBinlogPaths, ps)
 	}
 
+	expiredFilter := newEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime)
 	for _, paths := range fieldBinlogPaths {
 		allValues, err := t.binlogIO.Download(ctx, paths)
 		if err != nil {
@@ -1233,9 +1215,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 			v := pkIter.Value()
 
 			// Filtering expired entity
-			ts := typeutil.Timestamp(v.Timestamp)
-			if isExpiredEntity(t.plan.GetCollectionTtl(), t.currentTs, ts) {
-				expired++
+			if expiredFilter.Filtered(v.PK.GetValue(), uint64(v.Timestamp)) {
 				continue
 			}
 
@@ -1264,8 +1244,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 
 	log.Info("analyze segment end",
 		zap.Int64("remained entities", remained),
-		zap.Int64("deleted entities", deleted),
-		zap.Int64("expired entities", expired),
+		zap.Int("expired entities", expiredFilter.GetExpiredCount()),
 		zap.Duration("map elapse", time.Since(processStart)))
 	return analyzeResult, nil
 }

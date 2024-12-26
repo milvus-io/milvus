@@ -40,14 +40,14 @@ func TestKafkaConsumer_SeekExclusive(t *testing.T) {
 	data2 := []string{"111", "222", "333"}
 	testKafkaConsumerProduceData(t, topic, data1, data2)
 
-	msgID := &kafkaID{messageID: 1}
+	msgID := &KafkaID{MessageID: 1}
 	err = consumer.Seek(msgID, false)
 	assert.NoError(t, err)
 
 	msg := <-consumer.Chan()
 	assert.Equal(t, 333, BytesToInt(msg.Payload()))
 	assert.Equal(t, "333", msg.Properties()[common.TraceIDKey])
-	assert.Equal(t, int64(2), msg.ID().(*kafkaID).messageID)
+	assert.Equal(t, int64(2), msg.ID().(*KafkaID).MessageID)
 	assert.Equal(t, topic, msg.Topic())
 	assert.True(t, len(msg.Properties()) == 1)
 }
@@ -66,14 +66,14 @@ func TestKafkaConsumer_SeekInclusive(t *testing.T) {
 	data2 := []string{"111", "222", "333"}
 	testKafkaConsumerProduceData(t, topic, data1, data2)
 
-	msgID := &kafkaID{messageID: 1}
+	msgID := &KafkaID{MessageID: 1}
 	err = consumer.Seek(msgID, true)
 	assert.NoError(t, err)
 
 	msg := <-consumer.Chan()
 	assert.Equal(t, 222, BytesToInt(msg.Payload()))
 	assert.Equal(t, "222", msg.Properties()[common.TraceIDKey])
-	assert.Equal(t, int64(1), msg.ID().(*kafkaID).messageID)
+	assert.Equal(t, int64(1), msg.ID().(*KafkaID).MessageID)
 	assert.Equal(t, topic, msg.Topic())
 	assert.True(t, len(msg.Properties()) == 1)
 }
@@ -88,7 +88,7 @@ func TestKafkaConsumer_GetSeek(t *testing.T) {
 	assert.NoError(t, err)
 	defer consumer.Close()
 
-	msgID := &kafkaID{messageID: 0}
+	msgID := &KafkaID{MessageID: 0}
 	err = consumer.Seek(msgID, false)
 	assert.NoError(t, err)
 
@@ -163,7 +163,7 @@ func TestKafkaConsumer_GetLatestMsgID(t *testing.T) {
 	defer consumer.Close()
 
 	latestMsgID, err := consumer.GetLatestMsgID()
-	assert.Equal(t, int64(0), latestMsgID.(*kafkaID).messageID)
+	assert.Equal(t, int64(0), latestMsgID.(*KafkaID).MessageID)
 	assert.NoError(t, err)
 
 	data1 := []int{111, 222, 333}
@@ -171,7 +171,7 @@ func TestKafkaConsumer_GetLatestMsgID(t *testing.T) {
 	testKafkaConsumerProduceData(t, topic, data1, data2)
 
 	latestMsgID, err = consumer.GetLatestMsgID()
-	assert.Equal(t, int64(2), latestMsgID.(*kafkaID).messageID)
+	assert.Equal(t, int64(2), latestMsgID.(*KafkaID).MessageID)
 	assert.NoError(t, err)
 }
 

@@ -27,6 +27,6 @@ func (km *kafkaMessage) Payload() []byte {
 }
 
 func (km *kafkaMessage) ID() common.MessageID {
-	kid := &kafkaID{messageID: int64(km.msg.TopicPartition.Offset)}
+	kid := &KafkaID{MessageID: int64(km.msg.TopicPartition.Offset)}
 	return kid
 }
