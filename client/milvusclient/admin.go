@@ -19,11 +19,12 @@ package milvusclient
 import (
 	"context"
 
+	"github.com/samber/lo"
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/samber/lo"
-	"google.golang.org/grpc"
 )
 
 // GetServerVersionOption is the interface for GetServerVersion request.
