@@ -896,7 +896,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         // get index params for bm25 brute force
         std::map<std::string, std::string> index_info;
         if (search_info.metric_type_ == knowhere::metric::BM25) {
-            auto index_info =
+            index_info =
                 col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
         }
 
