@@ -375,7 +375,7 @@ func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 			err = mgr.UpdatePartitionLoadPercent(partitionID, 10)
 			suite.NoError(err)
 		}
-		_, err = mgr.UpdateCollectionLoadPercent(collectionID)
+		_, err = mgr.UpdateCollectionLoadPercent(ctx, collectionID)
 		suite.NoError(err)
 	}
 	suite.clearMemory()

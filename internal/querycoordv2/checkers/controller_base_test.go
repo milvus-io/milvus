@@ -73,7 +73,7 @@ func (suite *ControllerBaseTestSuite) SetupTest() {
 	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
 	suite.dist = meta.NewDistributionManager()
 	suite.broker = meta.NewMockBroker(suite.T())
-	suite.targetManager = meta.NewTargetManager(suite.broker, suite.meta, querycoord.NewCatalog(suite.kv))
+	suite.targetManager = meta.NewTargetManager(suite.broker, suite.meta)
 
 	suite.balancer = balance.NewMockBalancer(suite.T())
 	suite.scheduler = task.NewMockScheduler(suite.T())

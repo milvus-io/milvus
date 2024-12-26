@@ -88,6 +88,10 @@ func (_c *MockQueryNodeServer_Delete_Call) RunAndReturn(run func(context.Context
 func (_m *MockQueryNodeServer) DeleteBatch(_a0 context.Context, _a1 *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error) {
 	ret := _m.Called(_a0, _a1)
 
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteBatch")
+	}
+
 	var r0 *querypb.DeleteBatchResponse
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error)); ok {

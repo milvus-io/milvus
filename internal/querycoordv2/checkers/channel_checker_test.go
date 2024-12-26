@@ -72,7 +72,7 @@ func (suite *ChannelCheckerTestSuite) SetupTest() {
 	suite.nodeMgr = session.NewNodeManager()
 	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
-	targetManager := meta.NewTargetManager(suite.broker, suite.meta, querycoord.NewCatalog(suite.kv))
+	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 
 	distManager := meta.NewDistributionManager()
 

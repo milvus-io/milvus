@@ -163,7 +163,7 @@ func (suite *JobSuite) SetupTest() {
 	suite.dist = meta.NewDistributionManager()
 	suite.nodeMgr = session.NewNodeManager()
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store, suite.nodeMgr)
-	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta, querycoord.NewCatalog(suite.kv))
+	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.targetObserver = observers.NewTargetObserver(suite.meta,
 		suite.targetMgr,
 		suite.dist,

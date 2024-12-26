@@ -68,7 +68,7 @@ func (suite *ScoreBasedBalancerTestSuite) SetupTest() {
 	idAllocator := RandomIncrementIDAllocator()
 	nodeManager := session.NewNodeManager()
 	testMeta := meta.NewMeta(idAllocator, store, nodeManager)
-	testTarget := meta.NewTargetManager(suite.broker, testMeta, querycoord.NewCatalog(suite.kv))
+	testTarget := meta.NewTargetManager(suite.broker, testMeta)
 
 	distManager := meta.NewDistributionManager()
 	suite.mockScheduler = task.NewMockScheduler(suite.T())

@@ -19,6 +19,7 @@ package meta
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 
 	"github.com/samber/lo"
@@ -27,9 +28,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -62,7 +65,8 @@ type TargetManagerInterface interface {
 	GetCollectionTargetVersion(collectionID int64, scope TargetScope) int64
 	IsCurrentTargetExist(collectionID int64, partitionID int64) bool
 	IsNextTargetExist(collectionID int64) bool
-	Recover() error
+	SaveCurrentTarget(catalog metastore.QueryCoordCatalog)
+	Recover(catalog metastore.QueryCoordCatalog) error
 	CanSegmentBeMoved(collectionID, segmentID int64) bool
 }
 
@@ -76,17 +80,14 @@ type TargetManager struct {
 	// all remove segment/channel operation happens on Both current and next -> delete status should be consistent
 	current *target
 	next    *target
-
-	catalog metastore.QueryCoordCatalog
 }
 
-func NewTargetManager(broker Broker, meta *Meta, catalog metastore.QueryCoordCatalog) *TargetManager {
+func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
 	return &TargetManager{
 		broker:  broker,
 		meta:    meta,
 		current: newTarget(),
 		next:    newTarget(),
-		catalog: catalog,
 	}
 }
 
@@ -128,12 +129,6 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64) bool
 		zap.Int64("version", newTarget.GetTargetVersion()),
 		zap.String("partStatsVersion", partStatsVersionInfo),
 	)
-
-	// save collection current target for fast recovery after qc restart
-	err := mgr.catalog.SaveCollectionTargets(newTarget.toPbMsg())
-	if err != nil {
-		log.Warn("failed to save collection targets", zap.Error(err))
-	}
 	return true
 }
 
@@ -244,7 +239,6 @@ func (mgr *TargetManager) RemoveCollection(collectionID int64) {
 
 	mgr.current.removeCollectionTarget(collectionID)
 	mgr.next.removeCollectionTarget(collectionID)
-	mgr.catalog.RemoveCollectionTarget(collectionID)
 }
 
 // RemovePartition removes all segment in the given partition,
@@ -549,11 +543,51 @@ func (mgr *TargetManager) IsNextTargetExist(collectionID int64) bool {
 	return len(newChannels) > 0
 }
 
-func (mgr *TargetManager) Recover() error {
+func (mgr *TargetManager) SaveCurrentTarget(catalog metastore.QueryCoordCatalog) {
+	mgr.rwMutex.Lock()
+	defer mgr.rwMutex.Unlock()
+	if mgr.current != nil {
+		// use pool here to control maximal writer used by save target
+		pool := conc.NewPool[any](runtime.GOMAXPROCS(0) * 2)
+		defer pool.Release()
+		// use batch write in case of the number of collections is large
+		batchSize := 16
+		var wg sync.WaitGroup
+		submit := func(tasks []typeutil.Pair[int64, *querypb.CollectionTarget]) {
+			wg.Add(1)
+			pool.Submit(func() (any, error) {
+				defer wg.Done()
+				ids := lo.Map(tasks, func(p typeutil.Pair[int64, *querypb.CollectionTarget], _ int) int64 { return p.A })
+				if err := catalog.SaveCollectionTargets(lo.Map(tasks, func(p typeutil.Pair[int64, *querypb.CollectionTarget], _ int) *querypb.CollectionTarget {
+					return p.B
+				})...); err != nil {
+					log.Warn("failed to save current target for collection", zap.Int64s("collectionIDs", ids), zap.Error(err))
+				} else {
+					log.Info("succeed to save current target for collection", zap.Int64s("collectionIDs", ids))
+				}
+				return nil, nil
+			})
+		}
+		tasks := make([]typeutil.Pair[int64, *querypb.CollectionTarget], 0, batchSize)
+		for id, target := range mgr.current.collectionTargetMap {
+			tasks = append(tasks, typeutil.NewPair(id, target.toPbMsg()))
+			if len(tasks) >= batchSize {
+				submit(tasks)
+				tasks = make([]typeutil.Pair[int64, *querypb.CollectionTarget], 0, batchSize)
+			}
+		}
+		if len(tasks) > 0 {
+			submit(tasks)
+		}
+		wg.Wait()
+	}
+}
+
+func (mgr *TargetManager) Recover(catalog metastore.QueryCoordCatalog) error {
 	mgr.rwMutex.Lock()
 	defer mgr.rwMutex.Unlock()
 
-	targets, err := mgr.catalog.GetCollectionTargets()
+	targets, err := catalog.GetCollectionTargets()
 	if err != nil {
 		log.Warn("failed to recover collection target from etcd", zap.Error(err))
 		return err
@@ -568,7 +602,14 @@ func (mgr *TargetManager) Recover() error {
 			zap.Int("segmentNum", len(newTarget.GetAllSegmentIDs())),
 			zap.Int64("version", newTarget.GetTargetVersion()),
 		)
+
+		// clear target info in meta store
+		err := catalog.RemoveCollectionTarget(t.GetCollectionID())
+		if err != nil {
+			log.Warn("failed to clear collection target from etcd", zap.Error(err))
+		}
 	}
+
 	return nil
 }
 

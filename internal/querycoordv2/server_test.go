@@ -551,7 +551,7 @@ func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status quer
 func (suite *ServerSuite) hackServer() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.server.broker = suite.broker
-	suite.server.targetMgr = meta.NewTargetManager(suite.broker, suite.server.meta, suite.server.store)
+	suite.server.targetMgr = meta.NewTargetManager(suite.broker, suite.server.meta)
 	suite.server.taskScheduler = task.NewScheduler(
 		suite.server.ctx,
 		suite.server.meta,
