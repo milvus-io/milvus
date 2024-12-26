@@ -50,10 +50,8 @@ func genGroupByBinaryIndex(metricType entity.MetricType) []index.Index {
 
 func genUnsupportedFloatGroupByIndex() []index.Index {
 	idxIvfPq := index.NewIvfPQIndex(entity.L2, 128, 16, 8)
-	idxScann := index.NewSCANNIndex(entity.L2, 16, false)
 	return []index.Index{
 		idxIvfPq,
-		idxScann,
 	}
 }
 

@@ -10610,7 +10610,7 @@ class TestSearchGroupBy(TestcaseBase):
                 3. search with group by
                 verify: the error code and msg
         """
-        if index in ["HNSW", "IVF_FLAT", "FLAT", "IVF_SQ8", "DISKANN"]:
+        if index in ["HNSW", "IVF_FLAT", "FLAT", "IVF_SQ8", "DISKANN", "SCANN"]:
             pass  # Only HNSW and IVF_FLAT are supported
         else:
             metric = "L2"
