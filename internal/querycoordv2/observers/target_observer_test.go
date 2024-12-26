@@ -91,7 +91,7 @@ func (suite *TargetObserverSuite) SetupTest() {
 	suite.meta = meta.NewMeta(idAllocator, store, nodeMgr)
 
 	suite.broker = meta.NewMockBroker(suite.T())
-	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta, querycoord.NewCatalog(suite.kv))
+	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.distMgr = meta.NewDistributionManager()
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.observer = NewTargetObserver(suite.meta, suite.targetMgr, suite.distMgr, suite.broker, suite.cluster, nodeMgr)
@@ -300,7 +300,7 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 	suite.meta = meta.NewMeta(idAllocator, store, nodeMgr)
 
 	suite.broker = meta.NewMockBroker(suite.T())
-	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta, querycoord.NewCatalog(suite.kv))
+	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.distMgr = meta.NewDistributionManager()
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.observer = NewTargetObserver(

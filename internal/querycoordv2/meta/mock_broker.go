@@ -206,6 +206,10 @@ func (_c *MockBroker_GetCollectionLoadInfo_Call) RunAndReturn(run func(context.C
 func (_m *MockBroker) GetDataViewVersions(ctx context.Context, collectionIDs []int64) (map[int64]int64, error) {
 	ret := _m.Called(ctx, collectionIDs)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetDataViewVersions")
+	}
+
 	var r0 map[int64]int64
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, []int64) (map[int64]int64, error)); ok {
@@ -267,6 +271,10 @@ func (_m *MockBroker) GetIndexInfo(ctx context.Context, collectionID int64, segm
 	_ca = append(_ca, ctx, collectionID)
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetIndexInfo")
+	}
 
 	var r0 map[int64][]*querypb.FieldIndexInfo
 	var r1 error

@@ -410,8 +410,8 @@ func (s *Server) initMeta() error {
 		ChannelDistManager: meta.NewChannelDistManager(),
 		LeaderViewManager:  meta.NewLeaderViewManager(),
 	}
-	s.targetMgr = meta.NewTargetManager(s.broker, s.meta, s.store)
-	err = s.targetMgr.Recover()
+	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
+	err = s.targetMgr.Recover(s.store)
 	if err != nil {
 		log.Warn("failed to recover collection targets", zap.Error(err))
 	}
@@ -564,6 +564,12 @@ func (s *Server) Stop() error {
 	}
 	if s.targetObserver != nil {
 		s.targetObserver.Stop()
+	}
+
+	// save target to meta store, after querycoord restart, make it fast to recover current target
+	// should save target after target observer stop, incase of target changed
+	if s.targetMgr != nil {
+		s.targetMgr.SaveCurrentTarget(s.store)
 	}
 
 	if s.replicaObserver != nil {

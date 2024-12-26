@@ -78,7 +78,7 @@ func (suite *DistControllerTestSuite) SetupTest() {
 	suite.mockCluster = session.NewMockCluster(suite.T())
 	distManager := meta.NewDistributionManager()
 	suite.broker = meta.NewMockBroker(suite.T())
-	targetManager := meta.NewTargetManager(suite.broker, suite.meta, querycoord.NewCatalog(suite.kv))
+	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 	suite.mockScheduler = task.NewMockScheduler(suite.T())
 	suite.mockScheduler.EXPECT().GetExecutedFlag(mock.Anything).Return(nil).Maybe()
 	syncTargetVersionFn := func(collectionID int64) {}
