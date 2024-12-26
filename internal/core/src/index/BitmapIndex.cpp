@@ -200,7 +200,7 @@ size_t
 BitmapIndex<T>::GetIndexDataSize() {
     auto index_data_size = 0;
     for (auto& pair : data_) {
-        index_data_size += pair.second.getSizeInBytes() + sizeof(T);
+        index_data_size += pair.second.getSizeInBytes(false) + sizeof(T);
     }
     return index_data_size;
 }
@@ -211,7 +211,7 @@ BitmapIndex<std::string>::GetIndexDataSize() {
     auto index_data_size = 0;
     for (auto& pair : data_) {
         index_data_size +=
-            pair.second.getSizeInBytes() + pair.first.size() + sizeof(size_t);
+            pair.second.getSizeInBytes(false) + pair.first.size() + sizeof(size_t);
     }
     return index_data_size;
 }
@@ -224,7 +224,7 @@ BitmapIndex<T>::SerializeIndexData(uint8_t* data_ptr) {
         data_ptr += sizeof(T);
 
         pair.second.write(reinterpret_cast<char*>(data_ptr));
-        data_ptr += pair.second.getSizeInBytes();
+        data_ptr += pair.second.getSizeInBytes(false);
     }
 }
 
@@ -256,7 +256,7 @@ BitmapIndex<std::string>::SerializeIndexData(uint8_t* data_ptr) {
         data_ptr += key_size;
 
         pair.second.write(reinterpret_cast<char*>(data_ptr));
-        data_ptr += pair.second.getSizeInBytes();
+        data_ptr += pair.second.getSizeInBytes(false);
     }
 }
 
@@ -355,7 +355,7 @@ BitmapIndex<T>::DeserializeIndexData(const uint8_t* data_ptr,
 
         roaring::Roaring value;
         value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
-        data_ptr += value.getSizeInBytes();
+        data_ptr += value.getSizeInBytes(false);
 
         if (build_mode_ == BitmapIndexBuildMode::BITSET) {
             bitsets_[key] = ConvertRoaringToBitset(value);
@@ -418,7 +418,7 @@ BitmapIndex<std::string>::DeserializeIndexData(const uint8_t* data_ptr,
 
         roaring::Roaring value;
         value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
-        data_ptr += value.getSizeInBytes();
+        data_ptr += value.getSizeInBytes(false);
 
         if (build_mode_ == BitmapIndexBuildMode::BITSET) {
             bitsets_[key] = ConvertRoaringToBitset(value);
@@ -494,7 +494,7 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
         bitmaps[key] = {file_offset, frozen_size};
 
         file_offset += aligned_size;
-        data_ptr += value.getSizeInBytes();
+        data_ptr += value.getSizeInBytes(false);
     }
 
     file.Seek(0, SEEK_SET);
