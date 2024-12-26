@@ -146,6 +146,7 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 		return
 	}
 	defer m.lastUpdateMetricTime.Store(time.Now())
+	start := time.Now()
 	taskMetrics := make(map[UniqueID]map[commonpb.IndexState]int)
 	for _, segIdx := range m.buildID2SegmentIndex {
 		if segIdx.IsDeleted {
@@ -174,7 +175,7 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 			}
 		}
 	}
-	log.Ctx(m.ctx).Info("update index metric", zap.Int("collectionNum", len(taskMetrics)))
+	log.Ctx(m.ctx).Info("update index metric", zap.Int("collectionNum", len(taskMetrics)), zap.Duration("dur", time.Since(start)))
 }
 
 func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
