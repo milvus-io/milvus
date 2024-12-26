@@ -238,7 +238,7 @@ CreateIndex(CIndex* res_index,
 }
 
 CStatus
-BuildTextIndex(CBinarySet* c_binary_set,
+BuildTextIndex(ProtoLayoutInterface result,
                const uint8_t* serialized_build_index_info,
                const uint64_t len) {
     try {
@@ -286,9 +286,9 @@ BuildTextIndex(CBinarySet* c_binary_set,
             "milvus_tokenizer",
             field_schema.get_analyzer_params().c_str());
         index->Build(config);
-        auto binary =
-            std::make_unique<knowhere::BinarySet>(index->Upload(config));
-        *c_binary_set = binary.release();
+        auto create_index_result = index->Upload(config);
+        create_index_result->SerializeAt(
+            reinterpret_cast<milvus::ProtoLayout*>(result));
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";
@@ -776,7 +776,7 @@ AppendIndexStorageInfo(CBuildIndexInfo c_build_index_info,
 }
 
 CStatus
-SerializeIndexAndUpLoad(CIndex index, CBinarySet* c_binary_set) {
+SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result) {
     auto status = CStatus();
     try {
         AssertInfo(
@@ -784,9 +784,9 @@ SerializeIndexAndUpLoad(CIndex index, CBinarySet* c_binary_set) {
             "failed to serialize index to binary set, passed index was null");
         auto real_index =
             reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
-        auto binary =
-            std::make_unique<knowhere::BinarySet>(real_index->Upload());
-        *c_binary_set = binary.release();
+        auto create_index_result = real_index->Upload();
+        create_index_result->SerializeAt(
+            reinterpret_cast<milvus::ProtoLayout*>(result));
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {

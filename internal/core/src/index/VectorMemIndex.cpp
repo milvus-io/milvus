@@ -92,18 +92,19 @@ VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
 }
 
 template <typename T>
-BinarySet
+CreateIndexResultPtr
 VectorMemIndex<T>::Upload(const Config& config) {
     auto binary_set = Serialize(config);
     file_manager_->AddFile(binary_set);
 
     auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
-    BinarySet ret;
+    std::vector<SerializedIndexFileInfo> index_files;
+    index_files.reserve(remote_paths_to_size.size());
     for (auto& file : remote_paths_to_size) {
-        ret.Append(file.first, nullptr, file.second);
+        index_files.emplace_back(file.first, file.second);
     }
-
-    return ret;
+    return CreateIndexResult::New(file_manager_->GetAddedTotalMemSize(),
+                                  std::move(index_files));
 }
 
 template <typename T>

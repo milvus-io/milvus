@@ -89,7 +89,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     BinarySet
     Serialize(const Config& config) override;
 
-    BinarySet
+    CreateIndexResultPtr
     Upload(const Config& config = {}) override;
 
     /*

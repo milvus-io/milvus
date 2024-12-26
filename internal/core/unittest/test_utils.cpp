@@ -199,3 +199,9 @@ TEST(Util, dis_closer) {
     EXPECT_FALSE(milvus::query::dis_closer(0.1, 0.2, "IP"));
     EXPECT_FALSE(milvus::query::dis_closer(0.1, 0.1, "IP"));
 }
+
+TEST(Util, ProtoLayout) {
+    milvus::ProtoLayout layout;
+    milvus::proto::cgo::CreateIndexResult result;
+    EXPECT_TRUE(layout.SerializeAndHoldProto(result));
+}

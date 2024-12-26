@@ -169,6 +169,7 @@ message IndexTaskInfo {
   string fail_reason = 5;
   int32 current_index_version = 6;
   int64 index_store_version = 7;
+  uint64 mem_size = 8;
 }
 
 message IndexJobResults {

@@ -58,7 +58,7 @@ class VecIndexCreator : public IndexCreatorBase {
           const SearchInfo& search_info,
           const BitsetView& bitset);
 
-    BinarySet
+    index::CreateIndexResultPtr
     Upload() override;
 
  public:

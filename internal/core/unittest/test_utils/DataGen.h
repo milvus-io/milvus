@@ -1165,12 +1165,8 @@ GenVecIndexing(int64_t N,
         knowhere::Version::GetCurrentVersion().VersionNumber(),
         file_manager_context);
     indexing->BuildWithDataset(database, conf);
-    auto binary_set = indexing->Upload();
-
-    std::vector<std::string> index_files;
-    for (auto& binary : binary_set.binary_map_) {
-        index_files.emplace_back(binary.first);
-    }
+    auto create_index_result = indexing->Upload();
+    auto index_files = create_index_result->GetIndexFiles();
     conf["index_files"] = index_files;
     // we need a load stage to use index as the producation does
     // knowhere would do some data preparation in this stage

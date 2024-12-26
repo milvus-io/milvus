@@ -76,11 +76,12 @@ message SegmentIndex {
     repeated string index_file_keys = 11;
     bool deleted = 12;
     uint64 create_time = 13;
-    uint64 serialize_size = 14;
+    uint64 serialize_size = 14; // the total size of index file at oos. (may be compress)
     bool write_handoff = 15;
     int32 current_index_version = 16;
     int64 index_store_version = 17;
     uint64 finished_time = 18;
+    uint64 mem_size = 19; // the total size of index file at local (disk or memory) before loading by knowhere. (not compress)
 }
 
 message RegisterNodeRequest {
@@ -160,6 +161,7 @@ message IndexFilePathInfo {
     int64 index_version = 9;
     int64 num_rows = 10;
     int32 current_index_version = 11;
+    uint64 mem_size = 12;
 }
 
 message SegmentInfo {
