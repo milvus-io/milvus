@@ -1352,12 +1352,14 @@ func (s *LocalSegment) indexNeedLoadRawData(schema *schemapb.CollectionSchema, i
 	return !typeutil.IsVectorType(fieldSchema.DataType) && s.HasRawData(indexInfo.IndexInfo.FieldID), nil
 }
 
-type WarmupTask = func() (any, error)
-type AsyncWarmupDispatcher struct {
-	mu     sync.RWMutex
-	tasks  []WarmupTask
-	notify chan struct{}
-}
+type (
+	WarmupTask            = func() (any, error)
+	AsyncWarmupDispatcher struct {
+		mu     sync.RWMutex
+		tasks  []WarmupTask
+		notify chan struct{}
+	}
+)
 
 func NewWarmupDispatcher() *AsyncWarmupDispatcher {
 	return &AsyncWarmupDispatcher{

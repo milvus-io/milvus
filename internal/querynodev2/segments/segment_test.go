@@ -222,7 +222,6 @@ func (suite *SegmentSuite) TestSegmentReleased() {
 	suite.EqualValues(0, sealed.RowNum())
 	suite.EqualValues(0, sealed.MemSize())
 	suite.False(sealed.HasRawData(101))
-
 }
 
 func TestSegment(t *testing.T) {
@@ -246,5 +245,4 @@ func TestWarmupDispatcher(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return completed.Load() == int64(taskCnt)
 	}, 10*time.Second, time.Second)
-
 }
