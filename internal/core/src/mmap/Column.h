@@ -918,7 +918,15 @@ class SingleChunkArrayColumn : public SingleChunkColumnBase {
     void
     Append(const Array& array, bool valid_data = false) {
         indices_.emplace_back(data_size_);
-        element_indices_.emplace_back(array.get_offsets());
+        lens_.emplace_back(array.length());
+        if (IsVariableDataType(array.get_element_type())) {
+            element_indices_.emplace_back(
+                array.get_offsets_data(),
+                array.get_offsets_data() + array.length());
+        } else {
+            element_indices_.emplace_back();
+        }
+
         if (nullable_) {
             return SingleChunkColumnBase::Append(
                 static_cast<const char*>(array.data()),
@@ -931,10 +939,14 @@ class SingleChunkArrayColumn : public SingleChunkColumnBase {
 
     void
     Seal(std::vector<uint64_t>&& indices = {},
-         std::vector<std::vector<uint64_t>>&& element_indices = {}) {
+         std::vector<std::vector<uint32_t>>&& element_indices = {}) {
         if (!indices.empty()) {
             indices_ = std::move(indices);
             element_indices_ = std::move(element_indices);
+            lens_.reserve(element_indices_.size());
+            for (auto& ele_idices : element_indices_) {
+                lens_.emplace_back(ele_idices.size());
+            }
         }
         num_rows_ = indices_.size();
         ConstructViews();
@@ -944,22 +956,26 @@ class SingleChunkArrayColumn : public SingleChunkColumnBase {
     void
     ConstructViews() {
         views_.reserve(indices_.size());
-        for (size_t i = 0; i < indices_.size() - 1; i++) {
+        auto last = indices_.size() - 1;
+        for (size_t i = 0; i < last; i++) {
             views_.emplace_back(data_ + indices_[i],
+                                lens_[i],
                                 indices_[i + 1] - indices_[i],
                                 element_type_,
-                                std::move(element_indices_[i]));
+                                element_indices_[i].data());
         }
         views_.emplace_back(data_ + indices_.back(),
+                            lens_[last],
                             data_size_ - indices_.back(),
                             element_type_,
-                            std::move(element_indices_[indices_.size() - 1]));
-        element_indices_.clear();
+                            element_indices_[last].data());
+        lens_.clear();
     }
 
  private:
     std::vector<uint64_t> indices_{};
-    std::vector<std::vector<uint64_t>> element_indices_{};
+    std::vector<std::vector<uint32_t>> element_indices_{};
+    std::vector<int> lens_{};
     // Compatible with current Span type
     std::vector<ArrayView> views_{};
     DataType element_type_;
