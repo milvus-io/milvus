@@ -19,8 +19,7 @@ class TestChaosApply:
     @pytest.fixture(scope="function", autouse=True)
     def init_env(self, host, port, user, password, milvus_ns):
         if user and password:
-            # log.info(f"connect to {host}:{port} with user {user} and password {password}")
-            connections.connect('default', host=host, port=port, user=user, password=password, secure=True)
+            connections.connect('default', host=host, port=port, user=user, password=password)
         else:
             connections.connect('default', host=host, port=port)
         if connections.has_connection("default") is False:
