@@ -420,12 +420,9 @@ func (mgr *TargetManager) GetSealedSegmentsByChannel(collectionID int64,
 
 	targets := mgr.getCollectionTarget(scope, collectionID)
 	for _, t := range targets {
-		ret := make(map[int64]*datapb.SegmentInfo)
-		for k, v := range t.GetAllSegments() {
-			if v.GetInsertChannel() == channelName {
-				ret[k] = v
-			}
-		}
+		ret := lo.KeyBy(t.GetChannelSegments(channelName), func(s *datapb.SegmentInfo) int64 {
+			return s.GetID()
+		})
 
 		if len(ret) > 0 {
 			return ret
