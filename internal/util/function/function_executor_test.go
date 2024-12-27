@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/models/openai"
+	"github.com/milvus-io/milvus/internal/util/function/models/openai"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 )
 
@@ -49,16 +49,20 @@ func (s *FunctionExecutorSuite) creataSchema(url string) *schemapb.CollectionSch
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64},
 			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
-			{FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
+			{
+				FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: "dim", Value: "4"},
 				},
 				IsFunctionOutput: true,
 			},
-			{FieldID: 103, Name: "vector2", DataType: schemapb.DataType_FloatVector,
+			{
+				FieldID: 103, Name: "vector2", DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: "dim", Value: "8"},
-				}, IsFunctionOutput: true},
+				},
+				IsFunctionOutput: true,
+			},
 		},
 		Functions: []*schemapb.FunctionSchema{
 			{
@@ -69,10 +73,10 @@ func (s *FunctionExecutorSuite) creataSchema(url string) *schemapb.CollectionSch
 				OutputFieldIds:   []int64{102},
 				OutputFieldNames: []string{"vector"},
 				Params: []*commonpb.KeyValuePair{
-					{Key: Provider, Value: OpenAIProvider},
+					{Key: Provider, Value: openAIProvider},
 					{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
 					{Key: apiKeyParamKey, Value: "mock"},
-					{Key: embeddingUrlParamKey, Value: url},
+					{Key: embeddingURLParamKey, Value: url},
 					{Key: dimParamKey, Value: "4"},
 				},
 			},
@@ -84,20 +88,18 @@ func (s *FunctionExecutorSuite) creataSchema(url string) *schemapb.CollectionSch
 				OutputFieldIds:   []int64{103},
 				OutputFieldNames: []string{"vector2"},
 				Params: []*commonpb.KeyValuePair{
-					{Key: Provider, Value: OpenAIProvider},
+					{Key: Provider, Value: openAIProvider},
 					{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
 					{Key: apiKeyParamKey, Value: "mock"},
-					{Key: embeddingUrlParamKey, Value: url},
+					{Key: embeddingURLParamKey, Value: url},
 					{Key: dimParamKey, Value: "8"},
 				},
 			},
 		},
 	}
-
 }
 
 func (s *FunctionExecutorSuite) createMsg(texts []string) *msgstream.InsertMsg {
-
 	data := []*schemapb.FieldData{}
 	f := schemapb.FieldData{
 		Type:      schemapb.DataType_VarChar,
@@ -173,7 +175,6 @@ func (s *FunctionExecutorSuite) TestErrorEmbedding() {
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)
 		w.Write(data)
-
 	}))
 	defer ts.Close()
 	schema := s.creataSchema(ts.URL)

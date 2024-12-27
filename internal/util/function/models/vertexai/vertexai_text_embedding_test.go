@@ -27,7 +27,7 @@ import (
 )
 
 func TestEmbeddingClientCheck(t *testing.T) {
-	mockJsonKey := []byte{1, 2, 3}
+	mockJSONKey := []byte{1, 2, 3}
 	{
 		c := NewVertexAIEmbedding("mock_url", []byte{}, "mock_scopes", "")
 		err := c.Check()
@@ -36,14 +36,14 @@ func TestEmbeddingClientCheck(t *testing.T) {
 	}
 
 	{
-		c := NewVertexAIEmbedding("", mockJsonKey, "", "")
+		c := NewVertexAIEmbedding("", mockJSONKey, "", "")
 		err := c.Check()
 		assert.True(t, err != nil)
 		fmt.Println(err)
 	}
 
 	{
-		c := NewVertexAIEmbedding("mock_url", mockJsonKey, "mock_scopes", "")
+		c := NewVertexAIEmbedding("mock_url", mockJSONKey, "mock_scopes", "")
 		err := c.Check()
 		assert.True(t, err == nil)
 	}

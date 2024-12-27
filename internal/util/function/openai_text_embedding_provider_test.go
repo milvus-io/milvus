@@ -29,8 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-
-	"github.com/milvus-io/milvus/internal/models/openai"
+	"github.com/milvus-io/milvus/internal/util/function/models/openai"
 )
 
 func TestOpenAITextEmbeddingProvider(t *testing.T) {
@@ -49,16 +48,18 @@ func (s *OpenAITextEmbeddingProviderSuite) SetupTest() {
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64},
 			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
-			{FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
+			{
+				FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: "dim", Value: "4"},
-				}},
+				},
+			},
 		},
 	}
-	s.providers = []string{OpenAIProvider, AzureOpenAIProvider}
+	s.providers = []string{openAIProvider, azureOpenAIProvider}
 }
 
-func createOpenAIProvider(url string, schema *schemapb.FieldSchema, providerName string) (TextEmbeddingProvider, error) {
+func createOpenAIProvider(url string, schema *schemapb.FieldSchema, providerName string) (textEmbeddingProvider, error) {
 	functionSchema := &schemapb.FunctionSchema{
 		Name:             "test",
 		Type:             schemapb.FunctionType_Unknown,
@@ -70,13 +71,13 @@ func createOpenAIProvider(url string, schema *schemapb.FieldSchema, providerName
 			{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
 			{Key: apiKeyParamKey, Value: "mock"},
 			{Key: dimParamKey, Value: "4"},
-			{Key: embeddingUrlParamKey, Value: url},
+			{Key: embeddingURLParamKey, Value: url},
 		},
 	}
 	switch providerName {
-	case OpenAIProvider:
+	case openAIProvider:
 		return NewOpenAIEmbeddingProvider(schema, functionSchema)
-	case AzureOpenAIProvider:
+	case azureOpenAIProvider:
 		return NewAzureOpenAIEmbeddingProvider(schema, functionSchema)
 	default:
 		return nil, fmt.Errorf("Unknow provider")
@@ -103,7 +104,6 @@ func (s *OpenAITextEmbeddingProviderSuite) TestEmbedding() {
 			ret, _ := provder.CallEmbedding(data, false, SearchMode)
 			s.Equal([][]float32{{0.0, 0.1, 0.2, 0.3}, {1.0, 1.1, 1.2, 1.3}, {2.0, 2.1, 2.2, 2.3}}, ret)
 		}
-
 	}
 }
 
@@ -141,7 +141,6 @@ func (s *OpenAITextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 		data := []string{"sentence", "sentence"}
 		_, err2 := provder.CallEmbedding(data, false, InsertMode)
 		s.Error(err2)
-
 	}
 }
 
@@ -174,6 +173,5 @@ func (s *OpenAITextEmbeddingProviderSuite) TestEmbeddingNubmerNotMatch() {
 		data := []string{"sentence", "sentence2"}
 		_, err2 := provder.CallEmbedding(data, false, InsertMode)
 		s.Error(err2)
-
 	}
 }

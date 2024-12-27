@@ -26,9 +26,10 @@ import (
 	"net/http/httptest"
 
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
-	"github.com/milvus-io/milvus/internal/models/ali"
-	"github.com/milvus-io/milvus/internal/models/openai"
-	"github.com/milvus-io/milvus/internal/models/vertexai"
+
+	"github.com/milvus-io/milvus/internal/util/function/models/ali"
+	"github.com/milvus-io/milvus/internal/util/function/models/openai"
+	"github.com/milvus-io/milvus/internal/util/function/models/vertexai"
 )
 
 func mockEmbedding(texts []string, dim int) [][]float32 {
@@ -69,7 +70,6 @@ func CreateOpenAIEmbeddingServer() *httptest.Server {
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)
 		w.Write(data)
-
 	}))
 	return ts
 }
@@ -129,7 +129,6 @@ func CreateVertexAIEmbeddingServer() *httptest.Server {
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)
 		w.Write(data)
-
 	}))
 	return ts
 }

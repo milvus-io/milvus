@@ -21,12 +21,10 @@ package function
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/models/ali"
+	"github.com/milvus-io/milvus/internal/util/function/models/ali"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -39,15 +37,15 @@ type AliEmbeddingProvider struct {
 	outputType    string
 
 	maxBatch   int
-	timeoutSec int
+	timeoutSec int64
 }
 
 func createAliEmbeddingClient(apiKey string, url string) (*ali.AliDashScopeEmbedding, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv(dashscopeApiKey)
+		apiKey = os.Getenv(dashscopeAKEnvStr)
 	}
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service.", dashscopeApiKey)
+		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service.", dashscopeAKEnvStr)
 	}
 
 	if url == "" {
@@ -70,17 +68,13 @@ func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functio
 		case modelNameParamKey:
 			modelName = param.Value
 		case dimParamKey:
-			dim, err = strconv.ParseInt(param.Value, 10, 64)
+			dim, err = parseAndCheckFieldDim(param.Value, fieldDim, fieldSchema.Name)
 			if err != nil {
-				return nil, fmt.Errorf("dim [%s] is not int", param.Value)
-			}
-
-			if dim != 0 && dim != fieldDim {
-				return nil, fmt.Errorf("Field %s's dim is [%d], but embeding's dim is [%d]", functionSchema.Name, fieldDim, dim)
+				return nil, err
 			}
 		case apiKeyParamKey:
 			apiKey = param.Value
-		case embeddingUrlParamKey:
+		case embeddingURLParamKey:
 			url = param.Value
 		default:
 		}
@@ -122,7 +116,7 @@ func (provider *AliEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *AliEmbeddingProvider) CallEmbedding(texts []string, batchLimit bool, mode string) ([][]float32, error) {
+func (provider *AliEmbeddingProvider) CallEmbedding(texts []string, batchLimit bool, mode TextEmbeddingMode) ([][]float32, error) {
 	numRows := len(texts)
 	if batchLimit && numRows > provider.MaxBatch() {
 		return nil, fmt.Errorf("Ali text embedding supports up to [%d] pieces of data at a time, got [%d]", provider.MaxBatch(), numRows)
@@ -139,7 +133,7 @@ func (provider *AliEmbeddingProvider) CallEmbedding(texts []string, batchLimit b
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, time.Duration(provider.timeoutSec))
+		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.timeoutSec)
 		if err != nil {
 			return nil, err
 		}

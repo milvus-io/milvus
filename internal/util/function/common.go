@@ -18,16 +18,23 @@
 
 package function
 
+import (
+	"fmt"
+	"strconv"
+)
+
+type TextEmbeddingMode int
+
 const (
-	InsertMode string = "Insert"
-	SearchMode string = "Search"
+	InsertMode TextEmbeddingMode = iota
+	SearchMode
 )
 
 // common params
 const (
 	modelNameParamKey    string = "model_name"
 	dimParamKey          string = "dim"
-	embeddingUrlParamKey string = "url"
+	embeddingURLParamKey string = "url"
 	apiKeyParamKey       string = "api_key"
 )
 
@@ -37,7 +44,7 @@ const (
 	TextEmbeddingV2 string = "text-embedding-v2"
 	TextEmbeddingV3 string = "text-embedding-v3"
 
-	dashscopeApiKey string = "MILVUS_DASHSCOPE_API_KEY"
+	dashscopeAKEnvStr string = "MILVUSAI_DASHSCOPE_API_KEY"
 )
 
 // openai/azure text embedding
@@ -47,10 +54,10 @@ const (
 	TextEmbedding3Small string = "text-embedding-3-small"
 	TextEmbedding3Large string = "text-embedding-3-large"
 
-	openaiApiKey string = "MILVUSAI_OPENAI_API_KEY"
+	openaiAKEnvStr string = "MILVUSAI_OPENAI_API_KEY"
 
-	azureOpenaiApiKey   string = "MILVUSAI_AZURE_OPENAI_API_KEY"
-	azureOpenaiEndpoint string = "MILVUSAI_AZURE_OPENAI_ENDPOINT"
+	azureOpenaiAKEnvStr     string = "MILVUSAI_AZURE_OPENAI_API_KEY"
+	azureOpenaiResourceName string = "MILVUSAI_AZURE_OPENAI_RESOURCE_NAME"
 
 	userParamKey string = "user"
 )
@@ -59,13 +66,13 @@ const (
 
 const (
 	BedRockTitanTextEmbeddingsV2 string = "amazon.titan-embed-text-v2:0"
-	awsAccessKeyIdParamKey       string = "aws_access_key_id"
-	awsSecretAccessKeyParamKey   string = "aws_secret_access_key"
+	awsAKIdParamKey              string = "aws_access_key_id"
+	awsSAKParamKey               string = "aws_secret_access_key"
 	regionParamKey               string = "regin"
 	normalizeParamKey            string = "normalize"
 
-	bedrockAccessKeyId     string = "MILVUSAI_BEDROCK_ACCESS_KEY_ID"
-	bedrockSecretAccessKey string = "MILVUSAI_BEDROCK_SECRET_ACCESS_KEY"
+	bedrockAccessKeyId string = "MILVUSAI_BEDROCK_ACCESS_KEY_ID"
+	bedrockSAKEnvStr   string = "MILVUSAI_BEDROCK_SECRET_ACCESS_KEY"
 )
 
 // vertexAI
@@ -80,3 +87,15 @@ const (
 
 	vertexServiceAccountJSONEnv string = "MILVUSAI_GOOGLE_APPLICATION_CREDENTIALS"
 )
+
+func parseAndCheckFieldDim(dimStr string, fieldDim int64, fieldName string) (int64, error) {
+	dim, err := strconv.ParseInt(dimStr, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("dimension [%s] provided in Function params is not a valid int", dimStr)
+	}
+
+	if dim != 0 && dim != fieldDim {
+		return 0, fmt.Errorf("Function output field:[%s]'s dimension [%d] does not match the dimension [%d] provided in Function params.", fieldName, fieldDim, dim)
+	}
+	return dim, nil
+}

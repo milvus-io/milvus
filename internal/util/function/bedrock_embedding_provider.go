@@ -23,16 +23,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type BedrockClient interface {
@@ -60,13 +59,13 @@ func createBedRockEmbeddingClient(awsAccessKeyId string, awsSecretAccessKey stri
 	}
 
 	if awsSecretAccessKey == "" {
-		awsSecretAccessKey = os.Getenv(bedrockSecretAccessKey)
+		awsSecretAccessKey = os.Getenv(bedrockSAKEnvStr)
 	}
 	if awsSecretAccessKey == "" {
-		return nil, fmt.Errorf("Missing credentials. Please pass `aws_secret_access_key`, or configure the %s environment variable in the Milvus service.", bedrockSecretAccessKey)
+		return nil, fmt.Errorf("Missing credentials. Please pass `aws_secret_access_key`, or configure the %s environment variable in the Milvus service.", bedrockSAKEnvStr)
 	}
 	if region == "" {
-		return nil, fmt.Errorf("Missing region. Please pass `region` param.")
+		return nil, fmt.Errorf("Missing AWS Service region. Please pass `region` param.")
 	}
 
 	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region),
@@ -94,17 +93,13 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 		case modelNameParamKey:
 			modelName = param.Value
 		case dimParamKey:
-			dim, err = strconv.ParseInt(param.Value, 10, 64)
+			dim, err = parseAndCheckFieldDim(param.Value, fieldDim, fieldSchema.Name)
 			if err != nil {
-				return nil, fmt.Errorf("dim [%s] is not int", param.Value)
+				return nil, err
 			}
-
-			if dim != 0 && dim != fieldDim {
-				return nil, fmt.Errorf("Field %s's dim is [%d], but embeding's dim is [%d]", functionSchema.Name, fieldDim, dim)
-			}
-		case awsAccessKeyIdParamKey:
+		case awsAKIdParamKey:
 			awsAccessKeyId = param.Value
-		case awsSecretAccessKeyParamKey:
+		case awsSAKParamKey:
 			awsSecretAccessKey = param.Value
 		case regionParamKey:
 			region = param.Value
@@ -145,6 +140,7 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 }
 
 func (provider *BedrockEmbeddingProvider) MaxBatch() int {
+	// The bedrock model does not support batches, we support a small batch on the milvus side.
 	return 12 * provider.maxBatch
 }
 
@@ -152,7 +148,7 @@ func (provider *BedrockEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *BedrockEmbeddingProvider) CallEmbedding(texts []string, batchLimit bool, _ string) ([][]float32, error) {
+func (provider *BedrockEmbeddingProvider) CallEmbedding(texts []string, batchLimit bool, _ TextEmbeddingMode) ([][]float32, error) {
 	numRows := len(texts)
 	if batchLimit && numRows > provider.MaxBatch() {
 		return nil, fmt.Errorf("Bedrock text embedding supports up to [%d] pieces of data at a time, got [%d]", provider.MaxBatch(), numRows)
@@ -178,7 +174,6 @@ func (provider *BedrockEmbeddingProvider) CallEmbedding(texts []string, batchLim
 			ModelId:     aws.String(provider.modelName),
 			ContentType: aws.String("application/json"),
 		})
-
 		if err != nil {
 			return nil, err
 		}

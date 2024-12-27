@@ -26,7 +26,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/models/utils"
+	"github.com/milvus-io/milvus/internal/util/function/models/utils"
 )
 
 type EmbeddingRequest struct {
@@ -102,7 +102,7 @@ type EmbedddingError struct {
 
 type OpenAIEmbeddingInterface interface {
 	Check() error
-	Embedding(modelName string, texts []string, dim int, user string, timeoutSec time.Duration) (*EmbeddingResponse, error)
+	Embedding(modelName string, texts []string, dim int, user string, timeoutSec int64) (*EmbeddingResponse, error)
 }
 
 type openAIBase struct {
@@ -135,6 +135,40 @@ func (c *openAIBase) genReq(modelName string, texts []string, dim int, user stri
 	return &r
 }
 
+func (c *openAIBase) embedding(url string, headers map[string]string, modelName string, texts []string, dim int, user string, timeoutSec int64) (*EmbeddingResponse, error) {
+	r := c.genReq(modelName, texts, dim, user)
+	data, err := json.Marshal(r)
+	if err != nil {
+		return nil, err
+	}
+
+	if timeoutSec <= 0 {
+		timeoutSec = utils.DefaultTimeout
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(data))
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	body, err := utils.RetrySend(req, 3)
+	if err != nil {
+		return nil, err
+	}
+
+	var res EmbeddingResponse
+	err = json.Unmarshal(body, &res)
+	if err != nil {
+		return nil, err
+	}
+	sort.Sort(&ByIndex{&res})
+	return &res, err
+}
+
 type OpenAIEmbeddingClient struct {
 	openAIBase
 }
@@ -148,35 +182,12 @@ func NewOpenAIEmbeddingClient(apiKey string, url string) *OpenAIEmbeddingClient 
 	}
 }
 
-func (c *OpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim int, user string, timeoutSec time.Duration) (*EmbeddingResponse, error) {
-	r := c.genReq(modelName, texts, dim, user)
-	data, err := json.Marshal(r)
-	if err != nil {
-		return nil, err
+func (c *OpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim int, user string, timeoutSec int64) (*EmbeddingResponse, error) {
+	headers := map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": fmt.Sprintf("Bearer %s", c.apiKey),
 	}
-
-	if timeoutSec <= 0 {
-		timeoutSec = 30
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeoutSec*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewBuffer(data))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
-	body, err := utils.RetrySend(req, 3)
-	if err != nil {
-		return nil, err
-	}
-	var res EmbeddingResponse
-	err = json.Unmarshal(body, &res)
-	if err != nil {
-		return nil, err
-	}
-	sort.Sort(&ByIndex{&res})
-	return &res, err
+	return c.embedding(c.url, headers, modelName, texts, dim, user, timeoutSec)
 }
 
 type AzureOpenAIEmbeddingClient struct {
@@ -194,17 +205,7 @@ func NewAzureOpenAIEmbeddingClient(apiKey string, url string) *AzureOpenAIEmbedd
 	}
 }
 
-func (c *AzureOpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim int, user string, timeoutSec time.Duration) (*EmbeddingResponse, error) {
-	r := c.genReq(modelName, texts, dim, user)
-	data, err := json.Marshal(r)
-	if err != nil {
-		return nil, err
-	}
-
-	if timeoutSec <= 0 {
-		timeoutSec = 30
-	}
-
+func (c *AzureOpenAIEmbeddingClient) Embedding(modelName string, texts []string, dim int, user string, timeoutSec int64) (*EmbeddingResponse, error) {
 	base, err := url.Parse(c.url)
 	if err != nil {
 		return nil, err
@@ -214,25 +215,11 @@ func (c *AzureOpenAIEmbeddingClient) Embedding(modelName string, texts []string,
 	params := url.Values{}
 	params.Add("api-version", c.apiVersion)
 	base.RawQuery = params.Encode()
+	url := base.String()
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeoutSec*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base.String(), bytes.NewBuffer(data))
-	if err != nil {
-		return nil, err
+	headers := map[string]string{
+		"Content-Type": "application/json",
+		"api-key":      c.apiKey,
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", c.apiKey)
-	body, err := utils.RetrySend(req, 3)
-	if err != nil {
-		return nil, err
-	}
-
-	var res EmbeddingResponse
-	err = json.Unmarshal(body, &res)
-	if err != nil {
-		return nil, err
-	}
-	sort.Sort(&ByIndex{&res})
-	return &res, err
+	return c.embedding(url, headers, modelName, texts, dim, user, timeoutSec)
 }

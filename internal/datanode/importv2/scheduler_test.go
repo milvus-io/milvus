@@ -482,7 +482,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 				OutputFieldIds:   []int64{101},
 				OutputFieldNames: []string{"vec"},
 				Params: []*commonpb.KeyValuePair{
-					{Key: function.Provider, Value: function.OpenAIProvider},
+					{Key: "provider", Value: "openai"},
 					{Key: "model_name", Value: "text-embedding-ada-002"},
 					{Key: "api_key", Value: "mock"},
 					{Key: "url", Value: ts.URL},

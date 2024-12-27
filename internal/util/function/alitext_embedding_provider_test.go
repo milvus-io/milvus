@@ -29,8 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-
-	"github.com/milvus-io/milvus/internal/models/ali"
+	"github.com/milvus-io/milvus/internal/util/function/models/ali"
 )
 
 func TestAliTextEmbeddingProvider(t *testing.T) {
@@ -49,16 +48,18 @@ func (s *AliTextEmbeddingProviderSuite) SetupTest() {
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64},
 			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
-			{FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
+			{
+				FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: "dim", Value: "4"},
-				}},
+				},
+			},
 		},
 	}
-	s.providers = []string{AliDashScopeProvider}
+	s.providers = []string{aliDashScopeProvider}
 }
 
-func createAliProvider(url string, schema *schemapb.FieldSchema, providerName string) (TextEmbeddingProvider, error) {
+func createAliProvider(url string, schema *schemapb.FieldSchema, providerName string) (textEmbeddingProvider, error) {
 	functionSchema := &schemapb.FunctionSchema{
 		Name:             "test",
 		Type:             schemapb.FunctionType_Unknown,
@@ -69,12 +70,12 @@ func createAliProvider(url string, schema *schemapb.FieldSchema, providerName st
 		Params: []*commonpb.KeyValuePair{
 			{Key: modelNameParamKey, Value: TextEmbeddingV3},
 			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingUrlParamKey, Value: url},
+			{Key: embeddingURLParamKey, Value: url},
 			{Key: dimParamKey, Value: "4"},
 		},
 	}
 	switch providerName {
-	case AliDashScopeProvider:
+	case aliDashScopeProvider:
 		return NewAliDashScopeEmbeddingProvider(schema, functionSchema)
 	default:
 		return nil, fmt.Errorf("Unknow provider")
@@ -101,7 +102,6 @@ func (s *AliTextEmbeddingProviderSuite) TestEmbedding() {
 			ret, _ := provder.CallEmbedding(data, false, SearchMode)
 			s.Equal([][]float32{{0.0, 0.1, 0.2, 0.3}, {1.0, 1.1, 1.2, 1.3}, {2.0, 2.1, 2.2, 2.3}}, ret)
 		}
-
 	}
 }
 
@@ -126,19 +126,18 @@ func (s *AliTextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 	}))
 
 	defer ts.Close()
-	for _, provderName := range s.providers {
-		provder, err := createAliProvider(ts.URL, s.schema.Fields[2], provderName)
+	for _, providerName := range s.providers {
+		provder, err := createAliProvider(ts.URL, s.schema.Fields[2], providerName)
 		s.NoError(err)
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence"}
 		_, err2 := provder.CallEmbedding(data, false, InsertMode)
 		s.Error(err2)
-
 	}
 }
 
-func (s *AliTextEmbeddingProviderSuite) TestEmbeddingNubmerNotMatch() {
+func (s *AliTextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var res ali.EmbeddingResponse
 		res.Output.Embeddings = append(res.Output.Embeddings, ali.Embeddings{
@@ -163,6 +162,5 @@ func (s *AliTextEmbeddingProviderSuite) TestEmbeddingNubmerNotMatch() {
 		data := []string{"sentence", "sentence2"}
 		_, err2 := provder.CallEmbedding(data, false, InsertMode)
 		s.Error(err2)
-
 	}
 }

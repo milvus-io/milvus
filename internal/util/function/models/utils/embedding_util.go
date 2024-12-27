@@ -22,6 +22,8 @@ import (
 	"net/http"
 )
 
+const DefaultTimeout int64 = 30
+
 func send(req *http.Request) ([]byte, error) {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -34,7 +36,7 @@ func send(req *http.Request) ([]byte, error) {
 		return nil, err
 	}
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf(string(body))
 	}
 	return body, nil

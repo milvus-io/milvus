@@ -21,12 +21,10 @@ package function
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/models/openai"
+	"github.com/milvus-io/milvus/internal/util/function/models/openai"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -39,15 +37,15 @@ type OpenAIEmbeddingProvider struct {
 	user          string
 
 	maxBatch   int
-	timeoutSec int
+	timeoutSec int64
 }
 
 func createOpenAIEmbeddingClient(apiKey string, url string) (*openai.OpenAIEmbeddingClient, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv(openaiApiKey)
+		apiKey = os.Getenv(openaiAKEnvStr)
 	}
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service.", openaiApiKey)
+		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service.", openaiAKEnvStr)
 	}
 
 	if url == "" {
@@ -60,17 +58,19 @@ func createOpenAIEmbeddingClient(apiKey string, url string) (*openai.OpenAIEmbed
 
 func createAzureOpenAIEmbeddingClient(apiKey string, url string) (*openai.AzureOpenAIEmbeddingClient, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv(azureOpenaiApiKey)
+		apiKey = os.Getenv(azureOpenaiAKEnvStr)
 	}
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service", azureOpenaiApiKey)
+		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service", azureOpenaiAKEnvStr)
 	}
 
 	if url == "" {
-		url = os.Getenv(azureOpenaiEndpoint)
+		if resourceName := os.Getenv(azureOpenaiResourceName); resourceName != "" {
+			url = fmt.Sprintf("https://%s.openai.azure.com", resourceName)
+		}
 	}
 	if url == "" {
-		return nil, fmt.Errorf("Must provide `url` arguments or configure the %s environment variable in the Milvus service", azureOpenaiEndpoint)
+		return nil, fmt.Errorf("Must configure the %s environment variable in the Milvus service", azureOpenaiResourceName)
 	}
 	c := openai.NewAzureOpenAIEmbeddingClient(apiKey, url)
 	return c, nil
@@ -89,19 +89,15 @@ func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		case modelNameParamKey:
 			modelName = param.Value
 		case dimParamKey:
-			dim, err = strconv.ParseInt(param.Value, 10, 64)
+			dim, err = parseAndCheckFieldDim(param.Value, fieldDim, fieldSchema.Name)
 			if err != nil {
-				return nil, fmt.Errorf("dim [%s] is not int", param.Value)
-			}
-
-			if dim != 0 && dim != fieldDim {
-				return nil, fmt.Errorf("Field %s's dim is [%d], but embeding's dim is [%d]", fieldSchema.Name, fieldDim, dim)
+				return nil, err
 			}
 		case userParamKey:
 			user = param.Value
 		case apiKeyParamKey:
 			apiKey = param.Value
-		case embeddingUrlParamKey:
+		case embeddingURLParamKey:
 			url = param.Value
 		default:
 		}
@@ -153,7 +149,7 @@ func (provider *OpenAIEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *OpenAIEmbeddingProvider) CallEmbedding(texts []string, batchLimit bool, _ string) ([][]float32, error) {
+func (provider *OpenAIEmbeddingProvider) CallEmbedding(texts []string, batchLimit bool, _ TextEmbeddingMode) ([][]float32, error) {
 	numRows := len(texts)
 	if batchLimit && numRows > provider.MaxBatch() {
 		return nil, fmt.Errorf("OpenAI embedding supports up to [%d] pieces of data at a time, got [%d]", provider.MaxBatch(), numRows)
@@ -165,7 +161,7 @@ func (provider *OpenAIEmbeddingProvider) CallEmbedding(texts []string, batchLimi
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), provider.user, time.Duration(provider.timeoutSec))
+		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), provider.user, provider.timeoutSec)
 		if err != nil {
 			return nil, err
 		}

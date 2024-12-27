@@ -62,8 +62,8 @@ func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSc
 }
 
 func CheckFunctions(schema *schemapb.CollectionSchema) error {
-	for _, f_schema := range schema.Functions {
-		if _, err := createFunction(schema, f_schema); err != nil {
+	for _, fSchema := range schema.Functions {
+		if _, err := createFunction(schema, fSchema); err != nil {
 			return err
 		}
 	}
@@ -77,13 +77,13 @@ func NewFunctionExecutor(schema *schemapb.CollectionSchema) (*FunctionExecutor, 
 	executor := &FunctionExecutor{
 		runners: make(map[int64]Runner),
 	}
-	for _, f_schema := range schema.Functions {
-		if runner, err := createFunction(schema, f_schema); err != nil {
+	for _, fSchema := range schema.Functions {
+		runner, err := createFunction(schema, fSchema)
+		if err != nil {
 			return nil, err
-		} else {
-			if runner != nil {
-				executor.runners[f_schema.GetOutputFieldIds()[0]] = runner
-			}
+		}
+		if runner != nil {
+			executor.runners[fSchema.GetOutputFieldIds()[0]] = runner
 		}
 	}
 	return executor, nil
@@ -193,15 +193,14 @@ func (executor *FunctionExecutor) prcessAdvanceSearch(req *internalpb.SearchRequ
 				return fmt.Errorf("Nq [%d] > function [%s]'s max batch [%d]", sub.Nq, runner.GetSchema().Name, runner.MaxBatch())
 			}
 			wg.Add(1)
-			go func(runner Runner, idx int64) {
+			go func(runner Runner, idx int64, placeholderGroup []byte) {
 				defer wg.Done()
-				if newHolder, err := executor.processSingleSearch(runner, sub.GetPlaceholderGroup()); err != nil {
+				if newHolder, err := executor.processSingleSearch(runner, placeholderGroup); err != nil {
 					errChan <- err
 				} else {
 					outputs <- map[int64][]byte{idx: newHolder}
 				}
-
-			}(runner, int64(idx))
+			}(runner, int64(idx), sub.GetPlaceholderGroup())
 		}
 	}
 	wg.Wait()
@@ -222,9 +221,8 @@ func (executor *FunctionExecutor) prcessAdvanceSearch(req *internalpb.SearchRequ
 func (executor *FunctionExecutor) ProcessSearch(req *internalpb.SearchRequest) error {
 	if !req.IsAdvanced {
 		return executor.prcessSearch(req)
-	} else {
-		return executor.prcessAdvanceSearch(req)
 	}
+	return executor.prcessAdvanceSearch(req)
 }
 
 func (executor *FunctionExecutor) processSingleBulkInsert(runner Runner, data *storage.InsertData) (map[storage.FieldID]storage.FieldData, error) {

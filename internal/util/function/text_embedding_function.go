@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	// "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -34,17 +33,17 @@ const (
 )
 
 const (
-	OpenAIProvider       string = "openai"
-	AzureOpenAIProvider  string = "azure_openai"
-	AliDashScopeProvider string = "dashscope"
-	BedrockProvider      string = "bedrock"
-	VertexAIProvider     string = "vertexai"
+	openAIProvider       string = "openai"
+	azureOpenAIProvider  string = "azure_openai"
+	aliDashScopeProvider string = "dashscope"
+	bedrockProvider      string = "bedrock"
+	vertexAIProvider     string = "vertexai"
 )
 
 // Text embedding for retrieval task
-type TextEmbeddingProvider interface {
+type textEmbeddingProvider interface {
 	MaxBatch() int
-	CallEmbedding(texts []string, batchLimit bool, mode string) ([][]float32, error)
+	CallEmbedding(texts []string, batchLimit bool, mode TextEmbeddingMode) ([][]float32, error)
 	FieldDim() int64
 }
 
@@ -59,13 +58,13 @@ func getProvider(functionSchema *schemapb.FunctionSchema) (string, error) {
 	return "", fmt.Errorf("The text embedding service provider parameter:[%s] was not found", Provider)
 }
 
-type TextEmebddingFunction struct {
+type TextEmbeddingFunction struct {
 	FunctionBase
 
-	embProvider TextEmbeddingProvider
+	embProvider textEmbeddingProvider
 }
 
-func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema) (*TextEmebddingFunction, error) {
+func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema) (*TextEmbeddingFunction, error) {
 	if len(functionSchema.GetOutputFieldNames()) != 1 {
 		return nil, fmt.Errorf("Text function should only have one output field, but now is %d", len(functionSchema.GetOutputFieldNames()))
 	}
@@ -86,68 +85,67 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 		return nil, err
 	}
 	switch provider {
-	case OpenAIProvider:
+	case openAIProvider:
 		embP, err := NewOpenAIEmbeddingProvider(base.outputFields[0], functionSchema)
 		if err != nil {
 			return nil, err
 		}
-		return &TextEmebddingFunction{
+		return &TextEmbeddingFunction{
 			FunctionBase: *base,
 			embProvider:  embP,
 		}, nil
-	case AzureOpenAIProvider:
+	case azureOpenAIProvider:
 		embP, err := NewAzureOpenAIEmbeddingProvider(base.outputFields[0], functionSchema)
 		if err != nil {
 			return nil, err
 		}
-		return &TextEmebddingFunction{
+		return &TextEmbeddingFunction{
 			FunctionBase: *base,
 			embProvider:  embP,
 		}, nil
-	case BedrockProvider:
+	case bedrockProvider:
 		embP, err := NewBedrockEmbeddingProvider(base.outputFields[0], functionSchema, nil)
 		if err != nil {
 			return nil, err
 		}
-		return &TextEmebddingFunction{
+		return &TextEmbeddingFunction{
 			FunctionBase: *base,
 			embProvider:  embP,
 		}, nil
-	case AliDashScopeProvider:
+	case aliDashScopeProvider:
 		embP, err := NewAliDashScopeEmbeddingProvider(base.outputFields[0], functionSchema)
 		if err != nil {
 			return nil, err
 		}
-		return &TextEmebddingFunction{
+		return &TextEmbeddingFunction{
 			FunctionBase: *base,
 			embProvider:  embP,
 		}, nil
-	case VertexAIProvider:
-		embP, err := NewVertextAIEmbeddingProvider(base.outputFields[0], functionSchema, nil)
+	case vertexAIProvider:
+		embP, err := NewVertexAIEmbeddingProvider(base.outputFields[0], functionSchema, nil)
 		if err != nil {
 			return nil, err
 		}
-		return &TextEmebddingFunction{
+		return &TextEmbeddingFunction{
 			FunctionBase: *base,
 			embProvider:  embP,
 		}, nil
 	default:
-		return nil, fmt.Errorf("Unsupported embedding service provider: [%s] , list of supported [%s, %s, %s, %s]", provider, OpenAIProvider, AzureOpenAIProvider, AliDashScopeProvider, BedrockProvider)
+		return nil, fmt.Errorf("Unsupported embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s]", provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider)
 	}
-
 }
 
-func (runner *TextEmebddingFunction) MaxBatch() int {
+func (runner *TextEmbeddingFunction) MaxBatch() int {
 	return runner.embProvider.MaxBatch()
 }
 
-func (runner *TextEmebddingFunction) ProcessInsert(inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error) {
+func (runner *TextEmbeddingFunction) ProcessInsert(inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error) {
 	if len(inputs) != 1 {
-		return nil, fmt.Errorf("Text embedding function only receives one input, bug got [%d]", len(inputs))
+		return nil, fmt.Errorf("Text embedding function only receives one input field, but got [%d]", len(inputs))
 	}
 
 	if inputs[0].Type != schemapb.DataType_VarChar {
-		return nil, fmt.Errorf("Text embedding only supports varchar field, the input is not varchar")
+		return nil, fmt.Errorf("Text embedding only supports varchar field as input field, but got %s", schemapb.DataType_name[int32(inputs[0].Type)])
 	}
 
 	texts := inputs[0].GetScalars().GetStringData().GetData()
@@ -182,7 +180,7 @@ func (runner *TextEmebddingFunction) ProcessInsert(inputs []*schemapb.FieldData)
 	return []*schemapb.FieldData{&outputField}, nil
 }
 
-func (runner *TextEmebddingFunction) ProcessSearch(placeholderGroup *commonpb.PlaceholderGroup) (*commonpb.PlaceholderGroup, error) {
+func (runner *TextEmbeddingFunction) ProcessSearch(placeholderGroup *commonpb.PlaceholderGroup) (*commonpb.PlaceholderGroup, error) {
 	texts := funcutil.GetVarCharFromPlaceholder(placeholderGroup.Placeholders[0]) // Already checked externally
 	embds, err := runner.embProvider.CallEmbedding(texts, true, SearchMode)
 	if err != nil {
@@ -191,13 +189,13 @@ func (runner *TextEmebddingFunction) ProcessSearch(placeholderGroup *commonpb.Pl
 	return funcutil.Float32VectorsToPlaceholderGroup(embds), nil
 }
 
-func (runner *TextEmebddingFunction) ProcessBulkInsert(inputs []storage.FieldData) (map[storage.FieldID]storage.FieldData, error) {
+func (runner *TextEmbeddingFunction) ProcessBulkInsert(inputs []storage.FieldData) (map[storage.FieldID]storage.FieldData, error) {
 	if len(inputs) != 1 {
-		return nil, fmt.Errorf("OpenAIEmbedding function only receives one input, bug got [%d]", len(inputs))
+		return nil, fmt.Errorf("TextEmbedding function only receives one input, bug got [%d]", len(inputs))
 	}
 
 	if inputs[0].GetDataType() != schemapb.DataType_VarChar {
-		return nil, fmt.Errorf("OpenAIEmbedding only supports varchar field, the input is not varchar")
+		return nil, fmt.Errorf(" only supports varchar field, the input is not varchar")
 	}
 
 	texts, ok := inputs[0].GetDataRows().([]string)

@@ -21,13 +21,11 @@ package function
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/models/vertexai"
+	"github.com/milvus-io/milvus/internal/util/function/models/vertexai"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -68,7 +66,7 @@ func checkTask(modelName string, task string) error {
 	return nil
 }
 
-type VertextAIEmbeddingProvider struct {
+type VertexAIEmbeddingProvider struct {
 	fieldDim int64
 
 	client        *vertexai.VertexAIEmbedding
@@ -77,10 +75,10 @@ type VertextAIEmbeddingProvider struct {
 	task          string
 
 	maxBatch   int
-	timeoutSec int
+	timeoutSec int64
 }
 
-func createVertextAIEmbeddingClient(url string) (*vertexai.VertexAIEmbedding, error) {
+func createVertexAIEmbeddingClient(url string) (*vertexai.VertexAIEmbedding, error) {
 	jsonKey, err := getVertexAIJsonKey()
 	if err != nil {
 		return nil, err
@@ -89,7 +87,7 @@ func createVertextAIEmbeddingClient(url string) (*vertexai.VertexAIEmbedding, er
 	return c, nil
 }
 
-func NewVertextAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, c *vertexai.VertexAIEmbedding) (*VertextAIEmbeddingProvider, error) {
+func NewVertexAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, c *vertexai.VertexAIEmbedding) (*VertexAIEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
@@ -102,13 +100,9 @@ func NewVertextAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSc
 		case modelNameParamKey:
 			modelName = param.Value
 		case dimParamKey:
-			dim, err = strconv.ParseInt(param.Value, 10, 64)
+			dim, err = parseAndCheckFieldDim(param.Value, fieldDim, fieldSchema.Name)
 			if err != nil {
-				return nil, fmt.Errorf("dim [%s] is not int", param.Value)
-			}
-
-			if dim != 0 && dim != fieldDim {
-				return nil, fmt.Errorf("Field %s's dim is [%d], but embeding's dim is [%d]", functionSchema.Name, fieldDim, dim)
+				return nil, err
 			}
 		case locationParamKey:
 			location = param.Value
@@ -138,7 +132,7 @@ func NewVertextAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSc
 	url := fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/google/models/%s:predict", location, projectID, location, modelName)
 	var client *vertexai.VertexAIEmbedding
 	if c == nil {
-		client, err = createVertextAIEmbeddingClient(url)
+		client, err = createVertexAIEmbeddingClient(url)
 		if err != nil {
 			return nil, err
 		}
@@ -146,7 +140,7 @@ func NewVertextAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSc
 		client = c
 	}
 
-	provider := VertextAIEmbeddingProvider{
+	provider := VertexAIEmbeddingProvider{
 		fieldDim:      fieldDim,
 		client:        client,
 		modelName:     modelName,
@@ -158,15 +152,15 @@ func NewVertextAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSc
 	return &provider, nil
 }
 
-func (provider *VertextAIEmbeddingProvider) MaxBatch() int {
+func (provider *VertexAIEmbeddingProvider) MaxBatch() int {
 	return 5 * provider.maxBatch
 }
 
-func (provider *VertextAIEmbeddingProvider) FieldDim() int64 {
+func (provider *VertexAIEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *VertextAIEmbeddingProvider) getTaskType(mode string) string {
+func (provider *VertexAIEmbeddingProvider) getTaskType(mode TextEmbeddingMode) string {
 	if mode == SearchMode {
 		switch provider.task {
 		case vertexAIDocRetrival:
@@ -189,10 +183,10 @@ func (provider *VertextAIEmbeddingProvider) getTaskType(mode string) string {
 	return ""
 }
 
-func (provider *VertextAIEmbeddingProvider) CallEmbedding(texts []string, batchLimit bool, mode string) ([][]float32, error) {
+func (provider *VertexAIEmbeddingProvider) CallEmbedding(texts []string, batchLimit bool, mode TextEmbeddingMode) ([][]float32, error) {
 	numRows := len(texts)
 	if batchLimit && numRows > provider.MaxBatch() {
-		return nil, fmt.Errorf("VertextAI text embedding supports up to [%d] pieces of data at a time, got [%d]", provider.MaxBatch(), numRows)
+		return nil, fmt.Errorf("VertexAI text embedding supports up to [%d] pieces of data at a time, got [%d]", provider.MaxBatch(), numRows)
 	}
 
 	taskType := provider.getTaskType(mode)
@@ -202,7 +196,7 @@ func (provider *VertextAIEmbeddingProvider) CallEmbedding(texts []string, batchL
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], provider.embedDimParam, taskType, time.Duration(provider.timeoutSec))
+		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], provider.embedDimParam, taskType, provider.timeoutSec)
 		if err != nil {
 			return nil, err
 		}

@@ -20,14 +20,13 @@ package function
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func HasFunctions(functions []*schemapb.FunctionSchema, outputIDs []int64) bool {
 	// Determine whether the column corresponding to outputIDs contains functions, except bm25 function,
 	// if outputIDs is empty, check all cols
-	for _, f_schema := range functions {
-		switch f_schema.GetType() {
+	for _, fSchema := range functions {
+		switch fSchema.GetType() {
 		case schemapb.FunctionType_BM25:
 		case schemapb.FunctionType_Unknown:
 		default:
@@ -35,7 +34,7 @@ func HasFunctions(functions []*schemapb.FunctionSchema, outputIDs []int64) bool 
 				return true
 			} else {
 				for _, id := range outputIDs {
-					if f_schema.GetOutputFieldIds()[0] == id {
+					if fSchema.GetOutputFieldIds()[0] == id {
 						return true
 					}
 				}
@@ -43,19 +42,4 @@ func HasFunctions(functions []*schemapb.FunctionSchema, outputIDs []int64) bool 
 		}
 	}
 	return false
-}
-
-func GetOutputIDFunctionsMap(functions []*schemapb.FunctionSchema) (map[int64]*schemapb.FunctionSchema, error) {
-	outputIdMap := map[int64]*schemapb.FunctionSchema{}
-	for _, f_schema := range functions {
-		switch f_schema.GetType() {
-		case schemapb.FunctionType_BM25:
-		default:
-			if len(f_schema.OutputFieldIds) != 1 {
-				return nil, merr.WrapErrParameterInvalidMsg("Function [%s]'s outputs err, only supports one outputs", f_schema.Name)
-			}
-			outputIdMap[f_schema.OutputFieldIds[0]] = f_schema
-		}
-	}
-	return outputIdMap, nil
 }

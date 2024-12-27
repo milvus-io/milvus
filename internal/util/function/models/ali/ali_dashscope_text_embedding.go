@@ -25,7 +25,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/models/utils"
+	"github.com/milvus-io/milvus/internal/util/function/models/utils"
 )
 
 type Input struct {
@@ -83,6 +83,7 @@ func (eb *ByIndex) Len() int { return len(eb.resp.Output.Embeddings) }
 func (eb *ByIndex) Swap(i, j int) {
 	eb.resp.Output.Embeddings[i], eb.resp.Output.Embeddings[j] = eb.resp.Output.Embeddings[j], eb.resp.Output.Embeddings[i]
 }
+
 func (eb *ByIndex) Less(i, j int) bool {
 	return eb.resp.Output.Embeddings[i].TextIndex < eb.resp.Output.Embeddings[j].TextIndex
 }
@@ -116,23 +117,23 @@ func (c *AliDashScopeEmbedding) Check() error {
 	return nil
 }
 
-func (c *AliDashScopeEmbedding) Embedding(modelName string, texts []string, dim int, text_type string, output_type string, timeoutSec time.Duration) (*EmbeddingResponse, error) {
+func (c *AliDashScopeEmbedding) Embedding(modelName string, texts []string, dim int, textType string, outputType string, timeoutSec int64) (*EmbeddingResponse, error) {
 	var r EmbeddingRequest
 	r.Model = modelName
 	r.Input = Input{texts}
 	r.Parameters.Dimension = dim
-	r.Parameters.TextType = text_type
-	r.Parameters.OutputType = output_type
+	r.Parameters.TextType = textType
+	r.Parameters.OutputType = outputType
 	data, err := json.Marshal(r)
 	if err != nil {
 		return nil, err
 	}
 
 	if timeoutSec <= 0 {
-		timeoutSec = 30
+		timeoutSec = utils.DefaultTimeout
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeoutSec*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewBuffer(data))
 	if err != nil {

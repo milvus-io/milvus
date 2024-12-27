@@ -44,16 +44,18 @@ func (s *BedrockTextEmbeddingProviderSuite) SetupTest() {
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64},
 			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
-			{FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
+			{
+				FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: "dim", Value: "4"},
-				}},
+				},
+			},
 		},
 	}
-	s.providers = []string{BedrockProvider}
+	s.providers = []string{bedrockProvider}
 }
 
-func createBedrockProvider(schema *schemapb.FieldSchema, providerName string, dim int) (TextEmbeddingProvider, error) {
+func createBedrockProvider(schema *schemapb.FieldSchema, providerName string, dim int) (textEmbeddingProvider, error) {
 	functionSchema := &schemapb.FunctionSchema{
 		Name:             "test",
 		Type:             schemapb.FunctionType_Unknown,
@@ -68,7 +70,7 @@ func createBedrockProvider(schema *schemapb.FieldSchema, providerName string, di
 		},
 	}
 	switch providerName {
-	case BedrockProvider:
+	case bedrockProvider:
 		return NewBedrockEmbeddingProvider(schema, functionSchema, &MockBedrockClient{dim: dim})
 	default:
 		return nil, fmt.Errorf("Unknow provider")
@@ -92,7 +94,6 @@ func (s *BedrockTextEmbeddingProviderSuite) TestEmbedding() {
 			ret, _ := provder.CallEmbedding(data, false, SearchMode)
 			s.Equal([][]float32{{0.0, 0.1, 0.2, 0.3}, {0.0, 0.1, 0.2, 0.3}, {0.0, 0.1, 0.2, 0.3}}, ret)
 		}
-
 	}
 }
 
@@ -105,6 +106,5 @@ func (s *BedrockTextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 		data := []string{"sentence", "sentence"}
 		_, err2 := provder.CallEmbedding(data, false, InsertMode)
 		s.Error(err2)
-
 	}
 }

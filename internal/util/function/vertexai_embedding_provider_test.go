@@ -28,34 +28,36 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/models/vertexai"
+	"github.com/milvus-io/milvus/internal/util/function/models/vertexai"
 )
 
-func TestVertextAITextEmbeddingProvider(t *testing.T) {
-	suite.Run(t, new(VertextAITextEmbeddingProviderSuite))
+func TestVertexAITextEmbeddingProvider(t *testing.T) {
+	suite.Run(t, new(VertexAITextEmbeddingProviderSuite))
 }
 
-type VertextAITextEmbeddingProviderSuite struct {
+type VertexAITextEmbeddingProviderSuite struct {
 	suite.Suite
 	schema    *schemapb.CollectionSchema
 	providers []string
 }
 
-func (s *VertextAITextEmbeddingProviderSuite) SetupTest() {
+func (s *VertexAITextEmbeddingProviderSuite) SetupTest() {
 	s.schema = &schemapb.CollectionSchema{
 		Name: "test",
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64},
 			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
-			{FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
+			{
+				FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: "dim", Value: "4"},
-				}},
+				},
+			},
 		},
 	}
 }
 
-func createVertextAIProvider(url string, schema *schemapb.FieldSchema) (TextEmbeddingProvider, error) {
+func createVertexAIProvider(url string, schema *schemapb.FieldSchema) (textEmbeddingProvider, error) {
 	functionSchema := &schemapb.FunctionSchema{
 		Name:             "test",
 		Type:             schemapb.FunctionType_Unknown,
@@ -68,19 +70,19 @@ func createVertextAIProvider(url string, schema *schemapb.FieldSchema) (TextEmbe
 			{Key: locationParamKey, Value: "mock_local"},
 			{Key: projectIDParamKey, Value: "mock_id"},
 			{Key: taskTypeParamKey, Value: vertexAICodeRetrival},
-			{Key: embeddingUrlParamKey, Value: url},
+			{Key: embeddingURLParamKey, Value: url},
 			{Key: dimParamKey, Value: "4"},
 		},
 	}
 	mockClient := vertexai.NewVertexAIEmbedding(url, []byte{1, 2, 3}, "mock scope", "mock token")
-	return NewVertextAIEmbeddingProvider(schema, functionSchema, mockClient)
+	return NewVertexAIEmbeddingProvider(schema, functionSchema, mockClient)
 }
 
-func (s *VertextAITextEmbeddingProviderSuite) TestEmbedding() {
+func (s *VertexAITextEmbeddingProviderSuite) TestEmbedding() {
 	ts := CreateVertexAIEmbeddingServer()
 
 	defer ts.Close()
-	provder, err := createVertextAIProvider(ts.URL, s.schema.Fields[2])
+	provder, err := createVertexAIProvider(ts.URL, s.schema.Fields[2])
 	s.NoError(err)
 	{
 		data := []string{"sentence"}
@@ -95,10 +97,9 @@ func (s *VertextAITextEmbeddingProviderSuite) TestEmbedding() {
 		ret, _ := provder.CallEmbedding(data, false, SearchMode)
 		s.Equal([][]float32{{0.0, 0.1, 0.2, 0.3}, {1.0, 1.1, 1.2, 1.3}, {2.0, 2.1, 2.2, 2.3}}, ret)
 	}
-
 }
 
-func (s *VertextAITextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
+func (s *VertexAITextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var res vertexai.EmbeddingResponse
 		res.Predictions = append(res.Predictions, vertexai.Prediction{
@@ -130,7 +131,7 @@ func (s *VertextAITextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 	}))
 
 	defer ts.Close()
-	provder, err := createVertextAIProvider(ts.URL, s.schema.Fields[2])
+	provder, err := createVertexAIProvider(ts.URL, s.schema.Fields[2])
 	s.NoError(err)
 
 	// embedding dim not match
@@ -139,7 +140,7 @@ func (s *VertextAITextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 	s.Error(err2)
 }
 
-func (s *VertextAITextEmbeddingProviderSuite) TestEmbeddingNubmerNotMatch() {
+func (s *VertexAITextEmbeddingProviderSuite) TestEmbeddingNubmerNotMatch() {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var res vertexai.EmbeddingResponse
 		res.Predictions = append(res.Predictions, vertexai.Prediction{
@@ -161,7 +162,7 @@ func (s *VertextAITextEmbeddingProviderSuite) TestEmbeddingNubmerNotMatch() {
 	}))
 
 	defer ts.Close()
-	provder, err := createVertextAIProvider(ts.URL, s.schema.Fields[2])
+	provder, err := createVertexAIProvider(ts.URL, s.schema.Fields[2])
 
 	s.NoError(err)
 

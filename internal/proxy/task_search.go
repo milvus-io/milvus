@@ -361,6 +361,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	// fetch search_growing from search param
 	t.SearchRequest.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
+	queryFieldIds := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
 		plan, queryInfo, offset, _, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
 		if err != nil {
@@ -382,6 +383,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 
 		internalSubReq.FieldId = queryInfo.GetQueryFieldId()
+		queryFieldIds = append(queryFieldIds, internalSubReq.FieldId)
 		// set PartitionIDs for sub search
 		if t.partitionKeyMode {
 			// isolation has tighter constraint, check first
@@ -421,7 +423,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	}
 
 	var err error
-	if function.HasFunctions(t.schema.CollectionSchema.Functions, []int64{}) {
+	if function.HasFunctions(t.schema.CollectionSchema.Functions, queryFieldIds) {
 		exec, err := function.NewFunctionExecutor(t.schema.CollectionSchema)
 		if err != nil {
 			return err

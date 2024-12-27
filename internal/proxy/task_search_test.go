@@ -487,18 +487,24 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 		AutoID:      true,
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
-			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+			{
+				FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: "max_length", Value: "200"},
-				}},
-			{FieldID: 102, Name: "vector1", DataType: schemapb.DataType_FloatVector,
+				},
+			},
+			{
+				FieldID: 102, Name: "vector1", DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: "dim", Value: "4"},
-				}},
-			{FieldID: 103, Name: "vector2", DataType: schemapb.DataType_FloatVector,
+				},
+			},
+			{
+				FieldID: 103, Name: "vector2", DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: "dim", Value: "4"},
-				}},
+				},
+			},
 		},
 		Functions: []*schemapb.FunctionSchema{
 			{
@@ -509,7 +515,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 				OutputFieldIds:   []int64{102},
 				OutputFieldNames: []string{"vector1"},
 				Params: []*commonpb.KeyValuePair{
-					{Key: function.Provider, Value: function.OpenAIProvider},
+					{Key: "provider", Value: "openai"},
 					{Key: "model_name", Value: "text-embedding-ada-002"},
 					{Key: "api_key", Value: "mock"},
 					{Key: "url", Value: ts.URL},
@@ -524,7 +530,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 				OutputFieldIds:   []int64{103},
 				OutputFieldNames: []string{"vector2"},
 				Params: []*commonpb.KeyValuePair{
-					{Key: function.Provider, Value: function.OpenAIProvider},
+					{Key: "provider", Value: "openai"},
 					{Key: "model_name", Value: "text-embedding-ada-002"},
 					{Key: "api_key", Value: "mock"},
 					{Key: "url", Value: ts.URL},

@@ -24,9 +24,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/models/utils"
-
 	"golang.org/x/oauth2/google"
+
+	"github.com/milvus-io/milvus/internal/util/function/models/utils"
 )
 
 type Instance struct {
@@ -114,7 +114,7 @@ func (c *VertexAIEmbedding) getAccessToken() (string, error) {
 	return token.AccessToken, nil
 }
 
-func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int64, taskType string, timeoutSec time.Duration) (*EmbeddingResponse, error) {
+func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int64, taskType string, timeoutSec int64) (*EmbeddingResponse, error) {
 	var r EmbeddingRequest
 	for _, text := range texts {
 		r.Instances = append(r.Instances, Instance{TaskType: taskType, Content: text})
@@ -129,10 +129,10 @@ func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int6
 	}
 
 	if timeoutSec <= 0 {
-		timeoutSec = 30
+		timeoutSec = utils.DefaultTimeout
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeoutSec*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewBuffer(data))
 	if err != nil {
