@@ -16,48 +16,19 @@
 
 package entity
 
-type User struct {
-	UserName string
-	Roles    []string
+import "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+
+// Segment represent segment in milvus
+type Segment struct {
+	ID           int64
+	CollectionID int64
+	ParititionID int64
+
+	NumRows int64
+	State   commonpb.SegmentState
 }
 
-type Role struct {
-	RoleName   string
-	Privileges []GrantItem
-}
-
-type GrantItem struct {
-	Object     string
-	ObjectName string
-	RoleName   string
-	Grantor    string
-	Privilege  string
-}
-
-type UserInfo struct {
-	UserDescription
-	Password string
-}
-
-// UserDescription is the model for RBAC user description object.
-type UserDescription struct {
-	Name  string
-	Roles []string
-}
-
-type RBACMeta struct {
-	Users           []*UserInfo
-	Roles           []*Role
-	RoleGrants      []*RoleGrants
-	PrivilegeGroups []*PrivilegeGroup
-}
-
-// RoleGrants is the model for RBAC role description object.
-type RoleGrants struct {
-	Object        string
-	ObjectName    string
-	RoleName      string
-	GrantorName   string
-	PrivilegeName string
-	DbName        string
+// Flushed indicates segment is flushed
+func (s Segment) Flushed() bool {
+	return s.State == commonpb.SegmentState_Flushed
 }
