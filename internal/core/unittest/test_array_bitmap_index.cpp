@@ -211,7 +211,6 @@ class ArrayBitmapIndexTest : public testing::Test {
         insert_data.SetTimestamps(0, 100);
 
         auto serialized_bytes = insert_data.Serialize(storage::Remote);
-
         auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
                                     "/tmp/test_array_bitmap",
                                     collection_id,
@@ -221,7 +220,6 @@ class ArrayBitmapIndexTest : public testing::Test {
                                     0);
         chunk_manager_->Write(
             log_path, serialized_bytes.data(), serialized_bytes.size());
-
         storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager_);
         std::vector<std::string> index_files;
 
@@ -241,7 +239,6 @@ class ArrayBitmapIndexTest : public testing::Test {
                 index_files.push_back(key);
             }
         }
-
         index::CreateIndexInfo index_info{};
         index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
         index_info.field_type = DataType::ARRAY;

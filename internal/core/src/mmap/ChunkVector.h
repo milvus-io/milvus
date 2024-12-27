@@ -119,9 +119,10 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
         } else if constexpr (std::is_same_v<Array, Type>) {
             auto& src = chunk[chunk_offset];
             return ArrayView(const_cast<char*>(src.data()),
+                             src.length(),
                              src.byte_size(),
                              src.get_element_type(),
-                             src.get_offsets_in_copy());
+                             src.get_offsets_data());
         } else {
             return chunk[chunk_offset];
         }
