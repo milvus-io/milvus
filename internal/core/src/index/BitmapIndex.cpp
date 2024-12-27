@@ -354,7 +354,7 @@ BitmapIndex<T>::DeserializeIndexData(const uint8_t* data_ptr,
         data_ptr += sizeof(T);
 
         roaring::Roaring value;
-        value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
+        value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr), false);
         data_ptr += value.getSizeInBytes(false);
 
         if (build_mode_ == BitmapIndexBuildMode::BITSET) {
@@ -417,7 +417,7 @@ BitmapIndex<std::string>::DeserializeIndexData(const uint8_t* data_ptr,
         data_ptr += key_size;
 
         roaring::Roaring value;
-        value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
+        value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr), false);
         data_ptr += value.getSizeInBytes(false);
 
         if (build_mode_ == BitmapIndexBuildMode::BITSET) {
@@ -471,7 +471,7 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
         T key = ParseKey(&data_ptr);
 
         roaring::Roaring value;
-        value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
+        value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr), false);
         for (const auto& v : value) {
             valid_bitset_.set(v);
         }
