@@ -223,7 +223,7 @@ BitmapIndex<T>::SerializeIndexData(uint8_t* data_ptr) {
         memcpy(data_ptr, &pair.first, sizeof(T));
         data_ptr += sizeof(T);
 
-        pair.second.write(reinterpret_cast<char*>(data_ptr));
+        pair.second.write(reinterpret_cast<char*>(data_ptr), false);
         data_ptr += pair.second.getSizeInBytes(false);
     }
 }
@@ -255,7 +255,7 @@ BitmapIndex<std::string>::SerializeIndexData(uint8_t* data_ptr) {
         memcpy(data_ptr, pair.first.data(), key_size);
         data_ptr += key_size;
 
-        pair.second.write(reinterpret_cast<char*>(data_ptr));
+        pair.second.write(reinterpret_cast<char*>(data_ptr), false);
         data_ptr += pair.second.getSizeInBytes(false);
     }
 }
