@@ -198,7 +198,7 @@ BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_datas) {
 template <typename T>
 size_t
 BitmapIndex<T>::GetIndexDataSize() {
-    auto index_data_size = 0;
+    size_t index_data_size = 0;
     for (auto& pair : data_) {
         index_data_size += pair.second.getSizeInBytes(false) + sizeof(T);
     }
@@ -208,7 +208,7 @@ BitmapIndex<T>::GetIndexDataSize() {
 template <>
 size_t
 BitmapIndex<std::string>::GetIndexDataSize() {
-    auto index_data_size = 0;
+    size_t index_data_size = 0;
     for (auto& pair : data_) {
         index_data_size +=
             pair.second.getSizeInBytes(false) + pair.first.size() + sizeof(size_t);
