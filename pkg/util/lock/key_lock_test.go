@@ -67,3 +67,23 @@ func TestKeyRLock(t *testing.T) {
 	wg.Wait()
 	assert.Equal(t, keyLock.size(), 0)
 }
+
+func TestNewKeyLock(t *testing.T) {
+	keyLock := NewKeyLockWithGCTime[string](time.Second)
+	keyLock.Lock("a")
+	keyLock.Lock("b")
+
+	keyLock.Unlock("a")
+	keyLock.Unlock("b")
+
+	assert.Equal(t, 0, keyLock.size())
+	keyLock.keyLocksMutex.Lock()
+	keyLen := len(keyLock.refLocks)
+	keyLock.keyLocksMutex.Unlock()
+	assert.Equal(t, 2, keyLen)
+	time.Sleep(2 * time.Second)
+	keyLock.keyLocksMutex.Lock()
+	keyLen = len(keyLock.refLocks)
+	keyLock.keyLocksMutex.Unlock()
+	assert.Equal(t, 0, keyLen)
+}
