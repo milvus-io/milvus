@@ -77,12 +77,12 @@ func (replica *Replica) GetResourceGroup() string {
 // GetNodes returns the rw nodes of the replica.
 // readonly, don't modify the returned slice.
 func (replica *Replica) GetNodes() []int64 {
-	nodes := make([]int64, 0)
-	nodes = append(nodes, replica.replicaPB.GetRoNodes()...)
-	nodes = append(nodes, replica.replicaPB.GetNodes()...)
-	nodes = append(nodes, replica.replicaPB.GetRwSqNodes()...)
-	nodes = append(nodes, replica.replicaPB.GetRoSqNodes()...)
-	return nodes
+	nodes := typeutil.NewUniqueSet()
+	nodes.Insert(replica.replicaPB.GetRoNodes()...)
+	nodes.Insert(replica.replicaPB.GetNodes()...)
+	nodes.Insert(replica.replicaPB.GetRwSqNodes()...)
+	nodes.Insert(replica.replicaPB.GetRoSqNodes()...)
+	return nodes.Collect()
 }
 
 // GetRONodes returns the ro nodes of the replica.
