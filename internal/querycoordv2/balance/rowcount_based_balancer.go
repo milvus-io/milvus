@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -194,12 +195,16 @@ func (b *RowCountBasedBalancer) BalanceReplica(ctx context.Context, replica *met
 }
 
 func (b *RowCountBasedBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica, stoppingBalance bool) []ChannelAssignPlan {
-	rwNodes := replica.GetRWSQNodes()
-	roNodes := replica.GetROSQNodes()
+	var rwNodes, roNodes []int64
+	if streamingutil.IsStreamingServiceEnabled() {
+		rwNodes, roNodes = replica.GetRWSQNodes(), replica.GetROSQNodes()
+	} else {
+		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
+	}
+
 	if len(rwNodes) == 0 || !b.permitBalanceChannel(replica.GetCollectionID()) {
 		return nil
 	}
-
 	if len(roNodes) != 0 {
 		if !stoppingBalance {
 			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
