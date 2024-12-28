@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -120,7 +121,11 @@ func (b *RoundRobinBalancer) AssignChannel(ctx context.Context, collectionID int
 		return nil
 	}
 
-	channels, plans, scoreDelta := assignChannelToWALLocatedFirstForNodeInfo(channels, nodesInfo)
+	plans := make([]ChannelAssignPlan, 0)
+	scoreDelta := make(map[int64]int)
+	if streamingutil.IsStreamingServiceEnabled() {
+		channels, plans, scoreDelta = assignChannelToWALLocatedFirstForNodeInfo(channels, nodesInfo)
+	}
 
 	sort.Slice(nodesInfo, func(i, j int) bool {
 		cnt1, cnt2 := nodesInfo[i].ChannelCnt(), nodesInfo[j].ChannelCnt()

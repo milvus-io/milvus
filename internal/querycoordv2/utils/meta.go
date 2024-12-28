@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -162,7 +163,9 @@ func SpawnReplicasWithRG(ctx context.Context, m *meta.Meta, collection int64, re
 	}
 	// Active recover it.
 	RecoverReplicaOfCollection(ctx, m, collection)
-	m.RecoverSQNodesInCollection(ctx, collection, snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs())
+	if streamingutil.IsStreamingServiceEnabled() {
+		m.RecoverSQNodesInCollection(ctx, collection, snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs())
+	}
 	return replicas, nil
 }
 
