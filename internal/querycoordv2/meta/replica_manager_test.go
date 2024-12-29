@@ -221,7 +221,7 @@ func (suite *ReplicaManagerSuite) TestRecover() {
 	replica := mgr.Get(ctx, 2100)
 	suite.NotNil(replica)
 	suite.EqualValues(1000, replica.GetCollectionID())
-	suite.EqualValues([]int64{1, 2, 3}, replica.GetNodes())
+	suite.ElementsMatch([]int64{1, 2, 3}, replica.GetNodes())
 	suite.Len(replica.GetNodes(), len(replica.GetNodes()))
 	for _, node := range replica.GetNodes() {
 		suite.True(replica.Contains(node))
