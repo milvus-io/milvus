@@ -449,7 +449,7 @@ func (b *ScoreBasedBalancer) BalanceReplica(ctx context.Context, replica *meta.R
 	stoppingBalance := paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool()
 
 	channelPlans = b.balanceChannels(ctx, br, replica, stoppingBalance)
-	if len(channelPlans) != 0 {
+	if len(channelPlans) == 0 {
 		segmentPlans = b.balanceSegments(ctx, br, replica, stoppingBalance)
 	}
 	return
