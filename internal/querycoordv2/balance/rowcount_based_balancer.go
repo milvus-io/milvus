@@ -105,7 +105,10 @@ func (b *RowCountBasedBalancer) AssignChannel(ctx context.Context, collectionID 
 		return nil
 	}
 
-	channels, plans := assignChannelToWALLocatedFirst(channels, nodeItems)
+	plans := make([]ChannelAssignPlan, 0)
+	if streamingutil.IsStreamingServiceEnabled() {
+		channels, plans = assignChannelToWALLocatedFirst(channels, nodeItems)
+	}
 
 	queue := newPriorityQueue()
 	for _, item := range nodeItems {
@@ -188,7 +191,7 @@ func (b *RowCountBasedBalancer) BalanceReplica(ctx context.Context, replica *met
 	stoppingBalance := paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool()
 
 	channelPlans = b.balanceChannels(ctx, br, replica, stoppingBalance)
-	if len(channelPlans) != 0 {
+	if len(channelPlans) == 0 {
 		segmentPlans = b.balanceSegments(ctx, replica, stoppingBalance)
 	}
 	return
