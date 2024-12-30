@@ -241,15 +241,15 @@ func TestExpr_IsNull(t *testing.T) {
 	assert.NoError(t, err)
 
 	exprStrs := []string{
-		`is_null(VarCharField)`,
-		`IS_NULL(VarCharField)`,
+		`VarCharField is null`,
+		`VarCharField IS NULL`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
 	}
 
 	unsupported := []string{
-		`is_null(not_exist)`,
+		`not_exist is null`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
@@ -262,15 +262,15 @@ func TestExpr_IsNotNull(t *testing.T) {
 	assert.NoError(t, err)
 
 	exprStrs := []string{
-		`is_not_null(VarCharField)`,
-		`IS_NOT_NULL(VarCharField)`,
+		`VarCharField is not null`,
+		`VarCharField IS NOT NULL`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
 	}
 
 	unsupported := []string{
-		`is_not_null(not_exist)`,
+		`not_exist is not null`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)

@@ -50,11 +50,11 @@ class PhyNullExpr : public SegmentExpr {
 
  private:
     ColumnVectorPtr
-    PreCheckNullable();
+    PreCheckNullable(OffsetVector* input);
 
     template <typename T>
     VectorPtr
-    ExecVisitorImpl();
+    ExecVisitorImpl(OffsetVector* input);
 
  private:
     std::shared_ptr<const milvus::expr::NullExpr> expr_;

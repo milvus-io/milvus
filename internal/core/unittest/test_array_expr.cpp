@@ -782,6 +782,106 @@ TEST(Expr, TestArrayEqual) {
     }
 }
 
+TEST(Expr, TestArrayNullExpr) {
+    std::vector<std::tuple<std::string, std::function<bool(bool)>>> testcases =
+        {
+            {R"(null_expr: <
+                column_info: <
+                    field_id: 102
+                    data_type: Array
+                    element_type:Int64
+                    nullable: true
+                  >
+                op:IsNull
+        >)",
+             [](bool v) { return !v; }},
+        };
+
+    std::string raw_plan_tmp = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                      @@@@
+                                    >
+                                    query_info: <
+                                      topk: 10
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+     >)";
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto long_array_fid = schema->AddDebugField(
+        "long_array", DataType::ARRAY, DataType::INT64, true);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 1000;
+    std::vector<ScalarArray> long_array_col;
+    int num_iters = 1;
+    FixedVector<bool> valid_data;
+
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter, 0, 1, 3);
+        auto new_long_array_col = raw_data.get_col<ScalarArray>(long_array_fid);
+        long_array_col.insert(long_array_col.end(),
+                              new_long_array_col.begin(),
+                              new_long_array_col.end());
+        auto new_valid_col = raw_data.get_col_valid(long_array_fid);
+        valid_data.insert(
+            valid_data.end(), new_valid_col.begin(), new_valid_col.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    for (auto [clause, ref_func] : testcases) {
+        auto loc = raw_plan_tmp.find("@@@@");
+        auto raw_plan = raw_plan_tmp;
+        raw_plan.replace(loc, 4, clause);
+        auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
+        auto plan =
+            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        BitsetType final;
+        final = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        // specify some offsets and do scalar filtering on these offsets
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(N * num_iters / 2);
+        for (auto i = 0; i < N * num_iters; ++i) {
+            if (i % 2 == 0) {
+                offsets.emplace_back(i);
+            }
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get(),
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP,
+            &offsets);
+        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        EXPECT_EQ(view.size(), N * num_iters / 2);
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+            auto valid = valid_data[i];
+            auto ref = ref_func(valid);
+            ASSERT_EQ(ans, ref);
+        }
+    }
+}
+
 TEST(Expr, PraseArrayContainsExpr) {
     std::vector<const char*> raw_plans{
         R"(vector_anns:<

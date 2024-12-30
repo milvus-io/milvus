@@ -17,7 +17,6 @@
 #include "BinaryRangeExpr.h"
 #include <utility>
 
-#include "common/Types.h"
 #include "query/Utils.h"
 
 namespace milvus {
