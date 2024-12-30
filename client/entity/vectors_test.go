@@ -92,4 +92,15 @@ func TestVectors(t *testing.T) {
 		assert.Equal(t, dim*8, bv.Dim())
 		assert.ElementsMatch(t, raw, bv.Serialize())
 	})
+
+	t.Run("test int8 vector", func(t *testing.T) {
+		raw := make([]int8, dim)
+		for i := 0; i < dim; i++ {
+			raw[i] = int8(rand.Intn(256) - 128)
+		}
+
+		iv := Int8Vector(raw)
+		assert.Equal(t, dim, iv.Dim())
+		assert.Equal(t, dim, len(iv.Serialize()))
+	})
 }
