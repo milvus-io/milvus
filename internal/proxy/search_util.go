@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -80,6 +81,81 @@ type SearchInfo struct {
 	offset     int64
 	parseError error
 	isIterator bool
+}
+
+func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupByFieldId int64, isIterator bool, offset int64, queryTopK *int64) (*planpb.SearchIteratorV2Info, error) {
+	isIteratorV2Str, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterV2Key, searchParamsPair)
+	isIteratorV2, _ := strconv.ParseBool(isIteratorV2Str)
+	if !isIteratorV2 {
+		return nil, nil
+	}
+
+	// iteratorV1 and iteratorV2 should be set together for compatibility
+	if !isIterator {
+		return nil, fmt.Errorf("both %s and %s must be set in the SDK", IteratorField, SearchIterV2Key)
+	}
+
+	// disable groupBy when doing iteratorV2
+	// same behavior with V1
+	if isIteratorV2 && groupByFieldId > 0 {
+		return nil, merr.WrapErrParameterInvalid("", "",
+			"GroupBy is not permitted when using a search iterator")
+	}
+
+	// disable offset when doing iteratorV2
+	if isIteratorV2 && offset > 0 {
+		return nil, merr.WrapErrParameterInvalid("", "",
+			"Setting an offset is not permitted when using a search iterator v2")
+	}
+
+	// parse token, generate if not exist
+	token, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterIdKey, searchParamsPair)
+	if token == "" {
+		generatedToken, err := uuid.NewRandom()
+		if err != nil {
+			return nil, err
+		}
+		token = generatedToken.String()
+	} else {
+		// Validate existing token is a valid UUID
+		if _, err := uuid.Parse(token); err != nil {
+			return nil, fmt.Errorf("invalid token format")
+		}
+	}
+
+	// parse batch size, required non-zero value
+	batchSizeStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterBatchSizeKey, searchParamsPair)
+	if batchSizeStr == "" {
+		return nil, fmt.Errorf("batch size is required")
+	}
+	batchSize, err := strconv.ParseInt(batchSizeStr, 0, 64)
+	if err != nil {
+		return nil, fmt.Errorf("batch size is invalid, %w", err)
+	}
+	// use the same validation logic as topk
+	if err := validateLimit(batchSize); err != nil {
+		return nil, fmt.Errorf("batch size is invalid, %w", err)
+	}
+	*queryTopK = batchSize // for compatibility
+
+	// prepare plan iterator v2 info proto
+	planIteratorV2Info := &planpb.SearchIteratorV2Info{
+		Token:     token,
+		BatchSize: uint32(batchSize),
+	}
+
+	// append optional last bound if applicable
+	lastBoundStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterLastBoundKey, searchParamsPair)
+	if lastBoundStr != "" {
+		lastBound, err := strconv.ParseFloat(lastBoundStr, 32)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input last bound, %w", err)
+		}
+		lastBoundFloat32 := float32(lastBound)
+		planIteratorV2Info.LastBound = &lastBoundFloat32 // escape pointer
+	}
+
+	return planIteratorV2Info, nil
 }
 
 // parseSearchInfo returns QueryInfo and offset
@@ -196,16 +272,22 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			"Not allowed to do range-search when doing search-group-by")}
 	}
 
+	planSearchIteratorV2Info, err := parseSearchIteratorV2Info(searchParamsPair, groupByFieldId, isIterator, offset, &queryTopK)
+	if err != nil {
+		return &SearchInfo{planInfo: nil, offset: 0, isIterator: false, parseError: fmt.Errorf("parse iterator v2 info failed: %w", err)}
+	}
+
 	return &SearchInfo{
 		planInfo: &planpb.QueryInfo{
-			Topk:            queryTopK,
-			MetricType:      metricType,
-			SearchParams:    searchParamStr,
-			RoundDecimal:    roundDecimal,
-			GroupByFieldId:  groupByFieldId,
-			GroupSize:       groupSize,
-			StrictGroupSize: strictGroupSize,
-			Hints:           hints,
+			Topk:                 queryTopK,
+			MetricType:           metricType,
+			SearchParams:         searchParamStr,
+			RoundDecimal:         roundDecimal,
+			GroupByFieldId:       groupByFieldId,
+			GroupSize:            groupSize,
+			StrictGroupSize:      strictGroupSize,
+			Hints:                hints,
+			SearchIteratorV2Info: planSearchIteratorV2Info,
 		},
 		offset:     offset,
 		isIterator: isIterator,
@@ -273,7 +355,7 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 
 	useRegexp := Params.ProxyCfg.PartitionNameRegexp.GetAsBool()
 
-	partitionsSet := typeutil.NewSet[int64]()
+	partitionsSet := typeutil.NewUniqueSet()
 	for _, partitionName := range partitionNames {
 		if useRegexp {
 			// Legacy feature, use partition name as regexp
@@ -298,9 +380,7 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 				// TODO change after testcase updated: return nil, merr.WrapErrPartitionNotFound(partitionName)
 				return nil, fmt.Errorf("partition name %s not found", partitionName)
 			}
-			if !partitionsSet.Contain(partitionID) {
-				partitionsSet.Insert(partitionID)
-			}
+			partitionsSet.Insert(partitionID)
 		}
 	}
 	return partitionsSet.Collect(), nil
@@ -490,11 +570,12 @@ func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 
 	for _, sub := range req.GetRequests() {
 		subReq := &milvuspb.SubSearchRequest{
-			Dsl:              sub.GetDsl(),
-			PlaceholderGroup: sub.GetPlaceholderGroup(),
-			DslType:          sub.GetDslType(),
-			SearchParams:     sub.GetSearchParams(),
-			Nq:               sub.GetNq(),
+			Dsl:                sub.GetDsl(),
+			PlaceholderGroup:   sub.GetPlaceholderGroup(),
+			DslType:            sub.GetDslType(),
+			SearchParams:       sub.GetSearchParams(),
+			Nq:                 sub.GetNq(),
+			ExprTemplateValues: sub.GetExprTemplateValues(),
 		}
 		ret.SubReqs = append(ret.SubReqs, subReq)
 	}

@@ -8,6 +8,8 @@ affinity:
       weight: 1
 cluster:
   enabled: false
+streaming:
+  enabled: true
 common:
   security:
     authorizationEnabled: false

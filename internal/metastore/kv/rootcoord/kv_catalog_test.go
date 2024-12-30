@@ -2585,6 +2585,18 @@ func TestRBAC_Grant(t *testing.T) {
 			secondLoadWithPrefixReturn atomic.Bool
 		)
 
+		grant := func(role, obj, objName, privilege, dbName string) *milvuspb.GrantEntity {
+			return &milvuspb.GrantEntity{
+				Role:       &milvuspb.RoleEntity{Name: role},
+				Object:     &milvuspb.ObjectEntity{Name: obj},
+				ObjectName: objName,
+				DbName:     dbName,
+				Grantor: &milvuspb.GrantorEntity{
+					Privilege: &milvuspb.PrivilegeEntity{Name: util.PrivilegeNameForAPI(privilege)},
+				},
+			}
+		}
+
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Call.Return(
 			func(ctx context.Context, key string) []string {
 				contains := strings.Contains(key, GranteeIDPrefix)
@@ -2657,11 +2669,11 @@ func TestRBAC_Grant(t *testing.T) {
 				if test.isValid {
 					assert.NoError(t, err)
 					assert.Equal(t, 4, len(policy))
-					ps := []string{
-						funcutil.PolicyForPrivilege("role1", "obj1", "obj_name1", "PrivilegeLoad", "default"),
-						funcutil.PolicyForPrivilege("role1", "obj1", "obj_name1", "PrivilegeRelease", "default"),
-						funcutil.PolicyForPrivilege("role2", "obj2", "obj_name2", "PrivilegeLoad", "default"),
-						funcutil.PolicyForPrivilege("role2", "obj2", "obj_name2", "PrivilegeRelease", "default"),
+					ps := []*milvuspb.GrantEntity{
+						grant("role1", "obj1", "obj_name1", "PrivilegeLoad", "default"),
+						grant("role1", "obj1", "obj_name1", "PrivilegeRelease", "default"),
+						grant("role2", "obj2", "obj_name2", "PrivilegeLoad", "default"),
+						grant("role2", "obj2", "obj_name2", "PrivilegeRelease", "default"),
 					}
 					assert.ElementsMatch(t, ps, policy)
 				} else {

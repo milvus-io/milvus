@@ -410,7 +410,3 @@ func (s *Server) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest) (*
 func (s *Server) DropCompactionPlan(ctx context.Context, req *datapb.DropCompactionPlanRequest) (*commonpb.Status, error) {
 	return s.datanode.DropCompactionPlan(ctx, req)
 }
-
-func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	return s.datanode.CheckHealth(ctx, req)
-}

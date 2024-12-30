@@ -77,7 +77,7 @@ type RootCoordCatalog interface {
 	// ListGrant lists all grant infos accoording to entity for the tenant
 	// Please make sure entity valid before calling this API
 	ListGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
-	ListPolicy(ctx context.Context, tenant string) ([]string, error)
+	ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error)
 	// List all user role pair in string for the tenant
 	// For example []string{"user1/role1"}
 	ListUserRole(ctx context.Context, tenant string) ([]string, error)
@@ -214,7 +214,12 @@ type StreamingCoordCataLog interface {
 
 // StreamingNodeCataLog is the interface for streamingnode catalog
 type StreamingNodeCataLog interface {
+	// WAL select the wal related recovery infos.
+	// Which must give the pchannel name.
+
+	// ListSegmentAssignment list all segment assignments for the wal.
 	ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error)
 
+	// SaveSegmentAssignments save the segment assignments for the wal.
 	SaveSegmentAssignments(ctx context.Context, pChannelName string, infos []*streamingpb.SegmentAssignmentMeta) error
 }

@@ -19,7 +19,6 @@ package session
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -32,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -71,7 +69,7 @@ type DataNodeManager interface {
 	QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)
 	QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error)
 	DropImport(nodeID int64, in *datapb.DropImportRequest) error
-	CheckDNHealth(ctx context.Context) *healthcheck.Result
+	CheckHealth(ctx context.Context) error
 	QuerySlot(nodeID int64) (*datapb.QuerySlotResponse, error)
 	DropCompactionPlan(nodeID int64, req *datapb.DropCompactionPlanRequest) error
 	Close()
@@ -231,8 +229,8 @@ func (c *DataNodeManagerImpl) SyncSegments(ctx context.Context, nodeID int64, re
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("planID", req.GetPlanID()),
 	)
-	ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
-	cli, err := c.getClient(ctx, nodeID)
+	childCtx, cancel := context.WithTimeout(context.Background(), paramtable.Get().DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+	cli, err := c.getClient(childCtx, nodeID)
 	cancel()
 	if err != nil {
 		log.Warn("failed to get client", zap.Error(err))
@@ -509,44 +507,28 @@ func (c *DataNodeManagerImpl) DropImport(nodeID int64, in *datapb.DropImportRequ
 	return merr.CheckRPCCall(status, err)
 }
 
-func (c *DataNodeManagerImpl) CheckDNHealth(ctx context.Context) *healthcheck.Result {
-	result := healthcheck.NewResult()
-	wg := sync.WaitGroup{}
-	wlock := sync.Mutex{}
-	ids := c.GetSessionIDs()
+func (c *DataNodeManagerImpl) CheckHealth(ctx context.Context) error {
+	group, ctx := errgroup.WithContext(ctx)
 
+	ids := c.GetSessionIDs()
 	for _, nodeID := range ids {
 		nodeID := nodeID
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			datanodeClient, err := c.getClient(ctx, nodeID)
+		group.Go(func() error {
+			cli, err := c.getClient(ctx, nodeID)
 			if err != nil {
-				err = fmt.Errorf("failed to get node:%d: %v", nodeID, err)
-				return
+				return fmt.Errorf("failed to get DataNode %d: %v", nodeID, err)
 			}
 
-			checkHealthResp, err := datanodeClient.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
-			if err = merr.CheckRPCCall(checkHealthResp, err); err != nil && !errors.Is(err, merr.ErrServiceUnimplemented) {
-				err = fmt.Errorf("CheckHealth fails for datanode:%d, %w", nodeID, err)
-				wlock.Lock()
-				result.AppendUnhealthyClusterMsg(
-					healthcheck.NewUnhealthyClusterMsg(typeutil.DataNodeRole, nodeID, err.Error(), healthcheck.NodeHealthCheck))
-				wlock.Unlock()
-				return
+			sta, err := cli.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+			if err != nil {
+				return err
 			}
-
-			if checkHealthResp != nil && len(checkHealthResp.Reasons) > 0 {
-				wlock.Lock()
-				result.AppendResult(healthcheck.GetHealthCheckResultFromResp(checkHealthResp))
-				wlock.Unlock()
-			}
-		}()
+			err = merr.AnalyzeState("DataNode", nodeID, sta)
+			return err
+		})
 	}
 
-	wg.Wait()
-	return result
+	return group.Wait()
 }
 
 func (c *DataNodeManagerImpl) QuerySlot(nodeID int64) (*datapb.QuerySlotResponse, error) {

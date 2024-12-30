@@ -139,6 +139,7 @@ TEST(TextMatch, Index) {
     index->Commit();
     index->Reload();
     auto res = index->MatchQuery("football");
+    ASSERT_EQ(res.size(), 3);
     ASSERT_TRUE(res[0]);
     ASSERT_FALSE(res[1]);
     ASSERT_TRUE(res[2]);
@@ -150,6 +151,8 @@ TEST(TextMatch, Index) {
     ASSERT_TRUE(res2[0]);
     ASSERT_FALSE(res2[1]);
     ASSERT_TRUE(res2[2]);
+    res = index->MatchQuery("nothing");
+    ASSERT_EQ(res.size(), 0);
 }
 
 TEST(TextMatch, GrowingNaive) {

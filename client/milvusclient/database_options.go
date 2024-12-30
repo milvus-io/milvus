@@ -16,22 +16,27 @@
 
 package milvusclient
 
-import "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+import (
+	"fmt"
 
-type UsingDatabaseOption interface {
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/client/v2/entity"
+)
+
+type UseDatabaseOption interface {
 	DbName() string
 }
 
-type usingDatabaseNameOpt struct {
+type useDatabaseNameOpt struct {
 	dbName string
 }
 
-func (opt *usingDatabaseNameOpt) DbName() string {
+func (opt *useDatabaseNameOpt) DbName() string {
 	return opt.dbName
 }
 
-func NewUsingDatabaseOption(dbName string) *usingDatabaseNameOpt {
-	return &usingDatabaseNameOpt{
+func NewUseDatabaseOption(dbName string) *useDatabaseNameOpt {
+	return &useDatabaseNameOpt{
 		dbName: dbName,
 	}
 }
@@ -88,5 +93,76 @@ func (opt *dropDatabaseOption) Request() *milvuspb.DropDatabaseRequest {
 func NewDropDatabaseOption(dbName string) *dropDatabaseOption {
 	return &dropDatabaseOption{
 		dbName: dbName,
+	}
+}
+
+type DescribeDatabaseOption interface {
+	Request() *milvuspb.DescribeDatabaseRequest
+}
+
+type describeDatabaseOption struct {
+	dbName string
+}
+
+func (opt *describeDatabaseOption) Request() *milvuspb.DescribeDatabaseRequest {
+	return &milvuspb.DescribeDatabaseRequest{
+		DbName: opt.dbName,
+	}
+}
+
+func NewDescribeDatabaseOption(dbName string) *describeDatabaseOption {
+	return &describeDatabaseOption{
+		dbName: dbName,
+	}
+}
+
+type AlterDatabasePropertiesOption interface {
+	Request() *milvuspb.AlterDatabaseRequest
+}
+
+type alterDatabasePropertiesOption struct {
+	dbName     string
+	properties map[string]string
+}
+
+func (opt *alterDatabasePropertiesOption) Request() *milvuspb.AlterDatabaseRequest {
+	return &milvuspb.AlterDatabaseRequest{
+		DbName:     opt.dbName,
+		Properties: entity.MapKvPairs(opt.properties),
+	}
+}
+
+func (opt *alterDatabasePropertiesOption) WithProperty(key string, value any) *alterDatabasePropertiesOption {
+	opt.properties[key] = fmt.Sprintf("%v", value)
+	return opt
+}
+
+func NewAlterDatabasePropertiesOption(dbName string) *alterDatabasePropertiesOption {
+	return &alterDatabasePropertiesOption{
+		dbName:     dbName,
+		properties: make(map[string]string),
+	}
+}
+
+type DropDatabasePropertiesOption interface {
+	Request() *milvuspb.AlterDatabaseRequest
+}
+
+type dropDatabasePropertiesOption struct {
+	dbName string
+	keys   []string
+}
+
+func (opt *dropDatabasePropertiesOption) Request() *milvuspb.AlterDatabaseRequest {
+	return &milvuspb.AlterDatabaseRequest{
+		DbName:     opt.dbName,
+		DeleteKeys: opt.keys,
+	}
+}
+
+func NewDropDatabasePropertiesOption(dbName string, propertyKeys ...string) *dropDatabasePropertiesOption {
+	return &dropDatabasePropertiesOption{
+		dbName: dbName,
+		keys:   propertyKeys,
 	}
 }

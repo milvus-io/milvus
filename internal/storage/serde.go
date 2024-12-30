@@ -620,6 +620,10 @@ func calculateArraySize(a arrow.Array) int {
 	offset := a.Data().Offset()
 	length := a.Len()
 
+	if len(a.NullBitmapBytes()) > 0 {
+		totalSize += (length + 7) / 8
+	}
+
 	for i, buf := range a.Data().Buffers() {
 		if buf == nil {
 			continue
@@ -627,8 +631,7 @@ func calculateArraySize(a arrow.Array) int {
 
 		switch i {
 		case 0:
-			// Handle bitmap buffer
-			totalSize += (length + 7) / 8
+			// Handle bitmap buffer, already handled
 		case 1:
 			switch a.DataType().ID() {
 			case arrow.STRING, arrow.BINARY:
@@ -639,13 +642,14 @@ func calculateArraySize(a arrow.Array) int {
 			case arrow.LIST:
 				// Handle nest types like list
 				for i := 0; i < length; i++ {
-					startOffset := int(binary.LittleEndian.Uint32(buf.Bytes()[i*4:]))
-					endOffset := int(binary.LittleEndian.Uint32(buf.Bytes()[(i+1)*4:]))
-					totalSize += endOffset - startOffset
+					startOffset := int(binary.LittleEndian.Uint32(buf.Bytes()[(offset+i)*4:]))
+					endOffset := int(binary.LittleEndian.Uint32(buf.Bytes()[(offset+i+1)*4:]))
+					elementSize := a.DataType().(*arrow.ListType).Elem().(arrow.FixedWidthDataType).Bytes()
+					totalSize += (endOffset - startOffset) * elementSize
 				}
 			default:
 				// Handle fixed-length types
-				elementSize := buf.Len() / a.Data().Len()
+				elementSize := a.DataType().(arrow.FixedWidthDataType).Bytes()
 				totalSize += elementSize * length
 			}
 		}

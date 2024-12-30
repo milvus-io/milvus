@@ -110,7 +110,6 @@ func (s *DataNodeServicesSuite) SetupTest() {
 	s.Require().NoError(err)
 
 	s.node.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/milvus_test/datanode"))
-	s.node.flowgraphManager = pipeline.NewFlowgraphManager()
 	paramtable.SetNodeID(1)
 }
 
@@ -330,6 +329,10 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 
 func (s *DataNodeServicesSuite) TestFlushSegments() {
 	dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-FlushSegments"
+	stream, err := s.node.factory.NewTtMsgStream(context.Background())
+	s.NoError(err)
+	s.NotNil(stream)
+	stream.AsProducer(context.Background(), []string{dmChannelName})
 	schema := &schemapb.CollectionSchema{
 		Name: "test_collection",
 		Fields: []*schemapb.FieldSchema{
@@ -1159,41 +1162,6 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		info, exist = cache.GetSegmentByID(101)
 		s.False(exist)
 		s.Nil(info)
-	})
-}
-
-func (s *DataNodeServicesSuite) TestCheckHealth() {
-	s.Run("node not healthy", func() {
-		s.SetupTest()
-		s.node.UpdateStateCode(commonpb.StateCode_Abnormal)
-		ctx := context.Background()
-		resp, err := s.node.CheckHealth(ctx, nil)
-		s.NoError(err)
-		s.False(merr.Ok(resp.GetStatus()))
-		s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-	})
-
-	s.Run("exceeded timetick lag on pipeline", func() {
-		s.SetupTest()
-		fgm := pipeline.NewMockFlowgraphManager(s.T())
-		fgm.EXPECT().GetMinTTFlowGraph().Return("timetick-lag-ch", uint64(3600)).Once()
-		s.node.flowgraphManager = fgm
-		ctx := context.Background()
-		resp, err := s.node.CheckHealth(ctx, nil)
-		s.NoError(err)
-		s.True(merr.Ok(resp.GetStatus()))
-		s.False(resp.GetIsHealthy())
-		s.NotEmpty(resp.Reasons)
-	})
-
-	s.Run("ok", func() {
-		s.SetupTest()
-		ctx := context.Background()
-		resp, err := s.node.CheckHealth(ctx, nil)
-		s.NoError(err)
-		s.True(merr.Ok(resp.GetStatus()))
-		s.True(resp.GetIsHealthy())
-		s.Empty(resp.Reasons)
 	})
 }
 

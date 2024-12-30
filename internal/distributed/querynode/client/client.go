@@ -360,9 +360,3 @@ func (c *Client) DeleteBatch(ctx context.Context, req *querypb.DeleteBatchReques
 		return client.DeleteBatch(ctx, req)
 	})
 }
-
-func (c *Client) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
-	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*milvuspb.CheckHealthResponse, error) {
-		return client.CheckHealth(ctx, req)
-	})
-}
