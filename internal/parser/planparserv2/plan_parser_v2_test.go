@@ -239,6 +239,8 @@ func TestExpr_PhraseMatch(t *testing.T) {
 	exprStrs := []string{
 		`phrase_match(VarCharField, "phrase")`,
 		`phrase_match(StringField, "phrase")`,
+		`phrase_match(StringField, "phrase", 1)`,
+		`phrase_match(VarCharField, "phrase", 11223)`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)

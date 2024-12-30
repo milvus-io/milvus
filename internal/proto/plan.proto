@@ -97,7 +97,7 @@ message ValueExpr {
 message UnaryRangeExpr {
   ColumnInfo column_info = 1;
   OpType op = 2;
-  GenericValue value = 3;
+  repeated GenericValue value = 3;
   string template_variable_name = 4;
 }
 

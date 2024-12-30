@@ -355,7 +355,7 @@ func handleCompareRightValue(op planpb.OpType, left *ExprWithType, right *planpb
 			UnaryRangeExpr: &planpb.UnaryRangeExpr{
 				ColumnInfo:           columnInfo,
 				Op:                   op,
-				Value:                right.GetValue(),
+				Value:                []*planpb.GenericValue{right.GetValue()},
 				TemplateVariableName: right.GetTemplateVariableName(),
 			},
 		},
@@ -380,7 +380,7 @@ func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
 					ColumnInfo:           rightColumnInfo,
 					Op:                   op,
-					Value:                left.expr.GetValueExpr().GetValue(),
+					Value:                []*planpb.GenericValue{left.expr.GetValueExpr().GetValue()},
 					TemplateVariableName: left.expr.GetValueExpr().GetTemplateVariableName(),
 				},
 			},
