@@ -27,6 +27,7 @@ set(MILVUS_TEST_FILES
         test_array_bitmap_index.cpp
         test_array_inverted_index.cpp
         test_bf.cpp
+        test_bf_sparse.cpp
         test_binary.cpp
         test_binlog_index.cpp
         test_bitmap_index.cpp
@@ -88,6 +89,7 @@ set(MILVUS_TEST_FILES
         test_chunked_segment.cpp
         test_chunked_column.cpp
         test_rust_result.cpp
+        test_cached_search_iterator.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )
@@ -110,12 +112,6 @@ if (LINUX OR APPLE)
             test_scalar_index_creator.cpp
             test_string_index.cpp
             test_array.cpp test_array_expr.cpp)
-endif()
-
-if (LINUX)
-    set(MILVUS_TEST_FILES
-            ${MILVUS_TEST_FILES}
-            test_bf_sparse.cpp)
 endif()
 
 if (DEFINED AZURE_BUILD_DIR)
@@ -176,9 +172,7 @@ target_link_libraries(all_tests
 
 install(TARGETS all_tests DESTINATION unittest)
 
-if (LINUX)
-    add_subdirectory(bench)
-endif ()
+add_subdirectory(bench)
 
 # if (USE_DYNAMIC_SIMD)
 # add_executable(dynamic_simd_test

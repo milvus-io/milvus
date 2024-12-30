@@ -10,7 +10,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -38,7 +37,7 @@ func NewSessionBuilder(c *clientv3.Client, role string) Builder {
 func newBuilder(scheme string, d discoverer.Discoverer) Builder {
 	resolver := newResolverWithDiscoverer(scheme, d, 1*time.Second) // configurable.
 	return &builderImpl{
-		lifetime: lifetime.NewLifetime(lifetime.Working),
+		lifetime: typeutil.NewLifetime(),
 		scheme:   scheme,
 		resolver: resolver,
 	}
@@ -46,7 +45,7 @@ func newBuilder(scheme string, d discoverer.Discoverer) Builder {
 
 // builderImpl implements resolver.Builder.
 type builderImpl struct {
-	lifetime lifetime.Lifetime[lifetime.State]
+	lifetime *typeutil.Lifetime
 	scheme   string
 	resolver *resolverWithDiscoverer
 }
@@ -60,7 +59,7 @@ type builderImpl struct {
 // Resolver is built when a Builder constructed.
 // So build operation just register a new watcher into the existed resolver to share the resolver result.
 func (b *builderImpl) Build(_ resolver.Target, cc resolver.ClientConn, _ resolver.BuildOptions) (resolver.Resolver, error) {
-	if err := b.lifetime.Add(lifetime.IsWorking); err != nil {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, errors.New("builder is closed")
 	}
 	defer b.lifetime.Done()
@@ -84,8 +83,7 @@ func (b *builderImpl) Scheme() string {
 
 // Close closes the builder also close the underlying resolver.
 func (b *builderImpl) Close() {
-	b.lifetime.SetState(lifetime.Stopped)
+	b.lifetime.SetState(typeutil.LifetimeStateStopped)
 	b.lifetime.Wait()
-	b.lifetime.Close()
 	b.resolver.Close()
 }

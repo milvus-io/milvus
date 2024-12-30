@@ -28,6 +28,7 @@ type consumer struct {
 
 	startOnce sync.Once
 
+	stopCh    chan struct{}
 	msgMutex  chan struct{}
 	initCh    chan struct{}
 	messageCh chan common.Message
@@ -58,6 +59,7 @@ func newConsumer(c *client, options ConsumerOptions) (*consumer, error) {
 		client:       c,
 		consumerName: options.SubscriptionName,
 		options:      options,
+		stopCh:       make(chan struct{}),
 		msgMutex:     make(chan struct{}, 1),
 		initCh:       initCh,
 		messageCh:    messageCh,
@@ -133,7 +135,13 @@ func (c *consumer) Close() {
 	err := c.client.server.DestroyConsumerGroup(c.topic, c.consumerName)
 	if err != nil {
 		log.Warn("Consumer close failed", zap.String("topicName", c.topic), zap.String("groupName", c.consumerName), zap.Error(err))
+		// TODO: current rocksmq does't promise the msgmutex will be closed in some unittest,
+		// make the consuming goroutine leak.
+		// Here add a dirty way to close it.
+		close(c.msgMutex)
+		return
 	}
+	<-c.stopCh
 }
 
 func (c *consumer) GetLatestMsgID() (int64, error) {

@@ -16,6 +16,10 @@
 
 package index
 
+const (
+	autoLevelKey = `level`
+)
+
 var _ Index = autoIndex{}
 
 type autoIndex struct {
@@ -36,4 +40,24 @@ func NewAutoIndex(metricType MetricType) Index {
 			metricType: metricType,
 		},
 	}
+}
+
+type autoAnnParam struct {
+	baseAnnParam
+	level int
+}
+
+func NewAutoAnnParam(level int) autoAnnParam {
+	return autoAnnParam{
+		baseAnnParam: baseAnnParam{
+			params: make(map[string]any),
+		},
+		level: level,
+	}
+}
+
+func (ap autoAnnParam) Params() map[string]any {
+	result := ap.baseAnnParam.params
+	result[autoLevelKey] = ap.level
+	return result
 }

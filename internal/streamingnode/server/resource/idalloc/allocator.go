@@ -21,7 +21,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 // batchAllocateSize is the size of batch allocate from remote allocator.
@@ -30,18 +33,18 @@ const batchAllocateSize = 1000
 var _ Allocator = (*allocatorImpl)(nil)
 
 // NewTSOAllocator creates a new allocator.
-func NewTSOAllocator(rc types.RootCoordClient) Allocator {
+func NewTSOAllocator(rc *syncutil.Future[types.RootCoordClient]) Allocator {
 	return &allocatorImpl{
-		mu:              sync.Mutex{},
+		cond:            syncutil.NewContextCond(&sync.Mutex{}),
 		remoteAllocator: newTSOAllocator(rc),
 		localAllocator:  newLocalAllocator(),
 	}
 }
 
 // NewIDAllocator creates a new allocator.
-func NewIDAllocator(rc types.RootCoordClient) Allocator {
+func NewIDAllocator(rc *syncutil.Future[types.RootCoordClient]) Allocator {
 	return &allocatorImpl{
-		mu:              sync.Mutex{},
+		cond:            syncutil.NewContextCond(&sync.Mutex{}),
 		remoteAllocator: newIDAllocator(rc),
 		localAllocator:  newLocalAllocator(),
 	}
@@ -55,6 +58,9 @@ type Allocator interface {
 	// Allocate allocates a timestamp.
 	Allocate(ctx context.Context) (uint64, error)
 
+	// BarrierUtil make a barrier, next allocate call will generate id greater than barrier.
+	BarrierUntil(ctx context.Context, barrier uint64) error
+
 	// Sync expire the local allocator messages,
 	// syncs the local allocator and remote allocator.
 	Sync()
@@ -64,37 +70,92 @@ type Allocator interface {
 }
 
 type allocatorImpl struct {
-	mu              sync.Mutex
+	cond            *syncutil.ContextCond
 	remoteAllocator remoteBatchAllocator
 	lastSyncTime    time.Time
+	lastAllocated   uint64
 	localAllocator  *localAllocator
 }
 
-// AllocateOne allocates a timestamp.
 func (ta *allocatorImpl) Allocate(ctx context.Context) (uint64, error) {
-	ta.mu.Lock()
-	defer ta.mu.Unlock()
+	ta.cond.L.Lock()
+	defer ta.cond.L.Unlock()
 
+	return ta.allocateOne(ctx)
+}
+
+func (ta *allocatorImpl) BarrierUntil(ctx context.Context, barrier uint64) error {
+	err := ta.barrierFastPath(ctx, barrier)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, errFastPathFailed) {
+		return err
+	}
+
+	// Fall back to the slow path to avoid block other id allocation opeartions.
+	ta.cond.L.Lock()
+	for ta.lastAllocated < barrier {
+		if err := ta.cond.Wait(ctx); err != nil {
+			return err
+		}
+	}
+	ta.cond.L.Unlock()
+	return nil
+}
+
+func (ta *allocatorImpl) barrierFastPath(ctx context.Context, barrier uint64) error {
+	ta.cond.L.Lock()
+	defer ta.cond.L.Unlock()
+
+	for i := 0; i < 2; i++ {
+		id, err := ta.allocateOne(ctx)
+		if err != nil {
+			return err
+		}
+
+		// check if the allocated id is greater than barrier.
+		if id >= barrier {
+			return nil
+		}
+		if i == 0 {
+			// force to syncup the local allocator and remote allocator at first time.
+			// It's the fast path if the barrier is allocated from same remote allocator.
+			ta.localAllocator.exhausted()
+		}
+	}
+	return errFastPathFailed
+}
+
+func (ta *allocatorImpl) allocateOne(ctx context.Context) (uint64, error) {
 	// allocate one from local allocator first.
 	if id, err := ta.localAllocator.allocateOne(); err == nil {
+		ta.lastAllocated = id
+		ta.cond.UnsafeBroadcast()
 		return id, nil
 	}
 	// allocate from remote.
-	return ta.allocateRemote(ctx)
+	id, err := ta.allocateRemote(ctx)
+	if err != nil {
+		return 0, err
+	}
+	ta.lastAllocated = id
+	ta.cond.UnsafeBroadcast()
+	return id, nil
 }
 
 // Sync expire the local allocator messages,
 // syncs the local allocator and remote allocator.
 func (ta *allocatorImpl) Sync() {
-	ta.mu.Lock()
-	defer ta.mu.Unlock()
+	ta.cond.L.Lock()
+	defer ta.cond.L.Unlock()
 
 	ta.localAllocator.exhausted()
 }
 
 func (ta *allocatorImpl) SyncIfExpired(expire time.Duration) {
-	ta.mu.Lock()
-	defer ta.mu.Unlock()
+	ta.cond.L.Lock()
+	defer ta.cond.L.Unlock()
 
 	if time.Since(ta.lastSyncTime) > expire {
 		ta.localAllocator.exhausted()

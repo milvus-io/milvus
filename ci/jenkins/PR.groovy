@@ -89,7 +89,7 @@ pipeline {
                 axes {
                     axis {
                         name 'milvus_deployment_option'
-                        values 'standalone', 'distributed', 'standalone-kafka-mmap', 'distributed-streaming-service'
+                        values 'standalone', 'distributed', 'standalone-kafka-mmap'
                     }
                 }
                 stages {
@@ -100,32 +100,15 @@ pipeline {
                                     def helm_release_name =  get_helm_release_name milvus_deployment_option
                                     // pvc name would be <pod-name>-volume-0, used for pytest result archiving
                                     def pvc = env.JENKINS_AGENT_NAME + '-volume-0'
-
-                                    if (milvus_deployment_option == 'distributed-streaming-service') {
-                                        try {
-                                            tekton.pytest helm_release_name: helm_release_name,
-                                                    pvc: pvc,
-                                                    milvus_helm_version: milvus_helm_chart_version,
-                                                    ciMode: 'e2e',
-                                                    milvus_image_tag: milvus_image_tag,
-                                                    pytest_image: pytest_image,
-                                                    helm_image: helm_image,
-                                                    milvus_deployment_option: milvus_deployment_option,
-                                                    verbose: 'false'
-                                        } catch (Exception e) {
-                                            println e
-                                        }
-                                    } else {
-                                        tekton.pytest helm_release_name: helm_release_name,
-                                                    pvc: pvc,
-                                                    milvus_helm_version: milvus_helm_chart_version,
-                                                    ciMode: 'e2e',
-                                                    milvus_image_tag: milvus_image_tag,
-                                                    pytest_image: pytest_image,
-                                                    helm_image: helm_image,
-                                                    milvus_deployment_option: milvus_deployment_option,
-                                                    verbose: 'false'
-                                    }
+                                    tekton.pytest helm_release_name: helm_release_name,
+                                                pvc: pvc,
+                                                milvus_helm_version: milvus_helm_chart_version,
+                                                ciMode: 'e2e',
+                                                milvus_image_tag: milvus_image_tag,
+                                                pytest_image: pytest_image,
+                                                helm_image: helm_image,
+                                                milvus_deployment_option: milvus_deployment_option,
+                                                verbose: 'false'
                                 }
                             }
                         }

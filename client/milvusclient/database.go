@@ -22,10 +22,11 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-func (c *Client) UsingDatabase(ctx context.Context, option UsingDatabaseOption) error {
+func (c *Client) UseDatabase(ctx context.Context, option UseDatabaseOption) error {
 	dbName := option.DbName()
 	c.usingDatabase(dbName)
 	return c.connectInternal(ctx)
@@ -61,6 +62,45 @@ func (c *Client) DropDatabase(ctx context.Context, option DropDatabaseOption, ca
 
 	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.DropDatabase(ctx, req, callOptions...)
+		return merr.CheckRPCCall(resp, err)
+	})
+}
+
+func (c *Client) DescribeDatabase(ctx context.Context, option DescribeDatabaseOption, callOptions ...grpc.CallOption) (*entity.Database, error) {
+	req := option.Request()
+
+	var db *entity.Database
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.DescribeDatabase(ctx, req, callOptions...)
+		err = merr.CheckRPCCall(resp, err)
+		if err != nil {
+			return err
+		}
+		// databaseInfo = resp
+		db = &entity.Database{
+			Name:       resp.GetDbName(),
+			Properties: entity.KvPairsMap(resp.GetProperties()),
+		}
+		return nil
+	})
+
+	return db, err
+}
+
+func (c *Client) AlterDatabaseProperies(ctx context.Context, option AlterDatabasePropertiesOption, callOptions ...grpc.CallOption) error {
+	req := option.Request()
+
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.AlterDatabase(ctx, req, callOptions...)
+		return merr.CheckRPCCall(resp, err)
+	})
+}
+
+func (c *Client) DropDatabaseProperties(ctx context.Context, option DropDatabasePropertiesOption, callOptions ...grpc.CallOption) error {
+	req := option.Request()
+
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.AlterDatabase(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
 }

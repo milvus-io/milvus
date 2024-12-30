@@ -93,6 +93,9 @@ WriteFieldData(File& file,
                std::vector<std::vector<uint64_t>>& element_indices,
                FixedVector<bool>& valid_data) {
     if (IsVariableDataType(data_type)) {
+        // use buffered writer to reduce fwrite/write syscall
+        // buffer size = 1024*1024 = 1MB
+        BufferedWriter bw = BufferedWriter(file, 1048576);
         switch (data_type) {
             case DataType::VARCHAR:
             case DataType::STRING: {
@@ -101,17 +104,10 @@ WriteFieldData(File& file,
                     indices.push_back(total_written);
                     auto str =
                         static_cast<const std::string*>(data->RawValue(i));
-                    ssize_t written_data_size =
-                        file.FWriteInt<uint32_t>(uint32_t(str->size()));
-                    if (written_data_size != sizeof(uint32_t)) {
-                        THROW_FILE_WRITE_ERROR
-                    }
-                    total_written += written_data_size;
-                    auto written_data = file.FWrite(str->data(), str->size());
-                    if (written_data < str->size()) {
-                        THROW_FILE_WRITE_ERROR
-                    }
-                    total_written += written_data;
+                    bw.WriteInt<uint32_t>(static_cast<uint32_t>(str->size()));
+                    total_written += sizeof(uint32_t);
+                    bw.Write(str->data(), str->size());
+                    total_written += str->size();
                 }
                 break;
             }
@@ -121,18 +117,11 @@ WriteFieldData(File& file,
                     indices.push_back(total_written);
                     auto padded_string =
                         static_cast<const Json*>(data->RawValue(i))->data();
-                    ssize_t written_data_size = file.FWriteInt<uint32_t>(
-                        uint32_t(padded_string.size()));
-                    if (written_data_size != sizeof(uint32_t)) {
-                        THROW_FILE_WRITE_ERROR
-                    }
-                    total_written += written_data_size;
-                    ssize_t written_data =
-                        file.FWrite(padded_string.data(), padded_string.size());
-                    if (written_data < padded_string.size()) {
-                        THROW_FILE_WRITE_ERROR
-                    }
-                    total_written += written_data;
+                    bw.WriteInt<uint32_t>(
+                        static_cast<uint32_t>(padded_string.size()));
+                    total_written += padded_string.size();
+                    bw.Write(padded_string.data(), padded_string.size());
+                    total_written += padded_string.size();
                 }
                 break;
             }
@@ -141,13 +130,9 @@ WriteFieldData(File& file,
                 for (size_t i = 0; i < data->get_num_rows(); ++i) {
                     indices.push_back(total_written);
                     auto array = static_cast<const Array*>(data->RawValue(i));
-                    ssize_t written =
-                        file.FWrite(array->data(), array->byte_size());
-                    if (written < array->byte_size()) {
-                        THROW_FILE_WRITE_ERROR
-                    }
+                    bw.Write(array->data(), array->byte_size());
                     element_indices.emplace_back(array->get_offsets());
-                    total_written += written;
+                    total_written += array->byte_size();
                 }
                 break;
             }
@@ -157,12 +142,8 @@ WriteFieldData(File& file,
                     auto vec =
                         static_cast<const knowhere::sparse::SparseRow<float>*>(
                             data->RawValue(i));
-                    ssize_t written =
-                        file.FWrite(vec->data(), vec->data_byte_size());
-                    if (written < vec->data_byte_size()) {
-                        break;
-                    }
-                    total_written += written;
+                    bw.Write(vec->data(), vec->data_byte_size());
+                    total_written += vec->data_byte_size();
                 }
                 break;
             }
@@ -171,6 +152,7 @@ WriteFieldData(File& file,
                           "not supported data type {}",
                           GetDataTypeName(data_type));
         }
+        bw.flush();
     } else {
         // write as: data|data|data|data|data|data......
         size_t written = file.FWrite(data->Data(), data->DataSize());

@@ -273,18 +273,6 @@ func CheckHealthy(state commonpb.StateCode) error {
 	return nil
 }
 
-// CheckHealthyStandby checks whether the state is healthy or standby,
-// returns nil if healthy or standby
-// otherwise returns ErrServiceNotReady wrapped with current state
-// this method only used in GetMetrics
-func CheckHealthyStandby(state commonpb.StateCode) error {
-	if state != commonpb.StateCode_Healthy && state != commonpb.StateCode_StandBy {
-		return WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), state.String())
-	}
-
-	return nil
-}
-
 func IsHealthy(stateCode commonpb.StateCode) error {
 	if stateCode == commonpb.StateCode_Healthy {
 		return nil
@@ -1187,6 +1175,14 @@ func WrapErrClusteringCompactionSubmitTaskFail(taskType string, err error) error
 
 func WrapErrClusteringCompactionMetaError(operation string, err error) error {
 	return wrapFieldsWithDesc(ErrClusteringCompactionMetaError, err.Error(), value("operation", operation))
+}
+
+func WrapErrCleanPartitionStatsFail(msg ...string) error {
+	err := error(ErrCleanPartitionStatsFail)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
 }
 
 func WrapErrAnalyzeTaskNotFound(id int64) error {

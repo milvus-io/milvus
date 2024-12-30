@@ -18,7 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -34,7 +34,7 @@ func TestWAL(t *testing.T) {
 	handler.EXPECT().Close().Return()
 
 	w := &walAccesserImpl{
-		lifetime:                       lifetime.NewLifetime(lifetime.Working),
+		lifetime:                       typeutil.NewLifetime(),
 		streamingCoordAssignmentClient: coordClient,
 		handlerClient:                  handler,
 		producerMutex:                  sync.Mutex{},

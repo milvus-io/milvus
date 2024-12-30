@@ -25,6 +25,7 @@ import (
 type LoadCollectionOption interface {
 	Request() *milvuspb.LoadCollectionRequest
 	CheckInterval() time.Duration
+	IsRefresh() bool
 }
 
 type loadCollectionOption struct {
@@ -33,6 +34,8 @@ type loadCollectionOption struct {
 	replicaNum           int
 	loadFields           []string
 	skipLoadDynamicField bool
+	isRefresh            bool
+	resourceGroups       []string
 }
 
 func (opt *loadCollectionOption) Request() *milvuspb.LoadCollectionRequest {
@@ -41,6 +44,7 @@ func (opt *loadCollectionOption) Request() *milvuspb.LoadCollectionRequest {
 		ReplicaNumber:        int32(opt.replicaNum),
 		LoadFields:           opt.loadFields,
 		SkipLoadDynamicField: opt.skipLoadDynamicField,
+		ResourceGroups:       opt.resourceGroups,
 	}
 }
 
@@ -48,8 +52,17 @@ func (opt *loadCollectionOption) CheckInterval() time.Duration {
 	return opt.interval
 }
 
+func (opt *loadCollectionOption) IsRefresh() bool {
+	return opt.isRefresh
+}
+
 func (opt *loadCollectionOption) WithReplica(num int) *loadCollectionOption {
 	opt.replicaNum = num
+	return opt
+}
+
+func (opt *loadCollectionOption) WithResourceGroup(resourceGroups ...string) *loadCollectionOption {
+	opt.resourceGroups = resourceGroups
 	return opt
 }
 
@@ -60,6 +73,11 @@ func (opt *loadCollectionOption) WithLoadFields(loadFields ...string) *loadColle
 
 func (opt *loadCollectionOption) WithSkipLoadDynamicField(skipFlag bool) *loadCollectionOption {
 	opt.skipLoadDynamicField = skipFlag
+	return opt
+}
+
+func (opt *loadCollectionOption) WithRefresh(isRefresh bool) *loadCollectionOption {
+	opt.isRefresh = isRefresh
 	return opt
 }
 
@@ -74,6 +92,7 @@ func NewLoadCollectionOption(collectionName string) *loadCollectionOption {
 type LoadPartitionsOption interface {
 	Request() *milvuspb.LoadPartitionsRequest
 	CheckInterval() time.Duration
+	IsRefresh() bool
 }
 
 var _ LoadPartitionsOption = (*loadPartitionsOption)(nil)
@@ -83,8 +102,10 @@ type loadPartitionsOption struct {
 	partitionNames       []string
 	interval             time.Duration
 	replicaNum           int
+	resourceGroups       []string
 	loadFields           []string
 	skipLoadDynamicField bool
+	isRefresh            bool
 }
 
 func (opt *loadPartitionsOption) Request() *milvuspb.LoadPartitionsRequest {
@@ -94,6 +115,7 @@ func (opt *loadPartitionsOption) Request() *milvuspb.LoadPartitionsRequest {
 		ReplicaNumber:        int32(opt.replicaNum),
 		LoadFields:           opt.loadFields,
 		SkipLoadDynamicField: opt.skipLoadDynamicField,
+		ResourceGroups:       opt.resourceGroups,
 	}
 }
 
@@ -101,8 +123,17 @@ func (opt *loadPartitionsOption) CheckInterval() time.Duration {
 	return opt.interval
 }
 
+func (opt *loadPartitionsOption) IsRefresh() bool {
+	return opt.isRefresh
+}
+
 func (opt *loadPartitionsOption) WithReplica(num int) *loadPartitionsOption {
 	opt.replicaNum = num
+	return opt
+}
+
+func (opt *loadPartitionsOption) WithResourceGroup(resourceGroups ...string) *loadPartitionsOption {
+	opt.resourceGroups = resourceGroups
 	return opt
 }
 
@@ -116,12 +147,76 @@ func (opt *loadPartitionsOption) WithSkipLoadDynamicField(skipFlag bool) *loadPa
 	return opt
 }
 
+func (opt *loadPartitionsOption) WithRefresh(isRefresh bool) *loadPartitionsOption {
+	opt.isRefresh = isRefresh
+	return opt
+}
+
 func NewLoadPartitionsOption(collectionName string, partitionsNames ...string) *loadPartitionsOption {
 	return &loadPartitionsOption{
 		collectionName: collectionName,
 		partitionNames: partitionsNames,
 		replicaNum:     1,
 		interval:       time.Millisecond * 200,
+	}
+}
+
+type GetLoadStateOption interface {
+	Request() *milvuspb.GetLoadStateRequest
+	ProgressRequest() *milvuspb.GetLoadingProgressRequest
+}
+
+type getLoadStateOption struct {
+	collectionName string
+	partitionNames []string
+}
+
+func (opt *getLoadStateOption) Request() *milvuspb.GetLoadStateRequest {
+	return &milvuspb.GetLoadStateRequest{
+		CollectionName: opt.collectionName,
+		PartitionNames: opt.partitionNames,
+	}
+}
+
+func (opt *getLoadStateOption) ProgressRequest() *milvuspb.GetLoadingProgressRequest {
+	return &milvuspb.GetLoadingProgressRequest{
+		CollectionName: opt.collectionName,
+		PartitionNames: opt.partitionNames,
+	}
+}
+
+func NewGetLoadStateOption(collectionName string, partitionNames ...string) *getLoadStateOption {
+	return &getLoadStateOption{
+		collectionName: collectionName,
+		partitionNames: partitionNames,
+	}
+}
+
+type RefreshLoadOption interface {
+	Request() *milvuspb.LoadCollectionRequest
+	CheckInterval() time.Duration
+}
+
+type refreshLoadOption struct {
+	collectionName string
+	checkInterval  time.Duration
+}
+
+func (opt *refreshLoadOption) Request() *milvuspb.LoadCollectionRequest {
+	return &milvuspb.LoadCollectionRequest{
+		CollectionName: opt.collectionName,
+		Refresh:        true,
+	}
+}
+
+func (opt *refreshLoadOption) CheckInterval() time.Duration {
+	return opt.checkInterval
+}
+
+func NewRefreshLoadOption(collectionName string) *refreshLoadOption {
+	return &refreshLoadOption{
+		collectionName: collectionName,
+		checkInterval:  time.Millisecond * 200,
 	}
 }
 
@@ -201,5 +296,45 @@ func NewFlushOption(collName string) *flushOption {
 	return &flushOption{
 		collectionName: collName,
 		interval:       time.Millisecond * 200,
+	}
+}
+
+type CompactOption interface {
+	Request() *milvuspb.ManualCompactionRequest
+}
+
+type compactOption struct {
+	collectionName string
+}
+
+func (opt *compactOption) Request() *milvuspb.ManualCompactionRequest {
+	return &milvuspb.ManualCompactionRequest{
+		CollectionName: opt.collectionName,
+	}
+}
+
+func NewCompactOption(collectionName string) *compactOption {
+	return &compactOption{
+		collectionName: collectionName,
+	}
+}
+
+type GetCompactionStateOption interface {
+	Request() *milvuspb.GetCompactionStateRequest
+}
+
+type getCompactionStateOption struct {
+	compactionID int64
+}
+
+func (opt *getCompactionStateOption) Request() *milvuspb.GetCompactionStateRequest {
+	return &milvuspb.GetCompactionStateRequest{
+		CompactionID: opt.compactionID,
+	}
+}
+
+func NewGetCompactionStateOption(compactionID int64) *getCompactionStateOption {
+	return &getCompactionStateOption{
+		compactionID: compactionID,
 	}
 }

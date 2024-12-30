@@ -43,11 +43,10 @@ class EvalCtx {
     }
 
     explicit EvalCtx(ExecContext* exec_ctx, ExprSet* expr_set)
-        : exec_ctx_(exec_ctx), expr_set_(expr_set), offset_input_(nullptr) {
+        : exec_ctx_(exec_ctx), expr_set_(expr_set) {
     }
 
-    explicit EvalCtx(ExecContext* exec_ctx)
-        : exec_ctx_(exec_ctx), expr_set_(nullptr), offset_input_(nullptr) {
+    explicit EvalCtx(ExecContext* exec_ctx) : exec_ctx_(exec_ctx) {
     }
 
     ExecContext*

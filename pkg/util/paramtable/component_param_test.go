@@ -138,6 +138,10 @@ func TestComponentParam(t *testing.T) {
 		assert.False(t, params.CommonCfg.LocalRPCEnabled.GetAsBool())
 		params.Save("common.localRPCEnabled", "true")
 		assert.True(t, params.CommonCfg.LocalRPCEnabled.GetAsBool())
+
+		assert.Equal(t, 60*time.Second, params.CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second))
+		params.Save("common.sync.taskPoolReleaseTimeoutSeconds", "100")
+		assert.Equal(t, 100*time.Second, params.CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second))
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {

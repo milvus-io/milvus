@@ -735,7 +735,7 @@ func (sd *shardDelegator) createDeleteStreamFromStreamingService(ctx context.Con
 	s := streaming.WAL().Read(ctx, streaming.ReadOption{
 		VChannel: position.GetChannelName(),
 		DeliverPolicy: options.DeliverPolicyStartFrom(
-			adaptor.MustGetMessageIDFromMQWrapperIDBytes("pulsar", position.GetMsgID()),
+			adaptor.MustGetMessageIDFromMQWrapperIDBytes(streaming.WAL().WALName(), position.GetMsgID()),
 		),
 		DeliverFilters: []options.DeliverFilter{
 			// only deliver message which timestamp >= position.Timestamp
