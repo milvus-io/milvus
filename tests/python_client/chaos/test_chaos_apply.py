@@ -39,8 +39,7 @@ class TestChaosApply:
         if self.user and self.password:
             connections.connect('default', host=self.host, port=self.port,
                                 user=self.user,
-                                password=self.password,
-                                secure=True)
+                                password=self.password)
         else:
             connections.connect('default', host=self.host, port=self.port)
         if connections.has_connection("default") is False:
