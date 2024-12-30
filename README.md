@@ -250,9 +250,10 @@ Reference to cite when you use Milvus in a research paper:
 }
 ```
 <!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-423-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-424-orange"><br>
 <a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
+<a href="https://github.com/Abhijnan-Bajpai"><img src="https://avatars.githubusercontent.com/u/57059194?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
 <a href="https://github.com/Ahmetyasin"><img src="https://avatars.githubusercontent.com/u/34247619?v=4" width="30px" /></a>
 <a href="https://github.com/Ald392"><img src="https://avatars.githubusercontent.com/u/166891594?v=4" width="30px" /></a>

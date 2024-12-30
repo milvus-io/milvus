@@ -286,29 +286,83 @@ func NewRenameCollectionOption(oldName, newName string) *renameCollectionOption 
 	}
 }
 
-type AlterCollectionOption interface {
+type AlterCollectionPropertiesOption interface {
 	Request() *milvuspb.AlterCollectionRequest
 }
 
-type alterCollectionOption struct {
+type alterCollectionPropertiesOption struct {
 	collectionName string
 	properties     map[string]string
 }
 
-func (opt *alterCollectionOption) WithProperty(key string, value any) *alterCollectionOption {
+func (opt *alterCollectionPropertiesOption) WithProperty(key string, value any) *alterCollectionPropertiesOption {
 	opt.properties[key] = fmt.Sprintf("%v", value)
 	return opt
 }
 
-func (opt *alterCollectionOption) Request() *milvuspb.AlterCollectionRequest {
+func (opt *alterCollectionPropertiesOption) Request() *milvuspb.AlterCollectionRequest {
 	return &milvuspb.AlterCollectionRequest{
 		CollectionName: opt.collectionName,
 		Properties:     entity.MapKvPairs(opt.properties),
 	}
 }
 
-func NewAlterCollectionOption(collection string) *alterCollectionOption {
-	return &alterCollectionOption{collectionName: collection, properties: make(map[string]string)}
+func NewAlterCollectionPropertiesOption(collection string) *alterCollectionPropertiesOption {
+	return &alterCollectionPropertiesOption{collectionName: collection, properties: make(map[string]string)}
+}
+
+type DropCollectionPropertiesOption interface {
+	Request() *milvuspb.AlterCollectionRequest
+}
+
+type dropCollectionPropertiesOption struct {
+	collectionName string
+	keys           []string
+}
+
+func (opt *dropCollectionPropertiesOption) Request() *milvuspb.AlterCollectionRequest {
+	return &milvuspb.AlterCollectionRequest{
+		CollectionName: opt.collectionName,
+		DeleteKeys:     opt.keys,
+	}
+}
+
+func NewDropCollectionPropertiesOption(collection string, propertyKeys ...string) *dropCollectionPropertiesOption {
+	return &dropCollectionPropertiesOption{
+		collectionName: collection,
+		keys:           propertyKeys,
+	}
+}
+
+type AlterCollectionFieldPropertiesOption interface {
+	Request() *milvuspb.AlterCollectionFieldRequest
+}
+
+type alterCollectionFieldPropertiesOption struct {
+	collectionName string
+	fieldName      string
+	properties     map[string]string
+}
+
+func (opt *alterCollectionFieldPropertiesOption) WithProperty(key string, value any) *alterCollectionFieldPropertiesOption {
+	opt.properties[key] = fmt.Sprintf("%v", value)
+	return opt
+}
+
+func (opt *alterCollectionFieldPropertiesOption) Request() *milvuspb.AlterCollectionFieldRequest {
+	return &milvuspb.AlterCollectionFieldRequest{
+		CollectionName: opt.collectionName,
+		FieldName:      opt.fieldName,
+		Properties:     entity.MapKvPairs(opt.properties),
+	}
+}
+
+func NewAlterCollectionFieldPropertiesOption(collectionName string, fieldName string) *alterCollectionFieldPropertiesOption {
+	return &alterCollectionFieldPropertiesOption{
+		collectionName: collectionName,
+		fieldName:      fieldName,
+		properties:     make(map[string]string),
+	}
 }
 
 type getCollectionStatsOption struct {
