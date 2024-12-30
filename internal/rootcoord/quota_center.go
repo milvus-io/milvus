@@ -1216,6 +1216,9 @@ func (q *QuotaCenter) resetAllCurrentRates() error {
 						newParamLimiterFunc(internalpb.RateScope_Partition, allOps))
 				}
 			}
+			if len(collections) == 0 {
+				q.rateLimiter.GetOrCreateDatabaseLimiters(dbID, newParamLimiterFunc(internalpb.RateScope_Database, allOps))
+			}
 		}
 	}
 	initLimiters(q.readableCollections)
