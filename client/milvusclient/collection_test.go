@@ -285,7 +285,7 @@ func (s *CollectionSuite) TestRenameCollection() {
 	})
 }
 
-func (s *CollectionSuite) TestAlterCollection() {
+func (s *CollectionSuite) TestAlterCollectionProperties() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -304,14 +304,72 @@ func (s *CollectionSuite) TestAlterCollection() {
 			return merr.Success(), nil
 		}).Once()
 
-		err := s.client.AlterCollection(ctx, NewAlterCollectionOption(collName).WithProperty(key, value))
+		err := s.client.AlterCollectionProperties(ctx, NewAlterCollectionPropertiesOption(collName).WithProperty(key, value))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
 		s.mock.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
 
-		err := s.client.AlterCollection(ctx, NewAlterCollectionOption(collName).WithProperty(key, value))
+		err := s.client.AlterCollectionProperties(ctx, NewAlterCollectionPropertiesOption(collName).WithProperty(key, value))
+		s.Error(err)
+	})
+}
+
+func (s *CollectionSuite) TestDropCollectionProperties() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		dbName := fmt.Sprintf("dt_%s", s.randString(6))
+		key := fmt.Sprintf("key_%s", s.randString(4))
+		s.mock.EXPECT().AlterCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, adr *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+			s.Equal([]string{key}, adr.GetDeleteKeys())
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.DropCollectionProperties(ctx, NewDropCollectionPropertiesOption(dbName, key))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		dbName := fmt.Sprintf("dt_%s", s.randString(6))
+		s.mock.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.DropCollectionProperties(ctx, NewDropCollectionPropertiesOption(dbName, "key"))
+		s.Error(err)
+	})
+}
+
+func (s *CollectionSuite) TestAlterCollectionFieldProperties() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	collName := fmt.Sprintf("test_collection_%s", s.randString(6))
+	fieldName := fmt.Sprintf("field_%s", s.randString(4))
+	key := s.randString(6)
+	value := s.randString(6)
+
+	s.Run("success", func() {
+		s.mock.EXPECT().AlterCollectionField(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, acr *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
+			s.Equal(collName, acr.GetCollectionName())
+			s.Equal(fieldName, acr.GetFieldName())
+			if s.Len(acr.GetProperties(), 1) {
+				item := acr.GetProperties()[0]
+				s.Equal(key, item.GetKey())
+				s.Equal(value, item.GetValue())
+			}
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.AlterCollectionFieldProperty(ctx, NewAlterCollectionFieldPropertiesOption(collName, fieldName).WithProperty(key, value))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		s.mock.EXPECT().AlterCollectionField(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.AlterCollectionFieldProperty(ctx, NewAlterCollectionFieldPropertiesOption("coll", "field").WithProperty(key, value))
 		s.Error(err)
 	})
 }

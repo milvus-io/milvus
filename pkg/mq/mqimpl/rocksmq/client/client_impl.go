@@ -124,7 +124,10 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 }
 
 func (c *client) consume(consumer *consumer) {
-	defer c.wg.Done()
+	defer func() {
+		close(consumer.stopCh)
+		c.wg.Done()
+	}()
 
 	if err := c.blockUntilInitDone(consumer); err != nil {
 		log.Warn("consumer init failed", zap.Error(err))
