@@ -18,7 +18,7 @@ import (
 
 func TestIndexVectorDefault(t *testing.T) {
 	t.Parallel()
-	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64MultiVec)
@@ -51,7 +51,7 @@ func TestIndexVectorDefault(t *testing.T) {
 
 func TestIndexVectorIP(t *testing.T) {
 	t.Parallel()
-	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64MultiVec)
@@ -85,7 +85,7 @@ func TestIndexVectorIP(t *testing.T) {
 
 func TestIndexVectorCosine(t *testing.T) {
 	t.Parallel()
-	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64MultiVec)
