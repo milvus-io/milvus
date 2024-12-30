@@ -102,25 +102,17 @@ You can explore a comprehensive [Tutorials Overview](https://milvus.io/docs/tuto
 | Tutorial | Use Case | Related Milvus Features |
 | -------- | -------- | --------- |
 | [Build RAG with Milvus](https://milvus.io/docs/build-rag-with-milvus.md) |  RAG | vector search |
-| [Multimodal RAG with Milvus](https://milvus.io/docs/multimodal_rag_with_milvus.md) | RAG | vector search, dynamic field |
-| [Image Search with Milvus](https://milvus.io/docs/image_similarity_search.md) | Semantic Search | vector search, dynamic field |
+| [Advanced RAG Optimizations](https://milvus.io/docs/how_to_enhance_your_rag.md) | RAG | vector search, full text search |
+| [Full Text Search with Milvus](https://milvus.io/docs/full_text_search_with_milvus.md) | Text Search | full text search |
 | [Hybrid Search with Milvus](https://milvus.io/docs/hybrid_search_with_milvus.md) | Hybrid Search | hybrid search, multi vector, dense embedding, sparse embedding |
+| [Image Search with Milvus](https://milvus.io/docs/image_similarity_search.md) | Semantic Search | vector search, dynamic field |
 | [Multimodal Search using Multi Vectors](https://milvus.io/docs/multimodal_rag_with_milvus.md) | Semantic Search | multi vector, hybrid search |
-| [Question Answering System](https://milvus.io/docs/question_answering_system.md) | Question Answering | vector search |
-| [Recommender System](https://milvus.io/docs/recommendation_system.md) | Recommendation System | vector search |
-| [Video Similarity Search](https://milvus.io/docs/video_similarity_search.md) | Semantic Search | vector search |
-| [Audio Similarity Search](https://milvus.io/docs/audio_similarity_search.md) | Semantic Search | vector search |
-| [DNA Classification](https://milvus.io/docs/dna_sequence_classification.md) | Classification | vector search |
-| [Text Search Engine](https://milvus.io/docs/text_search_engine.md) | Semantic Search | vector search |
-| [Search Image by Text](https://milvus.io/docs/text_image_search.md) | Semantic Search | vector search |
-| [Image Deduplication](https://milvus.io/docs/image_deduplication_system.md) | Deduplication | vector search |
+| [Movie Recommendation with Milvus](https://milvus.io/docs/movie_recommendation_with_milvus.md) | Recommendation System | vector search |
 | [Graph RAG with Milvus](https://milvus.io/docs/graph_rag_with_milvus.md) | RAG | graph search |
 | [Contextual Retrieval with Milvus](https://milvus.io/docs/contextual_retrieval_with_milvus.md) | Quickstart | vector search |
+| [Vector Visualization](https://milvus.io/docs/vector_visualization.md) | Quickstart | vector search |
 | [HDBSCAN Clustering with Milvus](https://milvus.io/docs/hdbscan_clustering_with_milvus.md) | Quickstart | vector search |
 | [Use ColPali for Multi-Modal Retrieval with Milvus](https://milvus.io/docs/use_ColPali_with_milvus.md) | Quickstart | vector search |
-| [Vector Visualization](https://milvus.io/docs/vector_visualization.md) | Quickstart | vector search |
-| [Movie Recommendation with Milvus](https://milvus.io/docs/movie_recommendation_with_milvus.md) | Recommendation System | vector search |
-| [Funnel Search with Matryoshka Embeddings](https://milvus.io/docs/funnel_search_with_matryoshka.md) | Quickstart | vector search |
 
 <table>
   <tr>
