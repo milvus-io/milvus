@@ -220,8 +220,7 @@ func (kc *kafkaClient) CreateProducer(ctx context.Context, options common.Produc
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateProducerLabel).Observe(float64(elapsed.Milliseconds()))
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.SuccessLabel).Inc()
 
-	deliveryChan := make(chan kafka.Event, 128)
-	producer := &kafkaProducer{p: pp, deliveryChan: deliveryChan, topic: options.Topic}
+	producer := &kafkaProducer{p: pp, stopCh: make(chan struct{}), topic: options.Topic}
 	return producer, nil
 }
 
@@ -242,7 +241,7 @@ func (kc *kafkaClient) Subscribe(ctx context.Context, options mqwrapper.Consumer
 }
 
 func (kc *kafkaClient) EarliestMessageID() common.MessageID {
-	return &kafkaID{messageID: int64(kafka.OffsetBeginning)}
+	return &KafkaID{MessageID: int64(kafka.OffsetBeginning)}
 }
 
 func (kc *kafkaClient) StringToMsgID(id string) (common.MessageID, error) {
@@ -251,7 +250,7 @@ func (kc *kafkaClient) StringToMsgID(id string) (common.MessageID, error) {
 		return nil, err
 	}
 
-	return &kafkaID{messageID: offset}, nil
+	return &KafkaID{MessageID: offset}, nil
 }
 
 func (kc *kafkaClient) specialExtraConfig(current *kafka.ConfigMap, special kafka.ConfigMap) {
@@ -266,7 +265,7 @@ func (kc *kafkaClient) specialExtraConfig(current *kafka.ConfigMap, special kafk
 
 func (kc *kafkaClient) BytesToMsgID(id []byte) (common.MessageID, error) {
 	offset := DeserializeKafkaID(id)
-	return &kafkaID{messageID: offset}, nil
+	return &KafkaID{MessageID: offset}, nil
 }
 
 func (kc *kafkaClient) Close() {

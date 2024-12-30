@@ -394,7 +394,3 @@ func (s *Server) Delete(ctx context.Context, req *querypb.DeleteRequest) (*commo
 func (s *Server) DeleteBatch(ctx context.Context, req *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error) {
 	return s.querynode.DeleteBatch(ctx, req)
 }
-
-func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	return s.querynode.CheckHealth(ctx, req)
-}

@@ -534,8 +534,8 @@ func (m *ChannelManagerImpl) advanceToNotifies(ctx context.Context, toNotifies [
 		nodeID := nodeAssign.NodeID
 
 		var (
-			succeededChannels = make([]RWChannel, 0, channelCount)
-			failedChannels    = make([]RWChannel, 0, channelCount)
+			succeededChannels = 0
+			failedChannels    = 0
 			futures           = make([]*conc.Future[any], 0, channelCount)
 		)
 
@@ -552,31 +552,42 @@ func (m *ChannelManagerImpl) advanceToNotifies(ctx context.Context, toNotifies [
 
 			future := getOrCreateIOPool().Submit(func() (any, error) {
 				err := m.Notify(ctx, nodeID, tmpWatchInfo)
-				return innerCh, err
+				return poolResult{
+					ch:   innerCh,
+					opID: tmpWatchInfo.GetOpID(),
+				}, err
 			})
 			futures = append(futures, future)
 		}
 
 		for _, f := range futures {
-			ch, err := f.Await()
+			got, err := f.Await()
+			res := got.(poolResult)
+
 			if err != nil {
-				failedChannels = append(failedChannels, ch.(RWChannel))
+				log.Ctx(ctx).Warn("Failed to notify channel operations to datanode",
+					zap.Int64("assignment", nodeAssign.NodeID),
+					zap.Int("operation count", channelCount),
+					zap.String("channel name", res.ch.GetName()),
+					zap.Error(err),
+				)
+				failedChannels++
 			} else {
-				succeededChannels = append(succeededChannels, ch.(RWChannel))
+				succeededChannels++
 				advanced = true
 			}
+
+			m.mu.Lock()
+			m.store.UpdateState(err == nil, nodeID, res.ch, res.opID)
+			m.mu.Unlock()
 		}
 
 		log.Ctx(ctx).Info("Finish to notify channel operations to datanode",
 			zap.Int64("assignment", nodeAssign.NodeID),
 			zap.Int("operation count", channelCount),
-			zap.Int("success count", len(succeededChannels)),
-			zap.Int("failure count", len(failedChannels)),
+			zap.Int("success count", succeededChannels),
+			zap.Int("failure count", failedChannels),
 		)
-		m.mu.Lock()
-		m.store.UpdateState(false, failedChannels...)
-		m.store.UpdateState(true, succeededChannels...)
-		m.mu.Unlock()
 	}
 
 	return advanced
@@ -585,6 +596,7 @@ func (m *ChannelManagerImpl) advanceToNotifies(ctx context.Context, toNotifies [
 type poolResult struct {
 	successful bool
 	ch         RWChannel
+	opID       int64
 }
 
 func (m *ChannelManagerImpl) advanceToChecks(ctx context.Context, toChecks []*NodeChannelInfo) bool {
@@ -605,13 +617,15 @@ func (m *ChannelManagerImpl) advanceToChecks(ctx context.Context, toChecks []*No
 
 		for _, ch := range nodeAssign.Channels {
 			innerCh := ch
+			tmpWatchInfo := typeutil.Clone(innerCh.GetWatchInfo())
 
 			future := getOrCreateIOPool().Submit(func() (any, error) {
-				successful, got := m.Check(ctx, nodeID, innerCh.GetWatchInfo())
+				successful, got := m.Check(ctx, nodeID, tmpWatchInfo)
 				if got {
 					return poolResult{
 						successful: successful,
 						ch:         innerCh,
+						opID:       tmpWatchInfo.GetOpID(),
 					}, nil
 				}
 				return nil, errors.New("Got results with no progress")
@@ -624,7 +638,7 @@ func (m *ChannelManagerImpl) advanceToChecks(ctx context.Context, toChecks []*No
 			if err == nil {
 				m.mu.Lock()
 				result := got.(poolResult)
-				m.store.UpdateState(result.successful, result.ch)
+				m.store.UpdateState(result.successful, nodeID, result.ch, result.opID)
 				m.mu.Unlock()
 
 				advanced = true
@@ -644,6 +658,7 @@ func (m *ChannelManagerImpl) Notify(ctx context.Context, nodeID int64, info *dat
 		zap.String("channel", info.GetVchan().GetChannelName()),
 		zap.Int64("assignment", nodeID),
 		zap.String("operation", info.GetState().String()),
+		zap.Int64("opID", info.GetOpID()),
 	)
 	log.Info("Notify channel operation")
 	err := m.subCluster.NotifyChannelOperation(ctx, nodeID, &datapb.ChannelOperationsRequest{Infos: []*datapb.ChannelWatchInfo{info}})
@@ -694,6 +709,7 @@ func (m *ChannelManagerImpl) Check(ctx context.Context, nodeID int64, info *data
 		if resp.GetState() == datapb.ChannelWatchState_ReleaseFailure {
 			return false, true
 		}
+
 	}
 	return false, false
 }

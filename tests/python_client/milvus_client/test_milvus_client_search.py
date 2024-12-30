@@ -183,7 +183,7 @@ class TestMilvusClientSearchValid(TestcaseBase):
         collection_name = cf.gen_unique_str(prefix)
         client_w.using_database(client, "default")
         # 1. create collection
-        client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        client_w.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = client_w.list_collections(client)[0]
         assert collection_name in collections
         client_w.describe_collection(client, collection_name,
@@ -196,7 +196,7 @@ class TestMilvusClientSearchValid(TestcaseBase):
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         client_w.insert(client, collection_name, rows)
-        # client_w.flush(client, collection_name)
+        client_w.flush(client, collection_name)
         # assert client_w.num_entities(client, collection_name)[0] == default_nb
         # 3. search
         vectors_to_search = rng.random((1, default_dim))
@@ -257,7 +257,7 @@ class TestMilvusClientSearchValid(TestcaseBase):
         client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        client_w.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = client_w.list_collections(client)[0]
         assert collection_name in collections
         client_w.describe_collection(client, collection_name,
@@ -273,7 +273,7 @@ class TestMilvusClientSearchValid(TestcaseBase):
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         client_w.insert(client, new_name, rows)
-        # client_w.flush(client, collection_name)
+        client_w.flush(client, new_name)
         # assert client_w.num_entities(client, collection_name)[0] == default_nb
         # 3. search
         vectors_to_search = rng.random((1, default_dim))

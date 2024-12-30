@@ -88,6 +88,109 @@ func (s *DatabaseSuite) TestDropDatabase() {
 	})
 }
 
+func (s *DatabaseSuite) TestUseDatabase() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		dbName := fmt.Sprintf("dt_%s", s.randString(6))
+		s.mock.EXPECT().Connect(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cr *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error) {
+			return &milvuspb.ConnectResponse{
+				Status:     merr.Success(),
+				ServerInfo: &commonpb.ServerInfo{},
+			}, nil
+		}).Once()
+
+		err := s.client.UseDatabase(ctx, NewUseDatabaseOption(dbName))
+		s.NoError(err)
+
+		s.Equal(dbName, s.client.currentDB)
+	})
+}
+
+func (s *DatabaseSuite) TestDescribeDatabase() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		dbName := fmt.Sprintf("dt_%s", s.randString(6))
+		key := fmt.Sprintf("key_%s", s.randString(4))
+		value := s.randString(6)
+		s.mock.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&milvuspb.DescribeDatabaseResponse{
+			Status: merr.Success(),
+			DbName: dbName,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: key, Value: value},
+			},
+		}, nil).Once()
+
+		db, err := s.client.DescribeDatabase(ctx, NewDescribeDatabaseOption(dbName))
+		s.NoError(err)
+		s.Equal(dbName, db.Name)
+		s.Equal(value, db.Properties[key])
+	})
+
+	s.Run("failure", func() {
+		dbName := fmt.Sprintf("dt_%s", s.randString(6))
+		s.mock.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		_, err := s.client.DescribeDatabase(ctx, NewDescribeDatabaseOption(dbName))
+		s.Error(err)
+	})
+}
+
+func (s *DatabaseSuite) TestAlterDatabaseProperties() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		dbName := fmt.Sprintf("dt_%s", s.randString(6))
+		key := fmt.Sprintf("key_%s", s.randString(4))
+		value := s.randString(6)
+		s.mock.EXPECT().AlterDatabase(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, adr *milvuspb.AlterDatabaseRequest) (*commonpb.Status, error) {
+			s.Equal(dbName, adr.GetDbName())
+			s.Len(adr.GetProperties(), 1)
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.AlterDatabaseProperies(ctx, NewAlterDatabasePropertiesOption(dbName).WithProperty(key, value))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		dbName := fmt.Sprintf("dt_%s", s.randString(6))
+		s.mock.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.AlterDatabaseProperies(ctx, NewAlterDatabasePropertiesOption(dbName).WithProperty("key", "value"))
+		s.Error(err)
+	})
+}
+
+func (s *DatabaseSuite) TestDropDatabaseProperties() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		dbName := fmt.Sprintf("dt_%s", s.randString(6))
+		key := fmt.Sprintf("key_%s", s.randString(4))
+		s.mock.EXPECT().AlterDatabase(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, adr *milvuspb.AlterDatabaseRequest) (*commonpb.Status, error) {
+			s.Equal([]string{key}, adr.GetDeleteKeys())
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.DropDatabaseProperties(ctx, NewDropDatabasePropertiesOption(dbName, key))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		dbName := fmt.Sprintf("dt_%s", s.randString(6))
+		s.mock.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.DropDatabaseProperties(ctx, NewDropDatabasePropertiesOption(dbName, "key"))
+		s.Error(err)
+	})
+}
+
 func TestDatabase(t *testing.T) {
 	suite.Run(t, new(DatabaseSuite))
 }

@@ -73,13 +73,13 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 	for segmentID, info := range segmentDist {
 		_, exist := leader.Segments[segmentID]
 		if !exist {
-			log.RatedWarn(10, "leader is not available due to lack of segment", zap.Int64("segmentID", segmentID))
+			log.RatedInfo(10, "leader is not available due to lack of segment", zap.Int64("segmentID", segmentID))
 			return merr.WrapErrSegmentLack(segmentID)
 		}
 
 		l0WithWrongLocation := info.GetLevel() == datapb.SegmentLevel_L0 && leader.Segments[segmentID].GetNodeID() != leader.ID
 		if l0WithWrongLocation {
-			log.RatedWarn(10, "leader is not available due to lack of L0 segment", zap.Int64("segmentID", segmentID))
+			log.RatedInfo(10, "leader is not available due to lack of L0 segment", zap.Int64("segmentID", segmentID))
 			return merr.WrapErrSegmentLack(segmentID)
 		}
 	}
@@ -113,6 +113,8 @@ func GetShardLeadersWithChannels(ctx context.Context, m *meta.Meta, targetMgr me
 ) ([]*querypb.ShardLeadersList, error) {
 	ret := make([]*querypb.ShardLeadersList, 0)
 	for _, channel := range channels {
+		log := log.With(zap.String("channel", channel.GetChannelName()))
+
 		var channelErr error
 		leaders := dist.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel.GetChannelName()))
 		if len(leaders) == 0 {
@@ -130,7 +132,7 @@ func GetShardLeadersWithChannels(ctx context.Context, m *meta.Meta, targetMgr me
 
 		if len(readableLeaders) == 0 {
 			msg := fmt.Sprintf("channel %s is not available in any replica", channel.GetChannelName())
-			log.RatedWarn(60, msg, zap.Error(channelErr))
+			log.Warn(msg, zap.Error(channelErr))
 			err := merr.WrapErrChannelNotAvailable(channel.GetChannelName(), channelErr.Error())
 			return nil, err
 		}
@@ -183,9 +185,8 @@ func GetShardLeaders(ctx context.Context, m *meta.Meta, targetMgr meta.TargetMan
 }
 
 // CheckCollectionsQueryable check all channels are watched and all segments are loaded for this collection
-func CheckCollectionsQueryable(ctx context.Context, m *meta.Meta, targetMgr meta.TargetManagerInterface, dist *meta.DistributionManager, nodeMgr *session.NodeManager) map[int64]string {
-	maxInterval := paramtable.Get().QueryCoordCfg.UpdateCollectionLoadStatusInterval.GetAsDuration(time.Second)
-	checkResult := make(map[int64]string)
+func CheckCollectionsQueryable(ctx context.Context, m *meta.Meta, targetMgr meta.TargetManagerInterface, dist *meta.DistributionManager, nodeMgr *session.NodeManager) error {
+	maxInterval := paramtable.Get().QueryCoordCfg.UpdateCollectionLoadStatusInterval.GetAsDuration(time.Minute)
 	for _, coll := range m.GetAllCollections(ctx) {
 		err := checkCollectionQueryable(ctx, m, targetMgr, dist, nodeMgr, coll)
 		// the collection is not queryable, if meet following conditions:
@@ -193,10 +194,15 @@ func CheckCollectionsQueryable(ctx context.Context, m *meta.Meta, targetMgr meta
 		// 2. Collection is not starting to release
 		// 3. The load percentage has not been updated in the last 5 minutes.
 		if err != nil && m.Exist(ctx, coll.CollectionID) && time.Since(coll.UpdatedAt) >= maxInterval {
-			checkResult[coll.CollectionID] = err.Error()
+			log.Ctx(ctx).Warn("collection not querable",
+				zap.Int64("collectionID", coll.CollectionID),
+				zap.Time("lastUpdated", coll.UpdatedAt),
+				zap.Duration("maxInterval", maxInterval),
+				zap.Error(err))
+			return err
 		}
 	}
-	return checkResult
+	return nil
 }
 
 // checkCollectionQueryable check all channels are watched and all segments are loaded for this collection

@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
+	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/rmq"
@@ -311,6 +312,8 @@ func initializeTestState(t *testing.T) {
 			Status: merr.Success(),
 		}, nil
 	})
+	fDataCoordClient := syncutil.NewFuture[internaltypes.DataCoordClient]()
+	fDataCoordClient.Set(dataCoordClient)
 
 	rootCoordClient := idalloc.NewMockRootCoordClient(t)
 	rootCoordClient.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{
@@ -325,11 +328,13 @@ func initializeTestState(t *testing.T) {
 			},
 		},
 	}, nil)
+	fRootCoordClient := syncutil.NewFuture[internaltypes.RootCoordClient]()
+	fRootCoordClient.Set(rootCoordClient)
 
 	resource.InitForTest(t,
 		resource.OptStreamingNodeCatalog(streamingNodeCatalog),
-		resource.OptDataCoordClient(dataCoordClient),
-		resource.OptRootCoordClient(rootCoordClient),
+		resource.OptDataCoordClient(fDataCoordClient),
+		resource.OptRootCoordClient(fRootCoordClient),
 	)
 	streamingNodeCatalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(
 		[]*streamingpb.SegmentAssignmentMeta{

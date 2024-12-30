@@ -340,6 +340,7 @@ TEST_F(TestChunkSegment, TestCompareExpr) {
     file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
         milvus::proto::schema::Int64);
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
+    file_manager_ctx.fieldDataMeta.field_id = fid.get();
     index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::INT64;
     create_index_info.index_type = index::INVERTED_INDEX_TYPE;

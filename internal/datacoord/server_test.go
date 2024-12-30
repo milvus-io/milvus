@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -53,7 +54,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -574,6 +574,17 @@ func TestGetSegmentsByStates(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
+		channelManager := NewMockChannelManager(t)
+		channelName := "ch"
+		channelManager.EXPECT().GetChannelsByCollectionID(mock.Anything).RunAndReturn(func(id int64) []RWChannel {
+			return []RWChannel{
+				&channelMeta{
+					Name:         channelName + fmt.Sprint(id),
+					CollectionID: id,
+				},
+			}
+		}).Maybe()
+		svr.channelManager = channelManager
 		type testCase struct {
 			collID          int64
 			partID          int64
@@ -622,31 +633,92 @@ func TestGetSegmentsByStates(t *testing.T) {
 				expected:     []int64{9, 10},
 			},
 		}
+		svr.meta.AddCollection(&collectionInfo{
+			ID:         1,
+			Partitions: []int64{1, 2},
+			Schema:     nil,
+			StartPositions: []*commonpb.KeyDataPair{
+				{
+					Key:  "ch1",
+					Data: []byte{8, 9, 10},
+				},
+			},
+		})
+		svr.meta.AddCollection(&collectionInfo{
+			ID:         2,
+			Partitions: []int64{3},
+			Schema:     nil,
+			StartPositions: []*commonpb.KeyDataPair{
+				{
+					Key:  "ch1",
+					Data: []byte{8, 9, 10},
+				},
+			},
+		})
 		for _, tc := range cases {
 			for _, fs := range tc.flushedSegments {
 				segInfo := &datapb.SegmentInfo{
-					ID:           fs,
-					CollectionID: tc.collID,
-					PartitionID:  tc.partID,
-					State:        commonpb.SegmentState_Flushed,
+					ID:            fs,
+					CollectionID:  tc.collID,
+					PartitionID:   tc.partID,
+					InsertChannel: channelName + fmt.Sprint(tc.collID),
+					State:         commonpb.SegmentState_Flushed,
+					NumOfRows:     1024,
+					StartPosition: &msgpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{8, 9, 10},
+						MsgGroup:    "",
+					},
+					DmlPosition: &msgpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{11, 12, 13},
+						MsgGroup:    "",
+						Timestamp:   2,
+					},
 				}
 				assert.Nil(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo)))
 			}
 			for _, us := range tc.sealedSegments {
 				segInfo := &datapb.SegmentInfo{
-					ID:           us,
-					CollectionID: tc.collID,
-					PartitionID:  tc.partID,
-					State:        commonpb.SegmentState_Sealed,
+					ID:            us,
+					CollectionID:  tc.collID,
+					PartitionID:   tc.partID,
+					InsertChannel: channelName + fmt.Sprint(tc.collID),
+					State:         commonpb.SegmentState_Sealed,
+					NumOfRows:     1024,
+					StartPosition: &msgpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{8, 9, 10},
+						MsgGroup:    "",
+					},
+					DmlPosition: &msgpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{11, 12, 13},
+						MsgGroup:    "",
+						Timestamp:   2,
+					},
 				}
 				assert.Nil(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo)))
 			}
 			for _, us := range tc.growingSegments {
 				segInfo := &datapb.SegmentInfo{
-					ID:           us,
-					CollectionID: tc.collID,
-					PartitionID:  tc.partID,
-					State:        commonpb.SegmentState_Growing,
+					ID:            us,
+					CollectionID:  tc.collID,
+					PartitionID:   tc.partID,
+					InsertChannel: channelName + fmt.Sprint(tc.collID),
+					State:         commonpb.SegmentState_Growing,
+					NumOfRows:     1024,
+					StartPosition: &msgpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{8, 9, 10},
+						MsgGroup:    "",
+					},
+					DmlPosition: &msgpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{11, 12, 13},
+						MsgGroup:    "",
+						Timestamp:   2,
+					},
 				}
 				assert.Nil(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo)))
 			}
@@ -820,56 +892,10 @@ func TestServer_getSystemInfoMetrics(t *testing.T) {
 	}
 }
 
-type spySegmentManager struct {
-	spyCh chan struct{}
-}
-
-// AllocSegment allocates rows and record the allocation.
-func (s *spySegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error) {
-	return nil, nil
-}
-
-func (s *spySegmentManager) AllocNewGrowingSegment(ctx context.Context, collectionID, partitionID, segmentID UniqueID, channelName string) (*SegmentInfo, error) {
-	return nil, nil
-}
-
-func (s *spySegmentManager) allocSegmentForImport(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int64, taskID int64) (*Allocation, error) {
-	return nil, nil
-}
-
-// DropSegment drops the segment from manager.
-func (s *spySegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
-}
-
-// FlushImportSegments set importing segment state to Flushed.
-func (s *spySegmentManager) FlushImportSegments(ctx context.Context, collectionID UniqueID, segmentIDs []UniqueID) error {
-	return nil
-}
-
-// SealAllSegments seals all segments of collection with collectionID and return sealed segments
-func (s *spySegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error) {
-	return nil, nil
-}
-
-// GetFlushableSegments returns flushable segment ids
-func (s *spySegmentManager) GetFlushableSegments(ctx context.Context, channel string, ts Timestamp) ([]UniqueID, error) {
-	return nil, nil
-}
-
-// ExpireAllocations notifies segment status to expire old allocations
-func (s *spySegmentManager) ExpireAllocations(ctx context.Context, channel string, ts Timestamp) error {
-	return nil
-}
-
-// DropSegmentsOfChannel drops all segments in a channel
-func (s *spySegmentManager) DropSegmentsOfChannel(ctx context.Context, channel string) {
-	s.spyCh <- struct{}{}
-}
-
 func TestDropVirtualChannel(t *testing.T) {
 	t.Run("normal DropVirtualChannel", func(t *testing.T) {
-		spyCh := make(chan struct{}, 1)
-		svr := newTestServer(t, WithSegmentManager(&spySegmentManager{spyCh: spyCh}))
+		segmentManager := NewMockManager(t)
+		svr := newTestServer(t, WithSegmentManager(segmentManager))
 
 		defer closeTestServer(t, svr)
 
@@ -996,11 +1022,10 @@ func TestDropVirtualChannel(t *testing.T) {
 			}
 			req.Segments = append(req.Segments, seg2Drop)
 		}
+		segmentManager.EXPECT().DropSegmentsOfChannel(mock.Anything, mock.Anything).Return()
 		resp, err := svr.DropVirtualChannel(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-
-		<-spyCh
 
 		// resend
 		resp, err = svr.DropVirtualChannel(ctx, req)
@@ -2510,12 +2535,12 @@ func Test_CheckHealth(t *testing.T) {
 		return sm
 	}
 
-	getChannelManager := func(findWatcherOk bool) ChannelManager {
+	getChannelManager := func(t *testing.T, findWatcherOk bool) ChannelManager {
 		channelManager := NewMockChannelManager(t)
 		if findWatcherOk {
-			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, nil).Maybe()
+			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, nil)
 		} else {
-			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, errors.New("error")).Maybe()
+			channelManager.EXPECT().FindWatcher(mock.Anything).Return(0, errors.New("error"))
 		}
 		return channelManager
 	}
@@ -2526,21 +2551,6 @@ func Test_CheckHealth(t *testing.T) {
 			VChannelNames: []string{"ch1", "ch2"},
 		},
 		2: nil,
-	}
-
-	newServer := func(isHealthy bool, findWatcherOk bool, meta *meta) *Server {
-		svr := &Server{
-			ctx:            context.TODO(),
-			sessionManager: getSessionManager(isHealthy),
-			channelManager: getChannelManager(findWatcherOk),
-			meta:           meta,
-			session:        &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
-		}
-		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.healthChecker = healthcheck.NewChecker(20*time.Millisecond, svr.healthCheckFn)
-		svr.healthChecker.Start()
-		time.Sleep(30 * time.Millisecond) // wait for next cycle for health checker
-		return svr
 	}
 
 	t.Run("not healthy", func(t *testing.T) {
@@ -2554,8 +2564,9 @@ func Test_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("data node health check is fail", func(t *testing.T) {
-		svr := newServer(false, true, &meta{channelCPs: newChannelCps()})
-		defer svr.healthChecker.Close()
+		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.sessionManager = getSessionManager(false)
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -2564,8 +2575,11 @@ func Test_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("check channel watched fail", func(t *testing.T) {
-		svr := newServer(true, false, &meta{collections: collections, channelCPs: newChannelCps()})
-		defer svr.healthChecker.Close()
+		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.sessionManager = getSessionManager(true)
+		svr.channelManager = getChannelManager(t, false)
+		svr.meta = &meta{collections: collections}
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -2574,7 +2588,11 @@ func Test_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("check checkpoint fail", func(t *testing.T) {
-		svr := newServer(true, true, &meta{
+		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.sessionManager = getSessionManager(true)
+		svr.channelManager = getChannelManager(t, true)
+		svr.meta = &meta{
 			collections: collections,
 			channelCPs: &channelCPs{
 				checkpoints: map[string]*msgpb.MsgPosition{
@@ -2584,8 +2602,8 @@ func Test_CheckHealth(t *testing.T) {
 					},
 				},
 			},
-		})
-		defer svr.healthChecker.Close()
+		}
+
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -2594,7 +2612,11 @@ func Test_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("ok", func(t *testing.T) {
-		svr := newServer(true, true, &meta{
+		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.sessionManager = getSessionManager(true)
+		svr.channelManager = getChannelManager(t, true)
+		svr.meta = &meta{
 			collections: collections,
 			channelCPs: &channelCPs{
 				checkpoints: map[string]*msgpb.MsgPosition{
@@ -2612,8 +2634,7 @@ func Test_CheckHealth(t *testing.T) {
 					},
 				},
 			},
-		})
-		defer svr.healthChecker.Close()
+		}
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)

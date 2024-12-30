@@ -32,6 +32,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -49,7 +51,6 @@ import (
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -130,7 +131,6 @@ type Core struct {
 	activateFunc        func() error
 
 	metricsRequest *metricsinfo.MetricsRequest
-	healthChecker  *healthcheck.Checker
 }
 
 // --------------------- function --------------------------
@@ -501,8 +501,6 @@ func (c *Core) initInternal() error {
 		return err
 	}
 
-	interval := Params.CommonCfg.HealthCheckInterval.GetAsDuration(time.Second)
-	c.healthChecker = healthcheck.NewChecker(interval, c.healthCheckFn)
 	log.Info("init rootcoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", c.address))
 	return nil
 }
@@ -640,50 +638,6 @@ func (c *Core) initPublicRolePrivilege() error {
 	return nil
 }
 
-func (c *Core) initBuiltinPrivilegeGroups() []*milvuspb.PrivilegeGroupInfo {
-	// init built in privilege groups, override by config if rbac config enabled
-	builtinGroups := make([]*milvuspb.PrivilegeGroupInfo, 0)
-	for groupName, privileges := range util.BuiltinPrivilegeGroups {
-		if Params.RbacConfig.Enabled.GetAsBool() {
-			var confPrivs []string
-			switch groupName {
-			case "ClusterReadOnly":
-				confPrivs = Params.RbacConfig.ClusterReadOnlyPrivileges.GetAsStrings()
-			case "ClusterReadWrite":
-				confPrivs = Params.RbacConfig.ClusterReadWritePrivileges.GetAsStrings()
-			case "ClusterAdmin":
-				confPrivs = Params.RbacConfig.ClusterAdminPrivileges.GetAsStrings()
-			case "DatabaseReadOnly":
-				confPrivs = Params.RbacConfig.DBReadOnlyPrivileges.GetAsStrings()
-			case "DatabaseReadWrite":
-				confPrivs = Params.RbacConfig.DBReadWritePrivileges.GetAsStrings()
-			case "DatabaseAdmin":
-				confPrivs = Params.RbacConfig.DBAdminPrivileges.GetAsStrings()
-			case "CollectionReadOnly":
-				confPrivs = Params.RbacConfig.CollectionReadOnlyPrivileges.GetAsStrings()
-			case "CollectionReadWrite":
-				confPrivs = Params.RbacConfig.CollectionReadWritePrivileges.GetAsStrings()
-			case "CollectionAdmin":
-				confPrivs = Params.RbacConfig.CollectionAdminPrivileges.GetAsStrings()
-			default:
-				return nil
-			}
-			if len(confPrivs) > 0 {
-				privileges = confPrivs
-			}
-		}
-
-		privs := lo.Map(privileges, func(name string, _ int) *milvuspb.PrivilegeEntity {
-			return &milvuspb.PrivilegeEntity{Name: name}
-		})
-		builtinGroups = append(builtinGroups, &milvuspb.PrivilegeGroupInfo{
-			GroupName:  groupName,
-			Privileges: privs,
-		})
-	}
-	return builtinGroups
-}
-
 func (c *Core) initBuiltinRoles() error {
 	log := log.Ctx(c.ctx)
 	rolePrivilegesMap := Params.RoleCfg.Roles.GetAsRoleDetails()
@@ -797,7 +751,6 @@ func (c *Core) startInternal() error {
 	}()
 
 	c.startServerLoop()
-	c.healthChecker.Start()
 	c.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.RootCoordRole, c.session.ServerID)
 	log.Info("rootcoord startup successfully")
@@ -859,10 +812,6 @@ func (c *Core) revokeSession() {
 // Stop stops rootCoord.
 func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
-	if c.healthChecker != nil {
-		c.healthChecker.Close()
-	}
-
 	c.stopExecutor()
 	c.stopScheduler()
 	if c.proxyWatcher != nil {
@@ -1873,7 +1822,7 @@ func (c *Core) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfi
 
 // GetMetrics get metrics
 func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	if err := merr.CheckHealthyStandby(c.GetStateCode()); err != nil {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return &milvuspb.GetMetricsResponse{
 			Status:   merr.Status(err),
 			Response: "",
@@ -2655,7 +2604,7 @@ func (c *Core) isValidPrivilege(ctx context.Context, privilegeName string, objec
 	if customPrivGroup {
 		return fmt.Errorf("can not operate the custom privilege group [%s]", privilegeName)
 	}
-	if lo.Contains(lo.Keys(util.BuiltinPrivilegeGroups), privilegeName) {
+	if lo.Contains(Params.RbacConfig.GetDefaultPrivilegeGroupNames(), privilegeName) {
 		return fmt.Errorf("can not operate the built-in privilege group [%s]", privilegeName)
 	}
 	// check object privileges for built-in privileges
@@ -2763,8 +2712,7 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 		}
 		grants := []*milvuspb.GrantEntity{in.Entity}
 
-		allGroups, err := c.meta.ListPrivilegeGroups(ctx)
-		allGroups = append(allGroups, c.initBuiltinPrivilegeGroups()...)
+		allGroups, err := c.getPrivilegeGroups(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -2774,6 +2722,25 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 		expandGrants, err := c.expandPrivilegeGroups(ctx, grants, groups)
 		if err != nil {
 			return nil, err
+		}
+		// if there is same grant in the other privilege groups, the grant should not be removed from the cache
+		if in.Type == milvuspb.OperatePrivilegeType_Revoke {
+			metaGrants, err := c.meta.SelectGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+				Role:   in.Entity.Role,
+				DbName: in.Entity.DbName,
+			})
+			if err != nil {
+				return nil, err
+			}
+			metaExpandGrants, err := c.expandPrivilegeGroups(ctx, metaGrants, groups)
+			if err != nil {
+				return nil, err
+			}
+			expandGrants = lo.Filter(expandGrants, func(g1 *milvuspb.GrantEntity, _ int) bool {
+				return !lo.ContainsBy(metaExpandGrants, func(g2 *milvuspb.GrantEntity) bool {
+					return proto.Equal(g1, g2)
+				})
+			})
 		}
 		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 			OpType: opType,
@@ -2933,18 +2900,34 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
-	userRoles, err := c.meta.ListUserRole(ctx, util.DefaultTenant)
+	// expand privilege groups and turn to policies
+	allGroups, err := c.getPrivilegeGroups(ctx)
 	if err != nil {
-		errMsg := "fail to list user-role"
-		ctxLog.Warn(errMsg, zap.Any("in", in), zap.Error(err))
+		errMsg := "fail to get privilege groups"
+		ctxLog.Warn(errMsg, zap.Error(err))
 		return &internalpb.ListPolicyResponse{
 			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
-	privGroups, err := c.meta.ListPrivilegeGroups(ctx)
+	groups := lo.SliceToMap(allGroups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
+		return group.GroupName, group.Privileges
+	})
+	expandGrants, err := c.expandPrivilegeGroups(ctx, policies, groups)
 	if err != nil {
-		errMsg := "fail to list privilege groups"
+		errMsg := "fail to expand privilege groups"
 		ctxLog.Warn(errMsg, zap.Error(err))
+		return &internalpb.ListPolicyResponse{
+			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
+		}, nil
+	}
+	expandPolicies := lo.Map(expandGrants, func(r *milvuspb.GrantEntity, _ int) string {
+		return funcutil.PolicyForPrivilege(r.Role.Name, r.Object.Name, r.ObjectName, r.Grantor.Privilege.Name, r.DbName)
+	})
+
+	userRoles, err := c.meta.ListUserRole(ctx, util.DefaultTenant)
+	if err != nil {
+		errMsg := "fail to list user-role"
+		ctxLog.Warn(errMsg, zap.Any("in", in), zap.Error(err))
 		return &internalpb.ListPolicyResponse{
 			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
@@ -2955,9 +2938,9 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &internalpb.ListPolicyResponse{
 		Status:          merr.Success(),
-		PolicyInfos:     policies,
+		PolicyInfos:     expandPolicies,
 		UserRoles:       userRoles,
-		PrivilegeGroups: privGroups,
+		PrivilegeGroups: allGroups,
 	}, nil
 }
 
@@ -3110,40 +3093,53 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 		}, nil
 	}
 
-	latestCheckResult := c.healthChecker.GetLatestCheckResult()
-	return healthcheck.GetCheckHealthResponseFromResult(latestCheckResult), nil
-}
-
-func (c *Core) healthCheckFn() *healthcheck.Result {
-	timeout := Params.CommonCfg.HealthCheckRPCTimeout.GetAsDuration(time.Second)
-	ctx, cancel := context.WithTimeout(c.ctx, timeout)
-	defer cancel()
+	group, ctx := errgroup.WithContext(ctx)
+	errs := typeutil.NewConcurrentSet[error]()
 
 	proxyClients := c.proxyClientManager.GetProxyClients()
-	wg := sync.WaitGroup{}
-	lock := sync.Mutex{}
-	result := healthcheck.NewResult()
-
 	proxyClients.Range(func(key int64, value types.ProxyClient) bool {
 		nodeID := key
 		proxyClient := value
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			resp, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
-			err = merr.AnalyzeComponentStateResp(typeutil.ProxyRole, nodeID, resp, err)
-
-			lock.Lock()
-			defer lock.Unlock()
+		group.Go(func() error {
+			sta, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 			if err != nil {
-				result.AppendUnhealthyClusterMsg(healthcheck.NewUnhealthyClusterMsg(typeutil.ProxyRole, nodeID, err.Error(), healthcheck.NodeHealthCheck))
+				errs.Insert(err)
+				return err
 			}
-		}()
+
+			err = merr.AnalyzeState("Proxy", nodeID, sta)
+			if err != nil {
+				errs.Insert(err)
+			}
+
+			return err
+		})
 		return true
 	})
 
-	wg.Wait()
-	return result
+	maxDelay := Params.QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second)
+	if maxDelay > 0 {
+		group.Go(func() error {
+			err := CheckTimeTickLagExceeded(ctx, c.queryCoord, c.dataCoord, maxDelay)
+			if err != nil {
+				errs.Insert(err)
+			}
+			return err
+		})
+	}
+
+	err := group.Wait()
+	if err != nil {
+		return &milvuspb.CheckHealthResponse{
+			Status:    merr.Success(),
+			IsHealthy: false,
+			Reasons: lo.Map(errs.Collect(), func(e error, i int) string {
+				return err.Error()
+			}),
+		}, nil
+	}
+
+	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: []string{}}, nil
 }
 
 func (c *Core) CreatePrivilegeGroup(ctx context.Context, in *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error) {
@@ -3218,16 +3214,7 @@ func (c *Core) ListPrivilegeGroups(ctx context.Context, in *milvuspb.ListPrivile
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	// append built in privilege groups
-	for groupName, privileges := range util.BuiltinPrivilegeGroups {
-		privGroups = append(privGroups, &milvuspb.PrivilegeGroupInfo{
-			GroupName: groupName,
-			Privileges: lo.Map(privileges, func(p string, _ int) *milvuspb.PrivilegeEntity {
-				return &milvuspb.PrivilegeEntity{
-					Name: p,
-				}
-			}),
-		})
-	}
+	privGroups = append(privGroups, Params.RbacConfig.GetDefaultPrivilegeGroups()...)
 	return &milvuspb.ListPrivilegeGroupsResponse{
 		Status:          merr.Success(),
 		PrivilegeGroups: privGroups,
@@ -3424,4 +3411,14 @@ func (c *Core) expandPrivilegeGroups(ctx context.Context, grants []*milvuspb.Gra
 	return lo.UniqBy(newGrants, func(g *milvuspb.GrantEntity) string {
 		return fmt.Sprintf("%s-%s-%s-%s-%s-%s", g.Role, g.Object, g.ObjectName, g.Grantor.User, g.Grantor.Privilege.Name, g.DbName)
 	}), nil
+}
+
+// getPrivilegeGroups returns default privilege groups and user-defined privilege groups.
+func (c *Core) getPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
+	allGroups, err := c.meta.ListPrivilegeGroups(ctx)
+	allGroups = append(allGroups, Params.RbacConfig.GetDefaultPrivilegeGroups()...)
+	if err != nil {
+		return nil, err
+	}
+	return allGroups, nil
 }

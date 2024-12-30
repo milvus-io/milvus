@@ -258,6 +258,29 @@ default_diskann_index = {"index_type": "DISKANN", "metric_type": default_L0_metr
 default_diskann_search_params = {"params": {"search_list": 30}}
 default_sparse_search_params = {"metric_type": "IP", "params": {"drop_ratio_search": "0.2"}}
 default_text_sparse_search_params = {"metric_type": "BM25", "params": {}}
+built_in_privilege_groups = ["CollectionReadWrite", "CollectionReadOnly", "CollectionAdmin",
+                             "DatabaseReadWrite", "DatabaseReadOnly", "DatabaseAdmin",
+                             "ClusterReadWrite", "ClusterReadOnly", "ClusterAdmin"]
+privilege_group_privilege_dict = {"Query": False, "Search": False, "GetLoadState": False,
+                                  "GetLoadingProgress": False, "HasPartition": False, "ShowPartitions": False,
+                                  "ShowCollections": False, "ListAliases": False, "ListDatabases": False,
+                                  "DescribeDatabase": False, "DescribeAlias": False, "GetStatistics": False,
+                                  "CreateIndex": False, "DropIndex": False, "CreatePartition": False,
+                                  "DropPartition": False, "Load": False, "Release": False,
+                                  "Insert": False, "Delete": False, "Upsert": False,
+                                  "Import": False, "Flush": False, "Compaction": False,
+                                  "LoadBalance": False, "RenameCollection": False, "CreateAlias": False,
+                                  "DropAlias": False, "CreateCollection": False, "DropCollection": False,
+                                  "CreateOwnership": False, "DropOwnership": False, "SelectOwnership": False,
+                                  "ManageOwnership": False, "UpdateUser": False, "SelectUser": False,
+                                  "CreateResourceGroup": False, "DropResourceGroup": False,
+                                  "UpdateResourceGroups": False,
+                                  "DescribeResourceGroup": False, "ListResourceGroups": False, "TransferNode": False,
+                                  "TransferReplica": False, "CreateDatabase": False, "DropDatabase": False,
+                                  "AlterDatabase": False, "FlushAll": False, "ListPrivilegeGroups": False,
+                                  "CreatePrivilegeGroup": False, "DropPrivilegeGroup": False,
+                                  "OperatePrivilegeGroup": False}
+
 
 class CheckTasks:
     """ The name of the method used to check the result """
@@ -282,6 +305,7 @@ class CheckTasks:
     check_rg_property = "check_resource_group_property"
     check_describe_collection_property = "check_describe_collection_property"
     check_insert_result = "check_insert_result"
+    check_collection_fields_properties = "check_collection_fields_properties"
 
 
 class BulkLoadStates:

@@ -98,7 +98,7 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 	}
 
 	if streamingutil.IsStreamingServiceEnabled() {
-		startFrom := adaptor.MustGetMessageIDFromMQWrapperIDBytes("pulsar", position.GetMsgID())
+		startFrom := adaptor.MustGetMessageIDFromMQWrapperIDBytes(streaming.WAL().WALName(), position.GetMsgID())
 		log.Info(
 			"stream pipeline seeks from position with scanner",
 			zap.String("channel", position.GetChannelName()),

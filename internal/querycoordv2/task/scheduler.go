@@ -487,61 +487,74 @@ func (scheduler *taskScheduler) GetSegmentTaskDelta(nodeID, collectionID int64) 
 	scheduler.rwmutex.RLock()
 	defer scheduler.rwmutex.RUnlock()
 
-	targetActions := make([]Action, 0)
-	for _, t := range scheduler.segmentTasks {
-		if collectionID != -1 && collectionID != t.CollectionID() {
+	targetActions := make(map[int64][]Action)
+	for _, task := range scheduler.segmentTasks { // Map key: replicaSegmentIndex
+		taskCollID := task.CollectionID()
+		if collectionID != -1 && collectionID != taskCollID {
 			continue
 		}
-		for _, action := range t.Actions() {
-			if action.Node() == nodeID {
-				targetActions = append(targetActions, action)
-			}
+		actions := filterActions(task.Actions(), nodeID)
+		if len(actions) > 0 {
+			targetActions[taskCollID] = append(targetActions[taskCollID], actions...)
 		}
 	}
 
-	return scheduler.calculateTaskDelta(collectionID, targetActions)
+	return scheduler.calculateTaskDelta(targetActions)
 }
 
 func (scheduler *taskScheduler) GetChannelTaskDelta(nodeID, collectionID int64) int {
 	scheduler.rwmutex.RLock()
 	defer scheduler.rwmutex.RUnlock()
 
-	targetActions := make([]Action, 0)
-	for _, t := range scheduler.channelTasks {
-		if collectionID != -1 && collectionID != t.CollectionID() {
+	targetActions := make(map[int64][]Action)
+	for _, task := range scheduler.channelTasks { // Map key: replicaChannelIndex
+		taskCollID := task.CollectionID()
+		if collectionID != -1 && collectionID != taskCollID {
 			continue
 		}
-		for _, action := range t.Actions() {
-			if action.Node() == nodeID {
-				targetActions = append(targetActions, action)
-			}
+		actions := filterActions(task.Actions(), nodeID)
+		if len(actions) > 0 {
+			targetActions[taskCollID] = append(targetActions[taskCollID], actions...)
 		}
 	}
 
-	return scheduler.calculateTaskDelta(collectionID, targetActions)
+	return scheduler.calculateTaskDelta(targetActions)
 }
 
-func (scheduler *taskScheduler) calculateTaskDelta(collectionID int64, targetActions []Action) int {
-	sum := 0
-	for _, action := range targetActions {
-		delta := 0
-		if action.Type() == ActionTypeGrow {
-			delta = 1
-		} else if action.Type() == ActionTypeReduce {
-			delta = -1
+// filter actions by nodeID
+func filterActions(actions []Action, nodeID int64) []Action {
+	filtered := make([]Action, 0, len(actions))
+	for _, action := range actions {
+		if nodeID == -1 || action.Node() == nodeID {
+			filtered = append(filtered, action)
 		}
+	}
+	return filtered
+}
 
-		switch action := action.(type) {
-		case *SegmentAction:
-			// skip growing segment's count, cause doesn't know realtime row number of growing segment
-			if action.Scope == querypb.DataScope_Historical {
-				segment := scheduler.targetMgr.GetSealedSegment(scheduler.ctx, collectionID, action.SegmentID, meta.NextTargetFirst)
-				if segment != nil {
-					sum += int(segment.GetNumOfRows()) * delta
-				}
+func (scheduler *taskScheduler) calculateTaskDelta(targetActions map[int64][]Action) int {
+	sum := 0
+	for collectionID, actions := range targetActions {
+		for _, action := range actions {
+			delta := 0
+			if action.Type() == ActionTypeGrow {
+				delta = 1
+			} else if action.Type() == ActionTypeReduce {
+				delta = -1
 			}
-		case *ChannelAction:
-			sum += delta
+
+			switch action := action.(type) {
+			case *SegmentAction:
+				// skip growing segment's count, cause doesn't know realtime row number of growing segment
+				if action.Scope == querypb.DataScope_Historical {
+					segment := scheduler.targetMgr.GetSealedSegment(scheduler.ctx, collectionID, action.SegmentID, meta.NextTargetFirst)
+					if segment != nil {
+						sum += int(segment.GetNumOfRows()) * delta
+					}
+				}
+			case *ChannelAction:
+				sum += delta
+			}
 		}
 	}
 	return sum

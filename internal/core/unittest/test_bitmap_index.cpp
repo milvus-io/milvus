@@ -176,6 +176,8 @@ class BitmapIndexTest : public testing::Test {
         nb_ = 10000;
         cardinality_ = 30;
         nullable_ = false;
+        index_version_ = 3000;
+        index_build_id_ = 3000;
     }
     void
     SetUp() override {
@@ -196,8 +198,6 @@ class BitmapIndexTest : public testing::Test {
         int64_t partition_id = 2;
         int64_t segment_id = 3;
         int64_t field_id = 101;
-        int64_t index_build_id = 1000;
-        int64_t index_version = 10000;
         std::string root_path = "/tmp/test-bitmap-index/";
 
         storage::StorageConfig storage_config;
@@ -209,8 +209,8 @@ class BitmapIndexTest : public testing::Test {
              partition_id,
              segment_id,
              field_id,
-             index_build_id,
-             index_version);
+             index_build_id_,
+             index_version_);
     }
 
     virtual ~BitmapIndexTest() override {
@@ -400,6 +400,8 @@ class BitmapIndexTest : public testing::Test {
     bool nullable_;
     FixedVector<bool> valid_data_;
     std::shared_ptr<storage::ChunkManager> chunk_manager_;
+    int index_version_;
+    int index_build_id_;
 };
 
 TYPED_TEST_SUITE_P(BitmapIndexTest);
@@ -450,6 +452,8 @@ class BitmapIndexTestV2 : public BitmapIndexTest<T> {
         this->nb_ = 10000;
         this->cardinality_ = 2000;
         this->nullable_ = false;
+        this->index_version_ = 3001;
+        this->index_build_id_ = 3001;
     }
 
     virtual ~BitmapIndexTestV2() {
@@ -512,6 +516,8 @@ class BitmapIndexTestV3 : public BitmapIndexTest<T> {
         this->cardinality_ = 2000;
         this->is_mmap_ = true;
         this->nullable_ = false;
+        this->index_version_ = 3002;
+        this->index_build_id_ = 3002;
     }
 
     virtual ~BitmapIndexTestV3() {
@@ -574,6 +580,8 @@ class BitmapIndexTestV4 : public BitmapIndexTest<T> {
         this->cardinality_ = 2000;
         this->is_mmap_ = true;
         this->nullable_ = true;
+        this->index_version_ = 3003;
+        this->index_build_id_ = 3003;
     }
 
     virtual ~BitmapIndexTestV4() {

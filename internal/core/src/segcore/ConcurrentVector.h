@@ -318,6 +318,11 @@ class ConcurrentVectorImpl : public VectorBase {
         chunks_ptr_->clear();
     }
 
+    bool
+    is_mmap() const {
+        return chunks_ptr_->is_mmap();
+    }
+
  private:
     void
     set_data(ssize_t element_offset,
@@ -400,7 +405,7 @@ class ConcurrentVector<std::string>
         int64_t size_per_chunk,
         storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
         : ConcurrentVectorImpl<std::string, true>::ConcurrentVectorImpl(
-              1, size_per_chunk, mmap_descriptor) {
+              1, size_per_chunk, std::move(mmap_descriptor)) {
     }
 
     std::string_view
@@ -418,7 +423,7 @@ class ConcurrentVector<Json> : public ConcurrentVectorImpl<Json, true> {
         int64_t size_per_chunk,
         storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
         : ConcurrentVectorImpl<Json, true>::ConcurrentVectorImpl(
-              1, size_per_chunk, mmap_descriptor) {
+              1, size_per_chunk, std::move(mmap_descriptor)) {
     }
 
     std::string_view
@@ -437,7 +442,7 @@ class ConcurrentVector<Array> : public ConcurrentVectorImpl<Array, true> {
         int64_t size_per_chunk,
         storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
         : ConcurrentVectorImpl<Array, true>::ConcurrentVectorImpl(
-              1, size_per_chunk, mmap_descriptor) {
+              1, size_per_chunk, std::move(mmap_descriptor)) {
     }
 
     ArrayView
@@ -455,10 +460,9 @@ class ConcurrentVector<SparseFloatVector>
     explicit ConcurrentVector(
         int64_t size_per_chunk,
         storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
-        : ConcurrentVectorImpl<knowhere::sparse::SparseRow<float>,
-                               true>::ConcurrentVectorImpl(1,
-                                                           size_per_chunk,
-                                                           mmap_descriptor),
+        : ConcurrentVectorImpl<knowhere::sparse::SparseRow<float>, true>::
+              ConcurrentVectorImpl(
+                  1, size_per_chunk, std::move(mmap_descriptor)),
           dim_(0) {
     }
 
@@ -494,7 +498,7 @@ class ConcurrentVector<FloatVector>
                      int64_t size_per_chunk,
                      storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
         : ConcurrentVectorImpl<float, false>::ConcurrentVectorImpl(
-              dim, size_per_chunk, mmap_descriptor) {
+              dim, size_per_chunk, std::move(mmap_descriptor)) {
     }
 };
 
@@ -506,7 +510,8 @@ class ConcurrentVector<BinaryVector>
         int64_t dim,
         int64_t size_per_chunk,
         storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
-        : ConcurrentVectorImpl(dim / 8, size_per_chunk, mmap_descriptor) {
+        : ConcurrentVectorImpl(
+              dim / 8, size_per_chunk, std::move(mmap_descriptor)) {
         AssertInfo(dim % 8 == 0,
                    fmt::format("dim is not a multiple of 8, dim={}", dim));
     }
@@ -520,7 +525,7 @@ class ConcurrentVector<Float16Vector>
                      int64_t size_per_chunk,
                      storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
         : ConcurrentVectorImpl<float16, false>::ConcurrentVectorImpl(
-              dim, size_per_chunk, mmap_descriptor) {
+              dim, size_per_chunk, std::move(mmap_descriptor)) {
     }
 };
 
@@ -532,7 +537,7 @@ class ConcurrentVector<BFloat16Vector>
                      int64_t size_per_chunk,
                      storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
         : ConcurrentVectorImpl<bfloat16, false>::ConcurrentVectorImpl(
-              dim, size_per_chunk, mmap_descriptor) {
+              dim, size_per_chunk, std::move(mmap_descriptor)) {
     }
 };
 

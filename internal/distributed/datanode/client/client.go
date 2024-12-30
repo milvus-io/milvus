@@ -281,9 +281,3 @@ func (c *Client) DropCompactionPlan(ctx context.Context, req *datapb.DropCompact
 		return client.DropCompactionPlan(ctx, req)
 	})
 }
-
-func (c *Client) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
-	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*milvuspb.CheckHealthResponse, error) {
-		return client.CheckHealth(ctx, req)
-	})
-}
