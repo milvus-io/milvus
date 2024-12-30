@@ -5140,6 +5140,8 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeBenchExpr) {
 
 TEST(Expr, TestExprNull) {
     auto schema = std::make_shared<Schema>();
+    auto bool_fid = schema->AddDebugField("bool", DataType::BOOL, true);
+    auto bool_1_fid = schema->AddDebugField("bool1", DataType::BOOL);
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8, true);
     auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16, true);
@@ -5156,7 +5158,8 @@ TEST(Expr, TestExprNull) {
     auto double_1_fid = schema->AddDebugField("double1", DataType::DOUBLE);
     schema->set_primary_field_id(str1_fid);
 
-    std::map<DataType, FieldId> fids = {{DataType::INT8, int8_fid},
+    std::map<DataType, FieldId> fids = {{DataType::BOOL, bool_fid},
+                                        {DataType::INT8, int8_fid},
                                         {DataType::INT16, int16_fid},
                                         {DataType::INT32, int32_fid},
                                         {DataType::INT64, int64_fid},
@@ -5165,6 +5168,7 @@ TEST(Expr, TestExprNull) {
                                         {DataType::DOUBLE, double_fid}};
 
     std::map<DataType, FieldId> fids_not_nullable = {
+        {DataType::BOOL, bool_1_fid},
         {DataType::INT8, int8_1_fid},
         {DataType::INT16, int16_1_fid},
         {DataType::INT32, int32_1_fid},
@@ -5174,6 +5178,7 @@ TEST(Expr, TestExprNull) {
         {DataType::DOUBLE, double_1_fid}};
 
     auto seg = CreateSealedSegment(schema);
+    FixedVector<bool> valid_data_bool;
     FixedVector<bool> valid_data_i8;
     FixedVector<bool> valid_data_i16;
     FixedVector<bool> valid_data_i32;
@@ -5184,6 +5189,7 @@ TEST(Expr, TestExprNull) {
 
     int N = 1000;
     auto raw_data = DataGen(schema, N);
+    valid_data_bool = raw_data.get_col_valid(bool_fid);
     valid_data_i8 = raw_data.get_col_valid(int8_fid);
     valid_data_i16 = raw_data.get_col_valid(int16_fid);
     valid_data_i32 = raw_data.get_col_valid(int32_fid);
@@ -5248,8 +5254,11 @@ TEST(Expr, TestExprNull) {
         }
     };
 
-    auto expr = build_nullable_expr(DataType::INT8,
+    auto expr = build_nullable_expr(DataType::BOOL,
                                     proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_bool);
+    expr = build_nullable_expr(DataType::INT8,
+                               proto::plan::NullExpr_NullOp_IsNull);
     test_is_null_ans(expr, valid_data_i8);
     expr = build_nullable_expr(DataType::INT16,
                                proto::plan::NullExpr_NullOp_IsNull);
@@ -5272,6 +5281,9 @@ TEST(Expr, TestExprNull) {
     expr = build_nullable_expr(DataType::DOUBLE,
                                proto::plan::NullExpr_NullOp_IsNull);
     test_is_null_ans(expr, valid_data_double);
+    expr = build_nullable_expr(DataType::BOOL,
+                               proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_bool);
     expr = build_nullable_expr(DataType::INT8,
                                proto::plan::NullExpr_NullOp_IsNotNull);
     test_is_not_null_ans(expr, valid_data_i8);
@@ -5297,6 +5309,9 @@ TEST(Expr, TestExprNull) {
                                proto::plan::NullExpr_NullOp_IsNotNull);
     test_is_not_null_ans(expr, valid_data_double);
     //not nullable expr
+    expr = build_not_nullable_expr(DataType::BOOL,
+                                   proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_all_true);
     expr = build_not_nullable_expr(DataType::INT8,
                                    proto::plan::NullExpr_NullOp_IsNull);
     test_is_null_ans(expr, valid_data_all_true);
@@ -5321,6 +5336,9 @@ TEST(Expr, TestExprNull) {
     expr = build_not_nullable_expr(DataType::DOUBLE,
                                    proto::plan::NullExpr_NullOp_IsNull);
     test_is_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::BOOL,
+                                   proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_all_true);
     expr = build_not_nullable_expr(DataType::INT8,
                                    proto::plan::NullExpr_NullOp_IsNotNull);
     test_is_not_null_ans(expr, valid_data_all_true);
@@ -11660,6 +11678,104 @@ TEST_P(ExprTest, TestUnaryRangeWithJSONNullable) {
             } else {
                 ASSERT_TRUE(false) << "No test case defined for this data type";
             }
+        }
+    }
+}
+
+TEST_P(ExprTest, TestNullExprWithJSON) {
+    std::vector<std::tuple<std::string, std::function<bool(bool)>>> testcases =
+        {
+            {R"(null_expr: <
+                column_info: <
+                    field_id: 102
+                    data_type:JSON
+                    nullable: true
+                  >
+                op:IsNull
+        >)",
+             [](bool v) { return !v; }},
+        };
+
+    std::string raw_plan_tmp = R"(vector_anns: <
+                                    field_id: 100
+                                    predicates: <
+                                      @@@@
+                                    >
+                                    query_info: <
+                                      topk: 10
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+     >)";
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 1000;
+    int num_iters = 1;
+    FixedVector<bool> valid_data;
+    std::vector<std::string> json_col;
+
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter, 0, 1, 3);
+        auto new_json_col = raw_data.get_col<std::string>(json_fid);
+
+        json_col.insert(
+            json_col.end(), new_json_col.begin(), new_json_col.end());
+        auto new_valid_col = raw_data.get_col_valid(json_fid);
+        valid_data.insert(
+            valid_data.end(), new_valid_col.begin(), new_valid_col.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    for (auto [clause, ref_func] : testcases) {
+        auto loc = raw_plan_tmp.find("@@@@");
+        auto raw_plan = raw_plan_tmp;
+        raw_plan.replace(loc, 4, clause);
+        auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
+        auto plan =
+            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        BitsetType final;
+        final = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        // specify some offsets and do scalar filtering on these offsets
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(N * num_iters / 2);
+        for (auto i = 0; i < N * num_iters; ++i) {
+            if (i % 2 == 0) {
+                offsets.emplace_back(i);
+            }
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get(),
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP,
+            &offsets);
+        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        EXPECT_EQ(view.size(), N * num_iters / 2);
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+            auto valid = valid_data[i];
+            auto ref = ref_func(valid);
+            ASSERT_EQ(ans, ref);
         }
     }
 }

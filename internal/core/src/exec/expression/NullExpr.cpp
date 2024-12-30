@@ -26,33 +26,34 @@ namespace exec {
 
 void
 PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    auto input = context.get_offset_input();
     switch (expr_->column_.data_type_) {
         case DataType::BOOL: {
-            result = ExecVisitorImpl<bool>();
+            result = ExecVisitorImpl<bool>(input);
             break;
         }
         case DataType::INT8: {
-            result = ExecVisitorImpl<int8_t>();
+            result = ExecVisitorImpl<int8_t>(input);
             break;
         }
         case DataType::INT16: {
-            result = ExecVisitorImpl<int16_t>();
+            result = ExecVisitorImpl<int16_t>(input);
             break;
         }
         case DataType::INT32: {
-            result = ExecVisitorImpl<int32_t>();
+            result = ExecVisitorImpl<int32_t>(input);
             break;
         }
         case DataType::INT64: {
-            result = ExecVisitorImpl<int64_t>();
+            result = ExecVisitorImpl<int64_t>(input);
             break;
         }
         case DataType::FLOAT: {
-            result = ExecVisitorImpl<float>();
+            result = ExecVisitorImpl<float>(input);
             break;
         }
         case DataType::DOUBLE: {
-            result = ExecVisitorImpl<double>();
+            result = ExecVisitorImpl<double>(input);
             break;
         }
         case DataType::VARCHAR: {
@@ -60,18 +61,18 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 !storage::MmapManager::GetInstance()
                      .GetMmapConfig()
                      .growing_enable_mmap) {
-                result = ExecVisitorImpl<std::string>();
+                result = ExecVisitorImpl<std::string>(input);
             } else {
-                result = ExecVisitorImpl<std::string_view>();
+                result = ExecVisitorImpl<std::string_view>(input);
             }
             break;
         }
         case DataType::JSON: {
-            result = ExecVisitorImpl<Json>();
+            result = ExecVisitorImpl<Json>(input);
             break;
         }
         case DataType::ARRAY: {
-            result = ExecVisitorImpl<ArrayView>();
+            result = ExecVisitorImpl<ArrayView>(input);
             break;
         }
         default:
@@ -83,11 +84,14 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
 template <typename T>
 VectorPtr
-PhyNullExpr::ExecVisitorImpl() {
-    if (auto res = PreCheckNullable()) {
+PhyNullExpr::ExecVisitorImpl(OffsetVector* input) {
+    if (auto res = PreCheckNullable(input)) {
         return res;
     }
-    TargetBitmap valid_res = ProcessChunksForValid<T>(is_index_mode_);
+    auto valid_res =
+        (input != nullptr)
+            ? ProcessChunksForValidByOffsets<T>(is_index_mode_, *input)
+            : ProcessChunksForValid<T>(is_index_mode_);
     TargetBitmap res = valid_res.clone();
     if (expr_->op_ == proto::plan::NullExpr_NullOp_IsNull) {
         res.flip();
@@ -97,19 +101,28 @@ PhyNullExpr::ExecVisitorImpl() {
     return res_vec;
 }
 
+// if nullable is false, no need to process chunks
+// res is all false when is null, and is all true when is not null
 ColumnVectorPtr
-PhyNullExpr::PreCheckNullable() {
+PhyNullExpr::PreCheckNullable(OffsetVector* input) {
     if (expr_->column_.nullable_) {
         return nullptr;
     }
-    int64_t batch_size = precheck_pos_ + batch_size_ >= active_count_
-                             ? active_count_ - precheck_pos_
-                             : batch_size_;
-    precheck_pos_ += batch_size;
+
+    int64_t batch_size;
+    if (input != nullptr) {
+        batch_size = input->size();
+    } else {
+        batch_size = precheck_pos_ + batch_size_ >= active_count_
+                         ? active_count_ - precheck_pos_
+                         : batch_size_;
+        precheck_pos_ += batch_size;
+    }
     if (cached_precheck_res_ != nullptr &&
         cached_precheck_res_->size() == batch_size) {
         return cached_precheck_res_;
     }
+
     auto res_vec = std::make_shared<ColumnVector>(TargetBitmap(batch_size),
                                                   TargetBitmap(batch_size));
     TargetBitmapView res(res_vec->GetRawData(), batch_size);
