@@ -21,14 +21,13 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type StreamPipelineSuite struct {
