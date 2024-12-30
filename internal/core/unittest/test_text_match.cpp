@@ -138,21 +138,30 @@ TEST(TextMatch, Index) {
     index->AddText("swimming, football", true, 2);
     index->Commit();
     index->Reload();
-    auto res = index->MatchQuery("football");
-    ASSERT_EQ(res.size(), 3);
-    ASSERT_TRUE(res[0]);
-    ASSERT_FALSE(res[1]);
-    ASSERT_TRUE(res[2]);
-    auto res1 = index->IsNull();
-    ASSERT_FALSE(res1[0]);
-    ASSERT_TRUE(res1[1]);
-    ASSERT_FALSE(res1[2]);
-    auto res2 = index->IsNotNull();
-    ASSERT_TRUE(res2[0]);
-    ASSERT_FALSE(res2[1]);
-    ASSERT_TRUE(res2[2]);
-    res = index->MatchQuery("nothing");
-    ASSERT_EQ(res.size(), 0);
+
+    {
+        auto res = index->MatchQuery("football");
+        ASSERT_EQ(res.size(), 3);
+        ASSERT_TRUE(res[0]);
+        ASSERT_FALSE(res[1]);
+        ASSERT_TRUE(res[2]);
+        auto res1 = index->IsNull();
+        ASSERT_FALSE(res1[0]);
+        ASSERT_TRUE(res1[1]);
+        ASSERT_FALSE(res1[2]);
+        auto res2 = index->IsNotNull();
+        ASSERT_TRUE(res2[0]);
+        ASSERT_FALSE(res2[1]);
+        ASSERT_TRUE(res2[2]);
+        res = index->MatchQuery("nothing");
+        ASSERT_EQ(res.size(), 0);
+    }
+
+    {
+        auto res = index->PhraseMatchQuery("swimming basketball", 0);
+        ASSERT_EQ(res.size(), 1);
+        ASSERT_TRUE(res[0]);
+    }
 }
 
 TEST(TextMatch, GrowingNaive) {

@@ -796,11 +796,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
 template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(OffsetVector* input) {
-    if (expr_->op_type_ == proto::plan::OpType::TextMatch) {
+    if (expr_->op_type_ == proto::plan::OpType::TextMatch ||
+        expr_->op_type_ == proto::plan::OpType::PhraseMatch) {
         if (has_offset_input_) {
             PanicInfo(
                 OpTypeInvalid,
-                fmt::format("text match does not support iterative filter"));
+                fmt::format("match query does not support iterative filter"));
         }
         return ExecTextMatch();
     }
@@ -1089,8 +1090,17 @@ VectorPtr
 PhyUnaryRangeFilterExpr::ExecTextMatch() {
     using Index = index::TextMatchIndex;
     auto query = GetValueFromProto<std::string>(expr_->val_);
-    auto func = [](Index* index, const std::string& query) -> TargetBitmap {
-        return index->MatchQuery(query);
+    auto op_type = expr_->op_type_;
+    auto func = [op_type](Index* index, const std::string& query) -> TargetBitmap {
+        if (op_type == proto::plan::OpType::TextMatch) {
+            return index->MatchQuery(query);
+        } else if (op_type == proto::plan::OpType::PhraseMatch) {
+            // todo(SpdeaA): make slop enable to be passed from client
+            return index->PhraseMatchQuery(query, 0 /* slop */);
+        } else {
+            PanicInfo(OpTypeInvalid,
+                      "unsupported operator type for match query: {}", op_type);
+        }
     };
     auto res = ProcessTextMatchIndex(func, query);
     return res;
