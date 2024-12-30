@@ -15,6 +15,8 @@ func assignChannelToWALLocatedFirst(
 	for _, c := range channels {
 		nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(c.GetChannelName())
 		// Check if nodeID is in the list of nodeItems
+		// The nodeID may not be in the nodeItems when multi replica mode.
+		// Only one replica can be assigned to the node that wal is located.
 		found := false
 		for _, item := range nodeItems {
 			if item.nodeID == nodeID {
@@ -45,6 +47,8 @@ func assignChannelToWALLocatedFirstForNodeInfo(
 	for _, c := range channels {
 		nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(c.GetChannelName())
 		// Check if nodeID is in the list of nodeItems
+		// The nodeID may not be in the nodeItems when multi replica mode.
+		// Only one replica can be assigned to the node that wal is located.
 		found := false
 		for _, item := range nodeItems {
 			if item.ID() == nodeID {
