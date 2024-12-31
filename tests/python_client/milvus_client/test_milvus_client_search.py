@@ -510,3 +510,56 @@ class TestMilvusClientSearchValid(TestcaseBase):
                                     "with_vec": True,
                                     "primary_field": default_primary_key_field_name})
         client_w.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_client_search_with_iterative_filter(self):
+        """
+        target: test search with iterative filter
+        method: create connection, collection, insert, search with iterative filter
+        expected: search successfully
+        """
+        client = self._connect(enable_milvus_client_api=True)
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        schema = client_w.create_schema(client, enable_dynamic_field=False)[0]
+        dim = 32
+        pk_field_name = 'id'
+        vector_field_name = 'embeddings'
+        str_field_name = 'title'
+        json_field_name = 'json_field'
+        max_length = 16
+        schema.add_field(pk_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(str_field_name, DataType.VARCHAR, max_length=max_length)
+        schema.add_field(json_field_name, DataType.JSON)
+
+        index_params = client_w.prepare_index_params(client)[0]
+        index_params.add_index(field_name=vector_field_name, metric_type="COSINE",
+                               index_type="IVF_FLAT", params={"nlist": 128})
+        index_params.add_index(field_name=str_field_name)
+        client_w.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            pk_field_name: i,
+            vector_field_name: list(rng.random((1, dim))[0]),
+            str_field_name: cf.gen_str_by_length(max_length),
+            json_field_name: {"number": i}
+        } for i in range(default_nb)]
+        client_w.insert(client, collection_name, rows)
+        client_w.flush(client, collection_name)
+        client_w.load_collection(client, collection_name)
+
+        # 3. search
+        search_vector = list(rng.random((1, dim))[0])
+        search_params = {'hints': "iterative_filter",
+                         'params': cf.get_search_params_params('IVF_FLAT')}
+        client_w.search(client, collection_name, data=[search_vector], filter='id >= 10',
+                        search_params=search_params, limit=default_limit)
+        not_supported_hints = "not_supported_hints"
+        error = {ct.err_code: 0,
+                 ct.err_msg: f"Create Plan by expr failed:  => hints: {not_supported_hints} not supported"}
+        search_params = {'hints': not_supported_hints,
+                         'params': cf.get_search_params_params('IVF_FLAT')}
+        client_w.search(client, collection_name, data=[search_vector], filter='id >= 10',
+                        search_params=search_params, check_task=CheckTasks.err_res, check_items=error)
