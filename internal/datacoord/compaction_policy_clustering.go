@@ -120,7 +120,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 		return nil, 0, err
 	}
 
-	partSegments := GetSegmentsChanPart(policy.meta, WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
+	partSegments := GetSegmentsChanPart(policy.meta, collectionID, SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
 			isFlush(segment) &&
 			!segment.isCompacting && // not compacting now

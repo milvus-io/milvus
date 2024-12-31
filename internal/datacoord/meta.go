@@ -351,7 +351,7 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 
 // GetSegmentsChanPart returns segments organized in Channel-Partition dimension with selector applied
 // TODO: Move this function to the compaction module after reorganizing the DataCoord modules.
-func GetSegmentsChanPart(m *meta, filters ...SegmentFilter) []*chanPartSegments {
+func GetSegmentsChanPart(m *meta, collectionID int64, filters ...SegmentFilter) []*chanPartSegments {
 	type dim struct {
 		partitionID int64
 		channelName string
@@ -359,6 +359,7 @@ func GetSegmentsChanPart(m *meta, filters ...SegmentFilter) []*chanPartSegments 
 
 	mDimEntry := make(map[dim]*chanPartSegments)
 
+	filters = append(filters, WithCollection(collectionID))
 	candidates := m.SelectSegments(context.Background(), filters...)
 	for _, si := range candidates {
 		d := dim{si.PartitionID, si.InsertChannel}

@@ -1148,15 +1148,28 @@ func mockSegment(segID, rows, deleteRows, sizeInMB int64) *datapb.SegmentInfo {
 
 func mockSegmentsInfo(sizeInMB ...int64) *SegmentsInfo {
 	segments := make(map[int64]*SegmentInfo, len(sizeInMB))
+	collectionID := int64(2)
+	channel := "ch1"
+	coll2Segments := make(map[UniqueID]map[UniqueID]*SegmentInfo)
+	coll2Segments[collectionID] = make(map[UniqueID]*SegmentInfo)
+	channel2Segments := make(map[string]map[UniqueID]*SegmentInfo)
+	channel2Segments[channel] = make(map[UniqueID]*SegmentInfo)
 	for i, size := range sizeInMB {
 		segId := int64(i + 1)
-		segments[segId] = &SegmentInfo{
+		info := &SegmentInfo{
 			SegmentInfo:   mockSegment(segId, size, 1, size),
 			lastFlushTime: time.Now().Add(-100 * time.Minute),
 		}
+		segments[segId] = info
+		coll2Segments[collectionID][segId] = info
+		channel2Segments[channel][segId] = info
 	}
 	return &SegmentsInfo{
 		segments: segments,
+		secondaryIndexes: segmentInfoIndexes{
+			coll2Segments:    coll2Segments,
+			channel2Segments: channel2Segments,
+		},
 	}
 }
 
@@ -1602,6 +1615,10 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 
 	segmentInfos := &SegmentsInfo{
 		segments: make(map[UniqueID]*SegmentInfo),
+		secondaryIndexes: segmentInfoIndexes{
+			coll2Segments:    map[UniqueID]map[UniqueID]*SegmentInfo{2: {}},
+			channel2Segments: map[string]map[UniqueID]*SegmentInfo{"ch1": {}},
+		},
 	}
 
 	size := []int64{
@@ -1674,6 +1691,8 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 		})
 
 		segmentInfos.segments[i] = info
+		segmentInfos.secondaryIndexes.coll2Segments[2][i] = info
+		segmentInfos.secondaryIndexes.channel2Segments["ch1"][i] = info
 	}
 
 	mock0Allocator := newMockAllocator(t)

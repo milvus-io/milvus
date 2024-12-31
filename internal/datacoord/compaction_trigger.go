@@ -291,7 +291,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 		zap.Int64("signal.collectionID", signal.collectionID),
 		zap.Int64("signal.partitionID", signal.partitionID),
 		zap.Int64("signal.segmentID", signal.segmentID))
-	filters := []SegmentFilter{SegmentFilterFunc(func(segment *SegmentInfo) bool {
+	filter := SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
 			isFlush(segment) &&
 			!segment.isCompacting && // not compacting now
@@ -299,13 +299,18 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
 			segment.GetLevel() != datapb.SegmentLevel_L2 && // ignore l2 segment
 			!segment.GetIsInvisible()
-	})} // partSegments is list of chanPartSegments, which is channel-partition organized segments
+	}) // partSegments is list of chanPartSegments, which is channel-partition organized segments
 
+	partSegments := make([]*chanPartSegments, 0)
 	// get all segments if signal.collection == 0, otherwise get collection segments
 	if signal.collectionID != 0 {
-		filters = append(filters, WithCollection(signal.collectionID))
+		partSegments = GetSegmentsChanPart(t.meta, signal.collectionID, filter)
+	} else {
+		collections := t.meta.GetCollections()
+		for _, collection := range collections {
+			partSegments = append(partSegments, GetSegmentsChanPart(t.meta, collection.ID, filter)...)
+		}
 	}
-	partSegments := GetSegmentsChanPart(t.meta, filters...)
 
 	if len(partSegments) == 0 {
 		log.Info("the length of SegmentsChanPart is 0, skip to handle compaction")
