@@ -85,6 +85,7 @@ enum class DataType {
     VECTOR_FLOAT16 = 102,
     VECTOR_BFLOAT16 = 103,
     VECTOR_SPARSE_FLOAT = 104,
+    VECTOR_INT8 = 105,
 };
 
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp

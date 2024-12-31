@@ -23,6 +23,7 @@ func CalcVectorDistance(dim int64, dataType schemapb.DataType, left []byte, righ
 	case schemapb.DataType_BinaryVector:
 	case schemapb.DataType_Float16Vector:
 	case schemapb.DataType_BFloat16Vector:
+	case schemapb.DataType_Int8Vector:
 	default:
 		return nil, merr.ErrParameterInvalid
 	}
