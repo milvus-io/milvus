@@ -4,7 +4,7 @@ use tantivy::{
     Term,
 };
 
-use crate::error::Result;
+use crate::error::{Result, TantivyBindingError};
 use crate::{index_reader::IndexReaderWrapper, tokenizer::standard_analyzer};
 
 impl IndexReaderWrapper {
@@ -40,6 +40,11 @@ impl IndexReaderWrapper {
         while token_stream.advance() {
             let token = token_stream.token();
             terms.push(Term::from_field_text(self.field, &token.text));
+        }
+        if terms.len() <= 1 {
+            // tantivy will panic when terms.len() <= 1, so we forward to text match instead.
+            let query = BooleanQuery::new_multiterms_query(terms);
+            return self.search(&query);
         }
         let terms = terms.into_iter().enumerate().collect();
         let phrase_query = PhraseQuery::new_with_offset_and_slop(terms, slop);

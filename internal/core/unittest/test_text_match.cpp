@@ -85,7 +85,7 @@ GetNotTextMatchExpr(SchemaPtr schema, const std::string& query) {
     auto child_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
         milvus::expr::ColumnInfo(str_meta.get_id(), DataType::VARCHAR),
         proto::plan::OpType::TextMatch,
-        val);
+        val, std::vector<proto::plan::GenericValue>{});
     auto expr = std::make_shared<expr::LogicalUnaryExpr>(
         expr::LogicalUnaryExpr::OpType::LogicalNot, child_expr);
     auto parsed =
@@ -158,9 +158,29 @@ TEST(TextMatch, Index) {
     }
 
     {
-        auto res = index->PhraseMatchQuery("swimming basketball", 0);
-        ASSERT_EQ(res.size(), 1);
+        auto res = index->PhraseMatchQuery("football", 0);
+        ASSERT_EQ(res.size(), 3);
         ASSERT_TRUE(res[0]);
+        ASSERT_FALSE(res[1]);
+        ASSERT_TRUE(res[2]);
+
+        auto res1 = index->PhraseMatchQuery("swimming football", 0);
+        ASSERT_EQ(res1.size(), 3);
+        ASSERT_FALSE(res1[0]);
+        ASSERT_FALSE(res1[1]);
+        ASSERT_TRUE(res1[2]);
+
+        auto res2 = index->PhraseMatchQuery("football swimming", 0);
+        ASSERT_EQ(res2.size(), 0);
+
+        auto res3 = index->PhraseMatchQuery("football swimming", 1);
+        ASSERT_EQ(res3.size(), 0);
+
+        auto res4 = index->PhraseMatchQuery("football swimming", 2);
+        ASSERT_EQ(res4.size(), 3);
+        ASSERT_FALSE(res4[0]);
+        ASSERT_FALSE(res4[1]);
+        ASSERT_TRUE(res4[2]);
     }
 }
 

@@ -327,7 +327,6 @@ struct TantivyIndexWrapper {
             for (uintptr_t i = 0; i < len; i++) {
                 views.push_back(array[i].c_str());
             }
-            std::cout << "views size: " << views.size() << ", data: " << views.data() << std::endl;
             auto res = RustResultWrapper(tantivy_index_add_multi_keywords(
                 writer_, views.data(), len, offset));
             AssertInfo(res.result_->success,

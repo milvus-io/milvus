@@ -293,9 +293,6 @@ pub extern "C" fn tantivy_index_add_multi_keywords(
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
-        println!("array: {:?}, len: {}, addr {:?}", array, len, &array);
-        assert!(!array.is_null());
-        assert!(array.is_aligned());
         let arr = if len == 0 {
             &[]
         } else {
