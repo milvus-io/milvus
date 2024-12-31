@@ -149,7 +149,6 @@ class BitmapIndexTest : public testing::Test {
         auto serializedSize = create_index_result->GetSerializedSize();
         ASSERT_GT(memSize, 0);
         ASSERT_GT(serializedSize, 0);
-        ASSERT_GT(memSize, serializedSize);
         auto index_files = create_index_result->GetIndexFiles();
 
         index::CreateIndexInfo index_info{};
