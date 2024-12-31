@@ -23,7 +23,6 @@ add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/te
 # TODO: better to use ls/find pattern
 set(MILVUS_TEST_FILES
         init_gtest.cpp
-
         test_always_true_expr.cpp
         test_array_bitmap_index.cpp
         test_array_inverted_index.cpp
@@ -43,6 +42,7 @@ set(MILVUS_TEST_FILES
         test_c_tokenizer.cpp
         test_loading.cpp
         test_data_codec.cpp
+        test_delete_record.cpp
         test_disk_file_manager_test.cpp
         test_exec.cpp
         test_expr.cpp
@@ -51,6 +51,7 @@ set(MILVUS_TEST_FILES
         test_function.cpp
         test_futures.cpp
         test_group_by.cpp
+        test_iterative_filter.cpp
         test_growing.cpp
         test_growing_index.cpp
         test_hybrid_index.cpp
@@ -87,6 +88,8 @@ set(MILVUS_TEST_FILES
         test_utils.cpp
         test_chunked_segment.cpp
         test_chunked_column.cpp
+        test_rust_result.cpp
+        test_cached_search_iterator.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )
@@ -169,9 +172,7 @@ target_link_libraries(all_tests
 
 install(TARGETS all_tests DESTINATION unittest)
 
-if (LINUX)
-    add_subdirectory(bench)
-endif ()
+add_subdirectory(bench)
 
 # if (USE_DYNAMIC_SIMD)
 # add_executable(dynamic_simd_test

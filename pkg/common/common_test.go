@@ -177,3 +177,84 @@ func TestShouldFieldBeLoaded(t *testing.T) {
 		})
 	}
 }
+
+func TestReplicateProperty(t *testing.T) {
+	t.Run("ReplicateID", func(t *testing.T) {
+		{
+			p := []*commonpb.KeyValuePair{
+				{
+					Key:   ReplicateIDKey,
+					Value: "1001",
+				},
+			}
+			e, ok := IsReplicateEnabled(p)
+			assert.True(t, e)
+			assert.True(t, ok)
+			i, ok := GetReplicateID(p)
+			assert.True(t, ok)
+			assert.Equal(t, "1001", i)
+		}
+
+		{
+			p := []*commonpb.KeyValuePair{
+				{
+					Key:   ReplicateIDKey,
+					Value: "",
+				},
+			}
+			e, ok := IsReplicateEnabled(p)
+			assert.False(t, e)
+			assert.True(t, ok)
+		}
+
+		{
+			p := []*commonpb.KeyValuePair{
+				{
+					Key:   "foo",
+					Value: "1001",
+				},
+			}
+			e, ok := IsReplicateEnabled(p)
+			assert.False(t, e)
+			assert.False(t, ok)
+		}
+	})
+
+	t.Run("ReplicateTS", func(t *testing.T) {
+		{
+			p := []*commonpb.KeyValuePair{
+				{
+					Key:   ReplicateEndTSKey,
+					Value: "1001",
+				},
+			}
+			ts, ok := GetReplicateEndTS(p)
+			assert.True(t, ok)
+			assert.EqualValues(t, 1001, ts)
+		}
+
+		{
+			p := []*commonpb.KeyValuePair{
+				{
+					Key:   ReplicateEndTSKey,
+					Value: "foo",
+				},
+			}
+			ts, ok := GetReplicateEndTS(p)
+			assert.False(t, ok)
+			assert.EqualValues(t, 0, ts)
+		}
+
+		{
+			p := []*commonpb.KeyValuePair{
+				{
+					Key:   "foo",
+					Value: "1001",
+				},
+			}
+			ts, ok := GetReplicateEndTS(p)
+			assert.False(t, ok)
+			assert.EqualValues(t, 0, ts)
+		}
+	})
+}

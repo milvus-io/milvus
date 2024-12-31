@@ -95,7 +95,6 @@ VariableLengthChunk<std::string>::set(const std::string* src,
                                       uint32_t begin,
                                       uint32_t length) {
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
-    milvus::ErrorCode err_code;
     AssertInfo(
         begin + length <= size_,
         "failed to set a chunk with length: {} from beign {}, map_size={}",
@@ -126,7 +125,6 @@ VariableLengthChunk<knowhere::sparse::SparseRow<float>>::set(
     uint32_t begin,
     uint32_t length) {
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
-    milvus::ErrorCode err_code;
     AssertInfo(
         begin + length <= size_,
         "failed to set a chunk with length: {} from beign {}, map_size={}",
@@ -157,7 +155,6 @@ VariableLengthChunk<Json>::set(const Json* src,
                                uint32_t begin,
                                uint32_t length) {
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
-    milvus::ErrorCode err_code;
     AssertInfo(
         begin + length <= size_,
         "failed to set a chunk with length: {} from beign {}, map_size={}",
@@ -187,7 +184,6 @@ VariableLengthChunk<Array>::set(const Array* src,
                                 uint32_t begin,
                                 uint32_t length) {
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
-    milvus::ErrorCode err_code;
     AssertInfo(
         begin + length <= size_,
         "failed to set a chunk with length: {} from beign {}, map_size={}",

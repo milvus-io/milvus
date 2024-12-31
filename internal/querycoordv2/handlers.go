@@ -127,7 +127,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 			actions = append(actions, releaseAction)
 		}
 
-		t, err := task.NewSegmentTask(s.ctx,
+		t, err := task.NewSegmentTask(ctx,
 			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 			utils.ManualBalance,
 			collectionID,
@@ -183,7 +183,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 ) error {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 
-	plans := s.getBalancerFunc().AssignChannel(ctx, channels, dstNodes, true)
+	plans := s.getBalancerFunc().AssignChannel(ctx, collectionID, channels, dstNodes, true)
 	for i := range plans {
 		plans[i].From = srcNode
 		plans[i].Replica = replica
@@ -328,18 +328,29 @@ func (s *Server) getSystemInfoMetrics(
 	ctx context.Context,
 	req *milvuspb.GetMetricsRequest,
 ) (string, error) {
+	used, total, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
+	if err != nil {
+		log.Ctx(ctx).Warn("get disk usage failed", zap.Error(err))
+	}
+
+	ioWait, err := hardware.GetIOWait()
+	if err != nil {
+		log.Ctx(ctx).Warn("get iowait failed", zap.Error(err))
+	}
+
 	clusterTopology := metricsinfo.QueryClusterTopology{
 		Self: metricsinfo.QueryCoordInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
 				Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, paramtable.GetNodeID()),
 				HardwareInfos: metricsinfo.HardwareMetrics{
-					IP:           s.session.GetAddress(),
-					CPUCoreCount: hardware.GetCPUNum(),
-					CPUCoreUsage: hardware.GetCPUUsage(),
-					Memory:       hardware.GetMemoryCount(),
-					MemoryUsage:  hardware.GetUsedMemoryCount(),
-					Disk:         hardware.GetDiskCount(),
-					DiskUsage:    hardware.GetDiskUsage(),
+					IP:               s.session.GetAddress(),
+					CPUCoreCount:     hardware.GetCPUNum(),
+					CPUCoreUsage:     hardware.GetCPUUsage(),
+					Memory:           hardware.GetMemoryCount(),
+					MemoryUsage:      hardware.GetUsedMemoryCount(),
+					Disk:             total,
+					DiskUsage:        used,
+					IOWaitPercentage: ioWait,
 				},
 				SystemInfo:  metricsinfo.DeployMetrics{},
 				CreatedTime: paramtable.GetCreateTime().String(),

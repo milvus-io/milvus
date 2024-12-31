@@ -18,8 +18,10 @@
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
 #include "log/Log.h"
+#include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnIndex.h"
+#include "exec/operator/Utils.h"
 
 namespace milvus::query {
 
@@ -124,6 +126,19 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
         // step 3: brute force search where small indexing is unavailable
         auto vec_ptr = record.get_data_base(vecfield_id);
+
+        if (info.iterator_v2_info_.has_value()) {
+            CachedSearchIterator cached_iter(search_dataset,
+                                             vec_ptr,
+                                             active_count,
+                                             info,
+                                             index_info,
+                                             bitset,
+                                             data_type);
+            cached_iter.NextBatch(info, search_result);
+            return;
+        }
+
         auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
         auto max_chunk = upper_div(active_count, vec_size_per_chunk);
 
@@ -138,13 +153,14 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
             auto sub_data = query::dataset::RawDataset{
                 element_begin, dim, size_per_chunk, chunk_data};
-            if (info.group_by_field_id_.has_value()) {
-                auto sub_qr = BruteForceSearchIterators(search_dataset,
-                                                        sub_data,
-                                                        info,
-                                                        index_info,
-                                                        bitset,
-                                                        data_type);
+            if (milvus::exec::UseVectorIterator(info)) {
+                auto sub_qr =
+                    PackBruteForceSearchIteratorsIntoSubResult(search_dataset,
+                                                               sub_data,
+                                                               info,
+                                                               index_info,
+                                                               bitset,
+                                                               data_type);
                 final_qr.merge(sub_qr);
             } else {
                 auto sub_qr = BruteForceSearch(search_dataset,
@@ -156,7 +172,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 final_qr.merge(sub_qr);
             }
         }
-        if (info.group_by_field_id_.has_value()) {
+        if (milvus::exec::UseVectorIterator(info)) {
             std::vector<int64_t> chunk_rows(max_chunk, 0);
             for (int i = 1; i < max_chunk; ++i) {
                 chunk_rows[i] = i * vec_size_per_chunk;

@@ -12,6 +12,7 @@
 #include "common/ChunkWriter.h"
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 #include "arrow/array/array_binary.h"
 #include "arrow/array/array_primitive.h"
@@ -66,7 +67,7 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     int offset_start_pos = target_->tell() + sizeof(uint64_t) * offset_num;
     std::vector<uint64_t> offsets;
 
-    for (auto str : strs) {
+    for (const auto& str : strs) {
         offsets.push_back(offset_start_pos);
         offset_start_pos += str.size();
     }
@@ -133,7 +134,7 @@ JSONChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     int offset_start_pos = target_->tell() + sizeof(uint64_t) * offset_num;
     std::vector<uint64_t> offsets;
 
-    for (auto json : jsons) {
+    for (const auto& json : jsons) {
         offsets.push_back(offset_start_pos);
         offset_start_pos += json.data().size();
     }
@@ -142,7 +143,7 @@ JSONChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     target_->write(offsets.data(), offsets.size() * sizeof(uint64_t));
 
     // write data
-    for (auto json : jsons) {
+    for (const auto& json : jsons) {
         target_->write(json.data().data(), json.data().size());
     }
 }
@@ -288,7 +289,7 @@ SparseFloatVectorChunkWriter::write(
     int offset_start_pos = target_->tell() + sizeof(uint64_t) * offset_num;
     std::vector<uint64_t> offsets;
 
-    for (auto str : strs) {
+    for (const auto& str : strs) {
         offsets.push_back(offset_start_pos);
         offset_start_pos += str.size();
     }
@@ -396,7 +397,7 @@ create_chunk(const FieldMeta& field_meta,
             PanicInfo(Unsupported, "Unsupported data type");
     }
 
-    w->write(r);
+    w->write(std::move(r));
     return w->finish();
 }
 
@@ -493,7 +494,7 @@ create_chunk(const FieldMeta& field_meta,
             PanicInfo(Unsupported, "Unsupported data type");
     }
 
-    w->write(r);
+    w->write(std::move(r));
     return w->finish();
 }
 

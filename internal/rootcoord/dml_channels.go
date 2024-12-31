@@ -178,7 +178,7 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 	for i, name := range names {
 		ms, err := factory.NewMsgStream(ctx)
 		if err != nil {
-			log.Error("Failed to add msgstream",
+			log.Ctx(ctx).Error("Failed to add msgstream",
 				zap.String("name", name),
 				zap.Error(err))
 			panic("Failed to add msgstream")
@@ -188,7 +188,7 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 			d.checkPreCreatedTopic(ctx, factory, name)
 		}
 
-		ms.AsProducer([]string{name})
+		ms.AsProducer(ctx, []string{name})
 		dms := &dmlMsgStream{
 			ms:     ms,
 			refcnt: 0,
@@ -202,7 +202,7 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 
 	heap.Init(&d.channelsHeap)
 
-	log.Info("init dml channels", zap.String("prefix", chanNamePrefix), zap.Int64("num", chanNum))
+	log.Ctx(ctx).Info("init dml channels", zap.String("prefix", chanNamePrefix), zap.Int64("num", chanNum))
 
 	metrics.RootCoordNumOfDMLChannel.Add(float64(chanNum))
 	metrics.RootCoordNumOfMsgStream.Add(float64(chanNum))
@@ -276,7 +276,7 @@ func (d *dmlChannels) getChannelNum() int {
 func (d *dmlChannels) getMsgStreamByName(chanName string) (*dmlMsgStream, error) {
 	dms, ok := d.pool.Get(chanName)
 	if !ok {
-		log.Error("invalid channelName", zap.String("chanName", chanName))
+		log.Ctx(d.ctx).Error("invalid channelName", zap.String("chanName", chanName))
 		return nil, errors.Newf("invalid channel name: %s", chanName)
 	}
 	return dms, nil
@@ -291,8 +291,8 @@ func (d *dmlChannels) broadcast(chanNames []string, pack *msgstream.MsgPack) err
 
 		dms.mutex.RLock()
 		if dms.refcnt > 0 {
-			if _, err := dms.ms.Broadcast(pack); err != nil {
-				log.Error("Broadcast failed", zap.Error(err), zap.String("chanName", chanName))
+			if _, err := dms.ms.Broadcast(d.ctx, pack); err != nil {
+				log.Ctx(d.ctx).Error("Broadcast failed", zap.Error(err), zap.String("chanName", chanName))
 				dms.mutex.RUnlock()
 				return err
 			}
@@ -312,9 +312,9 @@ func (d *dmlChannels) broadcastMark(chanNames []string, pack *msgstream.MsgPack)
 
 		dms.mutex.RLock()
 		if dms.refcnt > 0 {
-			ids, err := dms.ms.Broadcast(pack)
+			ids, err := dms.ms.Broadcast(d.ctx, pack)
 			if err != nil {
-				log.Error("BroadcastMark failed", zap.Error(err), zap.String("chanName", chanName))
+				log.Ctx(d.ctx).Error("BroadcastMark failed", zap.Error(err), zap.String("chanName", chanName))
 				dms.mutex.RUnlock()
 				return result, err
 			}
@@ -378,12 +378,12 @@ func genChannelNames(prefix string, num int64) []string {
 func parseChannelNameIndex(channelName string) int {
 	index := strings.LastIndex(channelName, "_")
 	if index < 0 {
-		log.Error("invalid channelName", zap.String("chanName", channelName))
+		log.Ctx(context.TODO()).Error("invalid channelName", zap.String("chanName", channelName))
 		panic("invalid channel name: " + channelName)
 	}
 	index, err := strconv.Atoi(channelName[index+1:])
 	if err != nil {
-		log.Error("invalid channelName", zap.String("chanName", channelName), zap.Error(err))
+		log.Ctx(context.TODO()).Error("invalid channelName", zap.String("chanName", channelName), zap.Error(err))
 		panic("invalid channel name: " + channelName)
 	}
 	return index
@@ -407,7 +407,7 @@ func getNeedChanNum(setNum int, chanMap map[typeutil.UniqueID][]string) int {
 				panic("topic were empty")
 			}
 			if chanNameSet.Contain(topic) {
-				log.Error("duplicate topics are pre-created", zap.String("topic", topic))
+				log.Ctx(context.TODO()).Error("duplicate topics are pre-created", zap.String("topic", topic))
 				panic("duplicate topic: " + topic)
 			}
 			chanNameSet.Insert(topic)
@@ -416,7 +416,7 @@ func getNeedChanNum(setNum int, chanMap map[typeutil.UniqueID][]string) int {
 		for _, chanNames := range chanMap {
 			for _, chanName := range chanNames {
 				if !chanNameSet.Contain(chanName) {
-					log.Error("invalid channel that is not in the list when pre-created topic", zap.String("chanName", chanName))
+					log.Ctx(context.TODO()).Error("invalid channel that is not in the list when pre-created topic", zap.String("chanName", chanName))
 					panic("invalid chanName: " + chanName)
 				}
 			}

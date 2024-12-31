@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 )
 
 func Test_alterCollectionTask_Prepare(t *testing.T) {
@@ -217,14 +219,25 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("alter successfully", func(t *testing.T) {
+	t.Run("alter successfully2", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("GetCollectionByName",
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
-		).Return(&model.Collection{CollectionID: int64(1)}, nil)
+		).Return(&model.Collection{
+			CollectionID: int64(1),
+			Name:         "cn",
+			DBName:       "foo",
+			Properties: []*commonpb.KeyValuePair{
+				{
+					Key:   common.ReplicateIDKey,
+					Value: "local-test",
+				},
+			},
+			PhysicalChannelNames: []string{"by-dev-rootcoord-dml_1"},
+		}, nil)
 		meta.On("AlterCollection",
 			mock.Anything,
 			mock.Anything,
@@ -237,19 +250,37 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
 			return nil
 		}
+		packChan := make(chan *msgstream.MsgPack, 10)
+		ticker := newChanTimeTickSync(packChan)
+		ticker.addDmlChannels("by-dev-rootcoord-dml_1")
 
-		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker))
+		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker), withTtSynchronizer(ticker))
+		newPros := append(properties, &commonpb.KeyValuePair{
+			Key:   common.ReplicateEndTSKey,
+			Value: "10000",
+		})
 		task := &alterCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
 				CollectionName: "cn",
-				Properties:     properties,
+				Properties:     newPros,
 			},
 		}
 
 		err := task.Execute(context.Background())
 		assert.NoError(t, err)
+		time.Sleep(time.Second)
+		select {
+		case pack := <-packChan:
+			assert.Equal(t, commonpb.MsgType_Replicate, pack.Msgs[0].Type())
+			replicateMsg := pack.Msgs[0].(*msgstream.ReplicateMsg)
+			assert.Equal(t, "foo", replicateMsg.ReplicateMsg.GetDatabase())
+			assert.Equal(t, "cn", replicateMsg.ReplicateMsg.GetCollection())
+			assert.True(t, replicateMsg.ReplicateMsg.GetIsEnd())
+		default:
+			assert.Fail(t, "no message sent")
+		}
 	})
 
 	t.Run("test update collection props", func(t *testing.T) {
@@ -309,5 +340,43 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			Key:   common.PartitionKeyIsolationKey,
 			Value: "true",
 		})
+	})
+
+	t.Run("test delete collection props", func(t *testing.T) {
+		coll := &model.Collection{
+			Properties: []*commonpb.KeyValuePair{
+				{
+					Key:   common.CollectionTTLConfigKey,
+					Value: "1",
+				},
+				{
+					Key:   common.CollectionAutoCompactionKey,
+					Value: "true",
+				},
+			},
+		}
+
+		deleteKeys := []string{common.CollectionTTLConfigKey}
+		coll.Properties = DeleteProperties(coll.Properties, deleteKeys)
+		assert.NotContains(t, coll.Properties, &commonpb.KeyValuePair{
+			Key:   common.CollectionTTLConfigKey,
+			Value: "1",
+		})
+
+		assert.Contains(t, coll.Properties, &commonpb.KeyValuePair{
+			Key:   common.CollectionAutoCompactionKey,
+			Value: "true",
+		})
+
+		deleteKeys = []string{"nonexistent.key"}
+		coll.Properties = DeleteProperties(coll.Properties, deleteKeys)
+		assert.Contains(t, coll.Properties, &commonpb.KeyValuePair{
+			Key:   common.CollectionAutoCompactionKey,
+			Value: "true",
+		})
+
+		deleteKeys = []string{common.CollectionAutoCompactionKey}
+		coll.Properties = DeleteProperties(coll.Properties, deleteKeys)
+		assert.Empty(t, coll.Properties)
 	})
 }

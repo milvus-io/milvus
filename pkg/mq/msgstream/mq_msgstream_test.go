@@ -114,6 +114,8 @@ func TestStream_ConfigEvent(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_Insert(t *testing.T) {
+	Params.Save(Params.CommonCfg.TTMsgEnabled.Key, "false")
+	defer Params.Remove(Params.CommonCfg.TTMsgEnabled.Key)
 	pulsarAddress := getPulsarAddress()
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
@@ -129,13 +131,13 @@ func TestStream_PulsarMsgStream_Insert(t *testing.T) {
 	outputStream := getPulsarOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
 
 	{
-		inputStream.EnableProduce(false)
-		err := inputStream.Produce(&msgPack)
+		inputStream.ForceEnableProduce(false)
+		err := inputStream.Produce(ctx, &msgPack)
 		require.Error(t, err)
 	}
 
-	inputStream.EnableProduce(true)
-	err := inputStream.Produce(&msgPack)
+	inputStream.ForceEnableProduce(true)
+	err := inputStream.Produce(ctx, &msgPack)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
 	receiveMsg(ctx, outputStream, len(msgPack.Msgs))
@@ -156,7 +158,7 @@ func TestStream_PulsarMsgStream_Delete(t *testing.T) {
 	inputStream := getPulsarInputStream(ctx, pulsarAddress, producerChannels)
 	outputStream := getPulsarOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
 
-	err := inputStream.Produce(&msgPack)
+	err := inputStream.Produce(ctx, &msgPack)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
 	receiveMsg(ctx, outputStream, len(msgPack.Msgs))
@@ -178,7 +180,7 @@ func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 	inputStream := getPulsarInputStream(ctx, pulsarAddress, producerChannels)
 	outputStream := getPulsarOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
 
-	err := inputStream.Produce(&msgPack)
+	err := inputStream.Produce(ctx, &msgPack)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
 	receiveMsg(ctx, outputStream, len(msgPack.Msgs))
@@ -187,6 +189,8 @@ func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_BroadCast(t *testing.T) {
+	Params.Save(Params.CommonCfg.TTMsgEnabled.Key, "false")
+	defer Params.Remove(Params.CommonCfg.TTMsgEnabled.Key)
 	pulsarAddress := getPulsarAddress()
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
@@ -202,13 +206,13 @@ func TestStream_PulsarMsgStream_BroadCast(t *testing.T) {
 	outputStream := getPulsarOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
 
 	{
-		inputStream.EnableProduce(false)
-		_, err := inputStream.Broadcast(&msgPack)
+		inputStream.ForceEnableProduce(false)
+		_, err := inputStream.Broadcast(ctx, &msgPack)
 		require.Error(t, err)
 	}
 
-	inputStream.EnableProduce(true)
-	_, err := inputStream.Broadcast(&msgPack)
+	inputStream.ForceEnableProduce(true)
+	_, err := inputStream.Broadcast(ctx, &msgPack)
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
 	receiveMsg(ctx, outputStream, len(consumerChannels)*len(msgPack.Msgs))
@@ -230,7 +234,7 @@ func TestStream_PulsarMsgStream_RepackFunc(t *testing.T) {
 	ctx := context.Background()
 	inputStream := getPulsarInputStream(ctx, pulsarAddress, producerChannels, repackFunc)
 	outputStream := getPulsarOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
-	err := inputStream.Produce(&msgPack)
+	err := inputStream.Produce(ctx, &msgPack)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
 	receiveMsg(ctx, outputStream, len(msgPack.Msgs))
@@ -277,14 +281,14 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 	ctx := context.Background()
 	pulsarClient, _ := pulsarwrapper.NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	inputStream, _ := NewMqMsgStream(ctx, 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
-	inputStream.AsProducer(producerChannels)
+	inputStream.AsProducer(ctx, producerChannels)
 
 	pulsarClient2, _ := pulsarwrapper.NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream, _ := NewMqMsgStream(ctx, 100, 100, pulsarClient2, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(ctx, consumerChannels, consumerSubName, common.SubscriptionPositionEarliest)
 	var output MsgStream = outputStream
 
-	err := (*inputStream).Produce(&msgPack)
+	err := (*inputStream).Produce(ctx, &msgPack)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
 	receiveMsg(ctx, output, len(msgPack.Msgs)*2)
@@ -328,14 +332,14 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 	ctx := context.Background()
 	pulsarClient, _ := pulsarwrapper.NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	inputStream, _ := NewMqMsgStream(ctx, 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
-	inputStream.AsProducer(producerChannels)
+	inputStream.AsProducer(ctx, producerChannels)
 
 	pulsarClient2, _ := pulsarwrapper.NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream, _ := NewMqMsgStream(ctx, 100, 100, pulsarClient2, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(ctx, consumerChannels, consumerSubName, common.SubscriptionPositionEarliest)
 	var output MsgStream = outputStream
 
-	err := (*inputStream).Produce(&msgPack)
+	err := (*inputStream).Produce(ctx, &msgPack)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
 	receiveMsg(ctx, output, len(msgPack.Msgs)*1)
@@ -360,14 +364,14 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 	ctx := context.Background()
 	pulsarClient, _ := pulsarwrapper.NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	inputStream, _ := NewMqMsgStream(ctx, 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
-	inputStream.AsProducer(producerChannels)
+	inputStream.AsProducer(ctx, producerChannels)
 
 	pulsarClient2, _ := pulsarwrapper.NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream, _ := NewMqMsgStream(ctx, 100, 100, pulsarClient2, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(ctx, consumerChannels, consumerSubName, common.SubscriptionPositionEarliest)
 	var output MsgStream = outputStream
 
-	err := (*inputStream).Produce(&msgPack)
+	err := (*inputStream).Produce(ctx, &msgPack)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
 	receiveMsg(ctx, output, len(msgPack.Msgs))
@@ -395,13 +399,13 @@ func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
 	inputStream := getPulsarInputStream(ctx, pulsarAddress, producerChannels)
 	outputStream := getPulsarTtOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
 
-	_, err := inputStream.Broadcast(&msgPack0)
+	_, err := inputStream.Broadcast(ctx, &msgPack0)
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
-	err = inputStream.Produce(&msgPack1)
+	err = inputStream.Produce(ctx, &msgPack1)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
-	_, err = inputStream.Broadcast(&msgPack2)
+	_, err = inputStream.Broadcast(ctx, &msgPack2)
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
 	receiveMsg(ctx, outputStream, len(msgPack1.Msgs))
@@ -440,17 +444,17 @@ func TestStream_PulsarTtMsgStream_NoSeek(t *testing.T) {
 	inputStream := getPulsarInputStream(ctx, pulsarAddress, producerChannels)
 	outputStream := getPulsarTtOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
 
-	_, err := inputStream.Broadcast(&msgPack0)
+	_, err := inputStream.Broadcast(ctx, &msgPack0)
 	assert.NoError(t, err)
-	err = inputStream.Produce(&msgPack1)
+	err = inputStream.Produce(ctx, &msgPack1)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack2)
+	_, err = inputStream.Broadcast(ctx, &msgPack2)
 	assert.NoError(t, err)
-	err = inputStream.Produce(&msgPack3)
+	err = inputStream.Produce(ctx, &msgPack3)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack4)
+	_, err = inputStream.Broadcast(ctx, &msgPack4)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack5)
+	_, err = inputStream.Broadcast(ctx, &msgPack5)
 	assert.NoError(t, err)
 
 	o1 := consumer(ctx, outputStream)
@@ -495,7 +499,7 @@ func TestStream_PulsarMsgStream_SeekToLast(t *testing.T) {
 	}
 
 	// produce test data
-	err := inputStream.Produce(msgPack)
+	err := inputStream.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 
 	// pick a seekPosition
@@ -617,21 +621,21 @@ func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 	inputStream := getPulsarInputStream(ctx, pulsarAddress, producerChannels)
 	outputStream := getPulsarTtOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
 
-	_, err := inputStream.Broadcast(&msgPack0)
+	_, err := inputStream.Broadcast(ctx, &msgPack0)
 	assert.NoError(t, err)
-	err = inputStream.Produce(&msgPack1)
+	err = inputStream.Produce(ctx, &msgPack1)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack2)
+	_, err = inputStream.Broadcast(ctx, &msgPack2)
 	assert.NoError(t, err)
-	err = inputStream.Produce(&msgPack3)
+	err = inputStream.Produce(ctx, &msgPack3)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack4)
+	_, err = inputStream.Broadcast(ctx, &msgPack4)
 	assert.NoError(t, err)
-	err = inputStream.Produce(&msgPack5)
+	err = inputStream.Produce(ctx, &msgPack5)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack6)
+	_, err = inputStream.Broadcast(ctx, &msgPack6)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack7)
+	_, err = inputStream.Broadcast(ctx, &msgPack7)
 	assert.NoError(t, err)
 
 	receivedMsg := consumer(ctx, outputStream)
@@ -704,6 +708,21 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 
+	replicatePack := MsgPack{}
+	replicatePack.Msgs = append(replicatePack.Msgs, &ReplicateMsg{
+		BaseMsg: BaseMsg{
+			BeginTimestamp: 0,
+			EndTimestamp:   0,
+			HashValues:     []uint32{100},
+		},
+		ReplicateMsg: &msgpb.ReplicateMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Replicate,
+				Timestamp: 100,
+			},
+		},
+	})
+
 	msgPack2 := MsgPack{}
 	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5))
 
@@ -711,13 +730,16 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 	inputStream := getPulsarInputStream(ctx, pulsarAddress, producerChannels)
 	outputStream := getPulsarTtOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
 
-	_, err := inputStream.Broadcast(&msgPack0)
+	_, err := inputStream.Broadcast(ctx, &msgPack0)
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
-	err = inputStream.Produce(&msgPack1)
+	err = inputStream.Produce(ctx, &msgPack1)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
-	_, err = inputStream.Broadcast(&msgPack2)
+	err = inputStream.Produce(ctx, &replicatePack)
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
+
+	_, err = inputStream.Broadcast(ctx, &msgPack2)
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
 	receiveMsg(ctx, outputStream, len(msgPack1.Msgs))
@@ -748,16 +770,16 @@ func TestStream_PulsarTtMsgStream_DropCollection(t *testing.T) {
 	inputStream := getPulsarInputStream(ctx, pulsarAddress, producerChannels)
 	outputStream := getPulsarTtOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
 
-	_, err := inputStream.Broadcast(&msgPack0)
+	_, err := inputStream.Broadcast(ctx, &msgPack0)
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
-	err = inputStream.Produce(&msgPack1)
+	err = inputStream.Produce(ctx, &msgPack1)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
-	_, err = inputStream.Broadcast(&msgPack2)
+	_, err = inputStream.Broadcast(ctx, &msgPack2)
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
-	_, err = inputStream.Broadcast(&msgPack3)
+	_, err = inputStream.Broadcast(ctx, &msgPack3)
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
 	receiveMsg(ctx, outputStream, 2)
@@ -803,12 +825,12 @@ func sendMsgPacks(ms MsgStream, msgPacks []*MsgPack) error {
 		printMsgPack(msgPacks[i])
 		if i%2 == 0 {
 			// insert msg use Produce
-			if err := ms.Produce(msgPacks[i]); err != nil {
+			if err := ms.Produce(context.TODO(), msgPacks[i]); err != nil {
 				return err
 			}
 		} else {
 			// tt msg use Broadcast
-			if _, err := ms.Broadcast(msgPacks[i]); err != nil {
+			if _, err := ms.Broadcast(context.TODO(), msgPacks[i]); err != nil {
 				return err
 			}
 		}
@@ -971,7 +993,7 @@ func TestStream_MqMsgStream_Seek(t *testing.T) {
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 
-	err := inputStream.Produce(msgPack)
+	err := inputStream.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 	var seekPosition *msgpb.MsgPosition
 	for i := 0; i < 10; i++ {
@@ -1015,7 +1037,7 @@ func TestStream_MqMsgStream_SeekInvalidMessage(t *testing.T) {
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 
-	err := inputStream.Produce(msgPack)
+	err := inputStream.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 	var seekPosition *msgpb.MsgPosition
 	for i := 0; i < 10; i++ {
@@ -1049,7 +1071,7 @@ func TestStream_MqMsgStream_SeekInvalidMessage(t *testing.T) {
 		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
-	err = inputStream.Produce(msgPack)
+	err = inputStream.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 	result := consumer(ctx, outputStream2)
 	assert.Equal(t, result.Msgs[0].ID(), int64(1))
@@ -1074,7 +1096,7 @@ func TestSTream_MqMsgStream_SeekBadMessageID(t *testing.T) {
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 
-	err := inputStream.Produce(msgPack)
+	err := inputStream.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 	var seekPosition *msgpb.MsgPosition
 	for i := 0; i < 10; i++ {
@@ -1086,7 +1108,7 @@ func TestSTream_MqMsgStream_SeekBadMessageID(t *testing.T) {
 	// produce timetick for mqtt msgstream seek
 	msgPack = &MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, getTimeTickMsg(1000))
-	err = inputStream.Produce(msgPack)
+	err = inputStream.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 
 	factory := ProtoUDFactory{}
@@ -1139,7 +1161,7 @@ func TestStream_MqMsgStream_SeekLatest(t *testing.T) {
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 
-	err := inputStream.Produce(msgPack)
+	err := inputStream.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 	factory := ProtoUDFactory{}
 	pulsarClient, _ := pulsarwrapper.NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
@@ -1152,7 +1174,7 @@ func TestStream_MqMsgStream_SeekLatest(t *testing.T) {
 		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
-	err = inputStream.Produce(msgPack)
+	err = inputStream.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 
 	for i := 10; i < 20; i++ {
@@ -1169,6 +1191,7 @@ func TestStream_BroadcastMark(t *testing.T) {
 	c1 := funcutil.RandomString(8)
 	c2 := funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
+	ctx := context.Background()
 
 	factory := ProtoUDFactory{}
 	pulsarClient, err := pulsarwrapper.NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
@@ -1177,12 +1200,12 @@ func TestStream_BroadcastMark(t *testing.T) {
 	assert.NoError(t, err)
 
 	// add producer channels
-	outputStream.AsProducer(producerChannels)
+	outputStream.AsProducer(ctx, producerChannels)
 
 	msgPack0 := MsgPack{}
 	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0))
 
-	ids, err := outputStream.Broadcast(&msgPack0)
+	ids, err := outputStream.Broadcast(ctx, &msgPack0)
 	assert.NoError(t, err)
 	assert.NotNil(t, ids)
 	assert.Equal(t, len(producerChannels), len(ids))
@@ -1196,7 +1219,7 @@ func TestStream_BroadcastMark(t *testing.T) {
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 
-	ids, err = outputStream.Broadcast(&msgPack1)
+	ids, err = outputStream.Broadcast(ctx, &msgPack1)
 	assert.NoError(t, err)
 	assert.NotNil(t, ids)
 	assert.Equal(t, len(producerChannels), len(ids))
@@ -1207,19 +1230,19 @@ func TestStream_BroadcastMark(t *testing.T) {
 	}
 
 	// edge cases
-	_, err = outputStream.Broadcast(nil)
+	_, err = outputStream.Broadcast(ctx, nil)
 	assert.Error(t, err)
 
 	msgPack2 := MsgPack{}
 	msgPack2.Msgs = append(msgPack2.Msgs, &MarshalFailTsMsg{})
-	_, err = outputStream.Broadcast(&msgPack2)
+	_, err = outputStream.Broadcast(ctx, &msgPack2)
 	assert.Error(t, err)
 
 	// mock send fail
 	for k, p := range outputStream.producers {
 		outputStream.producers[k] = &mockSendFailProducer{Producer: p}
 	}
-	_, err = outputStream.Broadcast(&msgPack1)
+	_, err = outputStream.Broadcast(ctx, &msgPack1)
 	assert.Error(t, err)
 
 	outputStream.Close()
@@ -1497,7 +1520,7 @@ func getPulsarInputStream(ctx context.Context, pulsarAddress string, producerCha
 	factory := ProtoUDFactory{}
 	pulsarClient, _ := pulsarwrapper.NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	inputStream, _ := NewMqMsgStream(ctx, 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
-	inputStream.AsProducer(producerChannels)
+	inputStream.AsProducer(ctx, producerChannels)
 	for _, opt := range opts {
 		inputStream.SetRepackFunc(opt)
 	}

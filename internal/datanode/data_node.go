@@ -58,7 +58,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/expr"
-	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -193,6 +192,7 @@ func (node *DataNode) SetDataCoordClient(ds types.DataCoordClient) error {
 
 // Register register datanode to etcd
 func (node *DataNode) Register() error {
+	log := log.Ctx(node.ctx)
 	log.Debug("node begin to register to etcd", zap.String("serverName", node.session.ServerName), zap.Int64("ServerID", node.session.ServerID))
 	node.session.Register()
 
@@ -228,7 +228,7 @@ func (node *DataNode) Init() error {
 	var initError error
 	node.initOnce.Do(func() {
 		node.registerMetricsRequest()
-		logutil.Logger(node.ctx).Info("DataNode server initializing",
+		log.Ctx(node.ctx).Info("DataNode server initializing",
 			zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick.GetValue()),
 		)
 		if err := node.initSession(); err != nil {
@@ -299,12 +299,12 @@ func (node *DataNode) registerMetricsRequest() {
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return node.flowgraphManager.GetChannelsJSON(), nil
 		})
-	log.Info("register metrics actions finished")
+	log.Ctx(node.ctx).Info("register metrics actions finished")
 }
 
 // tryToReleaseFlowgraph tries to release a flowgraph
 func (node *DataNode) tryToReleaseFlowgraph(channel string) {
-	log.Info("try to release flowgraph", zap.String("channel", channel))
+	log.Ctx(node.ctx).Info("try to release flowgraph", zap.String("channel", channel))
 	if node.compactionExecutor != nil {
 		node.compactionExecutor.DiscardPlan(channel)
 	}
@@ -318,6 +318,7 @@ func (node *DataNode) tryToReleaseFlowgraph(channel string) {
 
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
+	log := log.Ctx(node.ctx)
 	var startErr error
 	node.startOnce.Do(func() {
 		if err := node.allocator.Start(); err != nil {
@@ -401,8 +402,15 @@ func (node *DataNode) Stop() error {
 			node.writeBufferManager.Stop()
 		}
 
+		if node.syncMgr != nil {
+			err := node.syncMgr.Close()
+			if err != nil {
+				log.Error("sync manager close failed", zap.Error(err))
+			}
+		}
+
 		if node.allocator != nil {
-			log.Info("close id allocator", zap.String("role", typeutil.DataNodeRole))
+			log.Ctx(node.ctx).Info("close id allocator", zap.String("role", typeutil.DataNodeRole))
 			node.allocator.Close()
 		}
 

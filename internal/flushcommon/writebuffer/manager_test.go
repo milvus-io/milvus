@@ -262,6 +262,39 @@ func (s *ManagerSuite) TestMemoryCheck() {
 	wb.AssertExpectations(s.T())
 }
 
+func (s *ManagerSuite) TestStopDuringMemoryCheck() {
+	manager := s.manager
+	param := paramtable.Get()
+
+	param.Save(param.DataNodeCfg.MemoryCheckInterval.Key, "50")
+	param.Save(param.DataNodeCfg.MemoryForceSyncEnable.Key, "true")
+	param.Save(param.DataNodeCfg.MemoryForceSyncWatermark.Key, "0.7")
+
+	defer func() {
+		param.Reset(param.DataNodeCfg.MemoryCheckInterval.Key)
+		param.Reset(param.DataNodeCfg.MemoryForceSyncEnable.Key)
+		param.Reset(param.DataNodeCfg.MemoryForceSyncWatermark.Key)
+	}()
+
+	wb := NewMockWriteBuffer(s.T())
+
+	// mock the memory size reach water mark
+	memoryLimit := hardware.GetMemoryCount()
+	wb.EXPECT().MemorySize().RunAndReturn(func() int64 {
+		return int64(float64(memoryLimit) * 0.8)
+	}).Maybe()
+	//.Return(int64(float64(memoryLimit) * 0.6))
+	wb.EXPECT().EvictBuffer(mock.Anything).Maybe()
+	manager.buffers.Insert(s.channelName, wb)
+	manager.Start()
+
+	// wait memory check triggered
+	time.Sleep(200 * time.Millisecond)
+
+	// expect stop operation won't stuck
+	manager.Stop()
+}
+
 func TestManager(t *testing.T) {
 	suite.Run(t, new(ManagerSuite))
 }

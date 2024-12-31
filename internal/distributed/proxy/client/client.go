@@ -55,7 +55,7 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.ProxyClien
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("Proxy client new session failed", zap.Error(err))
+		log.Ctx(ctx).Debug("Proxy client new session failed", zap.Error(err))
 		return nil, err
 	}
 	config := &Params.ProxyGrpcClientCfg
@@ -74,10 +74,11 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.ProxyClien
 		client.grpcClient.EnableEncryption()
 		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "Proxy")
 		if err != nil {
-			log.Error("Failed to create cert pool for Proxy client")
+			log.Ctx(ctx).Error("Failed to create cert pool for Proxy client")
 			return nil, err
 		}
 		client.grpcClient.SetInternalTLSCertPool(cp)
+		client.grpcClient.SetInternalTLSServerName(Params.InternalTLSCfg.InternalTLSSNI.GetValue())
 	}
 	return client, nil
 }

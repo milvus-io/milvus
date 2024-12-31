@@ -17,6 +17,7 @@
 package metrics
 
 import (
+	"context"
 	"os"
 	"sync"
 	"time"
@@ -55,6 +56,7 @@ func (thw *threadWatcher) Start() {
 }
 
 func (thw *threadWatcher) watchThreadNum() {
+	log := log.Ctx(context.TODO())
 	ticker := time.NewTicker(time.Second * 30)
 	defer ticker.Stop()
 	pid := os.Getpid()

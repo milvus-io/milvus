@@ -272,9 +272,10 @@ func (cf FieldsAllFields) GenFields(option GenFieldsOption) []*entity.Field {
 	}
 	// scalar fields and array fields
 	for _, fieldType := range GetAllScalarFieldType() {
-		if fieldType == entity.FieldTypeInt64 {
+		switch fieldType {
+		case entity.FieldTypeInt64:
 			continue
-		} else if fieldType == entity.FieldTypeArray {
+		case entity.FieldTypeArray:
 			for _, eleType := range GetAllArrayElementType() {
 				arrayField := entity.NewField().WithName(GetFieldNameByElementType(eleType)).WithDataType(entity.FieldTypeArray).WithElementType(eleType).WithMaxCapacity(option.MaxCapacity)
 				if eleType == entity.FieldTypeVarChar {
@@ -282,10 +283,10 @@ func (cf FieldsAllFields) GenFields(option GenFieldsOption) []*entity.Field {
 				}
 				fields = append(fields, arrayField)
 			}
-		} else if fieldType == entity.FieldTypeVarChar {
+		case entity.FieldTypeVarChar:
 			varcharField := entity.NewField().WithName(GetFieldNameByFieldType(fieldType)).WithDataType(fieldType).WithMaxLength(option.MaxLength)
 			fields = append(fields, varcharField)
-		} else {
+		default:
 			scalarField := entity.NewField().WithName(GetFieldNameByFieldType(fieldType)).WithDataType(fieldType)
 			fields = append(fields, scalarField)
 		}
@@ -312,9 +313,10 @@ func (cf FieldsInt64VecAllScalar) GenFields(option GenFieldsOption) []*entity.Fi
 	}
 	// scalar fields and array fields
 	for _, fieldType := range GetAllScalarFieldType() {
-		if fieldType == entity.FieldTypeInt64 {
+		switch fieldType {
+		case entity.FieldTypeInt64:
 			continue
-		} else if fieldType == entity.FieldTypeArray {
+		case entity.FieldTypeArray:
 			for _, eleType := range GetAllArrayElementType() {
 				arrayField := entity.NewField().WithName(GetFieldNameByElementType(eleType)).WithDataType(entity.FieldTypeArray).WithElementType(eleType).WithMaxCapacity(option.MaxCapacity)
 				if eleType == entity.FieldTypeVarChar {
@@ -322,10 +324,10 @@ func (cf FieldsInt64VecAllScalar) GenFields(option GenFieldsOption) []*entity.Fi
 				}
 				fields = append(fields, arrayField)
 			}
-		} else if fieldType == entity.FieldTypeVarChar {
+		case entity.FieldTypeVarChar:
 			varcharField := entity.NewField().WithName(GetFieldNameByFieldType(fieldType)).WithDataType(fieldType).WithMaxLength(option.MaxLength)
 			fields = append(fields, varcharField)
-		} else {
+		default:
 			scalarField := entity.NewField().WithName(GetFieldNameByFieldType(fieldType)).WithDataType(fieldType)
 			fields = append(fields, scalarField)
 		}

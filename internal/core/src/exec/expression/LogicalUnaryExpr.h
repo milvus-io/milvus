@@ -41,7 +41,14 @@ class PhyLogicalUnaryExpr : public Expr {
 
     void
     MoveCursor() override {
-        inputs_[0]->MoveCursor();
+        if (!has_offset_input_) {
+            inputs_[0]->MoveCursor();
+        }
+    }
+
+    bool
+    SupportOffsetInput() override {
+        return inputs_[0]->SupportOffsetInput();
     }
 
  private:

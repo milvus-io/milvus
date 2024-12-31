@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 // Server is the streamingcoord server.
@@ -26,7 +27,7 @@ type Server struct {
 	componentStateService *componentutil.ComponentStateService // state.
 
 	// basic component variables can be used at service level.
-	balancer balancer.Balancer
+	balancer *syncutil.Future[balancer.Balancer]
 }
 
 // Init initializes the streamingcoord server.
@@ -39,7 +40,6 @@ func (s *Server) Init(ctx context.Context) (err error) {
 		return err
 	}
 	// Init all grpc service of streamingcoord server.
-	s.initService()
 	s.componentStateService.OnInitialized(s.session.GetServerID())
 	log.Info("streamingcoord server initialized")
 	return nil
@@ -51,13 +51,12 @@ func (s *Server) initBasicComponent(ctx context.Context) error {
 	var err error
 	// Read new incoming topics from configuration, and register it into balancer.
 	newIncomingTopics := util.GetAllTopicsFromConfiguration()
-	s.balancer, err = balancer.RecoverBalancer(ctx, "pchannel_count_fair", newIncomingTopics.Collect()...)
+	balancer, err := balancer.RecoverBalancer(ctx, "pchannel_count_fair", newIncomingTopics.Collect()...)
+	if err != nil {
+		return err
+	}
+	s.balancer.Set(balancer)
 	return err
-}
-
-// initService initializes the grpc service.
-func (s *Server) initService() {
-	s.assignmentService = service.NewAssignmentService(s.balancer)
 }
 
 // registerGRPCService register all grpc service to grpc server.
@@ -76,6 +75,6 @@ func (s *Server) Start() {
 func (s *Server) Stop() {
 	s.componentStateService.OnStopping()
 	log.Info("close balancer...")
-	s.balancer.Close()
+	s.balancer.Get().Close()
 	log.Info("streamingcoord server stopped")
 }

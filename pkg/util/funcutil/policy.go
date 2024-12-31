@@ -1,6 +1,7 @@
 package funcutil
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -17,6 +18,7 @@ import (
 )
 
 func GetVersion(m interface{}) (string, error) {
+	log := log.Ctx(context.TODO())
 	pbMsg, ok := m.(proto.Message)
 	if !ok {
 		err := fmt.Errorf("MessageDescriptorProto result is nil")

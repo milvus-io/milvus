@@ -584,11 +584,13 @@ func (suite *TargetManagerSuite) TestRecover() {
 			ID:            11,
 			PartitionID:   1,
 			InsertChannel: "channel-1",
+			NumOfRows:     100,
 		},
 		{
 			ID:            12,
 			PartitionID:   1,
 			InsertChannel: "channel-2",
+			NumOfRows:     100,
 		},
 	}
 
@@ -609,6 +611,10 @@ func (suite *TargetManagerSuite) TestRecover() {
 	suite.Len(target.GetAllDmChannelNames(), 2)
 	suite.Len(target.GetAllSegmentIDs(), 2)
 	suite.Equal(target.GetTargetVersion(), version)
+	for _, segment := range target.GetAllSegments() {
+		suite.Equal(int64(100), segment.GetNumOfRows())
+	}
+	suite.True(target.Ready())
 
 	// after recover, target info should be cleaned up
 	targets, err := suite.catalog.GetCollectionTargets(ctx)
@@ -673,6 +679,53 @@ func (suite *TargetManagerSuite) TestGetTargetJSON() {
 	assert.Equal(suite.T(), collectionID, currentTarget[0].CollectionID)
 	assert.Len(suite.T(), currentTarget[0].DMChannels, 2)
 	assert.Len(suite.T(), currentTarget[0].Segments, 2)
+}
+
+func BenchmarkTargetManager(b *testing.B) {
+	paramtable.Init()
+	config := GenerateEtcdConfig()
+	cli, _ := etcd.GetEtcdClient(
+		config.UseEmbedEtcd.GetAsBool(),
+		config.EtcdUseSSL.GetAsBool(),
+		config.Endpoints.GetAsStrings(),
+		config.EtcdTLSCert.GetValue(),
+		config.EtcdTLSKey.GetValue(),
+		config.EtcdTLSCACert.GetValue(),
+		config.EtcdTLSMinVersion.GetValue())
+
+	kv := etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
+
+	catalog := querycoord.NewCatalog(kv)
+	idAllocator := RandomIncrementIDAllocator()
+	meta := NewMeta(idAllocator, catalog, session.NewNodeManager())
+	mgr := NewTargetManager(nil, meta)
+
+	segmentNum := 1000
+	segments := make(map[int64]*datapb.SegmentInfo)
+	for i := 0; i < segmentNum; i++ {
+		segments[int64(i)] = &datapb.SegmentInfo{
+			ID:            int64(i),
+			InsertChannel: "channel-1",
+		}
+	}
+
+	channels := map[string]*DmChannel{
+		"channel-1": {
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: int64(1),
+				ChannelName:  "channel-1",
+			},
+		},
+	}
+
+	collectionNum := 10000
+	for i := 0; i < collectionNum; i++ {
+		mgr.current.collectionTargetMap[int64(i)] = NewCollectionTarget(segments, channels, nil)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		mgr.SaveCurrentTarget(context.TODO(), catalog)
+	}
 }
 
 func TestTargetManager(t *testing.T) {

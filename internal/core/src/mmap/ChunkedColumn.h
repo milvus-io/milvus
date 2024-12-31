@@ -53,20 +53,20 @@ class ChunkedColumnBase : public ColumnBase {
  public:
     ChunkedColumnBase() = default;
     // memory mode ctor
-    ChunkedColumnBase(const FieldMeta& field_meta) {
+    explicit ChunkedColumnBase(const FieldMeta& field_meta) {
         if (field_meta.is_nullable()) {
             nullable_ = true;
         }
     }
 
-    virtual ~ChunkedColumnBase(){};
+    virtual ~ChunkedColumnBase() = default;
 
-    virtual void
+    void
     AppendBatch(const FieldDataPtr data) override {
         PanicInfo(ErrorCode::Unsupported, "AppendBatch not supported");
     }
 
-    virtual const char*
+    const char*
     Data(int chunk_id) const override {
         return chunks_[chunk_id]->Data();
     }
@@ -125,7 +125,7 @@ class ChunkedColumnBase : public ColumnBase {
         chunks_.push_back(chunk);
     }
 
-    virtual size_t
+    size_t
     DataByteSize() const override {
         auto size = 0;
         for (auto& chunk : chunks_) {
@@ -153,6 +153,13 @@ class ChunkedColumnBase : public ColumnBase {
     StringViews(int64_t chunk_id) const {
         PanicInfo(ErrorCode::Unsupported,
                   "StringViews only supported for VariableColumn");
+    }
+
+    virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    ViewsByOffsets(int64_t chunk_id,
+                   const FixedVector<int32_t>& offsets) const {
+        PanicInfo(ErrorCode::Unsupported,
+                  "viewsbyoffsets only supported for VariableColumn");
     }
 
     std::pair<size_t, size_t>
@@ -229,10 +236,11 @@ class ChunkedColumn : public ChunkedColumnBase {
  public:
     ChunkedColumn() = default;
     // memory mode ctor
-    ChunkedColumn(const FieldMeta& field_meta) : ChunkedColumnBase(field_meta) {
+    explicit ChunkedColumn(const FieldMeta& field_meta)
+        : ChunkedColumnBase(field_meta) {
     }
 
-    ChunkedColumn(std::vector<std::shared_ptr<Chunk>> chunks) {
+    explicit ChunkedColumn(const std::vector<std::shared_ptr<Chunk>>& chunks) {
         for (auto& chunk : chunks) {
             AddChunk(chunk);
         }
@@ -240,7 +248,7 @@ class ChunkedColumn : public ChunkedColumnBase {
 
     ~ChunkedColumn() override = default;
 
-    virtual SpanBase
+    SpanBase
     Span(int64_t chunk_id) const override {
         return std::dynamic_pointer_cast<FixedWidthChunk>(chunks_[chunk_id])
             ->Span();
@@ -251,11 +259,12 @@ class ChunkedColumn : public ChunkedColumnBase {
 class ChunkedSparseFloatColumn : public ChunkedColumnBase {
  public:
     // memory mode ctor
-    ChunkedSparseFloatColumn(const FieldMeta& field_meta)
+    explicit ChunkedSparseFloatColumn(const FieldMeta& field_meta)
         : ChunkedColumnBase(field_meta) {
     }
 
-    ChunkedSparseFloatColumn(std::vector<std::shared_ptr<Chunk>> chunks) {
+    explicit ChunkedSparseFloatColumn(
+        const std::vector<std::shared_ptr<Chunk>>& chunks) {
         for (auto& chunk : chunks) {
             AddChunk(chunk);
         }
@@ -304,11 +313,12 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
         std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
 
     // memory mode ctor
-    ChunkedVariableColumn(const FieldMeta& field_meta)
+    explicit ChunkedVariableColumn(const FieldMeta& field_meta)
         : ChunkedColumnBase(field_meta) {
     }
 
-    ChunkedVariableColumn(std::vector<std::shared_ptr<Chunk>> chunks) {
+    explicit ChunkedVariableColumn(
+        const std::vector<std::shared_ptr<Chunk>>& chunks) {
         for (auto& chunk : chunks) {
             AddChunk(chunk);
         }
@@ -331,6 +341,13 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
     std::shared_ptr<Chunk>
     GetChunk(int64_t chunk_id) const {
         return chunks_[chunk_id];
+    }
+
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    ViewsByOffsets(int64_t chunk_id,
+                   const FixedVector<int32_t>& offsets) const override {
+        return std::dynamic_pointer_cast<StringChunk>(chunks_[chunk_id])
+            ->ViewsByOffsets(offsets);
     }
 
     BufferView
@@ -374,11 +391,12 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
 class ChunkedArrayColumn : public ChunkedColumnBase {
  public:
     // memory mode ctor
-    ChunkedArrayColumn(const FieldMeta& field_meta)
+    explicit ChunkedArrayColumn(const FieldMeta& field_meta)
         : ChunkedColumnBase(field_meta) {
     }
 
-    ChunkedArrayColumn(std::vector<std::shared_ptr<Chunk>> chunks) {
+    explicit ChunkedArrayColumn(
+        const std::vector<std::shared_ptr<Chunk>>& chunks) {
         for (auto& chunk : chunks) {
             AddChunk(chunk);
         }

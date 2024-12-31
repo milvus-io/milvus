@@ -52,7 +52,7 @@ func (t *createPartitionTask) Prepare(ctx context.Context) error {
 func (t *createPartitionTask) Execute(ctx context.Context) error {
 	for _, partition := range t.collMeta.Partitions {
 		if partition.PartitionName == t.Req.GetPartitionName() {
-			log.Warn("add duplicate partition", zap.String("collection", t.Req.GetCollectionName()), zap.String("partition", t.Req.GetPartitionName()), zap.Uint64("ts", t.GetTs()))
+			log.Ctx(ctx).Warn("add duplicate partition", zap.String("collection", t.Req.GetCollectionName()), zap.String("partition", t.Req.GetPartitionName()), zap.Uint64("ts", t.GetTs()))
 			return nil
 		}
 	}
@@ -113,12 +113,6 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 		collectionID: t.collMeta.CollectionID,
 		partitionIDs: []int64{partID},
 	})
-
-	undoTask.AddStep(&syncNewCreatedPartitionStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: t.collMeta.CollectionID,
-		partitionID:  partID,
-	}, &nullStep{})
 
 	undoTask.AddStep(&changePartitionStateStep{
 		baseStep:     baseStep{core: t.core},

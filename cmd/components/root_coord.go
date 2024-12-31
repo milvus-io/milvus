@@ -56,10 +56,10 @@ func (rc *RootCoord) Prepare() error {
 // Run starts service
 func (rc *RootCoord) Run() error {
 	if err := rc.svr.Run(); err != nil {
-		log.Error("RootCoord starts error", zap.Error(err))
+		log.Ctx(rc.ctx).Error("RootCoord starts error", zap.Error(err))
 		return err
 	}
-	log.Info("RootCoord successfully started")
+	log.Ctx(rc.ctx).Info("RootCoord successfully started")
 	return nil
 }
 

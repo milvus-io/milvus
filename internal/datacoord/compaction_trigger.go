@@ -19,7 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"sort"
+	"math"
 	"sync"
 	"time"
 
@@ -283,23 +283,6 @@ func (t *compactionTrigger) allocSignalID() (UniqueID, error) {
 	return t.allocator.AllocID(ctx)
 }
 
-func (t *compactionTrigger) getExpectedSegmentSize(collectionID int64) int64 {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	collMeta, err := t.handler.GetCollection(ctx, collectionID)
-	if err != nil {
-		log.Warn("failed to get collection", zap.Int64("collectionID", collectionID), zap.Error(err))
-		return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
-	}
-	allDiskIndex := t.meta.indexMeta.AreAllDiskIndex(collectionID, collMeta.Schema)
-	if allDiskIndex {
-		// Only if all vector fields index type are DiskANN, recalc segment max size here.
-		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
-	}
-	// If some vector fields index type are not DiskANN, recalc segment max size using default policy.
-	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
-}
-
 func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 	t.forceMu.Lock()
 	defer t.forceMu.Unlock()
@@ -423,7 +406,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		return
 	}
 
-	segment := t.meta.GetHealthySegment(t.meta.ctx, signal.segmentID)
+	segment := t.meta.GetHealthySegment(context.TODO(), signal.segmentID)
 	if segment == nil {
 		log.Warn("segment in compaction signal not found in meta", zap.Int64("segmentID", signal.segmentID))
 		return
@@ -548,107 +531,62 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 	}
 
 	buckets := [][]*SegmentInfo{}
-	// sort segment from large to small
-	sort.Slice(prioritizedCandidates, func(i, j int) bool {
-		if prioritizedCandidates[i].getSegmentSize() != prioritizedCandidates[j].getSegmentSize() {
-			return prioritizedCandidates[i].getSegmentSize() > prioritizedCandidates[j].getSegmentSize()
-		}
-		return prioritizedCandidates[i].GetID() < prioritizedCandidates[j].GetID()
-	})
+	toUpdate := newSegmentPacker("update", prioritizedCandidates)
+	toMerge := newSegmentPacker("merge", smallCandidates)
+	toPack := newSegmentPacker("pack", nonPlannedSegments)
 
-	sort.Slice(smallCandidates, func(i, j int) bool {
-		if smallCandidates[i].getSegmentSize() != smallCandidates[j].getSegmentSize() {
-			return smallCandidates[i].getSegmentSize() > smallCandidates[j].getSegmentSize()
+	maxSegs := int64(4096) // Deprecate the max segment limit since it is irrelevant in simple compactions.
+	minSegs := Params.DataCoordCfg.MinSegmentToMerge.GetAsInt64()
+	compactableProportion := Params.DataCoordCfg.SegmentCompactableProportion.GetAsFloat()
+	satisfiedSize := int64(float64(expectedSize) * compactableProportion)
+	expantionRate := Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()
+	maxLeftSize := expectedSize - satisfiedSize
+	expectedExpandedSize := int64(float64(expectedSize) * expantionRate)
+	maxExpandedLeftSize := expectedExpandedSize - satisfiedSize
+	reasons := make([]string, 0)
+	// 1. Merge small segments if they can make a full bucket
+	for {
+		pack, left := toMerge.pack(expectedSize, maxLeftSize, minSegs, maxSegs)
+		if len(pack) == 0 {
+			break
 		}
-		return smallCandidates[i].GetID() < smallCandidates[j].GetID()
-	})
+		reasons = append(reasons, fmt.Sprintf("merging %d small segments with left size %d", len(pack), left))
+		buckets = append(buckets, pack)
+	}
 
-	// Sort non-planned from small to large.
-	sort.Slice(nonPlannedSegments, func(i, j int) bool {
-		if nonPlannedSegments[i].getSegmentSize() != nonPlannedSegments[j].getSegmentSize() {
-			return nonPlannedSegments[i].getSegmentSize() < nonPlannedSegments[j].getSegmentSize()
-		}
-		return nonPlannedSegments[i].GetID() > nonPlannedSegments[j].GetID()
-	})
-
-	// greedy pick from large segment to small, the goal is to fill each segment to reach 512M
-	// we must ensure all prioritized candidates is in a plan
+	// 2. Pack prioritized candidates with small segments
 	// TODO the compaction selection policy should consider if compaction workload is high
-	for len(prioritizedCandidates) > 0 {
-		var bucket []*SegmentInfo
-		// pop out the first element
-		segment := prioritizedCandidates[0]
-		bucket = append(bucket, segment)
-		prioritizedCandidates = prioritizedCandidates[1:]
-
-		// only do single file compaction if segment is already large enough
-		if segment.getSegmentSize() < expectedSize {
-			var result []*SegmentInfo
-			free := expectedSize - segment.getSegmentSize()
-			maxNum := Params.DataCoordCfg.MaxSegmentToMerge.GetAsInt() - 1
-			prioritizedCandidates, result, free = greedySelect(prioritizedCandidates, free, maxNum)
-			bucket = append(bucket, result...)
-			maxNum -= len(result)
-			if maxNum > 0 {
-				smallCandidates, result, _ = greedySelect(smallCandidates, free, maxNum)
-				bucket = append(bucket, result...)
-			}
+	for {
+		// No limit on the remaining size because we want to pack all prioritized candidates
+		pack, _ := toUpdate.packWith(expectedSize, math.MaxInt64, 0, maxSegs, toMerge)
+		if len(pack) == 0 {
+			break
 		}
-		// since this is priority compaction, we will execute even if there is only segment
-		log.Info("pick priority candidate for compaction",
-			zap.Int64("prioritized segmentID", segment.GetID()),
-			zap.Int64s("picked segmentIDs", lo.Map(bucket, func(s *SegmentInfo, _ int) int64 { return s.GetID() })),
-			zap.Int64("target size", lo.SumBy(bucket, func(s *SegmentInfo) int64 { return s.getSegmentSize() })),
-			zap.Int64("target count", lo.SumBy(bucket, func(s *SegmentInfo) int64 { return s.GetNumOfRows() })),
-		)
-		buckets = append(buckets, bucket)
+		reasons = append(reasons, fmt.Sprintf("packing %d prioritized segments", len(pack)))
+		buckets = append(buckets, pack)
 	}
 
-	var remainingSmallSegs []*SegmentInfo
-	// check if there are small candidates left can be merged into large segments
-	for len(smallCandidates) > 0 {
-		var bucket []*SegmentInfo
-		// pop out the first element
-		segment := smallCandidates[0]
-		bucket = append(bucket, segment)
-		smallCandidates = smallCandidates[1:]
-
-		var result []*SegmentInfo
-		free := expectedSize - segment.getSegmentSize()
-		// for small segment merge, we pick one largest segment and merge as much as small segment together with it
-		// Why reverse?	 try to merge as many segments as expected.
-		// for instance, if a 255M and 255M is the largest small candidates, they will never be merged because of the MinSegmentToMerge limit.
-		smallCandidates, result, _ = reverseGreedySelect(smallCandidates, free, Params.DataCoordCfg.MaxSegmentToMerge.GetAsInt()-1)
-		bucket = append(bucket, result...)
-
-		// only merge if candidate number is large than MinSegmentToMerge or if target size is large enough
-		targetSize := lo.SumBy(bucket, func(s *SegmentInfo) int64 { return s.getSegmentSize() })
-		if len(bucket) >= Params.DataCoordCfg.MinSegmentToMerge.GetAsInt() ||
-			len(bucket) > 1 && t.isCompactableSegment(targetSize, expectedSize) {
-			buckets = append(buckets, bucket)
-		} else {
-			remainingSmallSegs = append(remainingSmallSegs, bucket...)
+	// 2.+ legacy: squeeze small segments
+	// Try merge all small segments, and then squeeze
+	for {
+		pack, _ := toMerge.pack(expectedSize, math.MaxInt64, minSegs, maxSegs)
+		if len(pack) == 0 {
+			break
 		}
+		reasons = append(reasons, fmt.Sprintf("packing all %d small segments", len(pack)))
+		buckets = append(buckets, pack)
 	}
+	remaining := t.squeezeSmallSegmentsToBuckets(toMerge.candidates, buckets, expectedSize)
+	toMerge = newSegmentPacker("merge", remaining)
 
-	remainingSmallSegs = t.squeezeSmallSegmentsToBuckets(remainingSmallSegs, buckets, expectedSize)
-
-	// If there are still remaining small segments, try adding them to non-planned segments.
-	for _, npSeg := range nonPlannedSegments {
-		bucket := []*SegmentInfo{npSeg}
-		targetSize := npSeg.getSegmentSize()
-		for i := len(remainingSmallSegs) - 1; i >= 0; i-- {
-			// Note: could also simply use MaxRowNum as limit.
-			if targetSize+remainingSmallSegs[i].getSegmentSize() <=
-				int64(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()*float64(expectedSize)) {
-				bucket = append(bucket, remainingSmallSegs[i])
-				targetSize += remainingSmallSegs[i].getSegmentSize()
-				remainingSmallSegs = append(remainingSmallSegs[:i], remainingSmallSegs[i+1:]...)
-			}
+	// 3. pack remaining small segments with non-planned segments
+	for {
+		pack, _ := toMerge.packWith(expectedExpandedSize, maxExpandedLeftSize, minSegs, maxSegs, toPack)
+		if len(pack) == 0 {
+			break
 		}
-		if len(bucket) > 1 {
-			buckets = append(buckets, bucket)
-		}
+		reasons = append(reasons, fmt.Sprintf("packing %d small segments and non-planned segments", len(pack)))
+		buckets = append(buckets, pack)
 	}
 
 	tasks := make([]*typeutil.Pair[int64, []int64], len(buckets))
@@ -662,39 +600,16 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 		pair := typeutil.NewPair(totalRows, segmentIDs)
 		tasks[i] = &pair
 	}
-	log.Info("generatePlans", zap.Int64("collectionID", signal.collectionID), zap.Int("plan_num", len(tasks)))
+
+	if len(tasks) > 0 {
+		log.Info("generated nontrivial compaction tasks",
+			zap.Int64("collectionID", signal.collectionID),
+			zap.Int("prioritizedCandidates", len(prioritizedCandidates)),
+			zap.Int("smallCandidates", len(smallCandidates)),
+			zap.Int("nonPlannedSegments", len(nonPlannedSegments)),
+			zap.Strings("reasons", reasons))
+	}
 	return tasks
-}
-
-func greedySelect(candidates []*SegmentInfo, free int64, maxSegment int) ([]*SegmentInfo, []*SegmentInfo, int64) {
-	var result []*SegmentInfo
-
-	for i := 0; i < len(candidates); {
-		candidate := candidates[i]
-		if len(result) < maxSegment && candidate.getSegmentSize() < free {
-			result = append(result, candidate)
-			free -= candidate.getSegmentSize()
-			candidates = append(candidates[:i], candidates[i+1:]...)
-		} else {
-			i++
-		}
-	}
-
-	return candidates, result, free
-}
-
-func reverseGreedySelect(candidates []*SegmentInfo, free int64, maxSegment int) ([]*SegmentInfo, []*SegmentInfo, int64) {
-	var result []*SegmentInfo
-
-	for i := len(candidates) - 1; i >= 0; i-- {
-		candidate := candidates[i]
-		if (len(result) < maxSegment) && (candidate.getSegmentSize() < free) {
-			result = append(result, candidate)
-			free -= candidate.getSegmentSize()
-			candidates = append(candidates[:i], candidates[i+1:]...)
-		}
-	}
-	return candidates, result, free
 }
 
 func (t *compactionTrigger) getCandidateSegments(channel string, partitionID UniqueID) []*SegmentInfo {
@@ -743,10 +658,6 @@ func isExpandableSmallSegment(segment *SegmentInfo, expectedSize int64) bool {
 
 func isDeltalogTooManySegment(segment *SegmentInfo) bool {
 	deltaLogCount := GetBinlogCount(segment.GetDeltalogs())
-	log.Debug("isDeltalogTooManySegment",
-		zap.Int64("collectionID", segment.CollectionID),
-		zap.Int64("segmentID", segment.ID),
-		zap.Int("deltaLogCount", deltaLogCount))
 	return deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt()
 }
 
@@ -764,7 +675,7 @@ func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
 	is := float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
 		totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64()
 	if is {
-		log.Info("total delete entities is too much",
+		log.Ctx(context.TODO()).Info("total delete entities is too much",
 			zap.Int64("segmentID", segment.ID),
 			zap.Int64("numRows", segment.GetNumOfRows()),
 			zap.Int("deleted rows", totalDeletedRows),
@@ -776,6 +687,7 @@ func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
 
+	log := log.Ctx(context.TODO())
 	binlogCount := GetBinlogCount(segment.GetBinlogs())
 	deltaLogCount := GetBinlogCount(segment.GetDeltalogs())
 	if isDeltalogTooManySegment(segment) {

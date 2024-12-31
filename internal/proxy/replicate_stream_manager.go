@@ -34,16 +34,16 @@ func NewReplicateStreamManager(ctx context.Context, factory msgstream.Factory, r
 	return manager
 }
 
-func (m *ReplicateStreamManager) newMsgStreamResource(channel string) resource.NewResourceFunc {
+func (m *ReplicateStreamManager) newMsgStreamResource(ctx context.Context, channel string) resource.NewResourceFunc {
 	return func() (resource.Resource, error) {
-		msgStream, err := m.factory.NewMsgStream(m.ctx)
+		msgStream, err := m.factory.NewMsgStream(ctx)
 		if err != nil {
 			log.Ctx(m.ctx).Warn("failed to create msg stream", zap.String("channel", channel), zap.Error(err))
 			return nil, err
 		}
 		msgStream.SetRepackFunc(replicatePackFunc)
-		msgStream.AsProducer([]string{channel})
-		msgStream.EnableProduce(true)
+		msgStream.AsProducer(ctx, []string{channel})
+		msgStream.ForceEnableProduce(true)
 
 		res := resource.NewSimpleResource(msgStream, ReplicateMsgStreamTyp, channel, ReplicateMsgStreamExpireTime, func() {
 			msgStream.Close()
@@ -55,7 +55,7 @@ func (m *ReplicateStreamManager) newMsgStreamResource(channel string) resource.N
 
 func (m *ReplicateStreamManager) GetReplicateMsgStream(ctx context.Context, channel string) (msgstream.MsgStream, error) {
 	ctxLog := log.Ctx(ctx).With(zap.String("proxy_channel", channel))
-	res, err := m.resourceManager.Get(ReplicateMsgStreamTyp, channel, m.newMsgStreamResource(channel))
+	res, err := m.resourceManager.Get(ReplicateMsgStreamTyp, channel, m.newMsgStreamResource(ctx, channel))
 	if err != nil {
 		ctxLog.Warn("failed to get replicate msg stream", zap.String("channel", channel), zap.Error(err))
 		return nil, err

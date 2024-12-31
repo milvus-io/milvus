@@ -210,6 +210,15 @@ Join(const std::vector<T>& items, const std::string& delimiter) {
 }
 
 inline std::string
+PrintBitsetTypeView(const BitsetTypeView& view) {
+    std::stringstream ss;
+    for (auto i = 0; i < view.size(); ++i) {
+        ss << int(view[i]);
+    }
+    return ss.str();
+}
+
+inline std::string
 GetCommonPrefix(const std::string& str1, const std::string& str2) {
     size_t len = std::min(str1.length(), str2.length());
     size_t i = 0;

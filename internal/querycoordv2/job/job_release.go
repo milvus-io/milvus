@@ -53,7 +53,6 @@ func NewReleaseCollectionJob(ctx context.Context,
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
 	broker meta.Broker,
-	cluster session.Cluster,
 	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	checkerController *checkers.CheckerController,
@@ -65,7 +64,6 @@ func NewReleaseCollectionJob(ctx context.Context,
 		dist:              dist,
 		meta:              meta,
 		broker:            broker,
-		cluster:           cluster,
 		targetMgr:         targetMgr,
 		targetObserver:    targetObserver,
 		checkerController: checkerController,
@@ -81,12 +79,6 @@ func (job *ReleaseCollectionJob) Execute() error {
 		log.Info("release collection end, the collection has not been loaded into QueryNode")
 		return nil
 	}
-
-	loadedPartitions := job.meta.CollectionManager.GetPartitionsByCollection(job.ctx, req.GetCollectionID())
-	toRelease := lo.Map(loadedPartitions, func(partition *meta.Partition, _ int) int64 {
-		return partition.GetPartitionID()
-	})
-	releasePartitions(job.ctx, job.meta, job.cluster, req.GetCollectionID(), toRelease...)
 
 	err := job.meta.CollectionManager.RemoveCollection(job.ctx, req.GetCollectionID())
 	if err != nil {
@@ -112,8 +104,6 @@ func (job *ReleaseCollectionJob) Execute() error {
 		proxyutil.SetMsgType(commonpb.MsgType_ReleaseCollection))
 
 	waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
-	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
-	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(len(toRelease)))
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	return nil
@@ -139,7 +129,6 @@ func NewReleasePartitionJob(ctx context.Context,
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
 	broker meta.Broker,
-	cluster session.Cluster,
 	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	checkerController *checkers.CheckerController,
@@ -151,7 +140,6 @@ func NewReleasePartitionJob(ctx context.Context,
 		dist:              dist,
 		meta:              meta,
 		broker:            broker,
-		cluster:           cluster,
 		targetMgr:         targetMgr,
 		targetObserver:    targetObserver,
 		checkerController: checkerController,
@@ -180,7 +168,6 @@ func (job *ReleasePartitionJob) Execute() error {
 		log.Warn("releasing partition(s) not loaded")
 		return nil
 	}
-	releasePartitions(job.ctx, job.meta, job.cluster, req.GetCollectionID(), toRelease...)
 
 	// If all partitions are released, clear all
 	if len(toRelease) == len(loadedPartitions) {
@@ -196,7 +183,6 @@ func (job *ReleasePartitionJob) Execute() error {
 			log.Warn("failed to remove replicas", zap.Error(err))
 		}
 		job.targetObserver.ReleaseCollection(req.GetCollectionID())
-		metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 		// try best discard cache
 		// shall not affect releasing if failed
 		job.proxyManager.InvalidateCollectionMetaCache(job.ctx,
@@ -214,8 +200,9 @@ func (job *ReleasePartitionJob) Execute() error {
 			return errors.Wrap(err, msg)
 		}
 		job.targetObserver.ReleasePartition(req.GetCollectionID(), toRelease...)
+		// wait current target updated, so following querys will act as expected
+		waitCurrentTargetUpdated(job.ctx, job.targetObserver, job.req.GetCollectionID())
 		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID(), toRelease...)
 	}
-	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(len(toRelease)))
 	return nil
 }

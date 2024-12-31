@@ -86,6 +86,7 @@ type GrpcClient[T GrpcComponent] interface {
 	SetGetAddrFunc(func() (string, error))
 	EnableEncryption()
 	SetInternalTLSCertPool(cp *x509.CertPool)
+	SetInternalTLSServerName(cp string)
 	SetNewGrpcClientFunc(func(cc *grpc.ClientConn) T)
 	ReCall(ctx context.Context, caller func(client T) (any, error)) (any, error)
 	Call(ctx context.Context, caller func(client T) (any, error)) (any, error)
@@ -103,10 +104,12 @@ type ClientBase[T interface {
 	newGrpcClient func(cc *grpc.ClientConn) T
 
 	// grpcClient             T
-	grpcClient    *clientConnWrapper[T]
-	encryption    bool
-	cpInternalTLS *x509.CertPool
-	addr          atomic.String
+	grpcClient            *clientConnWrapper[T]
+	encryption            bool
+	cpInternalTLS         *x509.CertPool
+	addr                  atomic.String
+	internalTLSServerName string
+
 	// conn                   *grpc.ClientConn
 	grpcClientMtx sync.RWMutex
 	role          string
@@ -194,6 +197,10 @@ func (c *ClientBase[T]) SetInternalTLSCertPool(cp *x509.CertPool) {
 	c.cpInternalTLS = cp
 }
 
+func (c *ClientBase[T]) SetInternalTLSServerName(cp string) {
+	c.internalTLSServerName = cp
+}
+
 // SetNewGrpcClientFunc sets newGrpcClient of client
 func (c *ClientBase[T]) SetNewGrpcClientFunc(f func(cc *grpc.ClientConn) T) {
 	c.newGrpcClient = f
@@ -264,12 +271,17 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 		compress = Zstd
 	}
 	if c.encryption {
-		log.Debug("Running in internalTLS mode with encryption enabled")
+		log.Ctx(ctx).Debug("Running in internalTLS mode with encryption enabled")
 		conn, err = grpc.DialContext(
 			dialContext,
 			addr,
 			// #nosec G402
-			grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{RootCAs: c.cpInternalTLS})),
+			grpc.WithTransportCredentials(credentials.NewTLS(
+				&tls.Config{
+					RootCAs:    c.cpInternalTLS,
+					ServerName: c.internalTLSServerName,
+				},
+			)),
 			grpc.WithBlock(),
 			grpc.WithDefaultCallOptions(
 				grpc.MaxCallRecvMsgSize(c.ClientMaxRecvSize),

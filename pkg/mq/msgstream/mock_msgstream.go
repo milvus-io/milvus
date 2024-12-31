@@ -74,9 +74,9 @@ func (_c *MockMsgStream_AsConsumer_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// AsProducer provides a mock function with given fields: channels
-func (_m *MockMsgStream) AsProducer(channels []string) {
-	_m.Called(channels)
+// AsProducer provides a mock function with given fields: ctx, channels
+func (_m *MockMsgStream) AsProducer(ctx context.Context, channels []string) {
+	_m.Called(ctx, channels)
 }
 
 // MockMsgStream_AsProducer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AsProducer'
@@ -85,14 +85,15 @@ type MockMsgStream_AsProducer_Call struct {
 }
 
 // AsProducer is a helper method to define mock.On call
+//   - ctx context.Context
 //   - channels []string
-func (_e *MockMsgStream_Expecter) AsProducer(channels interface{}) *MockMsgStream_AsProducer_Call {
-	return &MockMsgStream_AsProducer_Call{Call: _e.mock.On("AsProducer", channels)}
+func (_e *MockMsgStream_Expecter) AsProducer(ctx interface{}, channels interface{}) *MockMsgStream_AsProducer_Call {
+	return &MockMsgStream_AsProducer_Call{Call: _e.mock.On("AsProducer", ctx, channels)}
 }
 
-func (_c *MockMsgStream_AsProducer_Call) Run(run func(channels []string)) *MockMsgStream_AsProducer_Call {
+func (_c *MockMsgStream_AsProducer_Call) Run(run func(ctx context.Context, channels []string)) *MockMsgStream_AsProducer_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]string))
+		run(args[0].(context.Context), args[1].([]string))
 	})
 	return _c
 }
@@ -102,14 +103,14 @@ func (_c *MockMsgStream_AsProducer_Call) Return() *MockMsgStream_AsProducer_Call
 	return _c
 }
 
-func (_c *MockMsgStream_AsProducer_Call) RunAndReturn(run func([]string)) *MockMsgStream_AsProducer_Call {
+func (_c *MockMsgStream_AsProducer_Call) RunAndReturn(run func(context.Context, []string)) *MockMsgStream_AsProducer_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// Broadcast provides a mock function with given fields: _a0
-func (_m *MockMsgStream) Broadcast(_a0 *MsgPack) (map[string][]common.MessageID, error) {
-	ret := _m.Called(_a0)
+// Broadcast provides a mock function with given fields: _a0, _a1
+func (_m *MockMsgStream) Broadcast(_a0 context.Context, _a1 *MsgPack) (map[string][]common.MessageID, error) {
+	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Broadcast")
@@ -117,19 +118,19 @@ func (_m *MockMsgStream) Broadcast(_a0 *MsgPack) (map[string][]common.MessageID,
 
 	var r0 map[string][]common.MessageID
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*MsgPack) (map[string][]common.MessageID, error)); ok {
-		return rf(_a0)
+	if rf, ok := ret.Get(0).(func(context.Context, *MsgPack) (map[string][]common.MessageID, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(*MsgPack) map[string][]common.MessageID); ok {
-		r0 = rf(_a0)
+	if rf, ok := ret.Get(0).(func(context.Context, *MsgPack) map[string][]common.MessageID); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string][]common.MessageID)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*MsgPack) error); ok {
-		r1 = rf(_a0)
+	if rf, ok := ret.Get(1).(func(context.Context, *MsgPack) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -143,14 +144,15 @@ type MockMsgStream_Broadcast_Call struct {
 }
 
 // Broadcast is a helper method to define mock.On call
-//   - _a0 *MsgPack
-func (_e *MockMsgStream_Expecter) Broadcast(_a0 interface{}) *MockMsgStream_Broadcast_Call {
-	return &MockMsgStream_Broadcast_Call{Call: _e.mock.On("Broadcast", _a0)}
+//   - _a0 context.Context
+//   - _a1 *MsgPack
+func (_e *MockMsgStream_Expecter) Broadcast(_a0 interface{}, _a1 interface{}) *MockMsgStream_Broadcast_Call {
+	return &MockMsgStream_Broadcast_Call{Call: _e.mock.On("Broadcast", _a0, _a1)}
 }
 
-func (_c *MockMsgStream_Broadcast_Call) Run(run func(_a0 *MsgPack)) *MockMsgStream_Broadcast_Call {
+func (_c *MockMsgStream_Broadcast_Call) Run(run func(_a0 context.Context, _a1 *MsgPack)) *MockMsgStream_Broadcast_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*MsgPack))
+		run(args[0].(context.Context), args[1].(*MsgPack))
 	})
 	return _c
 }
@@ -160,7 +162,7 @@ func (_c *MockMsgStream_Broadcast_Call) Return(_a0 map[string][]common.MessageID
 	return _c
 }
 
-func (_c *MockMsgStream_Broadcast_Call) RunAndReturn(run func(*MsgPack) (map[string][]common.MessageID, error)) *MockMsgStream_Broadcast_Call {
+func (_c *MockMsgStream_Broadcast_Call) RunAndReturn(run func(context.Context, *MsgPack) (map[string][]common.MessageID, error)) *MockMsgStream_Broadcast_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -290,35 +292,35 @@ func (_c *MockMsgStream_Close_Call) RunAndReturn(run func()) *MockMsgStream_Clos
 	return _c
 }
 
-// EnableProduce provides a mock function with given fields: can
-func (_m *MockMsgStream) EnableProduce(can bool) {
+// ForceEnableProduce provides a mock function with given fields: can
+func (_m *MockMsgStream) ForceEnableProduce(can bool) {
 	_m.Called(can)
 }
 
-// MockMsgStream_EnableProduce_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EnableProduce'
-type MockMsgStream_EnableProduce_Call struct {
+// MockMsgStream_ForceEnableProduce_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ForceEnableProduce'
+type MockMsgStream_ForceEnableProduce_Call struct {
 	*mock.Call
 }
 
-// EnableProduce is a helper method to define mock.On call
+// ForceEnableProduce is a helper method to define mock.On call
 //   - can bool
-func (_e *MockMsgStream_Expecter) EnableProduce(can interface{}) *MockMsgStream_EnableProduce_Call {
-	return &MockMsgStream_EnableProduce_Call{Call: _e.mock.On("EnableProduce", can)}
+func (_e *MockMsgStream_Expecter) ForceEnableProduce(can interface{}) *MockMsgStream_ForceEnableProduce_Call {
+	return &MockMsgStream_ForceEnableProduce_Call{Call: _e.mock.On("ForceEnableProduce", can)}
 }
 
-func (_c *MockMsgStream_EnableProduce_Call) Run(run func(can bool)) *MockMsgStream_EnableProduce_Call {
+func (_c *MockMsgStream_ForceEnableProduce_Call) Run(run func(can bool)) *MockMsgStream_ForceEnableProduce_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(bool))
 	})
 	return _c
 }
 
-func (_c *MockMsgStream_EnableProduce_Call) Return() *MockMsgStream_EnableProduce_Call {
+func (_c *MockMsgStream_ForceEnableProduce_Call) Return() *MockMsgStream_ForceEnableProduce_Call {
 	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockMsgStream_EnableProduce_Call) RunAndReturn(run func(bool)) *MockMsgStream_EnableProduce_Call {
+func (_c *MockMsgStream_ForceEnableProduce_Call) RunAndReturn(run func(bool)) *MockMsgStream_ForceEnableProduce_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -428,17 +430,17 @@ func (_c *MockMsgStream_GetProduceChannels_Call) RunAndReturn(run func() []strin
 	return _c
 }
 
-// Produce provides a mock function with given fields: _a0
-func (_m *MockMsgStream) Produce(_a0 *MsgPack) error {
-	ret := _m.Called(_a0)
+// Produce provides a mock function with given fields: _a0, _a1
+func (_m *MockMsgStream) Produce(_a0 context.Context, _a1 *MsgPack) error {
+	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Produce")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*MsgPack) error); ok {
-		r0 = rf(_a0)
+	if rf, ok := ret.Get(0).(func(context.Context, *MsgPack) error); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -452,14 +454,15 @@ type MockMsgStream_Produce_Call struct {
 }
 
 // Produce is a helper method to define mock.On call
-//   - _a0 *MsgPack
-func (_e *MockMsgStream_Expecter) Produce(_a0 interface{}) *MockMsgStream_Produce_Call {
-	return &MockMsgStream_Produce_Call{Call: _e.mock.On("Produce", _a0)}
+//   - _a0 context.Context
+//   - _a1 *MsgPack
+func (_e *MockMsgStream_Expecter) Produce(_a0 interface{}, _a1 interface{}) *MockMsgStream_Produce_Call {
+	return &MockMsgStream_Produce_Call{Call: _e.mock.On("Produce", _a0, _a1)}
 }
 
-func (_c *MockMsgStream_Produce_Call) Run(run func(_a0 *MsgPack)) *MockMsgStream_Produce_Call {
+func (_c *MockMsgStream_Produce_Call) Run(run func(_a0 context.Context, _a1 *MsgPack)) *MockMsgStream_Produce_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*MsgPack))
+		run(args[0].(context.Context), args[1].(*MsgPack))
 	})
 	return _c
 }
@@ -469,7 +472,7 @@ func (_c *MockMsgStream_Produce_Call) Return(_a0 error) *MockMsgStream_Produce_C
 	return _c
 }
 
-func (_c *MockMsgStream_Produce_Call) RunAndReturn(run func(*MsgPack) error) *MockMsgStream_Produce_Call {
+func (_c *MockMsgStream_Produce_Call) RunAndReturn(run func(context.Context, *MsgPack) error) *MockMsgStream_Produce_Call {
 	_c.Call.Return(run)
 	return _c
 }

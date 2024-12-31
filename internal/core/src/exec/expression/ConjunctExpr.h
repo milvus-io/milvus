@@ -84,9 +84,21 @@ class PhyConjunctFilterExpr : public Expr {
 
     void
     MoveCursor() override {
-        for (auto& input : inputs_) {
-            input->MoveCursor();
+        if (!has_offset_input_) {
+            for (auto& input : inputs_) {
+                input->MoveCursor();
+            }
         }
+    }
+
+    bool
+    SupportOffsetInput() override {
+        for (auto& input : inputs_) {
+            if (!(input->SupportOffsetInput())) {
+                return false;
+            }
+        }
+        return true;
     }
 
  private:

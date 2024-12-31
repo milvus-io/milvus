@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -82,7 +81,7 @@ type ShardDelegator interface {
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
-	SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition)
+	SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition)
 	GetTargetVersion() int64
 	GetDeleteBufferSize() (entryNum int64, memorySize int64)
 
@@ -90,6 +89,10 @@ type ShardDelegator interface {
 	AddExcludedSegments(excludeInfo map[int64]uint64)
 	VerifyExcludedSegments(segmentID int64, ts uint64) bool
 	TryCleanExcludedSegments(ts uint64)
+
+	// tsafe
+	UpdateTSafe(ts uint64)
+	GetTSafe() uint64
 
 	// control
 	Serviceable() bool
@@ -117,9 +120,7 @@ type shardDelegator struct {
 	idfOracle    IDFOracle
 
 	segmentManager segments.SegmentManager
-	tsafeManager   tsafe.Manager
 	pkOracle       pkoracle.PkOracle
-	level0Mut      sync.RWMutex
 	// stream delete buffer
 	deleteMut    sync.RWMutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
@@ -268,25 +269,6 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 	return nodeReq
 }
 
-func (sd *shardDelegator) getTargetPartitions(reqPartitions []int64) (searchPartitions []int64, err error) {
-	existPartitions := sd.collection.GetPartitions()
-
-	// search all loaded partitions if req partition ids not provided
-	if len(reqPartitions) == 0 {
-		searchPartitions = existPartitions
-		return searchPartitions, nil
-	}
-
-	// use brute search to avoid map struct cost
-	for _, partition := range reqPartitions {
-		if !funcutil.SliceContain(existPartitions, partition) {
-			return nil, merr.WrapErrPartitionNotLoaded(reqPartitions)
-		}
-	}
-	searchPartitions = reqPartitions
-	return searchPartitions, nil
-}
-
 // Search preforms search operation on shard.
 func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest, sealed []SnapshotItem, growing []SegmentEntry) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
@@ -382,19 +364,10 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 
 	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
 	if err != nil {
-		log.Warn("delegator failed to search, current distribution is not serviceable")
-		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
-	}
-	defer sd.distribution.Unpin(version)
-	targetPartitions, err := sd.getTargetPartitions(req.GetReq().GetPartitionIDs())
-	if err != nil {
+		log.Warn("delegator failed to search, current distribution is not serviceable", zap.Error(err))
 		return nil, err
 	}
-	// set target partition ids to sub task request
-	req.Req.PartitionIDs = targetPartitions
-	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
-		return funcutil.SliceContain(targetPartitions, segment.PartitionID)
-	})
+	defer sd.distribution.Unpin(version)
 
 	if req.GetReq().GetIsAdvanced() {
 		futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetSubReqs()))
@@ -499,21 +472,11 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 
 	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
 	if err != nil {
-		log.Warn("delegator failed to query, current distribution is not serviceable")
-		return merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
+		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
+		return err
 	}
 	defer sd.distribution.Unpin(version)
 
-	targetPartitions, err := sd.getTargetPartitions(req.GetReq().GetPartitionIDs())
-	if err != nil {
-		return err
-	}
-	// set target partition ids to sub task request
-	req.Req.PartitionIDs = targetPartitions
-
-	growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
-		return funcutil.SliceContain(targetPartitions, segment.PartitionID)
-	})
 	if req.Req.IgnoreGrowing {
 		growing = []SegmentEntry{}
 	}
@@ -572,24 +535,13 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 
 	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
 	if err != nil {
-		log.Warn("delegator failed to query, current distribution is not serviceable")
-		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not servcieable")
+		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
+		return nil, err
 	}
 	defer sd.distribution.Unpin(version)
 
-	targetPartitions, err := sd.getTargetPartitions(req.GetReq().GetPartitionIDs())
-	if err != nil {
-		return nil, err
-	}
-	// set target partition ids to sub task request
-	req.Req.PartitionIDs = targetPartitions
-
 	if req.Req.IgnoreGrowing {
 		growing = []SegmentEntry{}
-	} else {
-		growing = lo.Filter(growing, func(segment SegmentEntry, _ int) bool {
-			return funcutil.SliceContain(targetPartitions, segment.PartitionID)
-		})
 	}
 
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
@@ -839,41 +791,18 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 	}
 }
 
-// watchTSafe is the worker function to update serviceable timestamp.
-func (sd *shardDelegator) watchTSafe() {
-	defer sd.lifetime.Done()
-	listener := sd.tsafeManager.WatchChannel(sd.vchannelName)
-	sd.updateTSafe()
-	log := sd.getLogger(context.Background())
-	for {
-		select {
-		case _, ok := <-listener.On():
-			if !ok {
-				// listener close
-				log.Warn("tsafe listener closed")
-				return
-			}
-			sd.updateTSafe()
-		case <-sd.lifetime.CloseCh():
-			log.Info("updateTSafe quit")
-			// shard delegator closed
-			return
-		}
-	}
-}
-
 // updateTSafe read current tsafe value from tsafeManager.
-func (sd *shardDelegator) updateTSafe() {
+func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
 	sd.tsCond.L.Lock()
-	tsafe, err := sd.tsafeManager.Get(sd.vchannelName)
-	if err != nil {
-		log.Warn("tsafeManager failed to get lastest", zap.Error(err))
-	}
 	if tsafe > sd.latestTsafe.Load() {
 		sd.latestTsafe.Store(tsafe)
 		sd.tsCond.Broadcast()
 	}
 	sd.tsCond.L.Unlock()
+}
+
+func (sd *shardDelegator) GetTSafe() uint64 {
+	return sd.latestTsafe.Load()
 }
 
 // Close closes the delegator.
@@ -937,7 +866,7 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 
 // NewShardDelegator creates a new ShardDelegator instance with all fields initialized.
 func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
-	workerManager cluster.Manager, manager *segments.Manager, tsafeManager tsafe.Manager, loader segments.Loader,
+	workerManager cluster.Manager, manager *segments.Manager, loader segments.Loader,
 	factory msgstream.Factory, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
 ) (ShardDelegator, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID),
@@ -973,7 +902,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
 		pkOracle:         pkoracle.NewPkOracle(),
-		tsafeManager:     tsafeManager,
 		latestTsafe:      atomic.NewUint64(startTs),
 		loader:           loader,
 		factory:          factory,
@@ -1006,9 +934,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
-	if sd.lifetime.Add(lifetime.NotStopped) == nil {
-		go sd.watchTSafe()
-	}
 	log.Info("finish build new shardDelegator")
 	return sd, nil
 }

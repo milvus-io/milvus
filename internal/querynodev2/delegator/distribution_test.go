@@ -217,9 +217,10 @@ func (s *DistributionSuite) compareSnapshotItems(target, value []SnapshotItem) {
 
 func (s *DistributionSuite) TestAddGrowing() {
 	type testCase struct {
-		tag      string
-		input    []SegmentEntry
-		expected []SegmentEntry
+		tag          string
+		workingParts []int64
+		input        []SegmentEntry
+		expected     []SegmentEntry
 	}
 
 	cases := []testCase{
@@ -229,14 +230,26 @@ func (s *DistributionSuite) TestAddGrowing() {
 			expected: []SegmentEntry{},
 		},
 		{
-			tag: "normal case",
+			tag: "normal_case",
 			input: []SegmentEntry{
 				{SegmentID: 1, PartitionID: 1},
 				{SegmentID: 2, PartitionID: 2},
 			},
+			workingParts: []int64{1, 2},
 			expected: []SegmentEntry{
+				{SegmentID: 1, PartitionID: 1, TargetVersion: 1000},
+				{SegmentID: 2, PartitionID: 2, TargetVersion: 1000},
+			},
+		},
+		{
+			tag: "partial_partition_working",
+			input: []SegmentEntry{
 				{SegmentID: 1, PartitionID: 1},
 				{SegmentID: 2, PartitionID: 2},
+			},
+			workingParts: []int64{1},
+			expected: []SegmentEntry{
+				{SegmentID: 1, PartitionID: 1, TargetVersion: 1000},
 			},
 		},
 	}
@@ -247,6 +260,7 @@ func (s *DistributionSuite) TestAddGrowing() {
 			defer s.TearDownTest()
 
 			s.dist.AddGrowing(tc.input...)
+			s.dist.SyncTargetVersion(1000, tc.workingParts, []int64{1, 2}, nil, nil)
 			_, growing, version, err := s.dist.PinReadableSegments()
 			s.Require().NoError(err)
 			defer s.dist.Unpin(version)
@@ -305,7 +319,7 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 					},
 				},
 			},
-			expectGrowing: []SegmentEntry{{SegmentID: 4}},
+			expectGrowing: []SegmentEntry{{SegmentID: 4, TargetVersion: unreadableTargetVersion}},
 		},
 		{
 			tag: "remove with wrong nodeID",
@@ -341,7 +355,7 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 					},
 				},
 			},
-			expectGrowing: []SegmentEntry{{SegmentID: 4}, {SegmentID: 5}},
+			expectGrowing: []SegmentEntry{{SegmentID: 4, TargetVersion: unreadableTargetVersion}, {SegmentID: 5, TargetVersion: unreadableTargetVersion}},
 		},
 		{
 			tag: "remove with wildcardNodeID",
@@ -376,7 +390,7 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 					},
 				},
 			},
-			expectGrowing: []SegmentEntry{{SegmentID: 4}, {SegmentID: 5}},
+			expectGrowing: []SegmentEntry{{SegmentID: 4, TargetVersion: unreadableTargetVersion}, {SegmentID: 5, TargetVersion: unreadableTargetVersion}},
 		},
 		{
 			tag: "remove with read",
@@ -421,7 +435,7 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 					},
 				},
 			},
-			expectGrowing: []SegmentEntry{{SegmentID: 4}},
+			expectGrowing: []SegmentEntry{{SegmentID: 4, TargetVersion: unreadableTargetVersion}},
 		},
 	}
 
@@ -714,7 +728,7 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 
 	s.dist.AddGrowing(growing...)
 	s.dist.AddDistributions(sealed...)
-	s.dist.SyncTargetVersion(2, []int64{2, 3}, []int64{6}, []int64{})
+	s.dist.SyncTargetVersion(2, []int64{1}, []int64{2, 3}, []int64{6}, []int64{})
 
 	s1, s2, _, err := s.dist.PinReadableSegments()
 	s.Require().NoError(err)
@@ -726,13 +740,13 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 	s.Len(s2, 3)
 
 	s.dist.serviceable.Store(true)
-	s.dist.SyncTargetVersion(2, []int64{222}, []int64{}, []int64{})
+	s.dist.SyncTargetVersion(2, []int64{1}, []int64{222}, []int64{}, []int64{})
 	s.True(s.dist.Serviceable())
 
-	s.dist.SyncTargetVersion(2, []int64{}, []int64{333}, []int64{})
+	s.dist.SyncTargetVersion(2, []int64{1}, []int64{}, []int64{333}, []int64{})
 	s.False(s.dist.Serviceable())
 
-	s.dist.SyncTargetVersion(2, []int64{}, []int64{333}, []int64{1, 2, 3})
+	s.dist.SyncTargetVersion(2, []int64{1}, []int64{}, []int64{333}, []int64{1, 2, 3})
 	_, _, _, err = s.dist.PinReadableSegments()
 	s.Error(err)
 }

@@ -51,6 +51,7 @@ type Client struct {
 	grpcClient grpcclient.GrpcClient[datapb.DataCoordClient]
 	sess       *sessionutil.Session
 	sourceID   int64
+	ctx        context.Context
 }
 
 // NewClient creates a new client instance
@@ -58,7 +59,7 @@ func NewClient(ctx context.Context) (types.DataCoordClient, error) {
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("DataCoordClient NewClient failed", zap.Error(err))
+		log.Ctx(ctx).Debug("DataCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
 
@@ -66,6 +67,7 @@ func NewClient(ctx context.Context) (types.DataCoordClient, error) {
 	client := &Client{
 		grpcClient: grpcclient.NewClientBase[datapb.DataCoordClient](config, "milvus.proto.data.DataCoord"),
 		sess:       sess,
+		ctx:        ctx,
 	}
 	client.grpcClient.SetRole(typeutil.DataCoordRole)
 	client.grpcClient.SetGetAddrFunc(client.getDataCoordAddr)
@@ -76,10 +78,11 @@ func NewClient(ctx context.Context) (types.DataCoordClient, error) {
 		client.grpcClient.EnableEncryption()
 		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "Datacoord")
 		if err != nil {
-			log.Error("Failed to create cert pool for Datacoord client")
+			log.Ctx(ctx).Error("Failed to create cert pool for Datacoord client")
 			return nil, err
 		}
 		client.grpcClient.SetInternalTLSCertPool(cp)
+		client.grpcClient.SetInternalTLSServerName(Params.InternalTLSCfg.InternalTLSSNI.GetValue())
 	}
 	return client, nil
 }
@@ -90,6 +93,7 @@ func (c *Client) newGrpcClient(cc *grpc.ClientConn) datapb.DataCoordClient {
 
 func (c *Client) getDataCoordAddr() (string, error) {
 	key := c.grpcClient.GetRole()
+	log := log.Ctx(c.ctx)
 	msess, _, err := c.sess.GetSessions(key)
 	if err != nil {
 		log.Debug("DataCoordClient, getSessions failed", zap.Any("key", key), zap.Error(err))

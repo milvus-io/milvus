@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -1678,4 +1679,177 @@ func RequestHandlerFunc(c *gin.Context) {
 		return
 	}
 	c.Next()
+}
+
+func generateTemplateArrayData(list []interface{}) *schemapb.TemplateArrayValue {
+	dtype := getTemplateArrayType(list)
+	var data *schemapb.TemplateArrayValue
+	switch dtype {
+	case schemapb.DataType_Bool:
+		result := make([]bool, len(list))
+		for i, item := range list {
+			result[i] = item.(bool)
+		}
+		data = &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_BoolData{
+				BoolData: &schemapb.BoolArray{
+					Data: result,
+				},
+			},
+		}
+	case schemapb.DataType_String:
+		result := make([]string, len(list))
+		for i, item := range list {
+			result[i] = item.(string)
+		}
+		data = &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_StringData{
+				StringData: &schemapb.StringArray{
+					Data: result,
+				},
+			},
+		}
+	case schemapb.DataType_Int64:
+		result := make([]int64, len(list))
+		for i, item := range list {
+			result[i] = int64(item.(float64))
+		}
+		data = &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_LongData{
+				LongData: &schemapb.LongArray{
+					Data: result,
+				},
+			},
+		}
+	case schemapb.DataType_Float:
+		result := make([]float64, len(list))
+		for i, item := range list {
+			result[i] = item.(float64)
+		}
+		data = &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_DoubleData{
+				DoubleData: &schemapb.DoubleArray{
+					Data: result,
+				},
+			},
+		}
+	case schemapb.DataType_Array:
+		result := make([]*schemapb.TemplateArrayValue, len(list))
+		for i, item := range list {
+			result[i] = generateTemplateArrayData(item.([]interface{}))
+		}
+		data = &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_ArrayData{
+				ArrayData: &schemapb.TemplateArrayValueArray{
+					Data: result,
+				},
+			},
+		}
+	case schemapb.DataType_JSON:
+		result := make([][]byte, len(list))
+		for i, item := range list {
+			bytes, err := json.Marshal(item)
+			// won't happen
+			if err != nil {
+				panic(fmt.Sprintf("marshal data(%v) fail, please check it!", item))
+			}
+			result[i] = bytes
+		}
+		data = &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_JsonData{
+				JsonData: &schemapb.JSONArray{
+					Data: result,
+				},
+			},
+		}
+	// won't happen
+	default:
+		panic(fmt.Sprintf("Unexpected data(%v) type when generateTemplateArrayData, please check it!", list))
+	}
+	return data
+}
+
+func getTemplateArrayType(value []interface{}) schemapb.DataType {
+	dtype := getTemplateType(value[0])
+
+	for _, v := range value {
+		if getTemplateType(v) != dtype {
+			return schemapb.DataType_JSON
+		}
+	}
+	return dtype
+}
+
+func getTemplateType(value interface{}) schemapb.DataType {
+	switch v := value.(type) {
+	case bool:
+		return schemapb.DataType_Bool
+	case string:
+		return schemapb.DataType_String
+	case float64:
+		// note: all passed number is float64 type
+		// if field type is float64, but value in ExpressionTemplate is int64, it's ok to use TemplateValue_Int64Val to store it
+		// it will convert to float64 in ./internal/parser/planparserv2/utils.go, Line 233
+		if v == math.Trunc(v) && v >= math.MinInt64 && v <= math.MaxInt64 {
+			return schemapb.DataType_Int64
+		}
+		return schemapb.DataType_Float
+	// it won't happen
+	// case int64:
+	case []interface{}:
+		return schemapb.DataType_Array
+	default:
+		panic(fmt.Sprintf("Unexpected data(%v) when getTemplateType, please check it!", value))
+	}
+}
+
+func generateExpressionTemplate(params map[string]interface{}) map[string]*schemapb.TemplateValue {
+	expressionTemplate := make(map[string]*schemapb.TemplateValue, len(params))
+
+	for name, value := range params {
+		dtype := getTemplateType(value)
+		var data *schemapb.TemplateValue
+		switch dtype {
+		case schemapb.DataType_Bool:
+			data = &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_BoolVal{
+					BoolVal: value.(bool),
+				},
+			}
+		case schemapb.DataType_String:
+			data = &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_StringVal{
+					StringVal: value.(string),
+				},
+			}
+		case schemapb.DataType_Int64:
+			data = &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_Int64Val{
+					Int64Val: int64(value.(float64)),
+				},
+			}
+		case schemapb.DataType_Float:
+			data = &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_FloatVal{
+					FloatVal: value.(float64),
+				},
+			}
+		case schemapb.DataType_Array:
+			data = &schemapb.TemplateValue{
+				Val: &schemapb.TemplateValue_ArrayVal{
+					ArrayVal: generateTemplateArrayData(value.([]interface{})),
+				},
+			}
+		default:
+			panic(fmt.Sprintf("Unexpected data(%v) when generateExpressionTemplate, please check it!", data))
+		}
+		expressionTemplate[name] = data
+	}
+	return expressionTemplate
+}
+
+func WrapErrorToResponse(err error) *milvuspb.BoolResponse {
+	return &milvuspb.BoolResponse{
+		Status: merr.Status(err),
+	}
 }

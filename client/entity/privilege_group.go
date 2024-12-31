@@ -14,42 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package tsafe
+package entity
 
-import (
-	"go.uber.org/atomic"
-
-	. "github.com/milvus-io/milvus/pkg/util/typeutil"
-)
-
-type tSafe struct {
-	channel string
-	tSafe   atomic.Uint64
-	closed  atomic.Bool
-}
-
-func (ts *tSafe) valid() bool {
-	return !ts.closed.Load()
-}
-
-func (ts *tSafe) close() {
-	ts.closed.Store(true)
-}
-
-func (ts *tSafe) get() Timestamp {
-	return ts.tSafe.Load()
-}
-
-func (ts *tSafe) set(t Timestamp) {
-	ts.tSafe.Store(t)
-}
-
-func newTSafe(channel string, timestamp uint64) *tSafe {
-	ts := &tSafe{
-		channel: channel,
-	}
-	ts.tSafe.Store(timestamp)
-	ts.closed.Store(false)
-
-	return ts
+// PrivilegeGroup is the entity model for custom privilege group.
+type PrivilegeGroup struct {
+	GroupName  string
+	Privileges []string
 }

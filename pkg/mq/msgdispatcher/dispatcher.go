@@ -80,10 +80,14 @@ type Dispatcher struct {
 	stream msgstream.MsgStream
 }
 
-func NewDispatcher(ctx context.Context,
-	factory msgstream.Factory, isMain bool,
-	pchannel string, position *Pos,
-	subName string, subPos SubPos,
+func NewDispatcher(
+	ctx context.Context,
+	factory msgstream.Factory,
+	isMain bool,
+	pchannel string,
+	position *Pos,
+	subName string,
+	subPos SubPos,
 	lagNotifyChan chan struct{},
 	lagTargets *typeutil.ConcurrentMap[string, *target],
 	includeCurrentMsg bool,
@@ -91,7 +95,16 @@ func NewDispatcher(ctx context.Context,
 	log := log.With(zap.String("pchannel", pchannel),
 		zap.String("subName", subName), zap.Bool("isMain", isMain))
 	log.Info("creating dispatcher...")
-	stream, err := factory.NewTtMsgStream(ctx)
+
+	var stream msgstream.MsgStream
+	var err error
+	defer func() {
+		if err != nil && stream != nil {
+			stream.Close()
+		}
+	}()
+
+	stream, err = factory.NewTtMsgStream(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +119,6 @@ func NewDispatcher(ctx context.Context,
 
 		err = stream.Seek(ctx, []*Pos{position}, includeCurrentMsg)
 		if err != nil {
-			stream.Close()
 			log.Error("seek failed", zap.Error(err))
 			return nil, err
 		}
@@ -114,7 +126,7 @@ func NewDispatcher(ctx context.Context,
 		log.Info("seek successfully", zap.Uint64("posTs", position.GetTimestamp()),
 			zap.Time("posTime", posTime), zap.Duration("tsLag", time.Since(posTime)))
 	} else {
-		err := stream.AsConsumer(ctx, []string{pchannel}, subName, subPos)
+		err = stream.AsConsumer(ctx, []string{pchannel}, subName, subPos)
 		if err != nil {
 			log.Error("asConsumer failed", zap.Error(err))
 			return nil, err
@@ -252,13 +264,17 @@ func (d *Dispatcher) groupingMsgs(pack *MsgPack) map[string]*MsgPack {
 	// init packs for all targets, even though there's no msg in pack,
 	// but we still need to dispatch time ticks to the targets.
 	targetPacks := make(map[string]*MsgPack)
-	for vchannel := range d.targets {
+	replicateConfigs := make(map[string]*msgstream.ReplicateConfig)
+	for vchannel, t := range d.targets {
 		targetPacks[vchannel] = &MsgPack{
 			BeginTs:        pack.BeginTs,
 			EndTs:          pack.EndTs,
 			Msgs:           make([]msgstream.TsMsg, 0),
 			StartPositions: pack.StartPositions,
 			EndPositions:   pack.EndPositions,
+		}
+		if t.replicateConfig != nil {
+			replicateConfigs[vchannel] = t.replicateConfig
 		}
 	}
 	// group messages by vchannel
@@ -279,9 +295,16 @@ func (d *Dispatcher) groupingMsgs(pack *MsgPack) map[string]*MsgPack {
 			collectionID = strconv.FormatInt(msg.(*msgstream.DropPartitionMsg).GetCollectionID(), 10)
 		}
 		if vchannel == "" {
-			// for non-dml msg, such as CreateCollection, DropCollection, ...
 			// we need to dispatch it to the vchannel of this collection
 			for k := range targetPacks {
+				if msg.Type() == commonpb.MsgType_Replicate {
+					config := replicateConfigs[k]
+					if config != nil && msgstream.MatchReplicateID(msg, config.ReplicateID) {
+						targetPacks[k].Msgs = append(targetPacks[k].Msgs, msg)
+					}
+					continue
+				}
+
 				if !strings.Contains(k, collectionID) {
 					continue
 				}
@@ -295,7 +318,61 @@ func (d *Dispatcher) groupingMsgs(pack *MsgPack) map[string]*MsgPack {
 			targetPacks[vchannel].Msgs = append(targetPacks[vchannel].Msgs, msg)
 		}
 	}
+	replicateEndChannels := make(map[string]struct{})
+	for vchannel, c := range replicateConfigs {
+		if len(targetPacks[vchannel].Msgs) == 0 {
+			delete(targetPacks, vchannel) // no replicate msg, can't send pack
+			continue
+		}
+		// calculate the new pack ts
+		beginTs := targetPacks[vchannel].Msgs[0].BeginTs()
+		endTs := targetPacks[vchannel].Msgs[0].EndTs()
+		newMsgs := make([]msgstream.TsMsg, 0)
+		for _, msg := range targetPacks[vchannel].Msgs {
+			if msg.BeginTs() < beginTs {
+				beginTs = msg.BeginTs()
+			}
+			if msg.EndTs() > endTs {
+				endTs = msg.EndTs()
+			}
+			if msg.Type() == commonpb.MsgType_Replicate {
+				replicateMsg := msg.(*msgstream.ReplicateMsg)
+				if c.CheckFunc(replicateMsg) {
+					replicateEndChannels[vchannel] = struct{}{}
+				}
+				continue
+			}
+			newMsgs = append(newMsgs, msg)
+		}
+		targetPacks[vchannel].Msgs = newMsgs
+		d.resetMsgPackTS(targetPacks[vchannel], beginTs, endTs)
+	}
+	for vchannel := range replicateEndChannels {
+		if t, ok := d.targets[vchannel]; ok {
+			t.replicateConfig = nil
+			log.Info("replicate end, set replicate config nil", zap.String("vchannel", vchannel))
+		}
+	}
 	return targetPacks
+}
+
+func (d *Dispatcher) resetMsgPackTS(pack *MsgPack, newBeginTs, newEndTs typeutil.Timestamp) {
+	pack.BeginTs = newBeginTs
+	pack.EndTs = newEndTs
+	startPositions := make([]*msgstream.MsgPosition, 0)
+	endPositions := make([]*msgstream.MsgPosition, 0)
+	for _, pos := range pack.StartPositions {
+		startPosition := typeutil.Clone(pos)
+		startPosition.Timestamp = newBeginTs
+		startPositions = append(startPositions, startPosition)
+	}
+	for _, pos := range pack.EndPositions {
+		endPosition := typeutil.Clone(pos)
+		endPosition.Timestamp = newEndTs
+		endPositions = append(endPositions, endPosition)
+	}
+	pack.StartPositions = startPositions
+	pack.EndPositions = endPositions
 }
 
 func (d *Dispatcher) nonBlockingNotify() {

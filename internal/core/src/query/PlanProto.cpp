@@ -53,6 +53,30 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             nlohmann::json::parse(query_info_proto.search_params());
         search_info.materialized_view_involved =
             query_info_proto.materialized_view_involved();
+        // currently, iterative filter does not support range search
+        if (!search_info.search_params_.contains(RADIUS)) {
+            if (query_info_proto.hints() != "") {
+                if (query_info_proto.hints() == ITERATIVE_FILTER) {
+                    search_info.iterative_filter_execution = true;
+                } else {
+                    // check if hints is valid
+                    PanicInfo(ConfigInvalid,
+                              "hints: {} not supported",
+                              query_info_proto.hints());
+                }
+            }
+            if (!search_info.iterative_filter_execution &&
+                search_info.search_params_.contains(HINTS)) {
+                if (search_info.search_params_[HINTS] == ITERATIVE_FILTER) {
+                    search_info.iterative_filter_execution = true;
+                } else {
+                    // check if hints is valid
+                    PanicInfo(ConfigInvalid,
+                              "hints: {} not supported",
+                              search_info.search_params_[HINTS]);
+                }
+            }
+        }
 
         if (query_info_proto.bm25_avgdl() > 0) {
             search_info.search_params_[knowhere::meta::BM25_AVGDL] =
@@ -69,6 +93,20 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             search_info.strict_group_size_ =
                 query_info_proto.strict_group_size();
         }
+
+        if (query_info_proto.has_search_iterator_v2_info()) {
+            auto& iterator_v2_info_proto =
+                query_info_proto.search_iterator_v2_info();
+            search_info.iterator_v2_info_ = SearchIteratorV2Info{
+                .token = iterator_v2_info_proto.token(),
+                .batch_size = iterator_v2_info_proto.batch_size(),
+            };
+            if (iterator_v2_info_proto.has_last_bound()) {
+                search_info.iterator_v2_info_->last_bound =
+                    iterator_v2_info_proto.last_bound();
+            }
+        }
+
         return search_info;
     };
 
@@ -94,7 +132,24 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
 
     milvus::plan::PlanNodePtr plannode;
     std::vector<milvus::plan::PlanNodePtr> sources;
-    if (anns_proto.has_predicates()) {
+
+    // mvcc node -> vector search node -> iterative filter node
+    auto iterative_filter_plan = [&]() {
+        plannode = std::make_shared<milvus::plan::MvccNode>(
+            milvus::plan::GetNextPlanNodeId());
+        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+        plannode = std::make_shared<milvus::plan::VectorSearchNode>(
+            milvus::plan::GetNextPlanNodeId(), sources);
+        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+
+        auto expr = ParseExprs(anns_proto.predicates());
+        plannode = std::make_shared<plan::FilterNode>(
+            milvus::plan::GetNextPlanNodeId(), expr, sources);
+        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+    };
+
+    // pre filter node -> mvcc node -> vector search node
+    auto pre_filter_plan = [&]() {
         plannode = std::move(expr_parser());
         if (plan_node->search_info_.materialized_view_involved) {
             const auto expr_info = plannode->GatherInfo();
@@ -113,15 +168,32 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
                 materialized_view_search_info;
         }
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+        plannode = std::make_shared<milvus::plan::MvccNode>(
+            milvus::plan::GetNextPlanNodeId(), sources);
+        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+
+        plannode = std::make_shared<milvus::plan::VectorSearchNode>(
+            milvus::plan::GetNextPlanNodeId(), sources);
+        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+    };
+
+    if (anns_proto.has_predicates()) {
+        // currently limit iterative filter scope to search only
+        if (plan_node->search_info_.iterative_filter_execution &&
+            plan_node->search_info_.group_by_field_id_ == std::nullopt) {
+            iterative_filter_plan();
+        } else {
+            pre_filter_plan();
+        }
+    } else {
+        plannode = std::make_shared<milvus::plan::MvccNode>(
+            milvus::plan::GetNextPlanNodeId(), sources);
+        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+
+        plannode = std::make_shared<milvus::plan::VectorSearchNode>(
+            milvus::plan::GetNextPlanNodeId(), sources);
+        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
     }
-
-    plannode = std::make_shared<milvus::plan::MvccNode>(
-        milvus::plan::GetNextPlanNodeId(), sources);
-    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
-
-    plannode = std::make_shared<milvus::plan::VectorSearchNode>(
-        milvus::plan::GetNextPlanNodeId(), sources);
-    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
 
     if (plan_node->search_info_.group_by_field_id_ != std::nullopt) {
         plannode = std::make_shared<milvus::plan::GroupByNode>(

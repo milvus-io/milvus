@@ -277,17 +277,17 @@ type FailMsgStream struct {
 	errBroadcast bool
 }
 
-func (ms *FailMsgStream) Close()                                     {}
-func (ms *FailMsgStream) Chan() <-chan *msgstream.MsgPack            { return nil }
-func (ms *FailMsgStream) AsProducer(channels []string)               {}
-func (ms *FailMsgStream) AsReader(channels []string, subName string) {}
+func (ms *FailMsgStream) Close()                                            {}
+func (ms *FailMsgStream) Chan() <-chan *msgstream.MsgPack                   { return nil }
+func (ms *FailMsgStream) AsProducer(ctx context.Context, channels []string) {}
+func (ms *FailMsgStream) AsReader(channels []string, subName string)        {}
 func (ms *FailMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position common.SubscriptionInitialPosition) error {
 	return nil
 }
-func (ms *FailMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc) {}
-func (ms *FailMsgStream) GetProduceChannels() []string                  { return nil }
-func (ms *FailMsgStream) Produce(*msgstream.MsgPack) error              { return nil }
-func (ms *FailMsgStream) Broadcast(*msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
+func (ms *FailMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc)     {}
+func (ms *FailMsgStream) GetProduceChannels() []string                      { return nil }
+func (ms *FailMsgStream) Produce(context.Context, *msgstream.MsgPack) error { return nil }
+func (ms *FailMsgStream) Broadcast(context.Context, *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
 	if ms.errBroadcast {
 		return nil, errors.New("broadcast error")
 	}

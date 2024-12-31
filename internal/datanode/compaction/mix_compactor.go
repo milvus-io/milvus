@@ -40,13 +40,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type mixCompactionTask struct {
-	binlogIO  io.BinlogIO
-	currentTs typeutil.Timestamp
+	binlogIO    io.BinlogIO
+	currentTime time.Time
 
 	plan *datapb.CompactionPlan
 
@@ -74,13 +73,13 @@ func NewMixCompactionTask(
 ) *mixCompactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
 	return &mixCompactionTask{
-		ctx:       ctx1,
-		cancel:    cancel,
-		binlogIO:  binlogIO,
-		plan:      plan,
-		tr:        timerecord.NewTimeRecorder("mergeSplit compaction"),
-		currentTs: tsoutil.GetCurrentTime(),
-		done:      make(chan struct{}, 1),
+		ctx:         ctx1,
+		cancel:      cancel,
+		binlogIO:    binlogIO,
+		plan:        plan,
+		tr:          timerecord.NewTimeRecorder("mergeSplit compaction"),
+		currentTime: time.Now(),
+		done:        make(chan struct{}, 1),
 	}
 }
 
@@ -201,23 +200,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		log.Warn("compact wrong, fail to merge deltalogs", zap.Error(err))
 		return
 	}
-
-	isValueDeleted := func(pk any, ts typeutil.Timestamp) bool {
-		oldts, ok := delta[pk]
-		// insert task and delete task has the same ts when upsert
-		// here should be < instead of <=
-		// to avoid the upsert data to be deleted after compact
-		if ok && ts < oldts {
-			deletedRowCount++
-			return true
-		}
-		// Filtering expired entity
-		if isExpiredEntity(t.plan.GetCollectionTtl(), t.currentTs, typeutil.Timestamp(ts)) {
-			expiredRowCount++
-			return true
-		}
-		return false
-	}
+	entityFilter := newEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
 	reader, err := storage.NewCompositeBinlogRecordReader(blobs)
 	if err != nil {
@@ -265,7 +248,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				panic("invalid data type")
 			}
 			ts := typeutil.Timestamp(tsArray.Value(i))
-			if isValueDeleted(pk, ts) {
+			if entityFilter.Filtered(pk, ts) {
 				if sliceStart != -1 {
 					err = writeSlice(r, sliceStart, i)
 					if err != nil {
@@ -288,6 +271,14 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			}
 		}
 	}
+
+	deltalogDeleteEntriesCount := len(delta)
+	deletedRowCount = int64(entityFilter.GetDeletedCount())
+	expiredRowCount = int64(entityFilter.GetExpiredCount())
+
+	metrics.DataNodeCompactionDeleteCount.WithLabelValues(fmt.Sprint(t.collectionID)).Add(float64(deltalogDeleteEntriesCount))
+	metrics.DataNodeCompactionMissingDeleteCount.WithLabelValues(fmt.Sprint(t.collectionID)).Add(float64(entityFilter.GetMissingDeleteCount()))
+
 	return
 }
 
@@ -329,19 +320,25 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, errors.New("illegal compaction plan")
 	}
 
-	allSorted := true
-	for _, segment := range t.plan.GetSegmentBinlogs() {
-		if !segment.GetIsSorted() {
-			allSorted = false
-			break
+	sortMergeAppicable := paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool()
+	if sortMergeAppicable {
+		for _, segment := range t.plan.GetSegmentBinlogs() {
+			if !segment.GetIsSorted() {
+				sortMergeAppicable = false
+				break
+			}
+		}
+		if len(insertPaths) <= 1 || len(insertPaths) > paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt() {
+			// sort merge is not applicable if there is only one segment or too many segments
+			sortMergeAppicable = false
 		}
 	}
 
 	var res []*datapb.CompactionSegment
-	if paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool() && allSorted && len(t.plan.GetSegmentBinlogs()) > 1 {
-		log.Info("all segments are sorted, use merge sort")
+	if sortMergeAppicable {
+		log.Info("compact by merge sort")
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
-			t.plan.GetSegmentBinlogs(), t.tr, t.currentTs, t.plan.GetCollectionTtl(), t.bm25FieldIDs)
+			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.bm25FieldIDs)
 		if err != nil {
 			log.Warn("compact wrong, fail to merge sort segments", zap.Error(err))
 			return nil, err

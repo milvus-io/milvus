@@ -25,31 +25,36 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type SyncNewCreatedPartitionJob struct {
 	*BaseJob
-	req     *querypb.SyncNewCreatedPartitionRequest
-	meta    *meta.Meta
-	cluster session.Cluster
-	broker  meta.Broker
+	req            *querypb.SyncNewCreatedPartitionRequest
+	meta           *meta.Meta
+	cluster        session.Cluster
+	broker         meta.Broker
+	targetObserver *observers.TargetObserver
+	targetMgr      meta.TargetManagerInterface
 }
 
 func NewSyncNewCreatedPartitionJob(
 	ctx context.Context,
 	req *querypb.SyncNewCreatedPartitionRequest,
 	meta *meta.Meta,
-	cluster session.Cluster,
 	broker meta.Broker,
+	targetObserver *observers.TargetObserver,
+	targetMgr meta.TargetManagerInterface,
 ) *SyncNewCreatedPartitionJob {
 	return &SyncNewCreatedPartitionJob{
-		BaseJob: NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
-		req:     req,
-		meta:    meta,
-		cluster: cluster,
-		broker:  broker,
+		BaseJob:        NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
+		req:            req,
+		meta:           meta,
+		broker:         broker,
+		targetObserver: targetObserver,
+		targetMgr:      targetMgr,
 	}
 }
 
@@ -75,11 +80,6 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 		return nil
 	}
 
-	err := loadPartitions(job.ctx, job.meta, job.cluster, job.broker, false, req.GetCollectionID(), req.GetPartitionID())
-	if err != nil {
-		return err
-	}
-
 	partition := &meta.Partition{
 		PartitionLoadInfo: &querypb.PartitionLoadInfo{
 			CollectionID: req.GetCollectionID(),
@@ -89,12 +89,12 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 		LoadPercentage: 100,
 		CreatedAt:      time.Now(),
 	}
-	err = job.meta.CollectionManager.PutPartition(job.ctx, partition)
+	err := job.meta.CollectionManager.PutPartition(job.ctx, partition)
 	if err != nil {
 		msg := "failed to store partitions"
 		log.Warn(msg, zap.Error(err))
 		return errors.Wrap(err, msg)
 	}
 
-	return nil
+	return waitCurrentTargetUpdated(job.ctx, job.targetObserver, job.req.GetCollectionID())
 }

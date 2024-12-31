@@ -104,6 +104,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return stats_.mem_size.load() + deleted_record_.mem_size();
     }
 
+    InsertRecord<true>&
+    get_insert_record() override {
+        return insert_record_;
+    }
+
     int64_t
     get_row_count() const override;
 
@@ -114,10 +119,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     get_schema() const override;
 
     std::vector<SegOffset>
-    search_pk(const PkType& pk, Timestamp timestamp) const;
+    search_pk(const PkType& pk, Timestamp timestamp) const override;
 
     std::vector<SegOffset>
-    search_pk(const PkType& pk, int64_t insert_barrier) const;
+    search_pk(const PkType& pk, int64_t insert_barrier) const override;
 
     template <typename Condition>
     std::vector<SegOffset>
@@ -196,7 +201,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     is_mmap_field(FieldId id) const override;
 
     void
-    ClearData();
+    ClearData() override;
 
  protected:
     // blob and row_count
@@ -205,6 +210,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
     chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
+
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    chunk_view_by_offsets(FieldId field_id,
+                          int64_t chunk_id,
+                          const FixedVector<int32_t>& offsets) const override;
 
     std::pair<BufferView, FixedVector<bool>>
     get_chunk_buffer(FieldId field_id,
@@ -293,6 +303,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         // } else {
         num_rows_ = row_count;
         // }
+        deleted_record_.set_sealed_row_count(row_count);
     }
 
     void
@@ -317,11 +328,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return system_ready_count_ == 2;
     }
 
-    const DeletedRecord&
-    get_deleted_record() const {
-        return deleted_record_;
-    }
-
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
@@ -334,7 +340,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadScalarIndex(const LoadIndexInfo& info);
 
-    virtual void
+    void
     WarmupChunkCache(const FieldId field_id, bool mmap_enabled) override;
 
     bool
@@ -362,7 +368,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     InsertRecord<true> insert_record_;
 
     // deleted pks
-    mutable DeletedRecord deleted_record_;
+    mutable DeletedRecord<true> deleted_record_;
 
     LoadFieldDataInfo field_data_info_;
 

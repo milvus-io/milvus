@@ -152,6 +152,7 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 
 	segIDs := req.GetSegmentIDs()
 	collID := req.Req.GetCollectionID()
+	log := log.Ctx(ctx)
 	log.Debug("retrieve on segments", zap.Int64s("segmentIDs", segIDs), zap.Int64("collectionID", collID))
 
 	if req.GetScope() == querypb.DataScope_Historical {

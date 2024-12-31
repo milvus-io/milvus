@@ -117,7 +117,7 @@ type IndexNode struct {
 
 // NewIndexNode creates a new IndexNode component.
 func NewIndexNode(ctx context.Context, factory dependency.Factory) *IndexNode {
-	log.Debug("New IndexNode ...")
+	log.Ctx(ctx).Debug("New IndexNode ...")
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	b := &IndexNode{
@@ -144,7 +144,7 @@ func (i *IndexNode) Register() error {
 	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.IndexNodeRole).Inc()
 	// start liveness check
 	i.session.LivenessCheck(i.loopCtx, func() {
-		log.Error("Index Node disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
+		log.Ctx(i.loopCtx).Error("Index Node disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
 		os.Exit(1)
 	})
 	return nil

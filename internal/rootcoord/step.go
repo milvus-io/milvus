@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -28,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 )
@@ -297,6 +300,7 @@ type releaseCollectionStep struct {
 
 func (s *releaseCollectionStep) Execute(ctx context.Context) ([]nestedStep, error) {
 	err := s.core.broker.ReleaseCollection(ctx, s.collectionID)
+	log.Ctx(ctx).Info("release collection done", zap.Int64("collectionID", s.collectionID))
 	return nil, err
 }
 
@@ -324,25 +328,6 @@ func (s *releasePartitionsStep) Desc() string {
 }
 
 func (s *releasePartitionsStep) Weight() stepPriority {
-	return stepPriorityUrgent
-}
-
-type syncNewCreatedPartitionStep struct {
-	baseStep
-	collectionID UniqueID
-	partitionID  UniqueID
-}
-
-func (s *syncNewCreatedPartitionStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.broker.SyncNewCreatedPartition(ctx, s.collectionID, s.partitionID)
-	return nil, err
-}
-
-func (s *syncNewCreatedPartitionStep) Desc() string {
-	return fmt.Sprintf("sync new partition, collectionID=%d, partitionID=%d", s.partitionID, s.partitionID)
-}
-
-func (s *syncNewCreatedPartitionStep) Weight() stepPriority {
 	return stepPriorityUrgent
 }
 

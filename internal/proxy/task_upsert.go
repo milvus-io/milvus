@@ -148,7 +148,7 @@ func (it *upsertTask) OnEnqueue() error {
 func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	collectionName := it.upsertMsg.InsertMsg.CollectionName
 	if err := validateCollectionName(collectionName); err != nil {
-		log.Error("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
+		log.Ctx(ctx).Error("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
 		return err
 	}
 
@@ -292,6 +292,15 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		Timestamp: it.EndTs(),
 	}
 
+	replicateID, err := GetReplicateID(ctx, it.req.GetDbName(), collectionName)
+	if err != nil {
+		log.Warn("get replicate info failed", zap.String("collectionName", collectionName), zap.Error(err))
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+	}
+	if replicateID != "" {
+		return merr.WrapErrCollectionReplicateMode("upsert")
+	}
+
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.req.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("Failed to get collection schema",
@@ -393,7 +402,7 @@ func (it *upsertTask) insertExecute(ctx context.Context, msgPack *msgstream.MsgP
 		zap.Int64("collectionID", collID))
 	getCacheDur := tr.RecordSpan()
 
-	_, err = it.chMgr.getOrCreateDmlStream(collID)
+	_, err = it.chMgr.getOrCreateDmlStream(ctx, collID)
 	if err != nil {
 		return err
 	}
@@ -526,7 +535,7 @@ func (it *upsertTask) Execute(ctx context.Context) (err error) {
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.req.CollectionName))
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute upsert %d", it.ID()))
-	stream, err := it.chMgr.getOrCreateDmlStream(it.collectionID)
+	stream, err := it.chMgr.getOrCreateDmlStream(ctx, it.collectionID)
 	if err != nil {
 		return err
 	}
@@ -547,7 +556,7 @@ func (it *upsertTask) Execute(ctx context.Context) (err error) {
 	}
 
 	tr.RecordSpan()
-	err = stream.Produce(msgPack)
+	err = stream.Produce(ctx, msgPack)
 	if err != nil {
 		it.result.Status = merr.Status(err)
 		return err

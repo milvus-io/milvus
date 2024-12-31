@@ -80,9 +80,9 @@ func TestComsumeCompressedMessage(t *testing.T) {
 	assert.NoError(t, err)
 	defer consumer.Close()
 
-	producer, err := pc.CreateProducer(mqcommon.ProducerOptions{Topic: "TestTopics"})
+	producer, err := pc.CreateProducer(context.TODO(), mqcommon.ProducerOptions{Topic: "TestTopics"})
 	assert.NoError(t, err)
-	compressProducer, err := pc.CreateProducer(mqcommon.ProducerOptions{Topic: "TestTopics", EnableCompression: true})
+	compressProducer, err := pc.CreateProducer(context.TODO(), mqcommon.ProducerOptions{Topic: "TestTopics", EnableCompression: true})
 	assert.NoError(t, err)
 
 	msg := []byte("test message")

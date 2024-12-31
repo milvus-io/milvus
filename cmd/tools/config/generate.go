@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -59,7 +60,7 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 	if val.Kind() != reflect.Struct {
 		return
 	}
-	log.Debug("enter", zap.Any("variable", val.String()))
+	log.Ctx(context.TODO()).Debug("enter", zap.Any("variable", val.String()))
 	for j := 0; j < val.NumField(); j++ {
 		subVal := val.Field(j)
 		tag := val.Type().Field(j).Tag
@@ -71,11 +72,11 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 			if strings.HasPrefix(item.DefaultValue, "\"") && strings.HasSuffix(item.DefaultValue, "\"") {
 				defaultValue = fmt.Sprintf("\"%s\"", defaultValue)
 			}
-			log.Debug("got key", zap.String("key", item.Key), zap.Any("value", defaultValue), zap.String("variable", val.Type().Field(j).Name))
+			log.Ctx(context.TODO()).Debug("got key", zap.String("key", item.Key), zap.Any("value", defaultValue), zap.String("variable", val.Type().Field(j).Name))
 			*data = append(*data, DocContent{item.Key, defaultValue, item.Version, refreshable, item.Export, item.Doc})
 		} else if t == "paramtable.ParamGroup" {
 			item := subVal.Interface().(paramtable.ParamGroup)
-			log.Debug("got key", zap.String("key", item.KeyPrefix), zap.String("variable", val.Type().Field(j).Name))
+			log.Ctx(context.TODO()).Debug("got key", zap.String("key", item.KeyPrefix), zap.String("variable", val.Type().Field(j).Name))
 			refreshable := tag.Get("refreshable")
 
 			// Sort group items to stablize the output order
@@ -87,7 +88,7 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 			sort.Strings(keys)
 			for _, key := range keys {
 				value := m[key]
-				log.Debug("got group entry", zap.String("key", key), zap.String("value", value))
+				log.Ctx(context.TODO()).Debug("got group entry", zap.String("key", key), zap.String("value", value))
 				*data = append(*data, DocContent{fmt.Sprintf("%s%s", item.KeyPrefix, key), quoteIfNeeded(value), item.Version, refreshable, item.Export, item.GetDoc(key)})
 			}
 		} else {
@@ -148,7 +149,7 @@ func (m *YamlMarshaller) writeYamlRecursive(data []DocContent, level int) {
 	for _, key := range keys {
 		contents, ok := topLevels.Get(key)
 		if !ok {
-			log.Debug("didnot found config for " + key)
+			log.Ctx(context.TODO()).Debug("didnot found config for " + key)
 			continue
 		}
 		content := contents[0]
@@ -298,11 +299,11 @@ func WriteYaml(w io.Writer) {
 		},
 		{
 			name:   "tls",
-			header: "\n# Configure the proxy tls enable.",
+			header: "\n# Configure external tls.",
 		},
 		{
 			name:   "internaltls",
-			header: "\n# Configure the node-tls enable.",
+			header: "\n# Configure internal tls.",
 		},
 		{
 			name: "common",

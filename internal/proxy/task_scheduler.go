@@ -127,7 +127,7 @@ func (queue *baseTaskQueue) AddActiveTask(t task) {
 	tID := t.ID()
 	_, ok := queue.activeTasks[tID]
 	if ok {
-		log.Warn("Proxy task with tID already in active task list!", zap.Int64("ID", tID))
+		log.Ctx(t.TraceCtx()).Warn("Proxy task with tID already in active task list!", zap.Int64("ID", tID))
 	}
 
 	queue.activeTasks[tID] = t
@@ -142,7 +142,7 @@ func (queue *baseTaskQueue) PopActiveTask(taskID UniqueID) task {
 		return t
 	}
 
-	log.Warn("Proxy task not in active task list! ts", zap.Int64("taskID", taskID))
+	log.Ctx(context.TODO()).Warn("Proxy task not in active task list! ts", zap.Int64("taskID", taskID))
 	return t
 }
 
@@ -250,7 +250,7 @@ func (queue *dmTaskQueue) Enqueue(t task) error {
 	dmt := t.(dmlTask)
 	err := dmt.setChannels()
 	if err != nil {
-		log.Warn("setChannels failed when Enqueue", zap.Int64("taskID", t.ID()), zap.Error(err))
+		log.Ctx(t.TraceCtx()).Warn("setChannels failed when Enqueue", zap.Int64("taskID", t.ID()), zap.Error(err))
 		return err
 	}
 
@@ -279,10 +279,10 @@ func (queue *dmTaskQueue) PopActiveTask(taskID UniqueID) task {
 		defer queue.statsLock.Unlock()
 
 		delete(queue.activeTasks, taskID)
-		log.Debug("Proxy dmTaskQueue popPChanStats", zap.Int64("taskID", t.ID()))
+		log.Ctx(t.TraceCtx()).Debug("Proxy dmTaskQueue popPChanStats", zap.Int64("taskID", t.ID()))
 		queue.popPChanStats(t)
 	} else {
-		log.Warn("Proxy task not in active task list!", zap.Int64("taskID", taskID))
+		log.Ctx(context.TODO()).Warn("Proxy task not in active task list!", zap.Int64("taskID", taskID))
 	}
 	return t
 }
@@ -567,7 +567,7 @@ func (sched *taskScheduler) queryLoop() {
 					return struct{}{}, nil
 				})
 			} else {
-				log.Debug("query queue is empty ...")
+				log.Ctx(context.TODO()).Debug("query queue is empty ...")
 			}
 		}
 	}

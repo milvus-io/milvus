@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"reflect"
@@ -124,11 +125,12 @@ func (ws *weightedScorer) scorerType() rankType {
 	return weightedRankType
 }
 
-func NewReScorers(reqCnt int, rankParams []*commonpb.KeyValuePair) ([]reScorer, error) {
+func NewReScorers(ctx context.Context, reqCnt int, rankParams []*commonpb.KeyValuePair) ([]reScorer, error) {
 	if reqCnt == 0 {
 		return []reScorer{}, nil
 	}
 
+	log := log.Ctx(ctx)
 	res := make([]reScorer, reqCnt)
 	rankTypeStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RankTypeKey, rankParams)
 	if err != nil {

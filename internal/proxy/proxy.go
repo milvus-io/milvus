@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
@@ -216,6 +217,7 @@ func (node *Proxy) initRateCollector() error {
 
 // Init initialize proxy.
 func (node *Proxy) Init() error {
+	log := log.Ctx(node.ctx)
 	log.Info("init session for Proxy")
 	if err := node.initSession(); err != nil {
 		log.Warn("failed to init Proxy's session", zap.Error(err))
@@ -277,8 +279,8 @@ func (node *Proxy) Init() error {
 			zap.Error(err))
 		return err
 	}
-	node.replicateMsgStream.EnableProduce(true)
-	node.replicateMsgStream.AsProducer([]string{replicateMsgChannel})
+	node.replicateMsgStream.ForceEnableProduce(true)
+	node.replicateMsgStream.AsProducer(node.ctx, []string{replicateMsgChannel})
 
 	node.sched, err = newTaskScheduler(node.ctx, node.tsoAllocator, node.factory)
 	if err != nil {
@@ -303,12 +305,20 @@ func (node *Proxy) Init() error {
 
 	node.enableMaterializedView = Params.CommonCfg.EnableMaterializedView.GetAsBool()
 
+	// Enable internal rand pool for UUIDv4 generation
+	// This is NOT thread-safe and should only be called before the service starts and
+	// there is no possibility that New or any other UUID V4 generation function will be called concurrently
+	// Only proxy generates UUID for now, and one Milvus process only has one proxy
+	uuid.EnableRandPool()
+	log.Debug("enable rand pool for UUIDv4 generation")
+
 	log.Info("init proxy done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
 	return nil
 }
 
 // sendChannelsTimeTickLoop starts a goroutine that synchronizes the time tick information.
 func (node *Proxy) sendChannelsTimeTickLoop() {
+	log := log.Ctx(node.ctx)
 	node.wg.Add(1)
 	go func() {
 		defer node.wg.Done()
@@ -392,6 +402,7 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 
 // Start starts a proxy node.
 func (node *Proxy) Start() error {
+	log := log.Ctx(node.ctx)
 	if err := node.sched.Start(); err != nil {
 		log.Warn("failed to start task scheduler", zap.String("role", typeutil.ProxyRole), zap.Error(err))
 		return err
@@ -441,6 +452,7 @@ func (node *Proxy) Start() error {
 
 // Stop stops a proxy node.
 func (node *Proxy) Stop() error {
+	log := log.Ctx(node.ctx)
 	if node.rowIDAllocator != nil {
 		node.rowIDAllocator.Close()
 		log.Info("close id allocator", zap.String("role", typeutil.ProxyRole))

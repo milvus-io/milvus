@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -72,7 +73,7 @@ func newL0CompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator
 }
 
 // Note: return True means exit this state machine.
-// ONLY return True for processCompleted or processFailed
+// ONLY return True for Completed, Failed
 func (t *l0CompactionTask) Process() bool {
 	switch t.GetTaskProto().GetState() {
 	case datapb.CompactionTaskState_pipelining:
@@ -129,6 +130,9 @@ func (t *l0CompactionTask) processExecuting() bool {
 		log.Warn("l0CompactionTask failed to get compaction result", zap.Error(err))
 		return false
 	}
+
+	ts := time.Now().Unix()
+	updateOps := []compactionTaskOpt{setEndTime(ts)}
 	switch result.GetState() {
 	case datapb.CompactionTaskState_completed:
 		t.result = result
@@ -137,13 +141,15 @@ func (t *l0CompactionTask) processExecuting() bool {
 			return false
 		}
 
-		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved)); err != nil {
+		updateOps = append(updateOps, setState(datapb.CompactionTaskState_meta_saved))
+		if err := t.updateAndSaveTaskMeta(updateOps...); err != nil {
 			log.Warn("l0CompactionTask failed to save task meta_saved state", zap.Error(err))
 			return false
 		}
 		return t.processMetaSaved()
 	case datapb.CompactionTaskState_failed:
-		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed)); err != nil {
+		updateOps = append(updateOps, setState(datapb.CompactionTaskState_failed))
+		if err := t.updateAndSaveTaskMeta(updateOps...); err != nil {
 			log.Warn("l0CompactionTask failed to set task failed state", zap.Error(err))
 			return false
 		}
@@ -153,7 +159,9 @@ func (t *l0CompactionTask) processExecuting() bool {
 }
 
 func (t *l0CompactionTask) processMetaSaved() bool {
-	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
+	ts := time.Now().Unix()
+	updateOps := []compactionTaskOpt{setEndTime(ts), setState(datapb.CompactionTaskState_completed)}
+	err := t.updateAndSaveTaskMeta(updateOps...)
 	if err != nil {
 		log.Warn("l0CompactionTask unable to processMetaSaved", zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.Error(err))
 		return false
@@ -173,11 +181,18 @@ func (t *l0CompactionTask) processCompleted() bool {
 
 	t.resetSegmentCompacting()
 	UpdateCompactionSegmentSizeMetrics(t.result.GetSegments())
-	log.Info("l0CompactionTask processCompleted done", zap.Int64("planID", t.GetTaskProto().GetPlanID()))
+	task := t.taskProto.Load().(*datapb.CompactionTask)
+	log.Info("l0CompactionTask processCompleted done", zap.Int64("planID", task.GetPlanID()),
+		zap.Duration("costs", time.Duration(task.GetEndTime()-task.GetStartTime())*time.Second))
 	return true
 }
 
 func (t *l0CompactionTask) processFailed() bool {
+	return true
+}
+
+func (t *l0CompactionTask) doClean() error {
+	log := log.With(zap.Int64("planID", t.GetTaskProto().GetPlanID()))
 	if t.hasAssignedWorker() {
 		err := t.sessions.DropCompactionPlan(t.GetTaskProto().GetNodeID(), &datapb.DropCompactionPlanRequest{
 			PlanID: t.GetTaskProto().GetPlanID(),
@@ -187,15 +202,21 @@ func (t *l0CompactionTask) processFailed() bool {
 		}
 	}
 
-	t.resetSegmentCompacting()
 	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
 	if err != nil {
 		log.Warn("l0CompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
-		return false
+		return err
 	}
 
-	log.Info("l0CompactionTask processFailed done", zap.Int64("taskID", t.GetTaskProto().GetTriggerID()), zap.Int64("planID", t.GetTaskProto().GetPlanID()))
-	return true
+	// resetSegmentCompacting must be the last step of Clean, to make sure resetSegmentCompacting only called once
+	// otherwise, it may unlock segments locked by other compaction tasks
+	t.resetSegmentCompacting()
+	log.Info("l0CompactionTask clean done")
+	return nil
+}
+
+func (t *l0CompactionTask) Clean() bool {
+	return t.doClean() == nil
 }
 
 func (t *l0CompactionTask) GetResult() *datapb.CompactionPlanResult {

@@ -323,6 +323,7 @@ message LoadMetaInfo {
     string db_name = 5; // Only used for metrics label.
     string resource_group = 6; // Only used for metrics label.
     repeated int64 load_fields = 7;
+    repeated common.KeyValuePair db_properties = 8;
 }
 
 message WatchDmChannelsRequest {
@@ -830,6 +831,7 @@ message CheckerInfo {
 message SegmentTarget {
   int64 ID = 1;
   data.SegmentLevel level = 2; 
+  int64 num_of_rows = 3;
 }
 
 message PartitionTarget {

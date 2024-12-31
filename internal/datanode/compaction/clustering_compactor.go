@@ -56,8 +56,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+)
+
+const (
+	expectedBinlogSize = 16 * 1024 * 1024
 )
 
 var _ Compactor = (*clusteringCompactionTask)(nil)
@@ -89,7 +92,7 @@ type clusteringCompactionTask struct {
 	// inner field
 	collectionID          int64
 	partitionID           int64
-	currentTs             typeutil.Timestamp // for TTL
+	currentTime           time.Time // for TTL
 	isVectorClusteringKey bool
 	clusteringKeyField    *schemapb.FieldSchema
 	primaryKeyField       *schemapb.FieldSchema
@@ -219,7 +222,7 @@ func (t *clusteringCompactionTask) init() error {
 
 	t.primaryKeyField = pkField
 	t.isVectorClusteringKey = typeutil.IsVectorType(t.clusteringKeyField.DataType)
-	t.currentTs = tsoutil.GetCurrentTime()
+	t.currentTime = time.Now()
 	t.memoryBufferSize = t.getMemoryBufferSize()
 	workerPoolSize := t.getWorkerPoolSize()
 	t.mappingPool = conc.NewPool[any](workerPoolSize)
@@ -360,9 +363,75 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 	return nil
 }
 
+func splitCentroids(centroids []int, num int) ([][]int, map[int]int) {
+	if num <= 0 {
+		return nil, nil
+	}
+
+	result := make([][]int, num)
+	resultIndex := make(map[int]int, len(centroids))
+	listLen := len(centroids)
+
+	for i := 0; i < listLen; i++ {
+		group := i % num
+		result[group] = append(result[group], centroids[i])
+		resultIndex[i] = group
+	}
+
+	return result, resultIndex
+}
+
+func (t *clusteringCompactionTask) generatedVectorPlan(bufferNum int, centroids []*schemapb.VectorField) error {
+	centroidsOffset := make([]int, len(centroids))
+	for i := 0; i < len(centroids); i++ {
+		centroidsOffset[i] = i
+	}
+	centroidGroups, groupIndex := splitCentroids(centroidsOffset, bufferNum)
+	for id, group := range centroidGroups {
+		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
+		if err != nil {
+			return err
+		}
+
+		centroidValues := make([]storage.VectorFieldValue, len(group))
+		for i, offset := range group {
+			centroidValues[i] = storage.NewVectorFieldValue(t.clusteringKeyField.DataType, centroids[offset])
+		}
+
+		fieldStats.SetVectorCentroids(centroidValues...)
+		clusterBuffer := &ClusterBuffer{
+			id:                      id,
+			flushedRowNum:           map[typeutil.UniqueID]atomic.Int64{},
+			flushedBinlogs:          make(map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog, 0),
+			uploadedSegments:        make([]*datapb.CompactionSegment, 0),
+			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
+			clusteringKeyFieldStats: fieldStats,
+		}
+		if _, err = t.refreshBufferWriterWithPack(clusterBuffer); err != nil {
+			return err
+		}
+		t.clusterBuffers = append(t.clusterBuffers, clusterBuffer)
+	}
+	t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {
+		centroidGroupOffset := groupIndex[int(idMapping[offset])]
+		return t.clusterBuffers[centroidGroupOffset]
+	}
+	return nil
+}
+
+func (t *clusteringCompactionTask) switchPolicyForVectorPlan(centroids *clusteringpb.ClusteringCentroidsStats) error {
+	bufferNum := len(centroids.GetCentroids())
+	bufferNumByMemory := int(t.memoryBufferSize / expectedBinlogSize)
+	if bufferNumByMemory < bufferNum {
+		bufferNum = bufferNumByMemory
+	}
+	return t.generatedVectorPlan(bufferNum, centroids.GetCentroids())
+}
+
 func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) error {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("getVectorAnalyzeResult-%d", t.GetPlanID()))
 	defer span.End()
+	log := log.Ctx(ctx)
 	analyzeResultPath := t.plan.AnalyzeResultPath
 	centroidFilePath := path.Join(analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID), common.Centroids)
 	offsetMappingFiles := make(map[int64]string, 0)
@@ -385,29 +454,7 @@ func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) e
 		zap.Int("centroidNum", len(centroids.GetCentroids())),
 		zap.Any("offsetMappingFiles", t.segmentIDOffsetMapping))
 
-	for id, centroid := range centroids.GetCentroids() {
-		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
-		if err != nil {
-			return err
-		}
-		fieldStats.SetVectorCentroids(storage.NewVectorFieldValue(t.clusteringKeyField.DataType, centroid))
-		clusterBuffer := &ClusterBuffer{
-			id:                      id,
-			flushedRowNum:           map[typeutil.UniqueID]atomic.Int64{},
-			flushedBinlogs:          make(map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog, 0),
-			uploadedSegments:        make([]*datapb.CompactionSegment, 0),
-			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
-			clusteringKeyFieldStats: fieldStats,
-		}
-		if _, err = t.refreshBufferWriterWithPack(clusterBuffer); err != nil {
-			return err
-		}
-		t.clusterBuffers = append(t.clusterBuffers, clusterBuffer)
-	}
-	t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {
-		return t.clusterBuffers[idMapping[offset]]
-	}
-	return nil
+	return t.switchPolicyForVectorPlan(centroids)
 }
 
 // mapping read and split input segments into buffers
@@ -417,6 +464,7 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 	defer span.End()
 	inputSegments := t.plan.GetSegmentBinlogs()
 	mapStart := time.Now()
+	log := log.Ctx(ctx)
 
 	// start flush goroutine
 	go t.backgroundFlush(ctx)
@@ -514,11 +562,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 	log.Info("mapping segment start")
 	processStart := time.Now()
 	fieldBinlogPaths := make([][]string, 0)
-	var (
-		expired  int64 = 0
-		deleted  int64 = 0
-		remained int64 = 0
-	)
+	var remained int64 = 0
 
 	deltaPaths := make([]string, 0)
 	for _, d := range segment.GetDeltalogs() {
@@ -530,17 +574,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 	if err != nil {
 		return err
 	}
-
-	isDeletedValue := func(v *storage.Value) bool {
-		ts, ok := delta[v.PK.GetValue()]
-		// insert task and delete task has the same ts when upsert
-		// here should be < instead of <=
-		// to avoid the upsert data to be deleted after compact
-		if ok && uint64(v.Timestamp) < ts {
-			return true
-		}
-		return false
-	}
+	entityFilter := newEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
 	mappingStats := &clusteringpb.ClusteringCentroidIdMappingStats{}
 	if t.isVectorClusteringKey {
@@ -576,6 +610,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		fieldBinlogPaths = append(fieldBinlogPaths, ps)
 	}
 
+	var offset int64 = -1
 	for _, paths := range fieldBinlogPaths {
 		allValues, err := t.binlogIO.Download(ctx, paths)
 		if err != nil {
@@ -592,7 +627,6 @@ func (t *clusteringCompactionTask) mappingSegment(
 			return err
 		}
 
-		var offset int64 = -1
 		for {
 			err := pkIter.Next()
 			if err != nil {
@@ -607,15 +641,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			v := pkIter.Value()
 			offset++
 
-			// Filtering deleted entity
-			if isDeletedValue(v) {
-				deleted++
-				continue
-			}
-			// Filtering expired entity
-			ts := typeutil.Timestamp(v.Timestamp)
-			if isExpiredEntity(t.plan.GetCollectionTtl(), t.currentTs, ts) {
-				expired++
+			if entityFilter.Filtered(v.PK.GetValue(), uint64(v.Timestamp)) {
 				continue
 			}
 
@@ -704,13 +730,19 @@ func (t *clusteringCompactionTask) mappingSegment(
 			}
 		}
 	}
+	missing := entityFilter.GetMissingDeleteCount()
 
 	log.Info("mapping segment end",
 		zap.Int64("remained_entities", remained),
-		zap.Int64("deleted_entities", deleted),
-		zap.Int64("expired_entities", expired),
+		zap.Int("deleted_entities", entityFilter.GetDeletedCount()),
+		zap.Int("expired_entities", entityFilter.GetExpiredCount()),
+		zap.Int("deltalog deletes", entityFilter.GetDeltalogDeleteCount()),
+		zap.Int("missing deletes", missing),
 		zap.Int64("written_row_num", t.writtenRowNum.Load()),
 		zap.Duration("elapse", time.Since(processStart)))
+
+	metrics.DataNodeCompactionDeleteCount.WithLabelValues(fmt.Sprint(t.collectionID)).Add(float64(entityFilter.GetDeltalogDeleteCount()))
+	metrics.DataNodeCompactionMissingDeleteCount.WithLabelValues(fmt.Sprint(t.collectionID)).Add(float64(missing))
 	return nil
 }
 
@@ -810,7 +842,7 @@ func (t *clusteringCompactionTask) flushLargestBuffers(ctx context.Context) erro
 		t.clusterBufferLocks.RUnlock(buffer.id)
 	}
 	sort.Slice(bufferIDs, func(i, j int) bool {
-		return bufferRowNums[i] > bufferRowNums[j]
+		return bufferRowNums[bufferIDs[i]] > bufferRowNums[bufferIDs[j]]
 	})
 	log.Info("start flushLargestBuffers", zap.Ints("bufferIDs", bufferIDs), zap.Int64("currentMemorySize", currentMemorySize))
 
@@ -881,6 +913,7 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 		return nil
 	}
 
+	log := log.Ctx(ctx)
 	binlogNum := 0
 	numRows := buffer.flushedRowNum[segmentID]
 	insertLogs := make([]*datapb.FieldBinlog, 0)
@@ -1105,6 +1138,7 @@ func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[inter
 		zap.Int64("collectionID", t.GetCollection()),
 		zap.Int64("partitionID", t.partitionID),
 		zap.Int("segments", len(inputSegments)),
+		zap.Int("clustering num", len(analyzeDict)),
 		zap.Duration("elapse", time.Since(analyzeStart)))
 	return analyzeDict, nil
 }
@@ -1124,8 +1158,6 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	var (
 		timestampTo   int64                 = -1
 		timestampFrom int64                 = -1
-		expired       int64                 = 0
-		deleted       int64                 = 0
 		remained      int64                 = 0
 		analyzeResult map[interface{}]int64 = make(map[interface{}]int64, 0)
 	)
@@ -1152,6 +1184,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 		fieldBinlogPaths = append(fieldBinlogPaths, ps)
 	}
 
+	expiredFilter := newEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime)
 	for _, paths := range fieldBinlogPaths {
 		allValues, err := t.binlogIO.Download(ctx, paths)
 		if err != nil {
@@ -1182,9 +1215,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 			v := pkIter.Value()
 
 			// Filtering expired entity
-			ts := typeutil.Timestamp(v.Timestamp)
-			if isExpiredEntity(t.plan.GetCollectionTtl(), t.currentTs, ts) {
-				expired++
+			if expiredFilter.Filtered(v.PK.GetValue(), uint64(v.Timestamp)) {
 				continue
 			}
 
@@ -1213,31 +1244,17 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 
 	log.Info("analyze segment end",
 		zap.Int64("remained entities", remained),
-		zap.Int64("deleted entities", deleted),
-		zap.Int64("expired entities", expired),
+		zap.Int("expired entities", expiredFilter.GetExpiredCount()),
 		zap.Duration("map elapse", time.Since(processStart)))
 	return analyzeResult, nil
 }
 
-func (t *clusteringCompactionTask) splitClusterByScalarValue(dict map[interface{}]int64) ([][]interface{}, bool) {
-	keys := lo.MapToSlice(dict, func(k interface{}, _ int64) interface{} {
-		return k
-	})
-
-	notNullKeys := lo.Filter(keys, func(i interface{}, j int) bool {
-		return i != nil
-	})
-	sort.Slice(notNullKeys, func(i, j int) bool {
-		return storage.NewScalarFieldValue(t.clusteringKeyField.DataType, notNullKeys[i]).LE(storage.NewScalarFieldValue(t.clusteringKeyField.DataType, notNullKeys[j]))
-	})
-
+func (t *clusteringCompactionTask) generatedScalarPlan(maxRows, preferRows int64, keys []interface{}, dict map[interface{}]int64) [][]interface{} {
 	buckets := make([][]interface{}, 0)
 	currentBucket := make([]interface{}, 0)
 	var currentBucketSize int64 = 0
-	maxRows := t.plan.MaxSegmentRows
-	preferRows := t.plan.PreferSegmentRows
-	containsNull := len(keys) > len(notNullKeys)
-	for _, key := range notNullKeys {
+	for _, key := range keys {
+		// todo can optimize
 		if dict[key] > preferRows {
 			if len(currentBucket) != 0 {
 				buckets = append(buckets, currentBucket)
@@ -1260,7 +1277,38 @@ func (t *clusteringCompactionTask) splitClusterByScalarValue(dict map[interface{
 		}
 	}
 	buckets = append(buckets, currentBucket)
-	return buckets, containsNull
+	return buckets
+}
+
+func (t *clusteringCompactionTask) switchPolicyForScalarPlan(totalRows int64, keys []interface{}, dict map[interface{}]int64) [][]interface{} {
+	bufferNumBySegmentMaxRows := totalRows / t.plan.MaxSegmentRows
+	bufferNumByMemory := t.memoryBufferSize / expectedBinlogSize
+	log.Info("switchPolicyForScalarPlan", zap.Int64("totalRows", totalRows),
+		zap.Int64("bufferNumBySegmentMaxRows", bufferNumBySegmentMaxRows),
+		zap.Int64("bufferNumByMemory", bufferNumByMemory))
+	if bufferNumByMemory > bufferNumBySegmentMaxRows {
+		return t.generatedScalarPlan(t.plan.GetMaxSegmentRows(), t.plan.GetPreferSegmentRows(), keys, dict)
+	}
+
+	maxRows := totalRows / bufferNumByMemory
+	return t.generatedScalarPlan(maxRows, int64(float64(maxRows)*paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat()), keys, dict)
+}
+
+func (t *clusteringCompactionTask) splitClusterByScalarValue(dict map[interface{}]int64) ([][]interface{}, bool) {
+	totalRows := int64(0)
+	keys := lo.MapToSlice(dict, func(k interface{}, v int64) interface{} {
+		totalRows += v
+		return k
+	})
+
+	notNullKeys := lo.Filter(keys, func(i interface{}, j int) bool {
+		return i != nil
+	})
+	sort.Slice(notNullKeys, func(i, j int) bool {
+		return storage.NewScalarFieldValue(t.clusteringKeyField.DataType, notNullKeys[i]).LE(storage.NewScalarFieldValue(t.clusteringKeyField.DataType, notNullKeys[j]))
+	})
+
+	return t.switchPolicyForScalarPlan(totalRows, notNullKeys, dict), len(keys) > len(notNullKeys)
 }
 
 func (t *clusteringCompactionTask) refreshBufferWriterWithPack(buffer *ClusterBuffer) (bool, error) {
@@ -1309,6 +1357,7 @@ func (t *clusteringCompactionTask) GetSlotUsage() int64 {
 }
 
 func (t *clusteringCompactionTask) checkBuffersAfterCompaction() error {
+	log := log.Ctx(t.ctx)
 	for _, buffer := range t.clusterBuffers {
 		if len(buffer.flushedBinlogs) != 0 {
 			log.Warn("there are some binlogs have leaked, please check", zap.Int("buffer id", buffer.id),

@@ -24,6 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -151,6 +152,8 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store, suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.cluster = session.NewMockCluster(suite.T())
+	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 	suite.targetObserver = observers.NewTargetObserver(
 		suite.meta,
 		suite.targetMgr,
@@ -168,8 +171,6 @@ func (suite *ServiceSuite) SetupTest() {
 		}))
 		suite.meta.ResourceManager.HandleNodeUp(context.TODO(), node)
 	}
-	suite.cluster = session.NewMockCluster(suite.T())
-	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 	suite.jobScheduler = job.NewScheduler()
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
 	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
@@ -310,7 +311,8 @@ func (suite *ServiceSuite) TestShowPartitions() {
 			meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
 			resp, err = server.ShowPartitions(ctx, req)
 			suite.NoError(err)
-			suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
+			err := merr.CheckRPCCall(resp, err)
+			assert.True(suite.T(), errors.Is(err, merr.ErrPartitionNotLoaded))
 			meta.GlobalFailedLoadCache.Remove(collection)
 			err = suite.meta.CollectionManager.PutCollection(ctx, colBak)
 			suite.NoError(err)
@@ -322,7 +324,8 @@ func (suite *ServiceSuite) TestShowPartitions() {
 			meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
 			resp, err = server.ShowPartitions(ctx, req)
 			suite.NoError(err)
-			suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
+			err := merr.CheckRPCCall(resp, err)
+			assert.True(suite.T(), errors.Is(err, merr.ErrPartitionNotLoaded))
 			meta.GlobalFailedLoadCache.Remove(collection)
 			err = suite.meta.CollectionManager.PutPartition(ctx, parBak)
 			suite.NoError(err)
@@ -345,8 +348,9 @@ func (suite *ServiceSuite) TestLoadCollection() {
 
 	// Test load all collections
 	for _, collection := range suite.collections {
+		suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(nil, nil)
 		suite.expectGetRecoverInfo(collection)
-		suite.expectLoadPartitions()
 
 		req := &querypb.LoadCollectionRequest{
 			CollectionID: collection,
@@ -856,65 +860,14 @@ func (suite *ServiceSuite) TestTransferReplica() {
 	suite.ErrorIs(merr.Error(resp), merr.ErrServiceNotReady)
 }
 
-func (suite *ServiceSuite) TestLoadCollectionFailed() {
-	suite.loadAll()
-	ctx := context.Background()
-	server := suite.server
-
-	// Test load with different replica number
-	for _, collection := range suite.collections {
-		req := &querypb.LoadCollectionRequest{
-			CollectionID:  collection,
-			ReplicaNumber: suite.replicaNumber[collection] + 1,
-		}
-		resp, err := server.LoadCollection(ctx, req)
-		suite.NoError(err)
-		suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
-	}
-
-	req := &querypb.LoadCollectionRequest{
-		CollectionID:   1001,
-		ReplicaNumber:  2,
-		ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
-	}
-	resp, err := server.LoadCollection(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-
-	// Test load with partitions loaded
-	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
-			continue
-		}
-
-		req := &querypb.LoadCollectionRequest{
-			CollectionID: collection,
-		}
-		resp, err := server.LoadCollection(ctx, req)
-		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-	}
-
-	// Test load with wrong rg num
-	for _, collection := range suite.collections {
-		req := &querypb.LoadCollectionRequest{
-			CollectionID:   collection,
-			ReplicaNumber:  suite.replicaNumber[collection] + 1,
-			ResourceGroups: []string{"rg1", "rg2"},
-		}
-		resp, err := server.LoadCollection(ctx, req)
-		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-	}
-}
-
 func (suite *ServiceSuite) TestLoadPartition() {
 	ctx := context.Background()
 	server := suite.server
 
 	// Test load all partitions
 	for _, collection := range suite.collections {
-		suite.expectLoadPartitions()
+		suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(nil, nil)
 		suite.expectGetRecoverInfo(collection)
 
 		req := &querypb.LoadPartitionsRequest{
@@ -1009,9 +962,6 @@ func (suite *ServiceSuite) TestReleaseCollection() {
 	ctx := context.Background()
 	server := suite.server
 
-	suite.cluster.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Success(), nil)
-
 	// Test release all collections
 	for _, collection := range suite.collections {
 		req := &querypb.ReleaseCollectionRequest{
@@ -1044,18 +994,23 @@ func (suite *ServiceSuite) TestReleaseCollection() {
 }
 
 func (suite *ServiceSuite) TestReleasePartition() {
-	suite.loadAll()
 	ctx := context.Background()
+	suite.loadAll()
+	for _, collection := range suite.collections {
+		suite.updateChannelDist(ctx, collection)
+		suite.updateSegmentDist(collection, suite.nodes[0])
+	}
+
 	server := suite.server
 
 	// Test release all partitions
-	suite.cluster.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Success(), nil)
 	for _, collection := range suite.collections {
 		req := &querypb.ReleasePartitionsRequest{
 			CollectionID: collection,
 			PartitionIDs: suite.partitions[collection][0:1],
 		}
+		suite.updateChannelDist(ctx, collection)
+		suite.updateSegmentDist(collection, suite.nodes[0], suite.partitions[collection][1:]...)
 		resp, err := server.ReleasePartitions(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
@@ -1826,7 +1781,7 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 func (suite *ServiceSuite) loadAll() {
 	ctx := context.Background()
 	for _, collection := range suite.collections {
-		suite.expectLoadPartitions()
+		suite.expectLoadMetaRPCs()
 		suite.expectGetRecoverInfo(collection)
 		if suite.loadTypes[collection] == querypb.LoadType_LoadCollection {
 			req := &querypb.LoadCollectionRequest{
@@ -1839,7 +1794,6 @@ func (suite *ServiceSuite) loadAll() {
 				suite.dist,
 				suite.meta,
 				suite.broker,
-				suite.cluster,
 				suite.targetMgr,
 				suite.targetObserver,
 				suite.collectionObserver,
@@ -1864,7 +1818,6 @@ func (suite *ServiceSuite) loadAll() {
 				suite.dist,
 				suite.meta,
 				suite.broker,
-				suite.cluster,
 				suite.targetMgr,
 				suite.targetObserver,
 				suite.collectionObserver,
@@ -1963,13 +1916,11 @@ func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 		Return(vChannels, segmentBinlogs, nil).Maybe()
 }
 
-func (suite *ServiceSuite) expectLoadPartitions() {
+func (suite *ServiceSuite) expectLoadMetaRPCs() {
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-		Return(nil, nil)
+		Return(nil, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).
-		Return(nil, nil)
-	suite.cluster.EXPECT().LoadPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(merr.Success(), nil)
+		Return(nil, nil).Maybe()
 }
 
 func (suite *ServiceSuite) getAllSegments(collection int64) []int64 {
@@ -1980,9 +1931,13 @@ func (suite *ServiceSuite) getAllSegments(collection int64) []int64 {
 	return allSegments
 }
 
-func (suite *ServiceSuite) updateSegmentDist(collection, node int64) {
+func (suite *ServiceSuite) updateSegmentDist(collection, node int64, partitions ...int64) {
+	partitionSet := typeutil.NewSet(partitions...)
 	metaSegments := make([]*meta.Segment, 0)
 	for partition, segments := range suite.segments[collection] {
+		if partitionSet.Len() > 0 && !partitionSet.Contain(partition) {
+			continue
+		}
 		for _, segment := range segments {
 			metaSegments = append(metaSegments,
 				utils.CreateTestSegment(collection, partition, segment, node, 1, "test-channel"))

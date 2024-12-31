@@ -39,13 +39,13 @@ func (s *IndexCoord) Prepare() error {
 
 // Run starts service
 func (s *IndexCoord) Run() error {
-	log.Info("IndexCoord running ...")
+	log.Ctx(context.TODO()).Info("IndexCoord running ...")
 	return nil
 }
 
 // Stop terminates service
 func (s *IndexCoord) Stop() error {
-	log.Info("IndexCoord stopping ...")
+	log.Ctx(context.TODO()).Info("IndexCoord stopping ...")
 	return nil
 }
 

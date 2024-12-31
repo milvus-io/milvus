@@ -19,9 +19,11 @@ package meta
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -32,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -93,7 +96,7 @@ func (rm *ResourceManager) Recover(ctx context.Context) error {
 		needUpgrade := meta.Config == nil
 
 		rg := NewResourceGroupFromMeta(meta, rm.nodeMgr)
-		rm.groups[rg.GetName()] = rg
+		rm.setupInMemResourceGroup(rg)
 		for _, node := range rg.GetNodes() {
 			if _, ok := rm.nodeIDMap[node]; ok {
 				// unreachable code, should never happen.
@@ -158,7 +161,7 @@ func (rm *ResourceManager) AddResourceGroup(ctx context.Context, rgName string, 
 		return merr.WrapErrResourceGroupServiceAvailable()
 	}
 
-	rm.groups[rgName] = rg
+	rm.setupInMemResourceGroup(rg)
 	log.Info("add resource group",
 		zap.String("rgName", rgName),
 		zap.Any("config", cfg),
@@ -218,7 +221,7 @@ func (rm *ResourceManager) updateResourceGroups(ctx context.Context, rgs map[str
 			zap.String("rgName", rg.GetName()),
 			zap.Any("config", rg.GetConfig()),
 		)
-		rm.groups[rg.GetName()] = rg
+		rm.setupInMemResourceGroup(rg)
 	}
 
 	// notify that resource group config has been changed.
@@ -318,6 +321,12 @@ func (rm *ResourceManager) RemoveResourceGroup(ctx context.Context, rgName strin
 	// After recovering, all node assigned to these rg has been removed.
 	// no secondary index need to be removed.
 	delete(rm.groups, rgName)
+	metrics.QueryCoordResourceGroupInfo.DeletePartialMatch(prometheus.Labels{
+		metrics.ResourceGroupLabelName: rgName,
+	})
+	metrics.QueryCoordResourceGroupReplicaTotal.DeletePartialMatch(prometheus.Labels{
+		metrics.ResourceGroupLabelName: rgName,
+	})
 
 	log.Info("remove resource group",
 		zap.String("rgName", rgName),
@@ -840,7 +849,7 @@ func (rm *ResourceManager) transferNode(ctx context.Context, rgName string, node
 
 	// Commit updates to memory.
 	for _, rg := range modifiedRG {
-		rm.groups[rg.GetName()] = rg
+		rm.setupInMemResourceGroup(rg)
 	}
 	rm.nodeIDMap[node] = rgName
 	log.Info("transfer node to resource group",
@@ -860,6 +869,7 @@ func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string
 		mrg := rg.CopyForWrite()
 		mrg.UnassignNode(node)
 		rg := mrg.ToResourceGroup()
+
 		if err := rm.catalog.SaveResourceGroup(ctx, rg.GetMeta()); err != nil {
 			log.Fatal("unassign node from resource group",
 				zap.String("rgName", rg.GetName()),
@@ -869,7 +879,7 @@ func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string
 		}
 
 		// Commit updates to memory.
-		rm.groups[rg.GetName()] = rg
+		rm.setupInMemResourceGroup(rg)
 		delete(rm.nodeIDMap, node)
 		log.Info("unassign node to resource group",
 			zap.String("rgName", rg.GetName()),
@@ -942,6 +952,27 @@ func (rm *ResourceManager) validateResourceGroupIsDeletable(rgName string) error
 		}
 	}
 	return nil
+}
+
+// setupInMemResourceGroup setup resource group in memory.
+func (rm *ResourceManager) setupInMemResourceGroup(r *ResourceGroup) {
+	// clear old metrics.
+	if oldR, ok := rm.groups[r.GetName()]; ok {
+		for _, nodeID := range oldR.GetNodes() {
+			metrics.QueryCoordResourceGroupInfo.DeletePartialMatch(prometheus.Labels{
+				metrics.ResourceGroupLabelName: r.GetName(),
+				metrics.NodeIDLabelName:        strconv.FormatInt(nodeID, 10),
+			})
+		}
+	}
+	// add new metrics.
+	for _, nodeID := range r.GetNodes() {
+		metrics.QueryCoordResourceGroupInfo.WithLabelValues(
+			r.GetName(),
+			strconv.FormatInt(nodeID, 10),
+		).Set(1)
+	}
+	rm.groups[r.GetName()] = r
 }
 
 func (rm *ResourceManager) GetResourceGroupsJSON(ctx context.Context) string {

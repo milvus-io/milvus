@@ -214,7 +214,7 @@ func (suite *ReplicaManagerSuite) TestRecover() {
 	}
 	value, err := proto.Marshal(&replicaInfo)
 	suite.NoError(err)
-	suite.kv.Save(querycoord.ReplicaMetaPrefixV1+"/2100", string(value))
+	suite.kv.Save(ctx, querycoord.ReplicaMetaPrefixV1+"/2100", string(value))
 
 	suite.clearMemory()
 	mgr.Recover(ctx, append(lo.Keys(suite.collections), 1000))

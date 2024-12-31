@@ -142,6 +142,7 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 }
 
 func (s *Server) Prepare() error {
+	log := log.Ctx(s.ctx)
 	listener, err := netutil.NewListener(
 		netutil.OptIP(paramtable.Get().RootCoordGrpcServerCfg.IP),
 		netutil.OptPort(paramtable.Get().RootCoordGrpcServerCfg.Port.GetAsInt()),
@@ -165,12 +166,12 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Info("RootCoord init done ...")
+	log.Ctx(s.ctx).Info("RootCoord init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Info("RootCoord start done ...")
+	log.Ctx(s.ctx).Info("RootCoord start done ...")
 	return nil
 }
 
@@ -179,6 +180,7 @@ var getTiKVClient = tikv.GetTiKVClient
 func (s *Server) init() error {
 	params := paramtable.Get()
 	etcdConfig := &params.EtcdCfg
+	log := log.Ctx(s.ctx)
 	log.Info("init params done..")
 
 	etcdCli, err := etcd.CreateEtcdClient(
@@ -259,6 +261,7 @@ func (s *Server) startGrpcLoop() {
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
+	log := log.Ctx(s.ctx)
 	log.Info("start grpc ", zap.Int("port", s.listener.Port()))
 
 	ctx, cancel := context.WithCancel(s.ctx)
@@ -304,6 +307,7 @@ func (s *Server) startGrpcLoop() {
 }
 
 func (s *Server) start() error {
+	log := log.Ctx(s.ctx)
 	log.Info("RootCoord Core start ...")
 	if err := s.rootCoord.Register(); err != nil {
 		log.Error("RootCoord registers service failed", zap.Error(err))
@@ -319,9 +323,9 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() (err error) {
-	logger := log.With()
+	logger := log.Ctx(s.ctx)
 	if s.listener != nil {
-		logger = log.With(zap.String("address", s.listener.Address()))
+		logger = logger.With(zap.String("address", s.listener.Address()))
 	}
 	logger.Info("Rootcoord stopping")
 	defer func() {
@@ -528,6 +532,10 @@ func (s *Server) ListPolicy(ctx context.Context, request *internalpb.ListPolicyR
 
 func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.AlterCollection(ctx, request)
+}
+
+func (s *Server) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
+	return s.rootCoord.AlterCollectionField(ctx, request)
 }
 
 func (s *Server) RenameCollection(ctx context.Context, request *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {

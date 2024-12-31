@@ -147,7 +147,7 @@ func (b *ChannelLevelScoreBalancer) genStoppingChannelPlan(ctx context.Context, 
 	channelPlans := make([]ChannelAssignPlan, 0)
 	for _, nodeID := range offlineNodes {
 		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(nodeID), meta.WithChannelName2Channel(channelName))
-		plans := b.AssignChannel(ctx, dmChannels, onlineNodes, false)
+		plans := b.AssignChannel(ctx, replica.GetCollectionID(), dmChannels, onlineNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].Replica = replica
@@ -176,7 +176,7 @@ func (b *ChannelLevelScoreBalancer) genStoppingSegmentPlan(ctx context.Context, 
 
 func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, channelName string, onlineNodes []int64) []SegmentAssignPlan {
 	segmentDist := make(map[int64][]*meta.Segment)
-	nodeItemsMap := b.convertToNodeItems(br, replica.GetCollectionID(), onlineNodes)
+	nodeItemsMap := b.convertToNodeItemsBySegment(br, replica.GetCollectionID(), onlineNodes)
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
@@ -262,7 +262,7 @@ func (b *ChannelLevelScoreBalancer) genChannelPlan(ctx context.Context, replica 
 			return nil
 		}
 
-		channelPlans := b.AssignChannel(ctx, channelsToMove, nodeWithLessChannel, false)
+		channelPlans := b.AssignChannel(ctx, replica.GetCollectionID(), channelsToMove, nodeWithLessChannel, false)
 		for i := range channelPlans {
 			channelPlans[i].From = channelPlans[i].Channel.Node
 			channelPlans[i].Replica = replica

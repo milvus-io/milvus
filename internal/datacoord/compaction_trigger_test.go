@@ -72,11 +72,6 @@ func (h *spyCompactionHandler) enqueueCompaction(task *datapb.CompactionTask) er
 	return err
 }
 
-// completeCompaction record the result of a compaction
-func (h *spyCompactionHandler) completeCompaction(result *datapb.CompactionPlanResult) error {
-	return nil
-}
-
 // isFull return true if the task pool is full
 func (h *spyCompactionHandler) isFull() bool {
 	return false
@@ -607,10 +602,16 @@ func Test_compactionTrigger_force(t *testing.T) {
 			_, err := tr.triggerManualCompaction(tt.collectionID)
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
-			plan := <-spy.spyChan
-			plan.StartTime = 0
-			sortPlanCompactionBinlogs(plan)
-			assert.EqualValues(t, tt.wantPlans[0], plan)
+			select {
+			case plan := <-spy.spyChan:
+				plan.StartTime = 0
+				sortPlanCompactionBinlogs(plan)
+				assert.EqualValues(t, tt.wantPlans[0], plan)
+				return
+			case <-time.After(3 * time.Second):
+				assert.Fail(t, "timeout")
+				return
+			}
 		})
 
 		t.Run(tt.name+" with DiskANN index", func(t *testing.T) {
@@ -636,7 +637,14 @@ func Test_compactionTrigger_force(t *testing.T) {
 			// expect max row num =  2048*1024*1024/(128*4) = 4194304
 			// assert.EqualValues(t, 4194304, tt.fields.meta.segments.GetSegments()[0].MaxRowNum)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
-			<-spy.spyChan
+			select {
+			case plan := <-spy.spyChan:
+				assert.NotNil(t, plan)
+				return
+			case <-time.After(3 * time.Second):
+				assert.Fail(t, "timeout")
+				return
+			}
 		})
 
 		t.Run(tt.name+" with getCompact error", func(t *testing.T) {
@@ -743,7 +751,8 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 		},
 	}
 
-	for i := UniqueID(0); i < 50; i++ {
+	nSegments := 50
+	for i := UniqueID(0); i < UniqueID(nSegments); i++ {
 		info := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:             i,
@@ -905,16 +914,13 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 
-			// should be split into two plans
-			plan := <-spy.spyChan
-			assert.NotEmpty(t, plan)
-
-			// TODO CZS
-			// assert.Equal(t, len(plan.SegmentBinlogs), 30)
-			plan = <-spy.spyChan
-			assert.NotEmpty(t, plan)
-			// TODO CZS
-			// assert.Equal(t, len(plan.SegmentBinlogs), 20)
+			select {
+			case plan := <-spy.spyChan:
+				assert.NotEmpty(t, plan)
+				assert.Equal(t, len(plan.SegmentBinlogs), nSegments)
+			case <-time.After(2 * time.Second):
+				assert.Fail(t, "timeout")
+			}
 		})
 	}
 }
@@ -938,7 +944,8 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 		collectionID int64
 		compactTime  *compactTime
 	}
-	Params.DataCoordCfg.MinSegmentToMerge.DefaultValue = "4"
+	Params.Save(Params.DataCoordCfg.MinSegmentToMerge.Key, "4")
+	defer Params.Save(Params.DataCoordCfg.MinSegmentToMerge.Key, Params.DataCoordCfg.MinSegmentToMerge.DefaultValue)
 	vecFieldID := int64(201)
 	mock0Allocator := newMockAllocator(t)
 	im := newSegmentIndexMeta(nil)
@@ -1073,6 +1080,48 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 	}
 }
 
+func mockSegment(segID, rows, deleteRows, sizeInMB int64) *datapb.SegmentInfo {
+	return &datapb.SegmentInfo{
+		ID:             segID,
+		CollectionID:   2,
+		PartitionID:    1,
+		LastExpireTime: 100,
+		NumOfRows:      sizeInMB,
+		MaxRowNum:      150,
+		InsertChannel:  "ch1",
+		State:          commonpb.SegmentState_Flushed,
+		Binlogs: []*datapb.FieldBinlog{
+			{
+				Binlogs: []*datapb.Binlog{
+					{EntriesNum: rows, LogPath: "log1", LogSize: 100 * 1024 * 1024, MemorySize: sizeInMB * 1024 * 1024},
+				},
+			},
+		},
+		Deltalogs: []*datapb.FieldBinlog{
+			{
+				Binlogs: []*datapb.Binlog{
+					{EntriesNum: deleteRows, LogPath: "deltalog1"},
+				},
+			},
+		},
+		IsSorted: true,
+	}
+}
+
+func mockSegmentsInfo(sizeInMB ...int64) *SegmentsInfo {
+	segments := make(map[int64]*SegmentInfo, len(sizeInMB))
+	for i, size := range sizeInMB {
+		segId := int64(i + 1)
+		segments[segId] = &SegmentInfo{
+			SegmentInfo:   mockSegment(segId, size, 1, size),
+			lastFlushTime: time.Now().Add(-100 * time.Minute),
+		}
+	}
+	return &SegmentsInfo{
+		segments: segments,
+	}
+}
+
 // Test compaction with prioritized candi
 func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 	type fields struct {
@@ -1084,33 +1133,6 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 	}
 	vecFieldID := int64(201)
 
-	genSeg := func(segID, numRows int64) *datapb.SegmentInfo {
-		return &datapb.SegmentInfo{
-			ID:             segID,
-			CollectionID:   2,
-			PartitionID:    1,
-			LastExpireTime: 100,
-			NumOfRows:      numRows,
-			MaxRowNum:      150,
-			InsertChannel:  "ch1",
-			State:          commonpb.SegmentState_Flushed,
-			Binlogs: []*datapb.FieldBinlog{
-				{
-					Binlogs: []*datapb.Binlog{
-						{EntriesNum: numRows, LogPath: "log1", LogSize: 100, MemorySize: 100},
-					},
-				},
-			},
-			Deltalogs: []*datapb.FieldBinlog{
-				{
-					Binlogs: []*datapb.Binlog{
-						{EntriesNum: 5, LogPath: "deltalog1"},
-					},
-				},
-			},
-			IsSorted: true,
-		}
-	}
 	mock0Allocator := newMockAllocator(t)
 
 	genSegIndex := func(segID, indexID UniqueID, numRows int64) map[UniqueID]*model.SegmentIndex {
@@ -1141,34 +1163,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 					// 8 small segments
 					channelCPs: newChannelCps(),
 
-					segments: &SegmentsInfo{
-						segments: map[int64]*SegmentInfo{
-							1: {
-								SegmentInfo:   genSeg(1, 20),
-								lastFlushTime: time.Now().Add(-100 * time.Minute),
-							},
-							2: {
-								SegmentInfo:   genSeg(2, 20),
-								lastFlushTime: time.Now(),
-							},
-							3: {
-								SegmentInfo:   genSeg(3, 20),
-								lastFlushTime: time.Now(),
-							},
-							4: {
-								SegmentInfo:   genSeg(4, 20),
-								lastFlushTime: time.Now(),
-							},
-							5: {
-								SegmentInfo:   genSeg(5, 20),
-								lastFlushTime: time.Now(),
-							},
-							6: {
-								SegmentInfo:   genSeg(6, 20),
-								lastFlushTime: time.Now(),
-							},
-						},
-					},
+					segments: mockSegmentsInfo(20, 20, 20, 20, 20, 20),
 					indexMeta: &indexMeta{
 						segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
 							1: genSegIndex(1, indexID, 20),
@@ -1281,27 +1276,6 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 	vecFieldID := int64(201)
 	mock0Allocator := newMockAllocator(t)
 
-	genSeg := func(segID, numRows int64) *datapb.SegmentInfo {
-		return &datapb.SegmentInfo{
-			ID:             segID,
-			CollectionID:   2,
-			PartitionID:    1,
-			LastExpireTime: 100,
-			NumOfRows:      numRows,
-			MaxRowNum:      110,
-			InsertChannel:  "ch1",
-			State:          commonpb.SegmentState_Flushed,
-			Binlogs: []*datapb.FieldBinlog{
-				{
-					Binlogs: []*datapb.Binlog{
-						{EntriesNum: 5, LogPath: "log1", LogSize: numRows * 1024 * 1024, MemorySize: numRows * 1024 * 1024},
-					},
-				},
-			},
-			IsSorted: true,
-		}
-	}
-
 	genSegIndex := func(segID, indexID UniqueID, numRows int64) map[UniqueID]*model.SegmentIndex {
 		return map[UniqueID]*model.SegmentIndex{
 			indexID: {
@@ -1328,41 +1302,10 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 			"test small segment",
 			fields{
 				&meta{
-					// 4 small segments
 					channelCPs: newChannelCps(),
-
-					segments: &SegmentsInfo{
-						segments: map[int64]*SegmentInfo{
-							1: {
-								SegmentInfo:   genSeg(1, 200),
-								lastFlushTime: time.Now().Add(-100 * time.Minute),
-							},
-							2: {
-								SegmentInfo:   genSeg(2, 200),
-								lastFlushTime: time.Now(),
-							},
-							3: {
-								SegmentInfo:   genSeg(3, 200),
-								lastFlushTime: time.Now(),
-							},
-							4: {
-								SegmentInfo:   genSeg(4, 200),
-								lastFlushTime: time.Now(),
-							},
-							5: {
-								SegmentInfo:   genSeg(5, 200),
-								lastFlushTime: time.Now(),
-							},
-							6: {
-								SegmentInfo:   genSeg(6, 200),
-								lastFlushTime: time.Now(),
-							},
-							7: {
-								SegmentInfo:   genSeg(7, 200),
-								lastFlushTime: time.Now(),
-							},
-						},
-					},
+					// 7 segments with 200MB each, the compaction is expected to be triggered
+					//  as the first 5 being merged, and 1 plus being squeezed.
+					segments: mockSegmentsInfo(200, 200, 200, 200, 200, 200, 200),
 					indexMeta: &indexMeta{
 						segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
 							1: genSegIndex(1, indexID, 20),
@@ -1462,7 +1405,6 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 	}
 }
 
-// Test compaction with small candi
 func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 	type fields struct {
 		meta              *meta
@@ -1476,27 +1418,6 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 		compactTime  *compactTime
 	}
 	vecFieldID := int64(201)
-
-	genSeg := func(segID, numRows int64) *datapb.SegmentInfo {
-		return &datapb.SegmentInfo{
-			ID:             segID,
-			CollectionID:   2,
-			PartitionID:    1,
-			LastExpireTime: 100,
-			NumOfRows:      numRows,
-			MaxRowNum:      110,
-			InsertChannel:  "ch1",
-			State:          commonpb.SegmentState_Flushed,
-			Binlogs: []*datapb.FieldBinlog{
-				{
-					Binlogs: []*datapb.Binlog{
-						{EntriesNum: 5, LogPath: "log1", LogSize: numRows * 1024 * 1024, MemorySize: numRows * 1024 * 1024},
-					},
-				},
-			},
-			IsSorted: true,
-		}
-	}
 
 	genSegIndex := func(segID, indexID UniqueID, numRows int64) map[UniqueID]*model.SegmentIndex {
 		return map[UniqueID]*model.SegmentIndex{
@@ -1527,35 +1448,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 				&meta{
 					channelCPs: newChannelCps(),
 
-					// 4 small segments
-					segments: &SegmentsInfo{
-						segments: map[int64]*SegmentInfo{
-							1: {
-								SegmentInfo:   genSeg(1, 600),
-								lastFlushTime: time.Now().Add(-100 * time.Minute),
-							},
-							2: {
-								SegmentInfo:   genSeg(2, 600),
-								lastFlushTime: time.Now(),
-							},
-							3: {
-								SegmentInfo:   genSeg(3, 600),
-								lastFlushTime: time.Now(),
-							},
-							4: {
-								SegmentInfo:   genSeg(4, 600),
-								lastFlushTime: time.Now(),
-							},
-							5: {
-								SegmentInfo:   genSeg(5, 260),
-								lastFlushTime: time.Now(),
-							},
-							6: {
-								SegmentInfo:   genSeg(6, 260),
-								lastFlushTime: time.Now(),
-							},
-						},
-					},
+					segments: mockSegmentsInfo(600, 600, 600, 600, 260, 260),
 					indexMeta: &indexMeta{
 						segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
 							1: genSegIndex(1, indexID, 20),
@@ -2040,6 +1933,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 
 	// expire time < Timestamp To, but index engine version is 2 which is larger than CurrentIndexVersion in segmentIndex
 	Params.Save(Params.DataCoordCfg.AutoUpgradeSegmentIndex.Key, "true")
+	defer Params.Save(Params.DataCoordCfg.AutoUpgradeSegmentIndex.Key, "false")
 	couldDo = trigger.ShouldDoSingleCompaction(info4, &compactTime{expireTime: 300})
 	assert.True(t, couldDo)
 

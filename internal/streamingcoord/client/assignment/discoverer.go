@@ -8,14 +8,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // newAssignmentDiscoverClient creates a new assignment discover client.
 func newAssignmentDiscoverClient(w *watcher, streamClient streamingpb.StreamingCoordAssignmentService_AssignmentDiscoverClient) *assignmentDiscoverClient {
 	c := &assignmentDiscoverClient{
-		lifetime:     lifetime.NewLifetime(lifetime.Working),
+		lifetime:     typeutil.NewLifetime(),
 		w:            w,
 		streamClient: streamClient,
 		logger:       log.With(),
@@ -29,7 +28,7 @@ func newAssignmentDiscoverClient(w *watcher, streamClient streamingpb.StreamingC
 
 // assignmentDiscoverClient is the client for assignment discover.
 type assignmentDiscoverClient struct {
-	lifetime     lifetime.Lifetime[lifetime.State]
+	lifetime     *typeutil.Lifetime
 	w            *watcher
 	logger       *log.MLogger
 	requestCh    chan *streamingpb.AssignmentDiscoverRequest
@@ -40,7 +39,7 @@ type assignmentDiscoverClient struct {
 
 // ReportAssignmentError reports the assignment error to server.
 func (c *assignmentDiscoverClient) ReportAssignmentError(pchannel types.PChannelInfo, err error) {
-	if err := c.lifetime.Add(lifetime.IsWorking); err != nil {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return
 	}
 	defer c.lifetime.Done()
@@ -75,9 +74,8 @@ func (c *assignmentDiscoverClient) Available() <-chan struct{} {
 
 // Close closes the assignment discover client.
 func (c *assignmentDiscoverClient) Close() {
-	c.lifetime.SetState(lifetime.Stopped)
+	c.lifetime.SetState(typeutil.LifetimeStateStopped)
 	c.lifetime.Wait()
-	c.lifetime.Close()
 
 	close(c.requestCh)
 	c.wg.Wait()

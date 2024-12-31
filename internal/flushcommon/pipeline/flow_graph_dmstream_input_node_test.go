@@ -62,13 +62,16 @@ func (mm *mockMsgStreamFactory) NewMsgStreamDisposer(ctx context.Context) func([
 
 type mockTtMsgStream struct{}
 
+func (mtm *mockTtMsgStream) SetReplicate(config *msgstream.ReplicateConfig) {
+}
+
 func (mtm *mockTtMsgStream) Close() {}
 
 func (mtm *mockTtMsgStream) Chan() <-chan *msgstream.MsgPack {
 	return make(chan *msgstream.MsgPack, 100)
 }
 
-func (mtm *mockTtMsgStream) AsProducer(channels []string) {}
+func (mtm *mockTtMsgStream) AsProducer(ctx context.Context, channels []string) {}
 
 func (mtm *mockTtMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position common.SubscriptionInitialPosition) error {
 	return nil
@@ -80,11 +83,11 @@ func (mtm *mockTtMsgStream) GetProduceChannels() []string {
 	return make([]string, 0)
 }
 
-func (mtm *mockTtMsgStream) Produce(*msgstream.MsgPack) error {
+func (mtm *mockTtMsgStream) Produce(context.Context, *msgstream.MsgPack) error {
 	return nil
 }
 
-func (mtm *mockTtMsgStream) Broadcast(*msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
+func (mtm *mockTtMsgStream) Broadcast(context.Context, *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
 	return nil, nil
 }
 
@@ -100,7 +103,7 @@ func (mtm *mockTtMsgStream) CheckTopicValid(channel string) error {
 	return nil
 }
 
-func (mtm *mockTtMsgStream) EnableProduce(can bool) {
+func (mtm *mockTtMsgStream) ForceEnableProduce(can bool) {
 }
 
 func TestNewDmInputNode(t *testing.T) {

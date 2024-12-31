@@ -14,41 +14,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package kafka
+package index
 
 import (
-	"runtime"
-	"sync"
+	"testing"
 
-	"go.uber.org/atomic"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/stretchr/testify/assert"
 )
 
-var (
-	kafkaCPool atomic.Pointer[conc.Pool[any]]
-	initOnce   sync.Once
-)
+func TestAnnParams(t *testing.T) {
+	ivfAP := NewIvfAnnParam(16)
+	result := ivfAP.Params()
+	v, ok := result[ivfNprobeKey]
+	assert.True(t, ok)
+	assert.Equal(t, 16, v)
 
-func initPool() {
-	initOnce.Do(func() {
-		pool := conc.NewPool[any](
-			hardware.GetCPUNum(),
-			conc.WithPreAlloc(false),
-			conc.WithDisablePurge(false),
-			conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
-		)
+	hnswAP := NewHNSWAnnParam(16)
+	result = hnswAP.Params()
+	v, ok = result[hnswEfKey]
+	assert.True(t, ok)
+	assert.Equal(t, 16, v)
 
-		kafkaCPool.Store(pool)
-		log.Info("init dynamicPool done", zap.Int("size", hardware.GetCPUNum()))
-	})
-}
+	diskAP := NewDiskAnnParam(10)
+	result = diskAP.Params()
+	v, ok = result[diskANNSearchListKey]
+	assert.True(t, ok)
+	assert.Equal(t, 10, v)
 
-// GetSQPool returns the singleton pool instance for search/query operations.
-func getPool() *conc.Pool[any] {
-	initPool()
-	return kafkaCPool.Load()
+	scannAP := NewSCANNAnnParam(32, 50)
+	result = scannAP.Params()
+	v, ok = result[scannNProbeKey]
+	assert.True(t, ok)
+	assert.Equal(t, 32, v)
+	v, ok = result[scannReorderKKey]
+	assert.True(t, ok)
+	assert.Equal(t, 50, v)
 }

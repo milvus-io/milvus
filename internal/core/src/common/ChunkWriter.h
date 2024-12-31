@@ -52,7 +52,7 @@ class ChunkWriterBase {
 };
 
 template <typename ArrowType, typename T>
-class ChunkWriter : public ChunkWriterBase {
+class ChunkWriter final : public ChunkWriterBase {
  public:
     ChunkWriter(int dim, bool nullable) : ChunkWriterBase(nullable), dim_(dim) {
     }
@@ -67,7 +67,7 @@ class ChunkWriter : public ChunkWriterBase {
 
         auto batch_vec = data->ToRecordBatches().ValueOrDie();
 
-        for (auto batch : batch_vec) {
+        for (auto& batch : batch_vec) {
             row_nums += batch->num_rows();
             auto data = batch->column(0);
             auto array = std::dynamic_pointer_cast<ArrowType>(data);
@@ -83,7 +83,7 @@ class ChunkWriter : public ChunkWriterBase {
         }
 
         // chunk layout: nullbitmap, data1, data2, ..., datan
-        for (auto batch : batch_vec) {
+        for (auto& batch : batch_vec) {
             auto data = batch->column(0);
             auto null_bitmap = data->null_bitmap_data();
             auto null_bitmap_n = (data->length() + 7) / 8;
@@ -95,7 +95,7 @@ class ChunkWriter : public ChunkWriterBase {
             }
         }
 
-        for (auto batch : batch_vec) {
+        for (auto& batch : batch_vec) {
             auto data = batch->column(0);
             auto array = std::dynamic_pointer_cast<ArrowType>(data);
             auto data_ptr = array->raw_values();
@@ -122,7 +122,7 @@ ChunkWriter<arrow::BooleanArray, bool>::write(
     auto row_nums = 0;
     auto batch_vec = data->ToRecordBatches().ValueOrDie();
 
-    for (auto batch : batch_vec) {
+    for (auto& batch : batch_vec) {
         row_nums += batch->num_rows();
         auto data = batch->column(0);
         auto array = std::dynamic_pointer_cast<arrow::BooleanArray>(data);
@@ -136,7 +136,7 @@ ChunkWriter<arrow::BooleanArray, bool>::write(
         target_ = std::make_shared<MemChunkTarget>(size);
     }
     // chunk layout: nullbitmap, data1, data2, ..., datan
-    for (auto batch : batch_vec) {
+    for (auto& batch : batch_vec) {
         auto data = batch->column(0);
         auto null_bitmap = data->null_bitmap_data();
         auto null_bitmap_n = (data->length() + 7) / 8;
@@ -148,7 +148,7 @@ ChunkWriter<arrow::BooleanArray, bool>::write(
         }
     }
 
-    for (auto batch : batch_vec) {
+    for (auto& batch : batch_vec) {
         auto data = batch->column(0);
         auto array = std::dynamic_pointer_cast<arrow::BooleanArray>(data);
         for (int i = 0; i < array->length(); i++) {

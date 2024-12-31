@@ -65,6 +65,13 @@ func TestImportManager(t *testing.T) {
 	assert.Equal(t, 1, len(tasks))
 	assert.Equal(t, task2.GetTaskID(), tasks[0].GetTaskID())
 
+	// check idempotency
+	manager.Add(task2)
+	tasks = manager.GetBy(WithStates(datapb.ImportTaskStateV2_Completed))
+	assert.Equal(t, 1, len(tasks))
+	assert.Equal(t, task2.GetTaskID(), tasks[0].GetTaskID())
+	assert.True(t, task2 == tasks[0])
+
 	manager.Update(task1.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed))
 	task := manager.Get(task1.GetTaskID())
 	assert.Equal(t, datapb.ImportTaskStateV2_Failed, task.GetState())

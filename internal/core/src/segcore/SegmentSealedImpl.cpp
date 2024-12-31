@@ -61,7 +61,6 @@ namespace milvus::segcore {
             case DataType::INT64: {                                        \
                 auto col =                                                 \
                     std::dynamic_pointer_cast<SingleChunkColumn>(column);  \
-                auto pks = reinterpret_cast<const int64_t*>(col->Data());  \
                 for (int i = 1; i < col->NumRows(); ++i) {                 \
                     assert(pks[i - 1] <= pks[i] &&                         \
                            "INT64 Column is not ordered!");                \
@@ -122,7 +121,6 @@ void
 SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
-    auto& field_meta = schema_->operator[](field_id);
 
     AssertInfo(info.index_params.count("metric_type"),
                "Can't get metric_type in index_params");
@@ -667,38 +665,8 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     ParsePksFromIDs(pks, field_meta.get_data_type(), *info.primary_keys);
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
-    std::vector<std::tuple<Timestamp, PkType>> ordering(size);
-    for (int i = 0; i < size; i++) {
-        ordering[i] = std::make_tuple(timestamps[i], pks[i]);
-    }
-
-    if (!insert_record_.empty_pks()) {
-        auto end = std::remove_if(
-            ordering.begin(),
-            ordering.end(),
-            [&](const std::tuple<Timestamp, PkType>& record) {
-                return !insert_record_.contain(std::get<1>(record));
-            });
-        size = end - ordering.begin();
-        ordering.resize(size);
-    }
-
-    // all record filtered
-    if (size == 0) {
-        return;
-    }
-
-    std::sort(ordering.begin(), ordering.end());
-    std::vector<PkType> sort_pks(size);
-    std::vector<Timestamp> sort_timestamps(size);
-
-    for (int i = 0; i < size; i++) {
-        auto [t, pk] = ordering[i];
-        sort_timestamps[i] = t;
-        sort_pks[i] = pk;
-    }
-
-    deleted_record_.push(sort_pks, sort_timestamps.data());
+    // step 2: push delete info to delete_record
+    deleted_record_.LoadPush(pks, timestamps);
 }
 
 void
@@ -742,7 +710,6 @@ SegmentSealedImpl::get_chunk_buffer(FieldId field_id,
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
-    auto& field_meta = schema_->operator[](field_id);
     if (auto it = fields_.find(field_id); it != fields_.end()) {
         auto& field_data = it->second;
         FixedVector<bool> valid_data;
@@ -770,7 +737,6 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
-    auto& field_meta = schema_->operator[](field_id);
     if (auto it = fields_.find(field_id); it != fields_.end()) {
         auto& field_data = it->second;
         return field_data->Span();
@@ -787,13 +753,28 @@ SegmentSealedImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
-    auto& field_meta = schema_->operator[](field_id);
     if (auto it = fields_.find(field_id); it != fields_.end()) {
         auto& field_data = it->second;
         return field_data->StringViews();
     }
     PanicInfo(ErrorCode::UnexpectedError,
               "chunk_view_impl only used for variable column field ");
+}
+
+std::pair<std::vector<std::string_view>, FixedVector<bool>>
+SegmentSealedImpl::chunk_view_by_offsets(
+    FieldId field_id,
+    int64_t chunk_id,
+    const FixedVector<int32_t>& offsets) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto it = fields_.find(field_id); it != fields_.end()) {
+        auto& field_data = it->second;
+        return field_data->ViewsByOffsets(offsets);
+    }
+    PanicInfo(ErrorCode::UnexpectedError,
+              "chunk_view_by_offsets only used for variable column field ");
 }
 
 const index::IndexBase*
@@ -855,7 +836,7 @@ SegmentSealedImpl::search_sorted_pk(const PkType& pk,
         case DataType::INT64: {
             auto target = std::get<int64_t>(pk);
             // get int64 pks
-            auto src = reinterpret_cast<const int64_t*>(pk_column->Data());
+            auto src = reinterpret_cast<const int64_t*>(pk_column->Data(0));
             auto it =
                 std::lower_bound(src,
                                  src + pk_column->NumRows(),
@@ -903,35 +884,7 @@ void
 SegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
                                     int64_t ins_barrier,
                                     Timestamp timestamp) const {
-    auto del_barrier = get_barrier(get_deleted_record(), timestamp);
-    if (del_barrier == 0) {
-        return;
-    }
-
-    auto bitmap_holder = std::shared_ptr<DeletedRecord::TmpBitmap>();
-
-    auto search_fn = [this](const PkType& pk, int64_t barrier) {
-        return this->search_pk(pk, barrier);
-    };
-    bitmap_holder = get_deleted_bitmap(del_barrier,
-                                       ins_barrier,
-                                       deleted_record_,
-                                       insert_record_,
-                                       timestamp,
-                                       is_sorted_by_pk_,
-                                       search_fn);
-
-    if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
-        return;
-    }
-    auto& delete_bitset = *bitmap_holder->bitmap_ptr;
-    AssertInfo(
-        delete_bitset.size() == bitset.size(),
-        fmt::format(
-            "Deleted bitmap size:{} not equal to filtered bitmap size:{}",
-            delete_bitset.size(),
-            bitset.size()));
-    bitset |= delete_bitset;
+    deleted_record_.Query(bitset, ins_barrier, timestamp);
 }
 
 void
@@ -989,12 +942,12 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
         // get index params for bm25 brute force
         std::map<std::string, std::string> index_info;
         if (search_info.metric_type_ == knowhere::metric::BM25) {
-            auto index_info =
+            index_info =
                 col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
         }
 
         query::SearchOnSealed(*schema_,
-                              vec_data->Data(),
+                              vec_data->Data(0),
                               search_info,
                               index_info,
                               query_data,
@@ -1113,8 +1066,8 @@ SegmentSealedImpl::get_vector(FieldId field_id,
             pool.Submit(ReadFromChunkCache, cc, data_path, mmap_descriptor_));
     }
 
-    for (int i = 0; i < futures.size(); ++i) {
-        const auto& [data_path, column] = futures[i].get();
+    for (auto& future : futures) {
+        const auto& [data_path, column] = future.get();
         path_to_column[data_path] = column;
     }
 
@@ -1135,7 +1088,7 @@ SegmentSealedImpl::get_vector(FieldId field_id,
             AssertInfo(sparse_column, "incorrect column created");
             buf[i] = static_cast<const knowhere::sparse::SparseRow<float>*>(
                 static_cast<const void*>(
-                    sparse_column->Data()))[offset_in_binlog];
+                    sparse_column->Data(0)))[offset_in_binlog];
         }
         return segcore::CreateVectorDataArrayFrom(
             buf.data(), count, field_meta);
@@ -1156,7 +1109,7 @@ SegmentSealedImpl::get_vector(FieldId field_id,
                 offset_in_binlog,
                 column->NumRows(),
                 data_path);
-            auto vector = &column->Data()[offset_in_binlog * row_bytes];
+            auto vector = &column->Data(0)[offset_in_binlog * row_bytes];
             std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
         }
         return segcore::CreateVectorDataArrayFrom(
@@ -1177,7 +1130,6 @@ SegmentSealedImpl::DropFieldData(const FieldId field_id) {
         }
         lck.unlock();
     } else {
-        auto& field_meta = schema_->operator[](field_id);
         std::unique_lock lck(mutex_);
         if (get_bit(field_data_ready_bitset_, field_id)) {
             fields_.erase(field_id);
@@ -1255,7 +1207,8 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
       id_(segment_id),
       col_index_meta_(index_meta),
       TEST_skip_index_for_retrieve_(TEST_skip_index_for_retrieve),
-      is_sorted_by_pk_(is_sorted_by_pk) {
+      is_sorted_by_pk_(is_sorted_by_pk),
+      deleted_record_(&insert_record_, this) {
     mmap_descriptor_ = std::shared_ptr<storage::MmapChunkDescriptor>(
         new storage::MmapChunkDescriptor({segment_id, SegmentType::Sealed}));
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
@@ -1422,7 +1375,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
                                 const FieldMeta& field_meta,
                                 const int64_t* seg_offsets,
                                 int64_t count) const {
-    // DO NOT directly access the column by map like: `fields_.at(field_id)->Data()`,
+    // DO NOT directly access the column by map like: `fields_.at(field_id)->Data(0)`,
     // we have to clone the shared pointer,
     // to make sure it won't get released if segment released
     auto column = fields_.at(field_id);
@@ -1464,7 +1417,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
         }
 
         case DataType::BOOL: {
-            bulk_subscript_impl<bool>(column->Data(),
+            bulk_subscript_impl<bool>(column->Data(0),
                                       seg_offsets,
                                       count,
                                       ret->mutable_scalars()
@@ -1474,7 +1427,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::INT8: {
-            bulk_subscript_impl<int8_t>(column->Data(),
+            bulk_subscript_impl<int8_t>(column->Data(0),
                                         seg_offsets,
                                         count,
                                         ret->mutable_scalars()
@@ -1484,7 +1437,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::INT16: {
-            bulk_subscript_impl<int16_t>(column->Data(),
+            bulk_subscript_impl<int16_t>(column->Data(0),
                                          seg_offsets,
                                          count,
                                          ret->mutable_scalars()
@@ -1494,7 +1447,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::INT32: {
-            bulk_subscript_impl<int32_t>(column->Data(),
+            bulk_subscript_impl<int32_t>(column->Data(0),
                                          seg_offsets,
                                          count,
                                          ret->mutable_scalars()
@@ -1504,7 +1457,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::INT64: {
-            bulk_subscript_impl<int64_t>(column->Data(),
+            bulk_subscript_impl<int64_t>(column->Data(0),
                                          seg_offsets,
                                          count,
                                          ret->mutable_scalars()
@@ -1514,7 +1467,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::FLOAT: {
-            bulk_subscript_impl<float>(column->Data(),
+            bulk_subscript_impl<float>(column->Data(0),
                                        seg_offsets,
                                        count,
                                        ret->mutable_scalars()
@@ -1524,7 +1477,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::DOUBLE: {
-            bulk_subscript_impl<double>(column->Data(),
+            bulk_subscript_impl<double>(column->Data(0),
                                         seg_offsets,
                                         count,
                                         ret->mutable_scalars()
@@ -1535,7 +1488,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
         }
         case DataType::VECTOR_FLOAT: {
             bulk_subscript_impl(field_meta.get_sizeof(),
-                                column->Data(),
+                                column->Data(0),
                                 seg_offsets,
                                 count,
                                 ret->mutable_vectors()
@@ -1547,7 +1500,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
         case DataType::VECTOR_FLOAT16: {
             bulk_subscript_impl(
                 field_meta.get_sizeof(),
-                column->Data(),
+                column->Data(0),
                 seg_offsets,
                 count,
                 ret->mutable_vectors()->mutable_float16_vector()->data());
@@ -1556,7 +1509,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
         case DataType::VECTOR_BFLOAT16: {
             bulk_subscript_impl(
                 field_meta.get_sizeof(),
-                column->Data(),
+                column->Data(0),
                 seg_offsets,
                 count,
                 ret->mutable_vectors()->mutable_bfloat16_vector()->data());
@@ -1565,7 +1518,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
         case DataType::VECTOR_BINARY: {
             bulk_subscript_impl(
                 field_meta.get_sizeof(),
-                column->Data(),
+                column->Data(0),
                 seg_offsets,
                 count,
                 ret->mutable_vectors()->mutable_binary_vector()->data());
@@ -1573,7 +1526,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
         }
         case DataType::VECTOR_SPARSE_FLOAT: {
             auto rows = static_cast<const knowhere::sparse::SparseRow<float>*>(
-                static_cast<const void*>(column->Data()));
+                static_cast<const void*>(column->Data(0)));
             auto dst = ret->mutable_vectors()->mutable_sparse_float_vector();
             SparseRowsToProto(
                 [&](size_t i) {
@@ -1633,7 +1586,6 @@ SegmentSealedImpl::bulk_subscript(
     int64_t count,
     const std::vector<std::string>& dynamic_field_names) const {
     Assert(!dynamic_field_names.empty());
-    auto& field_meta = schema_->operator[](field_id);
     if (count == 0) {
         return fill_with_empty(field_id, 0);
     }
@@ -1721,11 +1673,7 @@ SegmentSealedImpl::search_ids(const IdArray& id_array,
 
     for (auto& pk : pks) {
         std::vector<SegOffset> pk_offsets;
-        if (!is_sorted_by_pk_) {
-            pk_offsets = insert_record_.search_pk(pk, timestamp);
-        } else {
-            pk_offsets = search_pk(pk, timestamp);
-        }
+        pk_offsets = search_pk(pk, timestamp);
         for (auto offset : pk_offsets) {
             switch (data_type) {
                 case DataType::INT64: {
@@ -1825,7 +1773,7 @@ SegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
         sort_pks[i] = pk;
     }
 
-    deleted_record_.push(sort_pks, sort_timestamps.data());
+    deleted_record_.StreamPush(sort_pks, sort_timestamps.data());
     return SegcoreError::success();
 }
 
@@ -1967,7 +1915,7 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         auto index_metric = field_binlog_config->GetMetricType();
 
         auto dataset =
-            knowhere::GenDataSet(row_count, dim, (void*)vec_data->Data());
+            knowhere::GenDataSet(row_count, dim, (void*)vec_data->Data(0));
         dataset->SetIsOwner(false);
         dataset->SetIsSparse(is_sparse);
 

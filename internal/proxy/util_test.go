@@ -1063,7 +1063,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 			Status:       merr.Success(),
 			PartitionIDs: []int64{partID},
 		}, nil)
-		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, qc, collID, partID)
 		assert.NoError(t, err)
 		assert.True(t, loaded)
 	})
@@ -1088,7 +1088,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 			Status:       merr.Success(),
 			PartitionIDs: []int64{partID},
 		}, errors.New("error"))
-		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, qc, collID, partID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
 	})
@@ -1116,7 +1116,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 			},
 			PartitionIDs: []int64{partID},
 		}, nil)
-		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, qc, collID, partID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
 	})
@@ -2430,7 +2430,7 @@ func TestSendReplicateMessagePack(t *testing.T) {
 	})
 
 	t.Run("produce fail", func(t *testing.T) {
-		mockStream.EXPECT().Produce(mock.Anything).Return(errors.New("produce error")).Once()
+		mockStream.EXPECT().Produce(mock.Anything, mock.Anything).Return(errors.New("produce error")).Once()
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateDatabaseRequest{
 			Base: &commonpb.MsgBase{ReplicateInfo: &commonpb.ReplicateInfo{
 				IsReplicate:  true,
@@ -2444,7 +2444,7 @@ func TestSendReplicateMessagePack(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		mockStream.EXPECT().Produce(mock.Anything).Return(nil)
+		mockStream.EXPECT().Produce(mock.Anything, mock.Anything).Return(nil)
 
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateDatabaseRequest{})
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DropDatabaseRequest{})
@@ -3076,6 +3076,168 @@ func TestValidateFunctionBasicParams(t *testing.T) {
 			OutputFieldNames: []string{"output1", "output1"},
 		}
 		err := checkFunctionBasicParams(function)
+		assert.Error(t, err)
+	})
+}
+
+func TestComputeRecall(t *testing.T) {
+	t.Run("normal case1", func(t *testing.T) {
+		result1 := &schemapb.SearchResultData{
+			NumQueries: 3,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{
+						Data: []string{"11", "9", "8", "5", "3", "1"},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.1},
+			Topks:  []int64{2, 2, 2},
+		}
+
+		gt := &schemapb.SearchResultData{
+			NumQueries: 3,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{
+						Data: []string{"11", "10", "8", "5", "3", "1"},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.98, 0.8, 0.5, 0.3, 0.1},
+			Topks:  []int64{2, 2, 2},
+		}
+
+		err := computeRecall(result1, gt)
+		assert.NoError(t, err)
+		assert.Equal(t, result1.Recalls[0], float32(0.5))
+		assert.Equal(t, result1.Recalls[1], float32(1.0))
+		assert.Equal(t, result1.Recalls[2], float32(1.0))
+	})
+
+	t.Run("normal case2", func(t *testing.T) {
+		result1 := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{11, 9, 8, 5, 3, 1, 34, 23, 22, 21},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.8, 0.7, 0.6, 0.5, 0.4},
+			Topks:  []int64{5, 5},
+		}
+
+		gt := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{11, 9, 6, 5, 4, 1, 34, 23, 22, 20},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.8, 0.7, 0.6, 0.5, 0.4},
+			Topks:  []int64{5, 5},
+		}
+
+		err := computeRecall(result1, gt)
+		assert.NoError(t, err)
+		assert.Equal(t, result1.Recalls[0], float32(0.6))
+		assert.Equal(t, result1.Recalls[1], float32(0.8))
+	})
+
+	t.Run("not match size", func(t *testing.T) {
+		result1 := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{11, 9, 8, 5, 3, 1, 34, 23, 22, 21},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.8, 0.7, 0.6, 0.5, 0.4},
+			Topks:  []int64{5, 5},
+		}
+
+		gt := &schemapb.SearchResultData{
+			NumQueries: 1,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{11, 9, 6, 5, 4},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3},
+			Topks:  []int64{5},
+		}
+
+		err := computeRecall(result1, gt)
+		assert.Error(t, err)
+	})
+
+	t.Run("not match type1", func(t *testing.T) {
+		result1 := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{11, 9, 8, 5, 3, 1, 34, 23, 22, 21},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.8, 0.7, 0.6, 0.5, 0.4},
+			Topks:  []int64{5, 5},
+		}
+
+		gt := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{
+						Data: []string{"11", "10", "8", "5", "3", "1", "23", "22", "21", "20"},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.8, 0.7, 0.6, 0.5, 0.4},
+			Topks:  []int64{5, 5},
+		}
+
+		err := computeRecall(result1, gt)
+		assert.Error(t, err)
+	})
+
+	t.Run("not match type2", func(t *testing.T) {
+		result1 := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{
+						Data: []string{"11", "10", "8", "5", "3", "1", "23", "22", "21", "20"},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.8, 0.7, 0.6, 0.5, 0.4},
+			Topks:  []int64{5, 5},
+		}
+
+		gt := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{11, 9, 8, 5, 3, 1, 34, 23, 22, 21},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.8, 0.7, 0.6, 0.5, 0.4},
+			Topks:  []int64{5, 5},
+		}
+
+		err := computeRecall(result1, gt)
 		assert.Error(t, err)
 	})
 }

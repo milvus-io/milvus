@@ -523,9 +523,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 }
 
 func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkoracle.Candidate) (storage.PrimaryKeys, []storage.Timestamp) {
-	sd.level0Mut.Lock()
-	defer sd.level0Mut.Unlock()
-
 	// TODO: this could be large, host all L0 delete on delegator might be a dangerous, consider mmap it on local segment and stream processing it
 	level0Segments := sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0), segments.WithChannel(sd.vchannelName))
 	deltaData := storage.NewDeltaData(0)
@@ -556,8 +553,6 @@ func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkorac
 }
 
 func (sd *shardDelegator) RefreshLevel0DeletionStats() {
-	sd.level0Mut.Lock()
-	defer sd.level0Mut.Unlock()
 	level0Segments := sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0), segments.WithChannel(sd.vchannelName))
 	totalSize := int64(0)
 	for _, segment := range level0Segments {
@@ -740,7 +735,7 @@ func (sd *shardDelegator) createDeleteStreamFromStreamingService(ctx context.Con
 	s := streaming.WAL().Read(ctx, streaming.ReadOption{
 		VChannel: position.GetChannelName(),
 		DeliverPolicy: options.DeliverPolicyStartFrom(
-			adaptor.MustGetMessageIDFromMQWrapperIDBytes("pulsar", position.GetMsgID()),
+			adaptor.MustGetMessageIDFromMQWrapperIDBytes(streaming.WAL().WALName(), position.GetMsgID()),
 		),
 		DeliverFilters: []options.DeliverFilter{
 			// only deliver message which timestamp >= position.Timestamp
@@ -948,7 +943,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	return nil
 }
 
-func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64,
+func (sd *shardDelegator) SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64,
 	sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition,
 ) {
 	growings := sd.segmentManager.GetBy(
@@ -980,7 +975,7 @@ func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []
 		log.Warn("found redundant growing segments",
 			zap.Int64s("growingSegments", redundantGrowingIDs))
 	}
-	sd.distribution.SyncTargetVersion(newVersion, growingInTarget, sealedInTarget, redundantGrowingIDs)
+	sd.distribution.SyncTargetVersion(newVersion, partitions, growingInTarget, sealedInTarget, redundantGrowingIDs)
 	sd.deleteBuffer.TryDiscard(checkpoint.GetTimestamp())
 }
 
@@ -1035,6 +1030,10 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 	idfSparseVector, avgdl, err := sd.idfOracle.BuildIDF(req.GetFieldId(), tfArray)
 	if err != nil {
 		return 0, err
+	}
+
+	for _, idf := range idfSparseVector {
+		metrics.QueryNodeSearchFTSNumTokens.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(sd.collectionID)).Observe(float64(typeutil.SparseFloatRowElementCount(idf)))
 	}
 
 	err = SetBM25Params(req, avgdl)

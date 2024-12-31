@@ -27,7 +27,7 @@ type catalog struct {
 
 // ListPChannels returns all pchannels
 func (c *catalog) ListPChannel(ctx context.Context) ([]*streamingpb.PChannelMeta, error) {
-	keys, values, err := c.metaKV.LoadWithPrefix(PChannelMeta)
+	keys, values, err := c.metaKV.LoadWithPrefix(ctx, PChannelMeta)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (c *catalog) SavePChannels(ctx context.Context, infos []*streamingpb.PChann
 		kvs[key] = string(v)
 	}
 	return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
-		return c.metaKV.MultiSave(partialKvs)
+		return c.metaKV.MultiSave(ctx, partialKvs)
 	})
 }
 

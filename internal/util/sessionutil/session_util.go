@@ -231,7 +231,7 @@ func NewSession(ctx context.Context, opts ...SessionOption) *Session {
 func NewSessionWithEtcd(ctx context.Context, metaRoot string, client *clientv3.Client, opts ...SessionOption) *Session {
 	hostName, hostNameErr := os.Hostname()
 	if hostNameErr != nil {
-		log.Error("get host name fail", zap.Error(hostNameErr))
+		log.Ctx(ctx).Error("get host name fail", zap.Error(hostNameErr))
 	}
 
 	session := &Session{
@@ -260,7 +260,7 @@ func NewSessionWithEtcd(ctx context.Context, metaRoot string, client *clientv3.C
 	session.UpdateRegistered(false)
 
 	connectEtcdFn := func() error {
-		log.Debug("Session try to connect to etcd")
+		log.Ctx(ctx).Debug("Session try to connect to etcd")
 		ctx2, cancel2 := context.WithTimeout(session.ctx, 5*time.Second)
 		defer cancel2()
 		if _, err := client.Get(ctx2, "health"); err != nil {
@@ -271,11 +271,11 @@ func NewSessionWithEtcd(ctx context.Context, metaRoot string, client *clientv3.C
 	}
 	err := retry.Do(ctx, connectEtcdFn, retry.Attempts(100))
 	if err != nil {
-		log.Warn("failed to initialize session",
+		log.Ctx(ctx).Warn("failed to initialize session",
 			zap.Error(err))
 		return nil
 	}
-	log.Debug("Session connect to etcd success")
+	log.Ctx(ctx).Debug("Session connect to etcd success")
 	return session
 }
 
@@ -319,7 +319,7 @@ func (s *Session) getServerID() (int64, error) {
 	serverIDMu.Lock()
 	defer serverIDMu.Unlock()
 
-	log.Debug("getServerID", zap.Bool("reuse", s.reuseNodeID))
+	log.Ctx(s.ctx).Debug("getServerID", zap.Bool("reuse", s.reuseNodeID))
 	if s.reuseNodeID {
 		// Notice, For standalone, all process share the same nodeID.
 		if nodeID := paramtable.GetNodeID(); nodeID != 0 {
@@ -365,6 +365,7 @@ func (s *Session) checkIDExist() {
 }
 
 func (s *Session) getServerIDWithKey(key string) (int64, error) {
+	log := log.Ctx(s.ctx)
 	for {
 		getResp, err := s.etcdCli.Get(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, key))
 		if err != nil {
@@ -459,6 +460,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 	}
 	completeKey := s.getCompleteKey()
 	var ch <-chan *clientv3.LeaseKeepAliveResponse
+	log := log.Ctx(s.ctx)
 	log.Debug("service begin to register to etcd", zap.String("serverName", s.ServerName), zap.Int64("ServerID", s.ServerID))
 
 	registerFn := func() error {
@@ -617,7 +619,7 @@ func fnWithTimeout(fn func() error, d time.Duration) error {
 
 		select {
 		case <-resultChan:
-			log.Debug("retry func success")
+			log.Ctx(context.TODO()).Debug("retry func success")
 		case <-time.After(d):
 			return fmt.Errorf("func timed out")
 		}
@@ -643,7 +645,7 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error)
 			return nil, 0, err
 		}
 		_, mapKey := path.Split(string(kv.Key))
-		log.Debug("SessionUtil GetSessions",
+		log.Ctx(s.ctx).Debug("SessionUtil GetSessions",
 			zap.String("prefix", prefix),
 			zap.String("key", mapKey),
 			zap.String("address", session.Address))
@@ -655,6 +657,7 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error)
 // GetSessionsWithVersionRange will get all sessions with provided prefix and version range in etcd.
 // Revision is returned for WatchServices to prevent missing events.
 func (s *Session) GetSessionsWithVersionRange(prefix string, r semver.Range) (map[string]*Session, int64, error) {
+	log := log.Ctx(s.ctx)
 	res := make(map[string]*Session)
 	key := path.Join(s.metaRoot, DefaultServiceRoot, prefix)
 	resp, err := s.etcdCli.Get(s.ctx, key, clientv3.WithPrefix(),
@@ -789,6 +792,7 @@ func (s *Session) WatchServicesWithVersionRange(prefix string, r semver.Range, r
 }
 
 func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
+	log := log.Ctx(context.TODO())
 	if wresp.Err() != nil {
 		err := w.handleWatchErr(wresp.Err())
 		if err != nil {
@@ -1048,7 +1052,7 @@ func (s *Session) safeCloseLiveCh() {
 // activateFunc is the function to re-active the service.
 func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 	s.activeKey = path.Join(s.metaRoot, DefaultServiceRoot, s.ServerName)
-
+	log := log.Ctx(s.ctx)
 	// try to register to the active_key.
 	// return
 	//   1. doRegistered: if registered the active_key by this session or by other session

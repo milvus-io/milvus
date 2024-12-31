@@ -489,6 +489,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 }
 
 func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context) {
+	log := log.Ctx(ctx)
 	channelCPs, err := gc.meta.catalog.ListChannelCheckpoint(ctx)
 	if err != nil {
 		log.Warn("list channel cp fail during GC", zap.Error(err))
@@ -596,7 +597,7 @@ func (gc *garbageCollector) removeObjectFiles(ctx context.Context, filePaths map
 				if !errors.Is(err, merr.ErrIoKeyNotFound) {
 					return struct{}{}, err
 				}
-				log.Info("remove log failed, key not found, may be removed at previous GC, ignore the error",
+				log.Ctx(ctx).Info("remove log failed, key not found, may be removed at previous GC, ignore the error",
 					zap.String("path", filePath),
 					zap.Error(err))
 			}
@@ -610,7 +611,7 @@ func (gc *garbageCollector) removeObjectFiles(ctx context.Context, filePaths map
 // recycleUnusedIndexes is used to delete those indexes that is deleted by collection.
 func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context) {
 	start := time.Now()
-	log := log.With(zap.String("gcName", "recycleUnusedIndexes"), zap.Time("startAt", start))
+	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedIndexes"), zap.Time("startAt", start))
 	log.Info("start recycleUnusedIndexes...")
 	defer func() { log.Info("recycleUnusedIndexes done", zap.Duration("timeCost", time.Since(start))) }()
 
@@ -633,7 +634,7 @@ func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context) {
 // recycleUnusedSegIndexes remove the index of segment if index is deleted or segment itself is deleted.
 func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context) {
 	start := time.Now()
-	log := log.With(zap.String("gcName", "recycleUnusedSegIndexes"), zap.Time("startAt", start))
+	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedSegIndexes"), zap.Time("startAt", start))
 	log.Info("start recycleUnusedSegIndexes...")
 	defer func() { log.Info("recycleUnusedSegIndexes done", zap.Duration("timeCost", time.Since(start))) }()
 
@@ -676,7 +677,7 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context) {
 // recycleUnusedIndexFiles is used to delete those index files that no longer exist in the meta.
 func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 	start := time.Now()
-	log := log.With(zap.String("gcName", "recycleUnusedIndexFiles"), zap.Time("startAt", start))
+	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedIndexFiles"), zap.Time("startAt", start))
 	log.Info("start recycleUnusedIndexFiles...")
 
 	prefix := path.Join(gc.option.cli.RootPath(), common.SegmentIndexPath) + "/"
@@ -774,6 +775,7 @@ func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 
 // recycleUnusedAnalyzeFiles is used to delete those analyze stats files that no longer exist in the meta.
 func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context) {
+	log := log.Ctx(ctx)
 	log.Info("start recycleUnusedAnalyzeFiles")
 	startTs := time.Now()
 	prefix := path.Join(gc.option.cli.RootPath(), common.AnalyzeStatsPath) + "/"
@@ -846,7 +848,7 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context) {
 // if missing found, performs gc cleanup
 func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context) {
 	start := time.Now()
-	log := log.With(zap.String("gcName", "recycleUnusedTextIndexFiles"), zap.Time("startAt", start))
+	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedTextIndexFiles"), zap.Time("startAt", start))
 	log.Info("start recycleUnusedTextIndexFiles...")
 	defer func() { log.Info("recycleUnusedTextIndexFiles done", zap.Duration("timeCost", time.Since(start))) }()
 

@@ -108,7 +108,7 @@ func (queue *IndexTaskQueue) AddActiveTask(t task) {
 	tName := t.Name()
 	_, ok := queue.activeTasks[tName]
 	if ok {
-		log.Debug("IndexNode task already in active task list", zap.String("TaskID", tName))
+		log.Ctx(context.TODO()).Debug("IndexNode task already in active task list", zap.String("TaskID", tName))
 	}
 
 	queue.activeTasks[tName] = t
@@ -124,7 +124,7 @@ func (queue *IndexTaskQueue) PopActiveTask(tName string) task {
 		delete(queue.activeTasks, tName)
 		return t
 	}
-	log.Debug("IndexNode task was not found in the active task list", zap.String("TaskName", tName))
+	log.Ctx(queue.sched.ctx).Debug("IndexNode task was not found in the active task list", zap.String("TaskName", tName))
 	return nil
 }
 
@@ -246,7 +246,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 }
 
 func (sched *TaskScheduler) indexBuildLoop() {
-	log.Debug("IndexNode TaskScheduler start build loop ...")
+	log.Ctx(sched.ctx).Debug("IndexNode TaskScheduler start build loop ...")
 	defer sched.wg.Done()
 	for {
 		select {

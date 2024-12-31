@@ -74,7 +74,7 @@ func newKafkaConsumer(config *kafka.ConfigMap, bufSize int64, topic string, grou
 					return nil, err
 				}
 			} else {
-				offset = kafka.Offset(latestMsgID.(*kafkaID).messageID)
+				offset = kafka.Offset(latestMsgID.(*KafkaID).MessageID)
 				kc.skipMsg = true
 			}
 		}
@@ -99,10 +99,7 @@ func newKafkaConsumer(config *kafka.ConfigMap, bufSize int64, topic string, grou
 
 func (kc *Consumer) createKafkaConsumer() error {
 	var err error
-	getPool().Submit(func() (any, error) {
-		kc.c, err = kafka.NewConsumer(kc.config)
-		return nil, err
-	}).Await()
+	kc.c, err = kafka.NewConsumer(kc.config)
 	if err != nil {
 		log.Error("create kafka consumer failed", zap.String("topic", kc.topic), zap.Error(err))
 		return err
@@ -136,12 +133,7 @@ func (kc *Consumer) Chan() <-chan common.Message {
 					return
 				default:
 					readTimeout := paramtable.Get().KafkaCfg.ReadTimeout.GetAsDuration(time.Second)
-					var e *kafka.Message
-					var err error
-					getPool().Submit(func() (any, error) {
-						e, err = kc.c.ReadMessage(readTimeout)
-						return nil, err
-					}).Await()
+					e, err := kc.c.ReadMessage(readTimeout)
 					if err != nil {
 						// if we failed to read message in 30 Seconds, print out a warn message since there should always be a tt
 						log.Warn("consume msg failed", zap.String("topic", kc.topic), zap.String("groupID", kc.groupID), zap.Error(err))
@@ -169,45 +161,43 @@ func (kc *Consumer) Seek(id common.MessageID, inclusive bool) error {
 		return errors.New("kafka consumer is already assigned, can not seek again")
 	}
 
-	offset := kafka.Offset(id.(*kafkaID).messageID)
+	offset := kafka.Offset(id.(*KafkaID).MessageID)
 	return kc.internalSeek(offset, inclusive)
 }
 
 func (kc *Consumer) internalSeek(offset kafka.Offset, inclusive bool) error {
-	_, err := getPool().Submit(func() (any, error) {
-		log.Info("kafka consumer seek start", zap.String("topic name", kc.topic),
-			zap.Any("Msg offset", offset), zap.Bool("inclusive", inclusive))
-		start := time.Now()
-		err := kc.c.Assign([]kafka.TopicPartition{{Topic: &kc.topic, Partition: mqwrapper.DefaultPartitionIdx, Offset: offset}})
-		if err != nil {
-			log.Warn("kafka consumer assign failed ", zap.String("topic name", kc.topic), zap.Any("Msg offset", offset), zap.Error(err))
-			return nil, err
-		}
+	log.Info("kafka consumer seek start", zap.String("topic name", kc.topic),
+		zap.Any("Msg offset", offset), zap.Bool("inclusive", inclusive))
 
-		cost := time.Since(start).Milliseconds()
-		if cost > 200 {
-			log.Warn("kafka consumer assign take too long!", zap.String("topic name", kc.topic),
-				zap.Any("Msg offset", offset), zap.Bool("inclusive", inclusive), zap.Int64("time cost(ms)", cost))
-		}
+	start := time.Now()
+	err := kc.c.Assign([]kafka.TopicPartition{{Topic: &kc.topic, Partition: mqwrapper.DefaultPartitionIdx, Offset: offset}})
+	if err != nil {
+		log.Warn("kafka consumer assign failed ", zap.String("topic name", kc.topic), zap.Any("Msg offset", offset), zap.Error(err))
+		return err
+	}
 
-		// If seek timeout is not 0 the call twice will return error isStarted RD_KAFKA_RESP_ERR__STATE.
-		// if the timeout is 0 it will initiate the seek  but return immediately without any error reporting
-		kc.skipMsg = !inclusive
-		if err := kc.c.Seek(kafka.TopicPartition{
-			Topic:     &kc.topic,
-			Partition: mqwrapper.DefaultPartitionIdx,
-			Offset:    offset,
-		}, timeout); err != nil {
-			return nil, err
-		}
-		cost = time.Since(start).Milliseconds()
-		log.Info("kafka consumer seek finished", zap.String("topic name", kc.topic),
+	cost := time.Since(start).Milliseconds()
+	if cost > 200 {
+		log.Warn("kafka consumer assign take too long!", zap.String("topic name", kc.topic),
 			zap.Any("Msg offset", offset), zap.Bool("inclusive", inclusive), zap.Int64("time cost(ms)", cost))
+	}
 
-		kc.hasAssign = true
-		return nil, nil
-	}).Await()
-	return err
+	// If seek timeout is not 0 the call twice will return error isStarted RD_KAFKA_RESP_ERR__STATE.
+	// if the timeout is 0 it will initiate the seek  but return immediately without any error reporting
+	kc.skipMsg = !inclusive
+	if err := kc.c.Seek(kafka.TopicPartition{
+		Topic:     &kc.topic,
+		Partition: mqwrapper.DefaultPartitionIdx,
+		Offset:    offset,
+	}, timeout); err != nil {
+		return err
+	}
+	cost = time.Since(start).Milliseconds()
+	log.Info("kafka consumer seek finished", zap.String("topic name", kc.topic),
+		zap.Any("Msg offset", offset), zap.Bool("inclusive", inclusive), zap.Int64("time cost(ms)", cost))
+
+	kc.hasAssign = true
+	return nil
 }
 
 func (kc *Consumer) Ack(message common.Message) {
@@ -217,13 +207,7 @@ func (kc *Consumer) Ack(message common.Message) {
 }
 
 func (kc *Consumer) GetLatestMsgID() (common.MessageID, error) {
-	var low, high int64
-	var err error
-
-	getPool().Submit(func() (any, error) {
-		low, high, err = kc.c.QueryWatermarkOffsets(kc.topic, mqwrapper.DefaultPartitionIdx, timeout)
-		return nil, err
-	}).Await()
+	low, high, err := kc.c.QueryWatermarkOffsets(kc.topic, mqwrapper.DefaultPartitionIdx, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +219,7 @@ func (kc *Consumer) GetLatestMsgID() (common.MessageID, error) {
 	}
 
 	log.Info("get latest msg ID ", zap.String("topic", kc.topic), zap.Int64("oldest offset", low), zap.Int64("latest offset", high))
-	return &kafkaID{messageID: high}, nil
+	return &KafkaID{MessageID: high}, nil
 }
 
 func (kc *Consumer) CheckTopicValid(topic string) error {
@@ -260,11 +244,7 @@ func (kc *Consumer) CheckTopicValid(topic string) error {
 func (kc *Consumer) closeInternal() {
 	log.Info("close consumer ", zap.String("topic", kc.topic), zap.String("groupID", kc.groupID))
 	start := time.Now()
-	var err error
-	getPool().Submit(func() (any, error) {
-		err = kc.c.Close()
-		return nil, err
-	}).Await()
+	err := kc.c.Close()
 	if err != nil {
 		log.Warn("failed to close ", zap.String("topic", kc.topic), zap.Error(err))
 	}

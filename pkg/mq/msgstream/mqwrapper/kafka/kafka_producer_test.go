@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/stretchr/testify/assert"
 
@@ -23,7 +22,7 @@ func TestKafkaProducer_SendSuccess(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	topic := fmt.Sprintf("test-topic-%d", rand.Int())
 
-	producer, err := kc.CreateProducer(common.ProducerOptions{Topic: topic})
+	producer, err := kc.CreateProducer(context.TODO(), common.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 	assert.NotNil(t, producer)
 
@@ -44,26 +43,21 @@ func TestKafkaProducer_SendSuccess(t *testing.T) {
 func TestKafkaProducer_SendFail(t *testing.T) {
 	kafkaAddress := getKafkaBrokerList()
 	{
-		deliveryChan := make(chan kafka.Event, 1)
 		rand.Seed(time.Now().UnixNano())
 		topic := fmt.Sprintf("test-topic-%d", rand.Int())
 
 		pp, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": kafkaAddress})
 		assert.NoError(t, err)
-		producer := &kafkaProducer{p: pp, deliveryChan: deliveryChan, topic: topic}
+		producer := &kafkaProducer{p: pp, stopCh: make(chan struct{}), topic: topic}
+		close(producer.stopCh)
 
 		msg := &common.ProducerMessage{
 			Payload:    []byte{1},
 			Properties: map[string]string{},
 		}
-		var resultMsg kafka.Event = &kafka.Message{TopicPartition: kafka.TopicPartition{Error: errors.New("error")}}
-		deliveryChan <- resultMsg
-
 		ret, err := producer.Send(context.TODO(), msg)
 		assert.Nil(t, ret)
 		assert.Error(t, err)
-
-		producer.Close()
 	}
 }
 
@@ -76,7 +70,7 @@ func TestKafkaProducer_SendFailAfterClose(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	topic := fmt.Sprintf("test-topic-%d", rand.Int())
 
-	producer, err := kc.CreateProducer(common.ProducerOptions{Topic: topic})
+	producer, err := kc.CreateProducer(context.TODO(), common.ProducerOptions{Topic: topic})
 	assert.Nil(t, err)
 	assert.NotNil(t, producer)
 

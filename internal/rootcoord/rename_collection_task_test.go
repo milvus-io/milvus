@@ -18,13 +18,15 @@ package rootcoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 )
 
 func Test_renameCollectionTask_Prepare(t *testing.T) {
@@ -55,7 +57,9 @@ func Test_renameCollectionTask_Prepare(t *testing.T) {
 
 func Test_renameCollectionTask_Execute(t *testing.T) {
 	t.Run("failed to expire cache", func(t *testing.T) {
-		core := newTestCore(withInvalidProxyManager())
+		mockMeta := mockrootcoord.NewIMetaTable(t)
+		mockMeta.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(111)
+		core := newTestCore(withInvalidProxyManager(), withMeta(mockMeta))
 		task := &renameCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.RenameCollectionRequest{
@@ -69,12 +73,11 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("failed to rename collection", func(t *testing.T) {
-		meta := newMockMetaTable()
-		meta.RenameCollectionFunc = func(ctx context.Context, oldName string, newName string, ts Timestamp) error {
-			return errors.New("fail")
-		}
-
-		core := newTestCore(withValidProxyManager(), withMeta(meta))
+		mockMeta := mockrootcoord.NewIMetaTable(t)
+		mockMeta.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(111)
+		mockMeta.EXPECT().RenameCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(fmt.Errorf("failed to alter alias"))
+		core := newTestCore(withValidProxyManager(), withMeta(mockMeta))
 		task := &renameCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.RenameCollectionRequest{

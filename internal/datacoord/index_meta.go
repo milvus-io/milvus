@@ -68,15 +68,16 @@ type indexMeta struct {
 
 func newIndexTaskStats(s *model.SegmentIndex) *metricsinfo.IndexTaskStats {
 	return &metricsinfo.IndexTaskStats{
-		IndexID:        s.IndexID,
-		CollectionID:   s.CollectionID,
-		SegmentID:      s.SegmentID,
-		BuildID:        s.BuildID,
-		IndexState:     s.IndexState.String(),
-		FailReason:     s.FailReason,
-		IndexSize:      s.IndexSize,
-		IndexVersion:   s.IndexVersion,
-		CreatedUTCTime: typeutil.TimestampToString(s.CreatedUTCTime),
+		IndexID:         s.IndexID,
+		CollectionID:    s.CollectionID,
+		SegmentID:       s.SegmentID,
+		BuildID:         s.BuildID,
+		IndexState:      s.IndexState.String(),
+		FailReason:      s.FailReason,
+		IndexSize:       s.IndexSize,
+		IndexVersion:    s.IndexVersion,
+		CreatedUTCTime:  typeutil.TimestampToString(s.CreatedUTCTime),
+		FinishedUTCTime: typeutil.TimestampToString(s.FinishedUTCTime),
 	}
 }
 
@@ -365,7 +366,7 @@ func (m *indexMeta) HasSameReq(req *indexpb.CreateIndexRequest) (bool, UniqueID)
 		if !checkParams(fieldIndex, req) {
 			continue
 		}
-		log.Debug("has same index", zap.Int64("collectionID", req.CollectionID),
+		log.Ctx(context.TODO()).Debug("has same index", zap.Int64("collectionID", req.CollectionID),
 			zap.Int64("fieldID", req.FieldID), zap.String("indexName", req.IndexName),
 			zap.Int64("indexID", fieldIndex.IndexID))
 		return true, fieldIndex.IndexID
@@ -375,20 +376,20 @@ func (m *indexMeta) HasSameReq(req *indexpb.CreateIndexRequest) (bool, UniqueID)
 }
 
 func (m *indexMeta) CreateIndex(ctx context.Context, index *model.Index) error {
-	log.Info("meta update: CreateIndex", zap.Int64("collectionID", index.CollectionID),
+	log.Ctx(ctx).Info("meta update: CreateIndex", zap.Int64("collectionID", index.CollectionID),
 		zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID), zap.String("indexName", index.IndexName))
 	m.Lock()
 	defer m.Unlock()
 
 	if err := m.catalog.CreateIndex(ctx, index); err != nil {
-		log.Error("meta update: CreateIndex save meta fail", zap.Int64("collectionID", index.CollectionID),
+		log.Ctx(ctx).Error("meta update: CreateIndex save meta fail", zap.Int64("collectionID", index.CollectionID),
 			zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID),
 			zap.String("indexName", index.IndexName), zap.Error(err))
 		return err
 	}
 
 	m.updateCollectionIndex(index)
-	log.Info("meta update: CreateIndex success", zap.Int64("collectionID", index.CollectionID),
+	log.Ctx(ctx).Info("meta update: CreateIndex success", zap.Int64("collectionID", index.CollectionID),
 		zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID), zap.String("indexName", index.IndexName))
 	return nil
 }
@@ -415,19 +416,19 @@ func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.Segment
 	defer m.Unlock()
 
 	buildID := segIndex.BuildID
-	log.Info("meta update: adding segment index", zap.Int64("collectionID", segIndex.CollectionID),
+	log.Ctx(ctx).Info("meta update: adding segment index", zap.Int64("collectionID", segIndex.CollectionID),
 		zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
 		zap.Int64("buildID", buildID))
 
 	segIndex.IndexState = commonpb.IndexState_Unissued
 	if err := m.catalog.CreateSegmentIndex(ctx, segIndex); err != nil {
-		log.Warn("meta update: adding segment index failed",
+		log.Ctx(ctx).Warn("meta update: adding segment index failed",
 			zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
 			zap.Int64("buildID", segIndex.BuildID), zap.Error(err))
 		return err
 	}
 	m.updateSegmentIndex(segIndex)
-	log.Info("meta update: adding segment index success", zap.Int64("collectionID", segIndex.CollectionID),
+	log.Ctx(ctx).Info("meta update: adding segment index success", zap.Int64("collectionID", segIndex.CollectionID),
 		zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
 		zap.Int64("buildID", buildID))
 	m.updateIndexTasksMetrics()
@@ -562,7 +563,7 @@ func (m *indexMeta) GetFieldIndexes(collID, fieldID UniqueID, indexName string) 
 
 // MarkIndexAsDeleted will mark the corresponding index as deleted, and recycleUnusedIndexFiles will recycle these tasks.
 func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, indexIDs []UniqueID) error {
-	log.Info("IndexCoord metaTable MarkIndexAsDeleted", zap.Int64("collectionID", collID),
+	log.Ctx(ctx).Info("IndexCoord metaTable MarkIndexAsDeleted", zap.Int64("collectionID", collID),
 		zap.Int64s("indexIDs", indexIDs))
 
 	m.Lock()
@@ -587,14 +588,14 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 	}
 	err := m.catalog.AlterIndexes(ctx, indexes)
 	if err != nil {
-		log.Error("failed to alter index meta in meta store", zap.Int("indexes num", len(indexes)), zap.Error(err))
+		log.Ctx(ctx).Error("failed to alter index meta in meta store", zap.Int("indexes num", len(indexes)), zap.Error(err))
 		return err
 	}
 	for _, index := range indexes {
 		m.indexes[index.CollectionID][index.IndexID] = index
 	}
 
-	log.Info("IndexCoord metaTable MarkIndexAsDeleted success", zap.Int64("collectionID", collID), zap.Int64s("indexIDs", indexIDs))
+	log.Ctx(ctx).Info("IndexCoord metaTable MarkIndexAsDeleted success", zap.Int64("collectionID", collID), zap.Int64s("indexIDs", indexIDs))
 	return nil
 }
 
@@ -759,7 +760,7 @@ func (m *indexMeta) UpdateVersion(buildID, nodeID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
 
-	log.Info("IndexCoord metaTable UpdateVersion receive", zap.Int64("buildID", buildID), zap.Int64("nodeID", nodeID))
+	log.Ctx(m.ctx).Info("IndexCoord metaTable UpdateVersion receive", zap.Int64("buildID", buildID), zap.Int64("nodeID", nodeID))
 	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if !ok {
 		return fmt.Errorf("there is no index with buildID: %d", buildID)
@@ -780,7 +781,7 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 
 	segIdx, ok := m.segmentBuildInfo.Get(taskInfo.GetBuildID())
 	if !ok {
-		log.Warn("there is no index with buildID", zap.Int64("buildID", taskInfo.GetBuildID()))
+		log.Ctx(m.ctx).Warn("there is no index with buildID", zap.Int64("buildID", taskInfo.GetBuildID()))
 		return nil
 	}
 	updateFunc := func(segIdx *model.SegmentIndex) error {
@@ -789,6 +790,7 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		segIdx.FailReason = taskInfo.GetFailReason()
 		segIdx.IndexSize = taskInfo.GetSerializedSize()
 		segIdx.CurrentIndexVersion = taskInfo.GetCurrentIndexVersion()
+		segIdx.FinishedUTCTime = uint64(time.Now().Unix())
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 
@@ -796,7 +798,7 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		return err
 	}
 
-	log.Info("finish index task success", zap.Int64("buildID", taskInfo.GetBuildID()),
+	log.Ctx(m.ctx).Info("finish index task success", zap.Int64("buildID", taskInfo.GetBuildID()),
 		zap.String("state", taskInfo.GetState().String()), zap.String("fail reason", taskInfo.GetFailReason()),
 		zap.Int32("current_index_version", taskInfo.GetCurrentIndexVersion()),
 	)
@@ -811,7 +813,7 @@ func (m *indexMeta) DeleteTask(buildID int64) error {
 
 	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if !ok {
-		log.Warn("there is no index with buildID", zap.Int64("buildID", buildID))
+		log.Ctx(m.ctx).Warn("there is no index with buildID", zap.Int64("buildID", buildID))
 		return nil
 	}
 
@@ -824,7 +826,7 @@ func (m *indexMeta) DeleteTask(buildID int64) error {
 		return err
 	}
 
-	log.Info("delete index task success", zap.Int64("buildID", buildID))
+	log.Ctx(m.ctx).Info("delete index task success", zap.Int64("buildID", buildID))
 	m.updateIndexTasksMetrics()
 	return nil
 }
@@ -844,7 +846,7 @@ func (m *indexMeta) BuildIndex(buildID UniqueID) error {
 
 		err := m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 		if err != nil {
-			log.Error("meta Update: segment index in progress fail", zap.Int64("buildID", segIdx.BuildID), zap.Error(err))
+			log.Ctx(m.ctx).Error("meta Update: segment index in progress fail", zap.Int64("buildID", segIdx.BuildID), zap.Error(err))
 			return err
 		}
 		return nil
@@ -852,7 +854,7 @@ func (m *indexMeta) BuildIndex(buildID UniqueID) error {
 	if err := m.updateSegIndexMeta(segIdx, updateFunc); err != nil {
 		return err
 	}
-	log.Info("meta update: segment index in progress success", zap.Int64("buildID", segIdx.BuildID),
+	log.Ctx(m.ctx).Info("meta update: segment index in progress success", zap.Int64("buildID", segIdx.BuildID),
 		zap.Int64("segmentID", segIdx.SegmentID))
 
 	m.updateIndexTasksMetrics()
@@ -883,7 +885,7 @@ func (m *indexMeta) SetStoredIndexFileSizeMetric(collections map[UniqueID]*colle
 		coll, ok := collections[segmentIdx.CollectionID]
 		if ok {
 			metrics.DataCoordStoredIndexFilesSize.WithLabelValues(coll.DatabaseName, coll.Schema.GetName(),
-				fmt.Sprint(segmentIdx.CollectionID)).Set(float64(segmentIdx.IndexSize))
+				fmt.Sprint(segmentIdx.CollectionID)).Add(float64(segmentIdx.IndexSize))
 			total += segmentIdx.IndexSize
 		}
 	}
@@ -930,10 +932,10 @@ func (m *indexMeta) GetDeletedIndexes() []*model.Index {
 func (m *indexMeta) RemoveIndex(ctx context.Context, collID, indexID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
-	log.Info("IndexCoord meta table remove index", zap.Int64("collectionID", collID), zap.Int64("indexID", indexID))
+	log.Ctx(ctx).Info("IndexCoord meta table remove index", zap.Int64("collectionID", collID), zap.Int64("indexID", indexID))
 	err := m.catalog.DropIndex(ctx, collID, indexID)
 	if err != nil {
-		log.Info("IndexCoord meta table remove index fail", zap.Int64("collectionID", collID),
+		log.Ctx(ctx).Info("IndexCoord meta table remove index fail", zap.Int64("collectionID", collID),
 			zap.Int64("indexID", indexID), zap.Error(err))
 		return err
 	}
@@ -946,7 +948,7 @@ func (m *indexMeta) RemoveIndex(ctx context.Context, collID, indexID UniqueID) e
 		metrics.IndexTaskNum.Delete(prometheus.Labels{"collection_id": strconv.FormatInt(collID, 10), "index_task_status": metrics.FinishedIndexTaskLabel})
 		metrics.IndexTaskNum.Delete(prometheus.Labels{"collection_id": strconv.FormatInt(collID, 10), "index_task_status": metrics.FailedIndexTaskLabel})
 	}
-	log.Info("IndexCoord meta table remove index success", zap.Int64("collectionID", collID), zap.Int64("indexID", indexID))
+	log.Ctx(ctx).Info("IndexCoord meta table remove index success", zap.Int64("collectionID", collID), zap.Int64("indexID", indexID))
 	return nil
 }
 

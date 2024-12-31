@@ -30,13 +30,13 @@ func TestFieldSchema(t *testing.T) {
 		NewField().WithName("array_field").WithDataType(FieldTypeArray).WithElementType(FieldTypeBool).WithMaxCapacity(128),
 		NewField().WithName("clustering_key").WithDataType(FieldTypeInt32).WithIsClusteringKey(true),
 		NewField().WithName("varchar_text").WithDataType(FieldTypeVarChar).WithMaxLength(65535).WithEnableAnalyzer(true).WithAnalyzerParams(map[string]any{}),
-		/*
-			NewField().WithName("default_value_bool").WithDataType(FieldTypeBool).WithDefaultValueBool(true),
-			NewField().WithName("default_value_int").WithDataType(FieldTypeInt32).WithDefaultValueInt(1),
-			NewField().WithName("default_value_long").WithDataType(FieldTypeInt64).WithDefaultValueLong(1),
-			NewField().WithName("default_value_float").WithDataType(FieldTypeFloat).WithDefaultValueFloat(1),
-			NewField().WithName("default_value_double").WithDataType(FieldTypeDouble).WithDefaultValueDouble(1),
-			NewField().WithName("default_value_string").WithDataType(FieldTypeString).WithDefaultValueString("a"),*/
+
+		NewField().WithName("default_value_bool").WithDataType(FieldTypeBool).WithDefaultValueBool(true),
+		NewField().WithName("default_value_int").WithDataType(FieldTypeInt32).WithDefaultValueInt(1),
+		NewField().WithName("default_value_long").WithDataType(FieldTypeInt64).WithDefaultValueLong(1),
+		NewField().WithName("default_value_float").WithDataType(FieldTypeFloat).WithDefaultValueFloat(1),
+		NewField().WithName("default_value_double").WithDataType(FieldTypeDouble).WithDefaultValueDouble(1),
+		NewField().WithName("default_value_string").WithDataType(FieldTypeString).WithDefaultValueString("a"),
 	}
 
 	for _, field := range fields {

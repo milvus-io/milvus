@@ -1245,6 +1245,54 @@ func (_c *IMetaTable_GetCollectionByName_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// GetCollectionID provides a mock function with given fields: ctx, dbName, collectionName
+func (_m *IMetaTable) GetCollectionID(ctx context.Context, dbName string, collectionName string) int64 {
+	ret := _m.Called(ctx, dbName, collectionName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCollectionID")
+	}
+
+	var r0 int64
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) int64); ok {
+		r0 = rf(ctx, dbName, collectionName)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	return r0
+}
+
+// IMetaTable_GetCollectionID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCollectionID'
+type IMetaTable_GetCollectionID_Call struct {
+	*mock.Call
+}
+
+// GetCollectionID is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dbName string
+//   - collectionName string
+func (_e *IMetaTable_Expecter) GetCollectionID(ctx interface{}, dbName interface{}, collectionName interface{}) *IMetaTable_GetCollectionID_Call {
+	return &IMetaTable_GetCollectionID_Call{Call: _e.mock.On("GetCollectionID", ctx, dbName, collectionName)}
+}
+
+func (_c *IMetaTable_GetCollectionID_Call) Run(run func(ctx context.Context, dbName string, collectionName string)) *IMetaTable_GetCollectionID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetCollectionID_Call) Return(_a0 int64) *IMetaTable_GetCollectionID_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_GetCollectionID_Call) RunAndReturn(run func(context.Context, string, string) int64) *IMetaTable_GetCollectionID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCollectionVirtualChannels provides a mock function with given fields: ctx, colID
 func (_m *IMetaTable) GetCollectionVirtualChannels(ctx context.Context, colID int64) []string {
 	ret := _m.Called(ctx, colID)
@@ -2117,23 +2165,23 @@ func (_c *IMetaTable_ListDatabases_Call) RunAndReturn(run func(context.Context, 
 }
 
 // ListPolicy provides a mock function with given fields: ctx, tenant
-func (_m *IMetaTable) ListPolicy(ctx context.Context, tenant string) ([]string, error) {
+func (_m *IMetaTable) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
 	ret := _m.Called(ctx, tenant)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListPolicy")
 	}
 
-	var r0 []string
+	var r0 []*milvuspb.GrantEntity
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) ([]string, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]*milvuspb.GrantEntity, error)); ok {
 		return rf(ctx, tenant)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) []string); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) []*milvuspb.GrantEntity); ok {
 		r0 = rf(ctx, tenant)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
+			r0 = ret.Get(0).([]*milvuspb.GrantEntity)
 		}
 	}
 
@@ -2165,12 +2213,12 @@ func (_c *IMetaTable_ListPolicy_Call) Run(run func(ctx context.Context, tenant s
 	return _c
 }
 
-func (_c *IMetaTable_ListPolicy_Call) Return(_a0 []string, _a1 error) *IMetaTable_ListPolicy_Call {
+func (_c *IMetaTable_ListPolicy_Call) Return(_a0 []*milvuspb.GrantEntity, _a1 error) *IMetaTable_ListPolicy_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *IMetaTable_ListPolicy_Call) RunAndReturn(run func(context.Context, string) ([]string, error)) *IMetaTable_ListPolicy_Call {
+func (_c *IMetaTable_ListPolicy_Call) RunAndReturn(run func(context.Context, string) ([]*milvuspb.GrantEntity, error)) *IMetaTable_ListPolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }

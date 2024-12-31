@@ -856,6 +856,32 @@ func TestRootCoord_AllocTimestamp(t *testing.T) {
 		assert.Equal(t, ts-uint64(count)+1, resp.GetTimestamp())
 		assert.Equal(t, count, resp.GetCount())
 	})
+
+	t.Run("block timestamp", func(t *testing.T) {
+		alloc := newMockTsoAllocator()
+		count := uint32(10)
+		current := time.Now()
+		ts := tsoutil.ComposeTSByTime(current.Add(time.Second), 1)
+		alloc.GenerateTSOF = func(count uint32) (uint64, error) {
+			// end ts
+			return ts, nil
+		}
+		alloc.GetLastSavedTimeF = func() time.Time {
+			return current
+		}
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(),
+			withTsoAllocator(alloc))
+		resp, err := c.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
+			Count:          count,
+			BlockTimestamp: tsoutil.ComposeTSByTime(current.Add(time.Second), 0),
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		// begin ts
+		assert.Equal(t, ts-uint64(count)+1, resp.GetTimestamp())
+		assert.Equal(t, count, resp.GetCount())
+	})
 }
 
 func TestRootCoord_AllocID(t *testing.T) {
@@ -1025,6 +1051,34 @@ func TestRootCoord_RenameCollection(t *testing.T) {
 		resp, err := c.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoord_ListPolicy(t *testing.T) {
+	t.Run("expand privilege groups", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		c := newTestCore(withHealthyCode(), withMeta(meta))
+		ctx := context.Background()
+
+		meta.EXPECT().ListPolicy(ctx, util.DefaultTenant).Return([]*milvuspb.GrantEntity{
+			{
+				ObjectName: "*",
+				Object: &milvuspb.ObjectEntity{
+					Name: "Global",
+				},
+				Role:    &milvuspb.RoleEntity{Name: "role"},
+				Grantor: &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "CollectionAdmin"}},
+			},
+		}, nil)
+
+		meta.EXPECT().ListPrivilegeGroups(ctx).Return([]*milvuspb.PrivilegeGroupInfo{}, nil)
+
+		meta.EXPECT().ListUserRole(ctx, util.DefaultTenant).Return([]string{}, nil)
+
+		resp, err := c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
+		assert.Equal(t, len(Params.RbacConfig.GetDefaultPrivilegeGroup("CollectionAdmin").Privileges), len(resp.PolicyInfos))
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 }
 
@@ -1891,14 +1945,44 @@ func TestRootCoord_RBACError(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
 		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.ListPolicyFunc = func(ctx context.Context, tenant string) ([]string, error) {
-			return []string{}, nil
+		mockMeta.ListPolicyFunc = func(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
+			return []*milvuspb.GrantEntity{{
+				ObjectName: "*",
+				Object: &milvuspb.ObjectEntity{
+					Name: "Global",
+				},
+				Role:    &milvuspb.RoleEntity{Name: "role"},
+				Grantor: &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "CustomGroup"}},
+			}}, nil
 		}
 		resp, err = c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		mockMeta.ListPolicyFunc = func(ctx context.Context, tenant string) ([]string, error) {
-			return []string{}, errors.New("mock error")
+		mockMeta.ListPrivilegeGroupsFunc = func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
+			return []*milvuspb.PrivilegeGroupInfo{
+				{
+					GroupName:  "CollectionAdmin",
+					Privileges: []*milvuspb.PrivilegeEntity{{Name: "CreateCollection"}},
+				},
+			}, nil
+		}
+		resp, err = c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		mockMeta.IsCustomPrivilegeGroupFunc = func(ctx context.Context, groupName string) (bool, error) {
+			return true, nil
+		}
+		resp, err = c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		mockMeta.ListPolicyFunc = func(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
+			return []*milvuspb.GrantEntity{}, errors.New("mock error")
+		}
+		mockMeta.ListPrivilegeGroupsFunc = func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
+			return []*milvuspb.PrivilegeGroupInfo{}, errors.New("mock error")
+		}
+		mockMeta.IsCustomPrivilegeGroupFunc = func(ctx context.Context, groupName string) (bool, error) {
+			return false, errors.New("mock error")
 		}
 	})
 }
@@ -1977,7 +2061,7 @@ func TestCore_InitRBAC(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		c := newTestCore(withHealthyCode(), withMeta(meta))
 		meta.EXPECT().CreateRole(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
-		meta.EXPECT().OperatePrivilege(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+		meta.EXPECT().OperatePrivilege(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(3)
 
 		Params.Save(Params.RoleCfg.Enabled.Key, "false")
 		Params.Save(Params.ProxyCfg.EnablePublicPrivilege.Key, "true")
@@ -2010,29 +2094,6 @@ func TestCore_InitRBAC(t *testing.T) {
 
 		err := c.initRbac()
 		assert.NoError(t, err)
-	})
-
-	t.Run("init default privilege groups", func(t *testing.T) {
-		clusterReadWrite := `SelectOwnership,SelectUser,DescribeResourceGroup`
-		meta := mockrootcoord.NewIMetaTable(t)
-		c := newTestCore(withHealthyCode(), withMeta(meta))
-
-		Params.Save(Params.RbacConfig.Enabled.Key, "true")
-		Params.Save(Params.RbacConfig.ClusterReadWritePrivileges.Key, clusterReadWrite)
-
-		defer func() {
-			Params.Reset(Params.RbacConfig.Enabled.Key)
-			Params.Reset(Params.RbacConfig.ClusterReadWritePrivileges.Key)
-		}()
-
-		builtinGroups := c.initBuiltinPrivilegeGroups()
-		fmt.Println(builtinGroups)
-		assert.Equal(t, len(util.BuiltinPrivilegeGroups), len(builtinGroups))
-		for _, group := range builtinGroups {
-			if group.GroupName == "ClusterReadWrite" {
-				assert.Equal(t, len(group.Privileges), 3)
-			}
-		}
 	})
 }
 

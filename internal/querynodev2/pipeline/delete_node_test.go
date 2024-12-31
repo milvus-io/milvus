@@ -17,7 +17,6 @@
 package pipeline
 
 import (
-	"context"
 	"testing"
 
 	"github.com/samber/lo"
@@ -26,7 +25,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -40,8 +38,6 @@ type DeleteNodeSuite struct {
 	channel        string
 	timeRange      TimeRange
 
-	// dependency
-	tSafeManager TSafeManager
 	// mocks
 	manager   *segments.Manager
 	delegator *delegator.MockShardDelegator
@@ -93,18 +89,13 @@ func (suite *DeleteNodeSuite) TestBasic() {
 			}
 		})
 	// init dependency
-	suite.tSafeManager = tsafe.NewTSafeReplica()
-	suite.tSafeManager.Add(context.Background(), suite.channel, 0)
 	// build delete node and data
-	node := newDeleteNode(suite.collectionID, suite.channel, suite.manager, suite.tSafeManager, suite.delegator, 8)
+	node := newDeleteNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
 	in := suite.buildDeleteNodeMsg()
+	suite.delegator.EXPECT().UpdateTSafe(in.timeRange.timestampMax).Return()
 	// run
 	out := node.Operate(in)
 	suite.Nil(out)
-	// check tsafe
-	tt, err := suite.tSafeManager.Get(suite.channel)
-	suite.NoError(err)
-	suite.Equal(suite.timeRange.timestampMax, tt)
 }
 
 func TestDeleteNode(t *testing.T) {

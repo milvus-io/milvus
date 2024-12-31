@@ -51,7 +51,7 @@ import (
 
 // WatchDmChannels is not in use
 func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	log.Warn("DataNode WatchDmChannels is not in use")
+	log.Ctx(ctx).Warn("DataNode WatchDmChannels is not in use")
 
 	// TODO ERROR OF GRPC NOT IN USE
 	return merr.Success(), nil
@@ -61,7 +61,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 func (node *DataNode) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	nodeID := common.NotRegisteredID
 	state := node.stateCode.Load().(commonpb.StateCode)
-	log.Debug("DataNode current state", zap.String("State", state.String()))
+	log.Ctx(ctx).Debug("DataNode current state", zap.String("State", state.String()))
 	if node.GetSession() != nil && node.session.Registered() {
 		nodeID = node.GetSession().ServerID
 	}
@@ -133,9 +133,9 @@ func (node *DataNode) GetStatisticsChannel(ctx context.Context, req *internalpb.
 
 // ShowConfigurations returns the configurations of DataNode matching req.Pattern
 func (node *DataNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	log.Debug("DataNode.ShowConfigurations", zap.String("pattern", req.Pattern))
+	log.Ctx(ctx).Debug("DataNode.ShowConfigurations", zap.String("pattern", req.Pattern))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		log.Warn("DataNode.ShowConfigurations failed", zap.Int64("nodeId", node.GetNodeID()), zap.Error(err))
+		log.Ctx(ctx).Warn("DataNode.ShowConfigurations failed", zap.Int64("nodeId", node.GetNodeID()), zap.Error(err))
 
 		return &internalpb.ShowConfigurationsResponse{
 			Status:        merr.Status(err),
@@ -160,7 +160,7 @@ func (node *DataNode) ShowConfigurations(ctx context.Context, req *internalpb.Sh
 // GetMetrics return datanode metrics
 func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		log.Warn("DataNode.GetMetrics failed", zap.Int64("nodeId", node.GetNodeID()), zap.Error(err))
+		log.Ctx(ctx).Warn("DataNode.GetMetrics failed", zap.Int64("nodeId", node.GetNodeID()), zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
 			Status: merr.Status(err),
@@ -252,7 +252,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 // return status of all compaction plans
 func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		log.Warn("DataNode.GetCompactionState failed", zap.Int64("nodeId", node.GetNodeID()), zap.Error(err))
+		log.Ctx(ctx).Warn("DataNode.GetCompactionState failed", zap.Int64("nodeId", node.GetNodeID()), zap.Error(err))
 		return &datapb.CompactionStateResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -351,9 +351,9 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 }
 
 func (node *DataNode) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperationsRequest) (*commonpb.Status, error) {
-	log.Ctx(ctx).Info("DataNode receives NotifyChannelOperation",
-		zap.Int("operation count", len(req.GetInfos())))
+	log := log.Ctx(ctx).With(zap.Int("operation count", len(req.GetInfos())))
 
+	log.Info("DataNode receives NotifyChannelOperation")
 	if node.channelManager == nil {
 		log.Warn("DataNode NotifyChannelOperation failed due to nil channelManager")
 		return merr.Status(merr.WrapErrServiceInternal("channelManager is nil! Ignore if you are upgrading datanode/coord to rpc based watch")), nil

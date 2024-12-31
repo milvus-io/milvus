@@ -24,10 +24,10 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
-	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -40,8 +40,7 @@ type PipelineManagerTestSuite struct {
 	collectionID int64
 	channel      string
 	// dependencies
-	tSafeManager TSafeManager
-	delegators   *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
+	delegators *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
 
 	// mocks
 	segmentManager    *segments.MockSegmentManager
@@ -59,9 +58,6 @@ func (suite *PipelineManagerTestSuite) SetupSuite() {
 func (suite *PipelineManagerTestSuite) SetupTest() {
 	paramtable.Init()
 	// init dependency
-	//	init tsafeManager
-	suite.tSafeManager = tsafe.NewTSafeReplica()
-	suite.tSafeManager.Add(context.Background(), suite.channel, 0)
 	suite.delegators = typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()
 
 	// init mock
@@ -78,9 +74,9 @@ func (suite *PipelineManagerTestSuite) SetupTest() {
 func (suite *PipelineManagerTestSuite) TestBasic() {
 	// init mock
 	//  mock collection manager
-	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(&segments.Collection{})
+	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(segments.NewTestCollection(suite.collectionID, querypb.LoadType_UnKnownType, &schemapb.CollectionSchema{}))
 	//  mock mq factory
-	suite.msgDispatcher.EXPECT().Register(mock.Anything, suite.channel, mock.Anything, common.SubscriptionPositionUnknown).Return(suite.msgChan, nil)
+	suite.msgDispatcher.EXPECT().Register(mock.Anything, mock.Anything).Return(suite.msgChan, nil)
 	suite.msgDispatcher.EXPECT().Deregister(suite.channel)
 
 	// build manager
@@ -88,7 +84,7 @@ func (suite *PipelineManagerTestSuite) TestBasic() {
 		Collection: suite.collectionManager,
 		Segment:    suite.segmentManager,
 	}
-	pipelineManager := NewManager(manager, suite.tSafeManager, suite.msgDispatcher, suite.delegators)
+	pipelineManager := NewManager(manager, suite.msgDispatcher, suite.delegators)
 	defer pipelineManager.Close()
 
 	// Add pipeline

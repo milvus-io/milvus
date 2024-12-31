@@ -95,11 +95,11 @@ func (s *Server) Prepare() error {
 		netutil.OptHighPriorityToUsePort(paramtable.Get().QueryNodeGrpcServerCfg.Port.GetAsInt()),
 	)
 	if err != nil {
-		log.Warn("QueryNode fail to create net listener", zap.Error(err))
+		log.Ctx(s.ctx).Warn("QueryNode fail to create net listener", zap.Error(err))
 		return err
 	}
 	s.listener = listener
-	log.Info("QueryNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	log.Ctx(s.ctx).Info("QueryNode listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
 	paramtable.Get().Save(
 		paramtable.Get().QueryNodeGrpcServerCfg.Port.Key,
 		strconv.FormatInt(int64(listener.Port()), 10))
@@ -109,6 +109,7 @@ func (s *Server) Prepare() error {
 // init initializes QueryNode's grpc service.
 func (s *Server) init() error {
 	etcdConfig := &paramtable.Get().EtcdCfg
+	log := log.Ctx(s.ctx)
 	log.Debug("QueryNode", zap.Int("port", s.listener.Port()))
 
 	etcdCli, err := etcd.CreateEtcdClient(
@@ -151,6 +152,7 @@ func (s *Server) init() error {
 
 // start starts QueryNode's grpc service.
 func (s *Server) start() error {
+	log := log.Ctx(s.ctx)
 	if err := s.querynode.Start(); err != nil {
 		log.Error("QueryNode start failed", zap.Error(err))
 		return err
@@ -215,7 +217,7 @@ func (s *Server) startGrpcLoop() {
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {
-		log.Debug("QueryNode Start Grpc Failed!!!!")
+		log.Ctx(s.ctx).Debug("QueryNode Start Grpc Failed!!!!")
 		s.grpcErrChan <- err
 	}
 }
@@ -225,20 +227,20 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("QueryNode init done ...")
+	log.Ctx(s.ctx).Debug("QueryNode init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Debug("QueryNode start done ...")
+	log.Ctx(s.ctx).Debug("QueryNode start done ...")
 	return nil
 }
 
 // Stop stops QueryNode's grpc service.
 func (s *Server) Stop() (err error) {
-	logger := log.With()
+	logger := log.Ctx(s.ctx)
 	if s.listener != nil {
-		logger = log.With(zap.String("address", s.listener.Address()))
+		logger = logger.With(zap.String("address", s.listener.Address()))
 	}
 	logger.Info("QueryNode stopping")
 	defer func() {
@@ -248,7 +250,7 @@ func (s *Server) Stop() (err error) {
 	logger.Info("internal server[querynode] start to stop")
 	err = s.querynode.Stop()
 	if err != nil {
-		log.Error("failed to close querynode", zap.Error(err))
+		logger.Error("failed to close querynode", zap.Error(err))
 		return err
 	}
 	if s.etcdCli != nil {

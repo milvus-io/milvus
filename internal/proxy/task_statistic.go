@@ -178,7 +178,7 @@ func (g *getStatisticsTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		log.Debug("get collection statistics from DataCoord execute done")
+		log.Ctx(ctx).Debug("get collection statistics from DataCoord execute done")
 	}
 	return nil
 }
@@ -194,13 +194,13 @@ func (g *getStatisticsTask) PostExecute(ctx context.Context) error {
 	toReduceResults := make([]*internalpb.GetStatisticsResponse, 0)
 	select {
 	case <-g.TraceCtx().Done():
-		log.Debug("wait to finish timeout!")
+		log.Ctx(ctx).Debug("wait to finish timeout!")
 		return nil
 	default:
-		log.Debug("all get statistics are finished or canceled")
+		log.Ctx(ctx).Debug("all get statistics are finished or canceled")
 		g.resultBuf.Range(func(res *internalpb.GetStatisticsResponse) bool {
 			toReduceResults = append(toReduceResults, res)
-			log.Debug("proxy receives one get statistic response",
+			log.Ctx(ctx).Debug("proxy receives one get statistic response",
 				zap.Int64("sourceID", res.GetBase().GetSourceID()))
 			return true
 		})
@@ -220,7 +220,7 @@ func (g *getStatisticsTask) PostExecute(ctx context.Context) error {
 		Stats:  result,
 	}
 
-	log.Debug("get statistics post execute done", zap.Any("result", result))
+	log.Ctx(ctx).Debug("get statistics post execute done", zap.Any("result", result))
 	return nil
 }
 
@@ -283,7 +283,7 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 	}
 	result, err := qn.GetStatistics(ctx, req)
 	if err != nil {
-		log.Warn("QueryNode statistic return error",
+		log.Ctx(ctx).Warn("QueryNode statistic return error",
 			zap.Int64("nodeID", nodeID),
 			zap.String("channel", channel),
 			zap.Error(err))
@@ -291,14 +291,14 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
-		log.Warn("QueryNode is not shardLeader",
+		log.Ctx(ctx).Warn("QueryNode is not shardLeader",
 			zap.Int64("nodeID", nodeID),
 			zap.String("channel", channel))
 		globalMetaCache.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
 		return errInvalidShardLeaders
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("QueryNode statistic result error",
+		log.Ctx(ctx).Warn("QueryNode statistic result error",
 			zap.Int64("nodeID", nodeID),
 			zap.String("reason", result.GetStatus().GetReason()))
 		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to get statistic on QueryNode ID=%d", nodeID)

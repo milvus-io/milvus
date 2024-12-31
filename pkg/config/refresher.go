@@ -16,6 +16,7 @@
 package config
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -64,6 +65,7 @@ func (r *refresher) refreshPeriodically(name string) {
 	defer r.wg.Done()
 	ticker := time.NewTicker(r.refreshInterval)
 	defer ticker.Stop()
+	log := log.Ctx(context.TODO())
 	log.Debug("start refreshing configurations", zap.String("source", name))
 	for {
 		select {

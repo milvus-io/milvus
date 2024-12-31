@@ -46,6 +46,7 @@ type Client struct {
 	sess       *sessionutil.Session
 	addr       string
 	serverID   int64
+	ctx        context.Context
 }
 
 // NewClient creates a client for DataNode.
@@ -56,15 +57,17 @@ func NewClient(ctx context.Context, addr string, serverID int64) (types.DataNode
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("DataNodeClient New Etcd Session failed", zap.Error(err))
+		log.Ctx(ctx).Debug("DataNodeClient New Etcd Session failed", zap.Error(err))
 		return nil, err
 	}
+
 	config := &Params.DataNodeGrpcClientCfg
 	client := &Client{
 		addr:       addr,
 		grpcClient: grpcclient.NewClientBase[datapb.DataNodeClient](config, "milvus.proto.data.DataNode"),
 		sess:       sess,
 		serverID:   serverID,
+		ctx:        ctx,
 	}
 	// node shall specify node id
 	client.grpcClient.SetRole(fmt.Sprintf("%s-%d", typeutil.DataNodeRole, serverID))
@@ -77,10 +80,11 @@ func NewClient(ctx context.Context, addr string, serverID int64) (types.DataNode
 		client.grpcClient.EnableEncryption()
 		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "DataNode")
 		if err != nil {
-			log.Error("Failed to create cert pool for DataNode client")
+			log.Ctx(ctx).Error("Failed to create cert pool for DataNode client")
 			return nil, err
 		}
 		client.grpcClient.SetInternalTLSCertPool(cp)
+		client.grpcClient.SetInternalTLSServerName(Params.InternalTLSCfg.InternalTLSSNI.GetValue())
 	}
 	return client, nil
 }

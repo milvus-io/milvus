@@ -93,10 +93,10 @@ func (s *Server) Prepare() error {
 		netutil.OptPort(paramtable.Get().DataCoordGrpcServerCfg.Port.GetAsInt()),
 	)
 	if err != nil {
-		log.Warn("DataCoord fail to create net listener", zap.Error(err))
+		log.Ctx(s.ctx).Warn("DataCoord fail to create net listener", zap.Error(err))
 		return err
 	}
-	log.Info("DataCoord listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
+	log.Ctx(s.ctx).Info("DataCoord listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
 	s.listener = listener
 	return nil
 }
@@ -104,6 +104,7 @@ func (s *Server) Prepare() error {
 func (s *Server) init() error {
 	params := paramtable.Get()
 	etcdConfig := &params.EtcdCfg
+	log := log.Ctx(s.ctx)
 
 	etcdCli, err := etcd.CreateEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -223,13 +224,13 @@ func (s *Server) startGrpcLoop() {
 func (s *Server) start() error {
 	err := s.dataCoord.Register()
 	if err != nil {
-		log.Debug("DataCoord register service failed", zap.Error(err))
+		log.Ctx(s.ctx).Debug("DataCoord register service failed", zap.Error(err))
 		return err
 	}
 
 	err = s.dataCoord.Start()
 	if err != nil {
-		log.Error("DataCoord start failed", zap.Error(err))
+		log.Ctx(s.ctx).Error("DataCoord start failed", zap.Error(err))
 		return err
 	}
 	return nil
@@ -238,9 +239,9 @@ func (s *Server) start() error {
 // Stop stops the DataCoord server gracefully.
 // Need to call the GracefulStop interface of grpc server and call the stop method of the inner DataCoord object.
 func (s *Server) Stop() (err error) {
-	logger := log.With()
+	logger := log.Ctx(s.ctx)
 	if s.listener != nil {
-		logger = log.With(zap.String("address", s.listener.Address()))
+		logger = logger.With(zap.String("address", s.listener.Address()))
 	}
 	logger.Info("Datacoord stopping")
 	defer func() {
@@ -261,7 +262,7 @@ func (s *Server) Stop() (err error) {
 	logger.Info("internal server[dataCoord] start to stop")
 	err = s.dataCoord.Stop()
 	if err != nil {
-		log.Error("failed to close dataCoord", zap.Error(err))
+		logger.Error("failed to close dataCoord", zap.Error(err))
 		return err
 	}
 	s.cancel()
@@ -278,12 +279,12 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("DataCoord init done ...")
+	log.Ctx(s.ctx).Debug("DataCoord init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Debug("DataCoord start done ...")
+	log.Ctx(s.ctx).Debug("DataCoord start done ...")
 	return nil
 }
 

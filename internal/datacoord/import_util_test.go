@@ -622,11 +622,15 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	err = imeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Stats))
 	assert.NoError(t, err)
 	sjm := NewMockStatsJobManager(t)
-	sjm.EXPECT().GetStatsTaskState(mock.Anything, mock.Anything).RunAndReturn(func(segmentID int64, _ indexpb.StatsSubJob) indexpb.JobState {
+	sjm.EXPECT().GetStatsTask(mock.Anything, mock.Anything).RunAndReturn(func(segmentID int64, _ indexpb.StatsSubJob) *indexpb.StatsTask {
 		if lo.Contains([]int64{10, 11, 12}, segmentID) {
-			return indexpb.JobState_JobStateFinished
+			return &indexpb.StatsTask{
+				State: indexpb.JobState_JobStateFinished,
+			}
 		}
-		return indexpb.JobState_JobStateInProgress
+		return &indexpb.StatsTask{
+			State: indexpb.JobState_JobStateInProgress,
+		}
 	})
 	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta, sjm)
 	assert.Equal(t, int64(10+30+30+10*0.5), progress)
@@ -635,7 +639,9 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 
 	// stats state, len(statsSegmentIDs) / (len(originalSegmentIDs) = 1
 	sjm = NewMockStatsJobManager(t)
-	sjm.EXPECT().GetStatsTaskState(mock.Anything, mock.Anything).Return(indexpb.JobState_JobStateFinished)
+	sjm.EXPECT().GetStatsTask(mock.Anything, mock.Anything).Return(&indexpb.StatsTask{
+		State: indexpb.JobState_JobStateFinished,
+	})
 	progress, state, _, _, reason = GetJobProgress(job.GetJobID(), imeta, meta, sjm)
 	assert.Equal(t, int64(10+30+30+10), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)

@@ -114,20 +114,29 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 
 	collectionName := it.insertMsg.CollectionName
 	if err := validateCollectionName(collectionName); err != nil {
-		log.Warn("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
+		log.Ctx(ctx).Warn("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
 		return err
 	}
 
 	maxInsertSize := Params.QuotaConfig.MaxInsertSize.GetAsInt()
 	if maxInsertSize != -1 && it.insertMsg.Size() > maxInsertSize {
-		log.Warn("insert request size exceeds maxInsertSize",
+		log.Ctx(ctx).Warn("insert request size exceeds maxInsertSize",
 			zap.Int("request size", it.insertMsg.Size()), zap.Int("maxInsertSize", maxInsertSize))
 		return merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge("insert request size exceeds maxInsertSize"))
 	}
 
+	replicateID, err := GetReplicateID(it.ctx, it.insertMsg.GetDbName(), collectionName)
+	if err != nil {
+		log.Warn("get replicate id failed", zap.String("collectionName", collectionName), zap.Error(err))
+		return merr.WrapErrAsInputError(err)
+	}
+	if replicateID != "" {
+		return merr.WrapErrCollectionReplicateMode("insert")
+	}
+
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
-		log.Warn("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
+		log.Ctx(ctx).Warn("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}
 	it.schema = schema.CollectionSchema
@@ -243,7 +252,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	it.insertMsg.CollectionID = collID
 
 	getCacheDur := tr.RecordSpan()
-	stream, err := it.chMgr.getOrCreateDmlStream(collID)
+	stream, err := it.chMgr.getOrCreateDmlStream(ctx, collID)
 	if err != nil {
 		return err
 	}
@@ -280,7 +289,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	log.Debug("assign segmentID for insert data success",
 		zap.Duration("assign segmentID duration", assignSegmentIDDur))
-	err = stream.Produce(msgPack)
+	err = stream.Produce(ctx, msgPack)
 	if err != nil {
 		log.Warn("fail to produce insert msg", zap.Error(err))
 		it.result.Status = merr.Status(err)

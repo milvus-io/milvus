@@ -431,9 +431,9 @@ class TestQueryParams(TestcaseBase):
         """
         # 1. initialize with data
         nb = 2000
-        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                             enable_dynamic_field=enable_dynamic_field)[
-                                                0:4]
+        collection_w, _vectors, _, insert_ids = \
+            self.init_collection_general(prefix, True, nb,
+                                         enable_dynamic_field=enable_dynamic_field)[0:4]
 
         # filter result with expression in collection
         _vectors = _vectors[0]
@@ -6679,7 +6679,7 @@ class TestQueryTextMatchNegative(TestcaseBase):
         default_schema = CollectionSchema(
             fields=default_fields, description="test collection"
         )
-        error = {ct.err_code: 2000, ct.err_msg: "invalid tokenizer parameters"}
+        error = {ct.err_code: 2000, ct.err_msg: "unsupported tokenizer"}
         self.init_collection_wrap(
             name=cf.gen_unique_str(prefix),
             schema=default_schema,

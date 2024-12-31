@@ -156,7 +156,7 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		defer cancel()
 		for size > 0 {
 			segmentInfo, err := AllocImportSegment(ctx, alloc, meta,
-				task.GetTaskID(), task.GetCollectionID(), partitionID, vchannel, segmentLevel)
+				task.GetJobID(), task.GetTaskID(), task.GetCollectionID(), partitionID, vchannel, segmentLevel)
 			if err != nil {
 				return err
 			}
@@ -180,8 +180,8 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 func AllocImportSegment(ctx context.Context,
 	alloc allocator.Allocator,
 	meta *meta,
-	taskID int64, collectionID UniqueID,
-	partitionID UniqueID,
+	jobID int64, taskID int64,
+	collectionID UniqueID, partitionID UniqueID,
 	channelName string,
 	level datapb.SegmentLevel,
 ) (*SegmentInfo, error) {
@@ -221,6 +221,7 @@ func AllocImportSegment(ctx context.Context,
 		return nil, err
 	}
 	log.Info("add import segment done",
+		zap.Int64("jobID", jobID),
 		zap.Int64("taskID", taskID),
 		zap.Int64("collectionID", segmentInfo.CollectionID),
 		zap.Int64("segmentID", segmentInfo.ID),
@@ -459,8 +460,8 @@ func getStatsProgress(jobID int64, imeta ImportMeta, sjm StatsJobManager) float3
 	}
 	doneCnt := 0
 	for _, originSegmentID := range originSegmentIDs {
-		state := sjm.GetStatsTaskState(originSegmentID, indexpb.StatsSubJob_Sort)
-		if state == indexpb.JobState_JobStateFinished {
+		t := sjm.GetStatsTask(originSegmentID, indexpb.StatsSubJob_Sort)
+		if t.GetState() == indexpb.JobState_JobStateFinished {
 			doneCnt++
 		}
 	}

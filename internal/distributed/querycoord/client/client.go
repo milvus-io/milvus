@@ -44,6 +44,7 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 type Client struct {
 	grpcClient grpcclient.GrpcClient[querypb.QueryCoordClient]
 	sess       *sessionutil.Session
+	ctx        context.Context
 }
 
 // NewClient creates a client for QueryCoord grpc call.
@@ -51,13 +52,15 @@ func NewClient(ctx context.Context) (types.QueryCoordClient, error) {
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("QueryCoordClient NewClient failed", zap.Error(err))
+		log.Ctx(ctx).Debug("QueryCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
+	clientCtx := log.WithFields(ctx, zap.String("module", "QueryCoordClient"))
 	config := &Params.QueryCoordGrpcClientCfg
 	client := &Client{
 		grpcClient: grpcclient.NewClientBase[querypb.QueryCoordClient](config, "milvus.proto.query.QueryCoord"),
 		sess:       sess,
+		ctx:        clientCtx,
 	}
 	client.grpcClient.SetRole(typeutil.QueryCoordRole)
 	client.grpcClient.SetGetAddrFunc(client.getQueryCoordAddr)
@@ -68,10 +71,11 @@ func NewClient(ctx context.Context) (types.QueryCoordClient, error) {
 		client.grpcClient.EnableEncryption()
 		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "QueryCoord")
 		if err != nil {
-			log.Error("Failed to create cert pool for QueryCoord client")
+			log.Ctx(ctx).Error("Failed to create cert pool for QueryCoord client")
 			return nil, err
 		}
 		client.grpcClient.SetInternalTLSCertPool(cp)
+		client.grpcClient.SetInternalTLSServerName(Params.InternalTLSCfg.InternalTLSSNI.GetValue())
 	}
 	return client, nil
 }
@@ -80,16 +84,16 @@ func (c *Client) getQueryCoordAddr() (string, error) {
 	key := c.grpcClient.GetRole()
 	msess, _, err := c.sess.GetSessions(key)
 	if err != nil {
-		log.Debug("QueryCoordClient GetSessions failed", zap.Error(err))
+		log.Ctx(c.ctx).Debug("QueryCoordClient GetSessions failed", zap.Error(err))
 		return "", err
 	}
 	ms, ok := msess[key]
 	if !ok {
-		log.Debug("QueryCoordClient msess key not existed", zap.Any("key", key))
+		log.Ctx(c.ctx).Debug("QueryCoordClient msess key not existed", zap.Any("key", key))
 		return "", fmt.Errorf("find no available querycoord, check querycoord state")
 	}
 
-	log.Debug("QueryCoordClient GetSessions success",
+	log.Ctx(c.ctx).Debug("QueryCoordClient GetSessions success",
 		zap.String("address", ms.Address),
 		zap.Int64("serverID", ms.ServerID),
 	)

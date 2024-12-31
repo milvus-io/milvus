@@ -52,7 +52,7 @@ func (b *baseUndoTask) Execute(ctx context.Context) error {
 		todoStep := b.todoStep[i]
 		// no children step in normal case.
 		if _, err := todoStep.Execute(ctx); err != nil {
-			log.Warn("failed to execute step, trying to undo", zap.Error(err), zap.String("desc", todoStep.Desc()))
+			log.Ctx(ctx).Warn("failed to execute step, trying to undo", zap.Error(err), zap.String("desc", todoStep.Desc()))
 			undoSteps := b.undoStep[:i]
 			b.undoStep = nil // let baseUndoTask can be collected.
 			go b.stepExecutor.AddSteps(&stepStack{undoSteps})

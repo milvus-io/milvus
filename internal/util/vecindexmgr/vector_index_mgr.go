@@ -87,7 +87,6 @@ type vecIndexMgrImpl struct {
 func (mgr *vecIndexMgrImpl) GetFeature(indexType IndexType) (uint64, bool) {
 	feature, ok := mgr.features[indexType]
 	if !ok {
-		log.Error("can not find index " + indexType + " in the index feature map")
 		return 0, false
 	}
 	return feature, true

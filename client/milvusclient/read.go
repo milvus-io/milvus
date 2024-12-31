@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ...grpc.CallOption) ([]ResultSet, error) {
@@ -47,7 +49,7 @@ func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ..
 		if err != nil {
 			return err
 		}
-		resultSets, err = c.handleSearchResult(collection.Schema, req.GetOutputFields(), int(req.GetNq()), resp)
+		resultSets, err = c.handleSearchResult(collection.Schema, req.GetOutputFields(), int(resp.GetResults().GetNumQueries()), resp)
 
 		return err
 	})
@@ -92,13 +94,24 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 
 func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fieldDataList []*schemapb.FieldData, _, from, to int) ([]column.Column, error) {
 	var wildcard bool
+	// serveral cases shall be handled here
+	// 1. output fields contains "*" wildcard => the schema shall be checked
+	// 2. dynamic schema $meta column, with field name not exist in schema
+	// 3. explicitly specified json column name
+	// 4. partial load field
+
+	// translate "*" into possible field names
+	// if partial load enabled, result set could miss some column
 	outputFields, wildcard = expandWildcard(sch, outputFields)
-	// duplicated name will have only one column now
-	outputSet := make(map[string]struct{})
-	for _, output := range outputFields {
-		outputSet[output] = struct{}{}
-	}
-	// fields := make(map[string]*schemapb.FieldData)
+	// duplicated field name will be merged into one column
+	outputSet := typeutil.NewSet(outputFields...)
+
+	// setup schema valid field name to get possible dynamic field name
+	schemaFieldSet := typeutil.NewSet(lo.Map(sch.Fields, func(f *entity.Field, _ int) string {
+		return f.Name
+	})...)
+	dynamicNames := outputSet.Complement(schemaFieldSet)
+
 	columns := make([]column.Column, 0, len(outputFields))
 	var dynamicColumn *column.ColumnJSONBytes
 	for _, fieldData := range fieldDataList {
@@ -106,6 +119,8 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 		if err != nil {
 			return nil, err
 		}
+
+		// if output data contains dynamic json, setup dynamicColumn
 		if fieldData.GetIsDynamic() {
 			var ok bool
 			dynamicColumn, ok = col.(*column.ColumnJSONBytes)
@@ -119,21 +134,22 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 			}
 		}
 
-		// remove processed field
-		delete(outputSet, fieldData.GetFieldName())
+		// remove processed field, remove from possible dynamic set
+		delete(dynamicNames, fieldData.GetFieldName())
 
 		columns = append(columns, col)
 	}
 
-	if len(outputSet) > 0 && dynamicColumn == nil {
+	// extra name found and not json output
+	if len(dynamicNames) > 0 && dynamicColumn == nil {
 		var extraFields []string
-		for output := range outputSet {
+		for output := range dynamicNames {
 			extraFields = append(extraFields, output)
 		}
-		return nil, errors.Newf("extra output fields %v found and result does not dynamic field", extraFields)
+		return nil, errors.Newf("extra output fields %v found and result does not contain dynamic field", extraFields)
 	}
 	// add dynamic column for extra fields
-	for outputField := range outputSet {
+	for outputField := range dynamicNames {
 		column := column.NewColumnDynamic(dynamicColumn, outputField)
 		columns = append(columns, column)
 	}
@@ -142,8 +158,11 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 }
 
 func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...grpc.CallOption) (ResultSet, error) {
-	req := option.Request()
 	var resultSet ResultSet
+	req, err := option.Request()
+	if err != nil {
+		return resultSet, err
+	}
 
 	collection, err := c.getCollection(ctx, req.GetCollectionName())
 	if err != nil {
@@ -171,6 +190,37 @@ func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...g
 		return nil
 	})
 	return resultSet, err
+}
+
+func (c *Client) Get(ctx context.Context, option QueryOption, callOptions ...grpc.CallOption) (ResultSet, error) {
+	return c.Query(ctx, option, callOptions...)
+}
+
+func (c *Client) HybridSearch(ctx context.Context, option HybridSearchOption, callOptions ...grpc.CallOption) ([]ResultSet, error) {
+	req, err := option.HybridRequest()
+	if err != nil {
+		return nil, err
+	}
+
+	collection, err := c.getCollection(ctx, req.GetCollectionName())
+	if err != nil {
+		return nil, err
+	}
+
+	var resultSets []ResultSet
+
+	err = c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.HybridSearch(ctx, req, callOptions...)
+		err = merr.CheckRPCCall(resp, err)
+		if err != nil {
+			return err
+		}
+
+		resultSets, err = c.handleSearchResult(collection.Schema, req.GetOutputFields(), int(resp.GetResults().GetNumQueries()), resp)
+
+		return err
+	})
+	return resultSets, err
 }
 
 func expandWildcard(schema *entity.Schema, outputFields []string) ([]string, bool) {

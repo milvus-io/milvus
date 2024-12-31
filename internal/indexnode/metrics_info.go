@@ -19,7 +19,10 @@ package indexnode
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -34,17 +37,30 @@ func getSystemInfoMetrics(
 	node *IndexNode,
 ) (*milvuspb.GetMetricsResponse, error) {
 	// TODO(dragondriver): add more metrics
+
+	used, total, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
+	if err != nil {
+		log.Ctx(ctx).Warn("get disk usage failed", zap.Error(err))
+	}
+
+	iowait, err := hardware.GetIOWait()
+	if err != nil {
+		log.Ctx(ctx).Warn("get iowait failed", zap.Error(err))
+	}
+
 	nodeInfos := metricsinfo.IndexNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, paramtable.GetNodeID()),
+
 			HardwareInfos: metricsinfo.HardwareMetrics{
-				IP:           node.session.Address,
-				CPUCoreCount: hardware.GetCPUNum(),
-				CPUCoreUsage: hardware.GetCPUUsage(),
-				Memory:       hardware.GetMemoryCount(),
-				MemoryUsage:  hardware.GetUsedMemoryCount(),
-				Disk:         hardware.GetDiskCount(),
-				DiskUsage:    hardware.GetDiskUsage(),
+				IP:               node.session.Address,
+				CPUCoreCount:     hardware.GetCPUNum(),
+				CPUCoreUsage:     hardware.GetCPUUsage(),
+				Memory:           hardware.GetMemoryCount(),
+				MemoryUsage:      hardware.GetUsedMemoryCount(),
+				Disk:             total,
+				DiskUsage:        used,
+				IOWaitPercentage: iowait,
 			},
 			SystemInfo:  metricsinfo.DeployMetrics{},
 			CreatedTime: paramtable.GetCreateTime().String(),

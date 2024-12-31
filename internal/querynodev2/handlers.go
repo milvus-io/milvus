@@ -310,7 +310,7 @@ func (node *QueryNode) queryChannelStream(ctx context.Context, req *querypb.Quer
 }
 
 func (node *QueryNode) queryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
-	log.Debug("received query stream request",
+	log.Ctx(ctx).Debug("received query stream request",
 		zap.Int64s("outputFields", req.GetReq().GetOutputFieldsId()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
@@ -328,13 +328,13 @@ func (node *QueryNode) queryStreamSegments(ctx context.Context, req *querypb.Que
 		paramtable.Get().QueryNodeCfg.QueryStreamBatchSize.GetAsInt(),
 		paramtable.Get().QueryNodeCfg.QueryStreamMaxBatchSize.GetAsInt())
 	if err := node.scheduler.Add(task); err != nil {
-		log.Warn("failed to add query task into scheduler", zap.Error(err))
+		log.Ctx(ctx).Warn("failed to add query task into scheduler", zap.Error(err))
 		return err
 	}
 
 	err := task.Wait()
 	if err != nil {
-		log.Warn("failed to execute task by node scheduler", zap.Error(err))
+		log.Ctx(ctx).Warn("failed to execute task by node scheduler", zap.Error(err))
 		return err
 	}
 

@@ -61,9 +61,10 @@ type createCollectionTask struct {
 	channels       collectionChannels
 	dbID           UniqueID
 	partitionNames []string
+	dbProperties   []*commonpb.KeyValuePair
 }
 
-func (t *createCollectionTask) validate() error {
+func (t *createCollectionTask) validate(ctx context.Context) error {
 	if t.Req == nil {
 		return errors.New("empty requests")
 	}
@@ -86,7 +87,7 @@ func (t *createCollectionTask) validate() error {
 
 	// 2. check db-collection capacity
 	db2CollIDs := t.core.meta.ListAllAvailCollections(t.ctx)
-	if err := t.checkMaxCollectionsPerDB(db2CollIDs); err != nil {
+	if err := t.checkMaxCollectionsPerDB(ctx, db2CollIDs); err != nil {
 		return err
 	}
 
@@ -98,7 +99,7 @@ func (t *createCollectionTask) validate() error {
 
 	maxCollectionNum := Params.QuotaConfig.MaxCollectionNum.GetAsInt()
 	if totalCollections >= maxCollectionNum {
-		log.Warn("unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
+		log.Ctx(ctx).Warn("unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
 		return merr.WrapErrCollectionNumLimitExceeded(t.Req.GetDbName(), maxCollectionNum)
 	}
 
@@ -111,22 +112,22 @@ func (t *createCollectionTask) validate() error {
 }
 
 // checkMaxCollectionsPerDB DB properties take precedence over quota configurations for max collections.
-func (t *createCollectionTask) checkMaxCollectionsPerDB(db2CollIDs map[int64][]int64) error {
+func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2CollIDs map[int64][]int64) error {
 	collIDs, ok := db2CollIDs[t.dbID]
 	if !ok {
-		log.Warn("can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
+		log.Ctx(ctx).Warn("can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
 		return merr.WrapErrDatabaseNotFound(t.Req.GetDbName(), "failed to create collection")
 	}
 
 	db, err := t.core.meta.GetDatabaseByName(t.ctx, t.Req.GetDbName(), typeutil.MaxTimestamp)
 	if err != nil {
-		log.Warn("can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
+		log.Ctx(ctx).Warn("can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
 		return merr.WrapErrDatabaseNotFound(t.Req.GetDbName(), "failed to create collection")
 	}
 
 	check := func(maxColNumPerDB int) error {
 		if len(collIDs) >= maxColNumPerDB {
-			log.Warn("unable to create collection because the number of collection has reached the limit in DB", zap.Int("maxCollectionNumPerDB", maxColNumPerDB))
+			log.Ctx(ctx).Warn("unable to create collection because the number of collection has reached the limit in DB", zap.Int("maxCollectionNumPerDB", maxColNumPerDB))
 			return merr.WrapErrCollectionNumLimitExceeded(t.Req.GetDbName(), maxColNumPerDB)
 		}
 		return nil
@@ -136,7 +137,7 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(db2CollIDs map[int64][]i
 	if maxColNumPerDBStr != "" {
 		maxColNumPerDB, err := strconv.Atoi(maxColNumPerDBStr)
 		if err != nil {
-			log.Warn("parse value of property fail", zap.String("key", common.DatabaseMaxCollectionsKey),
+			log.Ctx(ctx).Warn("parse value of property fail", zap.String("key", common.DatabaseMaxCollectionsKey),
 				zap.String("value", maxColNumPerDBStr), zap.Error(err))
 			return fmt.Errorf(fmt.Sprintf("parse value of property fail, key:%s, value:%s", common.DatabaseMaxCollectionsKey, maxColNumPerDBStr))
 		}
@@ -243,10 +244,10 @@ func validateFieldDataType(schema *schemapb.CollectionSchema) error {
 	return nil
 }
 
-func (t *createCollectionTask) validateSchema(schema *schemapb.CollectionSchema) error {
-	log.With(zap.String("CollectionName", t.Req.CollectionName))
+func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schemapb.CollectionSchema) error {
+	log.Ctx(ctx).With(zap.String("CollectionName", t.Req.CollectionName))
 	if t.Req.GetCollectionName() != schema.GetName() {
-		log.Error("collection name not matches schema name", zap.String("SchemaName", schema.Name))
+		log.Ctx(ctx).Error("collection name not matches schema name", zap.String("SchemaName", schema.Name))
 		msg := fmt.Sprintf("collection name = %s, schema.Name=%s", t.Req.GetCollectionName(), schema.Name)
 		return merr.WrapErrParameterInvalid("collection name matches schema name", "don't match", msg)
 	}
@@ -256,7 +257,7 @@ func (t *createCollectionTask) validateSchema(schema *schemapb.CollectionSchema)
 	}
 
 	if hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName, MetaFieldName}) {
-		log.Error("schema contains system field",
+		log.Ctx(ctx).Error("schema contains system field",
 			zap.String("RowIDFieldName", RowIDFieldName),
 			zap.String("TimeStampFieldName", TimeStampFieldName),
 			zap.String("MetaFieldName", MetaFieldName))
@@ -296,7 +297,7 @@ func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.Collect
 	return nil
 }
 
-func (t *createCollectionTask) appendDynamicField(schema *schemapb.CollectionSchema) {
+func (t *createCollectionTask) appendDynamicField(ctx context.Context, schema *schemapb.CollectionSchema) {
 	if schema.EnableDynamicField {
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 			Name:        MetaFieldName,
@@ -304,7 +305,7 @@ func (t *createCollectionTask) appendDynamicField(schema *schemapb.CollectionSch
 			DataType:    schemapb.DataType_JSON,
 			IsDynamic:   true,
 		})
-		log.Info("append dynamic field", zap.String("collection", schema.Name))
+		log.Ctx(ctx).Info("append dynamic field", zap.String("collection", schema.Name))
 	}
 }
 
@@ -325,15 +326,15 @@ func (t *createCollectionTask) appendSysFields(schema *schemapb.CollectionSchema
 	})
 }
 
-func (t *createCollectionTask) prepareSchema() error {
+func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	var schema schemapb.CollectionSchema
 	if err := proto.Unmarshal(t.Req.GetSchema(), &schema); err != nil {
 		return err
 	}
-	if err := t.validateSchema(&schema); err != nil {
+	if err := t.validateSchema(ctx, &schema); err != nil {
 		return err
 	}
-	t.appendDynamicField(&schema)
+	t.appendDynamicField(ctx, &schema)
 
 	if err := t.assignFieldAndFunctionID(&schema); err != nil {
 		return err
@@ -356,7 +357,7 @@ func (t *createCollectionTask) assignCollectionID() error {
 	return err
 }
 
-func (t *createCollectionTask) assignPartitionIDs() error {
+func (t *createCollectionTask) assignPartitionIDs(ctx context.Context) error {
 	t.partitionNames = make([]string, 0)
 	defaultPartitionName := Params.CommonCfg.DefaultPartitionName.GetValue()
 
@@ -391,7 +392,7 @@ func (t *createCollectionTask) assignPartitionIDs() error {
 	for i := start; i < end; i++ {
 		t.partIDs[i-start] = i
 	}
-	log.Info("assign partitions when create collection",
+	log.Ctx(ctx).Info("assign partitions when create collection",
 		zap.String("collectionName", t.Req.GetCollectionName()),
 		zap.Strings("partitionNames", t.partitionNames))
 
@@ -424,12 +425,24 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 		return err
 	}
 	t.dbID = db.ID
+	dbReplicateID, _ := common.GetReplicateID(db.Properties)
+	if dbReplicateID != "" {
+		reqProperties := make([]*commonpb.KeyValuePair, 0, len(t.Req.Properties))
+		for _, prop := range t.Req.Properties {
+			if prop.Key == common.ReplicateIDKey {
+				continue
+			}
+			reqProperties = append(reqProperties, prop)
+		}
+		t.Req.Properties = reqProperties
+	}
+	t.dbProperties = db.Properties
 
-	if err := t.validate(); err != nil {
+	if err := t.validate(ctx); err != nil {
 		return err
 	}
 
-	if err := t.prepareSchema(); err != nil {
+	if err := t.prepareSchema(ctx); err != nil {
 		return err
 	}
 
@@ -439,7 +452,7 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 		return err
 	}
 
-	if err := t.assignPartitionIDs(); err != nil {
+	if err := t.assignPartitionIDs(ctx); err != nil {
 		return err
 	}
 
@@ -527,13 +540,13 @@ func (t *createCollectionTask) broadcastCreateCollectionMsgIntoStreamingService(
 	return startPositions, nil
 }
 
-func (t *createCollectionTask) getCreateTs() (uint64, error) {
+func (t *createCollectionTask) getCreateTs(ctx context.Context) (uint64, error) {
 	replicateInfo := t.Req.GetBase().GetReplicateInfo()
 	if !replicateInfo.GetIsReplicate() {
 		return t.GetTs(), nil
 	}
 	if replicateInfo.GetMsgTimestamp() == 0 {
-		log.Warn("the cdc timestamp is not set in the request for the backup instance")
+		log.Ctx(ctx).Warn("the cdc timestamp is not set in the request for the backup instance")
 		return 0, merr.WrapErrParameterInvalidMsg("the cdc timestamp is not set in the request for the backup instance")
 	}
 	return replicateInfo.GetMsgTimestamp(), nil
@@ -542,7 +555,7 @@ func (t *createCollectionTask) getCreateTs() (uint64, error) {
 func (t *createCollectionTask) Execute(ctx context.Context) error {
 	collID := t.collID
 	partIDs := t.partIDs
-	ts, err := t.getCreateTs()
+	ts, err := t.getCreateTs(ctx)
 	if err != nil {
 		return err
 	}
@@ -565,6 +578,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		CollectionID:         collID,
 		DBID:                 t.dbID,
 		Name:                 t.schema.Name,
+		DBName:               t.Req.GetDbName(),
 		Description:          t.schema.Description,
 		AutoID:               t.schema.AutoID,
 		Fields:               model.UnmarshalFieldModels(t.schema.Fields),
@@ -592,7 +606,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 			return fmt.Errorf("create duplicate collection with different parameters, collection: %s", t.Req.GetCollectionName())
 		}
 		// make creating collection idempotent.
-		log.Warn("add duplicate collection", zap.String("collection", t.Req.GetCollectionName()), zap.Uint64("ts", ts))
+		log.Ctx(ctx).Warn("add duplicate collection", zap.String("collection", t.Req.GetCollectionName()), zap.Uint64("ts", ts))
 		return nil
 	}
 
@@ -611,7 +625,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		baseStep:        baseStep{core: t.core},
 		dbName:          t.Req.GetDbName(),
 		collectionNames: []string{t.Req.GetCollectionName()},
-		collectionID:    InvalidCollectionID,
+		collectionID:    collID,
 		ts:              ts,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
 	}, &nullStep{})
@@ -644,11 +658,14 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 			startPositions: toKeyDataPairs(startPositions),
 			schema: &schemapb.CollectionSchema{
 				Name:        collInfo.Name,
+				DbName:      collInfo.DBName,
 				Description: collInfo.Description,
 				AutoID:      collInfo.AutoID,
 				Fields:      model.MarshalFieldModels(collInfo.Fields),
+				Properties:  collInfo.Properties,
 				Functions:   model.MarshalFunctionModels(collInfo.Functions),
 			},
+			dbProperties: t.dbProperties,
 		},
 	}, &nullStep{})
 	undoTask.AddStep(&changeCollectionStateStep{

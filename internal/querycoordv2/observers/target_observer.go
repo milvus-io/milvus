@@ -26,7 +26,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -398,7 +397,6 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		collectionReadyLeaders = append(collectionReadyLeaders, channelReadyLeaders...)
 	}
 
-	var collectionInfo *milvuspb.DescribeCollectionResponse
 	var partitions []int64
 	var indexInfo []*indexpb.IndexInfo
 	var err error
@@ -413,16 +411,9 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			log.Warn("replica not found", zap.Int64("nodeID", leader.ID), zap.Int64("collectionID", collectionID))
 			continue
 		}
-
 		// init all the meta information
-		if collectionInfo == nil {
-			collectionInfo, err = ob.broker.DescribeCollection(ctx, collectionID)
-			if err != nil {
-				log.Warn("failed to get collection info", zap.Error(err))
-				return false
-			}
-
-			partitions, err = utils.GetPartitions(ctx, ob.meta.CollectionManager, collectionID)
+		if partitions == nil {
+			partitions, err = utils.GetPartitions(ctx, ob.targetMgr, collectionID)
 			if err != nil {
 				log.Warn("failed to get partitions", zap.Error(err))
 				return false
@@ -436,7 +427,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			}
 		}
 
-		if !ob.sync(ctx, replica, leader, []*querypb.SyncAction{updateVersionAction}, collectionInfo, partitions, indexInfo) {
+		if !ob.sync(ctx, replica, leader, []*querypb.SyncAction{updateVersionAction}, partitions, indexInfo) {
 			return false
 		}
 	}
@@ -444,7 +435,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 }
 
 func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, diffs []*querypb.SyncAction,
-	collectionInfo *milvuspb.DescribeCollectionResponse, partitions []int64, indexInfo []*indexpb.IndexInfo,
+	partitions []int64, indexInfo []*indexpb.IndexInfo,
 ) bool {
 	if len(diffs) == 0 {
 		return true
@@ -465,19 +456,18 @@ func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leade
 		ReplicaID:    replicaID,
 		Channel:      leaderView.Channel,
 		Actions:      diffs,
-		Schema:       collectionInfo.GetSchema(),
 		LoadMeta: &querypb.LoadMetaInfo{
 			LoadType:      ob.meta.GetLoadType(ctx, leaderView.CollectionID),
 			CollectionID:  leaderView.CollectionID,
 			PartitionIDs:  partitions,
-			DbName:        collectionInfo.GetDbName(),
 			ResourceGroup: replica.GetResourceGroup(),
 		},
 		Version:       time.Now().UnixNano(),
 		IndexInfoList: indexInfo,
 	}
-	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
+
 	resp, err := ob.cluster.SyncDistribution(ctx, leaderView.ID, req)
 	if err != nil {
 		log.Warn("failed to sync distribution", zap.Error(err))

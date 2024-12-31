@@ -55,7 +55,7 @@ func NewClient(ctx context.Context, addr string, nodeID int64, encryption bool) 
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("IndexNodeClient New Etcd Session failed", zap.Error(err))
+		log.Ctx(ctx).Debug("IndexNodeClient New Etcd Session failed", zap.Error(err))
 		return nil, err
 	}
 	config := &Params.IndexNodeGrpcClientCfg
@@ -77,10 +77,11 @@ func NewClient(ctx context.Context, addr string, nodeID int64, encryption bool) 
 		client.grpcClient.EnableEncryption()
 		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "IndexNode")
 		if err != nil {
-			log.Error("Failed to create cert pool for IndexNode client")
+			log.Ctx(ctx).Error("Failed to create cert pool for IndexNode client")
 			return nil, err
 		}
 		client.grpcClient.SetInternalTLSCertPool(cp)
+		client.grpcClient.SetInternalTLSServerName(Params.InternalTLSCfg.InternalTLSSNI.GetValue())
 	}
 	return client, nil
 }

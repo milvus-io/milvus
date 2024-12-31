@@ -232,7 +232,7 @@ func initLimiter(source string, rln *rlinternal.RateLimiterNode, rateLimiterConf
 			updated = true
 		}
 		if updated {
-			log.Debug("RateLimiter register for rateType",
+			log.Ctx(context.TODO()).Debug("RateLimiter register for rateType",
 				zap.String("source", source),
 				zap.String("rateType", internalpb.RateType_name[(int32(rt))]),
 				zap.String("rateLimit", newLimit.String()),

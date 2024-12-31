@@ -63,6 +63,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/tracer"
@@ -129,7 +130,7 @@ func authenticate(c *gin.Context) {
 	username, password, ok := httpserver.ParseUsernamePassword(c)
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {
-			log.Debug("auth successful", zap.String("username", username))
+			log.Ctx(context.TODO()).Debug("auth successful", zap.String("username", username))
 			c.Set(httpserver.ContextUsername, username)
 			return
 		}
@@ -141,8 +142,12 @@ func authenticate(c *gin.Context) {
 			c.Set(httpserver.ContextUsername, user)
 			return
 		}
-		log.Warn("fail to verify apikey", zap.Error(err))
+		log.Ctx(context.TODO()).Warn("fail to verify apikey", zap.Error(err))
 	}
+
+	hookutil.GetExtension().ReportRefused(context.Background(), nil, &milvuspb.BoolResponse{
+		Status: merr.Status(merr.ErrNeedAuthenticate),
+	}, nil, c.FullPath())
 	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{mhttp.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 }
 
@@ -193,11 +198,11 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	s.httpServer = &http.Server{Handler: ginHandler, ReadHeaderTimeout: time.Second}
 	errChan <- nil
 	if err := s.httpServer.Serve(s.listenerManager.HTTPListener()); err != nil && err != cmux.ErrServerClosed {
-		log.Error("start Proxy http server to listen failed", zap.Error(err))
+		log.Ctx(s.ctx).Error("start Proxy http server to listen failed", zap.Error(err))
 		errChan <- err
 		return
 	}
-	log.Info("Proxy http server exited")
+	log.Ctx(s.ctx).Info("Proxy http server exited")
 }
 
 func (s *Server) startInternalRPCServer(errChan chan error) {
@@ -222,6 +227,8 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
+
+	log := log.Ctx(s.ctx)
 
 	limiter, err := s.proxy.GetRateLimiter()
 	if err != nil {
@@ -376,6 +383,7 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 	grpc_health_v1.RegisterHealthServer(s.grpcInternalServer, s)
 	errChan <- nil
 
+	log := log.Ctx(s.ctx)
 	log.Info("create Proxy internal grpc server",
 		zap.Any("enforcement policy", kaep),
 		zap.Any("server parameters", kasp))
@@ -389,7 +397,7 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 }
 
 func (s *Server) Prepare() error {
-	listenerManager, err := newListenerManager()
+	listenerManager, err := newListenerManager(s.ctx)
 	if err != nil {
 		return err
 	}
@@ -399,6 +407,7 @@ func (s *Server) Prepare() error {
 
 // Start start the Proxy Server
 func (s *Server) Run() error {
+	log := log.Ctx(s.ctx)
 	log.Info("init Proxy server")
 	if err := s.init(); err != nil {
 		log.Warn("init Proxy server failed", zap.Error(err))
@@ -418,6 +427,7 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	etcdConfig := &paramtable.Get().EtcdCfg
 	Params := &paramtable.Get().ProxyGrpcServerCfg
+	log := log.Ctx(s.ctx)
 	log.Info("Proxy init service's parameter table done")
 	HTTPParams := &paramtable.Get().HTTPCfg
 	log.Info("Proxy init http server's parameter table done")
@@ -551,6 +561,7 @@ func (s *Server) init() error {
 }
 
 func (s *Server) start() error {
+	log := log.Ctx(s.ctx)
 	if err := s.proxy.Start(); err != nil {
 		log.Warn("failed to start Proxy server", zap.Error(err))
 		return err
@@ -577,7 +588,7 @@ func (s *Server) start() error {
 
 // Stop stop the Proxy Server
 func (s *Server) Stop() (err error) {
-	logger := log.With()
+	logger := log.Ctx(s.ctx)
 	if s.listenerManager != nil {
 		logger = log.With(
 			zap.String("internal address", s.listenerManager.internalGrpcListener.Address()),
@@ -601,17 +612,17 @@ func (s *Server) Stop() (err error) {
 		// try to close grpc server firstly, it has the same root listener with cmux server and
 		// http listener that tls has not been enabled.
 		if s.grpcExternalServer != nil {
-			log.Info("Proxy stop external grpc server")
+			logger.Info("Proxy stop external grpc server")
 			utils.GracefulStopGRPCServer(s.grpcExternalServer)
 		}
 
 		if s.httpServer != nil {
-			log.Info("Proxy stop http server...")
+			logger.Info("Proxy stop http server...")
 			s.httpServer.Close()
 		}
 
 		if s.grpcInternalServer != nil {
-			log.Info("Proxy stop internal grpc server")
+			logger.Info("Proxy stop internal grpc server")
 			utils.GracefulStopGRPCServer(s.grpcInternalServer)
 		}
 
@@ -626,7 +637,7 @@ func (s *Server) Stop() (err error) {
 	logger.Info("internal server[proxy] start to stop")
 	err = s.proxy.Stop()
 	if err != nil {
-		log.Error("failed to close proxy", zap.Error(err))
+		logger.Error("failed to close proxy", zap.Error(err))
 		return err
 	}
 
@@ -689,6 +700,10 @@ func (s *Server) ShowCollections(ctx context.Context, request *milvuspb.ShowColl
 
 func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return s.proxy.AlterCollection(ctx, request)
+}
+
+func (s *Server) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
+	return s.proxy.AlterCollectionField(ctx, request)
 }
 
 // CreatePartition notifies Proxy to create a partition

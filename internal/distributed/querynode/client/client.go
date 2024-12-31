@@ -46,6 +46,7 @@ type Client struct {
 	addr       string
 	sess       *sessionutil.Session
 	nodeID     int64
+	ctx        context.Context
 }
 
 // NewClient creates a new QueryNode client.
@@ -56,7 +57,7 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.QueryNodeC
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("QueryNodeClient NewClient failed", zap.Error(err))
+		log.Ctx(ctx).Debug("QueryNodeClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
 	config := &paramtable.Get().QueryNodeGrpcClientCfg
@@ -65,6 +66,7 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.QueryNodeC
 		grpcClient: grpcclient.NewClientBase[querypb.QueryNodeClient](config, "milvus.proto.query.QueryNode"),
 		sess:       sess,
 		nodeID:     nodeID,
+		ctx:        ctx,
 	}
 	// node shall specify node id
 	client.grpcClient.SetRole(fmt.Sprintf("%s-%d", typeutil.QueryNodeRole, nodeID))
@@ -77,10 +79,11 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.QueryNodeC
 		client.grpcClient.EnableEncryption()
 		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "QueryNode")
 		if err != nil {
-			log.Error("Failed to create cert pool for QueryNode client")
+			log.Ctx(ctx).Error("Failed to create cert pool for QueryNode client")
 			return nil, err
 		}
 		client.grpcClient.SetInternalTLSCertPool(cp)
+		client.grpcClient.SetInternalTLSServerName(Params.InternalTLSCfg.InternalTLSSNI.GetValue())
 	}
 	return client, nil
 }

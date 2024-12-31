@@ -82,11 +82,11 @@ func (s *Server) createIndexForSegment(ctx context.Context, segment *SegmentInfo
 
 func (s *Server) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
 	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() && !segment.GetIsSorted() && !segment.GetIsImporting() {
-		log.Debug("segment is not sorted by pk, skip create indexes", zap.Int64("segmentID", segment.GetID()))
+		log.Ctx(ctx).Debug("segment is not sorted by pk, skip create indexes", zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}
 	if segment.GetLevel() == datapb.SegmentLevel_L0 {
-		log.Debug("segment is level zero, skip create indexes", zap.Int64("segmentID", segment.GetID()))
+		log.Ctx(ctx).Debug("segment is level zero, skip create indexes", zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}
 
@@ -95,7 +95,7 @@ func (s *Server) createIndexesForSegment(ctx context.Context, segment *SegmentIn
 	for _, index := range indexes {
 		if _, ok := indexIDToSegIndexes[index.IndexID]; !ok {
 			if err := s.createIndexForSegment(ctx, segment, index.IndexID); err != nil {
-				log.Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
+				log.Ctx(ctx).Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
 					zap.Int64("indexID", index.IndexID))
 				return err
 			}
@@ -119,6 +119,7 @@ func (s *Server) getUnIndexTaskSegments(ctx context.Context) []*SegmentInfo {
 }
 
 func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
+	log := log.Ctx(ctx)
 	log.Info("start create index for segment loop...")
 	defer s.serverLoopWg.Done()
 
@@ -317,12 +318,33 @@ func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*
 	})
 }
 
+func DeleteParams(index *model.Index, from []*commonpb.KeyValuePair, deletes []string) []*commonpb.KeyValuePair {
+	params := make(map[string]string)
+	for _, param := range from {
+		params[param.GetKey()] = param.GetValue()
+	}
+
+	// delete the params
+	for _, key := range deletes {
+		delete(params, key)
+	}
+
+	return lo.MapToSlice(params, func(k string, v string) *commonpb.KeyValuePair {
+		return &commonpb.KeyValuePair{
+			Key:   k,
+			Value: v,
+		}
+	})
+}
+
 func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("indexName", req.GetIndexName()),
 	)
-	log.Info("received AlterIndex request", zap.Any("params", req.GetParams()))
+	log.Info("received AlterIndex request",
+		zap.Any("params", req.GetParams()),
+		zap.Any("deletekeys", req.GetDeleteKeys()))
 
 	if req.IndexName == "" {
 		return merr.Status(merr.WrapErrParameterInvalidMsg("index name is empty")), nil
@@ -339,22 +361,44 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 		return merr.Status(err), nil
 	}
 
-	for _, index := range indexes {
-		// update user index params
-		newUserIndexParams := UpdateParams(index, index.UserIndexParams, req.GetParams())
-		log.Info("alter index user index params",
-			zap.String("indexName", index.IndexName),
-			zap.Any("params", newUserIndexParams),
-		)
-		index.UserIndexParams = newUserIndexParams
+	if len(req.GetDeleteKeys()) > 0 && len(req.GetParams()) > 0 {
+		return merr.Status(merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")), nil
+	}
 
-		// update index params
-		newIndexParams := UpdateParams(index, index.IndexParams, req.GetParams())
-		log.Info("alter index index params",
-			zap.String("indexName", index.IndexName),
-			zap.Any("params", newIndexParams),
-		)
-		index.IndexParams = newIndexParams
+	for _, index := range indexes {
+		if len(req.GetParams()) > 0 {
+			// update user index params
+			newUserIndexParams := UpdateParams(index, index.UserIndexParams, req.GetParams())
+			log.Info("alter index user index params",
+				zap.String("indexName", index.IndexName),
+				zap.Any("params", newUserIndexParams),
+			)
+			index.UserIndexParams = newUserIndexParams
+
+			// update index params
+			newIndexParams := UpdateParams(index, index.IndexParams, req.GetParams())
+			log.Info("alter index index params",
+				zap.String("indexName", index.IndexName),
+				zap.Any("params", newIndexParams),
+			)
+			index.IndexParams = newIndexParams
+		} else if len(req.GetDeleteKeys()) > 0 {
+			// delete user index params
+			newUserIndexParams := DeleteParams(index, index.UserIndexParams, req.GetDeleteKeys())
+			log.Info("alter index user deletekeys",
+				zap.String("indexName", index.IndexName),
+				zap.Any("params", newUserIndexParams),
+			)
+			index.UserIndexParams = newUserIndexParams
+
+			// delete index params
+			newIndexParams := DeleteParams(index, index.IndexParams, req.GetDeleteKeys())
+			log.Info("alter index index deletekeys",
+				zap.String("indexName", index.IndexName),
+				zap.Any("params", newIndexParams),
+			)
+			index.IndexParams = newIndexParams
+		}
 
 		if err := ValidateIndexParams(index); err != nil {
 			return merr.Status(err), nil

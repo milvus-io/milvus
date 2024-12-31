@@ -60,7 +60,7 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 		curUser, err := contextutil.GetCurUserFromContext(ctx)
 		if err != nil || curUser == util.UserRoot {
 			if err != nil {
-				log.Warn("get current user from context failed", zap.Error(err))
+				log.Ctx(ctx).Warn("get current user from context failed", zap.Error(err))
 			}
 			privilegeColls.Insert(util.AnyWord)
 			return privilegeColls, nil
@@ -88,12 +88,15 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 			}
 			for _, entity := range entities {
 				objectType := entity.GetObject().GetName()
+				priv := entity.GetGrantor().GetPrivilege().GetName()
 				if objectType == commonpb.ObjectType_Global.String() &&
-					entity.GetGrantor().GetPrivilege().GetName() == util.PrivilegeNameForAPI(commonpb.ObjectPrivilege_PrivilegeAll.String()) {
+					priv == util.PrivilegeNameForAPI(commonpb.ObjectPrivilege_PrivilegeAll.String()) {
 					privilegeColls.Insert(util.AnyWord)
 					return privilegeColls, nil
 				}
-				if objectType != commonpb.ObjectType_Collection.String() {
+				// should list collection level built-in privilege group objects
+				if objectType != commonpb.ObjectType_Collection.String() &&
+					!Params.RbacConfig.IsCollectionPrivilegeGroup(priv) {
 					continue
 				}
 				collectionName := entity.GetObjectName()

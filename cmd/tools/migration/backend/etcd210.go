@@ -42,7 +42,7 @@ func newEtcd210(cfg *configs.MilvusConfig) (*etcd210, error) {
 func (b etcd210) loadTtAliases() (meta.TtAliasesMeta210, error) {
 	ttAliases := make(meta.TtAliasesMeta210)
 	prefix := path.Join(rootcoord.SnapshotPrefix, rootcoord.CollectionAliasMetaPrefix210)
-	keys, values, err := b.txn.LoadWithPrefix(prefix)
+	keys, values, err := b.txn.LoadWithPrefix(context.TODO(), prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (b etcd210) loadTtAliases() (meta.TtAliasesMeta210, error) {
 func (b etcd210) loadAliases() (meta.AliasesMeta210, error) {
 	aliases := make(meta.AliasesMeta210)
 	prefix := rootcoord.CollectionAliasMetaPrefix210
-	keys, values, err := b.txn.LoadWithPrefix(prefix)
+	keys, values, err := b.txn.LoadWithPrefix(context.TODO(), prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func (b etcd210) loadAliases() (meta.AliasesMeta210, error) {
 func (b etcd210) loadTtCollections() (meta.TtCollectionsMeta210, error) {
 	ttCollections := make(meta.TtCollectionsMeta210)
 	prefix := path.Join(rootcoord.SnapshotPrefix, rootcoord.CollectionMetaPrefix)
-	keys, values, err := b.txn.LoadWithPrefix(prefix)
+	keys, values, err := b.txn.LoadWithPrefix(context.TODO(), prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +144,7 @@ func (b etcd210) loadTtCollections() (meta.TtCollectionsMeta210, error) {
 func (b etcd210) loadCollections() (meta.CollectionsMeta210, error) {
 	collections := make(meta.CollectionsMeta210)
 	prefix := rootcoord.CollectionMetaPrefix
-	keys, values, err := b.txn.LoadWithPrefix(prefix)
+	keys, values, err := b.txn.LoadWithPrefix(context.TODO(), prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +199,7 @@ func parseCollectionIndexKey(key string) (collectionID, indexID typeutil.UniqueI
 func (b etcd210) loadCollectionIndexes() (meta.CollectionIndexesMeta210, error) {
 	collectionIndexes := make(meta.CollectionIndexesMeta210)
 	prefix := legacy.IndexMetaBefore220Prefix
-	keys, values, err := b.txn.LoadWithPrefix(prefix)
+	keys, values, err := b.txn.LoadWithPrefix(context.TODO(), prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +227,7 @@ func (b etcd210) loadCollectionIndexes() (meta.CollectionIndexesMeta210, error) 
 func (b etcd210) loadSegmentIndexes() (meta.SegmentIndexesMeta210, error) {
 	segmentIndexes := make(meta.SegmentIndexesMeta210)
 	prefix := legacy.SegmentIndexPrefixBefore220
-	keys, values, err := b.txn.LoadWithPrefix(prefix)
+	keys, values, err := b.txn.LoadWithPrefix(context.TODO(), prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +250,7 @@ func (b etcd210) loadSegmentIndexes() (meta.SegmentIndexesMeta210, error) {
 func (b etcd210) loadIndexBuildMeta() (meta.IndexBuildMeta210, error) {
 	indexBuildMeta := make(meta.IndexBuildMeta210)
 	prefix := legacy.IndexBuildPrefixBefore220
-	keys, values, err := b.txn.LoadWithPrefix(prefix)
+	keys, values, err := b.txn.LoadWithPrefix(context.TODO(), prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +279,7 @@ func (b etcd210) loadLastDDLRecords() (meta.LastDDLRecords, error) {
 		path.Join(rootcoord.SnapshotPrefix, legacy.DDMsgSendPrefixBefore220),
 	}
 	for _, prefix := range prefixes {
-		keys, values, err := b.txn.LoadWithPrefix(prefix)
+		keys, values, err := b.txn.LoadWithPrefix(context.TODO(), prefix)
 		if err != nil {
 			return nil, err
 		}
@@ -295,7 +295,7 @@ func (b etcd210) loadLastDDLRecords() (meta.LastDDLRecords, error) {
 
 func (b etcd210) loadLoadInfos() (meta.CollectionLoadInfo210, error) {
 	loadInfo := make(meta.CollectionLoadInfo210)
-	_, collectionValues, err := b.txn.LoadWithPrefix(legacy.CollectionLoadMetaPrefixV1)
+	_, collectionValues, err := b.txn.LoadWithPrefix(context.TODO(), legacy.CollectionLoadMetaPrefixV1)
 	if err != nil {
 		return nil, err
 	}

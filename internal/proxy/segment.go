@@ -82,7 +82,7 @@ func (info *segInfo) Capacity(ts Timestamp) uint32 {
 
 func (info *segInfo) Assign(ts Timestamp, count uint32) uint32 {
 	if info.IsExpired(ts) {
-		log.Debug("segInfo Assign IsExpired", zap.Uint64("ts", ts),
+		log.Ctx(context.TODO()).Debug("segInfo Assign IsExpired", zap.Uint64("ts", ts),
 			zap.Uint32("count", count))
 		return 0
 	}
@@ -228,7 +228,7 @@ func (sa *segIDAssigner) pickCanDoFunc() {
 			sa.CanDoReqs = append(sa.CanDoReqs, req)
 		}
 	}
-	log.Debug("Proxy segIDAssigner pickCanDoFunc", zap.Any("records", records),
+	log.Ctx(context.TODO()).Debug("Proxy segIDAssigner pickCanDoFunc", zap.Any("records", records),
 		zap.Int("len(newTodoReqs)", len(newTodoReqs)),
 		zap.Int("len(CanDoReqs)", len(sa.CanDoReqs)))
 	sa.ToDoReqs = newTodoReqs
@@ -268,7 +268,7 @@ func (sa *segIDAssigner) checkSegReqEqual(req1, req2 *datapb.SegmentIDRequest) b
 }
 
 func (sa *segIDAssigner) reduceSegReqs() {
-	log.Debug("Proxy segIDAssigner reduceSegReqs", zap.Int("len(segReqs)", len(sa.segReqs)))
+	log.Ctx(context.TODO()).Debug("Proxy segIDAssigner reduceSegReqs", zap.Int("len(segReqs)", len(sa.segReqs)))
 	if len(sa.segReqs) == 0 {
 		return
 	}
@@ -276,7 +276,7 @@ func (sa *segIDAssigner) reduceSegReqs() {
 	var newSegReqs []*datapb.SegmentIDRequest
 	for _, req1 := range sa.segReqs {
 		if req1.Count == 0 {
-			log.Debug("Proxy segIDAssigner reduceSegReqs hit perCount == 0")
+			log.Ctx(context.TODO()).Debug("Proxy segIDAssigner reduceSegReqs hit perCount == 0")
 			req1.Count = sa.countPerRPC
 		}
 		beforeCnt += req1.Count
@@ -298,7 +298,7 @@ func (sa *segIDAssigner) reduceSegReqs() {
 		afterCnt += req.Count
 	}
 	sa.segReqs = newSegReqs
-	log.Debug("Proxy segIDAssigner reduceSegReqs after reduce", zap.Int("len(segReqs)", len(sa.segReqs)),
+	log.Ctx(context.TODO()).Debug("Proxy segIDAssigner reduceSegReqs after reduce", zap.Int("len(segReqs)", len(sa.segReqs)),
 		zap.Uint32("BeforeCnt", beforeCnt),
 		zap.Uint32("AfterCnt", afterCnt))
 }
@@ -317,7 +317,7 @@ func (sa *segIDAssigner) syncSegments() (bool, error) {
 		strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(len(sa.segReqs)))
 	sa.segReqs = nil
 
-	log.Debug("syncSegments call dataCoord.AssignSegmentID", zap.Stringer("request", req))
+	log.Ctx(context.TODO()).Debug("syncSegments call dataCoord.AssignSegmentID", zap.Stringer("request", req))
 
 	resp, err := sa.dataCoord.AssignSegmentID(context.Background(), req)
 	if err != nil {
@@ -333,7 +333,7 @@ func (sa *segIDAssigner) syncSegments() (bool, error) {
 	success := true
 	for _, segAssign := range resp.SegIDAssignments {
 		if segAssign.Status.GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Warn("proxy", zap.String("SyncSegment Error", segAssign.GetStatus().GetReason()))
+			log.Ctx(context.TODO()).Warn("proxy", zap.String("SyncSegment Error", segAssign.GetStatus().GetReason()))
 			errMsg += segAssign.GetStatus().GetReason()
 			errMsg += "\n"
 			success = false

@@ -45,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/internal/util/function"
@@ -70,7 +69,6 @@ type DelegatorDataSuite struct {
 	version       int64
 	workerManager *cluster.MockManager
 	manager       *segments.Manager
-	tsafeManager  tsafe.Manager
 	loader        *segments.MockLoader
 	mq            *msgstream.MockMsgStream
 	channel       metautil.Channel
@@ -192,7 +190,7 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 		}},
 	}, nil, nil)
 
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, &msgstream.MockMqFactory{
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
@@ -204,7 +202,6 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 func (s *DelegatorDataSuite) SetupTest() {
 	s.workerManager = &cluster.MockManager{}
 	s.manager = segments.NewManager()
-	s.tsafeManager = tsafe.NewTSafeReplica()
 	s.loader = &segments.MockLoader{}
 
 	// init schema
@@ -213,7 +210,7 @@ func (s *DelegatorDataSuite) SetupTest() {
 	s.rootPath = s.Suite.T().Name()
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), s.rootPath)
 	s.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, &msgstream.MockMqFactory{
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
@@ -829,7 +826,6 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			s.version,
 			s.workerManager,
 			s.manager,
-			s.tsafeManager,
 			s.loader,
 			&msgstream.MockMqFactory{
 				NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
@@ -1363,9 +1359,10 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 
 	s.ElementsMatch([]SegmentEntry{
 		{
-			SegmentID:   1001,
-			NodeID:      1,
-			PartitionID: 500,
+			SegmentID:     1001,
+			NodeID:        1,
+			PartitionID:   500,
+			TargetVersion: unreadableTargetVersion,
 		},
 	}, growing)
 
@@ -1503,7 +1500,7 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 		s.manager.Segment.Put(context.Background(), segments.SegmentTypeGrowing, ms)
 	}
 
-	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{2}, []int64{3, 4}, &msgpb.MsgPosition{})
+	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{1}, []int64{2}, []int64{3, 4}, &msgpb.MsgPosition{})
 	s.Equal(int64(5), s.delegator.GetTargetVersion())
 }
 

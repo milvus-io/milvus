@@ -37,11 +37,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+var _ kv.MetaKv = &metaMemoryKV{}
 
 type metaMemoryKV struct {
 	memkv.MemoryKV
@@ -51,8 +54,8 @@ func NewMetaMemoryKV() *metaMemoryKV {
 	return &metaMemoryKV{MemoryKV: *memkv.NewMemoryKV()}
 }
 
-func (mm *metaMemoryKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
-	keys, values, err := mm.MemoryKV.LoadWithPrefix(prefix)
+func (mm *metaMemoryKV) WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error {
+	keys, values, err := mm.MemoryKV.LoadWithPrefix(context.TODO(), prefix)
 	if err != nil {
 		return err
 	}
@@ -69,19 +72,19 @@ func (mm *metaMemoryKV) GetPath(key string) string {
 	panic("implement me")
 }
 
-func (mm *metaMemoryKV) Watch(key string) clientv3.WatchChan {
+func (mm *metaMemoryKV) Watch(ctx context.Context, key string) clientv3.WatchChan {
 	panic("implement me")
 }
 
-func (mm *metaMemoryKV) WatchWithPrefix(key string) clientv3.WatchChan {
+func (mm *metaMemoryKV) WatchWithPrefix(ctx context.Context, key string) clientv3.WatchChan {
 	panic("implement me")
 }
 
-func (mm *metaMemoryKV) WatchWithRevision(key string, revision int64) clientv3.WatchChan {
+func (mm *metaMemoryKV) WatchWithRevision(ctx context.Context, key string, revision int64) clientv3.WatchChan {
 	panic("implement me")
 }
 
-func (mm *metaMemoryKV) CompareVersionAndSwap(key string, version int64, target string) (bool, error) {
+func (mm *metaMemoryKV) CompareVersionAndSwap(ctx context.Context, key string, version int64, target string) (bool, error) {
 	panic("implement me")
 }
 
@@ -447,6 +450,10 @@ func (m *mockRootCoordClient) AlterCollection(ctx context.Context, request *milv
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockRootCoordClient) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockRootCoordClient) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
@@ -738,6 +745,10 @@ func (h *mockHandler) GetCollection(_ context.Context, collectionID UniqueID) (*
 		return h.meta.GetCollection(collectionID), nil
 	}
 	return &collectionInfo{ID: collectionID}, nil
+}
+
+func (h *mockHandler) GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView {
+	return nil
 }
 
 func newMockHandlerWithMeta(meta *meta) *mockHandler {

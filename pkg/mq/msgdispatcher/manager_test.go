@@ -48,7 +48,7 @@ func TestManager(t *testing.T) {
 				offset++
 				vchannel := fmt.Sprintf("mock-pchannel-dml_0_vchannelv%d", offset)
 				t.Logf("add vchannel, %s", vchannel)
-				_, err := c.Add(context.Background(), vchannel, nil, common.SubscriptionPositionUnknown)
+				_, err := c.Add(context.Background(), NewStreamConfig(vchannel, nil, common.SubscriptionPositionUnknown))
 				assert.NoError(t, err)
 				assert.Equal(t, offset, c.Num())
 			}
@@ -67,11 +67,11 @@ func TestManager(t *testing.T) {
 		ctx := context.Background()
 		c := NewDispatcherManager(prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
 		assert.NotNil(t, c)
-		_, err := c.Add(ctx, "mock_vchannel_0", nil, common.SubscriptionPositionUnknown)
+		_, err := c.Add(ctx, NewStreamConfig("mock_vchannel_0", nil, common.SubscriptionPositionUnknown))
 		assert.NoError(t, err)
-		_, err = c.Add(ctx, "mock_vchannel_1", nil, common.SubscriptionPositionUnknown)
+		_, err = c.Add(ctx, NewStreamConfig("mock_vchannel_1", nil, common.SubscriptionPositionUnknown))
 		assert.NoError(t, err)
-		_, err = c.Add(ctx, "mock_vchannel_2", nil, common.SubscriptionPositionUnknown)
+		_, err = c.Add(ctx, NewStreamConfig("mock_vchannel_2", nil, common.SubscriptionPositionUnknown))
 		assert.NoError(t, err)
 		assert.Equal(t, 3, c.Num())
 		c.(*dispatcherManager).mainDispatcher.curTs.Store(1000)
@@ -98,11 +98,11 @@ func TestManager(t *testing.T) {
 		ctx := context.Background()
 		c := NewDispatcherManager(prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
 		assert.NotNil(t, c)
-		_, err := c.Add(ctx, "mock_vchannel_0", nil, common.SubscriptionPositionUnknown)
+		_, err := c.Add(ctx, NewStreamConfig("mock_vchannel_0", nil, common.SubscriptionPositionUnknown))
 		assert.NoError(t, err)
-		_, err = c.Add(ctx, "mock_vchannel_1", nil, common.SubscriptionPositionUnknown)
+		_, err = c.Add(ctx, NewStreamConfig("mock_vchannel_1", nil, common.SubscriptionPositionUnknown))
 		assert.NoError(t, err)
-		_, err = c.Add(ctx, "mock_vchannel_2", nil, common.SubscriptionPositionUnknown)
+		_, err = c.Add(ctx, NewStreamConfig("mock_vchannel_2", nil, common.SubscriptionPositionUnknown))
 		assert.NoError(t, err)
 		assert.Equal(t, 3, c.Num())
 		c.(*dispatcherManager).mainDispatcher.curTs.Store(1000)
@@ -134,11 +134,11 @@ func TestManager(t *testing.T) {
 		c := NewDispatcherManager(prefix+"_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
 		go c.Run()
 		assert.NotNil(t, c)
-		_, err := c.Add(ctx, "mock_vchannel_0", nil, common.SubscriptionPositionUnknown)
+		_, err := c.Add(ctx, NewStreamConfig("mock_vchannel_0", nil, common.SubscriptionPositionUnknown))
 		assert.Error(t, err)
-		_, err = c.Add(ctx, "mock_vchannel_1", nil, common.SubscriptionPositionUnknown)
+		_, err = c.Add(ctx, NewStreamConfig("mock_vchannel_1", nil, common.SubscriptionPositionUnknown))
 		assert.Error(t, err)
-		_, err = c.Add(ctx, "mock_vchannel_2", nil, common.SubscriptionPositionUnknown)
+		_, err = c.Add(ctx, NewStreamConfig("mock_vchannel_2", nil, common.SubscriptionPositionUnknown))
 		assert.Error(t, err)
 		assert.Equal(t, 0, c.Num())
 
@@ -153,18 +153,18 @@ func TestManager(t *testing.T) {
 		go c.Run()
 		assert.NotNil(t, c)
 		ctx := context.Background()
-		_, err := c.Add(ctx, "mock_vchannel_0", nil, common.SubscriptionPositionUnknown)
+		_, err := c.Add(ctx, NewStreamConfig("mock_vchannel_0", nil, common.SubscriptionPositionUnknown))
 		assert.NoError(t, err)
-		_, err = c.Add(ctx, "mock_vchannel_1", nil, common.SubscriptionPositionUnknown)
+		_, err = c.Add(ctx, NewStreamConfig("mock_vchannel_1", nil, common.SubscriptionPositionUnknown))
 		assert.NoError(t, err)
-		_, err = c.Add(ctx, "mock_vchannel_2", nil, common.SubscriptionPositionUnknown)
+		_, err = c.Add(ctx, NewStreamConfig("mock_vchannel_2", nil, common.SubscriptionPositionUnknown))
 		assert.NoError(t, err)
 
-		_, err = c.Add(ctx, "mock_vchannel_0", nil, common.SubscriptionPositionUnknown)
+		_, err = c.Add(ctx, NewStreamConfig("mock_vchannel_0", nil, common.SubscriptionPositionUnknown))
 		assert.Error(t, err)
-		_, err = c.Add(ctx, "mock_vchannel_1", nil, common.SubscriptionPositionUnknown)
+		_, err = c.Add(ctx, NewStreamConfig("mock_vchannel_1", nil, common.SubscriptionPositionUnknown))
 		assert.Error(t, err)
-		_, err = c.Add(ctx, "mock_vchannel_2", nil, common.SubscriptionPositionUnknown)
+		_, err = c.Add(ctx, NewStreamConfig("mock_vchannel_2", nil, common.SubscriptionPositionUnknown))
 		assert.Error(t, err)
 
 		assert.NotPanics(t, func() {
@@ -226,7 +226,7 @@ func (suite *SimulationSuite) produceMsg(wg *sync.WaitGroup, collectionID int64)
 		insNum := rand.Intn(10)
 		for j := 0; j < insNum; j++ {
 			vchannel := vchannelKeys[rand.Intn(len(vchannelKeys))].Interface().(string)
-			err := suite.producer.Produce(&msgstream.MsgPack{
+			err := suite.producer.Produce(context.TODO(), &msgstream.MsgPack{
 				Msgs: []msgstream.TsMsg{genInsertMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
 			})
 			assert.NoError(suite.T(), err)
@@ -237,7 +237,7 @@ func (suite *SimulationSuite) produceMsg(wg *sync.WaitGroup, collectionID int64)
 		delNum := rand.Intn(2)
 		for j := 0; j < delNum; j++ {
 			vchannel := vchannelKeys[rand.Intn(len(vchannelKeys))].Interface().(string)
-			err := suite.producer.Produce(&msgstream.MsgPack{
+			err := suite.producer.Produce(context.TODO(), &msgstream.MsgPack{
 				Msgs: []msgstream.TsMsg{genDeleteMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
 			})
 			assert.NoError(suite.T(), err)
@@ -247,7 +247,7 @@ func (suite *SimulationSuite) produceMsg(wg *sync.WaitGroup, collectionID int64)
 		// produce random ddl
 		ddlNum := rand.Intn(2)
 		for j := 0; j < ddlNum; j++ {
-			err := suite.producer.Produce(&msgstream.MsgPack{
+			err := suite.producer.Produce(context.TODO(), &msgstream.MsgPack{
 				Msgs: []msgstream.TsMsg{genDDLMsg(commonpb.MsgType_DropCollection, collectionID)},
 			})
 			assert.NoError(suite.T(), err)
@@ -257,7 +257,7 @@ func (suite *SimulationSuite) produceMsg(wg *sync.WaitGroup, collectionID int64)
 		}
 		// produce time tick
 		ts := uint64(i * 100)
-		err := suite.producer.Produce(&msgstream.MsgPack{
+		err := suite.producer.Produce(context.TODO(), &msgstream.MsgPack{
 			Msgs: []msgstream.TsMsg{genTimeTickMsg(ts)},
 		})
 		assert.NoError(suite.T(), err)
@@ -305,7 +305,7 @@ func (suite *SimulationSuite) produceTimeTickOnly(ctx context.Context) {
 			return
 		case <-ticker.C:
 			ts := uint64(tt * 1000)
-			err := suite.producer.Produce(&msgstream.MsgPack{
+			err := suite.producer.Produce(ctx, &msgstream.MsgPack{
 				Msgs: []msgstream.TsMsg{genTimeTickMsg(ts)},
 			})
 			assert.NoError(suite.T(), err)
@@ -325,7 +325,7 @@ func (suite *SimulationSuite) TestDispatchToVchannels() {
 	suite.vchannels = make(map[string]*vchannelHelper, vchannelNum)
 	for i := 0; i < vchannelNum; i++ {
 		vchannel := fmt.Sprintf("%s_%dv%d", suite.pchannel, collectionID, i)
-		output, err := suite.manager.Add(context.Background(), vchannel, nil, common.SubscriptionPositionEarliest)
+		output, err := suite.manager.Add(context.Background(), NewStreamConfig(vchannel, nil, common.SubscriptionPositionEarliest))
 		assert.NoError(suite.T(), err)
 		suite.vchannels[vchannel] = &vchannelHelper{output: output}
 	}
@@ -360,8 +360,10 @@ func (suite *SimulationSuite) TestMerge() {
 
 	for i := 0; i < vchannelNum; i++ {
 		vchannel := fmt.Sprintf("%s_vchannelv%d", suite.pchannel, i)
-		output, err := suite.manager.Add(context.Background(), vchannel, positions[rand.Intn(len(positions))],
-			common.SubscriptionPositionUnknown) // seek from random position
+		output, err := suite.manager.Add(context.Background(), NewStreamConfig(
+			vchannel, positions[rand.Intn(len(positions))],
+			common.SubscriptionPositionUnknown,
+		)) // seek from random position
 		assert.NoError(suite.T(), err)
 		suite.vchannels[vchannel] = &vchannelHelper{output: output}
 	}
@@ -402,7 +404,7 @@ func (suite *SimulationSuite) TestSplit() {
 			paramtable.Get().Save(targetBufSizeK, "10")
 		}
 		vchannel := fmt.Sprintf("%s_vchannelv%d", suite.pchannel, i)
-		_, err := suite.manager.Add(context.Background(), vchannel, nil, common.SubscriptionPositionEarliest)
+		_, err := suite.manager.Add(context.Background(), NewStreamConfig(vchannel, nil, common.SubscriptionPositionEarliest))
 		assert.NoError(suite.T(), err)
 	}
 

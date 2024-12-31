@@ -49,11 +49,14 @@ class PhyValueExpr : public Expr {
 
     void
     MoveCursor() override {
-        int64_t real_batch_size = current_pos_ + batch_size_ >= active_count_
-                                      ? active_count_ - current_pos_
-                                      : batch_size_;
+        if (!has_offset_input_) {
+            int64_t real_batch_size =
+                current_pos_ + batch_size_ >= active_count_
+                    ? active_count_ - current_pos_
+                    : batch_size_;
 
-        current_pos_ += real_batch_size;
+            current_pos_ += real_batch_size;
+        }
     }
 
  private:

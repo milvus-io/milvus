@@ -36,7 +36,7 @@ class Chunk {
  public:
     Chunk() = default;
     Chunk(int64_t row_nums, char* data, uint64_t size, bool nullable)
-        : row_nums_(row_nums), data_(data), size_(size), nullable_(nullable) {
+        : data_(data), row_nums_(row_nums), size_(size), nullable_(nullable) {
         if (nullable) {
             valid_.reserve(row_nums);
             for (int i = 0; i < row_nums; i++) {
@@ -73,7 +73,10 @@ class Chunk {
 
     virtual bool
     isValid(int offset) {
-        return valid_[offset];
+        if (nullable_) {
+            return valid_[offset];
+        }
+        return true;
     };
 
  protected:
@@ -170,6 +173,9 @@ class StringChunk : public Chunk {
         return result;
     }
 
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    ViewsByOffsets(const FixedVector<int32_t>& offsets);
+
     const char*
     ValueAt(int64_t idx) const override {
         return (*this)[idx].data();
@@ -237,7 +243,7 @@ class SparseFloatVectorChunk : public Chunk {
         for (int i = 0; i < row_nums; i++) {
             vec_[i] = {(offsets_ptr[i + 1] - offsets_ptr[i]) /
                            knowhere::sparse::SparseRow<float>::element_size(),
-                       (uint8_t*)(data + offsets_ptr[i]),
+                       reinterpret_cast<uint8_t*>(data + offsets_ptr[i]),
                        false};
             dim_ = std::max(dim_, vec_[i].dim());
         }

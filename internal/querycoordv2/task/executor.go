@@ -282,7 +282,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 				dstNode = action.Node()
 				req.NeedTransfer = false
 			} else {
-				view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard), meta.WithServiceable())
+				view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard))
 				if view == nil {
 					msg := "no shard leader for the segment to execute releasing"
 					err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
@@ -341,18 +341,23 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 
 	collectionInfo, err := ex.broker.DescribeCollection(ctx, task.CollectionID())
 	if err != nil {
-		log.Warn("failed to get collection info")
+		log.Warn("failed to get collection info", zap.Error(err))
 		return err
 	}
 	loadFields := ex.meta.GetLoadFields(ctx, task.CollectionID())
-	partitions, err := utils.GetPartitions(ctx, ex.meta.CollectionManager, task.CollectionID())
+	partitions, err := utils.GetPartitions(ctx, ex.targetMgr, task.CollectionID())
 	if err != nil {
-		log.Warn("failed to get partitions of collection")
+		log.Warn("failed to get partitions of collection", zap.Error(err))
 		return err
 	}
 	indexInfo, err := ex.broker.ListIndexes(ctx, task.CollectionID())
 	if err != nil {
-		log.Warn("fail to get index meta of collection")
+		log.Warn("fail to get index meta of collection", zap.Error(err))
+		return err
+	}
+	dbResp, err := ex.broker.DescribeDatabase(ctx, collectionInfo.GetDbName())
+	if err != nil {
+		log.Warn("failed to get database info", zap.Error(err))
 		return err
 	}
 	loadMeta := packLoadMeta(
@@ -363,6 +368,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		loadFields,
 		partitions...,
 	)
+	loadMeta.DbProperties = dbResp.GetProperties()
 
 	dmChannel := ex.targetMgr.GetDmChannel(ctx, task.CollectionID(), action.ChannelName(), meta.NextTarget)
 	if dmChannel == nil {
@@ -653,7 +659,7 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 		return nil, nil, nil, err
 	}
 	loadFields := ex.meta.GetLoadFields(ctx, task.CollectionID())
-	partitions, err := utils.GetPartitions(ctx, ex.meta.CollectionManager, collectionID)
+	partitions, err := utils.GetPartitions(ctx, ex.targetMgr, collectionID)
 	if err != nil {
 		log.Warn("failed to get partitions of collection", zap.Error(err))
 		return nil, nil, nil, err

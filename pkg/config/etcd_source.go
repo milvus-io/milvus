@@ -49,7 +49,7 @@ type EtcdSource struct {
 }
 
 func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
-	log.Debug("init etcd source", zap.Any("etcdInfo", etcdInfo))
+	log.Ctx(context.TODO()).Debug("init etcd source", zap.Any("etcdInfo", etcdInfo))
 	etcdCli, err := etcd.CreateEtcdClient(
 		etcdInfo.UseEmbed,
 		etcdInfo.EnableAuth,
@@ -144,7 +144,7 @@ func (es *EtcdSource) UpdateOptions(opts Options) {
 }
 
 func (es *EtcdSource) refreshConfigurations() error {
-	log := log.Ctx(context.TODO()).WithRateGroup("config.etcdSource", 1, 60)
+	log := log.Ctx(es.ctx).WithRateGroup("config.etcdSource", 1, 60)
 	es.RLock()
 	prefix := path.Join(es.keyPrefix, "config")
 	es.RUnlock()
@@ -176,7 +176,7 @@ func (es *EtcdSource) update(configs map[string]string) error {
 	events, err := PopulateEvents(es.GetSourceName(), es.currentConfigs, configs)
 	if err != nil {
 		es.Unlock()
-		log.Warn("generating event error", zap.Error(err))
+		log.Ctx(es.ctx).Warn("generating event error", zap.Error(err))
 		return err
 	}
 	es.currentConfigs = configs

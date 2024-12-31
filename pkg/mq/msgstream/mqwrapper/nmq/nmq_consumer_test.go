@@ -36,10 +36,10 @@ func TestNatsConsumer_Subscription(t *testing.T) {
 
 	topic := t.Name()
 	proOpts := common.ProducerOptions{Topic: topic}
-	_, err = client.CreateProducer(proOpts)
+	_, err = client.CreateProducer(context.TODO(), proOpts)
 	assert.NoError(t, err)
 
-	consumer, err := client.Subscribe(mqwrapper.ConsumerOptions{
+	consumer, err := client.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
 		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
@@ -69,7 +69,7 @@ func Test_BadLatestMessageID(t *testing.T) {
 	assert.NoError(t, err)
 	defer client.Close()
 
-	consumer, err := client.Subscribe(mqwrapper.ConsumerOptions{
+	consumer, err := client.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
 		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
@@ -88,10 +88,10 @@ func TestComsumeMessage(t *testing.T) {
 	defer client.Close()
 
 	topic := t.Name()
-	p, err := client.CreateProducer(common.ProducerOptions{Topic: topic})
+	p, err := client.CreateProducer(context.TODO(), common.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 
-	c, err := client.Subscribe(mqwrapper.ConsumerOptions{
+	c, err := client.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
 		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
@@ -149,7 +149,7 @@ func TestNatsConsumer_Close(t *testing.T) {
 	defer client.Close()
 
 	topic := t.Name()
-	c, err := client.Subscribe(mqwrapper.ConsumerOptions{
+	c, err := client.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
 		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
@@ -177,7 +177,7 @@ func TestNatsClientErrorOnUnsubscribeTwice(t *testing.T) {
 	assert.NoError(t, err)
 	defer client.Close()
 
-	consumer, err := client.Subscribe(mqwrapper.ConsumerOptions{
+	consumer, err := client.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
 		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
@@ -199,7 +199,7 @@ func TestCheckTopicValid(t *testing.T) {
 	defer client.Close()
 
 	topic := t.Name()
-	consumer, err := client.Subscribe(mqwrapper.ConsumerOptions{
+	consumer, err := client.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
 		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
@@ -220,7 +220,7 @@ func TestCheckTopicValid(t *testing.T) {
 	assert.Error(t, err)
 
 	// not empty topic can pass
-	pub, err := client.CreateProducer(common.ProducerOptions{
+	pub, err := client.CreateProducer(context.TODO(), common.ProducerOptions{
 		Topic: topic,
 	})
 	assert.NoError(t, err)
@@ -240,7 +240,7 @@ func TestCheckTopicValid(t *testing.T) {
 func newTestConsumer(t *testing.T, topic string, position common.SubscriptionInitialPosition) (mqwrapper.Consumer, error) {
 	client, err := createNmqClient()
 	assert.NoError(t, err)
-	return client.Subscribe(mqwrapper.ConsumerOptions{
+	return client.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
 		SubscriptionInitialPosition: position,
@@ -251,7 +251,7 @@ func newTestConsumer(t *testing.T, topic string, position common.SubscriptionIni
 func newProducer(t *testing.T, topic string) (*nmqClient, mqwrapper.Producer) {
 	client, err := createNmqClient()
 	assert.NoError(t, err)
-	producer, err := client.CreateProducer(common.ProducerOptions{Topic: topic})
+	producer, err := client.CreateProducer(context.TODO(), common.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 	return client, producer
 }
@@ -272,10 +272,10 @@ func TestNmqConsumer_GetLatestMsgID(t *testing.T) {
 	defer client.Close()
 
 	topic := t.Name()
-	p, err := client.CreateProducer(common.ProducerOptions{Topic: topic})
+	p, err := client.CreateProducer(context.TODO(), common.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 
-	c, err := client.Subscribe(mqwrapper.ConsumerOptions{
+	c, err := client.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
 		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
@@ -301,13 +301,13 @@ func TestNmqConsumer_ConsumeFromLatest(t *testing.T) {
 	defer client.Close()
 
 	topic := t.Name()
-	p, err := client.CreateProducer(common.ProducerOptions{Topic: topic})
+	p, err := client.CreateProducer(context.TODO(), common.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 
 	msgs := []string{"111", "222", "333"}
 	process(t, msgs, p)
 
-	c, err := client.Subscribe(mqwrapper.ConsumerOptions{
+	c, err := client.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
 		SubscriptionInitialPosition: common.SubscriptionPositionLatest,
@@ -331,13 +331,13 @@ func TestNmqConsumer_ConsumeFromEarliest(t *testing.T) {
 	defer client.Close()
 
 	topic := t.Name()
-	p, err := client.CreateProducer(common.ProducerOptions{Topic: topic})
+	p, err := client.CreateProducer(context.TODO(), common.ProducerOptions{Topic: topic})
 	assert.NoError(t, err)
 
 	msgs := []string{"111", "222"}
 	process(t, msgs, p)
 
-	c, err := client.Subscribe(mqwrapper.ConsumerOptions{
+	c, err := client.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
 		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,
@@ -354,7 +354,7 @@ func TestNmqConsumer_ConsumeFromEarliest(t *testing.T) {
 	msg = <-c.Chan()
 	assert.Equal(t, "222", string(msg.Payload()))
 
-	c2, err := client.Subscribe(mqwrapper.ConsumerOptions{
+	c2, err := client.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            topic,
 		SubscriptionInitialPosition: common.SubscriptionPositionEarliest,

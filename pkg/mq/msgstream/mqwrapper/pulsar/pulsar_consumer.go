@@ -51,6 +51,7 @@ func (pc *Consumer) Subscription() string {
 
 // Chan returns a message channel
 func (pc *Consumer) Chan() <-chan common.Message {
+	log := log.Ctx(context.TODO())
 	if pc.msgChannel == nil {
 		pc.once.Do(func() {
 			pc.msgChannel = make(chan common.Message, 256)

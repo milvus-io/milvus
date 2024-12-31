@@ -360,6 +360,39 @@ func (_c *MockGrpcClient_SetInternalTLSCertPool_Call[T]) RunAndReturn(run func(*
 	return _c
 }
 
+// SetInternalTLSServerName provides a mock function with given fields: cp
+func (_m *MockGrpcClient[T]) SetInternalTLSServerName(cp string) {
+	_m.Called(cp)
+}
+
+// MockGrpcClient_SetInternalTLSServerName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetInternalTLSServerName'
+type MockGrpcClient_SetInternalTLSServerName_Call[T grpcclient.GrpcComponent] struct {
+	*mock.Call
+}
+
+// SetInternalTLSServerName is a helper method to define mock.On call
+//   - cp string
+func (_e *MockGrpcClient_Expecter[T]) SetInternalTLSServerName(cp interface{}) *MockGrpcClient_SetInternalTLSServerName_Call[T] {
+	return &MockGrpcClient_SetInternalTLSServerName_Call[T]{Call: _e.mock.On("SetInternalTLSServerName", cp)}
+}
+
+func (_c *MockGrpcClient_SetInternalTLSServerName_Call[T]) Run(run func(cp string)) *MockGrpcClient_SetInternalTLSServerName_Call[T] {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockGrpcClient_SetInternalTLSServerName_Call[T]) Return() *MockGrpcClient_SetInternalTLSServerName_Call[T] {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockGrpcClient_SetInternalTLSServerName_Call[T]) RunAndReturn(run func(string)) *MockGrpcClient_SetInternalTLSServerName_Call[T] {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetNewGrpcClientFunc provides a mock function with given fields: _a0
 func (_m *MockGrpcClient[T]) SetNewGrpcClientFunc(_a0 func(*grpc.ClientConn) T) {
 	_m.Called(_a0)

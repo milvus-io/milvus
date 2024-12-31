@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v3/disk"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/config"
@@ -104,8 +105,6 @@ type ComponentParam struct {
 	StreamingCoordGrpcClientCfg GrpcClientConfig
 	StreamingNodeGrpcClientCfg  GrpcClientConfig
 	IntegrationTestCfg          integrationTestConfig
-
-	RuntimeConfig runtimeConfig
 }
 
 // Init initialize once
@@ -268,6 +267,7 @@ type commonConfig struct {
 	MaxBloomFalsePositive     ParamItem `refreshable:"true"`
 	BloomFilterApplyBatchSize ParamItem `refreshable:"true"`
 	PanicWhenPluginFail       ParamItem `refreshable:"false"`
+	CollectionReplicateEnable ParamItem `refreshable:"true"`
 
 	UsePartitionKeyAsClusteringKey ParamItem `refreshable:"true"`
 	UseVectorAsClusteringKey       ParamItem `refreshable:"true"`
@@ -286,6 +286,8 @@ type commonConfig struct {
 
 	// Local RPC enabled for milvus internal communication when mix or standalone mode.
 	LocalRPCEnabled ParamItem `refreshable:"false"`
+
+	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -784,6 +786,15 @@ This helps Milvus-CDC synchronize incremental data`,
 	}
 	p.TTMsgEnabled.Init(base.mgr)
 
+	p.CollectionReplicateEnable = ParamItem{
+		Key:          "common.collectionReplicateEnable",
+		Version:      "2.4.16",
+		DefaultValue: "false",
+		Doc:          `Whether to enable collection replication.`,
+		Export:       true,
+	}
+	p.CollectionReplicateEnable.Init(base.mgr)
+
 	p.TraceLogMode = ParamItem{
 		Key:          "common.traceLogMode",
 		Version:      "2.3.4",
@@ -936,6 +947,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.LocalRPCEnabled.Init(base.mgr)
+
+	p.SyncTaskPoolReleaseTimeoutSeconds = ParamItem{
+		Key:          "common.sync.taskPoolReleaseTimeoutSeconds",
+		DefaultValue: "60",
+		Version:      "2.4.19",
+		Doc:          "The maximum time to wait for the task to finish and release resources in the pool",
+		Export:       true,
+	}
+	p.SyncTaskPoolReleaseTimeoutSeconds.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -1780,6 +1800,7 @@ type queryCoordConfig struct {
 	RowCountFactor                      ParamItem `refreshable:"true"`
 	SegmentCountFactor                  ParamItem `refreshable:"true"`
 	GlobalSegmentCountFactor            ParamItem `refreshable:"true"`
+	CollectionChannelCountFactor        ParamItem `refreshable:"true"`
 	SegmentCountMaxSteps                ParamItem `refreshable:"true"`
 	RowCountMaxSteps                    ParamItem `refreshable:"true"`
 	RandomMaxSteps                      ParamItem `refreshable:"true"`
@@ -1827,6 +1848,7 @@ type queryCoordConfig struct {
 	CollectionObserverInterval         ParamItem `refreshable:"false"`
 	CheckExecutedFlagInterval          ParamItem `refreshable:"false"`
 	CollectionBalanceSegmentBatchSize  ParamItem `refreshable:"true"`
+	CollectionBalanceChannelBatchSize  ParamItem `refreshable:"true"`
 	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
 	ClusterLevelLoadReplicaNumber      ParamItem `refreshable:"true"`
 	ClusterLevelLoadResourceGroups     ParamItem `refreshable:"true"`
@@ -1944,6 +1966,17 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.GlobalSegmentCountFactor.Init(base.mgr)
+
+	p.CollectionChannelCountFactor = ParamItem{
+		Key:          "queryCoord.collectionChannelCountFactor",
+		Version:      "2.4.18",
+		DefaultValue: "10",
+		PanicIfEmpty: true,
+		Doc: `the channel count weight used when balancing channels among queryNodes, 
+		A higher value reduces the likelihood of assigning channels from the same collection to the same QueryNode. Set to 1 to disable this feature.`,
+		Export: true,
+	}
+	p.CollectionChannelCountFactor.Init(base.mgr)
 
 	p.SegmentCountMaxSteps = ParamItem{
 		Key:          "queryCoord.segmentCountMaxSteps",
@@ -2366,6 +2399,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.CollectionBalanceSegmentBatchSize.Init(base.mgr)
+
+	p.CollectionBalanceChannelBatchSize = ParamItem{
+		Key:          "queryCoord.collectionBalanceChannelBatchSize",
+		Version:      "2.4.18",
+		DefaultValue: "1",
+		Doc:          "the max balance task number for channel at each round",
+		Export:       false,
+	}
+	p.CollectionBalanceChannelBatchSize.Init(base.mgr)
 
 	p.ClusterLevelLoadReplicaNumber = ParamItem{
 		Key:          "queryCoord.clusterLevelLoadReplicaNumber",
@@ -3273,7 +3315,6 @@ type dataCoordConfig struct {
 	CompactionMaxParallelTasks       ParamItem `refreshable:"true"`
 	CompactionWorkerParalleTasks     ParamItem `refreshable:"true"`
 	MinSegmentToMerge                ParamItem `refreshable:"true"`
-	MaxSegmentToMerge                ParamItem `refreshable:"true"`
 	SegmentSmallProportion           ParamItem `refreshable:"true"`
 	SegmentCompactableProportion     ParamItem `refreshable:"true"`
 	SegmentExpansionRate             ParamItem `refreshable:"true"`
@@ -3292,6 +3333,9 @@ type dataCoordConfig struct {
 
 	ChannelCheckpointMaxLag ParamItem `refreshable:"true"`
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
+
+	// Index related configuration
+	IndexMemSizeEstimateMultiplier ParamItem `refreshable:"true"`
 
 	// Clustering Compaction
 	ClusteringCompactionEnable                 ParamItem `refreshable:"true"`
@@ -3599,13 +3643,6 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 	}
 	p.MinSegmentToMerge.Init(base.mgr)
 
-	p.MaxSegmentToMerge = ParamItem{
-		Key:          "dataCoord.compaction.max.segment",
-		Version:      "2.0.0",
-		DefaultValue: "30",
-	}
-	p.MaxSegmentToMerge.Init(base.mgr)
-
 	p.SegmentSmallProportion = ParamItem{
 		Key:          "dataCoord.segment.smallProportion",
 		Version:      "2.0.0",
@@ -3782,6 +3819,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.LevelZeroCompactionTriggerDeltalogMaxNum.Init(base.mgr)
+
+	p.IndexMemSizeEstimateMultiplier = ParamItem{
+		Key:          "dataCoord.index.memSizeEstimateMultiplier",
+		Version:      "2.4.19",
+		DefaultValue: "2",
+		Doc:          "When the memory size is not setup by index procedure, multiplier to estimate the memory size of index data",
+		Export:       true,
+	}
+	p.IndexMemSizeEstimateMultiplier.Init(base.mgr)
 
 	p.ClusteringCompactionEnable = ParamItem{
 		Key:          "dataCoord.compaction.clustering.enable",
@@ -4292,6 +4338,7 @@ type dataNodeConfig struct {
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
 	L0CompactionMaxBatchSize ParamItem `refreshable:"true"`
 	UseMergeSort             ParamItem `refreshable:"true"`
+	MaxSegmentMergeSort      ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -4632,6 +4679,15 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.UseMergeSort.Init(base.mgr)
 
+	p.MaxSegmentMergeSort = ParamItem{
+		Key:          "dataNode.compaction.maxSegmentMergeSort",
+		Version:      "2.5.0",
+		Doc:          "The maximum number of segments to be merged in mergeSort mode.",
+		DefaultValue: "30",
+		Export:       true,
+	}
+	p.MaxSegmentMergeSort.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -4654,7 +4710,7 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.clusteringCompaction.memoryBufferRatio",
 		Version:      "2.4.6",
 		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.",
-		DefaultValue: "0.1",
+		DefaultValue: "0.3",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -4816,11 +4872,13 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 	p.TxnDefaultKeepaliveTimeout.Init(base.mgr)
 }
 
+// runtimeConfig is just a private environment value table.
 type runtimeConfig struct {
-	CreateTime RuntimeParamItem
-	UpdateTime RuntimeParamItem
-	Role       RuntimeParamItem
-	NodeID     RuntimeParamItem
+	createTime time.Time
+	updateTime time.Time
+	role       string
+	nodeID     atomic.Int64
+	components map[string]struct{}
 }
 
 type integrationTestConfig struct {

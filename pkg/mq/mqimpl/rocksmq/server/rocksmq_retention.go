@@ -12,6 +12,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"strconv"
@@ -55,7 +56,7 @@ func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInf
 		closeWg:           sync.WaitGroup{},
 	}
 	// Get topic from topic begin id
-	topicKeys, _, err := ri.kv.LoadWithPrefix(TopicIDTitle)
+	topicKeys, _, err := ri.kv.LoadWithPrefix(context.TODO(), TopicIDTitle)
 	if err != nil {
 		return nil, err
 	}
@@ -77,6 +78,7 @@ func (ri *retentionInfo) startRetentionInfo() {
 
 // retention do time ticker and trigger retention check and operation for each topic
 func (ri *retentionInfo) retention() error {
+	log := log.Ctx(context.TODO())
 	log.Debug("Rocksmq retention goroutine start!")
 	params := paramtable.Get()
 	// Do retention check every 10 mins
@@ -142,6 +144,7 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 		return err
 	}
 	// Quick Path, No page to check
+	log := log.Ctx(context.TODO())
 	if totalAckedSize == 0 {
 		log.Debug("All messages are not expired, skip retention because no ack", zap.String("topic", topic),
 			zap.Int64("time taken", time.Since(start).Milliseconds()))
@@ -164,7 +167,7 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 			return err
 		}
 		ackedTsKey := fixedAckedTsKey + "/" + strconv.FormatInt(pageID, 10)
-		ackedTsVal, err := ri.kv.Load(ackedTsKey)
+		ackedTsVal, err := ri.kv.Load(context.TODO(), ackedTsKey)
 		if err != nil {
 			return err
 		}
@@ -265,7 +268,7 @@ func (ri *retentionInfo) calculateTopicAckedSize(topic string) (int64, error) {
 
 		// check if page is acked
 		ackedTsKey := fixedAckedTsKey + "/" + strconv.FormatInt(pageID, 10)
-		ackedTsVal, err := ri.kv.Load(ackedTsKey)
+		ackedTsVal, err := ri.kv.Load(context.TODO(), ackedTsKey)
 		if err != nil {
 			return -1, err
 		}
@@ -350,7 +353,7 @@ func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) err
 	if err != nil {
 		return err
 	}
-	log.Debug("Delete message for topic", zap.String("topic", topic), zap.Int64("startID", startID), zap.Int64("endID", endID))
+	log.Ctx(context.TODO()).Debug("Delete message for topic", zap.String("topic", topic), zap.Int64("startID", startID), zap.Int64("endID", endID))
 	return nil
 }
 

@@ -345,7 +345,7 @@ func Test_Run(t *testing.T) {
 	assert.NotNil(t, server)
 
 	mockRootCoord := mocks.NewMockRootCoordClient(t)
-	mockRootCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+	mockRootCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
 		},
@@ -361,7 +361,7 @@ func Test_Run(t *testing.T) {
 	}
 
 	mockDataCoord := mocks.NewMockDataCoordClient(t)
-	mockDataCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+	mockDataCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
 		},

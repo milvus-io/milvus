@@ -216,16 +216,22 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil).Maybe()
 	sjm := s.checker.sjm.(*MockStatsJobManager)
 	sjm.EXPECT().SubmitStatsTask(mock.Anything, mock.Anything, mock.Anything, false).Return(nil)
-	sjm.EXPECT().GetStatsTaskState(mock.Anything, mock.Anything).Return(indexpb.JobState_JobStateNone)
+	sjm.EXPECT().GetStatsTask(mock.Anything, mock.Anything).Return(&indexpb.StatsTask{
+		State: indexpb.JobState_JobStateNone,
+	})
 	s.checker.checkStatsJob(job)
 	s.Equal(internalpb.ImportJobState_Stats, s.imeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 	sjm = NewMockStatsJobManager(s.T())
-	sjm.EXPECT().GetStatsTaskState(mock.Anything, mock.Anything).Return(indexpb.JobState_JobStateInProgress)
+	sjm.EXPECT().GetStatsTask(mock.Anything, mock.Anything).Return(&indexpb.StatsTask{
+		State: indexpb.JobState_JobStateInProgress,
+	})
 	s.checker.sjm = sjm
 	s.checker.checkStatsJob(job)
 	s.Equal(internalpb.ImportJobState_Stats, s.imeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 	sjm = NewMockStatsJobManager(s.T())
-	sjm.EXPECT().GetStatsTaskState(mock.Anything, mock.Anything).Return(indexpb.JobState_JobStateFinished)
+	sjm.EXPECT().GetStatsTask(mock.Anything, mock.Anything).Return(&indexpb.StatsTask{
+		State: indexpb.JobState_JobStateFinished,
+	})
 	s.checker.sjm = sjm
 	s.checker.checkStatsJob(job)
 	s.Equal(internalpb.ImportJobState_IndexBuilding, s.imeta.GetJob(context.TODO(), job.GetJobID()).GetState())

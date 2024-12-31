@@ -284,14 +284,14 @@ func (t *queryTask) CanSkipAllocTimestamp() bool {
 	} else {
 		collID, err := globalMetaCache.GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
 		if err != nil { // err is not nil if collection not exists
-			log.Warn("query task get collectionID failed, can't skip alloc timestamp",
+			log.Ctx(t.ctx).Warn("query task get collectionID failed, can't skip alloc timestamp",
 				zap.String("collectionName", t.request.GetCollectionName()), zap.Error(err))
 			return false
 		}
 
 		collectionInfo, err2 := globalMetaCache.GetCollectionInfo(context.Background(), t.request.GetDbName(), t.request.GetCollectionName(), collID)
 		if err2 != nil {
-			log.Warn("query task get collection info failed, can't skip alloc timestamp",
+			log.Ctx(t.ctx).Warn("query task get collection info failed, can't skip alloc timestamp",
 				zap.String("collectionName", t.request.GetCollectionName()), zap.Error(err))
 			return false
 		}

@@ -35,9 +35,8 @@ type deleteNode struct {
 	collectionID UniqueID
 	channel      string
 
-	manager      *DataManager
-	tSafeManager TSafeManager
-	delegator    delegator.ShardDelegator
+	manager   *DataManager
+	delegator delegator.ShardDelegator
 }
 
 // addDeleteData find the segment of delete column in DeleteMsg and save in deleteData
@@ -78,17 +77,13 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 	}
 
 	// update tSafe
-	err := dNode.tSafeManager.Set(dNode.channel, nodeMsg.timeRange.timestampMax)
-	if err != nil {
-		// should not happen, QueryNode should addTSafe before start pipeline
-		panic(fmt.Errorf("serviceTimeNode setTSafe timeout, collectionID = %d, err = %s", dNode.collectionID, err))
-	}
+	dNode.delegator.UpdateTSafe(nodeMsg.timeRange.timestampMax)
 	return nil
 }
 
 func newDeleteNode(
 	collectionID UniqueID, channel string,
-	manager *DataManager, tSafeManager TSafeManager, delegator delegator.ShardDelegator,
+	manager *DataManager, delegator delegator.ShardDelegator,
 	maxQueueLength int32,
 ) *deleteNode {
 	return &deleteNode{
@@ -96,7 +91,6 @@ func newDeleteNode(
 		collectionID: collectionID,
 		channel:      channel,
 		manager:      manager,
-		tSafeManager: tSafeManager,
 		delegator:    delegator,
 	}
 }

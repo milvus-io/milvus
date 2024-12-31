@@ -58,8 +58,8 @@ func (chanPlan *ChannelAssignPlan) String() string {
 }
 
 type Balance interface {
-	AssignSegment(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan
-	AssignChannel(ctx context.Context, channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan
+	AssignSegment(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, forceAssign bool) []SegmentAssignPlan
+	AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan
 	BalanceReplica(ctx context.Context, replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan)
 }
 
@@ -68,9 +68,9 @@ type RoundRobinBalancer struct {
 	nodeManager *session.NodeManager
 }
 
-func (b *RoundRobinBalancer) AssignSegment(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan {
+func (b *RoundRobinBalancer) AssignSegment(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, forceAssign bool) []SegmentAssignPlan {
 	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
-	if !manualBalance {
+	if !forceAssign {
 		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
 			info := b.nodeManager.Get(node)
 			return info != nil && info.GetState() == session.NodeStateNormal
@@ -104,9 +104,9 @@ func (b *RoundRobinBalancer) AssignSegment(ctx context.Context, collectionID int
 	return ret
 }
 
-func (b *RoundRobinBalancer) AssignChannel(ctx context.Context, channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
+func (b *RoundRobinBalancer) AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan {
 	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
-	if !manualBalance {
+	if !forceAssign {
 		versionRangeFilter := semver.MustParseRange(">2.3.x")
 		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
 			info := b.nodeManager.Get(node)

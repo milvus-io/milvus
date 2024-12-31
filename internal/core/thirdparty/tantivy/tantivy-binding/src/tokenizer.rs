@@ -87,10 +87,12 @@ impl AnalyzerBuilder<'_> {
         }
     }
 
-    fn get_tokenizer_name(&self) -> Result<String> {
-        let tokenizer = self.params.get("tokenizer");
-        if tokenizer.is_none() {
-            return Ok("standard".to_string());
+    fn get_tokenizer_name(&self) -> Result<String>{
+        let tokenizer=self.params.get("tokenizer");
+        if tokenizer.is_none(){
+            return Err(TantivyBindingError::InternalError(format!(
+                "tokenizer name or type must be set"
+            )));
         }
         if !tokenizer.unwrap().is_string() {
             return Err(TantivyBindingError::InternalError(format!(
@@ -257,8 +259,14 @@ pub(crate) fn create_tokenizer_with_filter(params: &String) -> Result<TextAnalyz
                     "analyzer params should be a json map".to_string(),
                 ));
             }
-            let mut builder = AnalyzerBuilder::new(analyzer_params.unwrap().as_object().unwrap());
 
+            let builder_params = analyzer_params.unwrap().as_object().unwrap();
+            if builder_params.is_empty(){
+                return Ok(standard_analyzer(vec![]));
+            }
+
+            let mut builder = AnalyzerBuilder::new(builder_params);
+    
             // build custom filter
             let filter_params = json_params.get("filter");
             if !filter_params.is_none() && filter_params.unwrap().is_object() {
@@ -272,7 +280,7 @@ pub(crate) fn create_tokenizer_with_filter(params: &String) -> Result<TextAnalyz
     }
 }
 
-pub(crate) fn create_tokenizer(params: &String) -> Result<TextAnalyzer> {
+pub(crate) fn create_tokenizer(params: &str) -> Result<TextAnalyzer> {
     if params.len() == 0 {
         return Ok(standard_analyzer(vec![]));
     }
@@ -282,7 +290,6 @@ pub(crate) fn create_tokenizer(params: &String) -> Result<TextAnalyzer> {
 #[cfg(test)]
 mod tests {
     use crate::tokenizer::create_tokenizer;
-    use regex;
 
     #[test]
     fn test_standard_analyzer() {

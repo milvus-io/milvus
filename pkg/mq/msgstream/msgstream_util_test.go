@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/mq/common"
 )
 
@@ -36,7 +38,7 @@ func TestPulsarMsgUtil(t *testing.T) {
 	defer msgStream.Close()
 
 	// create a topic
-	msgStream.AsProducer([]string{"test"})
+	msgStream.AsProducer(ctx, []string{"test"})
 
 	UnsubscribeChannels(ctx, pmsFactory, "sub", []string{"test"})
 }
@@ -79,4 +81,91 @@ func TestGetLatestMsgID(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, []byte("mock"), id)
 	}
+}
+
+func TestReplicateConfig(t *testing.T) {
+	t.Run("get replicate id", func(t *testing.T) {
+		{
+			msg := &InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					Base: &commonpb.MsgBase{
+						ReplicateInfo: &commonpb.ReplicateInfo{
+							ReplicateID: "local",
+						},
+					},
+				},
+			}
+			assert.Equal(t, "local", GetReplicateID(msg))
+			assert.True(t, MatchReplicateID(msg, "local"))
+		}
+		{
+			msg := &InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					Base: &commonpb.MsgBase{},
+				},
+			}
+			assert.Equal(t, "", GetReplicateID(msg))
+			assert.False(t, MatchReplicateID(msg, "local"))
+		}
+		{
+			msg := &MarshalFailTsMsg{}
+			assert.Equal(t, "", GetReplicateID(msg))
+		}
+	})
+
+	t.Run("get replicate config", func(t *testing.T) {
+		{
+			assert.Nil(t, GetReplicateConfig("", "", ""))
+		}
+		{
+			rc := GetReplicateConfig("local", "db", "col")
+			assert.Equal(t, "local", rc.ReplicateID)
+			checkFunc := rc.CheckFunc
+			assert.False(t, checkFunc(&ReplicateMsg{
+				ReplicateMsg: &msgpb.ReplicateMsg{},
+			}))
+			assert.True(t, checkFunc(&ReplicateMsg{
+				ReplicateMsg: &msgpb.ReplicateMsg{
+					IsEnd:     true,
+					IsCluster: true,
+				},
+			}))
+			assert.False(t, checkFunc(&ReplicateMsg{
+				ReplicateMsg: &msgpb.ReplicateMsg{
+					IsEnd:    true,
+					Database: "db1",
+				},
+			}))
+			assert.True(t, checkFunc(&ReplicateMsg{
+				ReplicateMsg: &msgpb.ReplicateMsg{
+					IsEnd:    true,
+					Database: "db",
+				},
+			}))
+			assert.False(t, checkFunc(&ReplicateMsg{
+				ReplicateMsg: &msgpb.ReplicateMsg{
+					IsEnd:      true,
+					Database:   "db",
+					Collection: "col1",
+				},
+			}))
+		}
+		{
+			rc := GetReplicateConfig("local", "db", "col")
+			checkFunc := rc.CheckFunc
+			assert.True(t, checkFunc(&ReplicateMsg{
+				ReplicateMsg: &msgpb.ReplicateMsg{
+					IsEnd:    true,
+					Database: "db",
+				},
+			}))
+			assert.False(t, checkFunc(&ReplicateMsg{
+				ReplicateMsg: &msgpb.ReplicateMsg{
+					IsEnd:      true,
+					Database:   "db1",
+					Collection: "col1",
+				},
+			}))
+		}
+	})
 }

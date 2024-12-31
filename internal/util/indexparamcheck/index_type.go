@@ -62,7 +62,8 @@ func IsDiskIndex(indexType IndexType) bool {
 func IsScalarMmapIndex(indexType IndexType) bool {
 	return indexType == IndexINVERTED ||
 		indexType == IndexBitmap ||
-		indexType == IndexHybrid
+		indexType == IndexHybrid ||
+		indexType == IndexTrie
 }
 
 func ValidateMmapIndexParams(indexType IndexType, indexParams map[string]string) error {

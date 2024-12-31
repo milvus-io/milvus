@@ -201,7 +201,7 @@ var (
 			nodeIDLabelName,
 			queryTypeLabelName,
 			databaseLabelName,
-			resourceGroupLabelName,
+			ResourceGroupLabelName,
 		})
 
 	QueryNodeSQPerUserLatencyInQueue = prometheus.NewHistogramVec(
@@ -350,6 +350,18 @@ var (
 			Buckets:   buckets,
 		}, []string{
 			nodeIDLabelName,
+		})
+
+	QueryNodeSearchFTSNumTokens = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "search_fts_num_tokens",
+			Help:      "number of tokens in each Full Text Search search task",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
 		})
 
 	QueryNodeSearchGroupSize = prometheus.NewHistogramVec(
@@ -590,7 +602,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
-			resourceGroupLabelName,
+			ResourceGroupLabelName,
 			queryTypeLabelName,
 		},
 	)
@@ -605,7 +617,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
-			resourceGroupLabelName,
+			ResourceGroupLabelName,
 			queryTypeLabelName,
 		},
 	)
@@ -634,7 +646,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
-			resourceGroupLabelName,
+			ResourceGroupLabelName,
 			queryTypeLabelName,
 		})
 
@@ -648,7 +660,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
-			resourceGroupLabelName,
+			ResourceGroupLabelName,
 			queryTypeLabelName,
 		})
 
@@ -675,7 +687,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
-			resourceGroupLabelName,
+			ResourceGroupLabelName,
 		})
 
 	// QueryNodeDiskCacheLoadBytes records the number of bytes loaded from disk cache.
@@ -688,7 +700,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
-			resourceGroupLabelName,
+			ResourceGroupLabelName,
 		})
 
 	// QueryNodeDiskCacheLoadDuration records the total time cost of loading segments from disk cache.
@@ -702,7 +714,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
-			resourceGroupLabelName,
+			ResourceGroupLabelName,
 		})
 
 	// QueryNodeDiskCacheLoadGlobalDuration records the global time cost of loading segments from disk cache.
@@ -727,7 +739,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
-			resourceGroupLabelName,
+			ResourceGroupLabelName,
 		})
 
 	// QueryNodeDiskCacheEvictBytes records the number of bytes evicted from disk cache.
@@ -740,7 +752,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
-			resourceGroupLabelName,
+			ResourceGroupLabelName,
 		})
 
 	// QueryNodeDiskCacheEvictDuration records the total time cost of evicting segments from disk cache.
@@ -753,7 +765,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
-			resourceGroupLabelName,
+			ResourceGroupLabelName,
 		})
 
 	// QueryNodeDiskCacheEvictGlobalDuration records the global time cost of evicting segments from disk cache.
@@ -832,6 +844,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeEvictedReadReqCount)
 	registry.MustRegister(QueryNodeSearchGroupTopK)
 	registry.MustRegister(QueryNodeSearchTopK)
+	registry.MustRegister(QueryNodeSearchFTSNumTokens)
 	registry.MustRegister(QueryNodeNumFlowGraphs)
 	registry.MustRegister(QueryNodeNumEntities)
 	registry.MustRegister(QueryNodeEntitiesSize)
@@ -903,6 +916,61 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 				collectionIDLabelName: collectionIDLabel,
 			})
 	QueryNodeEntitiesSize.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+	QueryNodeNumSegments.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeSQCount.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeSearchHitSegmentNum.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeSegmentPruneRatio.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeSegmentPruneBias.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeSegmentPruneLatency.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeEntitiesSize.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeLevelZeroSize.
 		DeletePartialMatch(
 			prometheus.Labels{
 				nodeIDLabelName:       nodeIDLabel,

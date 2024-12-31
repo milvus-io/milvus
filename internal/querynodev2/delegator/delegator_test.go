@@ -19,7 +19,6 @@ package delegator
 import (
 	"context"
 	"io"
-	"sync"
 	"testing"
 	"time"
 
@@ -29,7 +28,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -39,13 +37,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -61,7 +57,6 @@ type DelegatorSuite struct {
 	version       int64
 	workerManager *cluster.MockManager
 	manager       *segments.Manager
-	tsafeManager  tsafe.Manager
 	loader        *segments.MockLoader
 	mq            *msgstream.MockMsgStream
 
@@ -85,7 +80,6 @@ func (s *DelegatorSuite) SetupTest() {
 	s.version = 2000
 	s.workerManager = &cluster.MockManager{}
 	s.manager = segments.NewManager()
-	s.tsafeManager = tsafe.NewTSafeReplica()
 	s.loader = &segments.MockLoader{}
 	s.loader.EXPECT().
 		Load(mock.Anything, s.collectionID, segments.SegmentTypeGrowing, int64(0), mock.Anything).
@@ -165,7 +159,7 @@ func (s *DelegatorSuite) SetupTest() {
 
 	var err error
 	//	s.delegator, err = NewShardDelegator(s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader)
-	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
+	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, &msgstream.MockMqFactory{
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
@@ -204,7 +198,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			}},
 		}, nil, nil)
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, &msgstream.MockMqFactory{
 			NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 				return s.mq, nil
 			},
@@ -247,7 +241,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			}},
 		}, nil, nil)
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, &msgstream.MockMqFactory{
 			NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 				return s.mq, nil
 			},
@@ -331,7 +325,7 @@ func (s *DelegatorSuite) initSegments() {
 			Version:     2001,
 		},
 	)
-	s.delegator.SyncTargetVersion(2001, []int64{1004}, []int64{1000, 1001, 1002, 1003}, []int64{}, &msgpb.MsgPosition{})
+	s.delegator.SyncTargetVersion(2001, []int64{500, 501}, []int64{1004}, []int64{1000, 1001, 1002, 1003}, []int64{}, &msgpb.MsgPosition{})
 }
 
 func (s *DelegatorSuite) TestSearch() {
@@ -1197,75 +1191,6 @@ func (s *DelegatorSuite) TestGetStats() {
 
 func TestDelegatorSuite(t *testing.T) {
 	suite.Run(t, new(DelegatorSuite))
-}
-
-func TestDelegatorWatchTsafe(t *testing.T) {
-	channelName := "default_dml_channel"
-
-	tsafeManager := tsafe.NewTSafeReplica()
-	tsafeManager.Add(context.Background(), channelName, 100)
-	sd := &shardDelegator{
-		tsafeManager: tsafeManager,
-		vchannelName: channelName,
-		lifetime:     lifetime.NewLifetime(lifetime.Initializing),
-		latestTsafe:  atomic.NewUint64(0),
-	}
-	defer sd.Close()
-
-	m := sync.Mutex{}
-	sd.tsCond = sync.NewCond(&m)
-	if sd.lifetime.Add(lifetime.NotStopped) == nil {
-		go sd.watchTSafe()
-	}
-
-	err := tsafeManager.Set(channelName, 200)
-	require.NoError(t, err)
-
-	assert.Eventually(t, func() bool {
-		return sd.latestTsafe.Load() == 200
-	}, time.Second*10, time.Millisecond*10)
-}
-
-func TestDelegatorTSafeListenerClosed(t *testing.T) {
-	channelName := "default_dml_channel"
-
-	tsafeManager := tsafe.NewTSafeReplica()
-	tsafeManager.Add(context.Background(), channelName, 100)
-	sd := &shardDelegator{
-		tsafeManager: tsafeManager,
-		vchannelName: channelName,
-		lifetime:     lifetime.NewLifetime(lifetime.Initializing),
-		latestTsafe:  atomic.NewUint64(0),
-	}
-	defer sd.Close()
-
-	m := sync.Mutex{}
-	sd.tsCond = sync.NewCond(&m)
-	signal := make(chan struct{})
-	if sd.lifetime.Add(lifetime.NotStopped) == nil {
-		go func() {
-			sd.watchTSafe()
-			close(signal)
-		}()
-	}
-
-	select {
-	case <-signal:
-		assert.FailNow(t, "watchTsafe quit unexpectedly")
-	case <-time.After(time.Millisecond * 10):
-	}
-
-	tsafeManager.Remove(context.Background(), channelName)
-
-	select {
-	case <-signal:
-	case <-time.After(time.Second):
-		assert.FailNow(t, "watchTsafe still working after listener closed")
-	}
-
-	sd.Close()
-	assert.Equal(t, sd.Serviceable(), false)
-	assert.Equal(t, sd.Stopped(), true)
 }
 
 func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {

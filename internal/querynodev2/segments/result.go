@@ -65,12 +65,16 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 
 	channelsMvcc := make(map[string]uint64)
 	isTopkReduce := false
+	isRecallEvaluation := false
 	for _, r := range results {
 		for ch, ts := range r.GetChannelsMvcc() {
 			channelsMvcc[ch] = ts
 		}
 		if r.GetIsTopkReduce() {
 			isTopkReduce = true
+		}
+		if r.GetIsRecallEvaluation() {
+			isRecallEvaluation = true
 		}
 		// shouldn't let new SearchResults.MetricType to be empty, though the req.MetricType is empty
 		if info.GetMetricType() == "" {
@@ -126,6 +130,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	searchResults.ChannelsMvcc = channelsMvcc
 	searchResults.IsTopkReduce = isTopkReduce
+	searchResults.IsRecallEvaluation = isRecallEvaluation
 	return searchResults, nil
 }
 
@@ -261,7 +266,8 @@ func EncodeSearchResultData(ctx context.Context, searchResultData *schemapb.Sear
 }
 
 func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, param *mergeParam) (*internalpb.RetrieveResults, error) {
-	log.Ctx(ctx).Debug("mergeInternelRetrieveResults",
+	log := log.Ctx(ctx)
+	log.Debug("mergeInternelRetrieveResults",
 		zap.Int64("limit", param.limit),
 		zap.Int("resultNum", len(retrieveResults)),
 	)
@@ -386,7 +392,8 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	ctx, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults")
 	defer span.End()
 
-	log.Ctx(ctx).Debug("mergeSegcoreRetrieveResults",
+	log := log.Ctx(ctx)
+	log.Debug("mergeSegcoreRetrieveResults",
 		zap.Int64("limit", param.limit),
 		zap.Int("resultNum", len(retrieveResults)),
 	)
@@ -538,7 +545,9 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			})
 			futures = append(futures, future)
 		}
-		if err := conc.AwaitAll(futures...); err != nil {
+		// Must be BlockOnAll operation here.
+		// If we perform a fast fail here, the cgo struct like `plan` will be used after free, unsafe memory access happens.
+		if err := conc.BlockOnAll(futures...); err != nil {
 			return nil, err
 		}
 

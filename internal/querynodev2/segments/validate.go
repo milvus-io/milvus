@@ -18,45 +18,20 @@ package segments
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func validate(ctx context.Context, manager *Manager, collectionID int64, partitionIDs []int64, segmentIDs []int64, segmentFilter SegmentFilter) ([]Segment, error) {
-	var searchPartIDs []int64
-
 	collection := manager.Collection.Get(collectionID)
 	if collection == nil {
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 
-	// validate partition
-	// no partition id specified, get all partition ids in collection
-	if len(partitionIDs) == 0 {
-		searchPartIDs = collection.GetPartitions()
-	} else {
-		// use request partition ids directly, ignoring meta partition ids
-		// partitions shall be controlled by delegator distribution
-		searchPartIDs = partitionIDs
-	}
-
-	log.Ctx(ctx).Debug("read target partitions", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", searchPartIDs))
-
-	// all partitions have been released
-	if len(searchPartIDs) == 0 && collection.GetLoadType() == querypb.LoadType_LoadPartition {
-		return nil, errors.Newf("partitions have been released , collectionID = %d target partitionIDs = %v", collectionID, searchPartIDs)
-	}
-
-	if len(searchPartIDs) == 0 && collection.GetLoadType() == querypb.LoadType_LoadCollection {
-		return []Segment{}, nil
-	}
+	log.Ctx(ctx).Debug("read target partitions", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 
 	// validate segment
 	segments := make([]Segment, 0, len(segmentIDs))
@@ -67,22 +42,17 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 		}
 	}()
 	if len(segmentIDs) == 0 {
-		for _, partID := range searchPartIDs {
-			segments, err = manager.Segment.GetAndPinBy(WithPartition(partID), segmentFilter)
-			if err != nil {
-				return nil, err
-			}
+		// legacy logic
+		segments, err = manager.Segment.GetAndPinBy(segmentFilter, SegmentFilterFunc(func(s Segment) bool {
+			return s.Collection() == collectionID
+		}))
+		if err != nil {
+			return nil, err
 		}
 	} else {
 		segments, err = manager.Segment.GetAndPin(segmentIDs, segmentFilter)
 		if err != nil {
 			return nil, err
-		}
-		for _, segment := range segments {
-			if !funcutil.SliceContain(searchPartIDs, segment.Partition()) {
-				err = fmt.Errorf("segment %d belongs to partition %d, which is not in %v", segment.ID(), segment.Partition(), searchPartIDs)
-				return nil, err
-			}
 		}
 	}
 	return segments, nil

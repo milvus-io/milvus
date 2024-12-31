@@ -23,14 +23,10 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -68,82 +64,21 @@ func waitCollectionReleased(dist *meta.DistributionManager, checkerController *c
 	}
 }
 
-func loadPartitions(ctx context.Context,
-	meta *meta.Meta,
-	cluster session.Cluster,
-	broker meta.Broker,
-	withSchema bool,
-	collection int64,
-	partitions ...int64,
-) error {
-	var err error
-	var schema *schemapb.CollectionSchema
-	if withSchema {
-		collectionInfo, err := broker.DescribeCollection(ctx, collection)
-		if err != nil {
-			return err
-		}
-		schema = collectionInfo.GetSchema()
-	}
-	indexes, err := broker.ListIndexes(ctx, collection)
+func waitCurrentTargetUpdated(ctx context.Context, targetObserver *observers.TargetObserver, collection int64) error {
+	// manual trigger update next target
+	ready, err := targetObserver.UpdateNextTarget(collection)
 	if err != nil {
+		log.Warn("failed to update next target for sync partition job", zap.Error(err))
 		return err
 	}
 
-	replicas := meta.ReplicaManager.GetByCollection(ctx, collection)
-	loadReq := &querypb.LoadPartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_LoadPartitions,
-		},
-		CollectionID:  collection,
-		PartitionIDs:  partitions,
-		Schema:        schema,
-		IndexInfoList: indexes,
-	}
-	for _, replica := range replicas {
-		for _, node := range replica.GetNodes() {
-			status, err := cluster.LoadPartitions(ctx, node, loadReq)
-			// There is no need to rollback LoadPartitions as the load job will fail
-			// and the Delegator will not be created,
-			// resulting in search and query requests failing due to the absence of Delegator.
-			if err != nil {
-				return err
-			}
-			if !merr.Ok(status) {
-				return merr.Error(status)
-			}
-		}
-	}
-	return nil
-}
-
-func releasePartitions(ctx context.Context,
-	meta *meta.Meta,
-	cluster session.Cluster,
-	collection int64,
-	partitions ...int64,
-) {
-	log := log.Ctx(ctx).With(zap.Int64("collection", collection), zap.Int64s("partitions", partitions))
-	replicas := meta.ReplicaManager.GetByCollection(ctx, collection)
-	releaseReq := &querypb.ReleasePartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_ReleasePartitions,
-		},
-		CollectionID: collection,
-		PartitionIDs: partitions,
-	}
-	for _, replica := range replicas {
-		for _, node := range replica.GetNodes() {
-			status, err := cluster.ReleasePartitions(ctx, node, releaseReq)
-			// Ignore error as the Delegator will be removed from the query node,
-			// causing search and query requests to fail due to the absence of Delegator.
-			if err != nil {
-				log.Warn("failed to ReleasePartitions", zap.Int64("node", node), zap.Error(err))
-				continue
-			}
-			if !merr.Ok(status) {
-				log.Warn("failed to ReleasePartitions", zap.Int64("node", node), zap.Error(merr.Error(status)))
-			}
-		}
+	// accelerate check
+	targetObserver.TriggerUpdateCurrentTarget(collection)
+	// wait current target ready
+	select {
+	case <-ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

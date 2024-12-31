@@ -40,8 +40,10 @@ type HardwareMetrics struct {
 	MemoryUsage  uint64  `json:"memory_usage"`
 
 	// how to metric disk & disk usage in distributed storage
-	Disk      uint64 `json:"disk"`
-	DiskUsage uint64 `json:"disk_usage"`
+	Disk      float64 `json:"disk"`
+	DiskUsage float64 `json:"disk_usage"`
+
+	IOWaitPercentage float64 `json:"io_wait_percentage"` // IO Wait in %
 }
 
 const (
@@ -303,15 +305,16 @@ type DataNodeConfiguration struct {
 }
 
 type IndexTaskStats struct {
-	IndexID        int64  `json:"index_id,omitempty,string"`
-	CollectionID   int64  `json:"collection_id,omitempty,string"`
-	SegmentID      int64  `json:"segment_id,omitempty,string"`
-	BuildID        int64  `json:"build_id,omitempty,string"`
-	IndexState     string `json:"index_state,omitempty"`
-	FailReason     string `json:"fail_reason,omitempty"`
-	IndexSize      uint64 `json:"index_size,omitempty,string"`
-	IndexVersion   int64  `json:"index_version,omitempty,string"`
-	CreatedUTCTime string `json:"create_time,omitempty"`
+	IndexID         int64  `json:"index_id,omitempty,string"`
+	CollectionID    int64  `json:"collection_id,omitempty,string"`
+	SegmentID       int64  `json:"segment_id,omitempty,string"`
+	BuildID         int64  `json:"build_id,omitempty,string"`
+	IndexState      string `json:"index_state,omitempty"`
+	FailReason      string `json:"fail_reason,omitempty"`
+	IndexSize       uint64 `json:"index_size,omitempty,string"`
+	IndexVersion    int64  `json:"index_version,omitempty,string"`
+	CreatedUTCTime  string `json:"create_time,omitempty"`
+	FinishedUTCTime string `json:"finished_time,omitempty"`
 }
 
 type SyncTask struct {
@@ -437,7 +440,7 @@ type Field struct {
 }
 
 type Collection struct {
-	CollectionID         string            `json:"collection_id,omitempty,string"`
+	CollectionID         string            `json:"collection_id,omitempty"`
 	CollectionName       string            `json:"collection_name,omitempty"`
 	CreatedTime          string            `json:"created_time,omitempty"`
 	ShardsNum            int               `json:"shards_num,omitempty"`
@@ -467,15 +470,13 @@ type Databases struct {
 }
 
 type Index struct {
-	CollectionID         int64             `json:"collection_id,omitempty,string"`
-	FieldID              int64             `json:"field_id,omitempty,string"`
-	IndexID              int64             `json:"index_id,omitempty,string"`
-	Name                 string            `json:"name,omitempty"`
-	IsDeleted            bool              `json:"is_deleted"`
-	CreateTime           string            `json:"create_time,omitempty"`
-	IndexParams          map[string]string `json:"index_params,omitempty"`
-	IsAutoIndex          bool              `json:"is_auto_index,omitempty"`
-	UserIndexParams      map[string]string `json:"user_index_params"`
-	State                string            `json:"state,omitempty"`
-	IndexStateFailReason string            `json:"index_state_fail_reason,omitempty"`
+	CollectionID    int64             `json:"collection_id,omitempty,string"`
+	FieldID         int64             `json:"field_id,omitempty,string"`
+	IndexID         int64             `json:"index_id,omitempty,string"`
+	Name            string            `json:"name,omitempty"`
+	IsDeleted       bool              `json:"is_deleted"`
+	CreateTime      string            `json:"create_time,omitempty"`
+	IndexParams     map[string]string `json:"index_params,omitempty"`
+	IsAutoIndex     bool              `json:"is_auto_index,omitempty"`
+	UserIndexParams map[string]string `json:"user_index_params"`
 }

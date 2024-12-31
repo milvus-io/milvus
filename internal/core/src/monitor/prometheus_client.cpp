@@ -177,6 +177,8 @@ std::map<std::string, std::string> vectorLatencyLabels{
     {"type", "vector_latency"}};
 std::map<std::string, std::string> groupbyLatencyLabels{
     {"type", "groupby_latency"}};
+std::map<std::string, std::string> iterativeFilterLatencyLabels{
+    {"type", "iterative_filter_latency"}};
 std::map<std::string, std::string> scalarProportionLabels{
     {"type", "scalar_proportion"}};
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency,
@@ -190,6 +192,9 @@ DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_vector,
 DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_groupby,
                             internal_core_search_latency,
                             groupbyLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_iterative_filter,
+                            internal_core_search_latency,
+                            iterativeFilterLatencyLabels)
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_core_search_latency_scalar_proportion,
     internal_core_search_latency,
@@ -200,6 +205,10 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
 std::map<std::string, std::string> mmapAllocatedSpaceAnonLabel = {
     {"type", "anon"}};
 std::map<std::string, std::string> mmapAllocatedSpaceFileLabel = {
+    {"type", "file"}};
+std::map<std::string, std::string> mmapAllocatedCountAnonLabel = {
+    {"type", "anon"}};
+std::map<std::string, std::string> mmapAllocatedCountFileLabel = {
     {"type", "file"}};
 
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_mmap_allocated_space_bytes,
@@ -223,4 +232,12 @@ DEFINE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_anon,
 DEFINE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_file,
                         internal_mmap_in_used_space_bytes,
                         mmapAllocatedSpaceFileLabel)
+DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_mmap_in_used_count,
+                               "[cpp]mmap in used count stats")
+DEFINE_PROMETHEUS_GAUGE(internal_mmap_in_used_count_anon,
+                        internal_mmap_in_used_count,
+                        mmapAllocatedCountAnonLabel)
+DEFINE_PROMETHEUS_GAUGE(internal_mmap_in_used_count_file,
+                        internal_mmap_in_used_count,
+                        mmapAllocatedCountFileLabel)
 }  // namespace milvus::monitor

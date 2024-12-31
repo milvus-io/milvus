@@ -8,7 +8,7 @@ image:
   all:
     repository: milvusdb/milvus
     tag: master-latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
 standalone:
   resources:
     limits:
@@ -17,6 +17,11 @@ standalone:
     requests:
       cpu: 4
       memory: 8Gi
+pulsarv3:
+  enabled: false
+
+pulsar:
+  enabled: false
 
 kafka:
   enabled: false

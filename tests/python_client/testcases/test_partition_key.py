@@ -485,7 +485,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
         float_vec_values = gen_vectors(nb, ct.default_dim)
         data = [pk_values, int64_values, string_values, float_vec_values]
 
-        err_msg = "expect string input"
+        err_msg = "field (varchar) expects string input"
         collection_w.insert(data, check_task=CheckTasks.err_res, check_items={"err_code": 2, "err_msg": err_msg})
 
 

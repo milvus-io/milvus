@@ -33,13 +33,16 @@ import (
 
 // IndexNode implements IndexNode grpc server
 type IndexNode struct {
+	ctx context.Context
 	svr *grpcindexnode.Server
 }
 
 // NewIndexNode creates a new IndexNode
 func NewIndexNode(ctx context.Context, factory dependency.Factory) (*IndexNode, error) {
 	var err error
-	n := &IndexNode{}
+	n := &IndexNode{
+		ctx: ctx,
+	}
 	svr, err := grpcindexnode.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
@@ -55,10 +58,10 @@ func (n *IndexNode) Prepare() error {
 // Run starts service
 func (n *IndexNode) Run() error {
 	if err := n.svr.Run(); err != nil {
-		log.Error("IndexNode starts error", zap.Error(err))
+		log.Ctx(n.ctx).Error("IndexNode starts error", zap.Error(err))
 		return err
 	}
-	log.Debug("IndexNode successfully started")
+	log.Ctx(n.ctx).Info("IndexNode successfully started")
 	return nil
 }
 

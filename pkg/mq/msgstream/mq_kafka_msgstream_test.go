@@ -123,7 +123,7 @@ func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
 	}
 
 	// produce test data
-	err := inputStream.Produce(msgPack)
+	err := inputStream.Produce(ctx, msgPack)
 	assert.NoError(t, err)
 
 	// pick a seekPosition
@@ -219,21 +219,21 @@ func TestStream_KafkaTtMsgStream_Seek(t *testing.T) {
 	inputStream := getKafkaInputStream(ctx, kafkaAddress, producerChannels)
 	outputStream := getKafkaTtOutputStream(ctx, kafkaAddress, consumerChannels, consumerSubName)
 
-	_, err := inputStream.Broadcast(&msgPack0)
+	_, err := inputStream.Broadcast(ctx, &msgPack0)
 	assert.NoError(t, err)
-	err = inputStream.Produce(&msgPack1)
+	err = inputStream.Produce(ctx, &msgPack1)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack2)
+	_, err = inputStream.Broadcast(ctx, &msgPack2)
 	assert.NoError(t, err)
-	err = inputStream.Produce(&msgPack3)
+	err = inputStream.Produce(ctx, &msgPack3)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack4)
+	_, err = inputStream.Broadcast(ctx, &msgPack4)
 	assert.NoError(t, err)
-	err = inputStream.Produce(&msgPack5)
+	err = inputStream.Produce(ctx, &msgPack5)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack6)
+	_, err = inputStream.Broadcast(ctx, &msgPack6)
 	assert.NoError(t, err)
-	_, err = inputStream.Broadcast(&msgPack7)
+	_, err = inputStream.Broadcast(ctx, &msgPack7)
 	assert.NoError(t, err)
 
 	receivedMsg := consumer(ctx, outputStream)
@@ -450,7 +450,7 @@ func getKafkaInputStream(ctx context.Context, kafkaAddress string, producerChann
 	}
 	kafkaClient := kafkawrapper.NewKafkaClientInstanceWithConfigMap(config, nil, nil)
 	inputStream, _ := NewMqMsgStream(ctx, 100, 100, kafkaClient, factory.NewUnmarshalDispatcher())
-	inputStream.AsProducer(producerChannels)
+	inputStream.AsProducer(ctx, producerChannels)
 	for _, opt := range opts {
 		inputStream.SetRepackFunc(opt)
 	}

@@ -41,6 +41,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
 			params[common.TopKKey] = int64(50)
 			params[common.SearchParamKey] = `{"param": 2}`
+			params[common.RecallEvalKey] = true
 		}).Return(nil)
 		suite.queryHook = mockHook
 		defer func() {
@@ -48,20 +49,21 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 			suite.queryHook = nil
 		}()
 
-		getPlan := func(topk int64) *planpb.PlanNode {
+		getPlan := func(topk int64, groupByField int64) *planpb.PlanNode {
 			return &planpb.PlanNode{
 				Node: &planpb.PlanNode_VectorAnns{
 					VectorAnns: &planpb.VectorANNS{
 						QueryInfo: &planpb.QueryInfo{
-							Topk:         topk,
-							SearchParams: `{"param": 1}`,
+							Topk:           topk,
+							SearchParams:   `{"param": 1}`,
+							GroupByFieldId: groupByField,
 						},
 					},
 				},
 			}
 		}
 
-		bs, err := proto.Marshal(getPlan(100))
+		bs, err := proto.Marshal(getPlan(100, 101))
 		suite.Require().NoError(err)
 
 		req, err := OptimizeSearchParams(ctx, &querypb.SearchRequest{
@@ -72,9 +74,9 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 			TotalChannelNum: 2,
 		}, suite.queryHook, 2)
 		suite.NoError(err)
-		suite.verifyQueryInfo(req, 50, true, `{"param": 2}`)
+		suite.verifyQueryInfo(req, 50, true, false, `{"param": 2}`)
 
-		bs, err = proto.Marshal(getPlan(50))
+		bs, err = proto.Marshal(getPlan(50, -1))
 		suite.Require().NoError(err)
 		req, err = OptimizeSearchParams(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
@@ -84,7 +86,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 			TotalChannelNum: 2,
 		}, suite.queryHook, 2)
 		suite.NoError(err)
-		suite.verifyQueryInfo(req, 50, false, `{"param": 2}`)
+		suite.verifyQueryInfo(req, 50, false, true, `{"param": 2}`)
 	})
 
 	suite.Run("disable optimization", func() {
@@ -112,7 +114,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 			TotalChannelNum: 2,
 		}, suite.queryHook, 2)
 		suite.NoError(err)
-		suite.verifyQueryInfo(req, 100, false, `{"param": 1}`)
+		suite.verifyQueryInfo(req, 100, false, false, `{"param": 1}`)
 	})
 
 	suite.Run("no_hook", func() {
@@ -140,7 +142,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 			TotalChannelNum: 2,
 		}, suite.queryHook, 2)
 		suite.NoError(err)
-		suite.verifyQueryInfo(req, 100, false, `{"param": 1}`)
+		suite.verifyQueryInfo(req, 100, false, false, `{"param": 1}`)
 	})
 
 	suite.Run("other_plannode", func() {
@@ -221,7 +223,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 	})
 }
 
-func (suite *QueryHookSuite) verifyQueryInfo(req *querypb.SearchRequest, topK int64, isTopkReduce bool, param string) {
+func (suite *QueryHookSuite) verifyQueryInfo(req *querypb.SearchRequest, topK int64, isTopkReduce bool, isRecallEvaluation bool, param string) {
 	planBytes := req.GetReq().GetSerializedExprPlan()
 
 	plan := planpb.PlanNode{}
@@ -232,6 +234,7 @@ func (suite *QueryHookSuite) verifyQueryInfo(req *querypb.SearchRequest, topK in
 	suite.Equal(topK, queryInfo.GetTopk())
 	suite.Equal(param, queryInfo.GetSearchParams())
 	suite.Equal(isTopkReduce, req.GetReq().GetIsTopkReduce())
+	suite.Equal(isRecallEvaluation, req.GetReq().GetIsRecallEvaluation())
 }
 
 func TestOptimizeSearchParam(t *testing.T) {

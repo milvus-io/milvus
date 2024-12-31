@@ -1,6 +1,7 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"testing"
@@ -242,8 +243,8 @@ func (s *StateChannelStoreSuite) TestUpdateWithTxnLimit() {
 	for _, test := range tests {
 		s.SetupTest()
 		s.Run(test.description, func() {
-			s.mockTxn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything).
-				Run(func(saves map[string]string, removals []string, preds ...predicates.Predicate) {
+			s.mockTxn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+				Run(func(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) {
 					log.Info("test save and remove", zap.Any("saves", saves), zap.Any("removals", removals))
 				}).Return(nil).Times(test.outTxnCount)
 
@@ -276,8 +277,8 @@ func (s *StateChannelStoreSuite) TestUpdateMeta2000kSegs() {
 		NewChannelOp(100, Watch, ch),
 	)
 	s.SetupTest()
-	s.mockTxn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything).
-		Run(func(saves map[string]string, removals []string, preds ...predicates.Predicate) {
+	s.mockTxn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) {
 		}).Return(nil).Once()
 
 	store := NewStateChannelStore(s.mockTxn)
@@ -381,8 +382,8 @@ func (s *StateChannelStoreSuite) TestUpdateMeta() {
 		},
 	}
 	s.SetupTest()
-	s.mockTxn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything).
-		Run(func(saves map[string]string, removals []string, preds ...predicates.Predicate) {
+	s.mockTxn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) {
 		}).Return(nil).Times(len(tests))
 
 	for _, test := range tests {
@@ -435,14 +436,14 @@ func (s *StateChannelStoreSuite) TestUpdateState() {
 			ch := "ch-1"
 			channel := NewStateChannel(getChannel(ch, 1))
 			channel.setState(test.inChannelState)
-			store.channelsInfo[1] = &NodeChannelInfo{
+			store.channelsInfo[bufferID] = &NodeChannelInfo{
 				NodeID: bufferID,
 				Channels: map[string]RWChannel{
 					ch: channel,
 				},
 			}
 
-			store.UpdateState(test.inSuccess, channel)
+			store.UpdateState(test.inSuccess, bufferID, channel, 0)
 			s.Equal(test.outChannelState, channel.currentState)
 		})
 	}
@@ -495,7 +496,7 @@ func (s *StateChannelStoreSuite) TestReload() {
 				s.Require().NoError(err)
 				values = append(values, string(bs))
 			}
-			s.mockTxn.EXPECT().LoadWithPrefix(mock.AnythingOfType("string")).Return(keys, values, nil)
+			s.mockTxn.EXPECT().LoadWithPrefix(mock.Anything, mock.AnythingOfType("string")).Return(keys, values, nil)
 
 			store := NewStateChannelStore(s.mockTxn)
 			err := store.Reload()

@@ -256,7 +256,7 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 		return nil, err
 	}
 	if streamingutil.IsStreamingServiceEnabled() {
-		cluster.StreamingNode, err = streamingnode.NewServer(cluster.factory)
+		cluster.StreamingNode, err = streamingnode.NewServer(ctx, cluster.factory)
 		if err != nil {
 			return nil, err
 		}
@@ -334,7 +334,7 @@ func (cluster *MiniClusterV2) AddStreamingNode() {
 	cluster.ptmu.Lock()
 	defer cluster.ptmu.Unlock()
 
-	node, err := streamingnode.NewServer(cluster.factory)
+	node, err := streamingnode.NewServer(context.TODO(), cluster.factory)
 	if err != nil {
 		panic(err)
 	}
@@ -605,6 +605,10 @@ func (r *ReportChanExtension) Report(info any) int {
 	default:
 	}
 	return 1
+}
+
+func (r *ReportChanExtension) ReportRefused(ctx context.Context, req interface{}, resp interface{}, err error, fullMethod string) error {
+	return nil
 }
 
 func (r *ReportChanExtension) GetReportChan() <-chan any {

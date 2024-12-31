@@ -409,98 +409,6 @@ func TestTimeout(t *testing.T) {
 	}
 }
 
-func TestDatabaseWrapper(t *testing.T) {
-	postTestCases := []requestBodyTestCase{}
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-		Status:  &StatusSuccess,
-		DbNames: []string{DefaultCollectionName, "exist"},
-	}, nil).Twice()
-	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{Status: commonErrorStatus}, nil).Once()
-	h := NewHandlersV2(mp)
-	ginHandler := gin.Default()
-	app := ginHandler.Group("", genAuthMiddleWare(false))
-	path := "/wrapper/database"
-	app.POST(path, wrapperPost(func() any { return &DefaultReq{} }, h.wrapperCheckDatabase(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
-		return nil, nil
-	})))
-	postTestCases = append(postTestCases, requestBodyTestCase{
-		path:        path,
-		requestBody: []byte(`{}`),
-	})
-	postTestCases = append(postTestCases, requestBodyTestCase{
-		path:        path,
-		requestBody: []byte(`{"dbName": "exist"}`),
-	})
-	postTestCases = append(postTestCases, requestBodyTestCase{
-		path:        path,
-		requestBody: []byte(`{"dbName": "non-exist"}`),
-		errMsg:      "database not found, database: non-exist",
-		errCode:     800, // ErrDatabaseNotFound
-	})
-	postTestCases = append(postTestCases, requestBodyTestCase{
-		path:        path,
-		requestBody: []byte(`{"dbName": "test"}`),
-		errMsg:      "",
-		errCode:     65535,
-	})
-
-	for _, testcase := range postTestCases {
-		t.Run("post"+testcase.path, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
-			w := httptest.NewRecorder()
-			ginHandler.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusOK, w.Code)
-			fmt.Println(w.Body.String())
-			if testcase.errCode != 0 {
-				returnBody := &ReturnErrMsg{}
-				err := json.Unmarshal(w.Body.Bytes(), returnBody)
-				assert.Nil(t, err)
-				assert.Equal(t, testcase.errCode, returnBody.Code)
-				assert.Equal(t, testcase.errMsg, returnBody.Message)
-			}
-		})
-	}
-
-	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-		Status:  &StatusSuccess,
-		DbNames: []string{DefaultCollectionName, "default"},
-	}, nil).Once()
-	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-		Status:  &StatusSuccess,
-		DbNames: []string{DefaultCollectionName, "test"},
-	}, nil).Once()
-	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{Status: commonErrorStatus}, nil).Once()
-	rawTestCases := []rawTestCase{
-		{
-			errMsg:  "database not found, database: test",
-			errCode: 800, // ErrDatabaseNotFound
-		},
-		{},
-		{
-			errMsg:  "",
-			errCode: 65535,
-		},
-	}
-	for _, testcase := range rawTestCases {
-		t.Run("post with db"+testcase.path, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{}`)))
-			req.Header.Set(HTTPHeaderDBName, "test")
-			w := httptest.NewRecorder()
-			ginHandler.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusOK, w.Code)
-			fmt.Println(w.Body.String())
-			if testcase.errCode != 0 {
-				returnBody := &ReturnErrMsg{}
-				err := json.Unmarshal(w.Body.Bytes(), returnBody)
-				assert.Nil(t, err)
-				assert.Equal(t, testcase.errCode, returnBody.Code)
-				assert.Equal(t, testcase.errMsg, returnBody.Message)
-			}
-		})
-	}
-}
-
 func TestDocInDocOutCreateCollection(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
@@ -745,6 +653,316 @@ func TestCreateIndex(t *testing.T) {
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2", "indexType": "L2", "params":{"nlist": 10}}]}`),
+	})
+
+	for _, testcase := range postTestCases {
+		t.Run("post"+testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			fmt.Println(w.Body.String())
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+			if testcase.errCode != 0 {
+				assert.Equal(t, testcase.errMsg, returnBody.Message)
+			}
+		})
+	}
+}
+
+func TestDatabase(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	postTestCases := []requestBodyTestCase{}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().CreateDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().CreateDatabase(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	path := versionalV2(DataBaseCategory, CreateAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"test"}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"invalid_name"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	mp.EXPECT().DropDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().DropDatabase(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	path = versionalV2(DataBaseCategory, DropAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"test"}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"mock"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{DbNames: []string{"a", "b", "c"}, DbIds: []int64{100, 101, 102}}, nil).Once()
+	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+		Status: &commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		},
+	}, nil).Once()
+	path = versionalV2(DataBaseCategory, ListAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"test"}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"mock"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	mp.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&milvuspb.DescribeDatabaseResponse{DbName: "test", DbID: 100}, nil).Once()
+	mp.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&milvuspb.DescribeDatabaseResponse{
+		Status: &commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		},
+	}, nil).Once()
+	path = versionalV2(DataBaseCategory, DescribeAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"test"}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"mock"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	mp.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	path = versionalV2(DataBaseCategory, AlterAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"test"}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"mock"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	for _, testcase := range postTestCases {
+		t.Run("post"+testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			fmt.Println(w.Body.String())
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+			if testcase.errCode != 0 {
+				assert.Equal(t, testcase.errMsg, returnBody.Message)
+			}
+		})
+	}
+}
+
+func TestColletcionProperties(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	postTestCases := []requestBodyTestCase{}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	path := versionalV2(CollectionCategory, AlterPropertiesAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"test", "properties":{"mmap": true}}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"mock", "properties":{"mmap": true}}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	mp.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	path = versionalV2(CollectionCategory, DropPropertiesAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"test", "deleteKeys":["mmap"]}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"mock", "deleteKeys":["mmap"]}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	for _, testcase := range postTestCases {
+		t.Run("post"+testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			fmt.Println(w.Body.String())
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+			if testcase.errCode != 0 {
+				assert.Equal(t, testcase.errMsg, returnBody.Message)
+			}
+		})
+	}
+}
+
+func TestIndexProperties(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	postTestCases := []requestBodyTestCase{}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	path := versionalV2(IndexCategory, AlterPropertiesAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"test", "indexName":"test", "properties":{"mmap": true}}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"mock", "indexName":"test", "properties":{"mmap": true}}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	mp.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	path = versionalV2(IndexCategory, DropPropertiesAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"test","indexName":"test", "deleteKeys":["test"]}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"mock","indexName":"test", "deleteKeys":["test"]}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	for _, testcase := range postTestCases {
+		t.Run("post"+testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			fmt.Println(w.Body.String())
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+			if testcase.errCode != 0 {
+				assert.Equal(t, testcase.errMsg, returnBody.Message)
+			}
+		})
+	}
+}
+
+func TestCollectionFieldProperties(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	postTestCases := []requestBodyTestCase{}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().AlterCollectionField(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().AlterCollectionField(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	path := versionalV2(CollectionFieldCategory, AlterPropertiesAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"test", "fieldName":"test", "fieldParams":{"max_length": 100}}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"mock", "fieldName":"test", "fieldParams":{"max_length": 100}}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
 	})
 
 	for _, testcase := range postTestCases {
@@ -1445,7 +1663,7 @@ func TestMethodPost(t *testing.T) {
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().RenameCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
+	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(3)
 	mp.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().CreatePartition(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().LoadPartitions(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
@@ -1494,6 +1712,9 @@ func TestMethodPost(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(CollectionCategory, LoadAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(CollectionCategory, RefreshLoadAction),
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(CollectionCategory, ReleaseAction),
@@ -1996,7 +2217,7 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases := []requestBodyTestCase{}
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in {list}", "exprParams":{"list": [2, 4, 6, 8]}, "limit": 4, "outputFields": ["word_count"]}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
@@ -2077,7 +2298,7 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path: AdvancedSearchAction,
 		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [` +
-			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+			`{"data": [[0.1, 0.2]], "annsField": "book_intro", "filter": "book_id in {list}", "exprParams":{"list": [2, 4, 6, 8]},"metricType": "L2", "limit": 3},` +
 			`{"data": ["AQ=="], "annsField": "binaryVector", "metricType": "L2", "limit": 3},` +
 			`{"data": ["AQIDBA=="], "annsField": "float16Vector", "metricType": "L2", "limit": 3},` +
 			`{"data": ["AQIDBA=="], "annsField": "bfloat16Vector", "metricType": "L2", "limit": 3}` +

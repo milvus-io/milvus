@@ -357,10 +357,24 @@ func CheckTimeTickLagExceeded(ctx context.Context, queryCoord types.QueryCoordCl
 			})
 		}
 	}
-	findMaxLagChannel(queryNodeTTDelay, dataNodeTTDelay)
 
+	var errStr string
+	findMaxLagChannel(queryNodeTTDelay)
 	if maxLag > 0 && len(maxLagChannel) != 0 {
-		return fmt.Errorf("max timetick lag execced threhold, max timetick lag:%s on channel:%s", maxLag, maxLagChannel)
+		errStr = fmt.Sprintf("query max timetick lag:%s on channel:%s", maxLag, maxLagChannel)
 	}
+	maxLagChannel = ""
+	maxLag = 0
+	findMaxLagChannel(dataNodeTTDelay)
+	if maxLag > 0 && len(maxLagChannel) != 0 {
+		if errStr != "" {
+			errStr += ", "
+		}
+		errStr += fmt.Sprintf("data max timetick lag:%s on channel:%s", maxLag, maxLagChannel)
+	}
+	if errStr != "" {
+		return fmt.Errorf("max timetick lag execced threhold: %s", errStr)
+	}
+
 	return nil
 }

@@ -255,7 +255,7 @@ func (ms *simpleMockMsgStream) Chan() <-chan *msgstream.MsgPack {
 	return ms.msgChan
 }
 
-func (ms *simpleMockMsgStream) AsProducer(channels []string) {
+func (ms *simpleMockMsgStream) AsProducer(ctx context.Context, channels []string) {
 }
 
 func (ms *simpleMockMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position common.SubscriptionInitialPosition) error {
@@ -283,7 +283,7 @@ func (ms *simpleMockMsgStream) decreaseMsgCount(delta int) {
 	ms.increaseMsgCount(-delta)
 }
 
-func (ms *simpleMockMsgStream) Produce(pack *msgstream.MsgPack) error {
+func (ms *simpleMockMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) error {
 	defer ms.increaseMsgCount(1)
 
 	ms.msgChan <- pack
@@ -291,7 +291,7 @@ func (ms *simpleMockMsgStream) Produce(pack *msgstream.MsgPack) error {
 	return nil
 }
 
-func (ms *simpleMockMsgStream) Broadcast(pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
+func (ms *simpleMockMsgStream) Broadcast(ctx context.Context, pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
 	return map[string][]msgstream.MessageID{}, nil
 }
 
@@ -311,7 +311,10 @@ func (ms *simpleMockMsgStream) CheckTopicValid(topic string) error {
 	return nil
 }
 
-func (ms *simpleMockMsgStream) EnableProduce(enabled bool) {
+func (ms *simpleMockMsgStream) ForceEnableProduce(enabled bool) {
+}
+
+func (ms *simpleMockMsgStream) SetReplicate(config *msgstream.ReplicateConfig) {
 }
 
 func newSimpleMockMsgStream() *simpleMockMsgStream {

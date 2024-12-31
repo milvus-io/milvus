@@ -70,7 +70,7 @@ func (node *QueryNode) GetComponentStates(ctx context.Context, req *milvuspb.Get
 	if node.session != nil && node.session.Registered() {
 		nodeID = node.GetNodeID()
 	}
-	log.Debug("QueryNode current state", zap.Int64("NodeID", nodeID), zap.String("StateCode", code.String()))
+	log.Ctx(ctx).Debug("QueryNode current state", zap.Int64("NodeID", nodeID), zap.String("StateCode", code.String()))
 
 	info := &milvuspb.ComponentInfo{
 		NodeID:    nodeID,
@@ -162,7 +162,7 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 	return ret, nil
 }
 
-func (node *QueryNode) composeIndexMeta(indexInfos []*indexpb.IndexInfo, schema *schemapb.CollectionSchema) *segcorepb.CollectionIndexMeta {
+func (node *QueryNode) composeIndexMeta(ctx context.Context, indexInfos []*indexpb.IndexInfo, schema *schemapb.CollectionSchema) *segcorepb.CollectionIndexMeta {
 	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0)
 	for _, info := range indexInfos {
 		fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
@@ -178,7 +178,7 @@ func (node *QueryNode) composeIndexMeta(indexInfos []*indexpb.IndexInfo, schema 
 	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
 	maxIndexRecordPerSegment := int64(0)
 	if err != nil || sizePerRecord == 0 {
-		log.Warn("failed to transfer segment size to collection, because failed to estimate size per record", zap.Error(err))
+		log.Ctx(ctx).Warn("failed to transfer segment size to collection, because failed to estimate size per record", zap.Error(err))
 	} else {
 		threshold := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
 		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
@@ -239,7 +239,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	}
 
 	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
-		node.composeIndexMeta(req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
+		node.composeIndexMeta(ctx, req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
 	defer func() {
 		if !merr.Ok(status) {
 			node.manager.Collection.Unref(req.GetCollectionID(), 1)
@@ -254,7 +254,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		req.GetVersion(),
 		node.clusterManager,
 		node.manager,
-		node.tSafeManager,
 		node.loader,
 		node.factory,
 		channel.GetSeekPosition().GetTimestamp(),
@@ -273,12 +272,12 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	}()
 
 	// create tSafe
-	node.tSafeManager.Add(ctx, channel.ChannelName, channel.GetSeekPosition().GetTimestamp())
-	defer func() {
-		if err != nil {
-			node.tSafeManager.Remove(ctx, channel.ChannelName)
-		}
-	}()
+	// node.tSafeManager.Add(ctx, channel.ChannelName, channel.GetSeekPosition().GetTimestamp())
+	// defer func() {
+	// 	if err != nil {
+	// 		node.tSafeManager.Remove(ctx, channel.ChannelName)
+	// 	}
+	// }()
 
 	pipeline, err := node.pipelineManager.Add(req.GetCollectionID(), channel.GetChannelName())
 	if err != nil {
@@ -369,7 +368,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		node.pipelineManager.Remove(req.GetChannelName())
 		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
 		_, sealed := node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
-		node.tSafeManager.Remove(ctx, req.GetChannelName())
+		// node.tSafeManager.Remove(ctx, req.GetChannelName())
 
 		node.manager.Collection.Unref(req.GetCollectionID(), uint32(1+sealed))
 	}
@@ -476,7 +475,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	}
 
 	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
-		node.composeIndexMeta(req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
+		node.composeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
 	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
 	if req.GetLoadScope() == querypb.LoadScope_Delta {
@@ -733,6 +732,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	if req.GetReq().GetIsTopkReduce() {
 		resp.IsTopkReduce = true
 	}
+	resp.IsRecallEvaluation = req.GetReq().GetIsRecallEvaluation()
 	return resp, nil
 }
 
@@ -763,7 +763,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 	collection := node.manager.Collection.Get(req.GetReq().GetCollectionID())
 	if collection == nil {
-		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(req.GetReq().GetCollectionID()))
+		resp.Status = merr.Status(merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID()))
 		return resp, nil
 	}
 
@@ -1068,7 +1068,7 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 // ShowConfigurations returns the configurations of queryNode matching req.Pattern
 func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
-		log.Warn("QueryNode.ShowConfigurations failed",
+		log.Ctx(ctx).Warn("QueryNode.ShowConfigurations failed",
 			zap.Int64("nodeId", node.GetNodeID()),
 			zap.String("req", req.Pattern),
 			zap.Error(err))
@@ -1098,7 +1098,7 @@ func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.S
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
-		log.Warn("QueryNode.GetMetrics failed",
+		log.Ctx(ctx).Warn("QueryNode.GetMetrics failed",
 			zap.Int64("nodeId", node.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
@@ -1292,7 +1292,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				})
 			})
 		case querypb.SyncType_UpdateVersion:
-			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()))
+			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()), zap.Int64s("partitions", req.GetLoadMeta().GetPartitionIDs()))
 			droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
 				if action.GetCheckpoint() == nil {
 					return id, typeutil.MaxTimestamp
@@ -1307,7 +1307,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				return id, action.GetCheckpoint().Timestamp
 			})
 			shardDelegator.AddExcludedSegments(flushedInfo)
-			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
+			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), req.GetLoadMeta().GetPartitionIDs(), action.GetGrowingInTarget(),
 				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint())
 		case querypb.SyncType_UpdatePartitionStats:
 			log.Info("sync update partition stats versions")

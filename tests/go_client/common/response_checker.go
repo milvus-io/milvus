@@ -44,7 +44,8 @@ func CheckErr(t *testing.T, actualErr error, expErrNil bool, expErrorMsg ...stri
 func EqualColumn(t *testing.T, columnA column.Column, columnB column.Column) {
 	require.Equal(t, columnA.Name(), columnB.Name())
 	require.Equal(t, columnA.Type(), columnB.Type())
-	switch columnA.Type() {
+	_type := columnA.Type()
+	switch _type {
 	case entity.FieldTypeBool:
 		require.ElementsMatch(t, columnA.(*column.ColumnBool).Data(), columnB.(*column.ColumnBool).Data())
 	case entity.FieldTypeInt8:
@@ -65,11 +66,13 @@ func EqualColumn(t *testing.T, columnA column.Column, columnB column.Column) {
 		log.Debug("data", zap.String("name", columnA.Name()), zap.Any("type", columnA.Type()), zap.Any("data", columnA.FieldData()))
 		log.Debug("data", zap.String("name", columnB.Name()), zap.Any("type", columnB.Type()), zap.Any("data", columnB.FieldData()))
 		require.Equal(t, reflect.TypeOf(columnA), reflect.TypeOf(columnB))
-		switch columnA.(type) {
+		switch _v := columnA.(type) {
 		case *column.ColumnDynamic:
 			require.ElementsMatch(t, columnA.(*column.ColumnDynamic).Data(), columnB.(*column.ColumnDynamic).Data())
 		case *column.ColumnJSONBytes:
 			require.ElementsMatch(t, columnA.(*column.ColumnJSONBytes).Data(), columnB.(*column.ColumnJSONBytes).Data())
+		default:
+			log.Warn("columnA type", zap.String("name", columnB.Name()), zap.Any("type", _v))
 		}
 	case entity.FieldTypeFloatVector:
 		require.ElementsMatch(t, columnA.(*column.ColumnFloatVector).Data(), columnB.(*column.ColumnFloatVector).Data())
@@ -98,7 +101,7 @@ func EqualArrayColumn(t *testing.T, columnA column.Column, columnB column.Column
 	require.Equal(t, columnA.Name(), columnB.Name())
 	require.IsType(t, columnA.Type(), entity.FieldTypeArray)
 	require.IsType(t, columnB.Type(), entity.FieldTypeArray)
-	switch columnA.(type) {
+	switch _type := columnA.(type) {
 	case *column.ColumnBoolArray:
 		require.ElementsMatch(t, columnA.(*column.ColumnBoolArray).Data(), columnB.(*column.ColumnBoolArray).Data())
 	case *column.ColumnInt8Array:
@@ -116,6 +119,7 @@ func EqualArrayColumn(t *testing.T, columnA column.Column, columnB column.Column
 	case *column.ColumnVarCharArray:
 		require.ElementsMatch(t, columnA.(*column.ColumnVarCharArray).Data(), columnB.(*column.ColumnVarCharArray).Data())
 	default:
+		log.Debug("columnA type is", zap.Any("type", _type))
 		log.Info("Support array element type is:", zap.Any("FieldType", []entity.FieldType{
 			entity.FieldTypeBool, entity.FieldTypeInt8, entity.FieldTypeInt16,
 			entity.FieldTypeInt32, entity.FieldTypeInt64, entity.FieldTypeFloat, entity.FieldTypeDouble, entity.FieldTypeVarChar,
@@ -124,16 +128,16 @@ func EqualArrayColumn(t *testing.T, columnA column.Column, columnB column.Column
 }
 
 // CheckInsertResult check insert result, ids len (insert count), ids data (pks, but no auto ids)
-func CheckInsertResult(t *testing.T, expIds column.Column, insertRes client.InsertResult) {
-	require.Equal(t, expIds.Len(), insertRes.IDs.Len())
-	require.Equal(t, expIds.Len(), int(insertRes.InsertCount))
-	actualIds := insertRes.IDs
-	switch expIds.Type() {
+func CheckInsertResult(t *testing.T, expIDs column.Column, insertRes client.InsertResult) {
+	require.Equal(t, expIDs.Len(), insertRes.IDs.Len())
+	require.Equal(t, expIDs.Len(), int(insertRes.InsertCount))
+	actualIDs := insertRes.IDs
+	switch expIDs.Type() {
 	// pk field support int64 and varchar type
 	case entity.FieldTypeInt64:
-		require.ElementsMatch(t, actualIds.(*column.ColumnInt64).Data(), expIds.(*column.ColumnInt64).Data())
+		require.ElementsMatch(t, actualIDs.(*column.ColumnInt64).Data(), expIDs.(*column.ColumnInt64).Data())
 	case entity.FieldTypeVarChar:
-		require.ElementsMatch(t, actualIds.(*column.ColumnVarChar).Data(), expIds.(*column.ColumnVarChar).Data())
+		require.ElementsMatch(t, actualIDs.(*column.ColumnVarChar).Data(), expIDs.(*column.ColumnVarChar).Data())
 	default:
 		log.Info("The primary field only support ", zap.Any("type", []entity.FieldType{entity.FieldTypeInt64, entity.FieldTypeVarChar}))
 	}

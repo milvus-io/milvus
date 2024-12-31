@@ -16,23 +16,96 @@
 
 #include <gtest/gtest.h>
 
+#include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "common/Consts.h"
+#include "common/FieldMeta.h"
+#include "common/Types.h"
 #include "fmt/format.h"
 #include "common/Schema.h"
+#include "gtest/gtest.h"
+#include "knowhere/sparse_utils.h"
+#include "mmap/Column.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 #include "storage/ChunkCache.h"
 #include "storage/LocalChunkManagerSingleton.h"
 
 #define DEFAULT_READ_AHEAD_POLICY "willneed"
-class ChunkCacheTest : public testing::TestWithParam</*mmap enabled*/ bool> {
- public:
+class ChunkCacheTest
+    : public testing::TestWithParam<
+          /*mmap enabled, is chunked*/ std::tuple<bool, bool>> {
+ protected:
     void
     SetUp() override {
         mcm = milvus::storage::MmapManager::GetInstance().GetMmapChunkManager();
         mcm->Register(descriptor);
+
+        N = 10000;
+        dim = 128;
+        auto dense_metric_type = knowhere::metric::L2;
+        auto sparse_metric_type = knowhere::metric::IP;
+
+        auto schema = std::make_shared<milvus::Schema>();
+        auto fake_dense_vec_id = schema->AddDebugField(
+            "fakevec", milvus::DataType::VECTOR_FLOAT, dim, dense_metric_type);
+        auto i64_fid =
+            schema->AddDebugField("counter", milvus::DataType::INT64);
+        auto fake_sparse_vec_id =
+            schema->AddDebugField("fakevec_sparse",
+                                  milvus::DataType::VECTOR_SPARSE_FLOAT,
+                                  dim,
+                                  sparse_metric_type);
+        schema->set_primary_field_id(i64_fid);
+
+        auto dataset = milvus::segcore::DataGen(schema, N);
+
+        auto dense_field_data_meta =
+            milvus::storage::FieldDataMeta{1, 2, 3, fake_dense_vec_id.get()};
+        auto sparse_field_data_meta =
+            milvus::storage::FieldDataMeta{1, 2, 3, fake_sparse_vec_id.get()};
+        dense_field_meta = milvus::FieldMeta(milvus::FieldName("fakevec"),
+                                             fake_dense_vec_id,
+                                             milvus::DataType::VECTOR_FLOAT,
+                                             dim,
+                                             dense_metric_type,
+                                             false);
+        sparse_field_meta =
+            milvus::FieldMeta(milvus::FieldName("fakevec_sparse"),
+                              fake_sparse_vec_id,
+                              milvus::DataType::VECTOR_SPARSE_FLOAT,
+                              dim,
+                              sparse_metric_type,
+                              false);
+
+        lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
+                  .GetChunkManager();
+        dense_data = dataset.get_col<float>(fake_dense_vec_id);
+        sparse_data = dataset.get_col<knowhere::sparse::SparseRow<float>>(
+            fake_sparse_vec_id);
+
+        auto data_slices = std::vector<void*>{dense_data.data()};
+        auto slice_sizes = std::vector<int64_t>{static_cast<int64_t>(N)};
+        auto slice_names = std::vector<std::string>{dense_file_name};
+        PutFieldData(lcm.get(),
+                     data_slices,
+                     slice_sizes,
+                     slice_names,
+                     dense_field_data_meta,
+                     dense_field_meta);
+
+        data_slices = std::vector<void*>{sparse_data.data()};
+        slice_sizes = std::vector<int64_t>{static_cast<int64_t>(N)};
+        slice_names = std::vector<std::string>{sparse_file_name};
+        PutFieldData(lcm.get(),
+                     data_slices,
+                     slice_sizes,
+                     slice_names,
+                     sparse_field_data_meta,
+                     sparse_field_meta);
     }
     void
     TearDown() override {
@@ -46,82 +119,38 @@ class ChunkCacheTest : public testing::TestWithParam</*mmap enabled*/ bool> {
         std::shared_ptr<milvus::storage::MmapChunkDescriptor>(
             new milvus::storage::MmapChunkDescriptor(
                 {101, SegmentType::Sealed}));
-};
 
+    int N;
+    int dim;
+    milvus::FieldMeta dense_field_meta = milvus::FieldMeta::RowIdMeta;
+    milvus::FixedVector<float> dense_data;
+    milvus::FieldMeta sparse_field_meta = milvus::FieldMeta::RowIdMeta;
+    milvus::FixedVector<knowhere::sparse::SparseRow<float>> sparse_data;
+    std::shared_ptr<milvus::storage::LocalChunkManager> lcm;
+};
 INSTANTIATE_TEST_SUITE_P(ChunkCacheTestSuite,
                          ChunkCacheTest,
-                         testing::Values(true, false));
+                         testing::Combine(testing::Bool(), testing::Bool()));
 
 TEST_P(ChunkCacheTest, Read) {
-    auto N = 10000;
-    auto dim = 128;
-    auto dense_metric_type = knowhere::metric::L2;
-    auto sparse_metric_type = knowhere::metric::IP;
-
-    auto schema = std::make_shared<milvus::Schema>();
-    auto fake_dense_vec_id = schema->AddDebugField(
-        "fakevec", milvus::DataType::VECTOR_FLOAT, dim, dense_metric_type);
-    auto i64_fid = schema->AddDebugField("counter", milvus::DataType::INT64);
-    auto fake_sparse_vec_id =
-        schema->AddDebugField("fakevec_sparse",
-                              milvus::DataType::VECTOR_SPARSE_FLOAT,
-                              dim,
-                              sparse_metric_type);
-    schema->set_primary_field_id(i64_fid);
-
-    auto dataset = milvus::segcore::DataGen(schema, N);
-
-    auto dense_field_data_meta =
-        milvus::storage::FieldDataMeta{1, 2, 3, fake_dense_vec_id.get()};
-    auto sparse_field_data_meta =
-        milvus::storage::FieldDataMeta{1, 2, 3, fake_sparse_vec_id.get()};
-    auto dense_field_meta = milvus::FieldMeta(milvus::FieldName("fakevec"),
-                                              fake_dense_vec_id,
-                                              milvus::DataType::VECTOR_FLOAT,
-                                              dim,
-                                              dense_metric_type,
-                                              false);
-    auto sparse_field_meta =
-        milvus::FieldMeta(milvus::FieldName("fakevec_sparse"),
-                          fake_sparse_vec_id,
-                          milvus::DataType::VECTOR_SPARSE_FLOAT,
-                          dim,
-                          sparse_metric_type,
-                          false);
-
-    auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                   .GetChunkManager();
-    auto dense_data = dataset.get_col<float>(fake_dense_vec_id);
-    auto sparse_data =
-        dataset.get_col<knowhere::sparse::SparseRow<float>>(fake_sparse_vec_id);
-
-    auto data_slices = std::vector<void*>{dense_data.data()};
-    auto slice_sizes = std::vector<int64_t>{static_cast<int64_t>(N)};
-    auto slice_names = std::vector<std::string>{dense_file_name};
-    PutFieldData(lcm.get(),
-                 data_slices,
-                 slice_sizes,
-                 slice_names,
-                 dense_field_data_meta,
-                 dense_field_meta);
-
-    data_slices = std::vector<void*>{sparse_data.data()};
-    slice_sizes = std::vector<int64_t>{static_cast<int64_t>(N)};
-    slice_names = std::vector<std::string>{sparse_file_name};
-    PutFieldData(lcm.get(),
-                 data_slices,
-                 slice_sizes,
-                 slice_names,
-                 sparse_field_data_meta,
-                 sparse_field_meta);
-
     auto cc = milvus::storage::MmapManager::GetInstance().GetChunkCache();
 
     // validate dense data
-    const auto& dense_column =
-        cc->Read(dense_file_name, descriptor, dense_field_meta, GetParam());
-    Assert(dense_column->DataByteSize() == dim * N * 4);
-    auto actual_dense = (const float*)(dense_column->Data());
+    std::shared_ptr<milvus::ColumnBase> dense_column;
+
+    auto p = GetParam();
+    auto mmap_enabled = std::get<0>(p);
+    auto is_test_chunked = std::get<1>(p);
+
+    if (is_test_chunked) {
+        dense_column =
+            cc->Read(dense_file_name, dense_field_meta, mmap_enabled);
+    } else {
+        dense_column = cc->Read(
+            dense_file_name, descriptor, dense_field_meta, mmap_enabled);
+        Assert(dense_column->DataByteSize() == dim * N * 4);
+    }
+    auto actual_dense = (const float*)(dense_column->Data(0));
     for (auto i = 0; i < N * dim; i++) {
         AssertInfo(dense_data[i] == actual_dense[i],
                    fmt::format(
@@ -129,11 +158,17 @@ TEST_P(ChunkCacheTest, Read) {
     }
 
     // validate sparse data
-    const auto& sparse_column =
-        cc->Read(sparse_file_name, descriptor, sparse_field_meta, GetParam());
+    std::shared_ptr<milvus::ColumnBase> sparse_column;
+    if (is_test_chunked) {
+        sparse_column =
+            cc->Read(sparse_file_name, sparse_field_meta, mmap_enabled);
+    } else {
+        sparse_column = cc->Read(
+            sparse_file_name, descriptor, sparse_field_meta, mmap_enabled);
+    }
     auto expected_sparse_size = 0;
     auto actual_sparse =
-        (const knowhere::sparse::SparseRow<float>*)(sparse_column->Data());
+        (const knowhere::sparse::SparseRow<float>*)(sparse_column->Data(0));
     for (auto i = 0; i < N; i++) {
         const auto& actual_sparse_row = actual_sparse[i];
         const auto& expect_sparse_row = sparse_data[i];
@@ -151,8 +186,9 @@ TEST_P(ChunkCacheTest, Read) {
                         actual_sparse_row.data()));
         expected_sparse_size += bytes;
     }
-
-    ASSERT_EQ(sparse_column->DataByteSize(), expected_sparse_size);
+    if (!is_test_chunked) {
+        Assert(sparse_column->DataByteSize() == expected_sparse_size);
+    }
 
     cc->Remove(dense_file_name);
     cc->Remove(sparse_file_name);
@@ -161,78 +197,25 @@ TEST_P(ChunkCacheTest, Read) {
 }
 
 TEST_P(ChunkCacheTest, TestMultithreads) {
-    auto N = 1000;
-    auto dim = 128;
-    auto dense_metric_type = knowhere::metric::L2;
-    auto sparse_metric_type = knowhere::metric::IP;
-
-    auto schema = std::make_shared<milvus::Schema>();
-    auto fake_dense_vec_id = schema->AddDebugField(
-        "fakevec", milvus::DataType::VECTOR_FLOAT, dim, dense_metric_type);
-    auto fake_sparse_vec_id =
-        schema->AddDebugField("fakevec_sparse",
-                              milvus::DataType::VECTOR_SPARSE_FLOAT,
-                              dim,
-                              sparse_metric_type);
-    auto i64_fid = schema->AddDebugField("counter", milvus::DataType::INT64);
-    schema->set_primary_field_id(i64_fid);
-
-    auto dataset = milvus::segcore::DataGen(schema, N);
-
-    auto dense_field_data_meta =
-        milvus::storage::FieldDataMeta{1, 2, 3, fake_dense_vec_id.get()};
-    auto sparse_field_data_meta =
-        milvus::storage::FieldDataMeta{1, 2, 3, fake_sparse_vec_id.get()};
-    auto dense_field_meta = milvus::FieldMeta(milvus::FieldName("fakevec"),
-                                              fake_dense_vec_id,
-                                              milvus::DataType::VECTOR_FLOAT,
-                                              dim,
-                                              dense_metric_type,
-                                              false);
-    auto sparse_field_meta =
-        milvus::FieldMeta(milvus::FieldName("fakevec_sparse"),
-                          fake_sparse_vec_id,
-                          milvus::DataType::VECTOR_SPARSE_FLOAT,
-                          dim,
-                          sparse_metric_type,
-                          false);
-
-    auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                   .GetChunkManager();
-    auto dense_data = dataset.get_col<float>(fake_dense_vec_id);
-    auto sparse_data =
-        dataset.get_col<knowhere::sparse::SparseRow<float>>(fake_sparse_vec_id);
-
-    auto dense_data_slices = std::vector<void*>{dense_data.data()};
-    auto sparse_data_slices = std::vector<void*>{sparse_data.data()};
-    auto slice_sizes = std::vector<int64_t>{static_cast<int64_t>(N)};
-    auto dense_slice_names = std::vector<std::string>{dense_file_name};
-    auto sparse_slice_names = std::vector<std::string>{sparse_file_name};
-
-    PutFieldData(lcm.get(),
-                 dense_data_slices,
-                 slice_sizes,
-                 dense_slice_names,
-                 dense_field_data_meta,
-                 dense_field_meta);
-
-    PutFieldData(lcm.get(),
-                 sparse_data_slices,
-                 slice_sizes,
-                 sparse_slice_names,
-                 sparse_field_data_meta,
-                 sparse_field_meta);
-
     auto cc = milvus::storage::MmapManager::GetInstance().GetChunkCache();
 
     constexpr int threads = 16;
     std::vector<int64_t> total_counts(threads);
+    auto p = GetParam();
+    auto mmap_enabled = std::get<0>(p);
+    auto is_test_chunked = std::get<1>(p);
     auto executor = [&](int thread_id) {
-        const auto& dense_column =
-            cc->Read(dense_file_name, descriptor, dense_field_meta, GetParam());
-        Assert(dense_column->DataByteSize() == dim * N * 4);
+        std::shared_ptr<milvus::ColumnBase> dense_column;
+        if (is_test_chunked) {
+            dense_column =
+                cc->Read(dense_file_name, dense_field_meta, mmap_enabled);
+        } else {
+            dense_column = cc->Read(
+                dense_file_name, descriptor, dense_field_meta, mmap_enabled);
+            Assert(dense_column->DataByteSize() == dim * N * 4);
+        }
 
-        auto actual_dense = (const float*)dense_column->Data();
+        auto actual_dense = (const float*)dense_column->Data(0);
         for (auto i = 0; i < N * dim; i++) {
             AssertInfo(
                 dense_data[i] == actual_dense[i],
@@ -240,10 +223,16 @@ TEST_P(ChunkCacheTest, TestMultithreads) {
                     "expect {}, actual {}", dense_data[i], actual_dense[i]));
         }
 
-        const auto& sparse_column = cc->Read(
-            sparse_file_name, descriptor, sparse_field_meta, GetParam());
+        std::shared_ptr<milvus::ColumnBase> sparse_column;
+        if (is_test_chunked) {
+            sparse_column =
+                cc->Read(sparse_file_name, sparse_field_meta, mmap_enabled);
+        } else {
+            sparse_column = cc->Read(
+                sparse_file_name, descriptor, sparse_field_meta, mmap_enabled);
+        }
         auto actual_sparse =
-            (const knowhere::sparse::SparseRow<float>*)sparse_column->Data();
+            (const knowhere::sparse::SparseRow<float>*)sparse_column->Data(0);
         for (auto i = 0; i < N; i++) {
             const auto& actual_sparse_row = actual_sparse[i];
             const auto& expect_sparse_row = sparse_data[i];

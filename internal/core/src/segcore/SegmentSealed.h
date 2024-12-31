@@ -52,6 +52,9 @@ class SegmentSealed : public SegmentInternalInterface {
     LoadTextIndex(FieldId field_id,
                   std::unique_ptr<index::TextMatchIndex> index) = 0;
 
+    virtual InsertRecord<true>&
+    get_insert_record() = 0;
+
     SegmentType
     type() const override {
         return SegmentType::Sealed;

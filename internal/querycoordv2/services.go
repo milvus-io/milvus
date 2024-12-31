@@ -56,8 +56,7 @@ var (
 )
 
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	log.Ctx(ctx).Info("show collections request received", zap.Int64s("collections", req.GetCollectionIDs()))
-
+	log.Ctx(ctx).Debug("show collections request received", zap.Int64s("collections", req.GetCollectionIDs()))
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to show collections"
 		log.Warn(msg, zap.Error(err))
@@ -160,15 +159,16 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 		if percentage < 0 {
 			err := meta.GlobalFailedLoadCache.Get(req.GetCollectionID())
 			if err != nil {
-				status := merr.Status(err)
-				log.Warn("show partition failed", zap.Error(err))
+				partitionErr := merr.WrapErrPartitionNotLoaded(partitionID, err.Error())
+				status := merr.Status(partitionErr)
+				log.Warn("show partition failed", zap.Error(partitionErr))
 				return &querypb.ShowPartitionsResponse{
 					Status: status,
 				}, nil
 			}
 
 			err = merr.WrapErrPartitionNotLoaded(partitionID)
-			log.Warn("show partitions failed", zap.Error(err))
+			log.Warn("show partition failed", zap.Error(err))
 			return &querypb.ShowPartitionsResponse{
 				Status: merr.Status(err),
 			}, nil
@@ -254,7 +254,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 
 	var loadJob job.Job
 	collection := s.meta.GetCollection(ctx, req.GetCollectionID())
-	if collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded {
+	if collection != nil {
 		// if collection is loaded, check if collection is loaded with the same replica number and resource groups
 		// if replica number or resource group changes， switch to update load config
 		collectionUsedRG := s.meta.ReplicaManager.GetResourceGroupByCollection(ctx, collection.GetCollectionID()).Collect()
@@ -287,7 +287,6 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 			s.dist,
 			s.meta,
 			s.broker,
-			s.cluster,
 			s.targetMgr,
 			s.targetObserver,
 			s.collectionObserver,
@@ -328,7 +327,6 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 		s.dist,
 		s.meta,
 		s.broker,
-		s.cluster,
 		s.targetMgr,
 		s.targetObserver,
 		s.checkerController,
@@ -404,7 +402,6 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		s.dist,
 		s.meta,
 		s.broker,
-		s.cluster,
 		s.targetMgr,
 		s.targetObserver,
 		s.collectionObserver,
@@ -451,7 +448,6 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 		s.dist,
 		s.meta,
 		s.broker,
-		s.cluster,
 		s.targetMgr,
 		s.targetObserver,
 		s.checkerController,
@@ -596,7 +592,7 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 		return merr.Status(err), nil
 	}
 
-	syncJob := job.NewSyncNewCreatedPartitionJob(ctx, req, s.meta, s.cluster, s.broker)
+	syncJob := job.NewSyncNewCreatedPartitionJob(ctx, req, s.meta, s.broker, s.targetObserver, s.targetMgr)
 	s.jobScheduler.Add(syncJob)
 	err := syncJob.Wait()
 	if err != nil {
@@ -687,15 +683,15 @@ func (s *Server) refreshCollection(ctx context.Context, collectionID int64) erro
 // 	}
 // }
 
-func (s *Server) isStoppingNode(nodeID int64) error {
+func (s *Server) isStoppingNode(ctx context.Context, nodeID int64) error {
 	isStopping, err := s.nodeMgr.IsStoppingNode(nodeID)
 	if err != nil {
-		log.Warn("fail to check whether the node is stopping", zap.Int64("node_id", nodeID), zap.Error(err))
+		log.Ctx(ctx).Warn("fail to check whether the node is stopping", zap.Int64("node_id", nodeID), zap.Error(err))
 		return err
 	}
 	if isStopping {
 		msg := fmt.Sprintf("failed to balance due to the source/destination node[%d] is stopping", nodeID)
-		log.Warn(msg)
+		log.Ctx(ctx).Warn(msg)
 		return errors.New(msg)
 	}
 	return nil
@@ -738,7 +734,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		log.Warn(msg)
 		return merr.Status(err), nil
 	}
-	if err := s.isStoppingNode(srcNode); err != nil {
+	if err := s.isStoppingNode(ctx, srcNode); err != nil {
 		return merr.Status(errors.Wrap(err,
 			fmt.Sprintf("can't balance, because the source node[%d] is invalid", srcNode))), nil
 	}
@@ -760,7 +756,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 
 	// check whether dstNode is healthy
 	for dstNode := range dstNodeSet {
-		if err := s.isStoppingNode(dstNode); err != nil {
+		if err := s.isStoppingNode(ctx, dstNode); err != nil {
 			return merr.Status(errors.Wrap(err,
 				fmt.Sprintf("can't balance, because the destination node[%d] is invalid", dstNode))), nil
 		}
@@ -837,7 +833,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	log.RatedDebug(60, "get metrics request received",
 		zap.String("metricType", req.GetRequest()))
 
-	if err := merr.CheckHealthyStandby(s.State()); err != nil {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get metrics"
 		log.Warn(msg, zap.Error(err))
 		return &milvuspb.GetMetricsResponse{
@@ -924,7 +920,7 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 	}
 
 	if err := utils.CheckCollectionsQueryable(ctx, s.meta, s.targetMgr, s.dist, s.nodeMgr); err != nil {
-		log.Warn("some collection is not queryable during health check", zap.Error(err))
+		log.Ctx(ctx).Warn("some collection is not queryable during health check", zap.Error(err))
 	}
 
 	return componentutil.CheckHealthRespWithErr(nil), nil
@@ -1185,7 +1181,7 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 	jobs := make([]job.Job, 0, len(req.GetCollectionIDs()))
 	for _, collectionID := range req.GetCollectionIDs() {
 		collection := s.meta.GetCollection(ctx, collectionID)
-		if collection == nil || collection.GetStatus() != querypb.LoadStatus_Loaded {
+		if collection == nil {
 			err := merr.WrapErrCollectionNotLoaded(collectionID)
 			log.Warn("failed to update load config", zap.Error(err))
 			continue

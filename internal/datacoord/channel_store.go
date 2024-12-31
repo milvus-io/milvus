@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strconv"
@@ -71,7 +72,7 @@ type RWChannelStore interface {
 	Update(op *ChannelOpSet) error
 
 	// UpdateState is used by StateChannelStore only
-	UpdateState(isSuccessful bool, channels ...RWChannel)
+	UpdateState(isSuccessful bool, nodeID int64, channel RWChannel, opID int64)
 	// SegLegacyChannelByNode is used by StateChannelStore only
 	SetLegacyChannelByNode(nodeIDs ...int64)
 
@@ -334,7 +335,7 @@ func NewStateChannelStore(kv kv.TxnKV) *StateChannelStore {
 
 func (c *StateChannelStore) Reload() error {
 	record := timerecord.NewTimeRecorder("datacoord")
-	keys, values, err := c.store.LoadWithPrefix(Params.CommonCfg.DataCoordWatchSubPath.GetValue())
+	keys, values, err := c.store.LoadWithPrefix(context.TODO(), Params.CommonCfg.DataCoordWatchSubPath.GetValue())
 	if err != nil {
 		return err
 	}
@@ -374,18 +375,17 @@ func (c *StateChannelStore) AddNode(nodeID int64) {
 	}
 }
 
-func (c *StateChannelStore) UpdateState(isSuccessful bool, channels ...RWChannel) {
-	lo.ForEach(channels, func(ch RWChannel, _ int) {
-		for _, cInfo := range c.channelsInfo {
-			if stateChannel, ok := cInfo.Channels[ch.GetName()]; ok {
-				if isSuccessful {
-					stateChannel.(*StateChannel).TransitionOnSuccess()
-				} else {
-					stateChannel.(*StateChannel).TransitionOnFailure()
-				}
+func (c *StateChannelStore) UpdateState(isSuccessful bool, nodeID int64, channel RWChannel, opID int64) {
+	channelName := channel.GetName()
+	if cInfo, ok := c.channelsInfo[nodeID]; ok {
+		if stateChannel, ok := cInfo.Channels[channelName]; ok {
+			if isSuccessful {
+				stateChannel.(*StateChannel).TransitionOnSuccess(opID)
+			} else {
+				stateChannel.(*StateChannel).TransitionOnFailure(opID)
 			}
 		}
-	})
+	}
 }
 
 func (c *StateChannelStore) SetLegacyChannelByNode(nodeIDs ...int64) {
@@ -516,9 +516,9 @@ func (c *StateChannelStore) getChannel(nodeID int64, channelName string) *StateC
 		if storedChannel, ok := cInfo.Channels[channelName]; ok {
 			return storedChannel.(*StateChannel)
 		}
-		log.Debug("Channel doesn't exist in Node", zap.String("channel", channelName), zap.Int64("nodeID", nodeID))
+		log.Ctx(context.TODO()).Debug("Channel doesn't exist in Node", zap.String("channel", channelName), zap.Int64("nodeID", nodeID))
 	} else {
-		log.Error("Node doesn't exist", zap.Int64("NodeID", nodeID))
+		log.Ctx(context.TODO()).Error("Node doesn't exist", zap.Int64("NodeID", nodeID))
 	}
 	return nil
 }
@@ -549,7 +549,7 @@ func (c *StateChannelStore) updateMetaMemoryForSingleOp(op *ChannelOp) error {
 		case Delete: // Remove Channel
 			c.removeAssignment(op.NodeID, ch.GetName())
 		default:
-			log.Error("unknown opType in updateMetaMemoryForSingleOp", zap.Any("type", op.Type))
+			log.Ctx(context.TODO()).Error("unknown opType in updateMetaMemoryForSingleOp", zap.Any("type", op.Type))
 		}
 	})
 	return nil
@@ -571,7 +571,7 @@ func (c *StateChannelStore) updateMeta(opSet *ChannelOpSet) error {
 		} else if ops.Len() == 1 {
 			c.updateMetaMemoryForSingleOp(ops.Collect()[0])
 		} else {
-			log.Error("unsupported ChannelOpSet", zap.Any("OpSet", ops))
+			log.Ctx(context.TODO()).Error("unsupported ChannelOpSet", zap.Any("OpSet", ops))
 		}
 	}
 	return nil
@@ -592,7 +592,7 @@ func (c *StateChannelStore) txn(opSet *ChannelOpSet) error {
 		saves = lo.Assign(opSaves, saves)
 		removals = append(removals, opRemovals...)
 	}
-	return c.store.MultiSaveAndRemove(saves, removals)
+	return c.store.MultiSaveAndRemove(context.TODO(), saves, removals)
 }
 
 func (c *StateChannelStore) RemoveNode(nodeID int64) {
@@ -735,5 +735,5 @@ func (c *StateChannelStore) GetNodes() []int64 {
 // remove deletes kv pairs from the kv store where keys have given nodeID as prefix.
 func (c *StateChannelStore) remove(nodeID int64) error {
 	k := buildKeyPrefix(nodeID)
-	return c.store.RemoveWithPrefix(k)
+	return c.store.RemoveWithPrefix(context.TODO(), k)
 }

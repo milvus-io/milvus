@@ -3,6 +3,7 @@
 #include "tantivy-binding.h"
 #include "rust-binding.h"
 #include "rust-hashmap.h"
+#include "tantivy/rust-array.h"
 #include "token-stream.h"
 
 namespace milvus::tantivy {
@@ -13,10 +14,12 @@ struct Tokenizer {
 
     explicit Tokenizer(std::string&& params) {
         auto shared_params = std::make_shared<std::string>(std::move(params));
-        ptr_ = tantivy_create_tokenizer(shared_params->c_str());
-        if (ptr_ == nullptr) {
-            throw std::invalid_argument("invalid tokenizer parameters");
-        }
+        auto res =
+            RustResultWrapper(tantivy_create_tokenizer(shared_params->c_str()));
+        AssertInfo(res.result_->success,
+                   "Tokenizer creation failed: {}",
+                   res.result_->error);
+        ptr_ = res.result_->value.ptr._0;
     }
 
     explicit Tokenizer(void* _ptr) : ptr_(_ptr) {

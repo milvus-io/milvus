@@ -249,8 +249,8 @@ func TestServer_CreateIndex(t *testing.T) {
 
 	t.Run("save index fail", func(t *testing.T) {
 		metakv := mockkv.NewMetaKv(t)
-		metakv.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
 		s.meta.indexMeta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
 		s.meta.catalog = &datacoord.Catalog{MetaKv: metakv}
 		s.meta.indexMeta.catalog = s.meta.catalog
@@ -635,6 +635,41 @@ func TestServer_AlterIndex(t *testing.T) {
 		assert.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 
 		req.Params[0].Value = "true"
+	})
+
+	t.Run("delete_params", func(t *testing.T) {
+		deleteReq := &indexpb.AlterIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			DeleteKeys:   []string{common.MmapEnabledKey},
+		}
+		resp, err := s.AlterIndex(ctx, deleteReq)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+		describeResp, err := s.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			Timestamp:    createTS,
+		})
+		assert.NoError(t, merr.CheckRPCCall(describeResp, err))
+		for _, param := range describeResp.IndexInfos[0].GetUserIndexParams() {
+			assert.NotEqual(t, common.MmapEnabledKey, param.GetKey())
+		}
+	})
+	t.Run("update_and_delete_params", func(t *testing.T) {
+		updateAndDeleteReq := &indexpb.AlterIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			Params: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MmapEnabledKey,
+					Value: "true",
+				},
+			},
+			DeleteKeys: []string{common.MmapEnabledKey},
+		}
+		resp, err := s.AlterIndex(ctx, updateAndDeleteReq)
+		assert.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 	})
 
 	t.Run("success", func(t *testing.T) {

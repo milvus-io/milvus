@@ -17,6 +17,7 @@
 package delegator
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -239,7 +240,7 @@ func (o *idfOracle) SyncDistribution(snapshot *snapshot) {
 		}
 	}
 
-	log.Debug("sync distribution finished", zap.Int64("version", o.targetVersion), zap.Int64("numrow", o.current.NumRow()))
+	log.Ctx(context.TODO()).Debug("sync distribution finished", zap.Int64("version", o.targetVersion), zap.Int64("numrow", o.current.NumRow()))
 }
 
 func (o *idfOracle) BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error) {

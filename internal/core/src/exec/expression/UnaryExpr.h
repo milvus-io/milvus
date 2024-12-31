@@ -33,68 +33,77 @@
 namespace milvus {
 namespace exec {
 
-template <typename T>
+template <typename T, FilterType filter_type>
 struct UnaryElementFuncForMatch {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
+    using IndexInnerType =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
 
     void
     operator()(const T* src,
+
                size_t size,
                IndexInnerType val,
-               TargetBitmapView res) {
+               TargetBitmapView res,
+               int64_t* offsets = nullptr) {
         PatternMatchTranslator translator;
         auto regex_pattern = translator(val);
         RegexMatcher matcher(regex_pattern);
         for (int i = 0; i < size; ++i) {
-            res[i] = matcher(src[i]);
+            if constexpr (filter_type == FilterType::random) {
+                res[i] = matcher(src[offsets ? offsets[i] : i]);
+            } else {
+                res[i] = matcher(src[i]);
+            }
         }
     }
 };
 
-template <typename T, proto::plan::OpType op>
+template <typename T, proto::plan::OpType op, FilterType filter_type>
 struct UnaryElementFunc {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
+    using IndexInnerType =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
+
     void
     operator()(const T* src,
                size_t size,
                IndexInnerType val,
-               TargetBitmapView res) {
+               TargetBitmapView res,
+               const int32_t* offsets = nullptr) {
         if constexpr (op == proto::plan::OpType::Match) {
-            UnaryElementFuncForMatch<T> func;
+            UnaryElementFuncForMatch<T, filter_type> func;
             func(src, size, val, res);
             return;
         }
 
-        /*
         // This is the original code, which is kept for the documentation purposes
-        for (int i = 0; i < size; ++i) {
-            if constexpr (op == proto::plan::OpType::Equal) {
-                res[i] = src[i] == val;
-            } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                res[i] = src[i] != val;
-            } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-                res[i] = src[i] > val;
-            } else if constexpr (op == proto::plan::OpType::LessThan) {
-                res[i] = src[i] < val;
-            } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-                res[i] = src[i] >= val;
-            } else if constexpr (op == proto::plan::OpType::LessEqual) {
-                res[i] = src[i] <= val;
-            } else if constexpr (op == proto::plan::OpType::PrefixMatch) {
-                res[i] = milvus::query::Match(
-                    src[i], val, proto::plan::OpType::PrefixMatch);
-            } else {
-                PanicInfo(
-                    OpTypeInvalid,
-                    fmt::format("unsupported op_type:{} for UnaryElementFunc",
-                                op));
+        // also, for iterative filter
+        if constexpr (filter_type == FilterType::random) {
+            for (int i = 0; i < size; ++i) {
+                auto offset = (offsets != nullptr) ? offsets[i] : i;
+                if constexpr (op == proto::plan::OpType::Equal) {
+                    res[i] = src[offset] == val;
+                } else if constexpr (op == proto::plan::OpType::NotEqual) {
+                    res[i] = src[offset] != val;
+                } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+                    res[i] = src[offset] > val;
+                } else if constexpr (op == proto::plan::OpType::LessThan) {
+                    res[i] = src[offset] < val;
+                } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+                    res[i] = src[offset] >= val;
+                } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                    res[i] = src[offset] <= val;
+                } else if constexpr (op == proto::plan::OpType::PrefixMatch) {
+                    res[i] = milvus::query::Match(
+                        src[offset], val, proto::plan::OpType::PrefixMatch);
+                } else {
+                    PanicInfo(
+                        OpTypeInvalid,
+                        fmt::format(
+                            "unsupported op_type:{} for UnaryElementFunc", op));
+                }
             }
+            return;
         }
-        */
 
         if constexpr (op == proto::plan::OpType::PrefixMatch) {
             for (int i = 0; i < size; ++i) {
@@ -141,7 +150,7 @@ struct UnaryElementFunc {
         }                                                               \
     } while (false)
 
-template <typename ValueType, proto::plan::OpType op>
+template <typename ValueType, proto::plan::OpType op, FilterType filter_type>
 struct UnaryElementFuncForArray {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -153,32 +162,39 @@ struct UnaryElementFuncForArray {
                ValueType val,
                int index,
                TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmapView valid_res,
+               const int32_t* offsets = nullptr) {
         for (int i = 0; i < size; ++i) {
-            if (valid_data != nullptr && !valid_data[i]) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
             if constexpr (op == proto::plan::OpType::Equal) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                    res[i] = src[i].is_same_array(val);
+                    res[i] = src[offset].is_same_array(val);
                 } else {
-                    if (index >= src[i].length()) {
+                    if (index >= src[offset].length()) {
                         res[i] = false;
                         continue;
                     }
-                    auto array_data = src[i].template get_data<GetType>(index);
+                    auto array_data =
+                        src[offset].template get_data<GetType>(index);
                     res[i] = array_data == val;
                 }
             } else if constexpr (op == proto::plan::OpType::NotEqual) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                    res[i] = !src[i].is_same_array(val);
+                    res[i] = !src[offset].is_same_array(val);
                 } else {
-                    if (index >= src[i].length()) {
+                    if (index >= src[offset].length()) {
                         res[i] = false;
                         continue;
                     }
-                    auto array_data = src[i].template get_data<GetType>(index);
+                    auto array_data =
+                        src[offset].template get_data<GetType>(index);
                     res[i] = array_data != val;
                 }
             } else if constexpr (op == proto::plan::OpType::GreaterThan) {
@@ -191,6 +207,21 @@ struct UnaryElementFuncForArray {
                 UnaryArrayCompare(array_data <= val);
             } else if constexpr (op == proto::plan::OpType::PrefixMatch) {
                 UnaryArrayCompare(milvus::query::Match(array_data, val, op));
+            } else if constexpr (op == proto::plan::OpType::Match) {
+                if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                    res[i] = false;
+                } else {
+                    if (index >= src[offset].length()) {
+                        res[i] = false;
+                        continue;
+                    }
+                    PatternMatchTranslator translator;
+                    auto regex_pattern = translator(val);
+                    RegexMatcher matcher(regex_pattern);
+                    auto array_data =
+                        src[offset].template get_data<GetType>(index);
+                    res[i] = matcher(array_data);
+                }
             } else {
                 PanicInfo(OpTypeInvalid,
                           "unsupported op_type:{} for "
@@ -203,9 +234,8 @@ struct UnaryElementFuncForArray {
 
 template <typename T>
 struct UnaryIndexFuncForMatch {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
+    using IndexInnerType =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
     operator()(Index* index, IndexInnerType val) {
@@ -243,9 +273,8 @@ struct UnaryIndexFuncForMatch {
 
 template <typename T, proto::plan::OpType op>
 struct UnaryIndexFunc {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
+    using IndexInnerType =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
     operator()(Index* index, IndexInnerType val) {
@@ -299,10 +328,18 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    bool
+    SupportOffsetInput() override {
+        if (expr_->op_type_ == proto::plan::OpType::TextMatch) {
+            return false;
+        }
+        return true;
+    }
+
  private:
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImpl();
+    ExecRangeVisitorImpl(OffsetVector* input = nullptr);
 
     template <typename T>
     VectorPtr
@@ -310,15 +347,15 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImplForData();
+    ExecRangeVisitorImplForData(OffsetVector* input = nullptr);
 
     template <typename ExprValueType>
     VectorPtr
-    ExecRangeVisitorImplJson();
+    ExecRangeVisitorImplJson(OffsetVector* input = nullptr);
 
     template <typename ExprValueType>
     VectorPtr
-    ExecRangeVisitorImplArray();
+    ExecRangeVisitorImplArray(OffsetVector* input = nullptr);
 
     template <typename T>
     VectorPtr
@@ -331,7 +368,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     // Check overflow and cache result for performace
     template <typename T>
     ColumnVectorPtr
-    PreCheckOverflow();
+    PreCheckOverflow(OffsetVector* input = nullptr);
 
     template <typename T>
     bool

@@ -162,6 +162,39 @@ func (s *PartitionSuite) TestDropPartition() {
 	})
 }
 
+func (s *PartitionSuite) TestGetPartitionStats() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		partitionName := fmt.Sprintf("part_%s", s.randString(6))
+		s.mock.EXPECT().GetPartitionStatistics(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, gpsr *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
+			s.Equal(collectionName, gpsr.GetCollectionName())
+			s.Equal(partitionName, gpsr.GetPartitionName())
+			return &milvuspb.GetPartitionStatisticsResponse{
+				Status: merr.Success(),
+				Stats: []*commonpb.KeyValuePair{
+					{Key: "rows", Value: "100"},
+				},
+			}, nil
+		}).Once()
+
+		stats, err := s.client.GetPartitionStats(ctx, NewGetPartitionStatsOption(collectionName, partitionName))
+		s.NoError(err)
+		s.Equal("100", stats["rows"])
+	})
+
+	s.Run("failure", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		partitionName := fmt.Sprintf("part_%s", s.randString(6))
+		s.mock.EXPECT().GetPartitionStatistics(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		_, err := s.client.GetPartitionStats(ctx, NewGetPartitionStatsOption(collectionName, partitionName))
+		s.Error(err)
+	})
+}
+
 func TestPartition(t *testing.T) {
 	suite.Run(t, new(PartitionSuite))
 }

@@ -18,6 +18,7 @@
 
 #include <string>
 #include <memory>
+#include <utility>
 
 #include <oneapi/tbb/concurrent_queue.h>
 
@@ -96,13 +97,13 @@ class FieldData<BinaryVector> : public FieldDataImpl<uint8_t, false> {
     explicit FieldData(int64_t dim,
                        DataType data_type,
                        int64_t buffered_num_rows = 0)
-        : binary_dim_(dim),
-          FieldDataImpl(dim / 8, data_type, false, buffered_num_rows) {
+        : FieldDataImpl(dim / 8, data_type, false, buffered_num_rows),
+          binary_dim_(dim) {
         Assert(dim % 8 == 0);
     }
 
     int64_t
-    get_dim() const {
+    get_dim() const override {
         return binary_dim_;
     }
 
@@ -149,7 +150,9 @@ struct ArrowDataWrapper {
     ArrowDataWrapper(std::shared_ptr<arrow::RecordBatchReader> reader,
                      std::shared_ptr<parquet::arrow::FileReader> arrow_reader,
                      std::shared_ptr<uint8_t[]> file_data)
-        : reader(reader), arrow_reader(arrow_reader), file_data(file_data) {
+        : reader(std::move(reader)),
+          arrow_reader(std::move(arrow_reader)),
+          file_data(std::move(file_data)) {
     }
     std::shared_ptr<arrow::RecordBatchReader> reader;
     // file reader must outlive the record batch reader

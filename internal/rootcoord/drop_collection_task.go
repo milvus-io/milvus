@@ -57,9 +57,9 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 	// dropping collection with `ts1` but a collection exists in catalog with newer ts which is bigger than `ts1`.
 	// fortunately, if ddls are promised to execute in sequence, then everything is OK. The `ts1` will always be latest.
 	collMeta, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
-	if errors.Is(err, merr.ErrCollectionNotFound) {
+	if errors.Is(err, merr.ErrCollectionNotFound) || errors.Is(err, merr.ErrDatabaseNotFound) {
 		// make dropping collection idempotent.
-		log.Warn("drop non-existent collection", zap.String("collection", t.Req.GetCollectionName()))
+		log.Ctx(ctx).Warn("drop non-existent collection", zap.String("collection", t.Req.GetCollectionName()), zap.String("database", t.Req.GetDbName()))
 		return nil
 	}
 

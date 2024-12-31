@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -67,6 +69,11 @@ const (
 	OffsetKey            = "offset"
 	LimitKey             = "limit"
 
+	SearchIterV2Key        = "search_iter_v2"
+	SearchIterBatchSizeKey = "search_iter_batch_size"
+	SearchIterLastBoundKey = "search_iter_last_bound"
+	SearchIterIdKey        = "search_iter_id"
+
 	InsertTaskName                = "InsertTask"
 	CreateCollectionTaskName      = "CreateCollectionTask"
 	DropCollectionTaskName        = "DropCollectionTask"
@@ -89,6 +96,7 @@ const (
 	DescribeAliasTaskName         = "DescribeAliasTask"
 	ListAliasesTaskName           = "ListAliasesTask"
 	AlterCollectionTaskName       = "AlterCollectionTask"
+	AlterCollectionFieldTaskName  = "AlterCollectionFieldTask"
 	UpsertTaskName                = "UpsertTask"
 	CreateResourceGroupTaskName   = "CreateResourceGroupTask"
 	UpdateResourceGroupsTaskName  = "UpdateResourceGroupsTask"
@@ -208,7 +216,7 @@ func (t *createCollectionTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *createCollectionTask) validatePartitionKey() error {
+func (t *createCollectionTask) validatePartitionKey(ctx context.Context) error {
 	idx := -1
 	for i, field := range t.schema.Fields {
 		if field.GetIsPartitionKey() {
@@ -263,7 +271,7 @@ func (t *createCollectionTask) validatePartitionKey() error {
 			return fmt.Errorf("num_partitions should only be specified with partition key field enabled")
 		}
 	} else {
-		log.Info("create collection with partition key mode",
+		log.Ctx(ctx).Info("create collection with partition key mode",
 			zap.String("collectionName", t.CollectionName),
 			zap.Int64("numDefaultPartitions", t.GetNumPartitions()))
 	}
@@ -271,7 +279,7 @@ func (t *createCollectionTask) validatePartitionKey() error {
 	return nil
 }
 
-func (t *createCollectionTask) validateClusteringKey() error {
+func (t *createCollectionTask) validateClusteringKey(ctx context.Context) error {
 	idx := -1
 	for i, field := range t.schema.Fields {
 		if field.GetIsClusteringKey() {
@@ -288,7 +296,7 @@ func (t *createCollectionTask) validateClusteringKey() error {
 	}
 
 	if idx != -1 {
-		log.Info("create collection with clustering key",
+		log.Ctx(ctx).Info("create collection with clustering key",
 			zap.String("collectionName", t.CollectionName),
 			zap.String("clusteringKeyField", t.schema.Fields[idx].Name))
 	}
@@ -358,17 +366,17 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	// validate partition key mode
-	if err := t.validatePartitionKey(); err != nil {
+	if err := t.validatePartitionKey(ctx); err != nil {
 		return err
 	}
 
 	hasPartitionKey := hasParitionKeyModeField(t.schema)
-	if _, err := validatePartitionKeyIsolation(t.CollectionName, hasPartitionKey, t.GetProperties()...); err != nil {
+	if _, err := validatePartitionKeyIsolation(ctx, t.CollectionName, hasPartitionKey, t.GetProperties()...); err != nil {
 		return err
 	}
 
 	// validate clustering key
-	if err := t.validateClusteringKey(); err != nil {
+	if err := t.validateClusteringKey(ctx); err != nil {
 		return err
 	}
 
@@ -808,7 +816,7 @@ func (t *showCollectionsTask) Execute(ctx context.Context) error {
 		for _, collectionName := range t.CollectionNames {
 			collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), collectionName)
 			if err != nil {
-				log.Debug("Failed to get collection id.", zap.String("collectionName", collectionName),
+				log.Ctx(ctx).Debug("Failed to get collection id.", zap.String("collectionName", collectionName),
 					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showCollections"))
 				return err
 			}
@@ -854,14 +862,14 @@ func (t *showCollectionsTask) Execute(ctx context.Context) error {
 		for offset, id := range resp.CollectionIDs {
 			collectionName, ok := IDs2Names[id]
 			if !ok {
-				log.Debug("Failed to get collection info. This collection may be not released",
+				log.Ctx(ctx).Debug("Failed to get collection info. This collection may be not released",
 					zap.Int64("collectionID", id),
 					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showCollections"))
 				continue
 			}
 			collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.GetDbName(), collectionName, id)
 			if err != nil {
-				log.Debug("Failed to get collection info.", zap.String("collectionName", collectionName),
+				log.Ctx(ctx).Debug("Failed to get collection info.", zap.String("collectionName", collectionName),
 					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showCollections"))
 				return err
 			}
@@ -953,7 +961,16 @@ func hasLazyLoadProp(props ...*commonpb.KeyValuePair) bool {
 	return false
 }
 
-func validatePartitionKeyIsolation(colName string, isPartitionKeyEnabled bool, props ...*commonpb.KeyValuePair) (bool, error) {
+func hasPropInDeletekeys(keys []string) string {
+	for _, key := range keys {
+		if key == common.MmapEnabledKey || key == common.LazyLoadEnableKey {
+			return key
+		}
+	}
+	return ""
+}
+
+func validatePartitionKeyIsolation(ctx context.Context, colName string, isPartitionKeyEnabled bool, props ...*commonpb.KeyValuePair) (bool, error) {
 	iso, err := common.IsPartitionKeyIsolationKvEnabled(props...)
 	if err != nil {
 		return false, err
@@ -974,25 +991,43 @@ func validatePartitionKeyIsolation(colName string, isPartitionKeyEnabled bool, p
 			"partition key isolation mode is enabled but current Milvus does not support it. Please contact us")
 	}
 
-	log.Info("validated with partition key isolation", zap.String("collectionName", colName))
+	log.Ctx(ctx).Info("validated with partition key isolation", zap.String("collectionName", colName))
 
 	return true, nil
 }
 
 func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
+	if len(t.GetProperties()) > 0 && len(t.GetDeleteKeys()) > 0 {
+		return merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
+	}
+
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
 	}
 
 	t.CollectionID = collectionID
-	if hasMmapProp(t.Properties...) || hasLazyLoadProp(t.Properties...) {
-		loaded, err := isCollectionLoaded(ctx, t.queryCoord, t.CollectionID)
-		if err != nil {
-			return err
+
+	if len(t.GetProperties()) > 0 {
+		if hasMmapProp(t.Properties...) || hasLazyLoadProp(t.Properties...) {
+			loaded, err := isCollectionLoaded(ctx, t.queryCoord, t.CollectionID)
+			if err != nil {
+				return err
+			}
+			if loaded {
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
+			}
 		}
-		if loaded {
-			return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
+	} else if len(t.GetDeleteKeys()) > 0 {
+		key := hasPropInDeletekeys(t.DeleteKeys)
+		if key != "" {
+			loaded, err := isCollectionLoaded(ctx, t.queryCoord, t.CollectionID)
+			if err != nil {
+				return err
+			}
+			if loaded {
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not delete mmap properties if collection loaded")
+			}
 		}
 	}
 
@@ -1001,7 +1036,7 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	// check if the new partition key isolation is valid to use
-	newIsoValue, err := validatePartitionKeyIsolation(t.CollectionName, isPartitionKeyMode, t.Properties...)
+	newIsoValue, err := validatePartitionKeyIsolation(ctx, t.CollectionName, isPartitionKeyMode, t.Properties...)
 	if err != nil {
 		return err
 	}
@@ -1011,7 +1046,7 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	oldIsoValue := collBasicInfo.partitionKeyIsolation
 
-	log.Info("alter collection pre check with partition key isolation",
+	log.Ctx(ctx).Info("alter collection pre check with partition key isolation",
 		zap.String("collectionName", t.CollectionName),
 		zap.Bool("isPartitionKeyMode", isPartitionKeyMode),
 		zap.Bool("newIsoValue", newIsoValue),
@@ -1052,6 +1087,25 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	_, ok := common.IsReplicateEnabled(t.Properties)
+	if ok {
+		return merr.WrapErrParameterInvalidMsg("can't set the replicate.id property")
+	}
+	endTS, ok := common.GetReplicateEndTS(t.Properties)
+	if ok && collBasicInfo.replicateID != "" {
+		allocResp, err := t.rootCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
+			Count:          1,
+			BlockTimestamp: endTS,
+		})
+		if err = merr.CheckRPCCall(allocResp, err); err != nil {
+			return merr.WrapErrServiceInternal("alloc timestamp failed", err.Error())
+		}
+		if allocResp.GetTimestamp() <= endTS {
+			return merr.WrapErrServiceInternal("alter collection: alloc timestamp failed, timestamp is not greater than endTS",
+				fmt.Sprintf("timestamp = %d, endTS = %d", allocResp.GetTimestamp(), endTS))
+		}
+	}
+
 	return nil
 }
 
@@ -1065,13 +1119,170 @@ func (t *alterCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+type alterCollectionFieldTask struct {
+	baseTask
+	Condition
+	*milvuspb.AlterCollectionFieldRequest
+	ctx        context.Context
+	rootCoord  types.RootCoordClient
+	result     *commonpb.Status
+	queryCoord types.QueryCoordClient
+	dataCoord  types.DataCoordClient
+}
+
+func (t *alterCollectionFieldTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *alterCollectionFieldTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *alterCollectionFieldTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *alterCollectionFieldTask) Name() string {
+	return AlterCollectionTaskName
+}
+
+func (t *alterCollectionFieldTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *alterCollectionFieldTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *alterCollectionFieldTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *alterCollectionFieldTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *alterCollectionFieldTask) OnEnqueue() error {
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_AlterCollectionField
+	t.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+const (
+	MmapEnabledKey = "mmap_enabled"
+)
+
+var allowedProps = []string{
+	common.MaxLengthKey,
+	common.MmapEnabledKey,
+}
+
+func IsKeyAllowed(key string) bool {
+	for _, allowedKey := range allowedProps {
+		if key == allowedKey {
+			return true
+		}
+	}
+	return false
+}
+
+func updatePropertiesKeys(oldProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+	props := make(map[string]string)
+	for _, prop := range oldProps {
+		var updatedKey string
+		if prop.Key == MmapEnabledKey {
+			updatedKey = common.MmapEnabledKey
+		} else {
+			updatedKey = prop.Key
+		}
+		props[updatedKey] = prop.Value
+	}
+
+	propKV := make([]*commonpb.KeyValuePair, 0)
+	for key, value := range props {
+		propKV = append(propKV, &commonpb.KeyValuePair{
+			Key:   key,
+			Value: value,
+		})
+	}
+
+	return propKV
+}
+
+func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
+	if err != nil {
+		return err
+	}
+	t.Properties = updatePropertiesKeys(t.Properties)
+	for _, prop := range t.Properties {
+		if !IsKeyAllowed(prop.Key) {
+			return merr.WrapErrParameterInvalidMsg("%s does not allow update in collection field param", prop.Key)
+		}
+		// Check the value type based on the key
+		switch prop.Key {
+		case common.MmapEnabledKey:
+			collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
+			if err != nil {
+				return err
+			}
+			loaded, err1 := isCollectionLoaded(ctx, t.queryCoord, collectionID)
+			if err1 != nil {
+				return err1
+			}
+			if loaded {
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter collection field properties if collection loaded")
+			}
+
+		case common.MaxLengthKey:
+			IsStringType := false
+			fieldName := ""
+			var dataType int32
+			for _, field := range collSchema.Fields {
+				if field.GetName() == t.FieldName && (typeutil.IsStringType(field.DataType) || typeutil.IsArrayContainStringElementType(field.DataType, field.ElementType)) {
+					IsStringType = true
+					fieldName = field.GetName()
+					dataType = int32(field.DataType)
+				}
+			}
+			if !IsStringType {
+				return merr.WrapErrParameterInvalid(fieldName, "%s can not modify the maxlength for non-string types", schemapb.DataType_name[dataType])
+			}
+			value, err := strconv.Atoi(prop.Value)
+			if err != nil {
+				return merr.WrapErrParameterInvalid("%s should be an integer, but got %T", prop.Key, prop.Value)
+			}
+
+			if value > defaultMaxVarCharLength {
+				return merr.WrapErrParameterInvalid("%s exceeds the maximum allowed value 1048576", prop.Value)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (t *alterCollectionFieldTask) Execute(ctx context.Context) error {
+	var err error
+	t.result, err = t.rootCoord.AlterCollectionField(ctx, t.AlterCollectionFieldRequest)
+	return merr.CheckRPCCall(t.result, err)
+}
+
+func (t *alterCollectionFieldTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
 type createPartitionTask struct {
 	baseTask
 	Condition
 	*milvuspb.CreatePartitionRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	result    *commonpb.Status
+	ctx        context.Context
+	rootCoord  types.RootCoordClient
+	queryCoord types.QueryCoordClient
+	result     *commonpb.Status
 }
 
 func (t *createPartitionTask) TraceCtx() context.Context {
@@ -1139,6 +1350,24 @@ func (t *createPartitionTask) PreExecute(ctx context.Context) error {
 
 func (t *createPartitionTask) Execute(ctx context.Context) (err error) {
 	t.result, err = t.rootCoord.CreatePartition(ctx, t.CreatePartitionRequest)
+	if err := merr.CheckRPCCall(t.result, err); err != nil {
+		return err
+	}
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.GetCollectionName())
+	if err != nil {
+		t.result = merr.Status(err)
+		return err
+	}
+	partitionID, err := globalMetaCache.GetPartitionID(ctx, t.GetDbName(), t.GetCollectionName(), t.GetPartitionName())
+	if err != nil {
+		t.result = merr.Status(err)
+		return err
+	}
+	t.result, err = t.queryCoord.SyncNewCreatedPartition(ctx, &querypb.SyncNewCreatedPartitionRequest{
+		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions)),
+		CollectionID: collectionID,
+		PartitionID:  partitionID,
+	})
 	return merr.CheckRPCCall(t.result, err)
 }
 
@@ -1233,7 +1462,7 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if collLoaded {
-		loaded, err := isPartitionLoaded(ctx, t.queryCoord, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, t.queryCoord, collID, partID)
 		if err != nil {
 			return err
 		}
@@ -1403,7 +1632,7 @@ func (t *showPartitionsTask) Execute(ctx context.Context) error {
 		collectionName := t.CollectionName
 		collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), collectionName)
 		if err != nil {
-			log.Debug("Failed to get collection id.", zap.String("collectionName", collectionName),
+			log.Ctx(ctx).Debug("Failed to get collection id.", zap.String("collectionName", collectionName),
 				zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showPartitions"))
 			return err
 		}
@@ -1416,7 +1645,7 @@ func (t *showPartitionsTask) Execute(ctx context.Context) error {
 		for _, partitionName := range t.PartitionNames {
 			partitionID, err := globalMetaCache.GetPartitionID(ctx, t.GetDbName(), collectionName, partitionName)
 			if err != nil {
-				log.Debug("Failed to get partition id.", zap.String("partitionName", partitionName),
+				log.Ctx(ctx).Debug("Failed to get partition id.", zap.String("partitionName", partitionName),
 					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showPartitions"))
 				return err
 			}
@@ -1447,13 +1676,13 @@ func (t *showPartitionsTask) Execute(ctx context.Context) error {
 		for offset, id := range resp.PartitionIDs {
 			partitionName, ok := IDs2Names[id]
 			if !ok {
-				log.Debug("Failed to get partition id.", zap.String("partitionName", partitionName),
+				log.Ctx(ctx).Debug("Failed to get partition id.", zap.String("partitionName", partitionName),
 					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showPartitions"))
 				return errors.New("failed to show partitions")
 			}
 			partitionInfo, err := globalMetaCache.GetPartitionInfo(ctx, t.GetDbName(), collectionName, partitionName)
 			if err != nil {
-				log.Debug("Failed to get partition id.", zap.String("partitionName", partitionName),
+				log.Ctx(ctx).Debug("Failed to get partition id.", zap.String("partitionName", partitionName),
 					zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "showPartitions"))
 				return err
 			}
@@ -1847,7 +2076,7 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 
 	if len(unindexedVecFields) != 0 {
 		errMsg := fmt.Sprintf("there is no vector index on field: %v, please create index firstly", unindexedVecFields)
-		log.Debug(errMsg)
+		log.Ctx(ctx).Debug(errMsg)
 		return errors.New(errMsg)
 	}
 
@@ -2258,7 +2487,7 @@ func (t *DescribeResourceGroupTask) Execute(ctx context.Context) error {
 		for key, value := range collections {
 			name, err := globalMetaCache.GetCollectionName(ctx, "", key)
 			if err != nil {
-				log.Warn("failed to get collection name",
+				log.Ctx(ctx).Warn("failed to get collection name",
 					zap.Int64("collectionID", key),
 					zap.Error(err))
 

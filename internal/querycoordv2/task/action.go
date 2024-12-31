@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -262,21 +261,5 @@ func (action *LeaderAction) GetLeaderID() typeutil.UniqueID {
 }
 
 func (action *LeaderAction) IsFinished(distMgr *meta.DistributionManager) bool {
-	views := distMgr.LeaderViewManager.GetByFilter(meta.WithNodeID2LeaderView(action.leaderID), meta.WithChannelName2LeaderView(action.Shard))
-	if len(views) == 0 {
-		return false
-	}
-	view := lo.MaxBy(views, func(v1 *meta.LeaderView, v2 *meta.LeaderView) bool {
-		return v1.Version > v2.Version
-	})
-	dist := view.Segments[action.SegmentID()]
-	switch action.Type() {
-	case ActionTypeGrow:
-		return action.rpcReturned.Load() && dist != nil && dist.NodeID == action.Node()
-	case ActionTypeReduce:
-		return action.rpcReturned.Load() && (dist == nil || dist.NodeID != action.Node())
-	case ActionTypeUpdate:
-		return action.rpcReturned.Load() && common.MapEquals(action.partStatsVersions, view.PartitionStatsVersions)
-	}
-	return false
+	return action.rpcReturned.Load()
 }

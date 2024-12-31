@@ -95,11 +95,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return indexing_record_;
     }
 
-    const DeletedRecord&
-    get_deleted_record() const {
-        return deleted_record_;
-    }
-
     std::shared_mutex&
     get_chunk_mutex() const {
         return chunk_mutex_;
@@ -254,7 +249,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
           insert_record_(
               *schema_, segcore_config.get_chunk_rows(), mmap_descriptor_),
           indexing_record_(*schema_, index_meta_, segcore_config_),
-          id_(segment_id) {
+          id_(segment_id),
+          deleted_record_(&insert_record_, this) {
         if (mmap_descriptor_ != nullptr) {
             LOG_INFO("growing segment {} use mmap to hold raw data",
                      this->get_segment_id());
@@ -334,6 +330,16 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return false;
     }
 
+    std::vector<SegOffset>
+    search_pk(const PkType& pk, Timestamp timestamp) const override {
+        return insert_record_.search_pk(pk, timestamp);
+    }
+
+    std::vector<SegOffset>
+    search_pk(const PkType& pk, int64_t insert_barrier) const override {
+        return insert_record_.search_pk(pk, insert_barrier);
+    }
+
  protected:
     int64_t
     num_chunk(FieldId field_id) const override;
@@ -343,6 +349,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
     chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
+
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    chunk_view_by_offsets(FieldId field_id,
+                          int64_t chunk_id,
+                          const FixedVector<int32_t>& offsets) const override;
 
     std::pair<BufferView, FixedVector<bool>>
     get_chunk_buffer(FieldId field_id,
@@ -390,7 +401,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     mutable std::shared_mutex chunk_mutex_;
 
     // deleted pks
-    mutable DeletedRecord deleted_record_;
+    mutable DeletedRecord<false> deleted_record_;
 
     int64_t id_;
 

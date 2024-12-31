@@ -17,6 +17,7 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -125,7 +126,7 @@ func (eNode *embeddingNode) addInsertData(insertDatas map[UniqueID]*delegator.In
 	iData.PrimaryKeys = append(iData.PrimaryKeys, pks...)
 	iData.RowIDs = append(iData.RowIDs, msg.RowIDs...)
 	iData.Timestamps = append(iData.Timestamps, msg.Timestamps...)
-	log.Debug("pipeline embedding insert msg",
+	log.Ctx(context.TODO()).Debug("pipeline embedding insert msg",
 		zap.Int64("collectionID", eNode.collectionID),
 		zap.Int64("segmentID", msg.SegmentID),
 		zap.Int("insertRowNum", len(pks)),

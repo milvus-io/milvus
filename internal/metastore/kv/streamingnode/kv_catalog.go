@@ -15,7 +15,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
 
-// NewCataLog creates a new catalog instance
+// NewCataLog creates a new streaming-node catalog instance.
+// It's used to persist the recovery info for a streaming node and wal.
+// The catalog is shown as following:
+// streamingnode-meta
+// └── wal
+//
+//	├── pchannel-1
+//	│   └── segment-assign
+//	│       ├── 456398247934
+//	│       ├── 456398247936
+//	│       └── 456398247939
+//	└── pchannel-2
+//	    └── segment-assign
+//	        ├── 456398247934
+//	        ├── 456398247935
+//	        └── 456398247938
 func NewCataLog(metaKV kv.MetaKv) metastore.StreamingNodeCataLog {
 	return &catalog{
 		metaKV: metaKV,
@@ -27,9 +42,10 @@ type catalog struct {
 	metaKV kv.MetaKv
 }
 
+// ListSegmentAssignment lists the segment assignment info of the pchannel.
 func (c *catalog) ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error) {
 	prefix := buildSegmentAssignmentMetaPath(pChannelName)
-	keys, values, err := c.metaKV.LoadWithPrefix(prefix)
+	keys, values, err := c.metaKV.LoadWithPrefix(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +82,7 @@ func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName strin
 
 	if len(removes) > 0 {
 		if err := etcd.RemoveByBatchWithLimit(removes, util.MaxEtcdTxnNum, func(partialRemoves []string) error {
-			return c.metaKV.MultiRemove(partialRemoves)
+			return c.metaKV.MultiRemove(ctx, partialRemoves)
 		}); err != nil {
 			return err
 		}
@@ -74,22 +90,23 @@ func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName strin
 
 	if len(kvs) > 0 {
 		return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
-			return c.metaKV.MultiSave(partialKvs)
+			return c.metaKV.MultiSave(ctx, partialKvs)
 		})
 	}
 	return nil
 }
 
 // buildSegmentAssignmentMetaPath builds the path for segment assignment
-// streamingnode-meta/segment-assign/${pChannelName}
 func buildSegmentAssignmentMetaPath(pChannelName string) string {
-	// !!! bad implementation here, but we can't make compatibility for underlying meta kv.
-	// underlying meta kv will remove the last '/' of the path, cause the pchannel lost.
-	// So we add a special sub path to avoid this.
-	return path.Join(SegmentAssignMeta, pChannelName, SegmentAssignSubFolder) + "/"
+	return path.Join(buildWALDirectory(pChannelName), DirectorySegmentAssign) + "/"
 }
 
 // buildSegmentAssignmentMetaPathOfSegment builds the path for segment assignment
 func buildSegmentAssignmentMetaPathOfSegment(pChannelName string, segmentID int64) string {
-	return path.Join(SegmentAssignMeta, pChannelName, SegmentAssignSubFolder, strconv.FormatInt(segmentID, 10))
+	return path.Join(buildWALDirectory(pChannelName), DirectorySegmentAssign, strconv.FormatInt(segmentID, 10))
+}
+
+// buildWALDirectory builds the path for wal directory
+func buildWALDirectory(pchannelName string) string {
+	return path.Join(MetaPrefix, DirectoryWAL, pchannelName) + "/"
 }

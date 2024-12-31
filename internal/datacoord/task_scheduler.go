@@ -255,7 +255,7 @@ func (s *taskScheduler) run() {
 		ok := s.process(taskID)
 		if !ok {
 			s.taskLock.Unlock(taskID)
-			log.Ctx(s.ctx).Info("there is no idle indexing node, wait a minute...")
+			log.Ctx(s.ctx).Info("there is no idle indexing node, waiting for retry...")
 			break
 		}
 		s.taskLock.Unlock(taskID)

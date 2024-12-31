@@ -37,7 +37,8 @@ func (t *renameCollectionTask) Prepare(ctx context.Context) error {
 }
 
 func (t *renameCollectionTask) Execute(ctx context.Context) error {
-	if err := t.core.ExpireMetaCache(ctx, t.Req.GetDbName(), []string{t.Req.GetOldName()}, InvalidCollectionID, "", t.GetTs(), proxyutil.SetMsgType(commonpb.MsgType_RenameCollection)); err != nil {
+	collID := t.core.meta.GetCollectionID(ctx, t.Req.GetDbName(), t.Req.GetOldName())
+	if err := t.core.ExpireMetaCache(ctx, t.Req.GetDbName(), []string{t.Req.GetOldName()}, collID, "", t.GetTs(), proxyutil.SetMsgType(commonpb.MsgType_RenameCollection)); err != nil {
 		return err
 	}
 	return t.core.meta.RenameCollection(ctx, t.Req.GetDbName(), t.Req.GetOldName(), t.Req.GetNewDBName(), t.Req.GetNewName(), t.GetTs())

@@ -132,7 +132,7 @@ class ColumnBase {
     AppendBatch(const FieldDataPtr data) = 0;
 
     virtual const char*
-    Data(int chunk_id = 0) const = 0;
+    Data(int chunk_id) const = 0;
 };
 class SingleChunkColumnBase : public ColumnBase {
  public:
@@ -183,8 +183,6 @@ class SingleChunkColumnBase : public ColumnBase {
                           bool nullable)
         : mcm_(mcm),
           mmap_descriptor_(descriptor),
-          num_rows_(0),
-          data_size_(0),
           data_cap_size_(reserve),
           mapping_type_(MappingType::MAP_WITH_MANAGER),
           nullable_(nullable) {
@@ -267,7 +265,7 @@ class SingleChunkColumnBase : public ColumnBase {
 
     // Data() points at an addr that contains the elements
     virtual const char*
-    Data(int chunk_id = 0) const override {
+    Data(int chunk_id) const override {
         return data_;
     }
 
@@ -297,7 +295,7 @@ class SingleChunkColumnBase : public ColumnBase {
 
     // returns the number of bytes used to store actual data
     size_t
-    DataByteSize() const {
+    DataByteSize() const override {
         return data_size_;
     }
 
@@ -323,8 +321,14 @@ class SingleChunkColumnBase : public ColumnBase {
                   "StringViews only supported for VariableColumn");
     }
 
+    virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    ViewsByOffsets(const FixedVector<int32_t>& offsets) const {
+        PanicInfo(ErrorCode::Unsupported,
+                  "viewsbyoffsets only supported for VariableColumn");
+    }
+
     virtual void
-    AppendBatch(const FieldDataPtr data) {
+    AppendBatch(const FieldDataPtr data) override {
         size_t required_size = data_size_ + data->DataSize();
         if (required_size > data_cap_size_) {
             ExpandData(required_size * 2);
@@ -472,11 +476,13 @@ class SingleChunkColumnBase : public ColumnBase {
                 mapped_size);
             milvus::monitor::internal_mmap_in_used_space_bytes_anon.Increment(
                 mapped_size);
+            milvus::monitor::internal_mmap_in_used_count_anon.Increment();
         } else if (mapping_type_ == MappingType::MAP_WITH_FILE) {
             milvus::monitor::internal_mmap_allocated_space_bytes_file.Observe(
                 mapped_size);
             milvus::monitor::internal_mmap_in_used_space_bytes_file.Increment(
                 mapped_size);
+            milvus::monitor::internal_mmap_in_used_count_file.Increment();
         }
         // else: does not update metric for MAP_WITH_MANAGER, MmapChunkManagerPtr
         // will update metric itself.
@@ -487,9 +493,11 @@ class SingleChunkColumnBase : public ColumnBase {
         if (mapping_type_ == MappingType::MAP_WITH_ANONYMOUS) {
             milvus::monitor::internal_mmap_in_used_space_bytes_anon.Decrement(
                 mapped_size);
+            milvus::monitor::internal_mmap_in_used_count_anon.Decrement();
         } else if (mapping_type_ == MappingType::MAP_WITH_FILE) {
             milvus::monitor::internal_mmap_in_used_space_bytes_file.Decrement(
                 mapped_size);
+            milvus::monitor::internal_mmap_in_used_count_file.Decrement();
         }
         // else: does not update metric for MAP_WITH_MANAGER, MmapChunkManagerPtr
         // will update metric itself.
@@ -574,7 +582,7 @@ class SingleChunkSparseFloatColumn : public SingleChunkColumnBase {
 
     // returned pointer points at a list of knowhere::sparse::SparseRow<float>
     const char*
-    Data(int chunk_id = 0) const override {
+    Data(int chunk_id) const override {
         return static_cast<const char*>(static_cast<const void*>(vec_.data()));
     }
 
@@ -688,10 +696,23 @@ class SingleChunkVariableColumn : public SingleChunkColumnBase {
             uint32_t size;
             size = *reinterpret_cast<uint32_t*>(pos);
             pos += sizeof(uint32_t);
-            res.emplace_back(std::string_view(pos, size));
+            res.emplace_back(pos, size);
             pos += size;
         }
         return std::make_pair(res, valid_data_);
+    }
+
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    ViewsByOffsets(const FixedVector<int32_t>& offsets) const override {
+        std::vector<std::string_view> res;
+        FixedVector<bool> valid;
+        res.reserve(offsets.size());
+        valid.reserve(offsets.size());
+        for (int offset : offsets) {
+            res.emplace_back(RawAt(offset));
+            valid.emplace_back(IsValid(offset));
+        }
+        return {res, valid};
     }
 
     [[nodiscard]] std::vector<ViewType>

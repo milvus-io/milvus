@@ -440,7 +440,7 @@ func TestProxy_FlushAll_DbCollection(t *testing.T) {
 			rpcRequestChannel := Params.CommonCfg.ReplicateMsgChannel.GetValue()
 			node.replicateMsgStream, err = node.factory.NewMsgStream(node.ctx)
 			assert.NoError(t, err)
-			node.replicateMsgStream.AsProducer([]string{rpcRequestChannel})
+			node.replicateMsgStream.AsProducer(ctx, []string{rpcRequestChannel})
 
 			Params.Save(Params.ProxyCfg.MaxTaskNum.Key, "1000")
 			node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
@@ -483,7 +483,7 @@ func TestProxy_FlushAll(t *testing.T) {
 	rpcRequestChannel := Params.CommonCfg.ReplicateMsgChannel.GetValue()
 	node.replicateMsgStream, err = node.factory.NewMsgStream(node.ctx)
 	assert.NoError(t, err)
-	node.replicateMsgStream.AsProducer([]string{rpcRequestChannel})
+	node.replicateMsgStream.AsProducer(ctx, []string{rpcRequestChannel})
 
 	Params.Save(Params.ProxyCfg.MaxTaskNum.Key, "1000")
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
@@ -955,7 +955,7 @@ func TestProxyCreateDatabase(t *testing.T) {
 	rpcRequestChannel := Params.CommonCfg.ReplicateMsgChannel.GetValue()
 	node.replicateMsgStream, err = node.factory.NewMsgStream(node.ctx)
 	assert.NoError(t, err)
-	node.replicateMsgStream.AsProducer([]string{rpcRequestChannel})
+	node.replicateMsgStream.AsProducer(ctx, []string{rpcRequestChannel})
 
 	t.Run("create database fail", func(t *testing.T) {
 		rc := mocks.NewMockRootCoordClient(t)
@@ -1015,7 +1015,7 @@ func TestProxyDropDatabase(t *testing.T) {
 	rpcRequestChannel := Params.CommonCfg.ReplicateMsgChannel.GetValue()
 	node.replicateMsgStream, err = node.factory.NewMsgStream(node.ctx)
 	assert.NoError(t, err)
-	node.replicateMsgStream.AsProducer([]string{rpcRequestChannel})
+	node.replicateMsgStream.AsProducer(ctx, []string{rpcRequestChannel})
 
 	t.Run("drop database fail", func(t *testing.T) {
 		rc := mocks.NewMockRootCoordClient(t)
@@ -1279,6 +1279,9 @@ func TestProxy_Delete(t *testing.T) {
 		},
 	}
 	schema := newSchemaInfo(collSchema)
+	basicInfo := &collectionInfo{
+		collID: collectionID,
+	}
 	paramtable.Init()
 
 	t.Run("delete run failed", func(t *testing.T) {
@@ -1311,6 +1314,7 @@ func TestProxy_Delete(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(partitionID, nil)
+		cache.On("GetCollectionInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(basicInfo, nil)
 		chMgr.On("getVChannels", mock.Anything).Return(channels, nil)
 		chMgr.On("getChannels", mock.Anything).Return(nil, fmt.Errorf("mock error"))
 		globalMetaCache = cache
@@ -1496,13 +1500,13 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 		factory := newMockMsgStreamFactory()
 		msgStreamObj := msgstream.NewMockMsgStream(t)
 		msgStreamObj.EXPECT().SetRepackFunc(mock.Anything).Return()
-		msgStreamObj.EXPECT().AsProducer(mock.Anything).Return()
-		msgStreamObj.EXPECT().EnableProduce(mock.Anything).Return()
+		msgStreamObj.EXPECT().AsProducer(mock.Anything, mock.Anything).Return()
+		msgStreamObj.EXPECT().ForceEnableProduce(mock.Anything).Return()
 		msgStreamObj.EXPECT().Close().Return()
 		mockMsgID1 := mqcommon.NewMockMessageID(t)
 		mockMsgID2 := mqcommon.NewMockMessageID(t)
 		mockMsgID2.EXPECT().Serialize().Return([]byte("mock message id 2"))
-		broadcastMock := msgStreamObj.EXPECT().Broadcast(mock.Anything).Return(map[string][]mqcommon.MessageID{
+		broadcastMock := msgStreamObj.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(map[string][]mqcommon.MessageID{
 			"unit_test_replicate_message": {mockMsgID1, mockMsgID2},
 		}, nil)
 
@@ -1581,7 +1585,7 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 
 		{
 			broadcastMock.Unset()
-			broadcastMock = msgStreamObj.EXPECT().Broadcast(mock.Anything).Return(nil, errors.New("mock error: broadcast"))
+			broadcastMock = msgStreamObj.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(nil, errors.New("mock error: broadcast"))
 			resp, err := node.ReplicateMessage(context.TODO(), replicateRequest)
 			assert.NoError(t, err)
 			assert.NotEqualValues(t, 0, resp.GetStatus().GetCode())
@@ -1590,7 +1594,7 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 		}
 		{
 			broadcastMock.Unset()
-			broadcastMock = msgStreamObj.EXPECT().Broadcast(mock.Anything).Return(map[string][]mqcommon.MessageID{
+			broadcastMock = msgStreamObj.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(map[string][]mqcommon.MessageID{
 				"unit_test_replicate_message": {},
 			}, nil)
 			resp, err := node.ReplicateMessage(context.TODO(), replicateRequest)
@@ -1862,4 +1866,331 @@ func TestRegisterRestRouter(t *testing.T) {
 			assert.Equal(t, tt.statusCode, w.Code)
 		})
 	}
+}
+
+func TestReplicateMessageForCollectionMode(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	insertMsg := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{
+			BeginTimestamp: 10,
+			EndTimestamp:   10,
+			HashValues:     []uint32{0},
+			MsgPosition: &msgstream.MsgPosition{
+				ChannelName: "foo",
+				MsgID:       []byte("mock message id 2"),
+			},
+		},
+		InsertRequest: &msgpb.InsertRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Insert,
+				MsgID:     10001,
+				Timestamp: 10,
+				SourceID:  -1,
+			},
+			ShardName:      "foo_v1",
+			DbName:         "default",
+			CollectionName: "foo_collection",
+			PartitionName:  "_default",
+			DbID:           1,
+			CollectionID:   11,
+			PartitionID:    22,
+			SegmentID:      33,
+			Timestamps:     []uint64{10},
+			RowIDs:         []int64{66},
+			NumRows:        1,
+		},
+	}
+	insertMsgBytes, _ := insertMsg.Marshal(insertMsg)
+	deleteMsg := &msgstream.DeleteMsg{
+		BaseMsg: msgstream.BaseMsg{
+			BeginTimestamp: 20,
+			EndTimestamp:   20,
+			HashValues:     []uint32{0},
+			MsgPosition: &msgstream.MsgPosition{
+				ChannelName: "foo",
+				MsgID:       []byte("mock message id 2"),
+			},
+		},
+		DeleteRequest: &msgpb.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Delete,
+				MsgID:     10002,
+				Timestamp: 20,
+				SourceID:  -1,
+			},
+			ShardName:      "foo_v1",
+			DbName:         "default",
+			CollectionName: "foo_collection",
+			PartitionName:  "_default",
+			DbID:           1,
+			CollectionID:   11,
+			PartitionID:    22,
+		},
+	}
+	deleteMsgBytes, _ := deleteMsg.Marshal(deleteMsg)
+
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+
+	t.Run("replicate message in the replicate collection mode", func(t *testing.T) {
+		defer func() {
+			paramtable.Get().Reset(paramtable.Get().CommonCfg.TTMsgEnabled.Key)
+			paramtable.Get().Reset(paramtable.Get().CommonCfg.CollectionReplicateEnable.Key)
+		}()
+
+		{
+			paramtable.Get().Save(paramtable.Get().CommonCfg.TTMsgEnabled.Key, "true")
+			paramtable.Get().Save(paramtable.Get().CommonCfg.CollectionReplicateEnable.Key, "false")
+			p := &Proxy{}
+			p.UpdateStateCode(commonpb.StateCode_Healthy)
+			r, err := p.ReplicateMessage(ctx, &milvuspb.ReplicateMessageRequest{
+				ChannelName: "foo",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(r.Status))
+		}
+
+		{
+			paramtable.Get().Save(paramtable.Get().CommonCfg.TTMsgEnabled.Key, "false")
+			paramtable.Get().Save(paramtable.Get().CommonCfg.CollectionReplicateEnable.Key, "true")
+			p := &Proxy{}
+			p.UpdateStateCode(commonpb.StateCode_Healthy)
+			r, err := p.ReplicateMessage(ctx, &milvuspb.ReplicateMessageRequest{
+				ChannelName: "foo",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(r.Status))
+		}
+	})
+
+	t.Run("replicate message for the replicate collection mode", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.TTMsgEnabled.Key, "true")
+		paramtable.Get().Save(paramtable.Get().CommonCfg.CollectionReplicateEnable.Key, "true")
+		defer func() {
+			paramtable.Get().Reset(paramtable.Get().CommonCfg.TTMsgEnabled.Key)
+			paramtable.Get().Reset(paramtable.Get().CommonCfg.CollectionReplicateEnable.Key)
+		}()
+
+		mockCache := NewMockCache(t)
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Twice()
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Twice()
+		globalMetaCache = mockCache
+
+		{
+			p := &Proxy{
+				replicateStreamManager: NewReplicateStreamManager(context.Background(), nil, nil),
+			}
+			p.UpdateStateCode(commonpb.StateCode_Healthy)
+			r, err := p.ReplicateMessage(ctx, &milvuspb.ReplicateMessageRequest{
+				ChannelName: "foo",
+				Msgs:        [][]byte{insertMsgBytes.([]byte)},
+			})
+			assert.NoError(t, err)
+			assert.EqualValues(t, r.GetStatus().GetCode(), merr.Code(merr.ErrCollectionReplicateMode))
+		}
+
+		{
+			p := &Proxy{
+				replicateStreamManager: NewReplicateStreamManager(context.Background(), nil, nil),
+			}
+			p.UpdateStateCode(commonpb.StateCode_Healthy)
+			r, err := p.ReplicateMessage(ctx, &milvuspb.ReplicateMessageRequest{
+				ChannelName: "foo",
+				Msgs:        [][]byte{deleteMsgBytes.([]byte)},
+			})
+			assert.NoError(t, err)
+			assert.EqualValues(t, r.GetStatus().GetCode(), merr.Code(merr.ErrCollectionReplicateMode))
+		}
+	})
+}
+
+func TestAlterCollectionReplicateProperty(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.TTMsgEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.CollectionReplicateEnable.Key, "true")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.TTMsgEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.CollectionReplicateEnable.Key)
+	}()
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+		replicateID: "local-milvus",
+	}, nil).Maybe()
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(1, nil).Maybe()
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{}, nil)
+	globalMetaCache = mockCache
+
+	factory := newMockMsgStreamFactory()
+	msgStreamObj := msgstream.NewMockMsgStream(t)
+	msgStreamObj.EXPECT().SetRepackFunc(mock.Anything).Return().Maybe()
+	msgStreamObj.EXPECT().AsProducer(mock.Anything, mock.Anything).Return().Maybe()
+	msgStreamObj.EXPECT().ForceEnableProduce(mock.Anything).Return().Maybe()
+	msgStreamObj.EXPECT().Close().Return().Maybe()
+	mockMsgID1 := mqcommon.NewMockMessageID(t)
+	mockMsgID2 := mqcommon.NewMockMessageID(t)
+	mockMsgID2.EXPECT().Serialize().Return([]byte("mock message id 2")).Maybe()
+	msgStreamObj.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(map[string][]mqcommon.MessageID{
+		"alter_property": {mockMsgID1, mockMsgID2},
+	}, nil).Maybe()
+
+	factory.f = func(ctx context.Context) (msgstream.MsgStream, error) {
+		return msgStreamObj, nil
+	}
+	resourceManager := resource.NewManager(time.Second, 2*time.Second, nil)
+	manager := NewReplicateStreamManager(context.Background(), factory, resourceManager)
+
+	ctx := context.Background()
+	var startTt uint64 = 10
+	startTime := time.Now()
+	dataCoord := &mockDataCoord{}
+	dataCoord.expireTime = Timestamp(1000)
+	segAllocator, err := newSegIDAssigner(ctx, dataCoord, func() Timestamp {
+		return Timestamp(time.Since(startTime).Seconds()) + startTt
+	})
+	assert.NoError(t, err)
+	segAllocator.Start()
+
+	mockRootcoord := mocks.NewMockRootCoordClient(t)
+	mockRootcoord.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *rootcoordpb.AllocTimestampRequest, option ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
+		return &rootcoordpb.AllocTimestampResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			Timestamp: Timestamp(time.Since(startTime).Seconds()) + startTt,
+		}, nil
+	})
+	mockRootcoord.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(&commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil)
+
+	p := &Proxy{
+		ctx:                    ctx,
+		replicateStreamManager: manager,
+		segAssigner:            segAllocator,
+		rootCoord:              mockRootcoord,
+	}
+	tsoAllocatorIns := newMockTsoAllocator()
+	p.sched, err = newTaskScheduler(p.ctx, tsoAllocatorIns, p.factory)
+	assert.NoError(t, err)
+	p.sched.Start()
+	defer p.sched.Close()
+	p.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	getInsertMsgBytes := func(channel string, ts uint64) []byte {
+		insertMsg := &msgstream.InsertMsg{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: ts,
+				EndTimestamp:   ts,
+				HashValues:     []uint32{0},
+				MsgPosition: &msgstream.MsgPosition{
+					ChannelName: channel,
+					MsgID:       []byte("mock message id 2"),
+				},
+			},
+			InsertRequest: &msgpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Insert,
+					MsgID:     10001,
+					Timestamp: ts,
+					SourceID:  -1,
+				},
+				ShardName:      channel + "_v1",
+				DbName:         "default",
+				CollectionName: "foo_collection",
+				PartitionName:  "_default",
+				DbID:           1,
+				CollectionID:   11,
+				PartitionID:    22,
+				SegmentID:      33,
+				Timestamps:     []uint64{ts},
+				RowIDs:         []int64{66},
+				NumRows:        1,
+			},
+		}
+		insertMsgBytes, _ := insertMsg.Marshal(insertMsg)
+		return insertMsgBytes.([]byte)
+	}
+	getDeleteMsgBytes := func(channel string, ts uint64) []byte {
+		deleteMsg := &msgstream.DeleteMsg{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: ts,
+				EndTimestamp:   ts,
+				HashValues:     []uint32{0},
+				MsgPosition: &msgstream.MsgPosition{
+					ChannelName: "foo",
+					MsgID:       []byte("mock message id 2"),
+				},
+			},
+			DeleteRequest: &msgpb.DeleteRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Delete,
+					MsgID:     10002,
+					Timestamp: ts,
+					SourceID:  -1,
+				},
+				ShardName:      channel + "_v1",
+				DbName:         "default",
+				CollectionName: "foo_collection",
+				PartitionName:  "_default",
+				DbID:           1,
+				CollectionID:   11,
+				PartitionID:    22,
+			},
+		}
+		deleteMsgBytes, _ := deleteMsg.Marshal(deleteMsg)
+		return deleteMsgBytes.([]byte)
+	}
+
+	go func() {
+		// replicate message
+		var replicateResp *milvuspb.ReplicateMessageResponse
+		var err error
+		replicateResp, err = p.ReplicateMessage(ctx, &milvuspb.ReplicateMessageRequest{
+			ChannelName: "alter_property_1",
+			Msgs:        [][]byte{getInsertMsgBytes("alter_property_1", startTt+5)},
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(replicateResp.Status), replicateResp.Status.Reason)
+
+		replicateResp, err = p.ReplicateMessage(ctx, &milvuspb.ReplicateMessageRequest{
+			ChannelName: "alter_property_2",
+			Msgs:        [][]byte{getDeleteMsgBytes("alter_property_2", startTt+5)},
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(replicateResp.Status), replicateResp.Status.Reason)
+
+		time.Sleep(time.Second)
+
+		replicateResp, err = p.ReplicateMessage(ctx, &milvuspb.ReplicateMessageRequest{
+			ChannelName: "alter_property_1",
+			Msgs:        [][]byte{getInsertMsgBytes("alter_property_1", startTt+10)},
+		})
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(replicateResp.Status), replicateResp.Status.Reason)
+
+		replicateResp, err = p.ReplicateMessage(ctx, &milvuspb.ReplicateMessageRequest{
+			ChannelName: "alter_property_2",
+			Msgs:        [][]byte{getInsertMsgBytes("alter_property_2", startTt+10)},
+		})
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(replicateResp.Status), replicateResp.Status.Reason)
+	}()
+	time.Sleep(200 * time.Millisecond)
+
+	// alter collection property
+	statusResp, err := p.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         "default",
+		CollectionName: "foo_collection",
+		Properties: []*commonpb.KeyValuePair{
+			{
+				Key:   "replicate.endTS",
+				Value: "1",
+			},
+		},
+	})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(statusResp))
 }

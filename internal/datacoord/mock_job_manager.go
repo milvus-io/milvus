@@ -67,49 +67,51 @@ func (_c *MockStatsJobManager_DropStatsTask_Call) RunAndReturn(run func(int64, i
 	return _c
 }
 
-// GetStatsTaskState provides a mock function with given fields: originSegmentID, subJobType
-func (_m *MockStatsJobManager) GetStatsTaskState(originSegmentID int64, subJobType indexpb.StatsSubJob) indexpb.JobState {
+// GetStatsTask provides a mock function with given fields: originSegmentID, subJobType
+func (_m *MockStatsJobManager) GetStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) *indexpb.StatsTask {
 	ret := _m.Called(originSegmentID, subJobType)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetStatsTaskState")
+		panic("no return value specified for GetStatsTask")
 	}
 
-	var r0 indexpb.JobState
-	if rf, ok := ret.Get(0).(func(int64, indexpb.StatsSubJob) indexpb.JobState); ok {
+	var r0 *indexpb.StatsTask
+	if rf, ok := ret.Get(0).(func(int64, indexpb.StatsSubJob) *indexpb.StatsTask); ok {
 		r0 = rf(originSegmentID, subJobType)
 	} else {
-		r0 = ret.Get(0).(indexpb.JobState)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*indexpb.StatsTask)
+		}
 	}
 
 	return r0
 }
 
-// MockStatsJobManager_GetStatsTaskState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetStatsTaskState'
-type MockStatsJobManager_GetStatsTaskState_Call struct {
+// MockStatsJobManager_GetStatsTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetStatsTask'
+type MockStatsJobManager_GetStatsTask_Call struct {
 	*mock.Call
 }
 
-// GetStatsTaskState is a helper method to define mock.On call
+// GetStatsTask is a helper method to define mock.On call
 //   - originSegmentID int64
 //   - subJobType indexpb.StatsSubJob
-func (_e *MockStatsJobManager_Expecter) GetStatsTaskState(originSegmentID interface{}, subJobType interface{}) *MockStatsJobManager_GetStatsTaskState_Call {
-	return &MockStatsJobManager_GetStatsTaskState_Call{Call: _e.mock.On("GetStatsTaskState", originSegmentID, subJobType)}
+func (_e *MockStatsJobManager_Expecter) GetStatsTask(originSegmentID interface{}, subJobType interface{}) *MockStatsJobManager_GetStatsTask_Call {
+	return &MockStatsJobManager_GetStatsTask_Call{Call: _e.mock.On("GetStatsTask", originSegmentID, subJobType)}
 }
 
-func (_c *MockStatsJobManager_GetStatsTaskState_Call) Run(run func(originSegmentID int64, subJobType indexpb.StatsSubJob)) *MockStatsJobManager_GetStatsTaskState_Call {
+func (_c *MockStatsJobManager_GetStatsTask_Call) Run(run func(originSegmentID int64, subJobType indexpb.StatsSubJob)) *MockStatsJobManager_GetStatsTask_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(int64), args[1].(indexpb.StatsSubJob))
 	})
 	return _c
 }
 
-func (_c *MockStatsJobManager_GetStatsTaskState_Call) Return(_a0 indexpb.JobState) *MockStatsJobManager_GetStatsTaskState_Call {
+func (_c *MockStatsJobManager_GetStatsTask_Call) Return(_a0 *indexpb.StatsTask) *MockStatsJobManager_GetStatsTask_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockStatsJobManager_GetStatsTaskState_Call) RunAndReturn(run func(int64, indexpb.StatsSubJob) indexpb.JobState) *MockStatsJobManager_GetStatsTaskState_Call {
+func (_c *MockStatsJobManager_GetStatsTask_Call) RunAndReturn(run func(int64, indexpb.StatsSubJob) *indexpb.StatsTask) *MockStatsJobManager_GetStatsTask_Call {
 	_c.Call.Return(run)
 	return _c
 }

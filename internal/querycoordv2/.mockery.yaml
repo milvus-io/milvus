@@ -1,0 +1,39 @@
+quiet: False
+with-expecter: True
+inpackage: True
+filename: "mock_{{.InterfaceNameSnake}}.go"
+mockname: "Mock{{.InterfaceName}}"
+outpkg: "{{.PackageName}}"
+dir: "{{.InterfaceDir}}"
+packages:
+  github.com/milvus-io/milvus/internal/querycoordv2/balance:
+    interfaces:
+      Balance:
+        config:
+          filename: "mock_balancer.go"
+          mockname: "MockBalancer"
+  github.com/milvus-io/milvus/internal/querycoordv2/dist:
+    interfaces:
+      Controller:
+  github.com/milvus-io/milvus/internal/querycoordv2/meta:
+    interfaces:
+      Broker:
+      TargetManagerInterface:
+        config:
+          filename: "mock_target_manager.go"
+          mockname: "MockTargetManager"
+  github.com/milvus-io/milvus/internal/querycoordv2/session:
+    interfaces:
+      Cluster:
+  github.com/milvus-io/milvus/internal/querycoordv2/task:
+    interfaces:
+      Scheduler:
+  github.com/milvus-io/milvus/internal/proto/querypb:
+    interfaces:
+      QueryNodeServer:
+        config:
+          dir: "internal/querycoordv2/mocks"
+          inpackage: False
+          outpkg: "mocks"
+          filename: "mock_querynode.go"
+          mockname: "MockQueryNodeServer"
