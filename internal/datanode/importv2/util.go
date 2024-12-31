@@ -105,7 +105,7 @@ func NewSyncTask(ctx context.Context,
 
 func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache.MetaCache) (*datapb.ImportSegmentInfo, error) {
 	segmentID := syncTask.SegmentID()
-	insertBinlogs, statsBinlog, deltaLog := syncTask.(*syncmgr.SyncTask).Binlogs()
+	insertBinlogs, statsBinlog, deltaLog, bm25Log := syncTask.(*syncmgr.SyncTask).Binlogs()
 	metaCache := metaCaches[syncTask.ChannelName()]
 	segment, ok := metaCache.GetSegmentByID(segmentID)
 	if !ok {
@@ -120,6 +120,7 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 		ImportedRows: segment.FlushedRows(),
 		Binlogs:      lo.Values(insertBinlogs),
 		Statslogs:    lo.Values(statsBinlog),
+		Bm25Logs:     lo.Values(bm25Log),
 		Deltalogs:    deltaLogs,
 	}, nil
 }
