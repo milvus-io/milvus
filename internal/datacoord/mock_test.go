@@ -747,6 +747,10 @@ func (h *mockHandler) GetCollection(_ context.Context, collectionID UniqueID) (*
 	return &collectionInfo{ID: collectionID}, nil
 }
 
+func (h *mockHandler) GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView {
+	return nil
+}
+
 func newMockHandlerWithMeta(meta *meta) *mockHandler {
 	return &mockHandler{
 		meta: meta,

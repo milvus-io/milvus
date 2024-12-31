@@ -49,7 +49,7 @@ func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ..
 		if err != nil {
 			return err
 		}
-		resultSets, err = c.handleSearchResult(collection.Schema, req.GetOutputFields(), int(req.GetNq()), resp)
+		resultSets, err = c.handleSearchResult(collection.Schema, req.GetOutputFields(), int(resp.GetResults().GetNumQueries()), resp)
 
 		return err
 	})
@@ -158,8 +158,11 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 }
 
 func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...grpc.CallOption) (ResultSet, error) {
-	req := option.Request()
 	var resultSet ResultSet
+	req, err := option.Request()
+	if err != nil {
+		return resultSet, err
+	}
 
 	collection, err := c.getCollection(ctx, req.GetCollectionName())
 	if err != nil {
@@ -187,6 +190,37 @@ func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...g
 		return nil
 	})
 	return resultSet, err
+}
+
+func (c *Client) Get(ctx context.Context, option QueryOption, callOptions ...grpc.CallOption) (ResultSet, error) {
+	return c.Query(ctx, option, callOptions...)
+}
+
+func (c *Client) HybridSearch(ctx context.Context, option HybridSearchOption, callOptions ...grpc.CallOption) ([]ResultSet, error) {
+	req, err := option.HybridRequest()
+	if err != nil {
+		return nil, err
+	}
+
+	collection, err := c.getCollection(ctx, req.GetCollectionName())
+	if err != nil {
+		return nil, err
+	}
+
+	var resultSets []ResultSet
+
+	err = c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.HybridSearch(ctx, req, callOptions...)
+		err = merr.CheckRPCCall(resp, err)
+		if err != nil {
+			return err
+		}
+
+		resultSets, err = c.handleSearchResult(collection.Schema, req.GetOutputFields(), int(resp.GetResults().GetNumQueries()), resp)
+
+		return err
+	})
+	return resultSets, err
 }
 
 func expandWildcard(schema *entity.Schema, outputFields []string) ([]string, bool) {

@@ -157,7 +157,7 @@ ChunkedSegmentSealedImpl::WarmupChunkCache(const FieldId field_id,
 
     auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     for (const auto& data_path : field_info.insert_files) {
-        auto column = cc->Read(data_path, mmap_descriptor_, field_meta);
+        auto column = cc->Read(data_path, field_meta, mmap_enabled, true);
     }
 }
 
@@ -896,7 +896,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         // get index params for bm25 brute force
         std::map<std::string, std::string> index_info;
         if (search_info.metric_type_ == knowhere::metric::BM25) {
-            auto index_info =
+            index_info =
                 col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
         }
 
@@ -948,7 +948,7 @@ std::tuple<
                                                               descriptor,
                                                       const FieldMeta&
                                                           field_meta) {
-    auto column = cc->Read(data_path, descriptor, field_meta);
+    auto column = cc->Read(data_path, field_meta, true);
     cc->Prefetch(data_path);
     return {data_path, std::dynamic_pointer_cast<ChunkedColumnBase>(column)};
 }

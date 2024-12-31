@@ -9,6 +9,7 @@ import pytest
 
 
 class TestIssues(TestcaseBase):
+
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("par_key_field", [ct.default_int64_field_name])
     @pytest.mark.parametrize("use_upsert", [True, False])
@@ -76,3 +77,40 @@ class TestIssues(TestcaseBase):
                     dirty_count += 1
                     assert dirty_count == 0
             log.info(f"check randomly {seeds}/{num_entities}, dirty count={dirty_count}")
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_issue_32294(self):
+        """
+        Method：
+        1. create a collection with partition key on collection schema with customized num_partitions
+        2. randomly check 200 entities
+        2. verify partition key values are hashed into correct partitions
+        """
+        self._connect()
+        pk_field = cf.gen_int64_field(name='pk', is_primary=True)
+        string_field = cf.gen_string_field(name="metadata")
+        vector_field = cf.gen_float_vec_field()
+        schema = cf.gen_collection_schema(fields=[pk_field, string_field, vector_field], auto_id=True)
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # insert
+        nb = 500
+        string_values = [str(i) for i in range(0, nb)]
+        float_vec_values = gen_vectors(nb, ct.default_dim)
+        string_values[0] = ('{\n'
+                            '"Header 1": "Foo1?", \n'
+                            '"document_category": "acme", \n'
+                            '"type": "passage"\n'
+                            '}')
+        string_values[1] = '{"Header 1": "Foo1?", "document_category": "acme", "type": "passage"}'
+        data = [string_values, float_vec_values]
+        collection_w.insert(data)
+        collection_w.create_index(field_name=ct.default_float_vec_field_name, index_params=ct.default_index)
+        collection_w.load()
+
+        expr = "metadata like '%passage%'"
+        collection_w.search(float_vec_values[-2:], ct.default_float_vec_field_name, {},
+                            ct.default_limit, expr, output_fields=["metadata"],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 2,
+                                         "limit": 2})

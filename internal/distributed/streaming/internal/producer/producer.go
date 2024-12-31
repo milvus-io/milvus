@@ -15,8 +15,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var errGracefulShutdown = errors.New("graceful shutdown")
@@ -35,7 +35,7 @@ func NewResumableProducer(f factory, opts *ProducerOptions) *ResumableProducer {
 		cancel:         cancel,
 		stopResumingCh: make(chan struct{}),
 		resumingExitCh: make(chan struct{}),
-		lifetime:       lifetime.NewLifetime(lifetime.Working),
+		lifetime:       typeutil.NewLifetime(),
 		logger:         log.With(zap.String("pchannel", opts.PChannel)),
 		opts:           opts,
 
@@ -63,7 +63,7 @@ type ResumableProducer struct {
 	// A: cancel the ctx will cancel the underlying running producer.
 	// Use producer Close is better way to stop producer.
 
-	lifetime lifetime.Lifetime[lifetime.State]
+	lifetime *typeutil.Lifetime
 	logger   *log.MLogger
 	opts     *ProducerOptions
 
@@ -78,7 +78,7 @@ type ResumableProducer struct {
 
 // Produce produce a new message to log service.
 func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMessage) (result *producer.ProduceResult, err error) {
-	if p.lifetime.Add(lifetime.IsWorking) != nil {
+	if !p.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, errors.Wrapf(errs.ErrClosed, "produce on closed producer")
 	}
 	metricGuard := p.metrics.StartProduce(msg.EstimateSize())
@@ -185,7 +185,7 @@ func (p *ResumableProducer) createNewProducer() (producer.Producer, error) {
 
 // gracefulClose graceful close the producer.
 func (p *ResumableProducer) gracefulClose() error {
-	p.lifetime.SetState(lifetime.Stopped)
+	p.lifetime.SetState(typeutil.LifetimeStateStopped)
 	p.lifetime.Wait()
 	// close the stop resuming background to avoid create new producer.
 	close(p.stopResumingCh)

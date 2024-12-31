@@ -174,6 +174,70 @@ func (_c *NMockHandler_GetCollection_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// GetCurrentSegmentsView provides a mock function with given fields: ctx, channel, partitionIDs
+func (_m *NMockHandler) GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...int64) *SegmentsView {
+	_va := make([]interface{}, len(partitionIDs))
+	for _i := range partitionIDs {
+		_va[_i] = partitionIDs[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, channel)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCurrentSegmentsView")
+	}
+
+	var r0 *SegmentsView
+	if rf, ok := ret.Get(0).(func(context.Context, RWChannel, ...int64) *SegmentsView); ok {
+		r0 = rf(ctx, channel, partitionIDs...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*SegmentsView)
+		}
+	}
+
+	return r0
+}
+
+// NMockHandler_GetCurrentSegmentsView_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCurrentSegmentsView'
+type NMockHandler_GetCurrentSegmentsView_Call struct {
+	*mock.Call
+}
+
+// GetCurrentSegmentsView is a helper method to define mock.On call
+//   - ctx context.Context
+//   - channel RWChannel
+//   - partitionIDs ...int64
+func (_e *NMockHandler_Expecter) GetCurrentSegmentsView(ctx interface{}, channel interface{}, partitionIDs ...interface{}) *NMockHandler_GetCurrentSegmentsView_Call {
+	return &NMockHandler_GetCurrentSegmentsView_Call{Call: _e.mock.On("GetCurrentSegmentsView",
+		append([]interface{}{ctx, channel}, partitionIDs...)...)}
+}
+
+func (_c *NMockHandler_GetCurrentSegmentsView_Call) Run(run func(ctx context.Context, channel RWChannel, partitionIDs ...int64)) *NMockHandler_GetCurrentSegmentsView_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]int64, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(int64)
+			}
+		}
+		run(args[0].(context.Context), args[1].(RWChannel), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *NMockHandler_GetCurrentSegmentsView_Call) Return(_a0 *SegmentsView) *NMockHandler_GetCurrentSegmentsView_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *NMockHandler_GetCurrentSegmentsView_Call) RunAndReturn(run func(context.Context, RWChannel, ...int64) *SegmentsView) *NMockHandler_GetCurrentSegmentsView_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetDataVChanPositions provides a mock function with given fields: ch, partitionID
 func (_m *NMockHandler) GetDataVChanPositions(ch RWChannel, partitionID int64) *datapb.VchannelInfo {
 	ret := _m.Called(ch, partitionID)

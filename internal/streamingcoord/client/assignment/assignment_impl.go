@@ -13,8 +13,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // NewAssignmentService creates a new assignment service.
@@ -23,7 +23,7 @@ func NewAssignmentService(service lazygrpc.Service[streamingpb.StreamingCoordAss
 	s := &AssignmentServiceImpl{
 		ctx:            ctx,
 		cancel:         cancel,
-		lifetime:       lifetime.NewLifetime(lifetime.Working),
+		lifetime:       typeutil.NewLifetime(),
 		watcher:        newWatcher(),
 		service:        service,
 		resumingExitCh: make(chan struct{}),
@@ -38,7 +38,7 @@ func NewAssignmentService(service lazygrpc.Service[streamingpb.StreamingCoordAss
 type AssignmentServiceImpl struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
-	lifetime       lifetime.Lifetime[lifetime.State]
+	lifetime       *typeutil.Lifetime
 	watcher        *watcher
 	service        lazygrpc.Service[streamingpb.StreamingCoordAssignmentServiceClient]
 	resumingExitCh chan struct{}
@@ -49,7 +49,7 @@ type AssignmentServiceImpl struct {
 
 // AssignmentDiscover watches the assignment discovery.
 func (c *AssignmentServiceImpl) AssignmentDiscover(ctx context.Context, cb func(*types.VersionedStreamingNodeAssignments) error) error {
-	if c.lifetime.Add(lifetime.IsWorking) != nil {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("assignment service client is closing")
 	}
 	defer c.lifetime.Done()
@@ -59,7 +59,7 @@ func (c *AssignmentServiceImpl) AssignmentDiscover(ctx context.Context, cb func(
 
 // ReportAssignmentError reports the assignment error to server.
 func (c *AssignmentServiceImpl) ReportAssignmentError(ctx context.Context, pchannel types.PChannelInfo, assignmentErr error) error {
-	if c.lifetime.Add(lifetime.IsWorking) != nil {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("assignment service client is closing")
 	}
 	defer c.lifetime.Done()
@@ -75,7 +75,7 @@ func (c *AssignmentServiceImpl) ReportAssignmentError(ctx context.Context, pchan
 
 // Close closes the assignment service.
 func (c *AssignmentServiceImpl) Close() {
-	c.lifetime.SetState(lifetime.Stopped)
+	c.lifetime.SetState(typeutil.LifetimeStateStopped)
 	c.lifetime.Wait()
 
 	c.cancel()

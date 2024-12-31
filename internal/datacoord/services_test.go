@@ -499,7 +499,7 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 	s.testServer.cluster = mockCluster
 
 	schema := newTestSchema()
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
+	s.testServer.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}, VChannelNames: []string{"channel-1"}})
 	allocations, err := s.testServer.segmentManager.AllocSegment(context.TODO(), 0, 1, "channel-1", 1)
 	s.NoError(err)
 	s.EqualValues(1, len(allocations))

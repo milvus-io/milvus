@@ -107,8 +107,8 @@ func (psm *partitionStatsMeta) ListPartitionStatsInfos(collectionID int64, parti
 func (psm *partitionStatsMeta) SavePartitionStatsInfo(info *datapb.PartitionStatsInfo) error {
 	psm.Lock()
 	defer psm.Unlock()
-	if err := psm.catalog.SavePartitionStatsInfo(psm.ctx, info); err != nil {
-		log.Error("meta update: update PartitionStatsInfo info fail", zap.Error(err))
+	if err := psm.catalog.SavePartitionStatsInfo(context.TODO(), info); err != nil {
+		log.Ctx(context.TODO()).Error("meta update: update PartitionStatsInfo info fail", zap.Error(err))
 		return err
 	}
 	if _, ok := psm.partitionStatsInfos[info.GetVChannel()]; !ok {
@@ -127,8 +127,26 @@ func (psm *partitionStatsMeta) SavePartitionStatsInfo(info *datapb.PartitionStat
 func (psm *partitionStatsMeta) DropPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error {
 	psm.Lock()
 	defer psm.Unlock()
+	// if the dropping partitionStats is the current version, should update currentPartitionStats
+	currentVersion := psm.innerGetCurrentPartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel())
+	if currentVersion == info.GetVersion() && currentVersion != emptyPartitionStatsVersion {
+		infos := psm.partitionStatsInfos[info.GetVChannel()][info.GetPartitionID()].infos
+		if len(infos) > 0 {
+			var maxVersion int64 = 0
+			for version := range infos {
+				if version > maxVersion && version < currentVersion {
+					maxVersion = version
+				}
+			}
+			err := psm.innerSaveCurrentPartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), maxVersion)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	if err := psm.catalog.DropPartitionStatsInfo(ctx, info); err != nil {
-		log.Error("meta update: drop PartitionStatsInfo info fail",
+		log.Ctx(ctx).Error("meta update: drop PartitionStatsInfo info fail",
 			zap.Int64("collectionID", info.GetCollectionID()),
 			zap.Int64("partitionID", info.GetPartitionID()),
 			zap.String("vchannel", info.GetVChannel()),
@@ -155,8 +173,11 @@ func (psm *partitionStatsMeta) DropPartitionStatsInfo(ctx context.Context, info 
 func (psm *partitionStatsMeta) SaveCurrentPartitionStatsVersion(collectionID, partitionID int64, vChannel string, currentPartitionStatsVersion int64) error {
 	psm.Lock()
 	defer psm.Unlock()
+	return psm.innerSaveCurrentPartitionStatsVersion(collectionID, partitionID, vChannel, currentPartitionStatsVersion)
+}
 
-	log.Info("update current partition stats version", zap.Int64("collectionID", collectionID),
+func (psm *partitionStatsMeta) innerSaveCurrentPartitionStatsVersion(collectionID, partitionID int64, vChannel string, currentPartitionStatsVersion int64) error {
+	log.Ctx(context.TODO()).Info("update current partition stats version", zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 		zap.String("vChannel", vChannel), zap.Int64("currentPartitionStatsVersion", currentPartitionStatsVersion))
 
@@ -180,7 +201,10 @@ func (psm *partitionStatsMeta) SaveCurrentPartitionStatsVersion(collectionID, pa
 func (psm *partitionStatsMeta) GetCurrentPartitionStatsVersion(collectionID, partitionID int64, vChannel string) int64 {
 	psm.RLock()
 	defer psm.RUnlock()
+	return psm.innerGetCurrentPartitionStatsVersion(collectionID, partitionID, vChannel)
+}
 
+func (psm *partitionStatsMeta) innerGetCurrentPartitionStatsVersion(collectionID, partitionID int64, vChannel string) int64 {
 	if _, ok := psm.partitionStatsInfos[vChannel]; !ok {
 		return emptyPartitionStatsVersion
 	}
@@ -201,4 +225,17 @@ func (psm *partitionStatsMeta) GetPartitionStats(collectionID, partitionID int64
 		return nil
 	}
 	return psm.partitionStatsInfos[vChannel][partitionID].infos[version]
+}
+
+func (psm *partitionStatsMeta) GetChannelPartitionsStatsVersion(collectionID int64, vChannel string) map[int64]int64 {
+	psm.RLock()
+	defer psm.RUnlock()
+
+	result := make(map[int64]int64)
+	partitionsStats := psm.partitionStatsInfos[vChannel]
+	for partitionID, info := range partitionsStats {
+		result[partitionID] = info.currentVersion
+	}
+
+	return result
 }
