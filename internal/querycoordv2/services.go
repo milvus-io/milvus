@@ -159,15 +159,16 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 		if percentage < 0 {
 			err := meta.GlobalFailedLoadCache.Get(req.GetCollectionID())
 			if err != nil {
-				status := merr.Status(err)
-				log.Warn("show partition failed", zap.Error(err))
+				partitionErr := merr.WrapErrPartitionNotLoaded(partitionID, err.Error())
+				status := merr.Status(partitionErr)
+				log.Warn("show partition failed", zap.Error(partitionErr))
 				return &querypb.ShowPartitionsResponse{
 					Status: status,
 				}, nil
 			}
 
 			err = merr.WrapErrPartitionNotLoaded(partitionID)
-			log.Warn("show partitions failed", zap.Error(err))
+			log.Warn("show partition failed", zap.Error(err))
 			return &querypb.ShowPartitionsResponse{
 				Status: merr.Status(err),
 			}, nil
