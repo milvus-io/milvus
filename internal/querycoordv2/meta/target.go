@@ -60,6 +60,7 @@ func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[
 	}
 	return &CollectionTarget{
 		segments:           segments,
+		channel2Segments:   channel2Segments,
 		partition2Segments: partition2Segments,
 		dmChannels:         dmChannels,
 		partitions:         typeutil.NewSet(partitionIDs...),
