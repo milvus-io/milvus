@@ -836,7 +836,7 @@ func TestCreateVarcharArrayInvalidLength(t *testing.T) {
 	for _, invalidLength := range []int64{-1, 0, common.MaxLength + 1} {
 		arrayVarcharField.WithMaxLength(invalidLength)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-		common.CheckErr(t, err, false, "the maximum length specified for a VarChar should be in (0, 1048576]")
+		common.CheckErr(t, err, false, "the maximum length specified for a VarChar should be in (0, 65535]")
 	}
 }
 
@@ -858,7 +858,7 @@ func TestCreateVarcharInvalidLength(t *testing.T) {
 	for _, invalidLength := range []int64{-1, 0, common.MaxLength + 1} {
 		varcharField.WithMaxLength(invalidLength)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-		common.CheckErr(t, err, false, "the maximum length specified for a VarChar should be in (0, 1048576]")
+		common.CheckErr(t, err, false, "the maximum length specified for a VarChar should be in (0, 65535]")
 	}
 }
 
