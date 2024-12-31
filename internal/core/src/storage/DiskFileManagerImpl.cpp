@@ -285,7 +285,7 @@ DiskFileManagerImpl::CacheIndexToDisk(
                 auto index_size = index_data->DataSize();
                 auto chunk_data = reinterpret_cast<uint8_t*>(
                     const_cast<void*>(index_data->Data()));
-                auto written = file.Write(chunk_data, index_size);
+                file.Write(chunk_data, index_size);
             }
             batch_remote_files.clear();
         };
@@ -353,7 +353,7 @@ DiskFileManagerImpl::CacheTextLogToDisk(
             auto index_size = index_data->Size();
             auto chunk_data = reinterpret_cast<uint8_t*>(
                 const_cast<void*>(index_data->Data()));
-            auto written = file.Write(chunk_data, index_size);
+            file.Write(chunk_data, index_size);
         }
         local_paths_.emplace_back(local_index_file_name);
     }

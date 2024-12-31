@@ -113,8 +113,10 @@ TextMatchIndex::Upload(const Config& config) {
     for (auto& file : remote_mem_path_to_size) {
         index_files.emplace_back(file.first, file.second);
     }
-    return CreateIndexResult::New(mem_file_manager_->GetAddedTotalMemSize(),
-                                  std::move(index_files));
+    return CreateIndexResult::New(
+        mem_file_manager_->GetAddedTotalMemSize() +
+            disk_file_manager_->GetAddedTotalFileSize(),
+        std::move(index_files));
 }
 
 void
