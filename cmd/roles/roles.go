@@ -385,6 +385,9 @@ func (mr *MilvusRoles) Run() {
 		paramtable.SetRole(mr.ServerType)
 	}
 
+	// init tracer before run any component
+	tracer.Init()
+
 	// Initialize streaming service if enabled.
 	if streamingutil.IsStreamingServiceEnabled() {
 		streaming.Init()
@@ -518,7 +521,6 @@ func (mr *MilvusRoles) Run() {
 		return nil
 	})
 
-	tracer.Init()
 	paramtable.Get().WatchKeyPrefix("trace", config.NewHandler("tracing handler", func(e *config.Event) {
 		params := paramtable.Get()
 
