@@ -1462,7 +1462,7 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if collLoaded {
-		loaded, err := isPartitionLoaded(ctx, t.queryCoord, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, t.queryCoord, collID, partID)
 		if err != nil {
 			return err
 		}
