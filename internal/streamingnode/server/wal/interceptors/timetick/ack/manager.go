@@ -8,13 +8,12 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // AckManager manages the timestampAck.
 type AckManager struct {
-	cond                  *syncutil.ContextCond
+	mu                    sync.Mutex
 	lastAllocatedTimeTick uint64                // The last allocated time tick, the latest timestamp allocated by the allocator.
 	lastConfirmedTimeTick uint64                // The last confirmed time tick, the message which time tick less than lastConfirmedTimeTick has been committed into wal.
 	notAckHeap            typeutil.Heap[*Acker] // A minimum heap of timestampAck to search minimum allocated but not ack timestamp in list.
@@ -34,7 +33,7 @@ func NewAckManager(
 	metrics *metricsutil.TimeTickMetrics,
 ) *AckManager {
 	return &AckManager{
-		cond:                  syncutil.NewContextCond(&sync.Mutex{}),
+		mu:                    sync.Mutex{},
 		lastAllocatedTimeTick: 0,
 		notAckHeap:            typeutil.NewHeap[*Acker](&ackersOrderByTimestamp{}),
 		ackHeap:               typeutil.NewHeap[*Acker](&ackersOrderByEndTimestamp{}),
@@ -46,23 +45,18 @@ func NewAckManager(
 
 // AllocateWithBarrier allocates a timestamp with a barrier.
 func (ta *AckManager) AllocateWithBarrier(ctx context.Context, barrierTimeTick uint64) (*Acker, error) {
-	// wait until the lastConfirmedTimeTick is greater than barrierTimeTick.
-	ta.cond.L.Lock()
-	for ta.lastConfirmedTimeTick <= barrierTimeTick {
-		if err := ta.cond.Wait(ctx); err != nil {
-			return nil, err
-		}
+	// Just make a barrier to the underlying allocator.
+	if err := resource.Resource().TSOAllocator().BarrierUntil(ctx, barrierTimeTick); err != nil {
+		return nil, err
 	}
-	ta.cond.L.Unlock()
-
 	return ta.Allocate(ctx)
 }
 
 // Allocate allocates a timestamp.
 // Concurrent safe to call with Sync and Allocate.
 func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
-	ta.cond.L.Lock()
-	defer ta.cond.L.Unlock()
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
 
 	// allocate one from underlying allocator first.
 	ts, err := resource.Resource().TSOAllocator().Allocate(ctx)
@@ -97,8 +91,8 @@ func (ta *AckManager) SyncAndGetAcknowledged(ctx context.Context) ([]*AckDetail,
 	}
 	tsWithAck.Ack(OptSync())
 
-	ta.cond.L.Lock()
-	defer ta.cond.L.Unlock()
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
 
 	details := ta.acknowledgedDetails
 	ta.acknowledgedDetails = make(sortedDetails, 0, 5)
@@ -107,8 +101,8 @@ func (ta *AckManager) SyncAndGetAcknowledged(ctx context.Context) ([]*AckDetail,
 
 // ack marks the timestamp as acknowledged.
 func (ta *AckManager) ack(acker *Acker) {
-	ta.cond.L.Lock()
-	defer ta.cond.L.Unlock()
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
 
 	acker.acknowledged = true
 	acker.detail.EndTimestamp = ta.lastAllocatedTimeTick
@@ -128,9 +122,6 @@ func (ta *AckManager) popUntilLastAllAcknowledged() {
 	if len(acknowledgedDetails) == 0 {
 		return
 	}
-
-	// broadcast to notify the last confirmed timetick updated.
-	ta.cond.UnsafeBroadcast()
 
 	// update last confirmed time tick.
 	ta.lastConfirmedTimeTick = acknowledgedDetails[len(acknowledgedDetails)-1].BeginTimestamp

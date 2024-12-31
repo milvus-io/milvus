@@ -69,6 +69,11 @@ const (
 	OffsetKey            = "offset"
 	LimitKey             = "limit"
 
+	SearchIterV2Key        = "search_iter_v2"
+	SearchIterBatchSizeKey = "search_iter_batch_size"
+	SearchIterLastBoundKey = "search_iter_last_bound"
+	SearchIterIdKey        = "search_iter_id"
+
 	InsertTaskName                = "InsertTask"
 	CreateCollectionTaskName      = "CreateCollectionTask"
 	DropCollectionTaskName        = "DropCollectionTask"
@@ -1457,7 +1462,7 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if collLoaded {
-		loaded, err := isPartitionLoaded(ctx, t.queryCoord, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, t.queryCoord, collID, partID)
 		if err != nil {
 			return err
 		}
