@@ -24,6 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -310,7 +311,8 @@ func (suite *ServiceSuite) TestShowPartitions() {
 			meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
 			resp, err = server.ShowPartitions(ctx, req)
 			suite.NoError(err)
-			suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
+			err := merr.CheckRPCCall(resp, err)
+			assert.True(suite.T(), errors.Is(err, merr.ErrPartitionNotLoaded))
 			meta.GlobalFailedLoadCache.Remove(collection)
 			err = suite.meta.CollectionManager.PutCollection(ctx, colBak)
 			suite.NoError(err)
@@ -322,7 +324,8 @@ func (suite *ServiceSuite) TestShowPartitions() {
 			meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
 			resp, err = server.ShowPartitions(ctx, req)
 			suite.NoError(err)
-			suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
+			err := merr.CheckRPCCall(resp, err)
+			assert.True(suite.T(), errors.Is(err, merr.ErrPartitionNotLoaded))
 			meta.GlobalFailedLoadCache.Remove(collection)
 			err = suite.meta.CollectionManager.PutPartition(ctx, parBak)
 			suite.NoError(err)
