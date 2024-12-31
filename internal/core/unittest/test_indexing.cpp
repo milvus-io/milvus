@@ -494,6 +494,11 @@ TEST_P(IndexTest, BuildAndQuery) {
     vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
 
     auto index_files = create_index_result->GetIndexFiles();
+    auto memSize = create_index_result->GetMemSize();
+    auto serializedSize = create_index_result->GetSerializedSize();
+    ASSERT_GT(memSize, 0);
+    ASSERT_GT(serializedSize, 0);
+    ASSERT_GT(memSize, serializedSize);
     load_conf = generate_load_conf(index_type, metric_type, 0);
     load_conf["index_files"] = index_files;
     ASSERT_NO_THROW(vec_index->Load(milvus::tracer::TraceContext{}, load_conf));
@@ -559,6 +564,11 @@ TEST_P(IndexTest, Mmap) {
     vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
 
     auto index_files = create_index_result->GetIndexFiles();
+    auto memSize = create_index_result->GetMemSize();
+    auto serializedSize = create_index_result->GetSerializedSize();
+    ASSERT_GT(memSize, 0);
+    ASSERT_GT(serializedSize, 0);
+    ASSERT_GT(memSize, serializedSize);
     load_conf = generate_load_conf(index_type, metric_type, 0);
     load_conf["index_files"] = index_files;
     load_conf["mmap_filepath"] = "mmap/test_index_mmap_" + index_type;
@@ -607,6 +617,11 @@ TEST_P(IndexTest, GetVector) {
     auto create_index_result = index->Upload();
     index.reset();
     auto index_files = create_index_result->GetIndexFiles();
+    auto memSize = create_index_result->GetMemSize();
+    auto serializedSize = create_index_result->GetSerializedSize();
+    ASSERT_GT(memSize, 0);
+    ASSERT_GT(serializedSize, 0);
+    ASSERT_GT(memSize, serializedSize);
     new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     load_conf = generate_load_conf(index_type, metric_type, 0);
@@ -705,6 +720,11 @@ TEST_P(IndexTest, GetVector_EmptySparseVector) {
     auto create_index_result = index->Upload();
     index.reset();
     auto index_files = create_index_result->GetIndexFiles();
+    auto memSize = create_index_result->GetMemSize();
+    auto serializedSize = create_index_result->GetSerializedSize();
+    ASSERT_GT(memSize, 0);
+    ASSERT_GT(serializedSize, 0);
+    ASSERT_GT(memSize, serializedSize);
     new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     load_conf = generate_load_conf(index_type, metric_type, 0);
@@ -777,6 +797,11 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
 
     // serialize and load disk index, disk index can only be search after loading for now
     auto create_index_result = index->Upload();
+    auto memSize = create_index_result->GetMemSize();
+    auto serializedSize = create_index_result->GetSerializedSize();
+    ASSERT_GT(memSize, 0);
+    ASSERT_GT(serializedSize, 0);
+    ASSERT_GT(memSize, serializedSize);
     auto index_files = create_index_result->GetIndexFiles();
     index.reset();
 
@@ -857,6 +882,11 @@ TEST(Indexing, SearchDiskAnnWithFloat16) {
 
     // serialize and load disk index, disk index can only be search after loading for now
     auto create_index_result = index->Upload();
+    auto memSize = create_index_result->GetMemSize();
+    auto serializedSize = create_index_result->GetSerializedSize();
+    ASSERT_GT(memSize, 0);
+    ASSERT_GT(serializedSize, 0);
+    ASSERT_GT(memSize, serializedSize);
     auto index_files = create_index_result->GetIndexFiles();
     index.reset();
 
@@ -936,6 +966,11 @@ TEST(Indexing, SearchDiskAnnWithBFloat16) {
 
     // serialize and load disk index, disk index can only be search after loading for now
     auto create_index_result = index->Upload();
+    auto memSize = create_index_result->GetMemSize();
+    auto serializedSize = create_index_result->GetSerializedSize();
+    ASSERT_GT(memSize, 0);
+    ASSERT_GT(serializedSize, 0);
+    ASSERT_GT(memSize, serializedSize);
     auto index_files = create_index_result->GetIndexFiles();
     index.reset();
 

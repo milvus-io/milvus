@@ -194,6 +194,11 @@ test_run() {
         index->Build();
 
         auto create_index_result = index->Upload();
+        auto memSize = create_index_result->GetMemSize();
+        auto serializedSize = create_index_result->GetSerializedSize();
+        ASSERT_GT(memSize, 0);
+        ASSERT_GT(serializedSize, 0);
+        ASSERT_GT(memSize, serializedSize);
         index_files = create_index_result->GetIndexFiles();
     }
 
@@ -465,7 +470,12 @@ test_string() {
         index->Build();
 
         auto create_index_result = index->Upload();
-        auto index_files = create_index_result->GetIndexFiles();
+        auto memSize = create_index_result->GetMemSize();
+        auto serializedSize = create_index_result->GetSerializedSize();
+        ASSERT_GT(memSize, 0);
+        ASSERT_GT(serializedSize, 0);
+        ASSERT_GT(memSize, serializedSize);
+        index_files = create_index_result->GetIndexFiles();
     }
 
     {
