@@ -57,12 +57,21 @@ res = client.insert(collection_name="demo_collection", data=data)
 Perform vector search:
 
 ```python
+from pymilvus import model
+
+# Other embedding functions can be found in the official documentation https://milvus.io/docs
+
+embedding_fn = model.hybrid.BGEM3EmbeddingFunction(
+    model_name='BAAI/bge-m3', # Specify t°he model name
+    device='cpu', # Specify the device to use, e.g., ‘cpu' or ‘cuda:0'
+    use_fp16=False # Whether to use fp16. “False for “device='cpu'
+
 query_vectors = embedding_fn.encode_queries(["Who is Alan Turing?", "What is AI?"])
 res = client.search(
-    collection_name="demo_collection",  # target collection
-    data=query_vectors,  # a list of one or more query vectors, supports batch
-    limit=2,  # how many results to return (topK)
-    output_fields=["vector", "text", "subject"],  # what fields to return
+    collection_name="demo_collection", # target collection
+    data=query_vectors, # a list of one or more query vectors, supports batch
+    limit=2, # how many results to return (topK)
+    output_fields=["vector", "text", "subject"], # what fields to return
 )
 ```
 
