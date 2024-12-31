@@ -1194,8 +1194,9 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 				return merr.WrapErrParameterInvalid("%s should be an integer, but got %T", prop.Key, prop.Value)
 			}
 
-			if value > defaultMaxVarCharLength {
-				return merr.WrapErrParameterInvalid("%s exceeds the maximum allowed value 65535", prop.Value)
+			defaultMaxVarCharLength := Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
+			if int64(value) > defaultMaxVarCharLength {
+				return merr.WrapErrParameterInvalidMsg("%s exceeds the maximum allowed value %s", prop.Value, strconv.FormatInt(defaultMaxVarCharLength, 10))
 			}
 		}
 	}
