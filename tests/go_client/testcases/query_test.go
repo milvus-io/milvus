@@ -165,7 +165,6 @@ func TestQueryWithoutExpr(t *testing.T) {
 // test query with part not existed field ["aa", "$meat"]: error or as dynamic field
 // test query with repeated field: ["*", "$meat"], ["floatVec", floatVec"] unique field
 func TestQueryOutputFields(t *testing.T) {
-	t.Skip("verify TODO")
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
@@ -193,16 +192,17 @@ func TestQueryOutputFields(t *testing.T) {
 			common.CheckErr(t, err1, false, "not exist")
 		}
 
-		// query with not existed field -> output field as dynamic or error
+		// query with not existed field -> output empty data field as dynamic or error
 		fakeName := "aaa"
 		res2, err2 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(expr).WithOutputFields(fakeName))
 		if enableDynamic {
 			common.CheckErr(t, err2, true)
 			for _, c := range res2.Fields {
-				log.Debug("data", zap.String("name", c.Name()), zap.Any("type", c.Type()), zap.Any("data", c.FieldData()))
+				log.Info("data", zap.String("name", c.Name()), zap.Any("type", c.Type()), zap.Any("data", c.FieldData()))
 			}
 			common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, fakeName}, res2.Fields)
-			dynamicColumn := hp.MergeColumnsToDynamic(10, hp.GenDynamicColumnData(0, 10), common.DefaultDynamicFieldName)
+			dynamicColumn := hp.MergeColumnsToDynamic(10, []column.Column{}, common.DefaultDynamicFieldName)
+			// dynamicColumn := hp.MergeColumnsToDynamic(10, hp.GenDynamicColumnData(0, 10), common.DefaultDynamicFieldName)
 			expColumns := []column.Column{
 				hp.GenColumnData(10, entity.FieldTypeInt64, *hp.TNewDataOption()),
 				column.NewColumnDynamic(dynamicColumn, fakeName),
