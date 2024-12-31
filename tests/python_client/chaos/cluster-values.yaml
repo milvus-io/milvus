@@ -6,9 +6,15 @@ image:
   all:
     repository: milvusdb/milvus
     tag: master-latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
 
 indexNode:
+  resources:
+    requests:
+      cpu: 2
+    limits:
+      cpu: 8
+proxy:
   resources:
     requests:
       cpu: 2
@@ -27,119 +33,11 @@ minio:
       memory: 256Mi
 
 kafka:
-  enabled: false
+  enabled: true
   name: kafka
   replicaCount: 3
   defaultReplicationFactor: 2
-
 pulsar:
-  enabled: true
-  extra:
-    bastion: no
-    wsproxy: no
-
-  autorecovery:
-    resources:
-      requests:
-        cpu: 0.1
-        memory: 256Mi
-  proxy:
-    replicaCount: 1
-    resources:
-      requests:
-        cpu: 0.1
-        memory: 256Mi
-    wsResources:
-      requests:
-        memory: 256Mi
-        cpu: 0.1
-    configData:
-      PULSAR_MEM: >
-        -Xms256m -Xmx256m
-      PULSAR_GC: >
-        -XX:MaxDirectMemorySize=512m
-      httpNumThreads: "50"
-
-  bookkeeper:
-    replicaCount: 2
-    resources:
-      requests:
-        cpu: 0.1
-        memory: 512Mi
-    configData:
-      PULSAR_MEM: >
-        -Xms512m
-        -Xmx512m
-        -XX:MaxDirectMemorySize=1024m
-      PULSAR_GC: >
-        -Dio.netty.leakDetectionLevel=disabled
-        -Dio.netty.recycler.linkCapacity=1024
-        -XX:+UseG1GC -XX:MaxGCPauseMillis=10
-        -XX:+ParallelRefProcEnabled
-        -XX:+UnlockExperimentalVMOptions
-        -XX:+DoEscapeAnalysis
-        -XX:ParallelGCThreads=32
-        -XX:ConcGCThreads=32
-        -XX:G1NewSizePercent=50
-        -XX:+DisableExplicitGC
-        -XX:-ResizePLAB
-        -XX:+ExitOnOutOfMemoryError
-        -XX:+PerfDisableSharedMem
-        -XX:+PrintGCDetails
-      nettyMaxFrameSizeBytes: "104867840"
-  zookeeper:
-    replicaCount: 1
-    resources:
-      requests:
-        cpu: 0.1
-        memory: 256Mi
-    configData:
-      PULSAR_MEM: >
-        -Xms512m
-        -Xmx512m
-      PULSAR_GC: >
-        -Dcom.sun.management.jmxremote
-        -Djute.maxbuffer=10485760
-        -XX:+ParallelRefProcEnabled
-        -XX:+UnlockExperimentalVMOptions
-        -XX:+DoEscapeAnalysis
-        -XX:+DisableExplicitGC
-        -XX:+PerfDisableSharedMem
-        -Dzookeeper.forceSync=no
-  broker:
-    replicaCount: 1
-    resources:
-      requests:
-        cpu: 0.1
-        memory: 512Mi
-    configData:
-      PULSAR_MEM: >
-        -Xms512m
-        -Xmx512m
-        -XX:MaxDirectMemorySize=1024m
-      PULSAR_GC: >
-        -Dio.netty.leakDetectionLevel=disabled
-        -Dio.netty.recycler.linkCapacity=1024
-        -XX:+ParallelRefProcEnabled
-        -XX:+UnlockExperimentalVMOptions
-        -XX:+DoEscapeAnalysis
-        -XX:ParallelGCThreads=32
-        -XX:ConcGCThreads=32
-        -XX:G1NewSizePercent=50
-        -XX:+DisableExplicitGC
-        -XX:-ResizePLAB
-        -XX:+ExitOnOutOfMemoryError
-      maxMessageSize: "104857600"
-      defaultRetentionTimeInMinutes: "10080"
-      defaultRetentionSizeInMB: "8192"
-      backlogQuotaDefaultLimitGB: "8"
-      backlogQuotaDefaultRetentionPolicy: producer_exception
-
-extraConfigFiles:
-  user.yaml: |+
-    dataCoord:
-      compaction:
-        indexBasedCompaction: false
-    indexCoord:
-      scheduler:
-        interval: 100        
+  enabled: false
+pulsarv3:
+  enabled: false
