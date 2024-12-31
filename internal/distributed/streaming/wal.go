@@ -12,12 +12,15 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/client"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+var ErrWALAccesserClosed = status.NewOnShutdownError("wal accesser closed")
 
 // newWALAccesser creates a new wal accesser.
 func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
@@ -26,7 +29,7 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 	// Create a new streamingnode handler client.
 	handlerClient := handler.NewHandlerClient(streamingCoordClient.Assignment())
 	return &walAccesserImpl{
-		lifetime:                       lifetime.NewLifetime(lifetime.Working),
+		lifetime:                       typeutil.NewLifetime(),
 		streamingCoordAssignmentClient: streamingCoordClient,
 		handlerClient:                  handlerClient,
 		producerMutex:                  sync.Mutex{},
@@ -40,7 +43,7 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 
 // walAccesserImpl is the implementation of WALAccesser.
 type walAccesserImpl struct {
-	lifetime lifetime.Lifetime[lifetime.State]
+	lifetime *typeutil.Lifetime
 
 	// All services
 	streamingCoordAssignmentClient client.Client
@@ -52,11 +55,15 @@ type walAccesserImpl struct {
 	dispatchExecutionPool *conc.Pool[struct{}]
 }
 
+func (w *walAccesserImpl) WALName() string {
+	return util.MustSelectWALName()
+}
+
 // RawAppend writes a record to the log.
 func (w *walAccesserImpl) RawAppend(ctx context.Context, msg message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error) {
 	assertValidMessage(msg)
-	if err := w.lifetime.Add(lifetime.IsWorking); err != nil {
-		return nil, status.NewOnShutdownError("wal accesser closed, %s", err.Error())
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrWALAccesserClosed
 	}
 	defer w.lifetime.Done()
 
@@ -66,10 +73,11 @@ func (w *walAccesserImpl) RawAppend(ctx context.Context, msg message.MutableMess
 
 // Read returns a scanner for reading records from the wal.
 func (w *walAccesserImpl) Read(_ context.Context, opts ReadOption) Scanner {
-	if err := w.lifetime.Add(lifetime.IsWorking); err != nil {
-		newErrScanner(status.NewOnShutdownError("wal accesser closed, %s", err.Error()))
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		newErrScanner(ErrWALAccesserClosed)
 	}
 	defer w.lifetime.Done()
+
 	if opts.VChannel == "" {
 		return newErrScanner(status.NewInvaildArgument("vchannel is required"))
 	}
@@ -87,8 +95,8 @@ func (w *walAccesserImpl) Read(_ context.Context, opts ReadOption) Scanner {
 }
 
 func (w *walAccesserImpl) Txn(ctx context.Context, opts TxnOption) (Txn, error) {
-	if err := w.lifetime.Add(lifetime.IsWorking); err != nil {
-		return nil, status.NewOnShutdownError("wal accesser closed, %s", err.Error())
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrWALAccesserClosed
 	}
 
 	if opts.VChannel == "" {
@@ -131,7 +139,7 @@ func (w *walAccesserImpl) Txn(ctx context.Context, opts TxnOption) (Txn, error) 
 
 // Close closes all the wal accesser.
 func (w *walAccesserImpl) Close() {
-	w.lifetime.SetState(lifetime.Stopped)
+	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	w.lifetime.Wait()
 
 	w.producerMutex.Lock()

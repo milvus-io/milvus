@@ -49,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -64,7 +63,7 @@ const (
 	// enableMultipleVectorFields indicates whether to enable multiple vector fields.
 	enableMultipleVectorFields = true
 
-	defaultMaxVarCharLength = 65535
+	defaultMaxVarCharLength = 1048576
 
 	defaultMaxArrayCapacity = 4096
 
@@ -266,7 +265,7 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 		tagSize := len(partitionTag)
 		for i := 1; i < tagSize; i++ {
 			c := partitionTag[i]
-			if c != '_' && !isAlpha(c) && !isNumber(c) {
+			if c != '_' && !isAlpha(c) && !isNumber(c) && c != '-' {
 				msg := invalidMsg + "Partition name can only contain numbers, letters and underscores."
 				return errors.New(msg)
 			}
@@ -365,7 +364,7 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 			return err
 		}
 		if maxLengthPerRow > defaultMaxVarCharLength || maxLengthPerRow <= 0 {
-			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, 65535]")
+			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, 1048576]")
 		}
 		exist = true
 	}
@@ -1476,11 +1475,11 @@ func isCollectionLoaded(ctx context.Context, qc types.QueryCoordClient, collID i
 	return false, nil
 }
 
-func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64, partIDs []int64) (bool, error) {
+func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64, partID int64) (bool, error) {
 	// get all loading collections
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
 		CollectionID: collID,
-		PartitionIDs: partIDs,
+		PartitionIDs: []int64{partID},
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		// qc returns error if partition not loaded
@@ -1490,7 +1489,7 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID in
 		return false, err
 	}
 
-	return funcutil.SliceSetEqual(partIDs, resp.GetPartitionIDs()), nil
+	return true, nil
 }
 
 func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {

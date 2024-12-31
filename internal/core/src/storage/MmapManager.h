@@ -66,7 +66,10 @@ class MmapManager {
                 auto rcm = RemoteChunkManagerSingleton::GetInstance()
                                .GetRemoteChunkManager();
                 cc_ = std::make_shared<ChunkCache>(
-                    std::move(mmap_config_.cache_read_ahead_policy), rcm, mcm_);
+                    mmap_config_.mmap_path,
+                    std::move(mmap_config_.cache_read_ahead_policy),
+                    rcm,
+                    mcm_);
             }
             LOG_INFO("Init MmapConfig with MmapConfig: {}",
                      mmap_config_.ToString());

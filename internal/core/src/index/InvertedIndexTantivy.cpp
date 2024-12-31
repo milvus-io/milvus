@@ -70,12 +70,8 @@ get_tantivy_data_type(const proto::schema::FieldSchema& schema) {
 }
 
 template <typename T>
-InvertedIndexTantivy<T>::InvertedIndexTantivy(
-    const storage::FileManagerContext& ctx)
-    : ScalarIndex<T>(INVERTED_INDEX_TYPE),
-      schema_(ctx.fieldDataMeta.field_schema) {
-    mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
-    disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
+void
+InvertedIndexTantivy<T>::InitForBuildIndex() {
     auto field =
         std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
     auto prefix = disk_file_manager_->GetIndexIdentifier();
@@ -83,13 +79,26 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
     boost::filesystem::create_directories(path_);
     d_type_ = get_tantivy_data_type(schema_);
     if (tantivy_index_exist(path_.c_str())) {
-        LOG_INFO(
-            "index {} already exists, which should happen in loading progress",
-            path_);
-    } else {
-        wrapper_ = std::make_shared<TantivyIndexWrapper>(
-            field.c_str(), d_type_, path_.c_str());
+        PanicInfo(IndexBuildError,
+                  "build inverted index temp dir:{} not empty",
+                  path_);
     }
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        field.c_str(), d_type_, path_.c_str());
+}
+
+template <typename T>
+InvertedIndexTantivy<T>::InvertedIndexTantivy(
+    const storage::FileManagerContext& ctx)
+    : ScalarIndex<T>(INVERTED_INDEX_TYPE),
+      schema_(ctx.fieldDataMeta.field_schema) {
+    mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
+    disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
+    // push init wrapper to load process
+    if (ctx.for_loading_index) {
+        return;
+    }
+    InitForBuildIndex();
 }
 
 template <typename T>
@@ -97,6 +106,7 @@ InvertedIndexTantivy<T>::~InvertedIndexTantivy() {
     auto local_chunk_manager =
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto prefix = path_;
+    LOG_INFO("inverted index remove path:{}", path_);
     local_chunk_manager->RemoveDir(prefix);
 }
 
@@ -114,8 +124,10 @@ InvertedIndexTantivy<T>::Serialize(const Config& config) {
         new uint8_t[index_valid_data_length]);
     memcpy(index_valid_data.get(), null_offset.data(), index_valid_data_length);
     BinarySet res_set;
-    res_set.Append(
-        "index_null_offset", index_valid_data, index_valid_data_length);
+    if (index_valid_data_length > 0) {
+        res_set.Append(
+            "index_null_offset", index_valid_data, index_valid_data_length);
+    }
     milvus::Disassemble(res_set);
     return res_set;
 }
@@ -214,6 +226,7 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
                (size_t)index_valid_data->size);
     }
     disk_file_manager_->CacheIndexToDisk(files_value);
+    path_ = prefix;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str());
 }
 

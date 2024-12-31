@@ -47,8 +47,10 @@ type SyncMeta struct {
 //go:generate mockery --name=SyncManager --structname=MockSyncManager --output=./  --filename=mock_sync_manager.go --with-expecter --inpackage
 type SyncManager interface {
 	// SyncData is the method to submit sync task.
-	SyncData(ctx context.Context, task Task, callbacks ...func(error) error) *conc.Future[struct{}]
+	SyncData(ctx context.Context, task Task, callbacks ...func(error) error) (*conc.Future[struct{}], error)
 
+	// Close waits for the task to finish and then shuts down the sync manager.
+	Close() error
 	TaskStatsJSON() string
 }
 
@@ -97,13 +99,17 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 	}
 }
 
-func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
+func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+	if mgr.workerPool.IsClosed() {
+		return nil, fmt.Errorf("sync manager is closed")
+	}
+
 	switch t := task.(type) {
 	case *SyncTask:
 		t.WithChunkManager(mgr.chunkManager)
 	}
 
-	return mgr.safeSubmitTask(ctx, task, callbacks...)
+	return mgr.safeSubmitTask(ctx, task, callbacks...), nil
 }
 
 // safeSubmitTask submits task to SyncManager
@@ -118,6 +124,10 @@ func (mgr *syncManager) safeSubmitTask(ctx context.Context, task Task, callbacks
 
 func (mgr *syncManager) submit(ctx context.Context, key int64, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 	handler := func(err error) error {
+		taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
+		defer func() {
+			mgr.tasks.Remove(taskKey)
+		}()
 		if err == nil {
 			return nil
 		}
@@ -126,6 +136,7 @@ func (mgr *syncManager) submit(ctx context.Context, key int64, task Task, callba
 	}
 	callbacks = append([]func(error) error{handler}, callbacks...)
 	log.Info("sync mgr sumbit task with key", zap.Int64("key", key))
+
 	return mgr.Submit(ctx, key, task, callbacks...)
 }
 
@@ -141,4 +152,9 @@ func (mgr *syncManager) TaskStatsJSON() string {
 		return ""
 	}
 	return string(ret)
+}
+
+func (mgr *syncManager) Close() error {
+	timeout := paramtable.Get().CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second)
+	return mgr.workerPool.ReleaseTimeout(timeout)
 }

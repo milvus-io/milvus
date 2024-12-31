@@ -41,7 +41,7 @@ class BitsetView : public knowhere::BitsetView {
     }
 
     BitsetView(const BitsetType& bitset)  // NOLINT
-        : BitsetView((uint8_t*)(bitset.data()), size_t(bitset.size())) {
+        : BitsetView((uint8_t*)(bitset.data()), bitset.size()) {
     }
 
     BitsetView(const BitsetTypePtr& bitset_ptr) {  // NOLINT

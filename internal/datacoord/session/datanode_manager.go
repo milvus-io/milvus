@@ -229,8 +229,8 @@ func (c *DataNodeManagerImpl) SyncSegments(ctx context.Context, nodeID int64, re
 		zap.Int64("nodeID", nodeID),
 		zap.Int64("planID", req.GetPlanID()),
 	)
-	ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
-	cli, err := c.getClient(ctx, nodeID)
+	childCtx, cancel := context.WithTimeout(context.Background(), paramtable.Get().DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
+	cli, err := c.getClient(childCtx, nodeID)
 	cancel()
 	if err != nil {
 		log.Warn("failed to get client", zap.Error(err))

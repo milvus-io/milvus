@@ -18,6 +18,7 @@
 
 #include <arrow/record_batch.h>
 #include <cstdint>
+#include <utility>
 #include <vector>
 #include <memory>
 #include <utility>
@@ -33,11 +34,11 @@ namespace milvus::storage {
 class DataCodec {
  public:
     explicit DataCodec(FieldDataPtr data, CodecType type)
-        : field_data_(std::move(data)), codec_type_(type) {
+        : codec_type_(type), field_data_(std::move(data)) {
     }
 
     explicit DataCodec(std::shared_ptr<PayloadReader> reader, CodecType type)
-        : payload_reader_(reader), codec_type_(type) {
+        : codec_type_(type), payload_reader_(std::move(reader)) {
     }
 
     virtual ~DataCodec() = default;
@@ -87,7 +88,7 @@ class DataCodec {
 
     void
     SetData(std::shared_ptr<uint8_t[]> data) {
-        data_ = data;
+        data_ = std::move(data);
     }
 
  protected:

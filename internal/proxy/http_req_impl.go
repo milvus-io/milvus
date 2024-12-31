@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -340,7 +339,7 @@ func describeCollection(node *Proxy) gin.HandlerFunc {
 		collection := &metricsinfo.Collection{
 			CollectionID:         strconv.FormatInt(describeCollectionResp.CollectionID, 10),
 			CollectionName:       describeCollectionResp.CollectionName,
-			CreatedTime:          tsoutil.PhysicalTimeFormat(describeCollectionResp.CreatedUtcTimestamp),
+			CreatedTime:          typeutil.TimestampToString(describeCollectionResp.CreatedUtcTimestamp),
 			ShardsNum:            int(describeCollectionResp.ShardsNum),
 			ConsistencyLevel:     describeCollectionResp.ConsistencyLevel.String(),
 			Aliases:              describeCollectionResp.Aliases,

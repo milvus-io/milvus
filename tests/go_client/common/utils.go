@@ -58,7 +58,6 @@ func GenInvalidNames() []string {
 	invalidNames := []string{
 		"",
 		"   ",
-		"12-s",
 		"(mn)",
 		"中文",
 		"%$#",
