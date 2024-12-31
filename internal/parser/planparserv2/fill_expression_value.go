@@ -88,7 +88,7 @@ func FillUnaryRangeExpressionValue(expr *planpb.UnaryRangeExpr, templateValues m
 	if err != nil {
 		return err
 	}
-	expr.Value = []*planpb.GenericValue{castedValue}
+	expr.Value = castedValue
 	return nil
 }
 

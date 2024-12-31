@@ -1090,13 +1090,19 @@ VectorPtr
 PhyUnaryRangeFilterExpr::ExecTextMatch() {
     using Index = index::TextMatchIndex;
     auto query = GetValueFromProto<std::string>(expr_->val_);
+    int slop = 0;
+    if (expr_->op_type_ == proto::plan::PhraseMatch) {
+        // It should be larger than 0 in normal cases. Check it incase of receiving old version proto.
+        if (expr_->extra_values_.size() > 0) {
+            slop = GetValueFromProto<int64_t>(expr_->extra_values_[0]);
+        }
+    }
     auto op_type = expr_->op_type_;
-    auto func = [op_type](Index* index, const std::string& query) -> TargetBitmap {
+    auto func = [op_type, slop](Index* index, const std::string& query) -> TargetBitmap {
         if (op_type == proto::plan::OpType::TextMatch) {
             return index->MatchQuery(query);
         } else if (op_type == proto::plan::OpType::PhraseMatch) {
-            // todo(SpdeaA): make slop enable to be passed from client
-            return index->PhraseMatchQuery(query, 0 /* slop */);
+            return index->PhraseMatchQuery(query, slop);
         } else {
             PanicInfo(OpTypeInvalid,
                       "unsupported operator type for match query: {}", op_type);

@@ -347,8 +347,9 @@ class UnaryRangeFilterExpr : public ITypeFilterExpr {
  public:
     explicit UnaryRangeFilterExpr(const ColumnInfo& column,
                                   proto::plan::OpType op_type,
-                                  const proto::plan::GenericValue& val)
-        : ITypeFilterExpr(), column_(column), op_type_(op_type), val_(val) {
+                                  const proto::plan::GenericValue& val,
+                                  const std::vector<proto::plan::GenericValue>& extra_values)
+        : ITypeFilterExpr(), column_(column), op_type_(op_type), val_(val), extra_values_(extra_values) {
     }
 
     std::string
@@ -356,7 +357,17 @@ class UnaryRangeFilterExpr : public ITypeFilterExpr {
         std::stringstream ss;
         ss << "UnaryRangeFilterExpr: {columnInfo:" << column_.ToString()
            << " op_type:" << milvus::proto::plan::OpType_Name(op_type_)
-           << " val:" << val_.DebugString() << "}";
+           << " val:" << val_.DebugString() 
+           << " extra_values: [";
+
+        for (size_t i = 0; i < extra_values_.size(); i++) {
+            ss << extra_values_[i].DebugString();
+            if (i != extra_values_.size() - 1) {
+                ss << ", ";
+            }
+        }
+
+        ss << "]}";
         return ss.str();
     }
 
@@ -389,6 +400,7 @@ class UnaryRangeFilterExpr : public ITypeFilterExpr {
     const ColumnInfo column_;
     const proto::plan::OpType op_type_;
     const proto::plan::GenericValue val_;
+    const std::vector<proto::plan::GenericValue> extra_values_;
 };
 
 class AlwaysTrueExpr : public ITypeFilterExpr {

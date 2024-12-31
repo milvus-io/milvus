@@ -472,7 +472,7 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
 					ColumnInfo: column,
 					Op:         op,
-					Value:      []*planpb.GenericValue{NewString(operand)},
+					Value:      NewString(operand),
 				},
 			},
 		},
@@ -500,7 +500,7 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
 					ColumnInfo: toColumnInfo(column),
 					Op:         planpb.OpType_TextMatch,
-					Value:      []*planpb.GenericValue{NewString(queryText)},
+					Value:      NewString(queryText),
 				},
 			},
 		},
@@ -532,9 +532,10 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
-					ColumnInfo: toColumnInfo(column),
-					Op:         planpb.OpType_PhraseMatch,
-					Value:      []*planpb.GenericValue{NewString(queryText), NewInt(slop)},
+					ColumnInfo:  toColumnInfo(column),
+					Op:          planpb.OpType_PhraseMatch,
+					Value:       NewString(queryText),
+					ExtraValues: []*planpb.GenericValue{NewInt(slop)},
 				},
 			},
 		},

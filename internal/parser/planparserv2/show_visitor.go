@@ -123,7 +123,7 @@ func (v *ShowExprVisitor) VisitUnaryRangeExpr(expr *planpb.UnaryRangeExpr) inter
 	js["expr_type"] = "unary_range"
 	js["op"] = expr.Op.String()
 	js["column_info"] = extractColumnInfo(expr.GetColumnInfo())
-	// todo(SpadeA): parse the operand
+	// todo(SpadeA): parse extra values
 	js["operand"] = nil
 	return js
 }
