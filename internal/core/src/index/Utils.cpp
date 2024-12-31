@@ -63,6 +63,7 @@ BIN_List() {
     return ret;
 }
 
+// TODO caiyd: should list supported list
 std::vector<std::tuple<IndexType, MetricType>>
 unsupported_index_combinations() {
     static std::vector<std::tuple<IndexType, MetricType>> ret{

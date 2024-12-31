@@ -644,5 +644,6 @@ template class VectorMemIndex<float>;
 template class VectorMemIndex<bin1>;
 template class VectorMemIndex<float16>;
 template class VectorMemIndex<bfloat16>;
+template class VectorMemIndex<int8>;
 
 }  // namespace milvus::index

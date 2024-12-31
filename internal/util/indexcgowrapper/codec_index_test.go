@@ -428,9 +428,7 @@ func genTypedIndexCase(dtype schemapb.DataType) []indexTestCase {
 	case schemapb.DataType_BFloat16Vector:
 		return genBFloat16VecIndexCases(dtype)
 	case schemapb.DataType_Int8Vector:
-		// TODO caiyd
-		fallthrough
-		//return genInt8VecIndexCases(dtype)
+		return genInt8VecIndexCases(dtype)
 	default:
 		return nil
 	}

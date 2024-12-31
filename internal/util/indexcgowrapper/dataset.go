@@ -137,6 +137,8 @@ func GenDataset(data storage.FieldData) *Dataset {
 		return GenBFloat16VecDataset(f.Data)
 	case *storage.SparseFloatVectorFieldData:
 		return GenSparseFloatVecDataset(f)
+	case *storage.Int8VectorFieldData:
+		return GenInt8VecDataset(f.Data)
 	default:
 		return &Dataset{
 			DType: schemapb.DataType_None,
