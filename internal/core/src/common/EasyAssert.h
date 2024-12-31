@@ -69,6 +69,7 @@ enum ErrorCode {
     FollyCancel = 2038,
     OutOfRange = 2039,
     GcpNativeError = 2040,
+    InvalidParameter = 2041,
 
     KnowhereError = 2099
 };

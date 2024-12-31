@@ -1096,6 +1096,10 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         if (expr_->extra_values_.size() > 0) {
             slop = GetValueFromProto<int64_t>(expr_->extra_values_[0]);
         }
+        if (slop < 0) {
+            throw SegcoreError(ErrorCode::InvalidParameter,
+                        "slop should not be less than 0 in phrase match query");
+        }
     }
     auto op_type = expr_->op_type_;
     auto func = [op_type, slop](Index* index, const std::string& query) -> TargetBitmap {
