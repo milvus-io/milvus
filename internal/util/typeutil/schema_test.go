@@ -42,6 +42,7 @@ func TestConvertArrowSchema(t *testing.T) {
 		{FieldID: 13, Name: "field12", DataType: schemapb.DataType_JSON},
 		{FieldID: 14, Name: "field13", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
 		{FieldID: 15, Name: "field14", DataType: schemapb.DataType_BFloat16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+		{FieldID: 16, Name: "field15", DataType: schemapb.DataType_Int8Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
 	}
 
 	schema, err := ConvertToArrowSchema(fieldSchemas)
@@ -66,6 +67,7 @@ func TestConvertArrowSchemaWithoutDim(t *testing.T) {
 		{FieldID: 13, Name: "field12", DataType: schemapb.DataType_JSON},
 		{FieldID: 14, Name: "field13", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{}},
 		{FieldID: 15, Name: "field14", DataType: schemapb.DataType_BFloat16Vector, TypeParams: []*commonpb.KeyValuePair{}},
+		{FieldID: 16, Name: "field15", DataType: schemapb.DataType_Int8Vector, TypeParams: []*commonpb.KeyValuePair{}},
 	}
 
 	_, err := ConvertToArrowSchema(fieldSchemas)

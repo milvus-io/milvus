@@ -26,28 +26,29 @@ import (
 
 // PayloadWriterInterface abstracts PayloadWriter
 type PayloadWriterInterface interface {
-	AddDataToPayload(msgs any, valids []bool) error
-	AddBoolToPayload(msgs []bool, valids []bool) error
-	AddByteToPayload(msgs []byte, valids []bool) error
-	AddInt8ToPayload(msgs []int8, valids []bool) error
-	AddInt16ToPayload(msgs []int16, valids []bool) error
-	AddInt32ToPayload(msgs []int32, valids []bool) error
-	AddInt64ToPayload(msgs []int64, valids []bool) error
-	AddFloatToPayload(msgs []float32, valids []bool) error
-	AddDoubleToPayload(msgs []float64, valids []bool) error
-	AddOneStringToPayload(msgs string, isValid bool) error
-	AddOneArrayToPayload(msg *schemapb.ScalarField, isValid bool) error
-	AddOneJSONToPayload(msg []byte, isValid bool) error
-	AddBinaryVectorToPayload(binVec []byte, dim int) error
-	AddFloatVectorToPayload(binVec []float32, dim int) error
-	AddFloat16VectorToPayload(binVec []byte, dim int) error
-	AddBFloat16VectorToPayload(binVec []byte, dim int) error
-	AddSparseFloatVectorToPayload(data *SparseFloatVectorFieldData) error
+	AddDataToPayload(any, []bool) error
+	AddBoolToPayload([]bool, []bool) error
+	AddByteToPayload([]byte, []bool) error
+	AddInt8ToPayload([]int8, []bool) error
+	AddInt16ToPayload([]int16, []bool) error
+	AddInt32ToPayload([]int32, []bool) error
+	AddInt64ToPayload([]int64, []bool) error
+	AddFloatToPayload([]float32, []bool) error
+	AddDoubleToPayload([]float64, []bool) error
+	AddOneStringToPayload(string, bool) error
+	AddOneArrayToPayload(*schemapb.ScalarField, bool) error
+	AddOneJSONToPayload([]byte, bool) error
+	AddBinaryVectorToPayload([]byte, int) error
+	AddFloatVectorToPayload([]float32, int) error
+	AddFloat16VectorToPayload([]byte, int) error
+	AddBFloat16VectorToPayload([]byte, int) error
+	AddSparseFloatVectorToPayload(*SparseFloatVectorFieldData) error
+	AddInt8VectorToPayload([]int8, int) error
 	FinishPayloadWriter() error
 	GetPayloadBufferFromWriter() ([]byte, error)
 	GetPayloadLengthFromWriter() (int, error)
 	ReleasePayloadWriter()
-	Reserve(size int)
+	Reserve(int)
 	Close()
 }
 
@@ -70,6 +71,7 @@ type PayloadReaderInterface interface {
 	GetBFloat16VectorFromPayload() ([]byte, int, error)
 	GetFloatVectorFromPayload() ([]float32, int, error)
 	GetSparseFloatVectorFromPayload() (*SparseFloatVectorFieldData, int, error)
+	GetInt8VectorFromPayload() ([]int8, int, error)
 	GetPayloadLengthFromReader() (int, error)
 
 	GetByteArrayDataSet() (*DataSet[parquet.ByteArray, *file.ByteArrayColumnChunkReader], error)

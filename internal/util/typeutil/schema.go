@@ -98,6 +98,15 @@ func ConvertToArrowSchema(fields []*schemapb.FieldSchema) (*arrow.Schema, error)
 				Name: field.Name,
 				Type: &arrow.FixedSizeBinaryType{ByteWidth: dim * 2},
 			})
+		case schemapb.DataType_Int8Vector:
+			dim, err := storage.GetDimFromParams(field.TypeParams)
+			if err != nil {
+				return nil, err
+			}
+			arrowFields = append(arrowFields, arrow.Field{
+				Name: field.Name,
+				Type: &arrow.FixedSizeBinaryType{ByteWidth: dim},
+			})
 		default:
 			return nil, merr.WrapErrParameterInvalidMsg("unknown type %v", field.DataType.String())
 		}

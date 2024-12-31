@@ -5,6 +5,7 @@ import (
 	"math"
 	"path"
 
+	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"google.golang.org/protobuf/proto"
 
@@ -124,7 +125,18 @@ func BuildRecord(b *array.RecordBuilder, data *storage.InsertData, fields []*sch
 			for i := 0; i < length; i++ {
 				builder.Append(data[i*byteLength : (i+1)*byteLength])
 			}
+		case schemapb.DataType_Int8Vector:
+			vecData := data.Data[field.FieldID].(*storage.Int8VectorFieldData)
+			builder := fBuilder.(*array.FixedSizeBinaryBuilder)
+			dim := vecData.Dim
+			data := vecData.Data
+			byteLength := dim
+			length := len(data) / byteLength
 
+			builder.Reserve(length)
+			for i := 0; i < length; i++ {
+				builder.Append(arrow.Int8Traits.CastToBytes(data[i*dim : (i+1)*dim]))
+			}
 		default:
 			return merr.WrapErrParameterInvalidMsg("unknown type %v", field.DataType.String())
 		}

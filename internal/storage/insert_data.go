@@ -232,6 +232,18 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			return nil, merr.WrapErrParameterInvalidMsg("vector not support null")
 		}
 		return &SparseFloatVectorFieldData{}, nil
+	case schemapb.DataType_Int8Vector:
+		if fieldSchema.GetNullable() {
+			return nil, merr.WrapErrParameterInvalidMsg("vector not support null")
+		}
+		dim, err := GetDimFromParams(typeParams)
+		if err != nil {
+			return nil, err
+		}
+		return &Int8VectorFieldData{
+			Data: make([]int8, 0, cap),
+			Dim:  dim,
+		}, nil
 	case schemapb.DataType_Bool:
 		data := &BoolFieldData{
 			Data:     make([]bool, 0, cap),
@@ -407,6 +419,11 @@ type SparseFloatVectorFieldData struct {
 	schemapb.SparseFloatArray
 }
 
+type Int8VectorFieldData struct {
+	Data []int8
+	Dim  int
+}
+
 func (dst *SparseFloatVectorFieldData) AppendAllRows(src *SparseFloatVectorFieldData) {
 	if len(src.Contents) == 0 {
 		return
@@ -435,6 +452,7 @@ func (data *BFloat16VectorFieldData) RowNum() int {
 	return len(data.Data) / 2 / data.Dim
 }
 func (data *SparseFloatVectorFieldData) RowNum() int { return len(data.Contents) }
+func (data *Int8VectorFieldData) RowNum() int        { return len(data.Data) / data.Dim }
 
 // GetRow implements FieldData.GetRow
 func (data *BoolFieldData) GetRow(i int) any {
@@ -527,6 +545,10 @@ func (data *BFloat16VectorFieldData) GetRow(i int) interface{} {
 	return data.Data[i*data.Dim*2 : (i+1)*data.Dim*2]
 }
 
+func (data *Int8VectorFieldData) GetRow(i int) interface{} {
+	return data.Data[i*data.Dim : (i+1)*data.Dim]
+}
+
 func (data *BoolFieldData) GetDataRows() any              { return data.Data }
 func (data *Int8FieldData) GetDataRows() any              { return data.Data }
 func (data *Int16FieldData) GetDataRows() any             { return data.Data }
@@ -542,6 +564,7 @@ func (data *FloatVectorFieldData) GetDataRows() any       { return data.Data }
 func (data *Float16VectorFieldData) GetDataRows() any     { return data.Data }
 func (data *BFloat16VectorFieldData) GetDataRows() any    { return data.Data }
 func (data *SparseFloatVectorFieldData) GetDataRows() any { return data.Contents }
+func (data *Int8VectorFieldData) GetDataRows() any        { return data.Data }
 
 // AppendRow implements FieldData.AppendRow
 func (data *BoolFieldData) AppendRow(row interface{}) error {
@@ -766,6 +789,15 @@ func (data *SparseFloatVectorFieldData) AppendRow(row interface{}) error {
 	return nil
 }
 
+func (data *Int8VectorFieldData) AppendRow(row interface{}) error {
+	v, ok := row.([]int8)
+	if !ok || len(v) != data.Dim {
+		return merr.WrapErrParameterInvalid("[]int8", row, "Wrong row type")
+	}
+	data.Data = append(data.Data, v...)
+	return nil
+}
+
 func (data *BoolFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
 	err := data.AppendDataRows(dataRows)
 	if err != nil {
@@ -883,6 +915,14 @@ func (data *BFloat16VectorFieldData) AppendRows(dataRows interface{}, validDataR
 }
 
 func (data *SparseFloatVectorFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
+	err := data.AppendDataRows(dataRows)
+	if err != nil {
+		return err
+	}
+	return data.AppendValidDataRows(validDataRows)
+}
+
+func (data *Int8VectorFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
 	err := data.AppendDataRows(dataRows)
 	if err != nil {
 		return err
@@ -1041,6 +1081,18 @@ func (data *SparseFloatVectorFieldData) AppendDataRows(rows interface{}) error {
 	if data.Dim < v.Dim {
 		data.Dim = v.Dim
 	}
+	return nil
+}
+
+func (data *Int8VectorFieldData) AppendDataRows(rows interface{}) error {
+	v, ok := rows.([]int8)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]int8", rows, "Wrong rows type")
+	}
+	if len(v)%(data.Dim) != 0 {
+		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
+	}
+	data.Data = append(data.Data, v...)
 	return nil
 }
 
@@ -1233,6 +1285,19 @@ func (data *SparseFloatVectorFieldData) AppendValidDataRows(rows interface{}) er
 	return nil
 }
 
+func (data *Int8VectorFieldData) AppendValidDataRows(rows interface{}) error {
+	if rows != nil {
+		v, ok := rows.([]bool)
+		if !ok {
+			return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
+		}
+		if len(v) != 0 {
+			return merr.WrapErrParameterInvalidMsg("not support Nullable in vector")
+		}
+	}
+	return nil
+}
+
 // GetMemorySize implements FieldData.GetMemorySize
 func (data *BoolFieldData) GetMemorySize() int {
 	return binary.Size(data.Data) + binary.Size(data.ValidData) + binary.Size(data.Nullable)
@@ -1271,6 +1336,8 @@ func (data *SparseFloatVectorFieldData) GetMemorySize() int {
 	return proto.Size(&data.SparseFloatArray)
 }
 
+func (data *Int8VectorFieldData) GetMemorySize() int { return binary.Size(data.Data) + 4 }
+
 // GetDataType implements FieldData.GetDataType
 func (data *BoolFieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_Bool }
 func (data *Int8FieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_Int8 }
@@ -1300,6 +1367,10 @@ func (data *BFloat16VectorFieldData) GetDataType() schemapb.DataType {
 
 func (data *SparseFloatVectorFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_SparseFloatVector
+}
+
+func (data *Int8VectorFieldData) GetDataType() schemapb.DataType {
+	return schemapb.DataType_Int8Vector
 }
 
 // why not binary.Size(data) directly? binary.Size(data) return -1
@@ -1358,6 +1429,7 @@ func (data *BinaryVectorFieldData) GetRowSize(i int) int   { return data.Dim / 8
 func (data *FloatVectorFieldData) GetRowSize(i int) int    { return data.Dim * 4 }
 func (data *Float16VectorFieldData) GetRowSize(i int) int  { return data.Dim * 2 }
 func (data *BFloat16VectorFieldData) GetRowSize(i int) int { return data.Dim * 2 }
+func (data *Int8VectorFieldData) GetRowSize(i int) int     { return data.Dim }
 func (data *StringFieldData) GetRowSize(i int) int         { return len(data.Data[i]) + 16 }
 func (data *JSONFieldData) GetRowSize(i int) int           { return len(data.Data[i]) + 16 }
 func (data *ArrayFieldData) GetRowSize(i int) int {
@@ -1431,6 +1503,10 @@ func (data *SparseFloatVectorFieldData) GetNullable() bool {
 }
 
 func (data *Float16VectorFieldData) GetNullable() bool {
+	return false
+}
+
+func (data *Int8VectorFieldData) GetNullable() bool {
 	return false
 }
 

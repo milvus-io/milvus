@@ -466,6 +466,10 @@ func IsBinaryVectorType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_BinaryVector
 }
 
+func IsIntVectorType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Int8Vector
+}
+
 func IsDenseFloatVectorType(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
@@ -498,12 +502,12 @@ func IsFloatVectorType(dataType schemapb.DataType) bool {
 }
 
 func IsFixDimVectorType(dataType schemapb.DataType) bool {
-	return IsBinaryVectorType(dataType) || IsDenseFloatVectorType(dataType)
+	return IsBinaryVectorType(dataType) || IsDenseFloatVectorType(dataType) || IsIntVectorType(dataType)
 }
 
 // IsVectorType returns true if input is a vector type, otherwise false
 func IsVectorType(dataType schemapb.DataType) bool {
-	return IsBinaryVectorType(dataType) || IsFloatVectorType(dataType)
+	return IsBinaryVectorType(dataType) || IsFloatVectorType(dataType) || IsIntVectorType(dataType)
 }
 
 // IsIntegerType returns true if input is an integer type, otherwise false
