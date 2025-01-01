@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -657,11 +658,13 @@ func (scheduler *taskScheduler) schedule(node int64) {
 		return
 	}
 
+	tr := timerecord.NewTimeRecorder("")
 	log := log.Ctx(scheduler.ctx).With(
 		zap.Int64("nodeID", node),
 	)
 
 	scheduler.tryPromoteAll()
+	promoteDur := tr.RecordSpan()
 
 	log.Debug("process tasks related to node",
 		zap.Int("processingTaskNum", scheduler.processQueue.Len()),
@@ -683,6 +686,7 @@ func (scheduler *taskScheduler) schedule(node int64) {
 
 		return true
 	})
+	preprocessDur := tr.RecordSpan()
 
 	// The scheduler doesn't limit the number of tasks,
 	// to commit tasks to executors as soon as possible, to reach higher merge possibility
@@ -693,15 +697,22 @@ func (scheduler *taskScheduler) schedule(node int64) {
 		}
 		return nil
 	}, "process")
+	processDur := tr.RecordSpan()
 
 	for _, task := range toRemove {
 		scheduler.remove(task)
 	}
 
+	scheduler.updateTaskMetrics()
+
 	log.Info("processed tasks",
 		zap.Int("toProcessNum", len(toProcess)),
 		zap.Int32("committedNum", commmittedNum.Load()),
 		zap.Int("toRemoveNum", len(toRemove)),
+		zap.Duration("promoteDur", promoteDur),
+		zap.Duration("preprocessDUr", preprocessDur),
+		zap.Duration("processDUr", processDur),
+		zap.Duration("totalDur", tr.ElapseSpan()),
 	)
 
 	log.Info("process tasks related to node done",
@@ -749,10 +760,6 @@ func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
 // return true if the task should be executed,
 // false otherwise
 func (scheduler *taskScheduler) preProcess(task Task) bool {
-	log := log.Ctx(scheduler.ctx).WithRateGroup("qcv2.taskScheduler", 1, 60).With(
-		zap.Int64("collectionID", task.CollectionID()),
-		zap.Int64("taskID", task.ID()),
-	)
 	if task.Status() != TaskStatusStarted {
 		return false
 	}
@@ -775,7 +782,9 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 			}
 
 			if !ready {
-				log.RatedInfo(30, "Blocking reduce action in balance channel task")
+				log.Ctx(scheduler.ctx).WithRateGroup("qcv2.taskScheduler", 1, 60).RatedInfo(30, "Blocking reduce action in balance channel task",
+					zap.Int64("collectionID", task.CollectionID()),
+					zap.Int64("taskID", task.ID()))
 				break
 			}
 		}
@@ -894,7 +903,6 @@ func (scheduler *taskScheduler) remove(task Task) {
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
 	}
 
-	scheduler.updateTaskMetrics()
 	log.Info("task removed")
 
 	if scheduler.meta.Exist(task.Context(), task.CollectionID()) {
@@ -940,14 +948,18 @@ func (scheduler *taskScheduler) getTaskMetricsLabel(task Task) string {
 	return metrics.UnknownTaskLabel
 }
 
-func (scheduler *taskScheduler) checkStale(task Task) error {
-	log := log.Ctx(task.Context()).With(
+func WrapTaskLog(task Task, fields ...zap.Field) []zap.Field {
+	res := []zap.Field{
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("replicaID", task.ReplicaID()),
 		zap.String("source", task.Source().String()),
-	)
+	}
+	res = append(res, fields...)
+	return res
+}
 
+func (scheduler *taskScheduler) checkStale(task Task) error {
 	switch task := task.(type) {
 	case *SegmentTask:
 		if err := scheduler.checkSegmentTaskStale(task); err != nil {
@@ -974,7 +986,9 @@ func (scheduler *taskScheduler) checkStale(task Task) error {
 			zap.Int("step", step))
 
 		if scheduler.nodeMgr.Get(action.Node()) == nil {
-			log.Warn("the task is stale, the target node is offline")
+			log.Warn("the task is stale, the target node is offline", WrapTaskLog(task,
+				zap.Int64("nodeID", action.Node()),
+				zap.Int("step", step))...)
 			return merr.WrapErrNodeNotFound(action.Node())
 		}
 	}
@@ -983,38 +997,30 @@ func (scheduler *taskScheduler) checkStale(task Task) error {
 }
 
 func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
-	log := log.Ctx(task.Context()).With(
-		zap.Int64("taskID", task.ID()),
-		zap.Int64("collectionID", task.CollectionID()),
-		zap.Int64("replicaID", task.ReplicaID()),
-		zap.String("source", task.Source().String()),
-	)
-
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
 			if ok, _ := scheduler.nodeMgr.IsStoppingNode(action.Node()); ok {
-				log.Warn("task stale due to node offline", zap.Int64("segment", task.segmentID))
+				log.Ctx(task.Context()).Warn("task stale due to node offline", WrapTaskLog(task, zap.Int64("segment", task.segmentID))...)
 				return merr.WrapErrNodeOffline(action.Node())
 			}
 			taskType := GetTaskType(task)
 			segment := scheduler.targetMgr.GetSealedSegment(task.ctx, task.CollectionID(), task.SegmentID(), meta.CurrentTargetFirst)
 			if segment == nil {
-				log.Warn("task stale due to the segment to load not exists in targets",
-					zap.Int64("segment", task.segmentID),
-					zap.String("taskType", taskType.String()),
-				)
+				log.Ctx(task.Context()).Warn("task stale due to the segment to load not exists in targets",
+					WrapTaskLog(task, zap.Int64("segment", task.segmentID),
+						zap.String("taskType", taskType.String()))...)
 				return merr.WrapErrSegmentReduplicate(task.SegmentID(), "target doesn't contain this segment")
 			}
 
 			replica := scheduler.meta.ReplicaManager.GetByCollectionAndNode(task.ctx, task.CollectionID(), action.Node())
 			if replica == nil {
-				log.Warn("task stale due to replica not found")
+				log.Ctx(task.Context()).Warn("task stale due to replica not found", WrapTaskLog(task)...)
 				return merr.WrapErrReplicaNotFound(task.CollectionID(), "by collectionID")
 			}
 			_, ok := scheduler.distMgr.GetShardLeader(replica, segment.GetInsertChannel())
 			if !ok {
-				log.Warn("task stale due to leader not found")
+				log.Ctx(task.Context()).Warn("task stale due to leader not found", WrapTaskLog(task)...)
 				return merr.WrapErrChannelNotFound(segment.GetInsertChannel(), "failed to get shard delegator")
 			}
 
@@ -1026,23 +1032,16 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 }
 
 func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) error {
-	log := log.Ctx(task.Context()).With(
-		zap.Int64("taskID", task.ID()),
-		zap.Int64("collectionID", task.CollectionID()),
-		zap.Int64("replicaID", task.ReplicaID()),
-		zap.String("source", task.Source().String()),
-	)
-
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
 			if ok, _ := scheduler.nodeMgr.IsStoppingNode(action.Node()); ok {
-				log.Warn("task stale due to node offline", zap.String("channel", task.Channel()))
+				log.Ctx(task.Context()).Warn("task stale due to node offline", WrapTaskLog(task, zap.String("channel", task.Channel()))...)
 				return merr.WrapErrNodeOffline(action.Node())
 			}
 			if scheduler.targetMgr.GetDmChannel(task.ctx, task.collectionID, task.Channel(), meta.NextTargetFirst) == nil {
-				log.Warn("the task is stale, the channel to subscribe not exists in targets",
-					zap.String("channel", task.Channel()))
+				log.Ctx(task.Context()).Warn("the task is stale, the channel to subscribe not exists in targets",
+					WrapTaskLog(task, zap.String("channel", task.Channel()))...)
 				return merr.WrapErrChannelReduplicate(task.Channel(), "target doesn't contain this channel")
 			}
 
@@ -1054,48 +1053,41 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) error {
 }
 
 func (scheduler *taskScheduler) checkLeaderTaskStale(task *LeaderTask) error {
-	log := log.Ctx(task.Context()).With(
-		zap.Int64("taskID", task.ID()),
-		zap.Int64("collectionID", task.CollectionID()),
-		zap.Int64("replicaID", task.ReplicaID()),
-		zap.String("source", task.Source().String()),
-		zap.Int64("leaderID", task.leaderID),
-	)
-
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
 			if ok, _ := scheduler.nodeMgr.IsStoppingNode(action.(*LeaderAction).GetLeaderID()); ok {
-				log.Warn("task stale due to node offline", zap.Int64("segment", task.segmentID))
+				log.Ctx(task.Context()).Warn("task stale due to node offline",
+					WrapTaskLog(task, zap.Int64("leaderID", task.leaderID), zap.Int64("segment", task.segmentID))...)
 				return merr.WrapErrNodeOffline(action.Node())
 			}
 
 			taskType := GetTaskType(task)
 			segment := scheduler.targetMgr.GetSealedSegment(task.ctx, task.CollectionID(), task.SegmentID(), meta.CurrentTargetFirst)
 			if segment == nil {
-				log.Warn("task stale due to the segment to load not exists in targets",
-					zap.Int64("segment", task.segmentID),
-					zap.String("taskType", taskType.String()),
-				)
+				log.Ctx(task.Context()).Warn("task stale due to the segment to load not exists in targets",
+					WrapTaskLog(task, zap.Int64("leaderID", task.leaderID),
+						zap.Int64("segment", task.segmentID),
+						zap.String("taskType", taskType.String()))...)
 				return merr.WrapErrSegmentReduplicate(task.SegmentID(), "target doesn't contain this segment")
 			}
 
 			replica := scheduler.meta.ReplicaManager.GetByCollectionAndNode(task.ctx, task.CollectionID(), action.Node())
 			if replica == nil {
-				log.Warn("task stale due to replica not found")
+				log.Ctx(task.Context()).Warn("task stale due to replica not found", WrapTaskLog(task, zap.Int64("leaderID", task.leaderID))...)
 				return merr.WrapErrReplicaNotFound(task.CollectionID(), "by collectionID")
 			}
 
 			view := scheduler.distMgr.GetLeaderShardView(task.leaderID, task.Shard())
 			if view == nil {
-				log.Warn("task stale due to leader not found")
+				log.Ctx(task.Context()).Warn("task stale due to leader not found", WrapTaskLog(task, zap.Int64("leaderID", task.leaderID))...)
 				return merr.WrapErrChannelNotFound(task.Shard(), "failed to get shard delegator")
 			}
 
 		case ActionTypeReduce:
 			view := scheduler.distMgr.GetLeaderShardView(task.leaderID, task.Shard())
 			if view == nil {
-				log.Warn("task stale due to leader not found")
+				log.Ctx(task.Context()).Warn("task stale due to leader not found", WrapTaskLog(task, zap.Int64("leaderID", task.leaderID))...)
 				return merr.WrapErrChannelNotFound(task.Shard(), "failed to get shard delegator")
 			}
 		}
