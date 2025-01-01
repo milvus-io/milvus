@@ -170,6 +170,9 @@ mq:
     mergeCheckInterval: 1 # the interval time(in seconds) for dispatcher to check whether to merge
     targetBufSize: 16 # the lenth of channel buffer for targe
     maxTolerantLag: 3 # Default value: "3", the timeout(in seconds) that target sends msgPack
+    maxDispatcherNumPerPchannel: 10 # The maximum number of dispatchers per physical channel, primarily to limit the number of consumers and prevent performance issues(e.g., during recovery when a large number of channels are watched).
+    retrySleep: 5 # register retry sleep time in seconds
+    retryTimeout: 300 # register retry timeout in seconds
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:

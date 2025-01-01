@@ -18,7 +18,9 @@ package msgdispatcher
 
 import (
 	"context"
+	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -27,8 +29,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+var ErrTooManyConsumers = errors.New("consumer number limit exceeded")
 
 type (
 	Pos     = msgpb.MsgPosition
@@ -66,6 +71,7 @@ func (c *client) Register(ctx context.Context, vchannel string, pos *Pos, subPos
 	log := log.With(zap.String("role", c.role),
 		zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
+	start := time.Now()
 	c.managerMut.Lock(pchannel)
 	defer c.managerMut.Unlock(pchannel)
 	var manager DispatcherManager
@@ -75,6 +81,11 @@ func (c *client) Register(ctx context.Context, vchannel string, pos *Pos, subPos
 		c.managers.Insert(pchannel, manager)
 		go manager.Run()
 	}
+	// Check if the consumer number limit has been reached.
+	if manager.Num() >= paramtable.Get().MQCfg.MaxDispatcherNumPerPchannel.GetAsInt() {
+		return nil, ErrTooManyConsumers
+	}
+	// Begin to register
 	ch, err := manager.Add(ctx, vchannel, pos, subPos)
 	if err != nil {
 		if manager.Num() == 0 {
@@ -84,12 +95,13 @@ func (c *client) Register(ctx context.Context, vchannel string, pos *Pos, subPos
 		log.Error("register failed", zap.Error(err))
 		return nil, err
 	}
-	log.Info("register done")
+	log.Info("register done", zap.Duration("dur", time.Since(start)))
 	return ch, nil
 }
 
 func (c *client) Deregister(vchannel string) {
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
+	start := time.Now()
 	c.managerMut.Lock(pchannel)
 	defer c.managerMut.Unlock(pchannel)
 	if manager, ok := c.managers.Get(pchannel); ok {
@@ -98,8 +110,8 @@ func (c *client) Deregister(vchannel string) {
 			manager.Close()
 			c.managers.Remove(pchannel)
 		}
-		log.Info("deregister done", zap.String("role", c.role),
-			zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
+		log.Info("deregister done", zap.String("role", c.role), zap.Int64("nodeID", c.nodeID),
+			zap.String("vchannel", vchannel), zap.Duration("dur", time.Since(start)))
 	}
 }
 
