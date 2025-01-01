@@ -195,7 +195,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 func (m *meta) reloadFromKV(broker broker.Broker) error {
 	record := timerecord.NewTimeRecorder("datacoord")
 
-	resp, err := broker.ShowCollectionsInternal(m.ctx)
+	resp, err := broker.ShowCollectionIDs(m.ctx)
 	if err != nil {
 		return err
 	}

@@ -76,7 +76,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListSegments_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionsInternal(mock.Anything).Return(&rootcoordpb.ShowCollectionsInternalResponse{
+		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
 			Status: merr.Success(),
 			DbCollections: []*rootcoordpb.DBCollections{
 				{
@@ -100,7 +100,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListChannelCheckpoint_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
@@ -117,7 +117,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ok", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionsInternal(mock.Anything).Return(&rootcoordpb.ShowCollectionsInternalResponse{
+		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
 			Status: merr.Success(),
 			DbCollections: []*rootcoordpb.DBCollections{
 				{
@@ -157,7 +157,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("test list segments", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionsInternal(mock.Anything).Return(&rootcoordpb.ShowCollectionsInternalResponse{
+		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
 			Status: merr.Success(),
 			DbCollections: []*rootcoordpb.DBCollections{
 				{
@@ -616,7 +616,7 @@ func TestMeta_Basic(t *testing.T) {
 		metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
-		broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		meta, err := newMeta(context.TODO(), catalog, nil, broker)
 		assert.NoError(t, err)
 
@@ -980,7 +980,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
-		broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		meta, err := newMeta(context.TODO(), catalog, nil, broker)
 		assert.NoError(t, err)
 

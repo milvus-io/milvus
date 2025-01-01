@@ -3182,6 +3182,65 @@ func (_c *RootCoord_SetTiKVClient_Call) RunAndReturn(run func(*txnkv.Client)) *R
 	return _c
 }
 
+// ShowCollectionIDs provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) ShowCollectionIDs(_a0 context.Context, _a1 *rootcoordpb.ShowCollectionIDsRequest) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ShowCollectionIDs")
+	}
+
+	var r0 *rootcoordpb.ShowCollectionIDsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.ShowCollectionIDsRequest) (*rootcoordpb.ShowCollectionIDsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.ShowCollectionIDsRequest) *rootcoordpb.ShowCollectionIDsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.ShowCollectionIDsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.ShowCollectionIDsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoord_ShowCollectionIDs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ShowCollectionIDs'
+type RootCoord_ShowCollectionIDs_Call struct {
+	*mock.Call
+}
+
+// ShowCollectionIDs is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.ShowCollectionIDsRequest
+func (_e *RootCoord_Expecter) ShowCollectionIDs(_a0 interface{}, _a1 interface{}) *RootCoord_ShowCollectionIDs_Call {
+	return &RootCoord_ShowCollectionIDs_Call{Call: _e.mock.On("ShowCollectionIDs", _a0, _a1)}
+}
+
+func (_c *RootCoord_ShowCollectionIDs_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.ShowCollectionIDsRequest)) *RootCoord_ShowCollectionIDs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rootcoordpb.ShowCollectionIDsRequest))
+	})
+	return _c
+}
+
+func (_c *RootCoord_ShowCollectionIDs_Call) Return(_a0 *rootcoordpb.ShowCollectionIDsResponse, _a1 error) *RootCoord_ShowCollectionIDs_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RootCoord_ShowCollectionIDs_Call) RunAndReturn(run func(context.Context, *rootcoordpb.ShowCollectionIDsRequest) (*rootcoordpb.ShowCollectionIDsResponse, error)) *RootCoord_ShowCollectionIDs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ShowCollections provides a mock function with given fields: _a0, _a1
 func (_m *RootCoord) ShowCollections(_a0 context.Context, _a1 *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -3237,65 +3296,6 @@ func (_c *RootCoord_ShowCollections_Call) Return(_a0 *milvuspb.ShowCollectionsRe
 }
 
 func (_c *RootCoord_ShowCollections_Call) RunAndReturn(run func(context.Context, *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error)) *RootCoord_ShowCollections_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ShowCollectionsInternal provides a mock function with given fields: _a0, _a1
-func (_m *RootCoord) ShowCollectionsInternal(_a0 context.Context, _a1 *rootcoordpb.ShowCollectionsInternalRequest) (*rootcoordpb.ShowCollectionsInternalResponse, error) {
-	ret := _m.Called(_a0, _a1)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ShowCollectionsInternal")
-	}
-
-	var r0 *rootcoordpb.ShowCollectionsInternalResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.ShowCollectionsInternalRequest) (*rootcoordpb.ShowCollectionsInternalResponse, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.ShowCollectionsInternalRequest) *rootcoordpb.ShowCollectionsInternalResponse); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*rootcoordpb.ShowCollectionsInternalResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.ShowCollectionsInternalRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// RootCoord_ShowCollectionsInternal_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ShowCollectionsInternal'
-type RootCoord_ShowCollectionsInternal_Call struct {
-	*mock.Call
-}
-
-// ShowCollectionsInternal is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *rootcoordpb.ShowCollectionsInternalRequest
-func (_e *RootCoord_Expecter) ShowCollectionsInternal(_a0 interface{}, _a1 interface{}) *RootCoord_ShowCollectionsInternal_Call {
-	return &RootCoord_ShowCollectionsInternal_Call{Call: _e.mock.On("ShowCollectionsInternal", _a0, _a1)}
-}
-
-func (_c *RootCoord_ShowCollectionsInternal_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.ShowCollectionsInternalRequest)) *RootCoord_ShowCollectionsInternal_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*rootcoordpb.ShowCollectionsInternalRequest))
-	})
-	return _c
-}
-
-func (_c *RootCoord_ShowCollectionsInternal_Call) Return(_a0 *rootcoordpb.ShowCollectionsInternalResponse, _a1 error) *RootCoord_ShowCollectionsInternal_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *RootCoord_ShowCollectionsInternal_Call) RunAndReturn(run func(context.Context, *rootcoordpb.ShowCollectionsInternalRequest) (*rootcoordpb.ShowCollectionsInternalResponse, error)) *RootCoord_ShowCollectionsInternal_Call {
 	_c.Call.Return(run)
 	return _c
 }

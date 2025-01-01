@@ -38,7 +38,7 @@ type Broker interface {
 	DescribeCollectionInternal(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error)
 	ShowPartitionsInternal(ctx context.Context, collectionID int64) ([]int64, error)
 	ShowCollections(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error)
-	ShowCollectionsInternal(ctx context.Context) (*rootcoordpb.ShowCollectionsInternalResponse, error)
+	ShowCollectionIDs(ctx context.Context) (*rootcoordpb.ShowCollectionIDsResponse, error)
 	ListDatabases(ctx context.Context) (*milvuspb.ListDatabasesResponse, error)
 	HasCollection(ctx context.Context, collectionID int64) (bool, error)
 }
@@ -118,17 +118,18 @@ func (b *coordinatorBroker) ShowCollections(ctx context.Context, dbName string) 
 	return resp, nil
 }
 
-func (b *coordinatorBroker) ShowCollectionsInternal(ctx context.Context) (*rootcoordpb.ShowCollectionsInternalResponse, error) {
+func (b *coordinatorBroker) ShowCollectionIDs(ctx context.Context) (*rootcoordpb.ShowCollectionIDsResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
-	resp, err := b.rootCoord.ShowCollectionsInternal(ctx, &rootcoordpb.ShowCollectionsInternalRequest{
+	resp, err := b.rootCoord.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
 		),
+		AllowUnavailable: true,
 	})
 
 	if err = merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("ShowCollectionsInternal failed", zap.Error(err))
+		log.Warn("ShowCollectionIDs failed", zap.Error(err))
 		return nil, err
 	}
 

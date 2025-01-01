@@ -730,11 +730,11 @@ func TestRootCoord_ShowCollections(t *testing.T) {
 	})
 }
 
-func TestRootCoord_ShowCollectionsInternal(t *testing.T) {
+func TestRootCoord_ShowCollectionIDs(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		ctx := context.Background()
-		resp, err := c.ShowCollectionsInternal(ctx, &rootcoordpb.ShowCollectionsInternalRequest{})
+		resp, err := c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
@@ -748,7 +748,7 @@ func TestRootCoord_ShowCollectionsInternal(t *testing.T) {
 
 		// specify db names
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(nil, fmt.Errorf("mock err"))
-		resp, err := c.ShowCollectionsInternal(ctx, &rootcoordpb.ShowCollectionsInternalRequest{
+		resp, err := c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{
 			DbNames: []string{"db1"},
 		})
 		assert.NoError(t, err)
@@ -756,7 +756,7 @@ func TestRootCoord_ShowCollectionsInternal(t *testing.T) {
 
 		// not specify db names
 		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock err"))
-		resp, err = c.ShowCollectionsInternal(ctx, &rootcoordpb.ShowCollectionsInternalRequest{})
+		resp, err = c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
@@ -765,7 +765,7 @@ func TestRootCoord_ShowCollectionsInternal(t *testing.T) {
 		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(
 			[]*model.Database{model.NewDatabase(rand.Int63(), "db1", etcdpb.DatabaseState_DatabaseCreated, nil)}, nil)
 		meta.EXPECT().ListCollections(mock.Anything, mock.Anything, typeutil.MaxTimestamp, false).Return(nil, fmt.Errorf("mock err"))
-		resp, err = c.ShowCollectionsInternal(ctx, &rootcoordpb.ShowCollectionsInternalRequest{})
+		resp, err = c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
@@ -781,7 +781,7 @@ func TestRootCoord_ShowCollectionsInternal(t *testing.T) {
 		// specify db names
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(
 			model.NewDatabase(rand.Int63(), "db1", etcdpb.DatabaseState_DatabaseCreated, nil), nil)
-		resp, err := c.ShowCollectionsInternal(ctx, &rootcoordpb.ShowCollectionsInternalRequest{
+		resp, err := c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{
 			DbNames: []string{"db1"},
 		})
 		assert.NoError(t, err)
@@ -790,7 +790,7 @@ func TestRootCoord_ShowCollectionsInternal(t *testing.T) {
 		// not specify db names
 		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(
 			[]*model.Database{model.NewDatabase(rand.Int63(), "db1", etcdpb.DatabaseState_DatabaseCreated, nil)}, nil)
-		resp, err = c.ShowCollectionsInternal(ctx, &rootcoordpb.ShowCollectionsInternalRequest{})
+		resp, err = c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})

@@ -68,7 +68,7 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	s.cluster = NewMockCluster(s.T())
 	s.alloc = allocator.NewMockAllocator(s.T())
 	broker := broker.NewMockBroker(s.T())
-	broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	s.meta, err = newMeta(context.TODO(), s.catalog, nil, broker)
 	s.NoError(err)
 	s.meta.AddCollection(&collectionInfo{

@@ -105,7 +105,7 @@ func Test_NewClient(t *testing.T) {
 			retCheck(retNotNil, r, err)
 		}
 		{
-			r, err := client.ShowCollectionsInternal(ctx, nil)
+			r, err := client.ShowCollectionIDs(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
 		{
@@ -355,7 +355,7 @@ func Test_NewClient(t *testing.T) {
 		retCheck(rTimeout, err)
 	}
 	{
-		rTimeout, err := client.ShowCollectionsInternal(shortCtx, nil)
+		rTimeout, err := client.ShowCollectionIDs(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
 	{

@@ -92,7 +92,7 @@ func (mm *metaMemoryKV) CompareVersionAndSwap(ctx context.Context, key string, v
 func newMemoryMeta(t *testing.T) (*meta, error) {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	return newMeta(context.TODO(), catalog, nil, broker)
 }
 
@@ -431,8 +431,8 @@ func (m *mockRootCoordClient) ShowCollections(ctx context.Context, req *milvuspb
 	}, nil
 }
 
-func (m *mockRootCoordClient) ShowCollectionsInternal(ctx context.Context, req *rootcoordpb.ShowCollectionsInternalRequest, opts ...grpc.CallOption) (*rootcoordpb.ShowCollectionsInternalResponse, error) {
-	return &rootcoordpb.ShowCollectionsInternalResponse{
+func (m *mockRootCoordClient) ShowCollectionIDs(ctx context.Context, req *rootcoordpb.ShowCollectionIDsRequest, opts ...grpc.CallOption) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+	return &rootcoordpb.ShowCollectionIDsResponse{
 		Status: merr.Success(),
 	}, nil
 }

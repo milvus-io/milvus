@@ -68,7 +68,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 	s.imeta = imeta
 
 	broker := broker2.NewMockBroker(s.T())
-	broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	s.NoError(err)

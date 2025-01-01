@@ -1313,16 +1313,16 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	return t.Rsp, nil
 }
 
-// ShowCollectionsInternal returns all collections, including unhealthy ones.
-func (c *Core) ShowCollectionsInternal(ctx context.Context, in *rootcoordpb.ShowCollectionsInternalRequest) (*rootcoordpb.ShowCollectionsInternalResponse, error) {
+// ShowCollectionIDs returns all collection IDs.
+func (c *Core) ShowCollectionIDs(ctx context.Context, in *rootcoordpb.ShowCollectionIDsRequest) (*rootcoordpb.ShowCollectionIDsResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return &rootcoordpb.ShowCollectionsInternalResponse{
+		return &rootcoordpb.ShowCollectionIDsResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionsInternal", metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder("ShowCollectionsInternal")
+	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionIDs", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("ShowCollectionIDs")
 
 	ts := typeutil.MaxTimestamp
 	log := log.Ctx(ctx).With(zap.Strings("dbNames", in.GetDbNames()))
@@ -1335,8 +1335,8 @@ func (c *Core) ShowCollectionsInternal(ctx context.Context, in *rootcoordpb.Show
 		dbs, err = c.meta.ListDatabases(ctx, ts)
 		if err != nil {
 			log.Info("failed to ListDatabases", zap.Error(err))
-			metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionsInternal", metrics.FailLabel).Inc()
-			return &rootcoordpb.ShowCollectionsInternalResponse{
+			metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionIDs", metrics.FailLabel).Inc()
+			return &rootcoordpb.ShowCollectionIDsResponse{
 				Status: merr.Status(err),
 			}, nil
 		}
@@ -1346,8 +1346,8 @@ func (c *Core) ShowCollectionsInternal(ctx context.Context, in *rootcoordpb.Show
 			db, err := c.meta.GetDatabaseByName(ctx, name, ts)
 			if err != nil {
 				log.Info("failed to GetDatabaseByName", zap.Error(err))
-				metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionsInternal", metrics.FailLabel).Inc()
-				return &rootcoordpb.ShowCollectionsInternalResponse{
+				metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionIDs", metrics.FailLabel).Inc()
+				return &rootcoordpb.ShowCollectionIDsResponse{
 					Status: merr.Status(err),
 				}, nil
 			}
@@ -1356,11 +1356,11 @@ func (c *Core) ShowCollectionsInternal(ctx context.Context, in *rootcoordpb.Show
 	}
 	dbCollections := make([]*rootcoordpb.DBCollections, 0, len(dbs))
 	for _, db := range dbs {
-		collections, err := c.meta.ListCollections(ctx, db.Name, ts, false)
+		collections, err := c.meta.ListCollections(ctx, db.Name, ts, !in.GetAllowUnavailable())
 		if err != nil {
 			log.Info("failed to ListCollections", zap.Error(err))
-			metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionsInternal", metrics.FailLabel).Inc()
-			return &rootcoordpb.ShowCollectionsInternalResponse{
+			metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionIDs", metrics.FailLabel).Inc()
+			return &rootcoordpb.ShowCollectionIDsResponse{
 				Status: merr.Status(err),
 			}, nil
 		}
@@ -1371,10 +1371,10 @@ func (c *Core) ShowCollectionsInternal(ctx context.Context, in *rootcoordpb.Show
 			}),
 		})
 	}
-	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionsInternal", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowCollectionsInternal").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionIDs", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowCollectionIDs").Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	return &rootcoordpb.ShowCollectionsInternalResponse{
+	return &rootcoordpb.ShowCollectionIDsResponse{
 		Status:        merr.Success(),
 		DbCollections: dbCollections,
 	}, nil

@@ -198,6 +198,64 @@ func (_c *MockBroker_ListDatabases_Call) RunAndReturn(run func(context.Context) 
 	return _c
 }
 
+// ShowCollectionIDs provides a mock function with given fields: ctx
+func (_m *MockBroker) ShowCollectionIDs(ctx context.Context) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ShowCollectionIDs")
+	}
+
+	var r0 *rootcoordpb.ShowCollectionIDsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (*rootcoordpb.ShowCollectionIDsResponse, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) *rootcoordpb.ShowCollectionIDsResponse); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.ShowCollectionIDsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroker_ShowCollectionIDs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ShowCollectionIDs'
+type MockBroker_ShowCollectionIDs_Call struct {
+	*mock.Call
+}
+
+// ShowCollectionIDs is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockBroker_Expecter) ShowCollectionIDs(ctx interface{}) *MockBroker_ShowCollectionIDs_Call {
+	return &MockBroker_ShowCollectionIDs_Call{Call: _e.mock.On("ShowCollectionIDs", ctx)}
+}
+
+func (_c *MockBroker_ShowCollectionIDs_Call) Run(run func(ctx context.Context)) *MockBroker_ShowCollectionIDs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockBroker_ShowCollectionIDs_Call) Return(_a0 *rootcoordpb.ShowCollectionIDsResponse, _a1 error) *MockBroker_ShowCollectionIDs_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBroker_ShowCollectionIDs_Call) RunAndReturn(run func(context.Context) (*rootcoordpb.ShowCollectionIDsResponse, error)) *MockBroker_ShowCollectionIDs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ShowCollections provides a mock function with given fields: ctx, dbName
 func (_m *MockBroker) ShowCollections(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error) {
 	ret := _m.Called(ctx, dbName)
@@ -253,64 +311,6 @@ func (_c *MockBroker_ShowCollections_Call) Return(_a0 *milvuspb.ShowCollectionsR
 }
 
 func (_c *MockBroker_ShowCollections_Call) RunAndReturn(run func(context.Context, string) (*milvuspb.ShowCollectionsResponse, error)) *MockBroker_ShowCollections_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ShowCollectionsInternal provides a mock function with given fields: ctx
-func (_m *MockBroker) ShowCollectionsInternal(ctx context.Context) (*rootcoordpb.ShowCollectionsInternalResponse, error) {
-	ret := _m.Called(ctx)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ShowCollectionsInternal")
-	}
-
-	var r0 *rootcoordpb.ShowCollectionsInternalResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*rootcoordpb.ShowCollectionsInternalResponse, error)); ok {
-		return rf(ctx)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context) *rootcoordpb.ShowCollectionsInternalResponse); ok {
-		r0 = rf(ctx)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*rootcoordpb.ShowCollectionsInternalResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockBroker_ShowCollectionsInternal_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ShowCollectionsInternal'
-type MockBroker_ShowCollectionsInternal_Call struct {
-	*mock.Call
-}
-
-// ShowCollectionsInternal is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockBroker_Expecter) ShowCollectionsInternal(ctx interface{}) *MockBroker_ShowCollectionsInternal_Call {
-	return &MockBroker_ShowCollectionsInternal_Call{Call: _e.mock.On("ShowCollectionsInternal", ctx)}
-}
-
-func (_c *MockBroker_ShowCollectionsInternal_Call) Run(run func(ctx context.Context)) *MockBroker_ShowCollectionsInternal_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
-	})
-	return _c
-}
-
-func (_c *MockBroker_ShowCollectionsInternal_Call) Return(_a0 *rootcoordpb.ShowCollectionsInternalResponse, _a1 error) *MockBroker_ShowCollectionsInternal_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockBroker_ShowCollectionsInternal_Call) RunAndReturn(run func(context.Context) (*rootcoordpb.ShowCollectionsInternalResponse, error)) *MockBroker_ShowCollectionsInternal_Call {
 	_c.Call.Return(run)
 	return _c
 }

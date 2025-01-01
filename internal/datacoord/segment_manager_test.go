@@ -200,7 +200,7 @@ func TestLastExpireReset(t *testing.T) {
 	collID, err := mockAllocator.AllocID(ctx)
 	assert.Nil(t, err)
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(&rootcoordpb.ShowCollectionsInternalResponse{
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
 		Status: merr.Success(),
 		DbCollections: []*rootcoordpb.DBCollections{
 			{
@@ -686,7 +686,7 @@ func TestTryToSealSegment(t *testing.T) {
 		memoryKV := NewMetaMemoryKV()
 		catalog := datacoord.NewCatalog(memoryKV, "", "")
 		broker := broker.NewMockBroker(t)
-		broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		meta, err := newMeta(context.TODO(), catalog, nil, broker)
 		assert.NoError(t, err)
 
@@ -717,7 +717,7 @@ func TestTryToSealSegment(t *testing.T) {
 		memoryKV := NewMetaMemoryKV()
 		catalog := datacoord.NewCatalog(memoryKV, "", "")
 		broker := broker.NewMockBroker(t)
-		broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		meta, err := newMeta(context.TODO(), catalog, nil, broker)
 		assert.NoError(t, err)
 

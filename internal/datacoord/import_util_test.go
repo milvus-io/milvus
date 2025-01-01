@@ -117,7 +117,7 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
 
@@ -177,7 +177,7 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(800, nil)
 
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
 	segment := &SegmentInfo{
@@ -258,7 +258,7 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	assert.NoError(t, err)
 
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
 
@@ -445,7 +445,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.NoError(t, err)
 
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionsInternal(mock.Anything).Return(nil, nil)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
 

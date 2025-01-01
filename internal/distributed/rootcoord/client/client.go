@@ -232,15 +232,15 @@ func (c *Client) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectio
 	})
 }
 
-// ShowCollectionsInternal returns all collections, including unhealthy ones.
-func (c *Client) ShowCollectionsInternal(ctx context.Context, in *rootcoordpb.ShowCollectionsInternalRequest, opts ...grpc.CallOption) (*rootcoordpb.ShowCollectionsInternalResponse, error) {
+// ShowCollectionIDs returns all collection IDs.
+func (c *Client) ShowCollectionIDs(ctx context.Context, in *rootcoordpb.ShowCollectionIDsRequest, opts ...grpc.CallOption) (*rootcoordpb.ShowCollectionIDsResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*rootcoordpb.ShowCollectionsInternalResponse, error) {
-		return client.ShowCollectionsInternal(ctx, in)
+	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+		return client.ShowCollectionIDs(ctx, in)
 	})
 }
 

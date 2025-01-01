@@ -413,9 +413,9 @@ func (s *Server) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectio
 	return s.rootCoord.ShowCollections(ctx, in)
 }
 
-// ShowCollectionsInternal returns all collections, including unhealthy ones.
-func (s *Server) ShowCollectionsInternal(ctx context.Context, in *rootcoordpb.ShowCollectionsInternalRequest) (*rootcoordpb.ShowCollectionsInternalResponse, error) {
-	return s.rootCoord.ShowCollectionsInternal(ctx, in)
+// ShowCollectionIDs returns all collection IDs.
+func (s *Server) ShowCollectionIDs(ctx context.Context, in *rootcoordpb.ShowCollectionIDsRequest) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+	return s.rootCoord.ShowCollectionIDs(ctx, in)
 }
 
 // CreatePartition creates a partition in a collection

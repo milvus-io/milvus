@@ -63,7 +63,7 @@ service RootCoord {
      */
     rpc ShowCollections(milvus.ShowCollectionsRequest) returns (milvus.ShowCollectionsResponse) {}
 
-    rpc ShowCollectionsInternal(ShowCollectionsInternalRequest) returns (ShowCollectionsInternalResponse) {}
+    rpc ShowCollectionIDs(ShowCollectionIDsRequest) returns (ShowCollectionIDsResponse) {}
 
     rpc AlterCollection(milvus.AlterCollectionRequest) returns (common.Status) {}
     
@@ -251,9 +251,10 @@ message PartitionInfoOnPChannel {
   int64 partition_id = 1;
 }
 
-message ShowCollectionsInternalRequest {
+message ShowCollectionIDsRequest {
   common.MsgBase base = 1;
   repeated string db_names = 2;
+  bool allowUnavailable = 3;
 }
 
 message DBCollections {
@@ -261,7 +262,7 @@ message DBCollections {
  repeated int64 collectionIDs = 2;
 }
 
-message ShowCollectionsInternalResponse {
+message ShowCollectionIDsResponse {
   common.Status status = 1;
   repeated DBCollections db_collections = 2;
 }
