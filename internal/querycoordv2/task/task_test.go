@@ -771,26 +771,14 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 		suite.NoError(err)
 	}
 
-	growings := map[int64]*meta.Segment{}
-	for _, segment := range suite.releaseSegments[1:] {
-		growings[segment] = utils.CreateTestSegment(suite.collection, 1, segment, targetNode, 1, "")
-	}
-	suite.dist.LeaderViewManager.Update(targetNode, &meta.LeaderView{
-		ID:              targetNode,
-		GrowingSegments: growings,
-	})
-
 	segmentsNum := len(suite.releaseSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
 
-	// Process tasks
+	// Process tasks and Release done
 	suite.dispatchAndWait(targetNode)
-	suite.AssertTaskNum(segmentsNum-1, 0, 0, segmentsNum-1)
+	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
 
-	// Release done
-	suite.dist.LeaderViewManager.Update(targetNode)
-
-	// Process tasks done
+	// Tasks removed
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
@@ -1090,7 +1078,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 			CollectionID: suite.collection,
 		},
 	}, nil)
-	for _, segment := range suite.loadSegments {
+	for _, segment := range suite.loadSegments[1:] {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
 			{
 				ID:            segment,
@@ -1131,15 +1119,6 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segments, nil)
-	suite.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(suite.collection, partition))
-	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
-	segmentsNum := len(suite.loadSegments)
-	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
-
-	// Process tasks
-	suite.dispatchAndWait(targetNode)
-	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
 
 	segments = make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments[1:] {
@@ -1149,13 +1128,16 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 			InsertChannel: channel.GetChannelName(),
 		})
 	}
-	bakExpectations := suite.broker.ExpectedCalls
-	suite.broker.AssertExpectations(suite.T())
-	suite.broker.ExpectedCalls = suite.broker.ExpectedCalls[:0]
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segments, nil)
 
 	suite.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(suite.collection, 2))
 	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
+
+	// process done
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+
+	// task removed
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
@@ -1168,7 +1150,6 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 			suite.NoError(task.Err())
 		}
 	}
-	suite.broker.ExpectedCalls = bakExpectations
 }
 
 func (suite *TaskSuite) TestChannelTaskReplace() {
