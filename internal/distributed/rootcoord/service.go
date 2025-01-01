@@ -413,6 +413,11 @@ func (s *Server) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectio
 	return s.rootCoord.ShowCollections(ctx, in)
 }
 
+// ShowCollectionIDs returns all collection IDs.
+func (s *Server) ShowCollectionIDs(ctx context.Context, in *rootcoordpb.ShowCollectionIDsRequest) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+	return s.rootCoord.ShowCollectionIDs(ctx, in)
+}
+
 // CreatePartition creates a partition in a collection
 func (s *Server) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.CreatePartition(ctx, in)

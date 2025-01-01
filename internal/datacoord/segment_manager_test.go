@@ -23,6 +23,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -30,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -44,7 +48,7 @@ func TestManagerOptions(t *testing.T) {
 	//	ctx := context.Background()
 	paramtable.Init()
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 	segmentManager, _ := newSegmentManager(meta, mockAllocator)
 	t.Run("test with alloc helper", func(t *testing.T) {
@@ -105,7 +109,7 @@ func TestAllocSegment(t *testing.T) {
 	paramtable.Init()
 	Params.Save(Params.DataCoordCfg.AllocLatestExpireAttempt.Key, "1")
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 	segmentManager, _ := newSegmentManager(meta, mockAllocator)
 
@@ -193,17 +197,28 @@ func TestLastExpireReset(t *testing.T) {
 	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	metaKV.RemoveWithPrefix(ctx, "")
 	catalog := datacoord.NewCatalog(metaKV, "", "")
-	meta, err := newMeta(context.TODO(), catalog, nil)
+	collID, err := mockAllocator.AllocID(ctx)
+	assert.Nil(t, err)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
+		Status: merr.Success(),
+		DbCollections: []*rootcoordpb.DBCollections{
+			{
+				DbName:        "db_1",
+				CollectionIDs: []int64{collID},
+			},
+		},
+	}, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.Nil(t, err)
 	// add collection
 	channelName := "c1"
 	schema := newTestSchema()
-	collID, err := mockAllocator.AllocID(ctx)
-	assert.Nil(t, err)
 	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 	initSegment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:            1,
+			CollectionID:  collID,
 			InsertChannel: "ch1",
 			State:         commonpb.SegmentState_Growing,
 		},
@@ -245,7 +260,7 @@ func TestLastExpireReset(t *testing.T) {
 	newMetaKV := etcdkv.NewEtcdKV(newEtcdCli, rootPath)
 	defer newMetaKV.RemoveWithPrefix(ctx, "")
 	newCatalog := datacoord.NewCatalog(newMetaKV, "", "")
-	restartedMeta, err := newMeta(context.TODO(), newCatalog, nil)
+	restartedMeta, err := newMeta(context.TODO(), newCatalog, nil, broker)
 	restartedMeta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 	assert.Nil(t, err)
 	newSegmentManager, _ := newSegmentManager(restartedMeta, mockAllocator)
@@ -274,7 +289,7 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Init()
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
 	schema := newTestSchema()
@@ -332,7 +347,7 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 func TestSaveSegmentsToMeta(t *testing.T) {
 	paramtable.Init()
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
 	schema := newTestSchema()
@@ -354,7 +369,7 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 func TestSaveSegmentsToMetaWithSpecificSegments(t *testing.T) {
 	paramtable.Init()
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
 	schema := newTestSchema()
@@ -376,7 +391,7 @@ func TestSaveSegmentsToMetaWithSpecificSegments(t *testing.T) {
 func TestDropSegment(t *testing.T) {
 	paramtable.Init()
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
 	schema := newTestSchema()
@@ -399,7 +414,7 @@ func TestDropSegment(t *testing.T) {
 func TestAllocRowsLargerThanOneSegment(t *testing.T) {
 	paramtable.Init()
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
 	schema := newTestSchema()
@@ -421,7 +436,7 @@ func TestAllocRowsLargerThanOneSegment(t *testing.T) {
 func TestExpireAllocation(t *testing.T) {
 	paramtable.Init()
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
 	schema := newTestSchema()
@@ -463,7 +478,7 @@ func TestGetFlushableSegments(t *testing.T) {
 	t.Run("get flushable segments between small interval", func(t *testing.T) {
 		paramtable.Init()
 		mockAllocator := newMockAllocator(t)
-		meta, err := newMemoryMeta()
+		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()
@@ -509,7 +524,7 @@ func TestTryToSealSegment(t *testing.T) {
 	t.Run("normal seal with segment policies", func(t *testing.T) {
 		paramtable.Init()
 		mockAllocator := newMockAllocator(t)
-		meta, err := newMemoryMeta()
+		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()
@@ -534,7 +549,7 @@ func TestTryToSealSegment(t *testing.T) {
 	t.Run("normal seal with channel seal policies", func(t *testing.T) {
 		paramtable.Init()
 		mockAllocator := newMockAllocator(t)
-		meta, err := newMemoryMeta()
+		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()
@@ -559,7 +574,7 @@ func TestTryToSealSegment(t *testing.T) {
 	t.Run("normal seal with both segment & channel seal policy", func(t *testing.T) {
 		paramtable.Init()
 		mockAllocator := newMockAllocator(t)
-		meta, err := newMemoryMeta()
+		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()
@@ -586,7 +601,7 @@ func TestTryToSealSegment(t *testing.T) {
 	t.Run("test sealByMaxBinlogFileNumberPolicy", func(t *testing.T) {
 		paramtable.Init()
 		mockAllocator := newMockAllocator(t)
-		meta, err := newMemoryMeta()
+		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()
@@ -670,7 +685,9 @@ func TestTryToSealSegment(t *testing.T) {
 		mockAllocator := newMockAllocator(t)
 		memoryKV := NewMetaMemoryKV()
 		catalog := datacoord.NewCatalog(memoryKV, "", "")
-		meta, err := newMeta(context.TODO(), catalog, nil)
+		broker := broker.NewMockBroker(t)
+		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+		meta, err := newMeta(context.TODO(), catalog, nil, broker)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()
@@ -699,7 +716,9 @@ func TestTryToSealSegment(t *testing.T) {
 		mockAllocator := newMockAllocator(t)
 		memoryKV := NewMetaMemoryKV()
 		catalog := datacoord.NewCatalog(memoryKV, "", "")
-		meta, err := newMeta(context.TODO(), catalog, nil)
+		broker := broker.NewMockBroker(t)
+		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+		meta, err := newMeta(context.TODO(), catalog, nil, broker)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()

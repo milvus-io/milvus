@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -151,7 +150,7 @@ func Test_ListSegments(t *testing.T) {
 		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error"))
 
 		catalog := NewCatalog(metakv, rootPath, "")
-		ret, err := catalog.ListSegments(context.TODO())
+		ret, err := catalog.ListSegments(context.TODO(), collectionID)
 		assert.Nil(t, ret)
 		assert.Error(t, err)
 	})
@@ -198,7 +197,7 @@ func Test_ListSegments(t *testing.T) {
 		})
 
 		catalog := NewCatalog(metakv, rootPath, "")
-		ret, err := catalog.ListSegments(context.TODO())
+		ret, err := catalog.ListSegments(context.TODO(), collectionID)
 		assert.NotNil(t, ret)
 		assert.NoError(t, err)
 
@@ -215,7 +214,7 @@ func Test_ListSegments(t *testing.T) {
 		})
 
 		catalog := NewCatalog(metakv, rootPath, "")
-		ret, err := catalog.ListSegments(context.TODO())
+		ret, err := catalog.ListSegments(context.TODO(), collectionID)
 		assert.NotNil(t, ret)
 		assert.NoError(t, err)
 		assert.Zero(t, len(ret))
@@ -256,7 +255,7 @@ func Test_ListSegments(t *testing.T) {
 			return errors.New("should not reach here")
 		})
 
-		ret, err := catalog.ListSegments(context.TODO())
+		ret, err := catalog.ListSegments(context.TODO(), collectionID)
 		assert.NotNil(t, ret)
 		assert.NoError(t, err)
 
@@ -745,44 +744,16 @@ func Test_ChannelExists_SaveError(t *testing.T) {
 func Test_parseBinlogKey(t *testing.T) {
 	catalog := NewCatalog(nil, "", "")
 
-	t.Run("parse collection id fail", func(t *testing.T) {
-		ret1, ret2, ret3, err := catalog.parseBinlogKey("root/err/1/1/1", 5)
-		assert.Error(t, err)
-		assert.Equal(t, int64(0), ret1)
-		assert.Equal(t, int64(0), ret2)
-		assert.Equal(t, int64(0), ret3)
-	})
-
-	t.Run("parse partition id fail", func(t *testing.T) {
-		ret1, ret2, ret3, err := catalog.parseBinlogKey("root/1/err/1/1", 5)
-		assert.Error(t, err)
-		assert.Equal(t, int64(0), ret1)
-		assert.Equal(t, int64(0), ret2)
-		assert.Equal(t, int64(0), ret3)
-	})
-
 	t.Run("parse segment id fail", func(t *testing.T) {
-		ret1, ret2, ret3, err := catalog.parseBinlogKey("root/1/1/err/1", 5)
+		segmentID, err := catalog.parseBinlogKey("root/1/1/err/1")
 		assert.Error(t, err)
-		assert.Equal(t, int64(0), ret1)
-		assert.Equal(t, int64(0), ret2)
-		assert.Equal(t, int64(0), ret3)
-	})
-
-	t.Run("miss field", func(t *testing.T) {
-		ret1, ret2, ret3, err := catalog.parseBinlogKey("root/1/1/", 5)
-		assert.Error(t, err)
-		assert.Equal(t, int64(0), ret1)
-		assert.Equal(t, int64(0), ret2)
-		assert.Equal(t, int64(0), ret3)
+		assert.Equal(t, int64(0), segmentID)
 	})
 
 	t.Run("test ok", func(t *testing.T) {
-		ret1, ret2, ret3, err := catalog.parseBinlogKey("root/1/1/1/1", 5)
+		segmentID, err := catalog.parseBinlogKey("root/1/1/1/1")
 		assert.NoError(t, err)
-		assert.Equal(t, int64(1), ret1)
-		assert.Equal(t, int64(1), ret2)
-		assert.Equal(t, int64(1), ret3)
+		assert.Equal(t, int64(1), segmentID)
 	})
 }
 
@@ -1193,7 +1164,7 @@ func BenchmarkCatalog_List1000Segments(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		segments, err := catalog.ListSegments(ctx)
+		segments, err := catalog.ListSegments(ctx, collectionID)
 		assert.NoError(b, err)
 		for _, s := range segments {
 			assert.NotNil(b, s)
@@ -1206,13 +1177,8 @@ func BenchmarkCatalog_List1000Segments(b *testing.B) {
 
 func generateSegments(ctx context.Context, catalog *Catalog, n int, rootPath string) {
 	rand.Seed(time.Now().UnixNano())
-	var collectionID int64
 
 	for i := 0; i < n; i++ {
-		if collectionID%25 == 0 {
-			collectionID = rand.Int63()
-		}
-
 		v := rand.Int63()
 		segment := addSegment(rootPath, collectionID, v, v, v)
 		err := catalog.AddSegment(ctx, segment)
@@ -1229,7 +1195,7 @@ func addSegment(rootPath string, collectionID, partitionID, segmentID, fieldID i
 			Binlogs: []*datapb.Binlog{
 				{
 					EntriesNum: 10000,
-					LogPath:    metautil.BuildInsertLogPath(rootPath, collectionID, partitionID, segmentID, fieldID, int64(rand.Int())),
+					LogID:      int64(rand.Int()),
 				},
 			},
 		},
@@ -1241,7 +1207,7 @@ func addSegment(rootPath string, collectionID, partitionID, segmentID, fieldID i
 			Binlogs: []*datapb.Binlog{
 				{
 					EntriesNum: 5,
-					LogPath:    metautil.BuildDeltaLogPath(rootPath, collectionID, partitionID, segmentID, int64(rand.Int())),
+					LogID:      int64(rand.Int()),
 				},
 			},
 		},
@@ -1253,58 +1219,7 @@ func addSegment(rootPath string, collectionID, partitionID, segmentID, fieldID i
 			Binlogs: []*datapb.Binlog{
 				{
 					EntriesNum: 5,
-					LogPath:    metautil.BuildStatsLogPath(rootPath, collectionID, partitionID, segmentID, fieldID, int64(rand.Int())),
-				},
-			},
-		},
-	}
-
-	return &datapb.SegmentInfo{
-		ID:           segmentID,
-		CollectionID: collectionID,
-		PartitionID:  partitionID,
-		NumOfRows:    10000,
-		State:        commonpb.SegmentState_Flushed,
-		Binlogs:      binlogs,
-		Deltalogs:    deltalogs,
-		Statslogs:    statslogs,
-	}
-}
-
-func getSegment(rootPath string, collectionID, partitionID, segmentID, fieldID int64, binlogNum int) *datapb.SegmentInfo {
-	binLogPaths := make([]*datapb.Binlog, binlogNum)
-	for i := 0; i < binlogNum; i++ {
-		binLogPaths[i] = &datapb.Binlog{
-			EntriesNum: 10000,
-			LogPath:    metautil.BuildInsertLogPath(rootPath, collectionID, partitionID, segmentID, fieldID, int64(i)),
-		}
-	}
-	binlogs = []*datapb.FieldBinlog{
-		{
-			FieldID: fieldID,
-			Binlogs: binLogPaths,
-		},
-	}
-
-	deltalogs = []*datapb.FieldBinlog{
-		{
-			FieldID: fieldID,
-			Binlogs: []*datapb.Binlog{
-				{
-					EntriesNum: 5,
-					LogPath:    metautil.BuildDeltaLogPath(rootPath, collectionID, partitionID, segmentID, int64(rand.Int())),
-				},
-			},
-		},
-	}
-
-	statslogs = []*datapb.FieldBinlog{
-		{
-			FieldID: 1,
-			Binlogs: []*datapb.Binlog{
-				{
-					EntriesNum: 5,
-					LogPath:    metautil.BuildStatsLogPath(rootPath, collectionID, partitionID, segmentID, fieldID, int64(rand.Int())),
+					LogID:      int64(rand.Int()),
 				},
 			},
 		},

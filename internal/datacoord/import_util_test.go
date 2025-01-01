@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
@@ -106,7 +107,6 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(rand.Uint64(), nil)
 
 	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
@@ -116,7 +116,9 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
 
 	tasks, err := NewImportTasks(fileGroups, job, alloc, meta)
@@ -158,7 +160,6 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	}
 
 	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
@@ -175,7 +176,9 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	})
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(800, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{ID: 5, IsImporting: true},
@@ -244,7 +247,6 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -255,7 +257,9 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	imeta, err := NewImportMeta(context.TODO(), catalog)
 	assert.NoError(t, err)
 
-	meta, err := newMeta(context.TODO(), catalog, nil)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
 
 	job := &importJob{
@@ -424,7 +428,6 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
@@ -441,7 +444,9 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	imeta, err := NewImportMeta(context.TODO(), catalog)
 	assert.NoError(t, err)
 
-	meta, err := newMeta(context.TODO(), catalog, nil)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
 
 	file1 := &internalpb.ImportFile{
