@@ -33,12 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/lock"
-<<<<<<< HEAD
 	"github.com/milvus-io/milvus/pkg/util/logutil"
-=======
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
->>>>>>> 1bcf3d9ee7 (fix: Fix consume blocked due to too many consumers)
 )
 
 // ChannelManagerImpl manages the allocation and the balance between channels and data nodes.
