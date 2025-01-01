@@ -212,12 +212,6 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 		slots       map[int64]int64
 	)
 
-	c.executingGuard.Lock()
-	if len(c.executingTasks) >= parallelism {
-		return selected
-	}
-	c.executingGuard.Unlock()
-
 	l0ChannelExcludes := typeutil.NewSet[string]()
 	mixChannelExcludes := typeutil.NewSet[string]()
 	clusterChannelExcludes := typeutil.NewSet[string]()
@@ -225,6 +219,11 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 	clusterLabelExcludes := typeutil.NewSet[string]()
 
 	c.executingGuard.RLock()
+	if len(c.executingTasks) >= parallelism {
+		c.executingGuard.RUnlock()
+		return selected
+	}
+
 	for _, t := range c.executingTasks {
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:

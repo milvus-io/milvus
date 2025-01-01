@@ -2137,7 +2137,7 @@ func TestCore_InitRBAC(t *testing.T) {
 			Params.Reset(Params.ProxyCfg.EnablePublicPrivilege.Key)
 		}()
 
-		err := c.initRbac()
+		err := c.initRbac(context.TODO())
 		assert.NoError(t, err)
 	})
 
@@ -2158,7 +2158,7 @@ func TestCore_InitRBAC(t *testing.T) {
 			Params.Reset(Params.ProxyCfg.EnablePublicPrivilege.Key)
 		}()
 
-		err := c.initRbac()
+		err := c.initRbac(context.TODO())
 		assert.NoError(t, err)
 	})
 }
