@@ -30,37 +30,63 @@ import (
 
 // CollectionTarget collection target is immutable,
 type CollectionTarget struct {
-	segments   map[int64]*datapb.SegmentInfo
-	dmChannels map[string]*DmChannel
-	partitions typeutil.Set[int64] // stores target partitions info
-	version    int64
+	segments           map[int64]*datapb.SegmentInfo
+	channel2Segments   map[string][]*datapb.SegmentInfo
+	partition2Segments map[int64][]*datapb.SegmentInfo
+	dmChannels         map[string]*DmChannel
+	partitions         typeutil.Set[int64] // stores target partitions info
+	version            int64
 
 	// record target status, if target has been save before milvus v2.4.19, then the target will lack of segment info.
 	lackSegmentInfo bool
 }
 
 func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64) *CollectionTarget {
+	channel2Segments := make(map[string][]*datapb.SegmentInfo, len(dmChannels))
+	partition2Segments := make(map[int64][]*datapb.SegmentInfo, len(partitionIDs))
+	for _, segment := range segments {
+		channel := segment.GetInsertChannel()
+		if _, ok := channel2Segments[channel]; !ok {
+			channel2Segments[channel] = make([]*datapb.SegmentInfo, 0)
+		}
+		channel2Segments[channel] = append(channel2Segments[channel], segment)
+		partitionID := segment.GetPartitionID()
+		if _, ok := partition2Segments[partitionID]; !ok {
+			partition2Segments[partitionID] = make([]*datapb.SegmentInfo, 0)
+		}
+		partition2Segments[partitionID] = append(partition2Segments[partitionID], segment)
+	}
 	return &CollectionTarget{
-		segments:   segments,
-		dmChannels: dmChannels,
-		partitions: typeutil.NewSet(partitionIDs...),
-		version:    time.Now().UnixNano(),
+		segments:           segments,
+		channel2Segments:   channel2Segments,
+		partition2Segments: partition2Segments,
+		dmChannels:         dmChannels,
+		partitions:         typeutil.NewSet(partitionIDs...),
+		version:            time.Now().UnixNano(),
 	}
 }
 
 func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget {
 	segments := make(map[int64]*datapb.SegmentInfo)
 	dmChannels := make(map[string]*DmChannel)
+	channel2Segments := make(map[string][]*datapb.SegmentInfo)
+	partition2Segments := make(map[int64][]*datapb.SegmentInfo)
 	var partitions []int64
 
 	lackSegmentInfo := false
 	for _, t := range target.GetChannelTargets() {
+		if _, ok := channel2Segments[t.GetChannelName()]; !ok {
+			channel2Segments[t.GetChannelName()] = make([]*datapb.SegmentInfo, 0)
+		}
 		for _, partition := range t.GetPartitionTargets() {
+			if _, ok := partition2Segments[partition.GetPartitionID()]; !ok {
+				partition2Segments[partition.GetPartitionID()] = make([]*datapb.SegmentInfo, 0, len(partition.GetSegments()))
+			}
 			for _, segment := range partition.GetSegments() {
 				if segment.GetNumOfRows() <= 0 {
 					lackSegmentInfo = true
 				}
-				segments[segment.GetID()] = &datapb.SegmentInfo{
+				info := &datapb.SegmentInfo{
 					ID:            segment.GetID(),
 					Level:         segment.GetLevel(),
 					CollectionID:  target.GetCollectionID(),
@@ -68,6 +94,9 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 					InsertChannel: t.GetChannelName(),
 					NumOfRows:     segment.GetNumOfRows(),
 				}
+				segments[segment.GetID()] = info
+				channel2Segments[t.GetChannelName()] = append(channel2Segments[t.GetChannelName()], info)
+				partition2Segments[partition.GetPartitionID()] = append(partition2Segments[partition.GetPartitionID()], info)
 			}
 			partitions = append(partitions, partition.GetPartitionID())
 		}
@@ -88,11 +117,13 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 	}
 
 	return &CollectionTarget{
-		segments:        segments,
-		dmChannels:      dmChannels,
-		partitions:      typeutil.NewSet(partitions...),
-		version:         target.GetVersion(),
-		lackSegmentInfo: lackSegmentInfo,
+		segments:           segments,
+		channel2Segments:   channel2Segments,
+		partition2Segments: partition2Segments,
+		dmChannels:         dmChannels,
+		partitions:         typeutil.NewSet(partitions...),
+		version:            target.GetVersion(),
+		lackSegmentInfo:    lackSegmentInfo,
 	}
 }
 
@@ -151,6 +182,14 @@ func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
 
 func (p *CollectionTarget) GetAllSegments() map[int64]*datapb.SegmentInfo {
 	return p.segments
+}
+
+func (p *CollectionTarget) GetChannelSegments(channel string) []*datapb.SegmentInfo {
+	return p.channel2Segments[channel]
+}
+
+func (p *CollectionTarget) GetPartitionSegments(partitionID int64) []*datapb.SegmentInfo {
+	return p.partition2Segments[partitionID]
 }
 
 func (p *CollectionTarget) GetTargetVersion() int64 {
