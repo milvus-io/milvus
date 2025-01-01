@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
@@ -50,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
@@ -184,7 +186,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		compactionTaskMeta: ctm,
 		statsTaskMeta:      stm,
 	}
-	err = mt.reloadFromKV(broker)
+	err = mt.reloadFromKV(ctx, broker)
 	if err != nil {
 		return nil, err
 	}
@@ -192,14 +194,25 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 }
 
 // reloadFromKV loads meta from KV storage
-func (m *meta) reloadFromKV(broker broker.Broker) error {
+func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
 	record := timerecord.NewTimeRecorder("datacoord")
 
-	resp, err := broker.ShowCollectionIDs(m.ctx)
-	if err != nil {
-		return err
+	var (
+		err  error
+		resp *rootcoordpb.ShowCollectionIDsResponse
+	)
+	// retry on un implemented for compatibility
+	retryErr := retry.Handle(ctx, func() (bool, error) {
+		resp, err = broker.ShowCollectionIDs(m.ctx)
+		if errors.Is(err, merr.ErrServiceUnimplemented) {
+			return true, err
+		}
+		return false, err
+	})
+	if retryErr != nil {
+		return retryErr
 	}
-	log.Info("datacoord show collections done", zap.Duration("dur", record.RecordSpan()))
+	log.Ctx(ctx).Info("datacoord show collections done", zap.Duration("dur", record.RecordSpan()))
 
 	collectionIDs := make([]int64, 0, 4096)
 	for _, collections := range resp.GetDbCollections() {
@@ -226,7 +239,7 @@ func (m *meta) reloadFromKV(broker broker.Broker) error {
 		return err
 	}
 
-	log.Info("datacoord show segments done", zap.Duration("dur", record.RecordSpan()))
+	log.Ctx(ctx).Info("datacoord show segments done", zap.Duration("dur", record.RecordSpan()))
 
 	metrics.DataCoordNumCollections.WithLabelValues().Set(0)
 	metrics.DataCoordNumSegments.Reset()
@@ -275,7 +288,7 @@ func (m *meta) reloadFromKV(broker broker.Broker) error {
 			Set(float64(ts.Unix()))
 	}
 
-	log.Info("DataCoord meta reloadFromKV done", zap.Int("numSegments", numSegments), zap.Duration("duration", record.ElapseSpan()))
+	log.Ctx(ctx).Info("DataCoord meta reloadFromKV done", zap.Int("numSegments", numSegments), zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 

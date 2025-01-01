@@ -129,7 +129,7 @@ func (b *coordinatorBroker) ShowCollectionIDs(ctx context.Context) (*rootcoordpb
 	})
 
 	if err = merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("ShowCollectionIDs failed", zap.Error(err))
+		log.Ctx(ctx).Warn("ShowCollectionIDs failed", zap.Error(err))
 		return nil, err
 	}
 
