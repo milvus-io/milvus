@@ -1099,13 +1099,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 	}))
 	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
 	tasks := []Task{}
-	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
-		segments = append(segments, &datapb.SegmentInfo{
-			ID:            segment,
-			PartitionID:   1,
-			InsertChannel: channel.GetChannelName(),
-		})
 		task, err := NewSegmentTask(
 			ctx,
 			timeout,
@@ -1120,7 +1114,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		suite.NoError(err)
 	}
 
-	segments = make([]*datapb.SegmentInfo, 0)
+	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments[1:] {
 		segments = append(segments, &datapb.SegmentInfo{
 			ID:            segment,
