@@ -749,7 +749,8 @@ func TestRootCoord_ShowCollectionIDs(t *testing.T) {
 		// specify db names
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(nil, fmt.Errorf("mock err"))
 		resp, err := c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{
-			DbNames: []string{"db1"},
+			DbNames:          []string{"db1"},
+			AllowUnavailable: true,
 		})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -765,7 +766,9 @@ func TestRootCoord_ShowCollectionIDs(t *testing.T) {
 		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(
 			[]*model.Database{model.NewDatabase(rand.Int63(), "db1", etcdpb.DatabaseState_DatabaseCreated, nil)}, nil)
 		meta.EXPECT().ListCollections(mock.Anything, mock.Anything, typeutil.MaxTimestamp, false).Return(nil, fmt.Errorf("mock err"))
-		resp, err = c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{})
+		resp, err = c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{
+			AllowUnavailable: true,
+		})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
@@ -782,7 +785,8 @@ func TestRootCoord_ShowCollectionIDs(t *testing.T) {
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(
 			model.NewDatabase(rand.Int63(), "db1", etcdpb.DatabaseState_DatabaseCreated, nil), nil)
 		resp, err := c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{
-			DbNames: []string{"db1"},
+			DbNames:          []string{"db1"},
+			AllowUnavailable: true,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -790,7 +794,9 @@ func TestRootCoord_ShowCollectionIDs(t *testing.T) {
 		// not specify db names
 		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(
 			[]*model.Database{model.NewDatabase(rand.Int63(), "db1", etcdpb.DatabaseState_DatabaseCreated, nil)}, nil)
-		resp, err = c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{})
+		resp, err = c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{
+			AllowUnavailable: true,
+		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
