@@ -434,8 +434,6 @@ func TestDeletePartitionName(t *testing.T) {
 
 // test delete ids field not pk int64
 func TestDeleteComplexExpr(t *testing.T) {
-	t.Parallel()
-
 	type exprCount struct {
 		expr  string
 		count int
