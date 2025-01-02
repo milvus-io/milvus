@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -274,16 +275,19 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
 		if req.GetToAllNodes() {
-			if streamingutil.IsStreamingServiceEnabled() {
-				dstNodeSet.Insert(replica.GetRWSQNodes()...)
-			} else {
-				dstNodeSet.Insert(replica.GetRWNodes()...)
-			}
+			dstNodeSet.Insert(replica.GetRWNodes()...)
 		} else {
 			// check whether dstNode is healthy
 			if err := s.isStoppingNode(ctx, req.GetTargetNodeID()); err != nil {
 				err := merr.WrapErrNodeNotAvailable(srcNode, "the target node is invalid")
 				return merr.Status(err), nil
+			}
+			if streamingutil.IsStreamingServiceEnabled() {
+				sqn := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
+				if sqn.Contain(req.GetTargetNodeID()) {
+					return merr.Status(
+						merr.WrapErrParameterInvalidMsg("embedded query node in streaming node can't be the destination of transfer segment")), nil
+				}
 			}
 			dstNodeSet.Insert(req.GetTargetNodeID())
 		}
