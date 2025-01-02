@@ -1096,15 +1096,13 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         if (expr_->extra_values_.size() > 0) {
             slop = GetValueFromProto<int64_t>(expr_->extra_values_[0]);
         }
-        if (slop < 0) {
+        if (slop < 0 || slop > std::numeric_limits<uint32_t>::max()) {
             throw SegcoreError(
                 ErrorCode::InvalidParameter,
-                "slop should not be less than 0 in phrase match query");
-        }
-        if (slop > std::numeric_limits<uint32_t>::max()) {
-            throw SegcoreError(ErrorCode::InvalidParameter,
-                               "slop should not be larger than UINT32_MAX in "
-                               "phrase match query");
+                fmt::format(
+                    "Slop {} is invalid in phrase match query. Should be "
+                    "within [0, UINT32_MAX].",
+                    slop));
         }
     }
     auto op_type = expr_->op_type_;
