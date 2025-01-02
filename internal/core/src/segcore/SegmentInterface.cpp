@@ -399,7 +399,7 @@ SegmentInternalInterface::GetTextIndex(FieldId field_id) const {
     if (iter == text_indexes_.end()) {
         throw SegcoreError(
             ErrorCode::TextIndexNotFound,
-            fmt::format("text index not found for field {}", field_id));
+            fmt::format("text index not found for field {}", field_id.get()));
     }
     return iter->second.get();
 }

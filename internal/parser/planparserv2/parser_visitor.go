@@ -27,13 +27,13 @@ func (v *ParserVisitor) VisitParens(ctx *parser.ParensContext) interface{} {
 	return ctx.Expr().Accept(v)
 }
 
-func (v *ParserVisitor) translateIdentifier(identifier string, require_enable_match bool) (*ExprWithType, error) {
+func (v *ParserVisitor) translateIdentifier(identifier string, requireEnableMatch bool) (*ExprWithType, error) {
 	identifier = decodeUnicode(identifier)
 	field, err := v.schema.GetFieldFromNameDefaultJSON(identifier)
 	if err != nil {
 		return nil, err
 	}
-	if require_enable_match && !typeutil.CreateFieldSchemaHelper(field).EnableMatch() {
+	if requireEnableMatch && !typeutil.CreateFieldSchemaHelper(field).EnableMatch() {
 		return nil, fmt.Errorf("field %s does not support text match operation", field)
 	}
 	var nestedPath []string

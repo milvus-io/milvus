@@ -866,7 +866,7 @@ SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
     if (iter == text_indexes_.end()) {
         throw SegcoreError(
             ErrorCode::TextIndexNotFound,
-            fmt::format("text index not found for field {}", field_id));
+            fmt::format("text index not found for field {}", field_id.get()));
     }
     iter->second->AddTexts(n, texts, texts_valid_data, offset_begin);
 }
