@@ -27,7 +27,7 @@
 #include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "index/Meta.h"
-#include "indexbuilder/JsonInvertedIndexCreator.h"
+#include "index/JsonInvertedIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "mmap/Types.h"
 #include "pb/plan.pb.h"
@@ -16063,7 +16063,7 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
         file_manager_ctx);
 
     using json_index_type =
-        indexbuilder::JsonInvertedIndexCreator<typename TestFixture::DataType>;
+        indexbuilder::JsonInvertedIndex<typename TestFixture::DataType>;
     auto json_index = std::unique_ptr<json_index_type>(
         static_cast<json_index_type*>(inv_index.release()));
     auto json_col = raw_data.get_col<std::string>(json_fid);

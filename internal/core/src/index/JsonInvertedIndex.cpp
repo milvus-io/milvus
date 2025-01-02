@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "indexbuilder/JsonInvertedIndexCreator.h"
+#include "index/JsonInvertedIndex.h"
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -20,11 +20,11 @@
 #include "log/Log.h"
 #include "simdjson/error.h"
 
-namespace milvus::indexbuilder {
+namespace milvus::index {
 
 template <typename T>
 void
-JsonInvertedIndexCreator<T>::build_index_for_json(
+JsonInvertedIndex<T>::build_index_for_json(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     using GetType =
         std::conditional_t<std::is_same_v<std::string, T>, std::string_view, T>;
@@ -59,9 +59,9 @@ JsonInvertedIndexCreator<T>::build_index_for_json(
     }
 }
 
-template class JsonInvertedIndexCreator<bool>;
-template class JsonInvertedIndexCreator<int64_t>;
-template class JsonInvertedIndexCreator<double>;
-template class JsonInvertedIndexCreator<std::string>;
+template class JsonInvertedIndex<bool>;
+template class JsonInvertedIndex<int64_t>;
+template class JsonInvertedIndex<double>;
+template class JsonInvertedIndex<std::string>;
 
-}  // namespace milvus::indexbuilder
+}  // namespace milvus::index
