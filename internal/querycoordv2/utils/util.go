@@ -47,7 +47,7 @@ func CheckNodeAvailable(nodeID int64, info *session.NodeInfo) error {
 // 4. All segments of the shard in target should be in the distribution
 func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.TargetManagerInterface, leader *meta.LeaderView, scope int32) error {
 	log := log.Ctx(context.TODO()).
-		WithRateGroup("utils.CheckLeaderAvailable", 1, 60).
+		WithRateGroup(fmt.Sprintf("util.CheckDelegatorDataReady-%d", leader.CollectionID), 1, 60).
 		With(zap.Int64("leaderID", leader.ID))
 	info := nodeMgr.Get(leader.ID)
 
