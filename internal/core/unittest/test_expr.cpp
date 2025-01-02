@@ -16063,7 +16063,7 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
         file_manager_ctx);
 
     using json_index_type =
-        indexbuilder::JsonInvertedIndex<typename TestFixture::DataType>;
+        index::JsonInvertedIndex<typename TestFixture::DataType>;
     auto json_index = std::unique_ptr<json_index_type>(
         static_cast<json_index_type*>(inv_index.release()));
     auto json_col = raw_data.get_col<std::string>(json_fid);
