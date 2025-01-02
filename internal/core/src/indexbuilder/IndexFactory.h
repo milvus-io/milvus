@@ -18,7 +18,7 @@
 
 #include "common/EasyAssert.h"
 #include "indexbuilder/IndexCreatorBase.h"
-#include "indexbuilder/JsonInvertedIndexCreator.h"
+#include "index/JsonInvertedIndex.h"
 #include "indexbuilder/ScalarIndexCreator.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/type_c.h"

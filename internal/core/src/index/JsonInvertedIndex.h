@@ -16,14 +16,14 @@
 #include "boost/filesystem.hpp"
 #include "tantivy-binding.h"
 
-namespace milvus::indexbuilder {
+namespace milvus::index {
 
 template <typename T>
-class JsonInvertedIndexCreator : public index::InvertedIndexTantivy<T> {
+class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
  public:
-    JsonInvertedIndexCreator(const proto::schema::DataType cast_type,
-                             const std::string& nested_path,
-                             const storage::FileManagerContext& ctx)
+    JsonInvertedIndex(const proto::schema::DataType cast_type,
+                      const std::string& nested_path,
+                      const storage::FileManagerContext& ctx)
         : nested_path_(nested_path) {
         this->schema_ = ctx.fieldDataMeta.field_schema;
         this->mem_file_manager_ =

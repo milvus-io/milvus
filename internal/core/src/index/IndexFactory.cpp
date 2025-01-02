@@ -23,7 +23,7 @@
 #include "index/VectorMemIndex.h"
 #include "index/Utils.h"
 #include "index/Meta.h"
-#include "indexbuilder/JsonInvertedIndexCreator.h"
+#include "index/JsonInvertedIndex.h"
 #include "knowhere/utils.h"
 
 #include "index/VectorDiskIndex.h"
@@ -391,8 +391,7 @@ IndexFactory::CreateJsonIndex(
                "Invalid index type for json index");
     switch (cast_dtype) {
         case DataType::BOOL:
-            return std::make_unique<
-                indexbuilder::JsonInvertedIndexCreator<bool>>(
+            return std::make_unique<index::JsonInvertedIndex<bool>>(
                 proto::schema::DataType::Bool,
                 nested_path,
                 file_manager_context);
@@ -400,22 +399,19 @@ IndexFactory::CreateJsonIndex(
         case milvus::DataType::INT16:
         case milvus::DataType::INT32:
         case DataType::INT64:
-            return std::make_unique<
-                indexbuilder::JsonInvertedIndexCreator<int64_t>>(
+            return std::make_unique<index::JsonInvertedIndex<int64_t>>(
                 proto::schema::DataType::Int64,
                 nested_path,
                 file_manager_context);
         case DataType::FLOAT:
         case DataType::DOUBLE:
-            return std::make_unique<
-                indexbuilder::JsonInvertedIndexCreator<double>>(
+            return std::make_unique<index::JsonInvertedIndex<double>>(
                 proto::schema::DataType::Double,
                 nested_path,
                 file_manager_context);
         case DataType::STRING:
         case DataType::VARCHAR:
-            return std::make_unique<
-                indexbuilder::JsonInvertedIndexCreator<std::string>>(
+            return std::make_unique<index::JsonInvertedIndex<std::string>>(
                 proto::schema::DataType::String,
                 nested_path,
                 file_manager_context);
