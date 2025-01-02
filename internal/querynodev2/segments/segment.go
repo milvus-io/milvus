@@ -32,6 +32,7 @@ import (
 	"io"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -261,6 +262,7 @@ type LocalSegment struct {
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo]
 	space              *milvus_storage.Space
+	warmupDispatcher   *AsyncWarmupDispatcher
 }
 
 func NewSegment(ctx context.Context,
@@ -268,6 +270,7 @@ func NewSegment(ctx context.Context,
 	segmentType SegmentType,
 	version int64,
 	loadInfo *querypb.SegmentLoadInfo,
+	warmupDispatcher *AsyncWarmupDispatcher,
 ) (Segment, error) {
 	log := log.Ctx(ctx)
 	/*
@@ -326,9 +329,10 @@ func NewSegment(ctx context.Context,
 		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 
-		memSize:     atomic.NewInt64(-1),
-		rowNum:      atomic.NewInt64(-1),
-		insertCount: atomic.NewInt64(0),
+		memSize:          atomic.NewInt64(-1),
+		rowNum:           atomic.NewInt64(-1),
+		insertCount:      atomic.NewInt64(0),
+		warmupDispatcher: warmupDispatcher,
 	}
 
 	if err := segment.initializeSegment(); err != nil {
@@ -1507,7 +1511,7 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64, mmap
 			return nil, nil
 		}).Await()
 	case "async":
-		GetWarmupPool().Submit(func() (any, error) {
+		task := func() (any, error) {
 			// failed to wait for state update, return directly
 			if !s.ptrLock.BlockUntilDataLoadedOrReleased() {
 				return nil, nil
@@ -1527,7 +1531,8 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64, mmap
 			}
 			log.Info("warming up chunk cache asynchronously done")
 			return nil, nil
-		})
+		}
+		s.warmupDispatcher.AddTask(task)
 	default:
 		// no warming up
 	}
@@ -1665,4 +1670,56 @@ func (s *LocalSegment) indexNeedLoadRawData(schema *schemapb.CollectionSchema, i
 		return false, err
 	}
 	return !typeutil.IsVectorType(fieldSchema.DataType) && s.HasRawData(indexInfo.IndexInfo.FieldID), nil
+}
+
+type (
+	WarmupTask            = func() (any, error)
+	AsyncWarmupDispatcher struct {
+		mu     sync.RWMutex
+		tasks  []WarmupTask
+		notify chan struct{}
+	}
+)
+
+func NewWarmupDispatcher() *AsyncWarmupDispatcher {
+	return &AsyncWarmupDispatcher{
+		notify: make(chan struct{}, 1),
+	}
+}
+
+func (d *AsyncWarmupDispatcher) AddTask(task func() (any, error)) {
+	d.mu.Lock()
+	d.tasks = append(d.tasks, task)
+	d.mu.Unlock()
+	select {
+	case d.notify <- struct{}{}:
+	default:
+	}
+}
+
+func (d *AsyncWarmupDispatcher) Run(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-d.notify:
+			d.mu.RLock()
+			tasks := make([]WarmupTask, len(d.tasks))
+			copy(tasks, d.tasks)
+			d.mu.RUnlock()
+
+			for _, task := range tasks {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					GetDynamicPool().Submit(task)
+				}
+			}
+
+			d.mu.Lock()
+			d.tasks = d.tasks[len(tasks):]
+			d.mu.Unlock()
+		}
+	}
 }

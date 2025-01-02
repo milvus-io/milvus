@@ -112,8 +112,11 @@ func initWarmupPool() {
 			poolSize,
 			conc.WithPreAlloc(false),
 			conc.WithDisablePurge(false),
-			conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
-			conc.WithNonBlocking(true),                // make warming up non blocking
+			conc.WithPreHandler(func() {
+				runtime.LockOSThread()
+				C.SetThreadName(cgoTagWarmup)
+			}), // lock os thread for cgo thread disposal
+			conc.WithNonBlocking(false),
 		)
 
 		warmupPool.Store(pool)
