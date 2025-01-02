@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -82,6 +83,9 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(CollectionCategory+ReleaseAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.releaseCollection))))
 	router.POST(CollectionCategory+AlterPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionReqWithProperties{} }, wrapperTraceLog(h.alterCollectionProperties))))
 	router.POST(CollectionCategory+DropPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DropCollectionPropertiesReq{} }, wrapperTraceLog(h.dropCollectionProperties))))
+	router.POST(CollectionCategory+CompactAction, timeoutMiddleware(wrapperPost(func() any { return &CompactReq{} }, wrapperTraceLog(h.compact))))
+	router.POST(CollectionCategory+CompactionStateAction, timeoutMiddleware(wrapperPost(func() any { return &GetCompactionStateReq{} }, wrapperTraceLog(h.getcompactionState))))
+	router.POST(CollectionCategory+FlushAction, timeoutMiddleware(wrapperPost(func() any { return &FlushReq{} }, wrapperTraceLog(h.flush))))
 
 	router.POST(CollectionFieldCategory+AlterPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionFieldReqWithParams{} }, wrapperTraceLog(h.alterCollectionFieldProperties))))
 
@@ -698,6 +702,62 @@ func (h *HandlersV2) dropCollectionProperties(ctx context.Context, c *gin.Contex
 	return resp, err
 }
 
+func (h *HandlersV2) compact(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CompactReq)
+	req := &milvuspb.ManualCompactionRequest{
+		DbName:          dbName,
+		CollectionName:  httpReq.CollectionName,
+		MajorCompaction: httpReq.IsClustering,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ManualCompaction", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.ManualCompaction(reqCtx, req.(*milvuspb.ManualCompactionRequest))
+	})
+	if err == nil {
+		resp := resp.(*milvuspb.ManualCompactionResponse)
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: gin.H{"compactionID": resp.CompactionID},
+		})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) getcompactionState(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*GetCompactionStateReq)
+	req := &milvuspb.GetCompactionStateRequest{
+		CompactionID: httpReq.JobID,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/GetCompactionState", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.GetCompactionState(reqCtx, req.(*milvuspb.GetCompactionStateRequest))
+	})
+	if err == nil {
+		resp := resp.(*milvuspb.GetCompactionStateResponse)
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: gin.H{"compactionID": httpReq.JobID, "state": resp.State.String(), "executingPlanNumber": resp.ExecutingPlanNo, "timeoutPlanNumber": resp.TimeoutPlanNo, "completedPlanNumber": resp.CompletedPlanNo},
+		})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) flush(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*FlushReq)
+	req := &milvuspb.FlushRequest{
+		DbName:          dbName,
+		CollectionNames: []string{httpReq.CollectionName},
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Flush", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.Flush(reqCtx, req.(*milvuspb.FlushRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
 func (h *HandlersV2) alterCollectionFieldProperties(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionFieldReqWithParams)
 	req := &milvuspb.AlterCollectionFieldRequest{
@@ -1058,18 +1118,62 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 	})
 }
 
-func generateSearchParams(reqSearchParams searchParams) []*commonpb.KeyValuePair {
+// after 2.5.1, all parameters of search_params can be written into one layer
+// no more parameters will be written searchParams.params
+// to ensure compatibility and milvus can still get a json format parameter
+// try to write all the parameters under searchParams into searchParams.Params
+func generateSearchParams(reqSearchParams map[string]interface{}) ([]*commonpb.KeyValuePair, error) {
 	var searchParams []*commonpb.KeyValuePair
-	if reqSearchParams.Params == nil {
-		reqSearchParams.Params = make(map[string]any)
+	var params interface{}
+	if val, ok := reqSearchParams[Params]; ok {
+		params = val
 	}
-	bs, _ := json.Marshal(reqSearchParams.Params)
+
+	paramsMap := make(map[string]interface{})
+	if params != nil {
+		var ok bool
+		if paramsMap, ok = params.(map[string]interface{}); !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("searchParams.params must be a dict")
+		}
+	}
+
+	for key, value := range reqSearchParams {
+		if val, ok := paramsMap[key]; ok {
+			if reflect.DeepEqual(val, value) {
+				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("ambiguous parameter: %s, in search_param: %v, in search_param.params: %v", key, value, val))
+			}
+		} else if key != Params {
+			paramsMap[key] = value
+		}
+	}
+
+	bs, _ := json.Marshal(paramsMap)
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: Params, Value: string(bs)})
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.IgnoreGrowing, Value: strconv.FormatBool(reqSearchParams.IgnoreGrowing)})
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.HintsKey, Value: reqSearchParams.Hints})
+	getStringValue := func(value interface{}) (string, error) {
+		switch v := value.(type) {
+		case bool:
+			return strconv.FormatBool(v), nil
+		case string:
+			return v, nil
+		case json.Number:
+			return v.String(), nil
+		default:
+			return "", merr.WrapErrParameterInvalidMsg(fmt.Sprintf("Unexpected data(%v) when generateSearchParams, please check it!", value))
+		}
+	}
+
+	for key, value := range reqSearchParams {
+		if key != Params {
+			stringValue, err := getStringValue(value)
+			if err != nil {
+				return nil, err
+			}
+			searchParams = append(searchParams, &commonpb.KeyValuePair{Key: key, Value: stringValue})
+		}
+	}
 	// need to exposure ParamRoundDecimal in req?
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
-	return searchParams
+	return searchParams, nil
 }
 
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
@@ -1100,7 +1204,15 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 
-	searchParams := generateSearchParams(httpReq.SearchParams)
+	searchParams, err := generateSearchParams(httpReq.SearchParams)
+	if err != nil {
+		log.Ctx(ctx).Warn("high level restful api, generate SearchParams failed", zap.Error(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: "err:" + err.Error(),
+		})
+		return nil, err
+	}
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	if httpReq.GroupByField != "" {
@@ -1177,7 +1289,15 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	body, _ := c.Get(gin.BodyBytesKey)
 	searchArray := gjson.Get(string(body.([]byte)), "search").Array()
 	for i, subReq := range httpReq.Search {
-		searchParams := generateSearchParams(subReq.SearchParams)
+		searchParams, err := generateSearchParams(subReq.SearchParams)
+		if err != nil {
+			log.Ctx(ctx).Warn("high level restful api, generate SearchParams failed", zap.Error(err))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: "err:" + err.Error(),
+			})
+			return nil, err
+		}
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(subReq.Limit), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(subReq.Offset), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: subReq.AnnsField})
