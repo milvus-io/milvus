@@ -63,8 +63,6 @@ const (
 	// enableMultipleVectorFields indicates whether to enable multiple vector fields.
 	enableMultipleVectorFields = true
 
-	defaultMaxVarCharLength = 1048576
-
 	defaultMaxArrayCapacity = 4096
 
 	defaultMaxSearchRequest = 1024
@@ -363,8 +361,10 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 		if err != nil {
 			return err
 		}
+
+		defaultMaxVarCharLength := Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
 		if maxLengthPerRow > defaultMaxVarCharLength || maxLengthPerRow <= 0 {
-			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, 1048576]")
+			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, %d]", defaultMaxVarCharLength)
 		}
 		exist = true
 	}
