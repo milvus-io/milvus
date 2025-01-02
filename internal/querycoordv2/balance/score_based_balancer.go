@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -150,6 +151,8 @@ func (b *ScoreBasedBalancer) AssignChannel(ctx context.Context, collectionID int
 }
 
 func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan {
+	nodes = filterSQNIfStreamingServiceEnabled(nodes)
+
 	balanceBatchSize := math.MaxInt64
 	if !forceAssign {
 		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
@@ -176,8 +179,18 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 	plans := make([]ChannelAssignPlan, 0, len(channels))
 	for _, ch := range channels {
 		func(ch *meta.DmChannel) {
+			var targetNode *nodeItem
+			if streamingutil.IsStreamingServiceEnabled() {
+				// When streaming service is enabled, we need to assign channel to the node where WAL is located.
+				nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(ch.GetChannelName())
+				if item, ok := nodeItemsMap[nodeID]; ok {
+					targetNode = item
+				}
+			}
 			// for each channel, pick the node with the least score
-			targetNode := queue.pop().(*nodeItem)
+			if targetNode == nil {
+				targetNode = queue.pop().(*nodeItem)
+			}
 			// make sure candidate is always push back
 			defer queue.push(targetNode)
 			scoreChanges := b.calculateChannelScore(ch, collectionID)

@@ -18,6 +18,7 @@ package utils
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -109,6 +110,13 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 	if len(resourceGroups) != 0 && len(resourceGroups) != 1 && len(resourceGroups) != int(replicaNumber) {
 		return nil, errors.Errorf(
 			"replica=[%d] resource group=[%s], resource group num can only be 0, 1 or same as replica number", replicaNumber, strings.Join(resourceGroups, ","))
+	}
+
+	if streamingutil.IsStreamingServiceEnabled() {
+		streamingNodeCount := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Len()
+		if replicaNumber > int32(streamingNodeCount) {
+			return nil, merr.WrapErrStreamingNodeNotEnough(streamingNodeCount, int(replicaNumber), fmt.Sprintf("when load %d replica count", replicaNumber))
+		}
 	}
 
 	replicaNumInRG := make(map[string]int)

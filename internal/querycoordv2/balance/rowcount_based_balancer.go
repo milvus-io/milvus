@@ -26,6 +26,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
@@ -88,6 +89,8 @@ func (b *RowCountBasedBalancer) AssignSegment(ctx context.Context, collectionID 
 // AssignSegment, when row count based balancer assign segments, it will assign channel to node with least global channel count.
 // try to make every query node has channel count
 func (b *RowCountBasedBalancer) AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan {
+	nodes = filterSQNIfStreamingServiceEnabled(nodes)
+
 	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
 	if !forceAssign {
 		versionRangeFilter := semver.MustParseRange(">2.3.x")
@@ -100,14 +103,8 @@ func (b *RowCountBasedBalancer) AssignChannel(ctx context.Context, collectionID 
 	}
 
 	nodeItems := b.convertToNodeItemsByChannel(nodes)
-	nodeItems = lo.Shuffle(nodeItems)
 	if len(nodeItems) == 0 {
 		return nil
-	}
-
-	plans := make([]ChannelAssignPlan, 0)
-	if streamingutil.IsStreamingServiceEnabled() {
-		channels, plans = assignChannelToWALLocatedFirst(channels, nodeItems)
 	}
 
 	queue := newPriorityQueue()
@@ -115,9 +112,20 @@ func (b *RowCountBasedBalancer) AssignChannel(ctx context.Context, collectionID 
 		queue.push(item)
 	}
 
+	plans := make([]ChannelAssignPlan, 0)
 	for _, c := range channels {
-		// pick the node with the least channel num and allocate to it.
-		ni := queue.pop().(*nodeItem)
+		var ni *nodeItem
+		if streamingutil.IsStreamingServiceEnabled() {
+			// When streaming service is enabled, we need to assign channel to the node where WAL is located.
+			nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(c.GetChannelName())
+			if item, ok := nodeItems[nodeID]; ok {
+				ni = item
+			}
+		}
+		if ni == nil {
+			// pick the node with the least channel num and allocate to it.
+			ni = queue.pop().(*nodeItem)
+		}
 		plan := ChannelAssignPlan{
 			From:    -1,
 			To:      ni.nodeID,
@@ -157,8 +165,8 @@ func (b *RowCountBasedBalancer) convertToNodeItemsBySegment(nodeIDs []int64) []*
 	return ret
 }
 
-func (b *RowCountBasedBalancer) convertToNodeItemsByChannel(nodeIDs []int64) []*nodeItem {
-	ret := make([]*nodeItem, 0, len(nodeIDs))
+func (b *RowCountBasedBalancer) convertToNodeItemsByChannel(nodeIDs []int64) map[int64]*nodeItem {
+	ret := make(map[int64]*nodeItem, len(nodeIDs))
 	for _, node := range nodeIDs {
 		channels := b.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(node))
 
@@ -167,7 +175,7 @@ func (b *RowCountBasedBalancer) convertToNodeItemsByChannel(nodeIDs []int64) []*
 		channelCount += b.scheduler.GetChannelTaskDelta(node, -1)
 		// more channel num, less priority
 		nodeItem := newNodeItem(channelCount, node)
-		ret = append(ret, &nodeItem)
+		ret[node] = &nodeItem
 	}
 	return ret
 }

@@ -106,6 +106,8 @@ func (b *RoundRobinBalancer) AssignSegment(ctx context.Context, collectionID int
 }
 
 func (b *RoundRobinBalancer) AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan {
+	nodes = filterSQNIfStreamingServiceEnabled(nodes)
+
 	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
 	if !forceAssign {
 		versionRangeFilter := semver.MustParseRange(">2.3.x")
@@ -130,7 +132,7 @@ func (b *RoundRobinBalancer) AssignChannel(ctx context.Context, collectionID int
 	sort.Slice(nodesInfo, func(i, j int) bool {
 		cnt1, cnt2 := nodesInfo[i].ChannelCnt(), nodesInfo[j].ChannelCnt()
 		id1, id2 := nodesInfo[i].ID(), nodesInfo[j].ID()
-		delta1, delta2 := b.scheduler.GetChannelTaskDelta(id1, -1)-scoreDelta[id1], b.scheduler.GetChannelTaskDelta(id2, -1)-scoreDelta[id2]
+		delta1, delta2 := b.scheduler.GetChannelTaskDelta(id1, -1)+scoreDelta[id1], b.scheduler.GetChannelTaskDelta(id2, -1)+scoreDelta[id2]
 		return cnt1+delta1 < cnt2+delta2
 	})
 

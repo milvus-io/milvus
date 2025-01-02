@@ -52,22 +52,6 @@ func TestAssignChannelToWALLocatedFirst(t *testing.T) {
 		{VchannelInfo: &datapb.VchannelInfo{ChannelName: "pchannel2_v2"}},
 		{VchannelInfo: &datapb.VchannelInfo{ChannelName: "pchannel3_v1"}},
 	}
-	nodeItems := []*nodeItem{
-		{nodeID: 1},
-		{nodeID: 2},
-	}
-
-	notFounChannels, plans := assignChannelToWALLocatedFirst(channels, nodeItems)
-	assert.Len(t, notFounChannels, 1)
-	assert.Equal(t, notFounChannels[0].GetChannelName(), "pchannel3_v1")
-	assert.Len(t, plans, 2)
-	for _, plan := range plans {
-		if plan.Channel.GetChannelName() == "pchannel_v1" {
-			assert.Equal(t, plan.To, int64(1))
-		} else {
-			assert.Equal(t, plan.To, int64(2))
-		}
-	}
 
 	var scoreDelta map[int64]int
 	nodeInfos := []*session.NodeInfo{
@@ -75,7 +59,7 @@ func TestAssignChannelToWALLocatedFirst(t *testing.T) {
 		session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 2}),
 	}
 
-	notFounChannels, plans, scoreDelta = assignChannelToWALLocatedFirstForNodeInfo(channels, nodeInfos)
+	notFounChannels, plans, scoreDelta := assignChannelToWALLocatedFirstForNodeInfo(channels, nodeInfos)
 	assert.Len(t, notFounChannels, 1)
 	assert.Equal(t, notFounChannels[0].GetChannelName(), "pchannel3_v1")
 	assert.Len(t, plans, 2)
