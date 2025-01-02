@@ -128,7 +128,7 @@ class DeletedRecord {
             }
             for (auto& offset : offsets) {
                 auto row_id = offset.get();
-                // if alreay deleted, no need to add new record
+                // if already deleted, no need to add new record
                 if (deleted_mask_.size() > row_id && deleted_mask_[row_id]) {
                     continue;
                 }
@@ -195,17 +195,17 @@ class DeletedRecord {
 
         auto it = start_iter;
         while (it != accessor.end() && it != end_iter) {
+            // shall check query_timestamp boundary
+            // since `lower_bound` could return end while other thread insert new records
+            if (it->first >= query_timestamp) {
+                break;
+            }
             if (it->second < insert_barrier) {
                 bitset.set(it->second);
             }
             it++;
         }
-        while (it != accessor.end() && it->first == query_timestamp) {
-            if (it->second < insert_barrier) {
-                bitset.set(it->second);
-            }
-            it++;
-        }
+        // no need to continue if it.first == query_timestamp, since only timestamps before mvcc_ts are needed
     }
 
     size_t
