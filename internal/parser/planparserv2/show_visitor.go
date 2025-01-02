@@ -124,7 +124,12 @@ func (v *ShowExprVisitor) VisitUnaryRangeExpr(expr *planpb.UnaryRangeExpr) inter
 	js["op"] = expr.Op.String()
 	js["column_info"] = extractColumnInfo(expr.GetColumnInfo())
 	// todo(SpadeA): parse extra values
-	js["operand"] = nil
+	js["operand"] = extractGenericValue(expr.Value)
+	var extraValues []interface{}
+	for _, v := range expr.ExtraValues {
+		extraValues = append(extraValues, extractGenericValue(v))
+	}
+	js["extra_values"] = extraValues
 	return js
 }
 
