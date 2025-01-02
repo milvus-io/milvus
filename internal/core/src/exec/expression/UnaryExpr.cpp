@@ -906,10 +906,10 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
                                  : batch_size_;
                 overflow_check_pos_ += batch_size;
             }
-            auto valid = (input != nullptr)
-                             ? ProcessChunksForValidByOffsets<T>(
-                                   CanUseIndex<T>(), *input)
-                             : ProcessChunksForValid<T>(CanUseIndex<T>());
+            auto valid =
+                (input != nullptr)
+                    ? ProcessChunksForValidByOffsets<T>(is_index_mode_, *input)
+                    : ProcessChunksForValid<T>(is_index_mode_);
             auto res_vec = std::make_shared<ColumnVector>(
                 TargetBitmap(batch_size), std::move(valid));
             TargetBitmapView res(res_vec->GetRawData(), batch_size);

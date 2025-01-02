@@ -31,6 +31,10 @@ func (v *BasePlanVisitor) VisitLogicalOr(ctx *LogicalOrContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitIsNotNull(ctx *IsNotNullContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitMulDivMod(ctx *MulDivModContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -136,6 +140,10 @@ func (v *BasePlanVisitor) VisitExists(ctx *ExistsContext) interface{} {
 }
 
 func (v *BasePlanVisitor) VisitBitAnd(ctx *BitAndContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitIsNull(ctx *IsNullContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

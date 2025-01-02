@@ -116,22 +116,26 @@ struct ColumnInfo {
     DataType data_type_;
     DataType element_type_;
     std::vector<std::string> nested_path_;
+    bool nullable_;
 
     ColumnInfo(const proto::plan::ColumnInfo& column_info)
         : field_id_(column_info.field_id()),
           data_type_(static_cast<DataType>(column_info.data_type())),
           element_type_(static_cast<DataType>(column_info.element_type())),
           nested_path_(column_info.nested_path().begin(),
-                       column_info.nested_path().end()) {
+                       column_info.nested_path().end()),
+          nullable_(column_info.nullable()) {
     }
 
     ColumnInfo(FieldId field_id,
                DataType data_type,
-               std::vector<std::string> nested_path = {})
+               std::vector<std::string> nested_path = {},
+               bool nullable = false)
         : field_id_(field_id),
           data_type_(data_type),
           element_type_(DataType::NONE),
-          nested_path_(std::move(nested_path)) {
+          nested_path_(std::move(nested_path)),
+          nullable_(nullable) {
     }
 
     bool
@@ -641,6 +645,24 @@ class BinaryArithOpEvalRangeExpr : public ITypeFilterExpr {
     const proto::plan::ArithOpType arith_op_type_;
     const proto::plan::GenericValue right_operand_;
     const proto::plan::GenericValue value_;
+};
+
+class NullExpr : public ITypeFilterExpr {
+ public:
+    explicit NullExpr(const ColumnInfo& column, NullExprType op)
+        : ITypeFilterExpr(), column_(column), op_(op) {
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format("NullExpr:[Column: {}, Operator: {} ",
+                           column_.ToString(),
+                           NullExpr_NullOp_Name(op_));
+    }
+
+ public:
+    const ColumnInfo column_;
+    NullExprType op_;
 };
 
 class CallExpr : public ITypeFilterExpr {

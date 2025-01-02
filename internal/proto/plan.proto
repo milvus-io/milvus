@@ -86,6 +86,7 @@ message ColumnInfo {
   bool is_partition_key = 6;
   schema.DataType element_type = 7;
   bool is_clustering_key = 8;
+  bool nullable = 9;
 }
 
 message ColumnExpr {
@@ -155,6 +156,16 @@ message JSONContainsExpr {
   string template_variable_name = 5;
 }
 
+message NullExpr {
+  ColumnInfo column_info = 1;
+  enum NullOp {
+    Invalid = 0;
+    IsNull = 1;
+    IsNotNull = 2;
+  }
+  NullOp op = 2;
+}
+
 message UnaryExpr {
   enum UnaryOp {
     Invalid = 0;
@@ -215,6 +226,7 @@ message Expr {
     AlwaysTrueExpr always_true_expr = 12;
     JSONContainsExpr json_contains_expr = 13;
     CallExpr call_expr = 14;
+    NullExpr null_expr = 15;
   };
   bool is_template = 20;
 }
