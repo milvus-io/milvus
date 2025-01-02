@@ -412,6 +412,34 @@ func TestGetNumRowsOfBinaryVectorField(t *testing.T) {
 	}
 }
 
+func TestGetNumRowsOfInt8VectorField(t *testing.T) {
+	cases := []struct {
+		iDatas   []byte
+		dim      int64
+		want     uint64
+		errIsNil bool
+	}{
+		{[]byte{}, -1, 0, false},   // dim <= 0
+		{[]byte{}, 0, 0, false},    // dim <= 0
+		{[]byte{1}, 128, 0, false}, // length % dim != 0
+		{[]byte{}, 128, 0, true},
+		{[]byte{1, 2}, 2, 1, true},
+		{[]byte{1, 2, 3, 4}, 2, 2, true},
+	}
+
+	for _, test := range cases {
+		got, err := GetNumRowsOfInt8VectorField(test.iDatas, test.dim)
+		if test.errIsNil {
+			assert.Equal(t, nil, err)
+			if got != test.want {
+				t.Errorf("GetNumRowsOfInt8VectorField(%v, %v) = %v, %v", test.iDatas, test.dim, test.want, nil)
+			}
+		} else {
+			assert.NotEqual(t, nil, err)
+		}
+	}
+}
+
 func Test_ReadBinary(t *testing.T) {
 	// TODO: test big endian.
 	// low byte in high address, high byte in low address.
@@ -596,6 +624,7 @@ func (s *NumRowsWithSchemaSuite) SetupSuite() {
 			{FieldID: 112, Name: "float16_vector", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
 			{FieldID: 113, Name: "bfloat16_vector", DataType: schemapb.DataType_BFloat16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
 			{FieldID: 114, Name: "sparse_vector", DataType: schemapb.DataType_SparseFloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
+			{FieldID: 115, Name: "int8_vector", DataType: schemapb.DataType_Int8Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
 			{FieldID: 999, Name: "unknown", DataType: schemapb.DataType_None},
 		},
 	}
@@ -777,6 +806,19 @@ func (s *NumRowsWithSchemaSuite) TestNormalCases() {
 			},
 			expect: 6,
 		},
+		{
+			tag: "int8_vector",
+			input: &schemapb.FieldData{
+				FieldName: "int8_vector",
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim:  8,
+						Data: &schemapb.VectorField_Int8Vector{Int8Vector: make([]byte, 7*8)},
+					},
+				},
+			},
+			expect: 7,
+		},
 	}
 	for _, tc := range cases {
 		s.Run(tc.tag, func() {
@@ -851,6 +893,18 @@ func (s *NumRowsWithSchemaSuite) TestErrorCases() {
 						Vectors: &schemapb.VectorField{
 							Dim:  13,
 							Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: make([]byte, 8*2*5)},
+						},
+					},
+				},
+			},
+			{
+				tag: "int8_vector",
+				input: &schemapb.FieldData{
+					FieldName: "int8_vector",
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim:  13,
+							Data: &schemapb.VectorField_Int8Vector{Int8Vector: make([]byte, 8*5)},
 						},
 					},
 				},

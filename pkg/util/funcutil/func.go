@@ -354,6 +354,17 @@ func GetNumRowsOfBFloat16VectorField(bf16Datas []byte, dim int64) (uint64, error
 	return uint64((int64(l)) / dim / 2), nil
 }
 
+func GetNumRowsOfInt8VectorField(iDatas []byte, dim int64) (uint64, error) {
+	if dim <= 0 {
+		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
+	}
+	l := len(iDatas)
+	if int64(l)%dim != 0 {
+		return 0, fmt.Errorf("the length(%d) of int8 data should divide the dim(%d)", l, dim)
+	}
+	return uint64(int64(l) / dim), nil
+}
+
 // GetNumRowOfFieldDataWithSchema returns num of rows with schema specification.
 func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeutil.SchemaHelper) (uint64, error) {
 	var fieldNumRows uint64
@@ -405,6 +416,12 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 		}
 	case schemapb.DataType_SparseFloatVector:
 		fieldNumRows = uint64(len(fieldData.GetVectors().GetSparseFloatVector().GetContents()))
+	case schemapb.DataType_Int8Vector:
+		dim := fieldData.GetVectors().GetDim()
+		fieldNumRows, err = GetNumRowsOfInt8VectorField(fieldData.GetVectors().GetInt8Vector(), dim)
+		if err != nil {
+			return 0, err
+		}
 	default:
 		return 0, fmt.Errorf("%s is not supported now", fieldSchema.GetDataType())
 	}
@@ -468,6 +485,12 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 			}
 		case *schemapb.VectorField_SparseFloatVector:
 			fieldNumRows = uint64(len(vectorField.GetSparseFloatVector().GetContents()))
+		case *schemapb.VectorField_Int8Vector:
+			dim := vectorField.GetDim()
+			fieldNumRows, err = GetNumRowsOfInt8VectorField(vectorField.GetInt8Vector(), dim)
+			if err != nil {
+				return 0, err
+			}
 		default:
 			return 0, fmt.Errorf("%s is not supported now", vectorFieldType)
 		}
