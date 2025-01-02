@@ -119,6 +119,17 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 		return nil
 	}
 
+	// Before performing balancing, check the CurrentTarget/LeaderView/Distribution for all collections.
+	// If any collection has unready info, skip the balance operation to avoid inconsistencies.
+	notReadyCollections := lo.Filter(loadedCollections, func(cid int64, _ int) bool {
+		// todo: should also check distribution and leader view in the future
+		return !b.targetMgr.IsCurrentTargetReady(cid)
+	})
+	if len(notReadyCollections) > 0 {
+		log.RatedInfo(10, "skip normal balance, cause collection not ready for balance", zap.Int64s("collectionIDs", notReadyCollections))
+		return nil
+	}
+
 	// iterator one normal collection in one round
 	normalReplicasToBalance := make([]int64, 0)
 	hasUnbalancedCollection := false
