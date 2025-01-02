@@ -102,8 +102,8 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		CheckPoints: checkPoints,
 
 		StartPositions: startPos,
-		Flushed:        pack.isFlush,
-		Dropped:        pack.isDrop,
+		Flushed:        pack.pack.isFlush,
+		Dropped:        pack.pack.isDrop,
 		Channel:        pack.channelName,
 		SegLevel:       pack.level,
 	}
@@ -111,7 +111,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		err := b.broker.SaveBinlogPaths(ctx, req)
 		// Segment not found during stale segment flush. Segment might get compacted already.
 		// Stop retry and still proceed to the end, ignoring this error.
-		if !pack.isFlush && errors.Is(err, merr.ErrSegmentNotFound) {
+		if !pack.pack.isFlush && errors.Is(err, merr.ErrSegmentNotFound) {
 			log.Warn("stale segment not found, could be compacted",
 				zap.Int64("segmentID", pack.segmentID))
 			log.Warn("failed to SaveBinlogPaths",

@@ -46,8 +46,7 @@ func (s *MetaWriterSuite) TestNormalSave() {
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(seg, true)
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-	task := NewSyncTask()
-	task.WithMetaCache(s.metacache)
+	task := NewSyncTask().WithMetaCache(s.metacache).WithSyncPack(new(SyncPack))
 	err := s.writer.UpdateSync(ctx, task)
 	s.NoError(err)
 }
@@ -62,8 +61,7 @@ func (s *MetaWriterSuite) TestReturnError() {
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
-	task := NewSyncTask()
-	task.WithMetaCache(s.metacache)
+	task := NewSyncTask().WithMetaCache(s.metacache).WithSyncPack(new(SyncPack))
 	err := s.writer.UpdateSync(ctx, task)
 	s.Error(err)
 }
