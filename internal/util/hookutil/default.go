@@ -63,3 +63,35 @@ func (d DefaultExtension) Report(info any) int {
 func (d DefaultExtension) ReportRefused(ctx context.Context, req interface{}, resp interface{}, err error, fullMethod string) error {
 	return nil
 }
+
+type DefaultCipher struct{}
+
+var (
+	_ hook.Cipher    = (*DefaultCipher)(nil)
+	_ hook.Encryptor = (*DefaultCipher)(nil)
+	_ hook.Decryptor = (*DefaultCipher)(nil)
+)
+
+func (d DefaultCipher) Init(params map[string]string) error {
+	return nil
+}
+
+func (d DefaultCipher) GetEncryptor(ezID int64) (encryptor hook.Encryptor, safeKey []byte, err error) {
+	return d, []byte("safe key"), nil
+}
+
+func (d DefaultCipher) GetDecryptor(ezID int64, safeKey []byte) (hook.Decryptor, error) {
+	return d, nil
+}
+
+func (d DefaultCipher) GetUnsafeKey(ezID int64) []byte {
+	return []byte("unsafe key")
+}
+
+func (d DefaultCipher) Encrypt(plainText []byte) (cipherText []byte, err error) {
+	return plainText, nil
+}
+
+func (d DefaultCipher) Decrypt(cipherText []byte) (plainText []byte, err error) {
+	return cipherText, nil
+}

@@ -41,3 +41,7 @@ func (h *hookConfig) WatchHookWithPrefix(ident string, keyPrefix string, onEvent
 func (h *hookConfig) GetAll() map[string]string {
 	return h.hookBase.mgr.GetConfigs()
 }
+
+func (h *hookConfig) Save(key string, value string) error {
+	return h.hookBase.Save(key, value)
+}
