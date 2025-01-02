@@ -2,10 +2,10 @@ package testcases
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/remeh/sizedwaitgroup"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
@@ -435,8 +435,6 @@ func TestDeletePartitionName(t *testing.T) {
 
 // test delete ids field not pk int64
 func TestDeleteComplexExpr(t *testing.T) {
-	t.Parallel()
-
 	type exprCount struct {
 		expr  string
 		count int
@@ -477,9 +475,13 @@ func TestDeleteComplexExpr(t *testing.T) {
 		{expr: fmt.Sprintf("%s == [0, 1]", common.DefaultDoubleArrayField), count: 0},                                    //  array ==
 		{expr: fmt.Sprintf("array_length(%s) == %d", common.DefaultDoubleArrayField, capacity), count: common.DefaultNb}, //  array_length
 	}
-	sizedwaitgroup := sizedwaitgroup.New(5)
+	ch := make(chan struct{}, 5)
+	wg := sync.WaitGroup{}
 	testFunc := func(exprLimit exprCount) {
-		defer sizedwaitgroup.Done()
+		defer func() {
+			wg.Done()
+			<-ch
+		}()
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 		mc := createDefaultMilvusClient(ctx, t)
 
@@ -509,10 +511,11 @@ func TestDeleteComplexExpr(t *testing.T) {
 
 	for _, exprLimit := range exprLimits {
 		exprLimit := exprLimit
-		sizedwaitgroup.Add()
+		ch <- struct{}{}
+		wg.Add(1)
 		go testFunc(exprLimit)
 	}
-	sizedwaitgroup.Wait()
+	wg.Wait()
 }
 
 func TestDeleteInvalidExpr(t *testing.T) {
