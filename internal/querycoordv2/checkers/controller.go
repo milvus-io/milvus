@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 var errTypeNotFound = errors.New("checker type not found")
@@ -157,8 +158,10 @@ func (controller *CheckerController) Check() {
 
 // check is the real implementation of Check
 func (controller *CheckerController) check(ctx context.Context, checkType utils.CheckerType) {
+	tr := timerecord.NewTimeRecorder("checker.check")
 	checker := controller.checkers[checkType]
 	tasks := checker.Check(ctx)
+	checkDur := tr.RecordSpan()
 
 	for _, task := range tasks {
 		err := controller.scheduler.Add(task)
@@ -167,6 +170,8 @@ func (controller *CheckerController) check(ctx context.Context, checkType utils.
 			continue
 		}
 	}
+	log.Info("checker check done", zap.String("checker", checkType.String()), zap.Int("taskNum", len(tasks)),
+		zap.Duration("checkDur", checkDur), zap.Duration("addDur", tr.RecordSpan()))
 }
 
 func (controller *CheckerController) Deactivate(typ utils.CheckerType) error {

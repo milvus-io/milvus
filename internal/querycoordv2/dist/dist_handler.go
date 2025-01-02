@@ -111,7 +111,7 @@ func (dh *distHandler) pullDist(ctx context.Context, failures *int, dispatchTask
 		dh.handleDistResp(resp, dispatchTask)
 	}
 	log.Ctx(ctx).WithRateGroup("distHandler.pullDist", 1, 120).
-		RatedInfo(120.0, "pull and handle distribution done",
+		RatedInfo(120.0, "pull and handle distribution done", zap.Int64("nodeID", dh.nodeID),
 			zap.Int("respSize", proto.Size(resp)), zap.Duration("pullDur", d1), zap.Duration("handleDur", tr.RecordSpan()))
 }
 
