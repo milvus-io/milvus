@@ -1090,7 +1090,7 @@ VectorPtr
 PhyUnaryRangeFilterExpr::ExecTextMatch() {
     using Index = index::TextMatchIndex;
     auto query = GetValueFromProto<std::string>(expr_->val_);
-    int slop = 0;
+    int64_t slop = 0;
     if (expr_->op_type_ == proto::plan::PhraseMatch) {
         // It should be larger than 0 in normal cases. Check it incase of receiving old version proto.
         if (expr_->extra_values_.size() > 0) {
@@ -1100,6 +1100,11 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
             throw SegcoreError(
                 ErrorCode::InvalidParameter,
                 "slop should not be less than 0 in phrase match query");
+        }
+        if (slop > std::numeric_limits<uint32_t>::max()) {
+            throw SegcoreError(ErrorCode::InvalidParameter,
+                               "slop should not be larger than UINT32_MAX in "
+                               "phrase match query");
         }
     }
     auto op_type = expr_->op_type_;
