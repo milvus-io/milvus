@@ -288,7 +288,10 @@ ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
         extra_values.emplace_back(val);
     }
     return std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
-        expr::ColumnInfo(column_info), expr_pb.op(), expr_pb.value(), extra_values);
+        expr::ColumnInfo(column_info),
+        expr_pb.op(),
+        expr_pb.value(),
+        extra_values);
 }
 
 expr::TypedExprPtr

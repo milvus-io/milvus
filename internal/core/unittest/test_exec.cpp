@@ -181,7 +181,8 @@ TEST_P(TaskTest, UnaryExpr) {
     auto logical_expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(field_map_["int64"], DataType::INT64),
         proto::plan::OpType::LessThan,
-        value, extra_values);
+        value,
+        extra_values);
     std::vector<milvus::plan::PlanNodePtr> sources;
     auto filter_node = std::make_shared<milvus::plan::FilterBitsNode>(
         "plannode id 1", logical_expr, sources);
@@ -218,11 +219,13 @@ TEST_P(TaskTest, LogicalExpr) {
     auto left = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(field_map_["int64"], DataType::INT64),
         proto::plan::OpType::LessThan,
-        value, std::vector<proto::plan::GenericValue>{});
+        value,
+        std::vector<proto::plan::GenericValue>{});
     auto right = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(field_map_["int64"], DataType::INT64),
         proto::plan::OpType::LessThan,
-        value, std::vector<proto::plan::GenericValue>{});
+        value,
+        std::vector<proto::plan::GenericValue>{});
 
     auto top = std::make_shared<milvus::expr::LogicalBinaryExpr>(
         expr::LogicalBinaryExpr::OpType::And, left, right);
@@ -270,21 +273,25 @@ TEST_P(TaskTest, CompileInputs_and) {
     auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(int64_fid, DataType::INT64),
         proto::plan::OpType::GreaterThan,
-        val, std::vector<proto::plan::GenericValue>{});
+        val,
+        std::vector<proto::plan::GenericValue>{});
     auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(int64_fid, DataType::INT64),
         proto::plan::OpType::GreaterThan,
-        val, std::vector<proto::plan::GenericValue>{});
+        val,
+        std::vector<proto::plan::GenericValue>{});
     auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
         expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
     auto expr4 = std::make_shared<expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(int64_fid, DataType::INT64),
         proto::plan::OpType::GreaterThan,
-        val, std::vector<proto::plan::GenericValue>{});
+        val,
+        std::vector<proto::plan::GenericValue>{});
     auto expr5 = std::make_shared<expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(int64_fid, DataType::INT64),
         proto::plan::OpType::GreaterThan,
-        val, std::vector<proto::plan::GenericValue>{});
+        val,
+        std::vector<proto::plan::GenericValue>{});
     auto expr6 = std::make_shared<expr::LogicalBinaryExpr>(
         expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
     auto expr7 = std::make_shared<expr::LogicalBinaryExpr>(
@@ -314,21 +321,25 @@ TEST_P(TaskTest, CompileInputs_or_with_and) {
         auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
-            val, std::vector<proto::plan::GenericValue>{});
+            val,
+            std::vector<proto::plan::GenericValue>{});
         auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
-            val, std::vector<proto::plan::GenericValue>{});
+            val,
+            std::vector<proto::plan::GenericValue>{});
         auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
         auto expr4 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
-            val, std::vector<proto::plan::GenericValue>{});
+            val,
+            std::vector<proto::plan::GenericValue>{});
         auto expr5 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
-            val, std::vector<proto::plan::GenericValue>{});
+            val,
+            std::vector<proto::plan::GenericValue>{});
         auto expr6 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
@@ -348,21 +359,25 @@ TEST_P(TaskTest, CompileInputs_or_with_and) {
         auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
-            val, std::vector<proto::plan::GenericValue>{});
+            val,
+            std::vector<proto::plan::GenericValue>{});
         auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
-            val, std::vector<proto::plan::GenericValue>{});
+            val,
+            std::vector<proto::plan::GenericValue>{});
         auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::Or, expr1, expr2);
         auto expr4 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
-            val, std::vector<proto::plan::GenericValue>{});
+            val,
+            std::vector<proto::plan::GenericValue>{});
         auto expr5 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
-            val, std::vector<proto::plan::GenericValue>{});
+            val,
+            std::vector<proto::plan::GenericValue>{});
         auto expr6 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
@@ -385,21 +400,25 @@ TEST_P(TaskTest, CompileInputs_or_with_and) {
         auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
-            val, std::vector<proto::plan::GenericValue>{});
+            val,
+            std::vector<proto::plan::GenericValue>{});
         auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
-            val, std::vector<proto::plan::GenericValue>{});
+            val,
+            std::vector<proto::plan::GenericValue>{});
         auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::Or, expr1, expr2);
         auto expr4 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
-            val, std::vector<proto::plan::GenericValue>{});
+            val,
+            std::vector<proto::plan::GenericValue>{});
         auto expr5 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
-            val, std::vector<proto::plan::GenericValue>{});
+            val,
+            std::vector<proto::plan::GenericValue>{});
         auto expr6 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(

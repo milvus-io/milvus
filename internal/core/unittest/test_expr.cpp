@@ -1315,7 +1315,8 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                 milvus::expr::ColumnInfo(
                     json_fid, DataType::JSON, testcase.nested_path),
                 op,
-                value, std::vector<proto::plan::GenericValue>{});
+                value,
+                std::vector<proto::plan::GenericValue>{});
             auto plan = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, expr);
             auto final = ExecuteQueryExpr(
@@ -1399,7 +1400,8 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                 milvus::expr::ColumnInfo(
                     json_fid, DataType::JSON, testcase.nested_path),
                 op,
-                testcase.val, std::vector<proto::plan::GenericValue>{});
+                testcase.val,
+                std::vector<proto::plan::GenericValue>{});
             BitsetType final;
             auto plan = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, expr);
@@ -1559,7 +1561,8 @@ TEST_P(ExprTest, TestUnaryRangeJsonNullable) {
                 milvus::expr::ColumnInfo(
                     json_fid, DataType::JSON, testcase.nested_path),
                 op,
-                value, std::vector<proto::plan::GenericValue>{});
+                value,
+                std::vector<proto::plan::GenericValue>{});
             BitsetType final;
             auto plan = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, expr);
@@ -1647,7 +1650,8 @@ TEST_P(ExprTest, TestUnaryRangeJsonNullable) {
                 milvus::expr::ColumnInfo(
                     json_fid, DataType::JSON, testcase.nested_path),
                 op,
-                testcase.val, std::vector<proto::plan::GenericValue>{});
+                testcase.val,
+                std::vector<proto::plan::GenericValue>{});
             BitsetType final;
             auto plan = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, expr);
@@ -3758,21 +3762,24 @@ TEST(Expr, TestExprPerformance) {
             return std::make_shared<expr::UnaryRangeFilterExpr>(
                 expr::ColumnInfo(fids[data_type], data_type),
                 proto::plan::OpType::LessThan,
-                val, std::vector<proto::plan::GenericValue>{});
+                val,
+                std::vector<proto::plan::GenericValue>{});
         } else if (IsFloatDataType(data_type)) {
             proto::plan::GenericValue val;
             val.set_float_val(float(value));
             return std::make_shared<expr::UnaryRangeFilterExpr>(
                 expr::ColumnInfo(fids[data_type], data_type),
                 proto::plan::OpType::LessThan,
-                val, std::vector<proto::plan::GenericValue>{});
+                val,
+                std::vector<proto::plan::GenericValue>{});
         } else if (IsStringDataType(data_type)) {
             proto::plan::GenericValue val;
             val.set_string_val(std::to_string(value));
             return std::make_shared<expr::UnaryRangeFilterExpr>(
                 expr::ColumnInfo(fids[data_type], data_type),
                 proto::plan::OpType::LessThan,
-                val, std::vector<proto::plan::GenericValue>{});
+                val,
+                std::vector<proto::plan::GenericValue>{});
         } else {
             throw std::runtime_error("not supported type");
         }
@@ -4133,21 +4140,24 @@ TEST(Expr, TestExprNOT) {
             return std::make_shared<expr::UnaryRangeFilterExpr>(
                 expr::ColumnInfo(fids[data_type], data_type),
                 proto::plan::OpType::LessThan,
-                val, std::vector<proto::plan::GenericValue>{});
+                val,
+                std::vector<proto::plan::GenericValue>{});
         } else if (IsFloatDataType(data_type)) {
             proto::plan::GenericValue val;
             val.set_float_val(float(value));
             return std::make_shared<expr::UnaryRangeFilterExpr>(
                 expr::ColumnInfo(fids[data_type], data_type),
                 proto::plan::OpType::LessThan,
-                val, std::vector<proto::plan::GenericValue>{});
+                val,
+                std::vector<proto::plan::GenericValue>{});
         } else if (IsStringDataType(data_type)) {
             proto::plan::GenericValue val;
             val.set_string_val(std::to_string(value));
             return std::make_shared<expr::UnaryRangeFilterExpr>(
                 expr::ColumnInfo(fids[data_type], data_type),
                 proto::plan::OpType::LessThan,
-                val, std::vector<proto::plan::GenericValue>{});
+                val,
+                std::vector<proto::plan::GenericValue>{});
         } else {
             throw std::runtime_error("not supported type");
         }
@@ -4544,7 +4554,8 @@ TEST_P(ExprTest, TestGrowingSegmentGetBatchSize) {
     auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(int8_fid, DataType::INT8),
         proto::plan::OpType::GreaterThan,
-        val, std::vector<proto::plan::GenericValue>{});
+        val,
+        std::vector<proto::plan::GenericValue>{});
     auto plan_node =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
 
@@ -4618,12 +4629,14 @@ TEST_P(ExprTest, TestConjuctExpr) {
         auto left = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
-            value, std::vector<proto::plan::GenericValue>{});
+            value,
+            std::vector<proto::plan::GenericValue>{});
         value.set_int64_val(r);
         auto right = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::LessThan,
-            value, std::vector<proto::plan::GenericValue>{});
+            value,
+            std::vector<proto::plan::GenericValue>{});
 
         return std::make_shared<milvus::expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, left, right);
@@ -4706,12 +4719,14 @@ TEST_P(ExprTest, TestConjuctExprNullable) {
         auto left = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
-            value, std::vector<proto::plan::GenericValue>{});
+            value,
+            std::vector<proto::plan::GenericValue>{});
         value.set_int64_val(r);
         auto right = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::LessThan,
-            value, std::vector<proto::plan::GenericValue>{});
+            value,
+            std::vector<proto::plan::GenericValue>{});
 
         return std::make_shared<milvus::expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, left, right);
@@ -4804,7 +4819,8 @@ TEST_P(ExprTest, TestUnaryBenchTest) {
         auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(pair.first, pair.second),
             proto::plan::OpType::GreaterThan,
-            val, std::vector<proto::plan::GenericValue>{});
+            val,
+            std::vector<proto::plan::GenericValue>{});
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
@@ -4956,7 +4972,8 @@ TEST_P(ExprTest, TestLogicalUnaryBenchTest) {
         auto child_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(pair.first, pair.second),
             proto::plan::OpType::GreaterThan,
-            val, std::vector<proto::plan::GenericValue>{});
+            val,
+            std::vector<proto::plan::GenericValue>{});
         auto expr = std::make_shared<expr::LogicalUnaryExpr>(
             expr::LogicalUnaryExpr::OpType::LogicalNot, child_expr);
         BitsetType final;
@@ -5036,11 +5053,13 @@ TEST_P(ExprTest, TestBinaryLogicalBenchTest) {
         auto child1_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(pair.first, pair.second),
             proto::plan::OpType::LessThan,
-            val, std::vector<proto::plan::GenericValue>{});
+            val,
+            std::vector<proto::plan::GenericValue>{});
         auto child2_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(pair.first, pair.second),
             proto::plan::OpType::NotEqual,
-            val1, std::vector<proto::plan::GenericValue>{});
+            val1,
+            std::vector<proto::plan::GenericValue>{});
         auto expr = std::make_shared<const expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, child1_expr, child2_expr);
         BitsetType final;
@@ -5265,7 +5284,8 @@ TEST_P(ExprTest, TestRefactorExprs) {
                 return std::make_shared<expr::UnaryRangeFilterExpr>(
                     expr::ColumnInfo(int64_fid, DataType::INT64),
                     proto::plan::OpType::GreaterThan,
-                    val, std::vector<proto::plan::GenericValue>{});
+                    val,
+                    std::vector<proto::plan::GenericValue>{});
             }
             case TermExprImpl: {
                 std::vector<proto::plan::GenericValue> retrieve_ints;
@@ -5312,7 +5332,8 @@ TEST_P(ExprTest, TestRefactorExprs) {
                 auto child_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
                     expr::ColumnInfo(int8_fid, DataType::INT8),
                     proto::plan::OpType::GreaterThan,
-                    val, std::vector<proto::plan::GenericValue>{});
+                    val,
+                    std::vector<proto::plan::GenericValue>{});
                 return std::make_shared<expr::LogicalUnaryExpr>(
                     expr::LogicalUnaryExpr::OpType::LogicalNot, child_expr);
             }
@@ -5322,11 +5343,13 @@ TEST_P(ExprTest, TestRefactorExprs) {
                 auto child1_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
                     expr::ColumnInfo(int8_fid, DataType::INT8),
                     proto::plan::OpType::GreaterThan,
-                    val, std::vector<proto::plan::GenericValue>{});
+                    val,
+                    std::vector<proto::plan::GenericValue>{});
                 auto child2_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
                     expr::ColumnInfo(int8_fid, DataType::INT8),
                     proto::plan::OpType::NotEqual,
-                    val, std::vector<proto::plan::GenericValue>{});
+                    val,
+                    std::vector<proto::plan::GenericValue>{});
                 ;
                 return std::make_shared<const expr::LogicalBinaryExpr>(
                     expr::LogicalBinaryExpr::OpType::And,
@@ -5351,7 +5374,8 @@ TEST_P(ExprTest, TestRefactorExprs) {
                 return std::make_shared<expr::UnaryRangeFilterExpr>(
                     expr::ColumnInfo(int8_fid, DataType::INT8),
                     proto::plan::OpType::GreaterThan,
-                    val, std::vector<proto::plan::GenericValue>{});
+                    val,
+                    std::vector<proto::plan::GenericValue>{});
             }
         }
     };

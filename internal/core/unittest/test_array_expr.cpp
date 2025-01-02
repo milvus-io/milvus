@@ -2361,7 +2361,8 @@ TEST(Expr, TestArrayStringMatch) {
             milvus::expr::ColumnInfo(
                 string_array_fid, DataType::ARRAY, testcase.nested_path),
             testcase.op_type,
-            value, std::vector<proto::plan::GenericValue>{});
+            value,
+            std::vector<proto::plan::GenericValue>{});
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);

@@ -249,6 +249,7 @@ func TestExpr_PhraseMatch(t *testing.T) {
 	unsupported := []string{
 		`phrase_match(not_exist, "phrase")`,
 		`phrase_match(BoolField, "phrase")`,
+		`phrase_match(StringField, "phrase", -1)`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
