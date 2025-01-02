@@ -12,7 +12,6 @@ from base.partition_wrapper import ApiPartitionWrapper
 from base.index_wrapper import ApiIndexWrapper
 from base.utility_wrapper import ApiUtilityWrapper
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
-from base.high_level_api_wrapper import HighLevelApiWrapper
 from base.async_milvus_client_wrapper import AsyncMilvusClientWrapper
 from utils.util_log import test_log as log
 from common import common_func as cf
@@ -33,7 +32,7 @@ class Base:
     collection_schema_wrap = None
     field_schema_wrap = None
     database_wrap = None
-    collection_object_list = []
+    tear_down_collection_names = []
     resource_group_list = []
     high_level_api_wrap = None
     async_milvus_client_wrap = None
@@ -60,7 +59,6 @@ class Base:
         self.collection_schema_wrap = ApiCollectionSchemaWrapper()
         self.field_schema_wrap = ApiFieldSchemaWrapper()
         self.database_wrap = ApiDatabaseWrapper()
-        self.high_level_api_wrap = HighLevelApiWrapper()
         self.async_milvus_client_wrap = AsyncMilvusClientWrapper()
 
     def teardown_method(self, method):
@@ -83,9 +81,9 @@ class Base:
                     self.collection_wrap.drop(check_task=ct.CheckTasks.check_nothing)
 
             collection_list = self.utility_wrap.list_collections()[0]
-            for collection_object in self.collection_object_list:
-                if collection_object.collection is not None and collection_object.name in collection_list:
-                    collection_object.drop(check_task=ct.CheckTasks.check_nothing)
+            for collection_name in self.tear_down_collection_names:
+                if collection_name is not None and collection_name in collection_list:
+                    self.collection_wrap.init_collection(name=collection_name)[0].drop()
 
             """ Clean up the rgs before disconnect """
             rgs_list = self.utility_wrap.list_resource_groups()[0]
@@ -189,7 +187,7 @@ class TestcaseBase(Base):
         collection_w = ApiCollectionWrapper()
         collection_w.init_collection(name=name, schema=schema, check_task=check_task,
                                      check_items=check_items, **kwargs)
-        self.collection_object_list.append(collection_w)
+        self.tear_down_collection_names.append(name)
         return collection_w
 
     def init_multi_fields_collection_wrap(self, name=cf.gen_unique_str()):
