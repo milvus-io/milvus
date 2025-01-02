@@ -7,7 +7,7 @@ use tantivy::{
 pub(crate) struct DocIdCollector;
 
 impl Collector for DocIdCollector {
-    type Fruit = Vec<u32>;
+    type Fruit = Vec<i64>;
     type Child = DocIdChildCollector;
 
     fn for_segment(
@@ -41,16 +41,16 @@ impl Collector for DocIdCollector {
 }
 
 pub(crate) struct DocIdChildCollector {
-    docs: Vec<u32>,
+    docs: Vec<i64>,
     column: Column<i64>,
 }
 
 impl SegmentCollector for DocIdChildCollector {
-    type Fruit = Vec<u32>;
+    type Fruit = Vec<i64>;
 
     fn collect(&mut self, doc: DocId, _score: Score) {
         self.column.values_for_doc(doc).for_each(|doc_id| {
-            self.docs.push(doc_id as u32);
+            self.docs.push(doc_id);
         })
     }
 

@@ -62,6 +62,11 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 								},
 							},
 						},
+						{
+							FieldID:  102,
+							Name:     "json",
+							DataType: schemapb.DataType_JSON,
+						},
 					},
 				},
 			},
@@ -117,5 +122,5 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 
 	jm.loopWg.Wait()
 
-	s.Equal(2, len(jm.scheduler.tasks))
+	s.Equal(3, len(jm.scheduler.tasks))
 }
