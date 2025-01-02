@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -50,6 +51,16 @@ func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 		AutoID:             true,
 		Fields:             fields,
 		EnableDynamicField: EnableDynamicField,
+	}
+}
+
+func enableMatch(schema *schemapb.CollectionSchema) {
+	for _, field := range schema.Fields {
+		if typeutil.IsStringType(field.DataType) {
+			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+				Key: "enable_match", Value: "True",
+			})
+		}
 	}
 }
 
@@ -221,6 +232,11 @@ func TestExpr_TextMatch(t *testing.T) {
 	exprStrs := []string{
 		`text_match(VarCharField, "query")`,
 	}
+	for _, exprStr := range exprStrs {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+
+	enableMatch(schema)
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
 	}
