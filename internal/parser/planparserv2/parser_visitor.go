@@ -27,11 +27,14 @@ func (v *ParserVisitor) VisitParens(ctx *parser.ParensContext) interface{} {
 	return ctx.Expr().Accept(v)
 }
 
-func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, error) {
+func (v *ParserVisitor) translateIdentifier(identifier string, require_enable_match bool) (*ExprWithType, error) {
 	identifier = decodeUnicode(identifier)
 	field, err := v.schema.GetFieldFromNameDefaultJSON(identifier)
 	if err != nil {
 		return nil, err
+	}
+	if require_enable_match && !typeutil.CreateFieldSchemaHelper(field).EnableMatch() {
+		return nil, fmt.Errorf("field %s does not support text match operation", field)
 	}
 	var nestedPath []string
 	if identifier != field.Name {
@@ -64,7 +67,7 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 // VisitIdentifier translates expr to column plan.
 func (v *ParserVisitor) VisitIdentifier(ctx *parser.IdentifierContext) interface{} {
 	identifier := ctx.GetText()
-	expr, err := v.translateIdentifier(identifier)
+	expr, err := v.translateIdentifier(identifier, false)
 	if err != nil {
 		return err
 	}
@@ -482,7 +485,7 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 }
 
 func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{} {
-	column, err := v.translateIdentifier(ctx.Identifier().GetText())
+	column, err := v.translateIdentifier(ctx.Identifier().GetText(), true)
 	if err != nil {
 		return err
 	}
@@ -593,7 +596,7 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 
 func (v *ParserVisitor) getChildColumnInfo(identifier, child antlr.TerminalNode) (*planpb.ColumnInfo, error) {
 	if identifier != nil {
-		childExpr, err := v.translateIdentifier(identifier.GetText())
+		childExpr, err := v.translateIdentifier(identifier.GetText(), false)
 		if err != nil {
 			return nil, err
 		}
@@ -1182,7 +1185,7 @@ func (v *ParserVisitor) VisitEmptyArray(ctx *parser.EmptyArrayContext) interface
 }
 
 func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{} {
-	column, err := v.translateIdentifier(ctx.Identifier().GetText())
+	column, err := v.translateIdentifier(ctx.Identifier().GetText(), false)
 	if err != nil {
 		return err
 	}
@@ -1202,7 +1205,7 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 }
 
 func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
-	column, err := v.translateIdentifier(ctx.Identifier().GetText())
+	column, err := v.translateIdentifier(ctx.Identifier().GetText(), false)
 	if err != nil {
 		return err
 	}
