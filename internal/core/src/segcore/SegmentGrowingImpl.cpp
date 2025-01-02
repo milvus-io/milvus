@@ -863,7 +863,11 @@ SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
                              int64_t offset_begin) {
     std::unique_lock lock(mutex_);
     auto iter = text_indexes_.find(field_id);
-    AssertInfo(iter != text_indexes_.end(), "text index not found");
+    if (iter == text_indexes_.end()) {
+        throw SegcoreError(
+            ErrorCode::TextIndexNotFound,
+            fmt::format("text index not found for field {}", field_id));
+    }
     iter->second->AddTexts(n, texts, texts_valid_data, offset_begin);
 }
 
