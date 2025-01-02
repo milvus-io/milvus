@@ -125,23 +125,26 @@ func (fs *FileSource) loadFromFile() error {
 
 	for _, configFile := range configFiles {
 		if _, err := os.Stat(configFile); err != nil {
-			continue
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
 		}
 
 		ext := filepath.Ext(configFile)
 		if len(ext) == 0 || (ext[1:] != "yaml" && ext[1:] != "yml") {
-			return fmt.Errorf("Unsupported Config Type: " + ext)
+			return fmt.Errorf("Unsupported Config Type: %s", ext)
 		}
 
 		data, err := os.ReadFile(configFile)
 		if err != nil {
-			return errors.Wrap(err, "Read config failed: "+configFile)
+			return errors.Wrapf(err, "Read config failed: %s", configFile)
 		}
 
 		var config map[string]interface{}
 		err = yaml.Unmarshal(data, &config)
 		if err != nil {
-			return errors.Wrap(err, "unmarshal yaml file "+configFile+" failed")
+			return errors.Wrapf(err, "unmarshal yaml file %s failed", configFile)
 		}
 
 		flattenAndMergeMap("", config, newConfig)
