@@ -61,4 +61,4 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
  private:
     std::string nested_path_;
 };
-}  // namespace milvus::indexbuilder
+}  // namespace milvus::index
