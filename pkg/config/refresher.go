@@ -72,7 +72,7 @@ func (r *refresher) refreshPeriodically(name string) {
 		case <-ticker.C:
 			err := r.fetchFunc()
 			if err != nil {
-				log.Error("can not pull configs", zap.Error(err))
+				log.Fatal("can not pull configs", zap.Error(err))
 				r.stop()
 			}
 		case <-r.intervalDone:
