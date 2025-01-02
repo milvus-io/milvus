@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/remeh/sizedwaitgroup"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
@@ -476,7 +477,9 @@ func TestDeleteComplexExpr(t *testing.T) {
 		{expr: fmt.Sprintf("%s == [0, 1]", common.DefaultDoubleArrayField), count: 0},                                    //  array ==
 		{expr: fmt.Sprintf("array_length(%s) == %d", common.DefaultDoubleArrayField, capacity), count: common.DefaultNb}, //  array_length
 	}
-	for _, exprLimit := range exprLimits {
+	sizedwaitgroup := sizedwaitgroup.New(5)
+	testFunc := func(exprLimit exprCount) {
+		defer sizedwaitgroup.Done()
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 		mc := createDefaultMilvusClient(ctx, t)
 
@@ -503,6 +506,13 @@ func TestDeleteComplexExpr(t *testing.T) {
 		common.CheckErr(t, err, true)
 		require.Zero(t, resQuery.ResultCount)
 	}
+
+	for _, exprLimit := range exprLimits {
+		exprLimit := exprLimit
+		sizedwaitgroup.Add()
+		go testFunc(exprLimit)
+	}
+	sizedwaitgroup.Wait()
 }
 
 func TestDeleteInvalidExpr(t *testing.T) {
