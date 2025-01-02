@@ -97,8 +97,8 @@ class FieldData<BinaryVector> : public FieldDataImpl<uint8_t, false> {
     explicit FieldData(int64_t dim,
                        DataType data_type,
                        int64_t buffered_num_rows = 0)
-        : binary_dim_(dim),
-          FieldDataImpl(dim / 8, data_type, false, buffered_num_rows) {
+        : FieldDataImpl(dim / 8, data_type, false, buffered_num_rows),
+          binary_dim_(dim) {
         Assert(dim % 8 == 0);
     }
 

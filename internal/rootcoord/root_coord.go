@@ -341,15 +341,14 @@ func (c *Core) initKVCreator() {
 	}
 }
 
-func (c *Core) initMetaTable() error {
-	log := log.Ctx(c.ctx)
+func (c *Core) initMetaTable(initCtx context.Context) error {
 	fn := func() error {
 		var catalog metastore.RootCoordCatalog
 		var err error
 
 		switch Params.MetaStoreCfg.MetaStoreType.GetValue() {
 		case util.MetaStoreTypeEtcd:
-			log.Info("Using etcd as meta storage.")
+			log.Ctx(initCtx).Info("Using etcd as meta storage.")
 			var metaKV kv.MetaKv
 			var ss *kvmetestore.SuffixSnapshot
 			var err error
@@ -363,7 +362,7 @@ func (c *Core) initMetaTable() error {
 			}
 			catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
 		case util.MetaStoreTypeTiKV:
-			log.Info("Using tikv as meta storage.")
+			log.Ctx(initCtx).Info("Using tikv as meta storage.")
 			var metaKV kv.MetaKv
 			var ss *kvmetestore.SuffixSnapshot
 			var err error
@@ -387,10 +386,10 @@ func (c *Core) initMetaTable() error {
 		return nil
 	}
 
-	return retry.Do(c.ctx, fn, retry.Attempts(10))
+	return retry.Do(initCtx, fn, retry.Attempts(10))
 }
 
-func (c *Core) initIDAllocator() error {
+func (c *Core) initIDAllocator(initCtx context.Context) error {
 	var tsoKV kv.TxnKV
 	var kvPath string
 	if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
@@ -406,7 +405,7 @@ func (c *Core) initIDAllocator() error {
 	}
 	c.idAllocator = idAllocator
 
-	log.Ctx(c.ctx).Info("id allocator initialized",
+	log.Ctx(initCtx).Info("id allocator initialized",
 		zap.String("root_path", kvPath),
 		zap.String("sub_path", globalIDAllocatorSubPath),
 		zap.String("key", globalIDAllocatorKey))
@@ -414,7 +413,7 @@ func (c *Core) initIDAllocator() error {
 	return nil
 }
 
-func (c *Core) initTSOAllocator() error {
+func (c *Core) initTSOAllocator(initCtx context.Context) error {
 	var tsoKV kv.TxnKV
 	var kvPath string
 	if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
@@ -430,7 +429,7 @@ func (c *Core) initTSOAllocator() error {
 	}
 	c.tsoAllocator = tsoAllocator
 
-	log.Ctx(c.ctx).Info("tso allocator initialized",
+	log.Ctx(initCtx).Info("tso allocator initialized",
 		zap.String("root_path", kvPath),
 		zap.String("sub_path", globalIDAllocatorSubPath),
 		zap.String("key", globalIDAllocatorKey))
@@ -439,19 +438,22 @@ func (c *Core) initTSOAllocator() error {
 }
 
 func (c *Core) initInternal() error {
-	log := log.Ctx(c.ctx)
+	initCtx, initSpan := log.NewIntentContext(typeutil.RootCoordRole, "initInternal")
+	defer initSpan.End()
+	log := log.Ctx(initCtx)
+
 	c.UpdateStateCode(commonpb.StateCode_Initializing)
 	c.initKVCreator()
 
-	if err := c.initIDAllocator(); err != nil {
+	if err := c.initIDAllocator(initCtx); err != nil {
 		return err
 	}
 
-	if err := c.initTSOAllocator(); err != nil {
+	if err := c.initTSOAllocator(initCtx); err != nil {
 		return err
 	}
 
-	if err := c.initMetaTable(); err != nil {
+	if err := c.initMetaTable(initCtx); err != nil {
 		return err
 	}
 
@@ -459,7 +461,7 @@ func (c *Core) initInternal() error {
 
 	c.factory.Init(Params)
 	chanMap := c.meta.ListCollectionPhysicalChannels(c.ctx)
-	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
+	c.chanTimeTick = newTimeTickSync(initCtx, c.ctx, c.session.ServerID, c.factory, chanMap)
 	log.Info("create TimeTick sync done")
 
 	c.proxyClientManager = proxyutil.NewProxyClientManager(c.proxyCreator)
@@ -492,12 +494,12 @@ func (c *Core) initInternal() error {
 	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.queryCoord, c.dataCoord, c.tsoAllocator, c.meta)
 	log.Debug("RootCoord init QuotaCenter done")
 
-	if err := c.initCredentials(); err != nil {
+	if err := c.initCredentials(initCtx); err != nil {
 		return err
 	}
 	log.Info("init credentials done")
 
-	if err := c.initRbac(); err != nil {
+	if err := c.initRbac(initCtx); err != nil {
 		return err
 	}
 
@@ -555,34 +557,33 @@ func (c *Core) Init() error {
 	return initError
 }
 
-func (c *Core) initCredentials() error {
-	log := log.Ctx(c.ctx)
-	credInfo, _ := c.meta.GetCredential(c.ctx, util.UserRoot)
+func (c *Core) initCredentials(initCtx context.Context) error {
+	credInfo, _ := c.meta.GetCredential(initCtx, util.UserRoot)
 	if credInfo == nil {
 		encryptedRootPassword, err := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
 		if err != nil {
-			log.Warn("RootCoord init user root failed", zap.Error(err))
+			log.Ctx(initCtx).Warn("RootCoord init user root failed", zap.Error(err))
 			return err
 		}
-		log.Info("RootCoord init user root")
-		err = c.meta.AddCredential(c.ctx, &internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
+		log.Ctx(initCtx).Info("RootCoord init user root")
+		err = c.meta.AddCredential(initCtx, &internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
 		return err
 	}
 	return nil
 }
 
-func (c *Core) initRbac() error {
+func (c *Core) initRbac(initCtx context.Context) error {
 	var err error
 	// create default roles, including admin, public
 	for _, role := range util.DefaultRoles {
-		err = c.meta.CreateRole(c.ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
+		err = c.meta.CreateRole(initCtx, util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
 		if err != nil && !common.IsIgnorableError(err) {
 			return errors.Wrap(err, "failed to create role")
 		}
 	}
 
 	if Params.ProxyCfg.EnablePublicPrivilege.GetAsBool() {
-		err = c.initPublicRolePrivilege()
+		err = c.initPublicRolePrivilege(initCtx)
 		if err != nil {
 			return err
 		}
@@ -594,7 +595,7 @@ func (c *Core) initRbac() error {
 	return nil
 }
 
-func (c *Core) initPublicRolePrivilege() error {
+func (c *Core) initPublicRolePrivilege(initCtx context.Context) error {
 	// grant privileges for the public role
 	globalPrivileges := []string{
 		commonpb.ObjectPrivilege_PrivilegeDescribeCollection.String(),
@@ -606,7 +607,7 @@ func (c *Core) initPublicRolePrivilege() error {
 
 	var err error
 	for _, globalPrivilege := range globalPrivileges {
-		err = c.meta.OperatePrivilege(c.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		err = c.meta.OperatePrivilege(initCtx, util.DefaultTenant, &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: util.RolePublic},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
 			ObjectName: util.AnyWord,
@@ -621,7 +622,7 @@ func (c *Core) initPublicRolePrivilege() error {
 		}
 	}
 	for _, collectionPrivilege := range collectionPrivileges {
-		err = c.meta.OperatePrivilege(c.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		err = c.meta.OperatePrivilege(initCtx, util.DefaultTenant, &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: util.RolePublic},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 			ObjectName: util.AnyWord,
@@ -636,50 +637,6 @@ func (c *Core) initPublicRolePrivilege() error {
 		}
 	}
 	return nil
-}
-
-func (c *Core) initBuiltinPrivilegeGroups() []*milvuspb.PrivilegeGroupInfo {
-	// init built in privilege groups, override by config if rbac config enabled
-	builtinGroups := make([]*milvuspb.PrivilegeGroupInfo, 0)
-	for groupName, privileges := range util.BuiltinPrivilegeGroups {
-		if Params.RbacConfig.Enabled.GetAsBool() {
-			var confPrivs []string
-			switch groupName {
-			case "ClusterReadOnly":
-				confPrivs = Params.RbacConfig.ClusterReadOnlyPrivileges.GetAsStrings()
-			case "ClusterReadWrite":
-				confPrivs = Params.RbacConfig.ClusterReadWritePrivileges.GetAsStrings()
-			case "ClusterAdmin":
-				confPrivs = Params.RbacConfig.ClusterAdminPrivileges.GetAsStrings()
-			case "DatabaseReadOnly":
-				confPrivs = Params.RbacConfig.DBReadOnlyPrivileges.GetAsStrings()
-			case "DatabaseReadWrite":
-				confPrivs = Params.RbacConfig.DBReadWritePrivileges.GetAsStrings()
-			case "DatabaseAdmin":
-				confPrivs = Params.RbacConfig.DBAdminPrivileges.GetAsStrings()
-			case "CollectionReadOnly":
-				confPrivs = Params.RbacConfig.CollectionReadOnlyPrivileges.GetAsStrings()
-			case "CollectionReadWrite":
-				confPrivs = Params.RbacConfig.CollectionReadWritePrivileges.GetAsStrings()
-			case "CollectionAdmin":
-				confPrivs = Params.RbacConfig.CollectionAdminPrivileges.GetAsStrings()
-			default:
-				return nil
-			}
-			if len(confPrivs) > 0 {
-				privileges = confPrivs
-			}
-		}
-
-		privs := lo.Map(privileges, func(name string, _ int) *milvuspb.PrivilegeEntity {
-			return &milvuspb.PrivilegeEntity{Name: name}
-		})
-		builtinGroups = append(builtinGroups, &milvuspb.PrivilegeGroupInfo{
-			GroupName:  groupName,
-			Privileges: privs,
-		})
-	}
-	return builtinGroups
 }
 
 func (c *Core) initBuiltinRoles() error {
@@ -2648,7 +2605,7 @@ func (c *Core) isValidPrivilege(ctx context.Context, privilegeName string, objec
 	if customPrivGroup {
 		return fmt.Errorf("can not operate the custom privilege group [%s]", privilegeName)
 	}
-	if lo.Contains(lo.Keys(util.BuiltinPrivilegeGroups), privilegeName) {
+	if lo.Contains(Params.RbacConfig.GetDefaultPrivilegeGroupNames(), privilegeName) {
 		return fmt.Errorf("can not operate the built-in privilege group [%s]", privilegeName)
 	}
 	// check object privileges for built-in privileges
@@ -2756,8 +2713,7 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 		}
 		grants := []*milvuspb.GrantEntity{in.Entity}
 
-		allGroups, err := c.meta.ListPrivilegeGroups(ctx)
-		allGroups = append(allGroups, c.initBuiltinPrivilegeGroups()...)
+		allGroups, err := c.getPrivilegeGroups(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -2945,18 +2901,34 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
-	userRoles, err := c.meta.ListUserRole(ctx, util.DefaultTenant)
+	// expand privilege groups and turn to policies
+	allGroups, err := c.getPrivilegeGroups(ctx)
 	if err != nil {
-		errMsg := "fail to list user-role"
-		ctxLog.Warn(errMsg, zap.Any("in", in), zap.Error(err))
+		errMsg := "fail to get privilege groups"
+		ctxLog.Warn(errMsg, zap.Error(err))
 		return &internalpb.ListPolicyResponse{
 			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
-	privGroups, err := c.meta.ListPrivilegeGroups(ctx)
+	groups := lo.SliceToMap(allGroups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
+		return group.GroupName, group.Privileges
+	})
+	expandGrants, err := c.expandPrivilegeGroups(ctx, policies, groups)
 	if err != nil {
-		errMsg := "fail to list privilege groups"
+		errMsg := "fail to expand privilege groups"
 		ctxLog.Warn(errMsg, zap.Error(err))
+		return &internalpb.ListPolicyResponse{
+			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
+		}, nil
+	}
+	expandPolicies := lo.Map(expandGrants, func(r *milvuspb.GrantEntity, _ int) string {
+		return funcutil.PolicyForPrivilege(r.Role.Name, r.Object.Name, r.ObjectName, r.Grantor.Privilege.Name, r.DbName)
+	})
+
+	userRoles, err := c.meta.ListUserRole(ctx, util.DefaultTenant)
+	if err != nil {
+		errMsg := "fail to list user-role"
+		ctxLog.Warn(errMsg, zap.Any("in", in), zap.Error(err))
 		return &internalpb.ListPolicyResponse{
 			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
@@ -2967,9 +2939,9 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &internalpb.ListPolicyResponse{
 		Status:          merr.Success(),
-		PolicyInfos:     policies,
+		PolicyInfos:     expandPolicies,
 		UserRoles:       userRoles,
-		PrivilegeGroups: privGroups,
+		PrivilegeGroups: allGroups,
 	}, nil
 }
 
@@ -3243,16 +3215,7 @@ func (c *Core) ListPrivilegeGroups(ctx context.Context, in *milvuspb.ListPrivile
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	// append built in privilege groups
-	for groupName, privileges := range util.BuiltinPrivilegeGroups {
-		privGroups = append(privGroups, &milvuspb.PrivilegeGroupInfo{
-			GroupName: groupName,
-			Privileges: lo.Map(privileges, func(p string, _ int) *milvuspb.PrivilegeEntity {
-				return &milvuspb.PrivilegeEntity{
-					Name: p,
-				}
-			}),
-		})
-	}
+	privGroups = append(privGroups, Params.RbacConfig.GetDefaultPrivilegeGroups()...)
 	return &milvuspb.ListPrivilegeGroupsResponse{
 		Status:          merr.Success(),
 		PrivilegeGroups: privGroups,
@@ -3449,4 +3412,14 @@ func (c *Core) expandPrivilegeGroups(ctx context.Context, grants []*milvuspb.Gra
 	return lo.UniqBy(newGrants, func(g *milvuspb.GrantEntity) string {
 		return fmt.Sprintf("%s-%s-%s-%s-%s-%s", g.Role, g.Object, g.ObjectName, g.Grantor.User, g.Grantor.Privilege.Name, g.DbName)
 	}), nil
+}
+
+// getPrivilegeGroups returns default privilege groups and user-defined privilege groups.
+func (c *Core) getPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
+	allGroups, err := c.meta.ListPrivilegeGroups(ctx)
+	allGroups = append(allGroups, Params.RbacConfig.GetDefaultPrivilegeGroups()...)
+	if err != nil {
+		return nil, err
+	}
+	return allGroups, nil
 }

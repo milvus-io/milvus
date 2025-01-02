@@ -84,7 +84,11 @@ func (filter *EntityFilter) GetDeltalogDeleteCount() int {
 }
 
 func (filter *EntityFilter) GetMissingDeleteCount() int {
-	return filter.GetDeltalogDeleteCount() - filter.GetDeletedCount()
+	diff := filter.GetDeltalogDeleteCount() - filter.GetDeletedCount()
+	if diff <= 0 {
+		diff = 0
+	}
+	return diff
 }
 
 func (filter *EntityFilter) isEntityDeleted(pk interface{}, pkTs typeutil.Timestamp) bool {

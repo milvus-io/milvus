@@ -120,8 +120,7 @@ class DeletedRecord {
             }
             std::vector<SegOffset> offsets;
             if (segment_) {
-                offsets =
-                    std::move(segment_->search_pk(deleted_pk, deleted_ts));
+                offsets = segment_->search_pk(deleted_pk, deleted_ts);
             } else {
                 // only for testing
                 offsets = std::move(
@@ -268,7 +267,7 @@ class DeletedRecord {
                     } else {
                         // add new snapshot
                         snapshots_.push_back(
-                            std::make_pair(dump_ts, std::move(bitmap.clone())));
+                            std::make_pair(dump_ts, bitmap.clone()));
                         Assert(it != accessor.end() && it.good());
                         snap_next_iter_.push_back(it);
                     }
@@ -314,7 +313,7 @@ class DeletedRecord {
         for (const auto& snap : snapshots_) {
             snapshots.emplace_back(snap.first, snap.second.clone());
         }
-        return std::move(snapshots);
+        return snapshots;
     }
 
  public:
