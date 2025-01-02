@@ -151,8 +151,6 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 		return err
 	}
 
-	mgr.rwMutex.Lock()
-	defer mgr.rwMutex.Unlock()
 	partitions := mgr.meta.GetPartitionsByCollection(collectionID)
 	partitionIDs := lo.Map(partitions, func(partition *Partition, i int) int64 {
 		return partition.PartitionID
@@ -182,7 +180,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 	}
 
 	for _, infos := range channelInfos {
-		merged := mgr.mergeDmChannelInfo(infos)
+		merged := mergeDmChannelInfo(infos)
 		dmChannels[merged.GetChannelName()] = merged
 	}
 
@@ -192,7 +190,11 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 	}
 
 	allocatedTarget := NewCollectionTarget(segments, dmChannels, partitionIDs)
+
+	mgr.rwMutex.Lock()
 	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
+	mgr.rwMutex.Unlock()
+
 	log.Debug("finish to update next targets for collection",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("PartitionIDs", partitionIDs))
@@ -200,7 +202,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 	return nil
 }
 
-func (mgr *TargetManager) mergeDmChannelInfo(infos []*datapb.VchannelInfo) *DmChannel {
+func mergeDmChannelInfo(infos []*datapb.VchannelInfo) *DmChannel {
 	var dmChannel *DmChannel
 
 	for _, info := range infos {
