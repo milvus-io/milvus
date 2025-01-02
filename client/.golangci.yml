@@ -1,5 +1,5 @@
 run:
-  go: "1.21"
+  go: "1.22"
   skip-dirs:
     - build
     - configs
@@ -42,7 +42,7 @@ linters-settings:
       - prefix(github.com/milvus-io)
     custom-order: true
   gofumpt:
-    lang-version: "1.18"
+    lang-version: "1.22"
     module-path: github.com/milvus-io
   goimports:
     local-prefixes: github.com/milvus-io
