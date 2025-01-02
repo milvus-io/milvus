@@ -70,8 +70,9 @@ GetMatchExpr(SchemaPtr schema,
 
     auto unary_range_expr = test::GenUnaryRangeExpr(op, query);
     unary_range_expr->set_allocated_column_info(column_info);
-    unary_range_expr->add_extra_values()->CopyFrom(
-        *milvus::test::GenGenericValue(slop));
+    auto generic_for_slop = milvus::test::GenGenericValue(slop);
+    unary_range_expr->add_extra_values()->CopyFrom(*generic_for_slop);
+    delete generic_for_slop;
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
@@ -91,7 +92,9 @@ GetNotMatchExpr(SchemaPtr schema,
     proto::plan::GenericValue val;
     val.set_string_val(query);
     std::vector<proto::plan::GenericValue> extra_values;
-    extra_values.push_back(*milvus::test::GenGenericValue(slop));
+    auto generic_for_slop = milvus::test::GenGenericValue(slop);
+    extra_values.push_back(*generic_for_slop);
+    delete generic_for_slop;
     auto child_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
         milvus::expr::ColumnInfo(str_meta.get_id(), DataType::VARCHAR),
         op,

@@ -177,12 +177,11 @@ TEST_P(TaskTest, CallExprEmpty) {
 TEST_P(TaskTest, UnaryExpr) {
     ::milvus::proto::plan::GenericValue value;
     value.set_int64_val(-1);
-    std::vector<proto::plan::GenericValue> extra_values;
     auto logical_expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(field_map_["int64"], DataType::INT64),
         proto::plan::OpType::LessThan,
         value,
-        extra_values);
+        std::vector<proto::plan::GenericValue>{});
     std::vector<milvus::plan::PlanNodePtr> sources;
     auto filter_node = std::make_shared<milvus::plan::FilterBitsNode>(
         "plannode id 1", logical_expr, sources);
