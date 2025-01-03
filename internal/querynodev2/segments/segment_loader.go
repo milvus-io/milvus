@@ -169,12 +169,15 @@ func NewLoader(
 	duf := NewDiskUsageFetcher(ctx)
 	go duf.Start()
 
+	warmupDispatcher := NewWarmupDispatcher()
+	go warmupDispatcher.Run(ctx)
 	loader := &segmentLoader{
 		manager:                   manager,
 		cm:                        cm,
 		loadingSegments:           typeutil.NewConcurrentMap[int64, *loadResult](),
 		committedResourceNotifier: syncutil.NewVersionedNotifier(),
 		duf:                       duf,
+		warmupDispatcher:          warmupDispatcher,
 	}
 
 	return loader
@@ -217,7 +220,8 @@ type segmentLoader struct {
 	committedResource         LoadResource
 	committedResourceNotifier *syncutil.VersionedNotifier
 
-	duf *diskUsageFetcher
+	duf              *diskUsageFetcher
+	warmupDispatcher *AsyncWarmupDispatcher
 }
 
 var _ Loader = (*segmentLoader)(nil)
@@ -300,6 +304,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			segmentType,
 			version,
 			loadInfo,
+			loader.warmupDispatcher,
 		)
 		if err != nil {
 			log.Warn("load segment failed when create new segment",
@@ -680,10 +685,10 @@ func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*Index
 }
 
 func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) (
-	map[int64]*IndexedFieldInfo, // indexed info
-	[]*datapb.FieldBinlog, // fields info
+	map[int64]*IndexedFieldInfo,      // indexed info
+	[]*datapb.FieldBinlog,            // fields info
 	map[int64]*datapb.TextIndexStats, // text indexed info
-	map[int64]struct{}, // unindexed text fields
+	map[int64]struct{},               // unindexed text fields
 ) {
 	fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 	for _, indexInfo := range loadInfo.IndexInfos {

@@ -28,9 +28,11 @@
 #include "exec/expression/JsonContainsExpr.h"
 #include "exec/expression/LogicalBinaryExpr.h"
 #include "exec/expression/LogicalUnaryExpr.h"
+#include "exec/expression/NullExpr.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/UnaryExpr.h"
 #include "exec/expression/ValueExpr.h"
+#include "expr/ITypeExpr.h"
 
 #include <memory>
 
@@ -282,6 +284,16 @@ CompileExpression(const expr::TypedExprPtr& expr,
             compiled_inputs,
             column_expr,
             "PhyColumnExpr",
+            context->get_segment(),
+            context->get_active_count(),
+            context->query_config()->get_expr_batch_size());
+    } else if (auto column_expr =
+                   std::dynamic_pointer_cast<const milvus::expr::NullExpr>(
+                       expr)) {
+        result = std::make_shared<PhyNullExpr>(
+            compiled_inputs,
+            column_expr,
+            "PhyNullExpr",
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
