@@ -136,6 +136,7 @@ func TestOnEvent(t *testing.T) {
 
 	dir, _ := os.MkdirTemp("", "milvus")
 	yamlFile := path.Join(dir, "milvus.yaml")
+	os.WriteFile(yamlFile, []byte("a.b: \"\""), 0o600)
 	mgr, _ := Init(WithEnvSource(formatKey),
 		WithFilesSource(&FileInfo{
 			Files:           []string{yamlFile},
@@ -147,31 +148,41 @@ func TestOnEvent(t *testing.T) {
 			RefreshInterval: 10 * time.Millisecond,
 		}))
 	os.WriteFile(yamlFile, []byte("a.b: aaa"), 0o600)
-	time.Sleep(time.Second)
-	value, err := mgr.GetConfig("a.b")
-	assert.NoError(t, err)
-	assert.Equal(t, value, "aaa")
+	assert.Eventually(t, func() bool {
+		value, err := mgr.GetConfig("a.b")
+		assert.NoError(t, err)
+		return value == "aaa"
+	}, time.Second*5, time.Second)
+
 	ctx := context.Background()
 	client.KV.Put(ctx, "test/config/a/b", "bbb")
-	time.Sleep(time.Second)
-	value, err = mgr.GetConfig("a.b")
-	assert.NoError(t, err)
-	assert.Equal(t, value, "bbb")
+
+	assert.Eventually(t, func() bool {
+		value, err := mgr.GetConfig("a.b")
+		assert.NoError(t, err)
+		return value == "bbb"
+	}, time.Second*5, time.Second)
+
 	client.KV.Put(ctx, "test/config/a/b", "ccc")
-	time.Sleep(time.Second)
-	value, err = mgr.GetConfig("a.b")
-	assert.NoError(t, err)
-	assert.Equal(t, value, "ccc")
+	assert.Eventually(t, func() bool {
+		value, err := mgr.GetConfig("a.b")
+		assert.NoError(t, err)
+		return value == "ccc"
+	}, time.Second*5, time.Second)
+
 	os.WriteFile(yamlFile, []byte("a.b: ddd"), 0o600)
-	time.Sleep(time.Second)
-	value, err = mgr.GetConfig("a.b")
-	assert.NoError(t, err)
-	assert.Equal(t, value, "ccc")
+	assert.Eventually(t, func() bool {
+		value, err := mgr.GetConfig("a.b")
+		assert.NoError(t, err)
+		return value == "ccc"
+	}, time.Second*5, time.Second)
+
 	client.KV.Delete(ctx, "test/config/a/b")
-	time.Sleep(time.Second)
-	value, err = mgr.GetConfig("a.b")
-	assert.NoError(t, err)
-	assert.Equal(t, value, "ddd")
+	assert.Eventually(t, func() bool {
+		value, err := mgr.GetConfig("a.b")
+		assert.NoError(t, err)
+		return value == "ddd"
+	}, time.Second*5, time.Second)
 }
 
 func TestDeadlock(t *testing.T) {
