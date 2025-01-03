@@ -192,19 +192,19 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 			}
 
 			from := int64(-1)
-			// fromScore := int64(0)
+			fromScore := int64(0)
 			if sourceNode != nil {
 				from = sourceNode.nodeID
-				// fromScore = int64(sourceNode.getPriority())
+				fromScore = int64(sourceNode.getPriority())
 			}
 
 			plan := ChannelAssignPlan{
-				From:    from,
-				To:      targetNode.nodeID,
-				Channel: ch,
-				// FromScore:    fromScore,
-				// ToScore:      int64(targetNode.getPriority()),
-				// SegmentScore: int64(scoreChanges),
+				From:         from,
+				To:           targetNode.nodeID,
+				Channel:      ch,
+				FromScore:    fromScore,
+				ToScore:      int64(targetNode.getPriority()),
+				ChannelScore: int64(scoreChanges),
 			}
 			br.AddRecord(StrRecordf("add segment plan %s", plan))
 			plans = append(plans, plan)
@@ -484,6 +484,20 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) (segmentPlans
 	}
 
 	return segmentPlans, channelPlans
+}
+
+func (b *ScoreBasedBalancer) genStoppingChannelPlan(replica *meta.Replica, rwNodes []int64, roNodes []int64) []ChannelAssignPlan {
+	channelPlans := make([]ChannelAssignPlan, 0)
+	for _, nodeID := range roNodes {
+		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(nodeID))
+		plans := b.AssignChannel(replica.GetCollectionID(), dmChannels, rwNodes, false)
+		for i := range plans {
+			plans[i].From = nodeID
+			plans[i].Replica = replica
+		}
+		channelPlans = append(channelPlans, plans...)
+	}
+	return channelPlans
 }
 
 func (b *ScoreBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []SegmentAssignPlan {
