@@ -280,6 +280,15 @@ func GenerateBFloat16Vectors(numRows, dim int) []byte {
 	return ret
 }
 
+func GenerateInt8Vectors(numRows, dim int) []int8 {
+	total := numRows * dim
+	ret := make([]int8, 0, total)
+	for i := 0; i < total; i++ {
+		ret = append(ret, int8(rand.Intn(256)-128))
+	}
+	return ret
+}
+
 func GenerateBFloat16VectorsWithInvalidData(numRows, dim int) []byte {
 	total := numRows * dim
 	ret16 := make([]uint16, 0, total)
@@ -858,6 +867,36 @@ func NewSparseFloatVectorFieldData(fieldName string, numRows int) *schemapb.Fiel
 	}
 }
 
+func NewInt8VectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_Int8Vector,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_Int8Vector{
+					Int8Vector: typeutil.Int8ArrayToBytes(GenerateInt8Vectors(numRows, dim)),
+				},
+			},
+		},
+	}
+}
+
+func NewInt8VectorFieldDataWithValue(fieldName string, fieldValue interface{}, dim int) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_Int8Vector,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_Int8Vector{
+					Int8Vector: fieldValue.([]byte),
+				},
+			},
+		},
+	}
+}
+
 func GenerateScalarFieldData(dType schemapb.DataType, fieldName string, numRows int) *schemapb.FieldData {
 	switch dType {
 	case schemapb.DataType_Bool:
@@ -931,6 +970,8 @@ func GenerateVectorFieldData(dType schemapb.DataType, fieldName string, numRows 
 		return NewBFloat16VectorFieldData(fieldName, numRows, dim)
 	case schemapb.DataType_SparseFloatVector:
 		return NewSparseFloatVectorFieldData(fieldName, numRows)
+	case schemapb.DataType_Int8Vector:
+		return NewInt8VectorFieldData(fieldName, numRows, dim)
 	default:
 		panic("unsupported data type")
 	}
@@ -953,6 +994,8 @@ func GenerateVectorFieldDataWithValue(dType schemapb.DataType, fieldName string,
 		fieldData = NewFloat16VectorFieldDataWithValue(fieldName, fieldValue, dim)
 	case schemapb.DataType_BFloat16Vector:
 		fieldData = NewBFloat16VectorFieldDataWithValue(fieldName, fieldValue, dim)
+	case schemapb.DataType_Int8Vector:
+		fieldData = NewInt8VectorFieldDataWithValue(fieldName, fieldValue, dim)
 	default:
 		panic("unsupported data type")
 	}

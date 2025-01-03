@@ -60,6 +60,15 @@ func GenBinaryVecDataset(vectors []byte) *Dataset {
 	}
 }
 
+func GenInt8VecDataset(vectors []int8) *Dataset {
+	return &Dataset{
+		DType: schemapb.DataType_Int8Vector,
+		Data: map[string]interface{}{
+			keyRawArr: vectors,
+		},
+	}
+}
+
 func GenDataset(data storage.FieldData) *Dataset {
 	switch f := data.(type) {
 	case *storage.BoolFieldData:
@@ -128,6 +137,8 @@ func GenDataset(data storage.FieldData) *Dataset {
 		return GenBFloat16VecDataset(f.Data)
 	case *storage.SparseFloatVectorFieldData:
 		return GenSparseFloatVecDataset(f)
+	case *storage.Int8VectorFieldData:
+		return GenInt8VecDataset(f.Data)
 	default:
 		return &Dataset{
 			DType: schemapb.DataType_None,

@@ -236,6 +236,12 @@ func (w *NativePayloadWriter) AddDataToPayload(data interface{}, validData []boo
 			return merr.WrapErrParameterInvalidMsg("incorrect data type")
 		}
 		return w.AddSparseFloatVectorToPayload(val)
+	case schemapb.DataType_Int8Vector:
+		val, ok := data.([]int8)
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg("incorrect data type")
+		}
+		return w.AddInt8VectorToPayload(val, w.dim.GetValue())
 	default:
 		return errors.New("unsupported datatype")
 	}
@@ -668,6 +674,33 @@ func (w *NativePayloadWriter) AddSparseFloatVectorToPayload(data *SparseFloatVec
 	return nil
 }
 
+func (w *NativePayloadWriter) AddInt8VectorToPayload(data []int8, dim int) error {
+	if w.finished {
+		return errors.New("can't append data to finished int8 vector payload")
+	}
+
+	if len(data) == 0 {
+		return errors.New("can't add empty msgs into int8 vector payload")
+	}
+
+	builder, ok := w.builder.(*array.FixedSizeBinaryBuilder)
+	if !ok {
+		return errors.New("failed to cast Int8VectorBuilder")
+	}
+
+	byteLength := dim
+	length := len(data) / byteLength
+
+	builder.Reserve(length)
+	for i := 0; i < length; i++ {
+		vec := data[i*dim : (i+1)*dim]
+		vecBytes := arrow.Int8Traits.CastToBytes(vec)
+		builder.Append(vecBytes)
+	}
+
+	return nil
+}
+
 func (w *NativePayloadWriter) FinishPayloadWriter() error {
 	if w.finished {
 		return errors.New("can't reuse a finished writer")
@@ -770,6 +803,10 @@ func milvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 		}
 	case schemapb.DataType_SparseFloatVector:
 		return &arrow.BinaryType{}
+	case schemapb.DataType_Int8Vector:
+		return &arrow.FixedSizeBinaryType{
+			ByteWidth: dim,
+		}
 	default:
 		panic("unsupported data type")
 	}

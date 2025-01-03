@@ -107,7 +107,7 @@ func TestVecIndexChecker_SetDefaultMetricTypeIfNotExist(t *testing.T) {
 			name:         "Float vector",
 			dataType:     schemapb.DataType_FloatVector,
 			params:       map[string]string{},
-			expectedType: FloatVectorDefaultMetricType,
+			expectedType: VectorDefaultMetricType,
 		},
 		{
 			name:         "Binary vector",

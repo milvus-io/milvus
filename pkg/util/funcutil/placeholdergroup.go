@@ -102,6 +102,19 @@ func fieldDataToPlaceholderValue(fieldData *schemapb.FieldData) (*commonpb.Place
 			Values: vec.Contents,
 		}
 		return placeholderValue, nil
+	case schemapb.DataType_Int8Vector:
+		vectors := fieldData.GetVectors()
+		x, ok := vectors.GetData().(*schemapb.VectorField_Int8Vector)
+		if !ok {
+			return nil, errors.New("vector data is not schemapb.VectorField_Int8Vector")
+		}
+
+		placeholderValue := &commonpb.PlaceholderValue{
+			Tag:    "$0",
+			Type:   commonpb.PlaceholderType_Int8Vector,
+			Values: flattenedInt8VectorsToByteVectors(x.Int8Vector, int(vectors.Dim)),
+		}
+		return placeholderValue, nil
 	case schemapb.DataType_VarChar:
 		strs := fieldData.GetScalars().GetStringData().GetData()
 		placeholderValue := &commonpb.PlaceholderValue{
@@ -121,7 +134,6 @@ func flattenedFloatVectorsToByteVectors(flattenedVectors []float32, dimension in
 	for _, floatVector := range floatVectors {
 		result = append(result, floatVectorToByteVector(floatVector))
 	}
-
 	return result
 }
 
@@ -153,25 +165,28 @@ func flattenedByteVectorsToByteVectors(flattenedVectors []byte, dimension int) [
 
 func flattenedFloat16VectorsToByteVectors(flattenedVectors []byte, dimension int) [][]byte {
 	result := make([][]byte, 0)
-
 	vectorBytes := 2 * dimension
-
 	for i := 0; i < len(flattenedVectors); i += vectorBytes {
 		result = append(result, flattenedVectors[i:i+vectorBytes])
 	}
-
 	return result
 }
 
 func flattenedBFloat16VectorsToByteVectors(flattenedVectors []byte, dimension int) [][]byte {
 	result := make([][]byte, 0)
-
 	vectorBytes := 2 * dimension
-
 	for i := 0; i < len(flattenedVectors); i += vectorBytes {
 		result = append(result, flattenedVectors[i:i+vectorBytes])
 	}
+	return result
+}
 
+func flattenedInt8VectorsToByteVectors(flattenedVectors []byte, dimension int) [][]byte {
+	result := make([][]byte, 0)
+	vectorBytes := dimension
+	for i := 0; i < len(flattenedVectors); i += vectorBytes {
+		result = append(result, flattenedVectors[i:i+vectorBytes])
+	}
 	return result
 }
 

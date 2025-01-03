@@ -52,7 +52,7 @@ const (
 )
 
 var (
-	FloatVectorMetrics  = []string{metric.L2, metric.IP, metric.COSINE}                                        // const
+	VectorMetrics       = []string{metric.L2, metric.IP, metric.COSINE}                                        // const
 	BinaryVectorMetrics = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE} // const
 )
 
@@ -60,7 +60,7 @@ var (
 var (
 	BinIDMapMetrics           = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE} // const
 	BinIvfMetrics             = []string{metric.HAMMING, metric.JACCARD}                                             // const
-	HnswMetrics               = []string{metric.L2, metric.IP, metric.COSINE, metric.HAMMING, metric.JACCARD}        // const
+	HnswMetrics               = []string{metric.L2, metric.IP, metric.COSINE}                                        // const
 	RaftMetrics               = []string{metric.L2, metric.IP}
 	CagraBuildAlgoTypes       = []string{CargaBuildAlgoIVFPQ, CargaBuildAlgoNNDESCENT}
 	supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1}              // const
@@ -69,7 +69,7 @@ var (
 )
 
 const (
-	FloatVectorDefaultMetricType       = metric.COSINE
+	VectorDefaultMetricType            = metric.COSINE
 	SparseFloatVectorDefaultMetricType = metric.IP
 	BinaryVectorDefaultMetricType      = metric.HAMMING
 )
