@@ -46,8 +46,10 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/rootcoord/mock_tombstone"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
+	"github.com/milvus-io/milvus/internal/rootcoord/tombstone"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -120,6 +122,9 @@ func Test_garbageCollector_scan(t *testing.T) {
 
 	meta, err := newMemoryMeta()
 	assert.NoError(t, err)
+	tbMeta := mock_tombstone.NewMockCollectionTombstoneInterface(t)
+	tbMeta.EXPECT().CheckIfPartitionAvailable(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
+	tombstone.InitCollectionTombstoneForTest(tbMeta)
 
 	t.Run("key is reference", func(t *testing.T) {
 		gc := newGarbageCollector(meta, newMockHandler(), GcOption{

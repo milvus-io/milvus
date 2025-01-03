@@ -44,6 +44,10 @@ func (m *mockFailStep) Execute(ctx context.Context) ([]nestedStep, error) {
 	return nil, errors.New("error mock Execute")
 }
 
+func (m *mockFailStep) Desc() string {
+	return "mockFailStep"
+}
+
 type mockNormalStep struct {
 	nestedStep
 	calledChan chan struct{}
@@ -58,6 +62,10 @@ func (m *mockNormalStep) Execute(ctx context.Context) ([]nestedStep, error) {
 	m.called = true
 	m.calledChan <- struct{}{}
 	return nil, nil
+}
+
+func (m *mockNormalStep) Desc() string {
+	return "mockNormalStep"
 }
 
 func newTestRedoTask() *baseRedoTask {

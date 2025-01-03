@@ -56,6 +56,7 @@ func (s *stepStack) Execute(ctx context.Context) *stepStack {
 	for len(steps) > 0 {
 		l := len(steps)
 		todo := steps[l-1]
+		log.Debug("step task begin", zap.String("step", todo.Desc()))
 		childSteps, err := todo.Execute(ctx)
 
 		// TODO: maybe a interface `step.LogOnError` is better.
@@ -76,6 +77,7 @@ func (s *stepStack) Execute(ctx context.Context) *stepStack {
 			}
 			return &stepStack{steps: steps}
 		}
+		log.Debug("step task done", zap.String("step", todo.Desc()))
 		// this step is done.
 		steps = steps[:l-1]
 		steps = append(steps, childSteps...)

@@ -897,3 +897,21 @@ func (s *ChannelManagerSuite) TestGetChannelWatchInfos() {
 	infos = cm.GetChannelWatchInfos()
 	s.Equal(0, len(infos))
 }
+
+func (s *ChannelManagerSuite) TestReleaseByCollectionID() {
+	chNodes := map[string]int64{
+		"ch1": 1,
+		"ch2": 1,
+		"ch3": 1,
+	}
+	s.prepareMeta(chNodes, datapb.ChannelWatchState_WatchSuccess)
+
+	m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+	s.Require().NoError(err)
+	err = m.ReleaseByCollectionID(1)
+	s.NoError(err)
+
+	s.checkAssignment(m, 1, "ch1", ToRelease)
+	s.checkAssignment(m, 1, "ch2", ToRelease)
+	s.checkAssignment(m, 1, "ch3", ToRelease)
+}

@@ -522,3 +522,11 @@ func (s *Server) ListImports(ctx context.Context, in *internalpb.ListImportsRequ
 func (s *Server) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest) (*indexpb.ListIndexesResponse, error) {
 	return s.dataCoord.ListIndexes(ctx, in)
 }
+
+func (s *Server) DropCollection(ctx context.Context, in *datapb.DropCollectionRequest) (*datapb.DropCollectionResponse, error) {
+	return s.dataCoord.DropCollection(ctx, in)
+}
+
+func (s *Server) DropPartition(ctx context.Context, in *datapb.DropPartitionRequest) (*datapb.DropPartitionResponse, error) {
+	return s.dataCoord.DropPartition(ctx, in)
+}

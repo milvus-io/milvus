@@ -9,6 +9,9 @@ packages:
     interfaces:
       WALAccesser:
       Utility:
+  github.com/milvus-io/milvus/internal/rootcoord/tombstone:
+    interfaces:
+      CollectionTombstoneInterface:
   github.com/milvus-io/milvus/internal/streamingcoord/server/balancer:
     interfaces:
       Balancer:
@@ -60,6 +63,7 @@ packages:
   github.com/milvus-io/milvus/internal/metastore:
     interfaces:
       StreamingCoordCataLog:
+      DataCoordCatalog:
       StreamingNodeCataLog:
   github.com/milvus-io/milvus/internal/util/segcore:
     interfaces:

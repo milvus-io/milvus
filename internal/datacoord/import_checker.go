@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -30,9 +29,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/rootcoord/tombstone"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -453,25 +454,22 @@ func (c *importChecker) tryTimeoutJob(job ImportJob) {
 }
 
 func (c *importChecker) checkCollection(collectionID int64, jobs []ImportJob) {
-	if len(jobs) == 0 {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	has, err := c.broker.HasCollection(ctx, collectionID)
-	if err != nil {
-		log.Warn("verify existence of collection failed", zap.Int64("collection", collectionID), zap.Error(err))
-		return
-	}
-	if !has {
-		jobs = lo.Filter(jobs, func(job ImportJob, _ int) bool {
-			return job.GetState() != internalpb.ImportJobState_Failed
-		})
-		for _, job := range jobs {
-			err = c.imeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed),
-				UpdateJobReason(fmt.Sprintf("collection %d dropped", collectionID)))
-			if err != nil {
+	for _, job := range jobs {
+		if job.GetState() == internalpb.ImportJobState_Failed {
+			continue
+		}
+		dropped := false
+		var reason string
+		// Collection with partitionKey will never drop partition.
+		for _, partitionID := range job.GetPartitionIDs() {
+			if !tombstone.CollectionTombstone().CheckIfPartitionAvailable(context.TODO(), collectionID, partitionID) {
+				dropped = true
+				reason = merr.WrapErrPartitionDrop(partitionID).Error()
+				break
+			}
+		}
+		if dropped {
+			if err := c.imeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason)); err != nil {
 				log.Warn("failed to update job state to Failed", zap.Int64("jobID", job.GetJobID()), zap.Error(err))
 			}
 		}

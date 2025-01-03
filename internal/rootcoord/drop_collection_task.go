@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -72,52 +73,67 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 
 	ts := t.GetTs()
 
-	redoTask := newBaseRedoTask(t.core.stepExecutor)
+	task := newDropCollectionRedoTask(t.core, collMeta, t.Req.GetDbName(), aliases, ts, false)
+	return task.Execute(ctx)
+}
+
+// newDropCollectionRedoTask creates a redo task for dropping collection.
+func newDropCollectionRedoTask(
+	core *Core,
+	collMeta *model.Collection,
+	dbName string,
+	aliases []string,
+	ts uint64,
+	isRecover bool,
+) *baseRedoTask {
+	redoTask := newBaseRedoTask(core.stepExecutor)
+	if !isRecover {
+		// if the task is recoverred from meta, the state has been changed to dropping, so skip it.
+		redoTask.AddSyncStep(&changeCollectionStateStep{
+			baseStep:     baseStep{core: core},
+			collectionID: collMeta.CollectionID,
+			state:        pb.CollectionState_CollectionDropping,
+			ts:           ts,
+		})
+	}
 
 	redoTask.AddSyncStep(&expireCacheStep{
-		baseStep:        baseStep{core: t.core},
-		dbName:          t.Req.GetDbName(),
+		baseStep:        baseStep{core: core},
+		dbName:          dbName,
 		collectionNames: append(aliases, collMeta.Name),
 		collectionID:    collMeta.CollectionID,
 		ts:              ts,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
 	})
-	redoTask.AddSyncStep(&changeCollectionStateStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: collMeta.CollectionID,
-		state:        pb.CollectionState_CollectionDropping,
-		ts:           ts,
-	})
-
 	redoTask.AddAsyncStep(&releaseCollectionStep{
-		baseStep:     baseStep{core: t.core},
+		baseStep:     baseStep{core: core},
 		collectionID: collMeta.CollectionID,
 	})
 	redoTask.AddAsyncStep(&dropIndexStep{
-		baseStep: baseStep{core: t.core},
+		baseStep: baseStep{core: core},
 		collID:   collMeta.CollectionID,
 		partIDs:  nil,
 	})
 	redoTask.AddAsyncStep(&deleteCollectionDataStep{
-		baseStep: baseStep{core: t.core},
+		baseStep: baseStep{core: core},
 		coll:     collMeta,
-		isSkip:   t.Req.GetBase().GetReplicateInfo().GetIsReplicate(),
+		isSkip:   !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
 	})
 	redoTask.AddAsyncStep(&removeDmlChannelsStep{
-		baseStep:  baseStep{core: t.core},
-		pChannels: collMeta.PhysicalChannelNames,
+		baseStep: baseStep{core: core},
+		collInfo: collMeta,
 	})
-	redoTask.AddAsyncStep(newConfirmGCStep(t.core, collMeta.CollectionID, allPartition))
+	redoTask.AddAsyncStep(newDropCollectionAtDataCoordStep(core, collMeta.CollectionID, collMeta.VirtualChannelNames))
+	redoTask.AddAsyncStep(newConfirmGCStep(core, collMeta.CollectionID, allPartition))
 	redoTask.AddAsyncStep(&deleteCollectionMetaStep{
-		baseStep:     baseStep{core: t.core},
+		baseStep:     baseStep{core: core},
 		collectionID: collMeta.CollectionID,
 		// This ts is less than the ts when we notify data nodes to drop collection, but it's OK since we have already
 		// marked this collection as deleted. If we want to make this ts greater than the notification's ts, we should
 		// wrap a step who will have these three children and connect them with ts.
 		ts: ts,
 	})
-
-	return redoTask.Execute(ctx)
+	return redoTask
 }
 
 func (t *dropCollectionTask) GetLockerKey() LockerKey {

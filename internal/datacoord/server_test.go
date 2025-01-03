@@ -49,9 +49,11 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/rootcoord/mock_tombstone"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
+	"github.com/milvus-io/milvus/internal/rootcoord/tombstone"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -117,6 +119,9 @@ func TestGetTimeTickChannel(t *testing.T) {
 }
 
 func TestGetSegmentStates(t *testing.T) {
+	tbMeta := mock_tombstone.NewMockCollectionTombstoneInterface(t)
+	tbMeta.EXPECT().CheckIfPartitionAvailable(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
+	tombstone.InitCollectionTombstoneForTest(tbMeta)
 	t.Run("normal cases", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
@@ -2193,85 +2198,6 @@ func TestGetFlushAllStateWithDB(t *testing.T) {
 			assert.Equal(t, test.ExpectedFlushed, resp.GetFlushed())
 		})
 	}
-}
-
-func TestDataCoordServer_SetSegmentState(t *testing.T) {
-	t.Run("normal case", func(t *testing.T) {
-		svr := newTestServer(t)
-		defer closeTestServer(t, svr)
-		segment := &datapb.SegmentInfo{
-			ID:            1000,
-			CollectionID:  100,
-			PartitionID:   0,
-			InsertChannel: "c1",
-			NumOfRows:     0,
-			State:         commonpb.SegmentState_Growing,
-			StartPosition: &msgpb.MsgPosition{
-				ChannelName: "c1",
-				MsgID:       []byte{},
-				MsgGroup:    "",
-				Timestamp:   0,
-			},
-		}
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
-		assert.NoError(t, err)
-		// Set segment state.
-		svr.SetSegmentState(context.TODO(), &datapb.SetSegmentStateRequest{
-			SegmentId: 1000,
-			NewState:  commonpb.SegmentState_Flushed,
-		})
-		// Verify that the state has been updated.
-		resp, err := svr.GetSegmentStates(context.TODO(), &datapb.GetSegmentStatesRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  0,
-			},
-			SegmentIDs: []int64{1000},
-		})
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		assert.EqualValues(t, 1, len(resp.States))
-		assert.EqualValues(t, commonpb.SegmentState_Flushed, resp.States[0].State)
-	})
-
-	t.Run("dataCoord meta set state not exists", func(t *testing.T) {
-		meta, err := newMemoryMeta()
-		assert.NoError(t, err)
-		svr := newTestServer(t, WithMeta(meta))
-		defer closeTestServer(t, svr)
-		// Set segment state.
-		svr.SetSegmentState(context.TODO(), &datapb.SetSegmentStateRequest{
-			SegmentId: 1000,
-			NewState:  commonpb.SegmentState_Flushed,
-		})
-		// Verify that the state has been updated.
-		resp, err := svr.GetSegmentStates(context.TODO(), &datapb.GetSegmentStatesRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  0,
-			},
-			SegmentIDs: []int64{1000},
-		})
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		assert.EqualValues(t, 1, len(resp.States))
-		assert.EqualValues(t, commonpb.SegmentState_NotExist, resp.States[0].State)
-	})
-
-	t.Run("with closed server", func(t *testing.T) {
-		svr := newTestServer(t)
-		closeTestServer(t, svr)
-		resp, err := svr.SetSegmentState(context.TODO(), &datapb.SetSegmentStateRequest{
-			SegmentId: 1000,
-			NewState:  commonpb.SegmentState_Flushed,
-		})
-		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-	})
 }
 
 func TestDataCoord_SegmentStatistics(t *testing.T) {

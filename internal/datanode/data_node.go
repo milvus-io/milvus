@@ -302,20 +302,6 @@ func (node *DataNode) registerMetricsRequest() {
 	log.Ctx(node.ctx).Info("register metrics actions finished")
 }
 
-// tryToReleaseFlowgraph tries to release a flowgraph
-func (node *DataNode) tryToReleaseFlowgraph(channel string) {
-	log.Ctx(node.ctx).Info("try to release flowgraph", zap.String("channel", channel))
-	if node.compactionExecutor != nil {
-		node.compactionExecutor.DiscardPlan(channel)
-	}
-	if node.flowgraphManager != nil {
-		node.flowgraphManager.RemoveFlowgraph(channel)
-	}
-	if node.writeBufferManager != nil {
-		node.writeBufferManager.RemoveChannel(channel)
-	}
-}
-
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
 	log := log.Ctx(node.ctx)

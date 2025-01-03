@@ -61,6 +61,10 @@ type Broker interface {
 	DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 	// notify observer to clean their meta cache
 	BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
+
+	DropCollectionAtDataCoord(ctx context.Context, collectionID UniqueID, vchannels []string) error
+
+	DropPartitionAtDataCoord(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error
 }
 
 type ServerBroker struct {
@@ -295,4 +299,42 @@ func (b *ServerBroker) GcConfirm(ctx context.Context, collectionID, partitionID 
 
 	log.Info("received gc_confirm response", zap.Bool("finished", resp.GetGcFinished()))
 	return resp.GetGcFinished()
+}
+
+func (b *ServerBroker) DropCollectionAtDataCoord(ctx context.Context, collectionID UniqueID, vchannels []string) error {
+	logger := log.Ctx(ctx).With(zap.Int64("collection", collectionID), zap.Strings("vchannels", vchannels))
+	logger.Info("dropping collection at data coord")
+
+	resp, err := b.s.dataCoord.DropCollection(ctx, &datapb.DropCollectionRequest{
+		CollectionId:  collectionID,
+		VchannelNames: vchannels,
+	})
+	if err != nil {
+		return err
+	}
+
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		return fmt.Errorf("failed to drop collection at data coord, code: %s, reason: %s", resp.GetStatus().GetErrorCode(), resp.GetStatus().GetReason())
+	}
+	logger.Info("done to drop collection at data coord")
+	return nil
+}
+
+func (b *ServerBroker) DropPartitionAtDataCoord(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error {
+	logger := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID))
+	logger.Info("dropping partition at data coord")
+
+	resp, err := b.s.dataCoord.DropPartition(ctx, &datapb.DropPartitionRequest{
+		CollectionId: collectionID,
+		PartitionId:  partitionID,
+	})
+	if err != nil {
+		return err
+	}
+
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		return fmt.Errorf("failed to drop partition at data coord, code: %s, reason: %s", resp.GetStatus().GetErrorCode(), resp.GetStatus().GetReason())
+	}
+	logger.Info("done to drop partition at data coord")
+	return nil
 }

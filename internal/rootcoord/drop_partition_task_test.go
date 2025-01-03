@@ -112,7 +112,9 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		partitionName := funcutil.GenRandomStr()
 		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{{PartitionName: partitionName}}}
-		core := newTestCore(withInvalidProxyManager())
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ChangePartitionState(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		core := newTestCore(withInvalidProxyManager(), withMeta(meta))
 		task := &dropPartitionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.DropPartitionRequest{
@@ -192,6 +194,9 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 			return nil
 		}
 		broker.ReleasePartitionsFunc = func(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) error {
+			return nil
+		}
+		broker.DropPartitionFunc = func(ctx context.Context, collectionID, partitionID UniqueID) error {
 			return nil
 		}
 

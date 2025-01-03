@@ -122,10 +122,6 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 		dropCollection: fgMsg.dropCollection,
 	}
 
-	if fgMsg.dropCollection {
-		wNode.wbManager.DropChannel(wNode.channelName)
-	}
-
 	if len(fgMsg.dropPartitions) > 0 {
 		wNode.wbManager.DropPartitions(wNode.channelName, fgMsg.dropPartitions)
 	}

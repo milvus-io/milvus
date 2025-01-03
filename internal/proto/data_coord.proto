@@ -68,13 +68,23 @@ service DataCoord {
 
   rpc WatchChannels(WatchChannelsRequest) returns (WatchChannelsResponse) {}
   rpc GetFlushState(GetFlushStateRequest) returns (milvus.GetFlushStateResponse) {}
-  rpc DropVirtualChannel(DropVirtualChannelRequest) returns (DropVirtualChannelResponse) {}
+  rpc DropVirtualChannel(DropVirtualChannelRequest) returns (DropVirtualChannelResponse) {
+      option deprecated = true; // Calling DropCollection from rootcoord now, not from datanode.
+  }
 
-  rpc SetSegmentState(SetSegmentStateRequest) returns (SetSegmentStateResponse) {}
+  // DropCollection is used to drop all data of a collection on datacoord.
+  rpc DropCollection(DropCollectionRequest) returns (DropCollectionResponse) {}
+  rpc DropPartition(DropPartitionRequest) returns (DropPartitionResponse) {}
+
+  rpc SetSegmentState(SetSegmentStateRequest) returns (SetSegmentStateResponse) {
+    option deprecated = true; // No longer used.
+  }
   rpc UpdateSegmentStatistics(UpdateSegmentStatisticsRequest) returns (common.Status) {}
   rpc UpdateChannelCheckpoint(UpdateChannelCheckpointRequest) returns (common.Status) {}
 
-  rpc MarkSegmentsDropped(MarkSegmentsDroppedRequest) returns(common.Status) {}
+  rpc MarkSegmentsDropped(MarkSegmentsDroppedRequest) returns(common.Status) {
+    option deprecated = true; // No longer used.
+  }
 
   rpc BroadcastAlteredCollection(AlterCollectionRequest) returns (common.Status) {}
 
@@ -694,6 +704,26 @@ message DropVirtualChannelResponse {
   common.Status status = 1;
 }
 
+message DropCollectionRequest {
+  int64 collection_id = 1; // drop collection target id.
+  repeated string vchannel_names = 3; // drop vchannel target names,
+                                    // should be set as all vchannel of a collection.
+}
+
+message DropCollectionResponse {
+  common.Status status = 1;
+}
+
+message DropPartitionRequest {
+  int64 collection_id = 1;
+  repeated string vchannels = 2;
+  int64 partition_id = 3;
+}
+
+message DropPartitionResponse {
+  common.Status status = 1;
+}
+
 message UpdateSegmentStatisticsRequest {
   common.MsgBase base = 1;
   repeated common.SegmentStats stats = 2;
@@ -996,4 +1026,30 @@ message PartitionStatsInfo {
 
 message DropCompactionPlanRequest {
   int64 planID = 1;
+}
+
+// CollectionTombstone is a message to indicate the target collection is on dropping.
+message CollectionTombstone {
+  oneof tombstone {
+    CollectionTombstoneImpl collection = 1;
+    PartitionTombstoneImpl partition = 2;
+  }
+}
+
+// CollectionTombstoneImpl is a message to indicate the target collection is on dropping.
+// It's used to perform drop operation atomic between coords.
+// TODO: It can be removed after we can merge all coordinators into one.
+message CollectionTombstoneImpl {
+    int64 collection_id = 1;
+    repeated string vchannels = 2;
+    int64 create_timestamp = 3;
+}
+
+// PartitionTombstoneImpl is a message to indicate the target partition is on dropping.
+// It's used to perform drop  atomioperationc between coords.
+// TODO: It can be removed after we can merge all coordinators into one.
+message PartitionTombstoneImpl {
+    int64 collection_id = 1;
+    int64 partition_id = 2;
+    int64 create_timestamp = 3;
 }

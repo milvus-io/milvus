@@ -117,8 +117,9 @@ type MetaTable struct {
 
 	tsoAllocator tso.Allocator
 
-	dbName2Meta map[string]*model.Database              // database name ->  db meta
-	collID2Meta map[typeutil.UniqueID]*model.Collection // collection id -> collection meta
+	dbName2Meta        map[string]*model.Database              // database name ->  db meta
+	collID2Meta        map[typeutil.UniqueID]*model.Collection // collection id -> collection meta
+	vchannel2CollIndex map[string]int64                        // vchannel -> collection id index.
 
 	generalCnt int // sum of product of partition number and shard number
 
@@ -150,6 +151,7 @@ func (mt *MetaTable) reload() error {
 	record := timerecord.NewTimeRecorder("rootcoord")
 	mt.dbName2Meta = make(map[string]*model.Database)
 	mt.collID2Meta = make(map[UniqueID]*model.Collection)
+	mt.vchannel2CollIndex = make(map[string]int64)
 	mt.names = newNameDb()
 	mt.aliases = newNameDb()
 
@@ -199,6 +201,9 @@ func (mt *MetaTable) reload() error {
 				collection.DBName = dbName
 			}
 			mt.collID2Meta[collection.CollectionID] = collection
+			for _, vchannel := range collection.VirtualChannelNames {
+				mt.vchannel2CollIndex[vchannel] = collection.CollectionID
+			}
 			if collection.Available() {
 				mt.names.insert(dbName, collection.Name, collection.CollectionID)
 				pn := collection.GetPartitionNum(true)
@@ -242,6 +247,9 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 
 	for _, collection := range oldCollections {
 		mt.collID2Meta[collection.CollectionID] = collection
+		for _, vchannel := range collection.VirtualChannelNames {
+			mt.vchannel2CollIndex[vchannel] = collection.CollectionID
+		}
 		if collection.Available() {
 			mt.names.insert(util.DefaultDBName, collection.Name, collection.CollectionID)
 			pn := collection.GetPartitionNum(true)
@@ -429,6 +437,9 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	}
 
 	mt.collID2Meta[coll.CollectionID] = coll.Clone()
+	for _, vchannel := range coll.VirtualChannelNames {
+		mt.vchannel2CollIndex[vchannel] = coll.CollectionID
+	}
 	mt.names.insert(db.Name, coll.Name, coll.CollectionID)
 
 	log.Ctx(ctx).Info("add collection to meta table",
@@ -504,6 +515,13 @@ func (mt *MetaTable) removeAllNamesIfMatchedInternal(collectionID UniqueID, name
 }
 
 func (mt *MetaTable) removeCollectionByIDInternal(collectionID UniqueID) {
+	collectionMeta, ok := mt.collID2Meta[collectionID]
+	if !ok {
+		return
+	}
+	for _, vchannel := range collectionMeta.VirtualChannelNames {
+		delete(mt.vchannel2CollIndex, vchannel)
+	}
 	delete(mt.collID2Meta, collectionID)
 }
 
@@ -797,6 +815,9 @@ func (mt *MetaTable) ListCollectionPhysicalChannels(ctx context.Context) map[typ
 }
 
 func (mt *MetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error {
+	if oldColl.CollectionID != newColl.CollectionID {
+		panic("collection id should not be changed")
+	}
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -804,7 +825,15 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, oldColl *model.Collect
 	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, ts); err != nil {
 		return err
 	}
+	if oldColl, ok := mt.collID2Meta[oldColl.CollectionID]; ok {
+		for _, vchannel := range oldColl.VirtualChannelNames {
+			delete(mt.vchannel2CollIndex, vchannel)
+		}
+	}
 	mt.collID2Meta[oldColl.CollectionID] = newColl
+	for _, vchannel := range newColl.VirtualChannelNames {
+		mt.vchannel2CollIndex[vchannel] = newColl.CollectionID
+	}
 	log.Ctx(ctx).Info("alter collection finished", zap.Int64("collectionID", oldColl.CollectionID), zap.Uint64("ts", ts))
 	return nil
 }
@@ -1711,4 +1740,32 @@ func (mt *MetaTable) GetPrivilegeGroupRoles(ctx context.Context, groupName strin
 		}
 	}
 	return lo.Keys(rolesMap), nil
+}
+
+func (mt *MetaTable) CheckIfVChannelAvailable(ctx context.Context, vchannel string) bool {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	collID, ok := mt.vchannel2CollIndex[vchannel]
+	if !ok {
+		return false
+	}
+	coll, ok := mt.collID2Meta[collID]
+	return ok && coll.Available()
+}
+
+func (mt *MetaTable) CheckIfPartitionAvailable(ctx context.Context, collectionID int64, partitionID int64) bool {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	coll, ok := mt.collID2Meta[collectionID]
+	if !ok || !coll.Available() {
+		return false
+	}
+	for _, partition := range coll.Partitions {
+		if partition.PartitionID == partitionID {
+			return partition.Available()
+		}
+	}
+	return false
 }

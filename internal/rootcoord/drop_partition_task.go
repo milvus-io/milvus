@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
@@ -54,62 +53,78 @@ func (t *dropPartitionTask) Prepare(ctx context.Context) error {
 }
 
 func (t *dropPartitionTask) Execute(ctx context.Context) error {
-	partID := common.InvalidPartitionID
-	for _, partition := range t.collMeta.Partitions {
-		if partition.PartitionName == t.Req.GetPartitionName() {
-			partID = partition.PartitionID
+	var partition *model.Partition
+	for _, p := range t.collMeta.Partitions {
+		if p.PartitionName == t.Req.GetPartitionName() {
+			partition = p
 			break
 		}
 	}
-	if partID == common.InvalidPartitionID {
-		log.Ctx(ctx).Warn("drop an non-existent partition", zap.String("collection", t.Req.GetCollectionName()), zap.String("partition", t.Req.GetPartitionName()))
+	if partition == nil || partition.State == pb.PartitionState_PartitionDropping || partition.State == pb.PartitionState_PartitionDropped {
+		log.Ctx(ctx).Warn("drop an non-existent or dropping/dropped partition", zap.String("collection", t.Req.GetCollectionName()), zap.String("partition", t.Req.GetPartitionName()))
 		// make dropping partition idempotent.
 		return nil
 	}
 
-	redoTask := newBaseRedoTask(t.core.stepExecutor)
+	task := newDropPartitionTask(t.core, t.collMeta, partition, t.Req.GetDbName(), t.GetTs(), false)
+	return task.Execute(ctx)
+}
+
+func newDropPartitionTask(
+	core *Core,
+	collMeta *model.Collection,
+	partition *model.Partition,
+	dbName string,
+	ts uint64,
+	isRecover bool,
+) *baseRedoTask {
+	redoTask := newBaseRedoTask(core.stepExecutor)
+
+	if !isRecover {
+		// if the task is recoverred from meta, the state has been changed to dropping, so skip it.
+		redoTask.AddSyncStep(&changePartitionStateStep{
+			baseStep:     baseStep{core: core},
+			collectionID: collMeta.CollectionID,
+			partitionID:  partition.PartitionID,
+			state:        pb.PartitionState_PartitionDropping,
+			ts:           ts,
+		})
+	}
 
 	redoTask.AddSyncStep(&expireCacheStep{
-		baseStep:        baseStep{core: t.core},
-		dbName:          t.Req.GetDbName(),
-		collectionNames: []string{t.collMeta.Name},
-		collectionID:    t.collMeta.CollectionID,
-		partitionName:   t.Req.GetPartitionName(),
-		ts:              t.GetTs(),
+		baseStep:        baseStep{core: core},
+		dbName:          dbName,
+		collectionNames: []string{collMeta.Name},
+		collectionID:    collMeta.CollectionID,
+		partitionName:   partition.PartitionName,
+		ts:              ts,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropPartition)},
-	})
-	redoTask.AddSyncStep(&changePartitionStateStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: t.collMeta.CollectionID,
-		partitionID:  partID,
-		state:        pb.PartitionState_PartitionDropping,
-		ts:           t.GetTs(),
 	})
 
 	redoTask.AddAsyncStep(&deletePartitionDataStep{
-		baseStep: baseStep{core: t.core},
-		pchans:   t.collMeta.PhysicalChannelNames,
-		vchans:   t.collMeta.VirtualChannelNames,
+		baseStep: baseStep{core: core},
+		pchans:   collMeta.PhysicalChannelNames,
+		vchans:   collMeta.VirtualChannelNames,
 		partition: &model.Partition{
-			PartitionID:   partID,
-			PartitionName: t.Req.GetPartitionName(),
-			CollectionID:  t.collMeta.CollectionID,
+			PartitionID:   partition.PartitionID,
+			PartitionName: partition.PartitionName,
+			CollectionID:  collMeta.CollectionID,
 		},
-		isSkip: t.Req.GetBase().GetReplicateInfo().GetIsReplicate(),
+		isSkip: !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
 	})
-	redoTask.AddAsyncStep(newConfirmGCStep(t.core, t.collMeta.CollectionID, partID))
+	redoTask.AddAsyncStep(newDropPartitionAtDataCoordStep(core, collMeta.CollectionID, partition.PartitionID))
+	redoTask.AddAsyncStep(newConfirmGCStep(core, collMeta.CollectionID, partition.PartitionID))
 	redoTask.AddAsyncStep(&removePartitionMetaStep{
-		baseStep:     baseStep{core: t.core},
-		dbID:         t.collMeta.DBID,
-		collectionID: t.collMeta.CollectionID,
-		partitionID:  partID,
+		baseStep:     baseStep{core: core},
+		dbID:         collMeta.DBID,
+		collectionID: collMeta.CollectionID,
+		partitionID:  partition.PartitionID,
 		// This ts is less than the ts when we notify data nodes to drop partition, but it's OK since we have already
 		// marked this partition as deleted. If we want to make this ts greater than the notification's ts, we should
 		// wrap a step who will have these children and connect them with ts.
-		ts: t.GetTs(),
+		ts: ts,
 	})
-
-	return redoTask.Execute(ctx)
+	return redoTask
 }
 
 func (t *dropPartitionTask) GetLockerKey() LockerKey {

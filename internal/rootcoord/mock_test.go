@@ -293,6 +293,8 @@ type mockDataCoord struct {
 	broadCastAlteredCollectionFunc func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error)
 	GetSegmentIndexStateFunc       func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error)
 	DropIndexFunc                  func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
+	DropCollectionFunc             func(ctx context.Context, req *datapb.DropCollectionRequest) (*datapb.DropCollectionResponse, error)
+	DropPartitionFunc              func(ctx context.Context, req *datapb.DropPartitionRequest) (*datapb.DropPartitionResponse, error)
 }
 
 func newMockDataCoord() *mockDataCoord {
@@ -327,6 +329,14 @@ func (m *mockDataCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.G
 
 func (m *mockDataCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return m.DropIndexFunc(ctx, req)
+}
+
+func (m *mockDataCoord) DropCollection(ctx context.Context, req *datapb.DropCollectionRequest, opts ...grpc.CallOption) (*datapb.DropCollectionResponse, error) {
+	return m.DropCollectionFunc(ctx, req)
+}
+
+func (m *mockDataCoord) DropPartition(ctx context.Context, req *datapb.DropPartitionRequest, opts ...grpc.CallOption) (*datapb.DropPartitionResponse, error) {
+	return m.DropPartitionFunc(ctx, req)
 }
 
 type mockQueryCoord struct {
@@ -407,6 +417,7 @@ func newTestCore(opts ...Opt) *Core {
 	c := &Core{
 		metricsRequest: metricsinfo.NewMetricsRequest(),
 		session:        &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}},
+		broker:         &mockBroker{},
 	}
 	executor := newMockStepExecutor()
 	executor.AddStepsFunc = func(s *stepStack) {
@@ -754,6 +765,12 @@ func withInvalidDataCoord() Opt {
 	dc.DropIndexFunc = func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 		return nil, errors.New("error mock DropIndexFunc")
 	}
+	dc.DropCollectionFunc = func(ctx context.Context, req *datapb.DropCollectionRequest) (*datapb.DropCollectionResponse, error) {
+		return nil, errors.New("error mock DropCollectionFunc")
+	}
+	dc.DropPartitionFunc = func(ctx context.Context, req *datapb.DropPartitionRequest) (*datapb.DropPartitionResponse, error) {
+		return nil, errors.New("error mock DropPartitionFunc")
+	}
 	return withDataCoord(dc)
 }
 
@@ -787,6 +804,16 @@ func withFailedDataCoord() Opt {
 	dc.DropIndexFunc = func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 		return merr.Status(err), nil
 	}
+	dc.DropCollectionFunc = func(ctx context.Context, req *datapb.DropCollectionRequest) (*datapb.DropCollectionResponse, error) {
+		return &datapb.DropCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	dc.DropPartitionFunc = func(ctx context.Context, req *datapb.DropPartitionRequest) (*datapb.DropPartitionResponse, error) {
+		return &datapb.DropPartitionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 	return withDataCoord(dc)
 }
 
@@ -818,6 +845,17 @@ func withValidDataCoord() Opt {
 	}
 	dc.DropIndexFunc = func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 		return merr.Success(), nil
+	}
+	dc.DropCollectionFunc = func(ctx context.Context, req *datapb.DropCollectionRequest) (*datapb.DropCollectionResponse, error) {
+		return &datapb.DropCollectionResponse{
+			Status: merr.Success(),
+		}, nil
+	}
+
+	dc.DropPartitionFunc = func(ctx context.Context, req *datapb.DropPartitionRequest) (*datapb.DropPartitionResponse, error) {
+		return &datapb.DropPartitionResponse{
+			Status: merr.Success(),
+		}, nil
 	}
 	return withDataCoord(dc)
 }
@@ -943,6 +981,9 @@ type mockBroker struct {
 	BroadcastAlteredCollectionFunc func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
 
 	GCConfirmFunc func(ctx context.Context, collectionID, partitionID UniqueID) bool
+
+	DropCollectionFunc func(ctx context.Context, collectionID UniqueID, vchannels []string) error
+	DropPartitionFunc  func(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error
 }
 
 func newMockBroker() *mockBroker {
@@ -983,6 +1024,14 @@ func (b mockBroker) BroadcastAlteredCollection(ctx context.Context, req *milvusp
 
 func (b mockBroker) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool {
 	return b.GCConfirmFunc(ctx, collectionID, partitionID)
+}
+
+func (b mockBroker) DropCollectionAtDataCoord(ctx context.Context, collectionID UniqueID, vchannels []string) error {
+	return b.DropCollectionFunc(ctx, collectionID, vchannels)
+}
+
+func (b mockBroker) DropPartitionAtDataCoord(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error {
+	return b.DropPartitionFunc(ctx, collectionID, partitionID)
 }
 
 func withBroker(b Broker) Opt {
