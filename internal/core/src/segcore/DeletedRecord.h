@@ -190,22 +190,11 @@ class DeletedRecord {
         }
 
         auto start_iter = hit_snapshot ? next_iter : accessor.begin();
-        auto end_iter =
-            accessor.lower_bound(std::make_pair(query_timestamp, 0));
-
+        
+        // accessor.lower_bound(std::make_pair(query_timestamp, 0)) is not reliable here:
+        // concurrent delete may append new value while end_iter is the end causing mvcc broken
         auto it = start_iter;
-        while (it != accessor.end() && it != end_iter) {
-            // shall check query_timestamp boundary
-            // since `lower_bound` could return end while other thread insert new records
-            if (it->first >= query_timestamp) {
-                break;
-            }
-            if (it->second < insert_barrier) {
-                bitset.set(it->second);
-            }
-            it++;
-        }
-        while (it != accessor.end() && it->first == query_timestamp) {
+        while (it != accessor.end() && it->first <= query_timestamp) {
             if (it->second < insert_barrier) {
                 bitset.set(it->second);
             }
