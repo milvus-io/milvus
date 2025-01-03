@@ -336,9 +336,8 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 }
 
 // GetSegmentsChanPart returns segments organized in Channel-Partition dimension with selector applied
-func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegments {
-	m.RLock()
-	defer m.RUnlock()
+// TODO: Move this function to the compaction module after reorganizing the DataCoord modules.
+func GetSegmentsChanPart(m *meta, collectionID int64, filters ...SegmentFilter) []*chanPartSegments {
 	type dim struct {
 		partitionID int64
 		channelName string
@@ -346,10 +345,9 @@ func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegm
 
 	mDimEntry := make(map[dim]*chanPartSegments)
 
-	for _, si := range m.segments.segments {
-		if !selector(si) {
-			continue
-		}
+	filters = append(filters, WithCollection(collectionID))
+	candidates := m.SelectSegments(context.Background(), filters...)
+	for _, si := range candidates {
 		d := dim{si.PartitionID, si.InsertChannel}
 		entry, ok := mDimEntry[d]
 		if !ok {
@@ -1303,6 +1301,16 @@ func (m *meta) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
 	m.Lock()
 	defer m.Unlock()
 	m.segments.SetAllocations(segmentID, allocations)
+}
+
+// SetSegmentsAllocations set Segments allocations, will overwrite ALL original allocations
+// Note that allocations is not persisted in KV store
+func (m *meta) SetSegmentsAllocations(segmentsAllocations map[int64][]*Allocation) {
+	m.Lock()
+	defer m.Unlock()
+	for segmentID, allocations := range segmentsAllocations {
+		m.segments.SetAllocations(segmentID, allocations)
+	}
 }
 
 // SetCurrentRows set current row count for segment with provided `segmentID`

@@ -126,23 +126,33 @@ func Test_compactionTrigger_force_without_index(t *testing.T) {
 		},
 	}
 
+	segInfo := &datapb.SegmentInfo{
+		ID:             1,
+		CollectionID:   collectionID,
+		PartitionID:    1,
+		LastExpireTime: 100,
+		NumOfRows:      100,
+		MaxRowNum:      300,
+		InsertChannel:  "ch1",
+		State:          commonpb.SegmentState_Flushed,
+		Binlogs:        binlogs,
+		Deltalogs:      deltaLogs,
+	}
 	m := &meta{
 		catalog:    catalog,
 		channelCPs: newChannelCps(),
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				1: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             1,
-						CollectionID:   collectionID,
-						PartitionID:    1,
-						LastExpireTime: 100,
-						NumOfRows:      100,
-						MaxRowNum:      300,
-						InsertChannel:  "ch1",
-						State:          commonpb.SegmentState_Flushed,
-						Binlogs:        binlogs,
-						Deltalogs:      deltaLogs,
+					SegmentInfo: segInfo,
+				},
+			},
+			secondaryIndexes: segmentInfoIndexes{
+				coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
+					collectionID: {
+						1: {
+							SegmentInfo: segInfo,
+						},
 					},
 				},
 			},
@@ -215,6 +225,75 @@ func Test_compactionTrigger_force(t *testing.T) {
 		},
 	}
 
+	mock0Allocator := newMock0Allocator(t)
+
+	seg1 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   2,
+			PartitionID:    1,
+			LastExpireTime: 100,
+			NumOfRows:      100,
+			MaxRowNum:      300,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 5, LogID: 1},
+					},
+				},
+			},
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 5, LogID: 1},
+					},
+				},
+			},
+		},
+	}
+
+	seg2 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             2,
+			CollectionID:   2,
+			PartitionID:    1,
+			LastExpireTime: 100,
+			NumOfRows:      100,
+			MaxRowNum:      300,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 5, LogID: 2},
+					},
+				},
+			},
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 5, LogID: 2},
+					},
+				},
+			},
+		},
+	}
+
+	seg3 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             3,
+			CollectionID:   1111,
+			PartitionID:    1,
+			LastExpireTime: 100,
+			NumOfRows:      100,
+			MaxRowNum:      300,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+		},
+	}
+
 	tests := []struct {
 		name         string
 		fields       fields
@@ -231,68 +310,18 @@ func Test_compactionTrigger_force(t *testing.T) {
 					channelCPs: newChannelCps(),
 					segments: &SegmentsInfo{
 						segments: map[int64]*SegmentInfo{
-							1: {
-								SegmentInfo: &datapb.SegmentInfo{
-									ID:             1,
-									CollectionID:   2,
-									PartitionID:    1,
-									LastExpireTime: 100,
-									NumOfRows:      100,
-									MaxRowNum:      300,
-									InsertChannel:  "ch1",
-									State:          commonpb.SegmentState_Flushed,
-									Binlogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogID: 1},
-											},
-										},
-									},
-									Deltalogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogID: 1},
-											},
-										},
-									},
+							1: seg1,
+							2: seg2,
+							3: seg3,
+						},
+						secondaryIndexes: segmentInfoIndexes{
+							coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
+								2: {
+									seg1.GetID(): seg1,
+									seg2.GetID(): seg2,
 								},
-							},
-							2: {
-								SegmentInfo: &datapb.SegmentInfo{
-									ID:             2,
-									CollectionID:   2,
-									PartitionID:    1,
-									LastExpireTime: 100,
-									NumOfRows:      100,
-									MaxRowNum:      300,
-									InsertChannel:  "ch1",
-									State:          commonpb.SegmentState_Flushed,
-									Binlogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogID: 2},
-											},
-										},
-									},
-									Deltalogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogID: 2},
-											},
-										},
-									},
-								},
-							},
-							3: {
-								SegmentInfo: &datapb.SegmentInfo{
-									ID:             3,
-									CollectionID:   1111,
-									PartitionID:    1,
-									LastExpireTime: 100,
-									NumOfRows:      100,
-									MaxRowNum:      300,
-									InsertChannel:  "ch1",
-									State:          commonpb.SegmentState_Flushed,
+								1111: {
+									seg3.GetID(): seg3,
 								},
 							},
 						},
@@ -605,7 +634,13 @@ func Test_compactionTrigger_force(t *testing.T) {
 		t.Run(tt.name+" with DiskANN index", func(t *testing.T) {
 			for _, segment := range tt.fields.meta.segments.GetSegments() {
 				// Collection 1000 means it has DiskANN index
+				delete(tt.fields.meta.segments.secondaryIndexes.coll2Segments[segment.GetCollectionID()], segment.GetID())
 				segment.CollectionID = 1000
+				_, ok := tt.fields.meta.segments.secondaryIndexes.coll2Segments[segment.GetCollectionID()]
+				if !ok {
+					tt.fields.meta.segments.secondaryIndexes.coll2Segments[segment.GetCollectionID()] = make(map[UniqueID]*SegmentInfo)
+				}
+				tt.fields.meta.segments.secondaryIndexes.coll2Segments[segment.GetCollectionID()][segment.GetID()] = segment
 			}
 			tr := &compactionTrigger{
 				meta:                         tt.fields.meta,
@@ -706,6 +741,9 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 	vecFieldID := int64(201)
 	segmentInfos := &SegmentsInfo{
 		segments: make(map[UniqueID]*SegmentInfo),
+		secondaryIndexes: segmentInfoIndexes{
+			coll2Segments: make(map[UniqueID]map[UniqueID]*SegmentInfo),
+		},
 	}
 
 	indexMeta := newSegmentIndexMeta(nil)
@@ -732,7 +770,9 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 		},
 	}
 
-	for i := UniqueID(0); i < 50; i++ {
+	segmentInfos.secondaryIndexes.coll2Segments[2] = make(map[UniqueID]*SegmentInfo)
+	nSegments := 50
+	for i := UniqueID(0); i < UniqueID(nSegments); i++ {
 		info := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:             i,
@@ -773,6 +813,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 		})
 
 		segmentInfos.segments[i] = info
+		segmentInfos.secondaryIndexes.coll2Segments[2][i] = info
 	}
 
 	tests := []struct {
@@ -1647,6 +1688,10 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 
 	segmentInfos := &SegmentsInfo{
 		segments: make(map[UniqueID]*SegmentInfo),
+		secondaryIndexes: segmentInfoIndexes{
+			coll2Segments:    map[UniqueID]map[UniqueID]*SegmentInfo{2: {}},
+			channel2Segments: map[string]map[UniqueID]*SegmentInfo{"ch1": {}},
+		},
 	}
 
 	size := []int64{
@@ -1718,6 +1763,8 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 		})
 
 		segmentInfos.segments[i] = info
+		segmentInfos.secondaryIndexes.coll2Segments[2][i] = info
+		segmentInfos.secondaryIndexes.channel2Segments["ch1"][i] = info
 	}
 
 	tests := []struct {
