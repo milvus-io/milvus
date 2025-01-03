@@ -15,6 +15,8 @@
 // limitations under the License.
 
 #include "LocalChunkManager.h"
+#include "boost/algorithm/string/join.hpp"
+#include "boost/filesystem/directory.hpp"
 #include "log/Log.h"
 
 #include <boost/filesystem.hpp>
@@ -217,10 +219,18 @@ LocalChunkManager::RemoveDir(const std::string& dir) {
     boost::system::error_code err;
     boost::filesystem::remove_all(dirPath, err);
     if (err) {
+        boost::filesystem::directory_iterator it(dirPath);
+        std::vector<std::string> paths;
+        for (; it != boost::filesystem::directory_iterator(); ++it) {
+            paths.push_back(it->path().string());
+        }
+        std::string files = boost::algorithm::join(paths, ", ");
         PanicInfo(FileWriteFailed,
-                  fmt::format("remove local directory:{} failed, error: {}",
-                              dir,
-                              err.message()));
+                  fmt::format(
+                      "remove local directory:{} failed, error: {}, files: {}",
+                      dir,
+                      err.message(),
+                      files));
     }
 }
 
