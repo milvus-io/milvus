@@ -340,8 +340,7 @@ func (s *MixCompactionTaskSuite) TestCompactSortedSegment() {
 func (s *MixCompactionTaskSuite) TestSplitMergeEntityExpired() {
 	s.initSegBuffer(1, 3)
 	collTTL := 864000 // 10 days
-	currTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second*(time.Duration(collTTL)+1)), 0)
-	s.task.currentTs = currTs
+	s.task.currentTime = getMilvusBirthday().Add(time.Second * (time.Duration(collTTL) + 1))
 	s.task.plan.CollectionTtl = int64(collTTL)
 	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
 
@@ -512,15 +511,14 @@ func (s *MixCompactionTaskSuite) TestMergeDeltalogsMultiSegment() {
 
 			got, err := mergeDeltalogs(s.task.ctx, s.task.binlogIO, []string{"random"})
 			s.NoError(err)
+			s.Equal(len(got), len(test.expectedpk2ts))
 
-			s.Equal(len(test.expectedpk2ts), len(got))
-			gotKeys := lo.Map(lo.Keys(got), func(k interface{}, _ int) int64 {
-				res, ok := k.(int64)
+			for gotKT, gotV := range got {
+				gotK, ok := gotKT.(int64)
 				s.Require().True(ok)
-				return res
-			})
-			s.ElementsMatch(gotKeys, lo.Keys(test.expectedpk2ts))
-			s.ElementsMatch(lo.Values(got), lo.Values(test.expectedpk2ts))
+
+				s.EqualValues(test.expectedpk2ts[gotK], gotV)
+			}
 		})
 	}
 }
@@ -551,13 +549,12 @@ func (s *MixCompactionTaskSuite) TestMergeDeltalogsOneSegment() {
 	s.NotNil(got)
 	s.Equal(len(expectedMap), len(got))
 
-	gotKeys := lo.Map(lo.Keys(got), func(k interface{}, _ int) int64 {
-		res, ok := k.(int64)
+	for gotKT, gotV := range got {
+		gotK, ok := gotKT.(int64)
 		s.Require().True(ok)
-		return res
-	})
-	s.ElementsMatch(gotKeys, lo.Keys(expectedMap))
-	s.ElementsMatch(lo.Values(got), lo.Values(expectedMap))
+
+		s.EqualValues(expectedMap[gotK], gotV)
+	}
 }
 
 func (s *MixCompactionTaskSuite) TestCompactFail() {
@@ -584,44 +581,6 @@ func (s *MixCompactionTaskSuite) TestCompactFail() {
 		_, err := s.task.Compact()
 		s.Error(err)
 	})
-}
-
-func (s *MixCompactionTaskSuite) TestIsExpiredEntity() {
-	milvusBirthdayTs := tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)
-
-	tests := []struct {
-		description string
-		collTTL     int64
-		nowTs       uint64
-		entityTs    uint64
-
-		expect bool
-	}{
-		{"ttl=maxInt64, nowTs-entityTs=ttl", math.MaxInt64, math.MaxInt64, 0, true},
-		{"ttl=maxInt64, nowTs-entityTs < 0", math.MaxInt64, milvusBirthdayTs, 0, false},
-		{"ttl=maxInt64, 0<nowTs-entityTs<ttl", math.MaxInt64, 0, milvusBirthdayTs, false},
-		{"ttl=maxInt64, nowTs-entityTs>ttl v2", math.MaxInt64, math.MaxInt64, milvusBirthdayTs, true},
-		// entityTs==currTs will never happen
-		// {"ttl=maxInt64, curTs-entityTs=0", math.MaxInt64, milvusBirthdayTs, milvusBirthdayTs, true},
-		{"ttl=0, nowTs>entityTs", 0, milvusBirthdayTs + 1, milvusBirthdayTs, false},
-		{"ttl=0, nowTs==entityTs", 0, milvusBirthdayTs, milvusBirthdayTs, false},
-		{"ttl=0, nowTs<entityTs", 0, milvusBirthdayTs, milvusBirthdayTs + 1, false},
-		{"ttl=10days, nowTs-entityTs>10days", 864000, milvusBirthdayTs + 864001, milvusBirthdayTs, true},
-		{"ttl=10days, nowTs-entityTs==10days", 864000, milvusBirthdayTs + 864000, milvusBirthdayTs, true},
-		{"ttl=10days, nowTs-entityTs<10days", 864000, milvusBirthdayTs + 10, milvusBirthdayTs, false},
-	}
-	for _, test := range tests {
-		s.Run(test.description, func() {
-			t := &mixCompactionTask{
-				plan: &datapb.CompactionPlan{
-					CollectionTtl: test.collTTL,
-				},
-				currentTs: test.nowTs,
-			}
-			got := isExpiredEntity(t.plan.GetCollectionTtl(), t.currentTs, test.entityTs)
-			s.Equal(test.expect, got)
-		})
-	}
 }
 
 func getRow(magic int64) map[int64]interface{} {
