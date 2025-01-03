@@ -300,7 +300,8 @@ TEST_P(RetrieveTest, Limit) {
         milvus::expr::ColumnInfo(
             fid_64, DataType::INT64, std::vector<std::string>()),
         OpType::GreaterEqual,
-        unary_val);
+        unary_val,
+        std::vector<proto::plan::GenericValue>{});
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->plannodes_ = milvus::test::CreateRetrievePlanByExpr(expr);
 
@@ -347,7 +348,8 @@ TEST_P(RetrieveTest, FillEntry) {
         milvus::expr::ColumnInfo(
             fid_64, DataType::INT64, std::vector<std::string>()),
         OpType::GreaterEqual,
-        unary_val);
+        unary_val,
+        std::vector<proto::plan::GenericValue>{});
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->plannodes_ = milvus::test::CreateRetrievePlanByExpr(expr);
     // test query results exceed the limit size

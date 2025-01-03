@@ -77,6 +77,9 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     TargetBitmap
     MatchQuery(const std::string& query);
 
+    TargetBitmap
+    PhraseMatchQuery(const std::string& query, uint32_t slop);
+
  private:
     bool
     shouldTriggerCommit();

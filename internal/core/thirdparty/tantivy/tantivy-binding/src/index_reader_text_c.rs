@@ -21,6 +21,19 @@ pub extern "C" fn tantivy_match_query(ptr: *mut c_void, query: *const c_char) ->
 }
 
 #[no_mangle]
+pub extern "C" fn tantivy_phrase_match_query(
+    ptr: *mut c_void,
+    query: *const c_char,
+    slop: u32,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    unsafe {
+        let query = cstr_to_str!(query);
+        (*real).phrase_match_query(query, slop).into()
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_register_tokenizer(
     ptr: *mut c_void,
     tokenizer_name: *const c_char,

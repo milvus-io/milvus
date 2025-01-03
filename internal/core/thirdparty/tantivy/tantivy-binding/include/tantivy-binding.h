@@ -137,6 +137,8 @@ RustResult tantivy_regex_query(void *ptr, const char *pattern);
 
 RustResult tantivy_match_query(void *ptr, const char *query);
 
+RustResult tantivy_phrase_match_query(void *ptr, const char *query, uint32_t slop);
+
 RustResult tantivy_register_tokenizer(void *ptr,
                                       const char *tokenizer_name,
                                       const char *analyzer_params);
