@@ -65,12 +65,14 @@ TEST(DeleteMVCC, common_case) {
         for (int i = 0; i < c; i++) {
             ASSERT_EQ(bitsets_view[i], expected[i]);
         }
+        BitsetType bitsets2(c);
+        BitsetTypeView bitsets_view2(bitsets);
         // query at ts (10)
         query_timestamp = 10;
-        delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
+        delete_record.Query(bitsets_view2, insert_barrier, query_timestamp);
         expected = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
         for (int i = 0; i < c; i++) {
-            ASSERT_EQ(bitsets_view[i], expected[i]);
+            ASSERT_EQ(bitsets_view2[i], expected[i]);
         }
     }
     {
