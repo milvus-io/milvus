@@ -27,14 +27,11 @@ func (v *ParserVisitor) VisitParens(ctx *parser.ParensContext) interface{} {
 	return ctx.Expr().Accept(v)
 }
 
-func (v *ParserVisitor) translateIdentifier(identifier string, requireEnableMatch bool) (*ExprWithType, error) {
+func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, error) {
 	identifier = decodeUnicode(identifier)
 	field, err := v.schema.GetFieldFromNameDefaultJSON(identifier)
 	if err != nil {
 		return nil, err
-	}
-	if requireEnableMatch && !typeutil.CreateFieldSchemaHelper(field).EnableMatch() {
-		return nil, fmt.Errorf("field %s does not support text match operation", field)
 	}
 	var nestedPath []string
 	if identifier != field.Name {
@@ -67,7 +64,7 @@ func (v *ParserVisitor) translateIdentifier(identifier string, requireEnableMatc
 // VisitIdentifier translates expr to column plan.
 func (v *ParserVisitor) VisitIdentifier(ctx *parser.IdentifierContext) interface{} {
 	identifier := ctx.GetText()
-	expr, err := v.translateIdentifier(identifier, false)
+	expr, err := v.translateIdentifier(identifier)
 	if err != nil {
 		return err
 	}
@@ -485,9 +482,13 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 }
 
 func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{} {
-	column, err := v.translateIdentifier(ctx.Identifier().GetText(), true)
+	column, err := v.translateIdentifier(ctx.Identifier().GetText())
 	if err != nil {
 		return err
+	}
+	columnInfo := toColumnInfo(column)
+	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
+		return fmt.Errorf("field %v does not enable text match", columnInfo.FieldId)
 	}
 	if !typeutil.IsStringType(column.dataType) {
 		return fmt.Errorf("text match operation on non-string is unsupported")
@@ -502,7 +503,7 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
-					ColumnInfo: toColumnInfo(column),
+					ColumnInfo: columnInfo,
 					Op:         planpb.OpType_TextMatch,
 					Value:      NewString(queryText),
 				},
@@ -596,7 +597,7 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 
 func (v *ParserVisitor) getChildColumnInfo(identifier, child antlr.TerminalNode) (*planpb.ColumnInfo, error) {
 	if identifier != nil {
-		childExpr, err := v.translateIdentifier(identifier.GetText(), false)
+		childExpr, err := v.translateIdentifier(identifier.GetText())
 		if err != nil {
 			return nil, err
 		}
@@ -1185,7 +1186,7 @@ func (v *ParserVisitor) VisitEmptyArray(ctx *parser.EmptyArrayContext) interface
 }
 
 func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{} {
-	column, err := v.translateIdentifier(ctx.Identifier().GetText(), false)
+	column, err := v.translateIdentifier(ctx.Identifier().GetText())
 	if err != nil {
 		return err
 	}
@@ -1205,7 +1206,7 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 }
 
 func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
-	column, err := v.translateIdentifier(ctx.Identifier().GetText(), false)
+	column, err := v.translateIdentifier(ctx.Identifier().GetText())
 	if err != nil {
 		return err
 	}
