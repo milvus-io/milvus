@@ -1406,3 +1406,155 @@ class TestCollectionWithAuth(TestBase):
         }
         rsp = client.collection_create(payload)
         assert rsp['code'] == 1800
+
+
+@pytest.mark.L0
+class TestCollectionProperties(TestBase):
+    """Test collection property operations"""
+
+    def test_refresh_load_collection(self):
+        """
+        target: test refresh load collection
+        method: create collection, refresh load
+        expected: refresh load success
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+
+        # release collection
+        client.collection_release(collection_name=name)
+        # load collection
+        client.collection_load(collection_name=name)
+        client.wait_load_completed(collection_name=name)
+        # refresh load
+        rsp = client.refresh_load(collection_name=name)
+
+        assert rsp['code'] == 0
+
+    def test_alter_collection_properties(self):
+        """
+        target: test alter collection properties
+        method: create collection, alter properties
+        expected: alter properties success
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        client.collection_release(collection_name=name)
+        # alter properties
+        properties = {"mmap.enabled": "true"}
+        rsp = client.alter_collection_properties(name, properties)
+        assert rsp['code'] == 0
+        rsp = client.collection_describe(name)
+        enabled_mmap = False
+        for prop in rsp['data']['properties']:
+            if prop['key'] == "mmap.enabled":
+                assert prop['value'] == "true"
+                enabled_mmap = True
+        assert enabled_mmap
+
+    def test_drop_collection_properties(self):
+        """
+        target: test drop collection properties
+        method: create collection, alter properties, drop properties
+        expected: drop properties success
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        client.collection_release(collection_name=name)
+
+        # alter properties
+        properties = {"mmap.enabled": "true"}
+        rsp = client.alter_collection_properties(name, properties)
+        assert rsp['code'] == 0
+        rsp = client.collection_describe(name)
+        enabled_mmap = False
+        for prop in rsp['data']['properties']:
+            if prop['key'] == "mmap.enabled":
+                assert prop['value'] == "true"
+                enabled_mmap = True
+        assert enabled_mmap
+
+        # drop properties
+        delete_keys = ["mmap.enabled"]
+        rsp = client.drop_collection_properties(name, delete_keys)
+        assert rsp['code'] == 0
+        rsp = client.collection_describe(name)
+        enabled_mmap = False
+        for prop in rsp['data']['properties']:
+            if prop['key'] == "mmap.enabled":
+                enabled_mmap = True
+        assert not enabled_mmap
+
+    def test_alter_field_properties(self):
+        """
+        target: test alter field properties
+        method: create collection with varchar field, alter field properties
+        expected: alter field properties success
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": True,
+                "enableDynamicField": True,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": True,
+                     "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                    {"fieldName": "image_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                ]
+            }
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        # release collection
+        client.collection_release(collection_name=name)
+
+        # describe collection
+        rsp = client.collection_describe(name)
+        for field in rsp['data']['fields']:
+            if field['name'] == "book_describe":
+                for p in field['params']:
+                    if p['key'] == "max_length":
+                        assert p['value'] == "256"
+
+        # alter field properties
+        field_params = {"max_length": "100"}
+        rsp = client.alter_field_properties(name, "book_describe", field_params)
+        assert rsp['code'] == 0
+
+        # describe collection
+        rsp = client.collection_describe(name)
+        for field in rsp['data']['fields']:
+            if field['name'] == "book_describe":
+                for p in field['params']:
+                    if p['key'] == "max_length":
+                        assert p['value'] == "100"
+
+
