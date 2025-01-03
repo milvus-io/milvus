@@ -10,7 +10,7 @@ import (
 )
 
 func TestCheckIdentical(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
