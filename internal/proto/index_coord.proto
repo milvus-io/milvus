@@ -80,6 +80,7 @@ message SegmentIndex {
     bool write_handoff = 15;
     int32 current_index_version = 16;
     int64 index_store_version = 17;
+    uint64 finished_time = 18;
 }
 
 message RegisterNodeRequest {

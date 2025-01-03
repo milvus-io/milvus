@@ -254,9 +254,10 @@ func (m *SegmentDistManager) GetSegmentDist(collectionID int64) []*metricsinfo.S
 	var segments []*metricsinfo.Segment
 	for _, nodeSeg := range m.segments {
 		for _, segment := range nodeSeg.segments {
-			if collectionID == 0 || segment.GetCollectionID() == collectionID {
-				segments = append(segments, newSegmentMetricsFrom(segment))
+			if collectionID > 0 && segment.GetCollectionID() != collectionID {
+				continue
 			}
+			segments = append(segments, newSegmentMetricsFrom(segment))
 		}
 	}
 
