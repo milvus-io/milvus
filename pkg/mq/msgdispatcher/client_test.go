@@ -79,8 +79,6 @@ func TestClient_Concurrency(t *testing.T) {
 	expected := int(total - deregisterCount.Load())
 
 	c := client1.(*client)
-	c.managerMut.Lock()
-	n := len(c.managers)
-	c.managerMut.Unlock()
+	n := c.managers.Len()
 	assert.Equal(t, expected, n)
 }

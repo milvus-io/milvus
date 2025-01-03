@@ -21,6 +21,11 @@ import (
 	"sync"
 	"time"
 
+<<<<<<< HEAD
+=======
+	"github.com/cockroachdb/errors"
+	"go.uber.org/atomic"
+>>>>>>> 1bcf3d9ee7 (fix: Fix consume blocked due to too many consumers)
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -28,6 +33,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+<<<<<<< HEAD
+=======
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
+>>>>>>> 1bcf3d9ee7 (fix: Fix consume blocked due to too many consumers)
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -71,11 +84,20 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 	}
 
 	start := time.Now()
-	p.input, err = p.dispatcher.Register(ctx, p.vChannel, position, common.SubscriptionPositionUnknown)
+	err = retry.Handle(ctx, func() (bool, error) {
+		p.input, err = p.dispatcher.Register(ctx, p.vChannel, position, common.SubscriptionPositionUnknown)
+		if err != nil {
+			log.Warn("dispatcher register failed", zap.String("channel", position.ChannelName), zap.Error(err))
+			return errors.Is(err, msgdispatcher.ErrTooManyConsumers), err
+		}
+		return false, nil
+	}, retry.Sleep(paramtable.Get().MQCfg.RetrySleep.GetAsDuration(time.Second)), // 5 seconds
+		retry.MaxSleepTime(paramtable.Get().MQCfg.RetryTimeout.GetAsDuration(time.Second))) // 5 minutes
 	if err != nil {
-		log.Error("dispatcher register failed", zap.String("channel", position.ChannelName))
+		log.Error("dispatcher register failed after retried", zap.String("channel", position.ChannelName), zap.Error(err))
 		return WrapErrRegDispather(err)
 	}
+
 	ts, _ := tsoutil.ParseTS(position.GetTimestamp())
 	log.Info("stream pipeline seeks from position with msgDispatcher",
 		zap.String("pchannel", position.ChannelName),
