@@ -550,12 +550,12 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 }
 
 func filterUnavailable(coll *model.Collection) *model.Collection {
-	clone := coll.Clone()
+	clone := coll.ShadowClone()
 	// pick available partitions.
-	clone.Partitions = nil
+	clone.Partitions = make([]*model.Partition, 0, len(coll.Partitions))
 	for _, partition := range coll.Partitions {
 		if partition.Available() {
-			clone.Partitions = append(clone.Partitions, partition.Clone())
+			clone.Partitions = append(clone.Partitions, partition)
 		}
 	}
 	return clone
@@ -852,8 +852,8 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 	}
 
 	// check new collection already exists
-	newColl, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, ts)
-	if newColl != nil {
+	coll, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, ts)
+	if coll != nil {
 		log.Warn("check new collection fail")
 		return fmt.Errorf("duplicated new collection name %s:%s with other collection name or alias", newDBName, newName)
 	}
@@ -875,7 +875,7 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 		return fmt.Errorf("fail to rename db name, must drop all aliases of this collection before rename")
 	}
 
-	newColl = oldColl.Clone()
+	newColl := oldColl.Clone()
 	newColl.Name = newName
 	newColl.DBID = targetDB.ID
 	if err := mt.catalog.AlterCollection(ctx, oldColl, newColl, metastore.MODIFY, ts); err != nil {
