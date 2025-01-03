@@ -40,17 +40,17 @@ func HandleCStatus(status *C.CStatus) error {
 }
 
 func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, params map[string]string) error {
-	if typeutil.IsDenseFloatVectorType(dataType) {
-		if !CheckStrByValues(params, Metric, FloatVectorMetrics) {
-			return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], FloatVectorMetrics)
-		}
-	} else if typeutil.IsSparseFloatVectorType(dataType) {
+	if typeutil.IsSparseFloatVectorType(dataType) {
 		if !CheckStrByValues(params, Metric, SparseMetrics) {
 			return fmt.Errorf("metric type not found or not supported, supported: %v", SparseMetrics)
 		}
 	} else if typeutil.IsBinaryVectorType(dataType) {
 		if !CheckStrByValues(params, Metric, BinaryVectorMetrics) {
 			return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], BinaryVectorMetrics)
+		}
+	} else {
+		if !CheckStrByValues(params, Metric, VectorMetrics) {
+			return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], VectorMetrics)
 		}
 	}
 
