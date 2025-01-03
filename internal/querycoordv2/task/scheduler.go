@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -90,6 +91,7 @@ type replicaChannelIndex struct {
 }
 
 type taskQueue struct {
+	mu sync.RWMutex
 	// TaskPriority -> TaskID -> Task
 	buckets []map[int64]Task
 }
@@ -105,6 +107,8 @@ func newTaskQueue() *taskQueue {
 }
 
 func (queue *taskQueue) Len() int {
+	queue.mu.RLock()
+	defer queue.mu.RUnlock()
 	taskNum := 0
 	for _, tasks := range queue.buckets {
 		taskNum += len(tasks)
@@ -114,17 +118,23 @@ func (queue *taskQueue) Len() int {
 }
 
 func (queue *taskQueue) Add(task Task) {
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
 	bucket := queue.buckets[task.Priority()]
 	bucket[task.ID()] = task
 }
 
 func (queue *taskQueue) Remove(task Task) {
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
 	bucket := queue.buckets[task.Priority()]
 	delete(bucket, task.ID())
 }
 
 // Range iterates all tasks in the queue ordered by priority from high to low
 func (queue *taskQueue) Range(fn func(task Task) bool) {
+	queue.mu.RLock()
+	defer queue.mu.RUnlock()
 	for priority := len(queue.buckets) - 1; priority >= 0; priority-- {
 		for _, task := range queue.buckets[priority] {
 			if !fn(task) {
@@ -151,9 +161,8 @@ type Scheduler interface {
 }
 
 type taskScheduler struct {
-	rwmutex     sync.RWMutex
 	ctx         context.Context
-	executors   map[int64]*Executor // NodeID -> Executor
+	executors   *ConcurrentMap[int64, *Executor] // NodeID -> Executor
 	idAllocator func() UniqueID
 
 	distMgr   *meta.DistributionManager
@@ -163,9 +172,10 @@ type taskScheduler struct {
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
-	tasks        UniqueSet
-	segmentTasks map[replicaSegmentIndex]Task
-	channelTasks map[replicaChannelIndex]Task
+	collKeyLock  *lock.KeyLock[int64] // guards Add()
+	tasks        *ConcurrentMap[UniqueID, struct{}]
+	segmentTasks *ConcurrentMap[replicaSegmentIndex, Task]
+	channelTasks *ConcurrentMap[replicaChannelIndex, Task]
 	processQueue *taskQueue
 	waitQueue    *taskQueue
 }
@@ -181,7 +191,7 @@ func NewScheduler(ctx context.Context,
 	id := time.Now().UnixMilli()
 	return &taskScheduler{
 		ctx:       ctx,
-		executors: make(map[int64]*Executor),
+		executors: NewConcurrentMap[int64, *Executor](),
 		idAllocator: func() UniqueID {
 			id++
 			return id
@@ -194,9 +204,10 @@ func NewScheduler(ctx context.Context,
 		cluster:   cluster,
 		nodeMgr:   nodeMgr,
 
-		tasks:        make(UniqueSet),
-		segmentTasks: make(map[replicaSegmentIndex]Task),
-		channelTasks: make(map[replicaChannelIndex]Task),
+		collKeyLock:  lock.NewKeyLock[int64](),
+		tasks:        NewConcurrentMap[UniqueID, struct{}](),
+		segmentTasks: NewConcurrentMap[replicaSegmentIndex, Task](),
+		channelTasks: NewConcurrentMap[replicaChannelIndex, Task](),
 		processQueue: newTaskQueue(),
 		waitQueue:    newTaskQueue(),
 	}
@@ -205,30 +216,22 @@ func NewScheduler(ctx context.Context,
 func (scheduler *taskScheduler) Start() {}
 
 func (scheduler *taskScheduler) Stop() {
-	scheduler.rwmutex.Lock()
-	defer scheduler.rwmutex.Unlock()
-
-	for nodeID, executor := range scheduler.executors {
+	scheduler.executors.Range(func(nodeID int64, executor *Executor) bool {
 		executor.Stop()
-		delete(scheduler.executors, nodeID)
-	}
+		return true
+	})
 
-	for _, task := range scheduler.segmentTasks {
+	scheduler.segmentTasks.Range(func(_ replicaSegmentIndex, task Task) bool {
 		scheduler.remove(task)
-	}
-	for _, task := range scheduler.channelTasks {
+		return true
+	})
+	scheduler.channelTasks.Range(func(_ replicaChannelIndex, task Task) bool {
 		scheduler.remove(task)
-	}
+		return true
+	})
 }
 
 func (scheduler *taskScheduler) AddExecutor(nodeID int64) {
-	scheduler.rwmutex.Lock()
-	defer scheduler.rwmutex.Unlock()
-
-	if _, exist := scheduler.executors[nodeID]; exist {
-		return
-	}
-
 	executor := NewExecutor(scheduler.meta,
 		scheduler.distMgr,
 		scheduler.broker,
@@ -236,27 +239,24 @@ func (scheduler *taskScheduler) AddExecutor(nodeID int64) {
 		scheduler.cluster,
 		scheduler.nodeMgr)
 
-	scheduler.executors[nodeID] = executor
+	if _, exist := scheduler.executors.GetOrInsert(nodeID, executor); exist {
+		return
+	}
 	executor.Start(scheduler.ctx)
 	log.Info("add executor for new QueryNode", zap.Int64("nodeID", nodeID))
 }
 
 func (scheduler *taskScheduler) RemoveExecutor(nodeID int64) {
-	scheduler.rwmutex.Lock()
-	defer scheduler.rwmutex.Unlock()
-
-	executor, ok := scheduler.executors[nodeID]
+	executor, ok := scheduler.executors.GetAndRemove(nodeID)
 	if ok {
 		executor.Stop()
-		delete(scheduler.executors, nodeID)
-		log.Info("remove executor of offline QueryNode", zap.Int64("nodeID", nodeID))
+		log.Ctx(scheduler.ctx).Info("remove executor of offline QueryNode", zap.Int64("nodeID", nodeID))
 	}
 }
 
 func (scheduler *taskScheduler) Add(task Task) error {
-	scheduler.rwmutex.Lock()
-	defer scheduler.rwmutex.Unlock()
-
+	scheduler.collKeyLock.Lock(task.CollectionID())
+	defer scheduler.collKeyLock.Unlock(task.CollectionID())
 	err := scheduler.preAdd(task)
 	if err != nil {
 		task.Cancel(err)
@@ -265,19 +265,19 @@ func (scheduler *taskScheduler) Add(task Task) error {
 
 	task.SetID(scheduler.idAllocator())
 	scheduler.waitQueue.Add(task)
-	scheduler.tasks.Insert(task.ID())
+	scheduler.tasks.Insert(task.ID(), struct{}{})
 	switch task := task.(type) {
 	case *SegmentTask:
 		index := NewReplicaSegmentIndex(task)
-		scheduler.segmentTasks[index] = task
+		scheduler.segmentTasks.Insert(index, task)
 
 	case *ChannelTask:
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
-		scheduler.channelTasks[index] = task
+		scheduler.channelTasks.Insert(index, task)
 
 	case *LeaderTask:
 		index := NewReplicaLeaderIndex(task)
-		scheduler.segmentTasks[index] = task
+		scheduler.segmentTasks.Insert(index, task)
 	}
 
 	scheduler.updateTaskMetrics()
@@ -287,21 +287,39 @@ func (scheduler *taskScheduler) Add(task Task) error {
 }
 
 func (scheduler *taskScheduler) updateTaskMetrics() {
-	segmentGrowNum, segmentReduceNum, segmentMoveNum := 0, 0, 0
+	segmentGrowNum, segmentReduceNum, segmentUpdateNum, segmentMoveNum := 0, 0, 0, 0
+	leaderGrowNum, leaderReduceNum, leaderUpdateNum := 0, 0, 0
 	channelGrowNum, channelReduceNum, channelMoveNum := 0, 0, 0
-	for _, task := range scheduler.segmentTasks {
-		taskType := GetTaskType(task)
-		switch taskType {
-		case TaskTypeGrow:
-			segmentGrowNum++
-		case TaskTypeReduce:
-			segmentReduceNum++
-		case TaskTypeMove:
+	scheduler.segmentTasks.Range(func(_ replicaSegmentIndex, task Task) bool {
+		switch {
+		case len(task.Actions()) > 1:
 			segmentMoveNum++
+		case task.Actions()[0].Type() == ActionTypeGrow:
+			if _, ok := task.Actions()[0].(*SegmentAction); ok {
+				segmentGrowNum++
+			}
+			if _, ok := task.Actions()[0].(*LeaderAction); ok {
+				leaderGrowNum++
+			}
+		case task.Actions()[0].Type() == ActionTypeReduce:
+			if _, ok := task.Actions()[0].(*SegmentAction); ok {
+				segmentReduceNum++
+			}
+			if _, ok := task.Actions()[0].(*LeaderAction); ok {
+				leaderReduceNum++
+			}
+		case task.Actions()[0].Type() == ActionTypeUpdate:
+			if _, ok := task.Actions()[0].(*SegmentAction); ok {
+				segmentUpdateNum++
+			}
+			if _, ok := task.Actions()[0].(*LeaderAction); ok {
+				leaderUpdateNum++
+			}
 		}
-	}
+		return true
+	})
 
-	for _, task := range scheduler.channelTasks {
+	scheduler.channelTasks.Range(func(_ replicaChannelIndex, task Task) bool {
 		taskType := GetTaskType(task)
 		switch taskType {
 		case TaskTypeGrow:
@@ -311,11 +329,18 @@ func (scheduler *taskScheduler) updateTaskMetrics() {
 		case TaskTypeMove:
 			channelMoveNum++
 		}
-	}
+		return true
+	})
 
 	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentGrowTaskLabel).Set(float64(segmentGrowNum))
 	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentReduceTaskLabel).Set(float64(segmentReduceNum))
 	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentMoveTaskLabel).Set(float64(segmentMoveNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.SegmentUpdateTaskLabel).Set(float64(segmentUpdateNum))
+
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.LeaderGrowTaskLabel).Set(float64(leaderGrowNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.LeaderReduceTaskLabel).Set(float64(leaderReduceNum))
+	metrics.QueryCoordTaskNum.WithLabelValues(metrics.LeaderUpdateTaskLabel).Set(float64(leaderUpdateNum))
+
 	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelGrowTaskLabel).Set(float64(channelGrowNum))
 	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelReduceTaskLabel).Set(float64(channelReduceNum))
 	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelMoveTaskLabel).Set(float64(channelMoveNum))
@@ -327,7 +352,7 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 	switch task := task.(type) {
 	case *SegmentTask:
 		index := NewReplicaSegmentIndex(task)
-		if old, ok := scheduler.segmentTasks[index]; ok {
+		if old, ok := scheduler.segmentTasks.Get(index); ok {
 			if task.Priority() > old.Priority() {
 				log.Info("replace old task, the new one with higher priority",
 					zap.Int64("oldID", old.ID()),
@@ -360,7 +385,7 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 	case *ChannelTask:
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
-		if old, ok := scheduler.channelTasks[index]; ok {
+		if old, ok := scheduler.channelTasks.Get(index); ok {
 			if task.Priority() > old.Priority() {
 				log.Info("replace old task, the new one with higher priority",
 					zap.Int64("oldID", old.ID()),
@@ -393,7 +418,7 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		}
 	case *LeaderTask:
 		index := NewReplicaLeaderIndex(task)
-		if old, ok := scheduler.segmentTasks[index]; ok {
+		if old, ok := scheduler.segmentTasks.Get(index); ok {
 			if task.Priority() > old.Priority() {
 				log.Info("replace old task, the new one with higher priority",
 					zap.Int64("oldID", old.ID()),
@@ -472,46 +497,40 @@ func (scheduler *taskScheduler) Dispatch(node int64) {
 		log.Info("scheduler stopped")
 
 	default:
-		scheduler.rwmutex.Lock()
-		defer scheduler.rwmutex.Unlock()
 		scheduler.schedule(node)
 	}
 }
 
 func (scheduler *taskScheduler) GetSegmentTaskDelta(nodeID, collectionID int64) int {
-	scheduler.rwmutex.RLock()
-	defer scheduler.rwmutex.RUnlock()
-
 	targetActions := make(map[int64][]Action)
-	for _, task := range scheduler.segmentTasks { // Map key: replicaSegmentIndex
+	scheduler.segmentTasks.Range(func(_ replicaSegmentIndex, task Task) bool {
 		taskCollID := task.CollectionID()
 		if collectionID != -1 && collectionID != taskCollID {
-			continue
+			return true
 		}
 		actions := filterActions(task.Actions(), nodeID)
 		if len(actions) > 0 {
 			targetActions[taskCollID] = append(targetActions[taskCollID], actions...)
 		}
-	}
+		return true
+	})
 
 	return scheduler.calculateTaskDelta(targetActions)
 }
 
 func (scheduler *taskScheduler) GetChannelTaskDelta(nodeID, collectionID int64) int {
-	scheduler.rwmutex.RLock()
-	defer scheduler.rwmutex.RUnlock()
-
 	targetActions := make(map[int64][]Action)
-	for _, task := range scheduler.channelTasks { // Map key: replicaChannelIndex
+	scheduler.channelTasks.Range(func(_ replicaChannelIndex, task Task) bool {
 		taskCollID := task.CollectionID()
 		if collectionID != -1 && collectionID != taskCollID {
-			continue
+			return true
 		}
 		actions := filterActions(task.Actions(), nodeID)
 		if len(actions) > 0 {
 			targetActions[taskCollID] = append(targetActions[taskCollID], actions...)
 		}
-	}
+		return true
+	})
 
 	return scheduler.calculateTaskDelta(targetActions)
 }
@@ -556,10 +575,7 @@ func (scheduler *taskScheduler) calculateTaskDelta(targetActions map[int64][]Act
 }
 
 func (scheduler *taskScheduler) GetExecutedFlag(nodeID int64) <-chan struct{} {
-	scheduler.rwmutex.RLock()
-	defer scheduler.rwmutex.RUnlock()
-
-	executor, ok := scheduler.executors[nodeID]
+	executor, ok := scheduler.executors.Get(nodeID)
 	if !ok {
 		return nil
 	}
@@ -582,16 +598,13 @@ func WithTaskTypeFilter(taskType Type) TaskFilter {
 }
 
 func (scheduler *taskScheduler) GetChannelTaskNum(filters ...TaskFilter) int {
-	scheduler.rwmutex.RLock()
-	defer scheduler.rwmutex.RUnlock()
-
 	if len(filters) == 0 {
-		return len(scheduler.channelTasks)
+		return scheduler.channelTasks.Len()
 	}
 
 	// rewrite this with for loop
 	counter := 0
-	for _, task := range scheduler.channelTasks {
+	scheduler.channelTasks.Range(func(_ replicaChannelIndex, task Task) bool {
 		allMatch := true
 		for _, filter := range filters {
 			if !filter(task) {
@@ -602,21 +615,19 @@ func (scheduler *taskScheduler) GetChannelTaskNum(filters ...TaskFilter) int {
 		if allMatch {
 			counter++
 		}
-	}
+		return true
+	})
 	return counter
 }
 
 func (scheduler *taskScheduler) GetSegmentTaskNum(filters ...TaskFilter) int {
-	scheduler.rwmutex.RLock()
-	defer scheduler.rwmutex.RUnlock()
-
 	if len(filters) == 0 {
-		return len(scheduler.segmentTasks)
+		scheduler.segmentTasks.Len()
 	}
 
 	// rewrite this with for loop
 	counter := 0
-	for _, task := range scheduler.segmentTasks {
+	scheduler.segmentTasks.Range(func(_ replicaSegmentIndex, task Task) bool {
 		allMatch := true
 		for _, filter := range filters {
 			if !filter(task) {
@@ -627,7 +638,8 @@ func (scheduler *taskScheduler) GetSegmentTaskNum(filters ...TaskFilter) int {
 		if allMatch {
 			counter++
 		}
-	}
+		return true
+	})
 	return counter
 }
 
@@ -651,8 +663,8 @@ func (scheduler *taskScheduler) schedule(node int64) {
 	log.Debug("process tasks related to node",
 		zap.Int("processingTaskNum", scheduler.processQueue.Len()),
 		zap.Int("waitingTaskNum", scheduler.waitQueue.Len()),
-		zap.Int("segmentTaskNum", len(scheduler.segmentTasks)),
-		zap.Int("channelTaskNum", len(scheduler.channelTasks)),
+		zap.Int("segmentTaskNum", scheduler.segmentTasks.Len()),
+		zap.Int("channelTaskNum", scheduler.channelTasks.Len()),
 	)
 
 	// Process tasks
@@ -700,8 +712,8 @@ func (scheduler *taskScheduler) schedule(node int64) {
 	log.Info("process tasks related to node done",
 		zap.Int("processingTaskNum", scheduler.processQueue.Len()),
 		zap.Int("waitingTaskNum", scheduler.waitQueue.Len()),
-		zap.Int("segmentTaskNum", len(scheduler.segmentTasks)),
-		zap.Int("channelTaskNum", len(scheduler.channelTasks)),
+		zap.Int("segmentTaskNum", scheduler.segmentTasks.Len()),
+		zap.Int("channelTaskNum", scheduler.channelTasks.Len()),
 	)
 }
 
@@ -797,7 +809,7 @@ func (scheduler *taskScheduler) process(task Task) bool {
 	)
 
 	actions, step := task.Actions(), task.Step()
-	executor, ok := scheduler.executors[actions[step].Node()]
+	executor, ok := scheduler.executors.Get(actions[step].Node())
 	if !ok {
 		log.Warn("no executor for QueryNode",
 			zap.Int("step", step),
@@ -818,19 +830,18 @@ func (scheduler *taskScheduler) check(task Task) error {
 }
 
 func (scheduler *taskScheduler) RemoveByNode(node int64) {
-	scheduler.rwmutex.Lock()
-	defer scheduler.rwmutex.Unlock()
-
-	for _, task := range scheduler.segmentTasks {
+	scheduler.segmentTasks.Range(func(_ replicaSegmentIndex, task Task) bool {
 		if scheduler.isRelated(task, node) {
 			scheduler.remove(task)
 		}
-	}
-	for _, task := range scheduler.channelTasks {
+		return true
+	})
+	scheduler.channelTasks.Range(func(_ replicaChannelIndex, task Task) bool {
 		if scheduler.isRelated(task, node) {
 			scheduler.remove(task)
 		}
-	}
+		return true
+	})
 }
 
 func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
@@ -866,7 +877,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 	switch task := task.(type) {
 	case *SegmentTask:
 		index := NewReplicaSegmentIndex(task)
-		delete(scheduler.segmentTasks, index)
+		scheduler.segmentTasks.Remove(index)
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
 		if task.Status() == TaskStatusFailed &&
 			task.Err() != nil &&
@@ -876,12 +887,12 @@ func (scheduler *taskScheduler) remove(task Task) {
 
 	case *ChannelTask:
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
-		delete(scheduler.channelTasks, index)
+		scheduler.channelTasks.Remove(index)
 		log = log.With(zap.String("channel", task.Channel()))
 
 	case *LeaderTask:
 		index := NewReplicaLeaderIndex(task)
-		delete(scheduler.segmentTasks, index)
+		scheduler.segmentTasks.Remove(index)
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
 	}
 

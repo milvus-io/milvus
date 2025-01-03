@@ -1450,10 +1450,10 @@ func (suite *TaskSuite) AssertTaskNum(process, wait, channel, segment int) {
 
 	suite.Equal(process, scheduler.processQueue.Len())
 	suite.Equal(wait, scheduler.waitQueue.Len())
-	suite.Len(scheduler.segmentTasks, segment)
-	suite.Len(scheduler.channelTasks, channel)
-	suite.Equal(len(scheduler.tasks), process+wait)
-	suite.Equal(len(scheduler.tasks), segment+channel)
+	suite.Equal(scheduler.segmentTasks.Len(), segment)
+	suite.Equal(scheduler.channelTasks.Len(), channel)
+	suite.Equal(scheduler.tasks.Len(), process+wait)
+	suite.Equal(scheduler.tasks.Len(), segment+channel)
 }
 
 func (suite *TaskSuite) dispatchAndWait(node int64) {
@@ -1465,13 +1465,14 @@ func (suite *TaskSuite) dispatchAndWait(node int64) {
 		count = 0
 		keys = make([]any, 0)
 
-		for _, executor := range suite.scheduler.executors {
+		suite.scheduler.executors.Range(func(_ int64, executor *Executor) bool {
 			executor.executingTasks.Range(func(taskIndex string) bool {
 				keys = append(keys, taskIndex)
 				count++
 				return true
 			})
-		}
+			return true
+		})
 
 		if count == 0 {
 			return
