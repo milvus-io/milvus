@@ -88,6 +88,7 @@ func (suite *SearchSuite) SetupTest() {
 			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 			Level:         datapb.SegmentLevel_Legacy,
 		},
+		nil,
 	)
 	suite.Require().NoError(err)
 
@@ -116,6 +117,7 @@ func (suite *SearchSuite) SetupTest() {
 			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 			Level:         datapb.SegmentLevel_Legacy,
 		},
+		nil,
 	)
 	suite.Require().NoError(err)
 

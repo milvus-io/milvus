@@ -399,11 +399,11 @@ func TestRoleRBAC(t *testing.T) {
 	suite.Run(t, new(RoleSuite))
 }
 
-type PrivilgeGroupSuite struct {
+type PrivilegeGroupSuite struct {
 	MockSuiteBase
 }
 
-func (s *PrivilgeGroupSuite) TestGrantV2() {
+func (s *PrivilegeGroupSuite) TestGrantV2() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -433,7 +433,7 @@ func (s *PrivilgeGroupSuite) TestGrantV2() {
 	})
 }
 
-func (s *PrivilgeGroupSuite) TestRevokeV2() {
+func (s *PrivilegeGroupSuite) TestRevokeV2() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -463,7 +463,7 @@ func (s *PrivilgeGroupSuite) TestRevokeV2() {
 	})
 }
 
-func (s *PrivilgeGroupSuite) TestCreatePrivilegeGroup() {
+func (s *PrivilegeGroupSuite) TestCreatePrivilegeGroup() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -487,7 +487,7 @@ func (s *PrivilgeGroupSuite) TestCreatePrivilegeGroup() {
 	})
 }
 
-func (s *PrivilgeGroupSuite) TestDropPrivilegeGroup() {
+func (s *PrivilegeGroupSuite) TestDropPrivilegeGroup() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -511,7 +511,7 @@ func (s *PrivilgeGroupSuite) TestDropPrivilegeGroup() {
 	})
 }
 
-func (s *PrivilgeGroupSuite) TestListPrivilegeGroups() {
+func (s *PrivilegeGroupSuite) TestListPrivilegeGroups() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -548,7 +548,7 @@ func (s *PrivilgeGroupSuite) TestListPrivilegeGroups() {
 	})
 }
 
-func (s *PrivilgeGroupSuite) TestOperatePrivilegeGroup() {
+func (s *PrivilegeGroupSuite) TestOperatePrivilegeGroup() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -575,5 +575,5 @@ func (s *PrivilgeGroupSuite) TestOperatePrivilegeGroup() {
 }
 
 func TestPrivilegeGroup(t *testing.T) {
-	suite.Run(t, new(PrivilgeGroupSuite))
+	suite.Run(t, new(PrivilegeGroupSuite))
 }

@@ -39,16 +39,28 @@ func (t *dropDatabaseTask) Prepare(ctx context.Context) error {
 }
 
 func (t *dropDatabaseTask) Execute(ctx context.Context) error {
-	redoTask := newBaseRedoTask(t.core.stepExecutor)
 	dbName := t.Req.GetDbName()
 	ts := t.GetTs()
+	return executeDropDatabaseTaskSteps(ctx, t.core, dbName, ts)
+}
+
+func (t *dropDatabaseTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(NewClusterLockerKey(true))
+}
+
+func executeDropDatabaseTaskSteps(ctx context.Context,
+	core *Core,
+	dbName string,
+	ts Timestamp,
+) error {
+	redoTask := newBaseRedoTask(core.stepExecutor)
 	redoTask.AddSyncStep(&deleteDatabaseMetaStep{
-		baseStep:     baseStep{core: t.core},
+		baseStep:     baseStep{core: core},
 		databaseName: dbName,
 		ts:           ts,
 	})
 	redoTask.AddSyncStep(&expireCacheStep{
-		baseStep: baseStep{core: t.core},
+		baseStep: baseStep{core: core},
 		dbName:   dbName,
 		ts:       ts,
 		// make sure to send the "expire cache" request
@@ -59,8 +71,4 @@ func (t *dropDatabaseTask) Execute(ctx context.Context) error {
 		},
 	})
 	return redoTask.Execute(ctx)
-}
-
-func (t *dropDatabaseTask) GetLockerKey() LockerKey {
-	return NewLockerKeyChain(NewClusterLockerKey(true))
 }

@@ -81,7 +81,7 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 
 	// Dependencies
 	suite.manager = NewManager()
-	suite.loader = NewLoader(suite.manager, suite.chunkManager)
+	suite.loader = NewLoader(ctx, suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
 	// Data
@@ -98,7 +98,7 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 func (suite *SegmentLoaderSuite) SetupBM25() {
 	// Dependencies
 	suite.manager = NewManager()
-	suite.loader = NewLoader(suite.manager, suite.chunkManager)
+	suite.loader = NewLoader(context.Background(), suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
 	suite.schema = mock_segcore.GenTestBM25CollectionSchema("test")
@@ -798,7 +798,7 @@ func (suite *SegmentLoaderDetailSuite) SetupTest() {
 	ctx := context.Background()
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
-	suite.loader = NewLoader(suite.manager, suite.chunkManager)
+	suite.loader = NewLoader(ctx, suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
 	// Data

@@ -40,14 +40,14 @@ func Code(err error) int32 {
 	}
 
 	cause := errors.Cause(err)
-	switch cause := cause.(type) {
+	switch specificErr := cause.(type) {
 	case milvusError:
-		return cause.code()
+		return specificErr.code()
 
 	default:
-		if errors.Is(cause, context.Canceled) {
+		if errors.Is(specificErr, context.Canceled) {
 			return CanceledCode
-		} else if errors.Is(cause, context.DeadlineExceeded) {
+		} else if errors.Is(specificErr, context.DeadlineExceeded) {
 			return TimeoutCode
 		} else {
 			return errUnexpected.code()

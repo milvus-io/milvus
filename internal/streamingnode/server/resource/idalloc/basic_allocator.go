@@ -15,7 +15,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
-var errExhausted = errors.New("exhausted")
+var (
+	errExhausted      = errors.New("exhausted")
+	errFastPathFailed = errors.New("fast path failed")
+)
 
 // newLocalAllocator creates a new local allocator.
 func newLocalAllocator() *localAllocator {

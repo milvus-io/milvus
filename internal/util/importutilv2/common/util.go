@@ -84,8 +84,15 @@ func EstimateReadCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema
 	if err != nil {
 		return 0, err
 	}
+	if sizePerRecord <= 0 || bufferSize <= 0 {
+		return 0, fmt.Errorf("invalid size, sizePerRecord=%d, bufferSize=%d", sizePerRecord, bufferSize)
+	}
 	if 1000*sizePerRecord <= bufferSize {
 		return 1000, nil
 	}
-	return int64(bufferSize) / int64(sizePerRecord), nil
+	ret := int64(bufferSize) / int64(sizePerRecord)
+	if ret <= 0 {
+		return 1, nil
+	}
+	return ret, nil
 }

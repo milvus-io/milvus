@@ -114,7 +114,7 @@ func (s *scannerAdaptorImpl) executeConsume() {
 			Message:      s.pendingQueue.Next(),
 		})
 		if handleResult.Error != nil {
-			s.Finish(err)
+			s.Finish(handleResult.Error)
 			return
 		}
 		if handleResult.MessageHandled {

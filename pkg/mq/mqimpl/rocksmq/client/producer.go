@@ -28,6 +28,9 @@ type Producer interface {
 	// publish a message
 	Send(message *common.ProducerMessage) (UniqueID, error)
 
+	// publish a message for new streaming service.
+	SendForStreamingService(message *common.ProducerMessage) (UniqueID, error)
+
 	// Close a producer
 	Close()
 }

@@ -1,104 +1,139 @@
 #!/bin/bash
-set -e
-set -x
 
+# Set PS4 prompt to display line number, function name and timestamp
+export PS4='+(${BASH_SOURCE}:${LINENO}):${FUNCNAME[0]:+${FUNCNAME[0]}(): }'
 
-echo "check os env"
-platform='Linux'
-unamestr=$(uname)
-if [[ "$unamestr" == 'Linux' ]]; then
-   platform='Linux'
-elif [[ "$unamestr" == 'Darwin' ]]; then
-   platform='Mac'
-fi
-echo "platform: $platform"
+set -e  # Exit immediately if a command exits with a non-zero status
+set -x  # Print commands and their arguments as they are executed
 
+# Store the initial directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Function to log important steps
+declare -A colors=(
+    ["INFO"]=$'\033[32m'    # Green
+    ["BOLD"]=$'\033[1m'     # Bold
+    ["TIME"]=$'\033[36m'    # Cyan
+    ["RESET"]=$'\033[0m'    # Reset
+)
+
+log_step() {
+    # Check if stdout is a terminal
+    if [ -t 1 ]; then
+        local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+        echo -e "${colors[INFO]}${colors[BOLD]}===> STEP [${colors[TIME]}${timestamp}${colors[INFO]}]: $1${colors[RESET]}"
+    else
+        # If not terminal (e.g., redirected to file), don't use colors
+        local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+        echo "===> STEP [${timestamp}]: $1"
+    fi
+}
+
+# Cleanup function to ensure resources are properly released
+cleanup() {
+    local exit_code=$?
+    log_step "Performing cleanup (exit code: $exit_code)"
+    
+    # Make sure we're in the correct directory for cleanup
+    cd "${SCRIPT_DIR}" || true
+    
+    # Export logs
+    cur_time=$(date +%Y-%m-%d-%H-%M-%S)
+    if [ -f "../../scripts/export_log_k8s.sh" ]; then
+        bash ../../scripts/export_log_k8s.sh ${ns} ${release} k8s_log/${target_component}-${chaos_type}-${cur_time} || true
+    else
+        echo "Warning: export_log_k8s.sh not found in expected location"
+    fi
+    
+    # Uninstall Milvus
+    if [ -f "./scripts/uninstall_milvus.sh" ]; then
+        bash ./scripts/uninstall_milvus.sh ${release} ${ns} || true
+    else
+        echo "Warning: uninstall_milvus.sh not found in expected location"
+    fi
+    
+    exit $exit_code
+}
+
+# Set up trap to catch exits
+trap cleanup EXIT
+
+# Initialize basic variables
 ns="chaos-testing"
-
-# switch namespace
-# kubectl config set-context --current --namespace=${ns}
-# kubectl get pod
-
-# set parameters
-pod=${1:-"querynode"}
-chaos_type=${2:-"pod_kill"} #pod_kill or pod_failure
-chaos_task=${3:-"chaos-test"} # chaos-test or data-consist-test 
-node_num=${4:-1} # cluster_1_node or cluster_n_nodes
-
 cur_time=$(date +%H-%M-%S)
-release_name="test"-${pod}-${chaos_type/_/-}-${cur_time} # replace pod_kill to pod-kill
+target_component=${1:-"standalone"}
+chaos_type=${2:-"pod_kill"}
+node_num=${3:-1}
+
+log_step "Initializing with parameters: target_component=${target_component}, chaos_type=${chaos_type}, node_num=${node_num}"
+
+# Generate release name
+release_name="test"-${target_component}-${chaos_type/_/-}-${cur_time}
 release=${RELEASE_NAME:-"${release_name}"}
 
-# replace separator to default
-chaos_type=${chaos_type/-/_} # default separator of chaos_type is _
-chaos_task=${chaos_task/_/-} # default separator of chaos_task is -
-echo "chaos_type: ${chaos_type}"
-# install milvus cluster for chaos testing
-pushd ./scripts
-echo "uninstall milvus if exist"
-bash uninstall_milvus.sh ${release} ${ns}|| true
+# Normalize chaos type format
+chaos_type=${chaos_type/-/_}
+log_step "Configured chaos_type: ${chaos_type}"
 
-declare -A pod_map=(["querynode"]="queryNode" ["indexnode"]="indexNode" ["datanode"]="dataNode" ["proxy"]="proxy")
-echo "install milvus"
-if [[ ${pod} != *"standalone"* ]];
-then
-    echo "insatll cluster"
-    helm install --wait --timeout 360s ${release} milvus/milvus --set ${pod_map[${pod}]}.replicas=$node_num -f ../cluster-values.yaml -n=${ns}
+# Change to scripts directory
+pushd ./scripts || exit 1
+log_step "Uninstalling existing Milvus instance if any"
+bash uninstall_milvus.sh ${release} ${ns} || true
+
+# Map component names
+declare -A target_component_map=(["querynode"]="queryNode" ["indexnode"]="indexNode" ["datanode"]="dataNode" ["proxy"]="proxy")
+log_step "Installing Milvus"
+
+# Install cluster configuration if not standalone
+if [[ ${target_component} != *"standalone"* ]]; then
+    log_step "Installing cluster configuration"
+    helm repo add milvus https://zilliztech.github.io/milvus-helm/
+    helm repo update milvus
+    helm install --wait --debug --timeout 360s ${release} milvus/milvus \
+         --set ${target_component_map[${target_component}]}.replicas=$node_num \
+         -f ../cluster-values.yaml -n=${ns}
 fi
 
-if [[ ${pod} == *"standalone"* ]];
-then
-    echo "install standalone"
-    helm install --wait --timeout 360s ${release} milvus/milvus -f ../standalone-values.yaml -n=${ns}
+# Install standalone configuration
+if [[ ${target_component} == *"standalone"* ]]; then
+    log_step "Installing standalone configuration"
+    helm install --wait --debug --timeout 360s ${release} milvus/milvus \
+         -f ../standalone-values.yaml -n=${ns}
 fi
 
-# wait all pod ready
+# Wait for all pods to be ready
+log_step "Waiting for pods to be ready"
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${release} -n ${ns} --timeout=360s
 kubectl wait --for=condition=Ready pod -l release=${release} -n ${ns} --timeout=360s
+kubectl get pod -o wide -l app.kubernetes.io/instance=${release} -n ${ns}
+popd || exit 1
 
-popd
+# Configure service and get LoadBalancer IP
+log_step "Starting chaos testing"
+kubectl patch svc ${release}-milvus -p='{"spec":{"type":"LoadBalancer"}}' -n ${ns}
+loadbalancer_ip=$(kubectl get svc ${release}-milvus -n ${ns} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+host=${loadbalancer_ip}
 
-# replace chaos object as defined
-if [ "$platform" == "Mac" ];
-then
-    sed -i "" "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/${chaos_type}\/'/g" constants.py
-    sed -i "" "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${pod}_${chaos_type}.yaml\'/g" constants.py
-    sed -i "" "s/RELEASE_NAME =.*/RELEASE_NAME = \'${release}\'/g" constants.py
-else
-    sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/${chaos_type}\/'/g" constants.py
-    sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${pod}_${chaos_type}.yaml\'/g" constants.py
-    sed -i "s/RELEASE_NAME =.*/RELEASE_NAME = \'${release}\'/g" constants.py
-fi
-
-# run chaos testing
-echo "start running testcase ${pod}"
-if [[ $release =~ "milvus" ]]
-then
-    host=$(kubectl get svc/${release} -o jsonpath="{.spec.clusterIP}")
-else
-    host=$(kubectl get svc/${release}-milvus -o jsonpath="{.spec.clusterIP}")
-fi
+# Run initial e2e tests
+log_step "Running initial e2e tests"
 pytest -s -v ../testcases/test_e2e.py --host "$host" --log-cli-level=INFO --capture=no
 python3 scripts/hello_milvus.py --host "$host"
 
-# chaos test
-if [ "$chaos_task" == "chaos-test" ];
-then
-    pytest -s -v test_chaos.py --host "$host" --log-cli-level=INFO --capture=no || echo "chaos test fail"
-fi
-# data consist test
-if [ "$chaos_task" == "data-consist-test" ];
-then
-    pytest -s -v test_chaos_data_consist.py --host "$host" --log-cli-level=INFO --capture=no || echo "chaos test fail"
-fi
-sleep 30
-echo "start running e2e test"
+# Run parallel chaos and request tests
+log_step "Starting parallel chaos and request tests"
+pytest test_chaos_apply.py --milvus_ns ${ns} --chaos_type ${chaos_type} \
+      --target_component ${target_component} --host "$host" \
+      --log-cli-level=INFO --capture=no &
+pytest testcases/test_single_request_operation.py --host "$host" \
+      --request_duration 15m --log-cli-level=INFO --capture=no &
+wait
+
+# Wait for system recovery after chaos tests
+log_step "Waiting for pods to be ready after chaos tests"
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${release} -n ${ns} --timeout=360s
 kubectl wait --for=condition=Ready pod -l release=${release} -n ${ns} --timeout=360s
 
+# Run final verification tests
+log_step "Running final e2e tests"
 pytest -s -v ../testcases/test_e2e.py --host "$host" --log-cli-level=INFO --capture=no || echo "e2e test fail"
 python3 scripts/hello_milvus.py --host "$host" || echo "e2e test fail"
-
-# save logs
-cur_time=$(date +%Y-%m-%d-%H-%M-%S)
-bash ../../scripts/export_log_k8s.sh ${ns} ${release} k8s_log/${pod}-${chaos_type}-${chaos_task}-${cur_time}

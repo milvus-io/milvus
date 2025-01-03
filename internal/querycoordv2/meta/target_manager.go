@@ -72,6 +72,7 @@ type TargetManagerInterface interface {
 	CanSegmentBeMoved(ctx context.Context, collectionID, segmentID int64) bool
 	GetTargetJSON(ctx context.Context, scope TargetScope) string
 	GetPartitions(ctx context.Context, collectionID int64, scope TargetScope) ([]int64, error)
+	IsCurrentTargetReady(ctx context.Context, collectionID int64) bool
 }
 
 type TargetManager struct {
@@ -672,4 +673,15 @@ func (mgr *TargetManager) getTarget(scope TargetScope) *target {
 	}
 
 	return mgr.next
+}
+
+func (mgr *TargetManager) IsCurrentTargetReady(ctx context.Context, collectionID int64) bool {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+	target, ok := mgr.current.collectionTargetMap[collectionID]
+	if !ok {
+		return false
+	}
+
+	return target.Ready()
 }

@@ -75,7 +75,7 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqcommon.ProducerMes
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.SendMsgLabel).Observe(float64(elapsed.Milliseconds()))
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.SuccessLabel).Inc()
 
-	return &kafkaID{messageID: int64(m.TopicPartition.Offset)}, nil
+	return &KafkaID{MessageID: int64(m.TopicPartition.Offset)}, nil
 }
 
 func (kp *kafkaProducer) Close() {

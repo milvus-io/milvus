@@ -13,6 +13,7 @@ from base.index_wrapper import ApiIndexWrapper
 from base.utility_wrapper import ApiUtilityWrapper
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from base.high_level_api_wrapper import HighLevelApiWrapper
+from base.async_milvus_client_wrapper import AsyncMilvusClientWrapper
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
@@ -35,6 +36,7 @@ class Base:
     collection_object_list = []
     resource_group_list = []
     high_level_api_wrap = None
+    async_milvus_client_wrap = None
     skip_connection = False
 
     def setup_class(self):
@@ -59,6 +61,7 @@ class Base:
         self.field_schema_wrap = ApiFieldSchemaWrapper()
         self.database_wrap = ApiDatabaseWrapper()
         self.high_level_api_wrap = HighLevelApiWrapper()
+        self.async_milvus_client_wrap = AsyncMilvusClientWrapper()
 
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
@@ -165,6 +168,16 @@ class TestcaseBase(Base):
         server_version = utility.get_server_version()
         log.info(f"server version: {server_version}")
         return res
+
+    def init_async_milvus_client(self):
+        uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
+        kwargs = {
+            "uri": uri,
+            "user": cf.param_info.param_user,
+            "password": cf.param_info.param_password,
+            "token": cf.param_info.param_token,
+        }
+        self.async_milvus_client_wrap.init_async_client(**kwargs)
 
     def init_collection_wrap(self, name=None, schema=None, check_task=None, check_items=None,
                              enable_dynamic_field=False, with_json=True, **kwargs):

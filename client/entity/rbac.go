@@ -33,3 +33,31 @@ type GrantItem struct {
 	Grantor    string
 	Privilege  string
 }
+
+type UserInfo struct {
+	UserDescription
+	Password string
+}
+
+// UserDescription is the model for RBAC user description object.
+type UserDescription struct {
+	Name  string
+	Roles []string
+}
+
+type RBACMeta struct {
+	Users           []*UserInfo
+	Roles           []*Role
+	RoleGrants      []*RoleGrants
+	PrivilegeGroups []*PrivilegeGroup
+}
+
+// RoleGrants is the model for RBAC role description object.
+type RoleGrants struct {
+	Object        string
+	ObjectName    string
+	RoleName      string
+	GrantorName   string
+	PrivilegeName string
+	DbName        string
+}

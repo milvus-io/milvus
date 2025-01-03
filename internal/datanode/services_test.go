@@ -329,6 +329,10 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 
 func (s *DataNodeServicesSuite) TestFlushSegments() {
 	dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-FlushSegments"
+	stream, err := s.node.factory.NewTtMsgStream(context.Background())
+	s.NoError(err)
+	s.NotNil(stream)
+	stream.AsProducer(context.Background(), []string{dmChannelName})
 	schema := &schemapb.CollectionSchema{
 		Name: "test_collection",
 		Fields: []*schemapb.FieldSchema{

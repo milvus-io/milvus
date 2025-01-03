@@ -66,3 +66,43 @@ func TestUtil_EstimateReadCountPerBatch(t *testing.T) {
 	_, err = EstimateReadCountPerBatch(16*1024*1024, schema)
 	assert.Error(t, err)
 }
+
+func TestUtil_EstimateReadCountPerBatch_InvalidBufferSize(t *testing.T) {
+	schema := &schemapb.CollectionSchema{}
+	count, err := EstimateReadCountPerBatch(16*1024*1024, schema)
+	assert.Error(t, err)
+	assert.Equal(t, int64(0), count)
+	t.Logf("err=%v", err)
+
+	schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  100,
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+	count, err = EstimateReadCountPerBatch(0, schema)
+	assert.Error(t, err)
+	assert.Equal(t, int64(0), count)
+	t.Logf("err=%v", err)
+}
+
+func TestUtil_EstimateReadCountPerBatch_LargeSchema(t *testing.T) {
+	schema := &schemapb.CollectionSchema{}
+	for i := 0; i < 100; i++ {
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:  int64(i),
+			DataType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxLengthKey,
+					Value: "10000000",
+				},
+			},
+		})
+	}
+	count, err := EstimateReadCountPerBatch(16*1024*1024, schema)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+}

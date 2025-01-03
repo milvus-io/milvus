@@ -147,7 +147,10 @@ type dmlChannels struct {
 	channelsHeap channelsHeap
 }
 
-func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePrefixDefault string, chanNumDefault int64) *dmlChannels {
+func newDmlChannels(initCtx context.Context, factory msgstream.Factory, chanNamePrefixDefault string, chanNumDefault int64) *dmlChannels {
+	log.Ctx(initCtx).Info("new DmlChannels",
+		zap.String("chanNamePrefixDefault", chanNamePrefixDefault),
+		zap.Int64("chanNumDefault", chanNumDefault))
 	params := &paramtable.Get().CommonCfg
 	var (
 		chanNamePrefix string
@@ -167,7 +170,7 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 	}
 
 	d := &dmlChannels{
-		ctx:          ctx,
+		ctx:          context.TODO(),
 		factory:      factory,
 		namePrefix:   chanNamePrefix,
 		capacity:     chanNum,
@@ -176,19 +179,19 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 	}
 
 	for i, name := range names {
-		ms, err := factory.NewMsgStream(ctx)
+		ms, err := factory.NewMsgStream(initCtx)
 		if err != nil {
-			log.Ctx(ctx).Error("Failed to add msgstream",
+			log.Ctx(initCtx).Error("Failed to add msgstream",
 				zap.String("name", name),
 				zap.Error(err))
 			panic("Failed to add msgstream")
 		}
 
 		if params.PreCreatedTopicEnabled.GetAsBool() {
-			d.checkPreCreatedTopic(ctx, factory, name)
+			d.checkPreCreatedTopic(initCtx, factory, name)
 		}
 
-		ms.AsProducer(ctx, []string{name})
+		ms.AsProducer(initCtx, []string{name})
 		dms := &dmlMsgStream{
 			ms:     ms,
 			refcnt: 0,
@@ -202,7 +205,7 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 
 	heap.Init(&d.channelsHeap)
 
-	log.Ctx(ctx).Info("init dml channels", zap.String("prefix", chanNamePrefix), zap.Int64("num", chanNum))
+	log.Ctx(initCtx).Info("init dml channels", zap.String("prefix", chanNamePrefix), zap.Int64("num", chanNum))
 
 	metrics.RootCoordNumOfDMLChannel.Add(float64(chanNum))
 	metrics.RootCoordNumOfMsgStream.Add(float64(chanNum))

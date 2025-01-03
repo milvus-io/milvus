@@ -29,8 +29,8 @@ namespace milvus::storage {
 std::unique_ptr<DataCodec>
 DeserializeRemoteFileData(BinlogReaderPtr reader, bool is_field_data) {
     DescriptorEvent descriptor_event(reader);
-    DataType data_type =
-        DataType(descriptor_event.event_data.fix_part.data_type);
+    auto data_type =
+        static_cast<DataType>(descriptor_event.event_data.fix_part.data_type);
     auto& extras = descriptor_event.event_data.extras;
     bool nullable = (extras.find(NULLABLE) != extras.end())
                         ? std::any_cast<bool>(extras[NULLABLE])

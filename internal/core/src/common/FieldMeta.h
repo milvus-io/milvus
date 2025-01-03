@@ -19,6 +19,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
@@ -40,25 +41,25 @@ class FieldMeta {
     FieldMeta&
     operator=(FieldMeta&&) = default;
 
-    FieldMeta(const FieldName& name, FieldId id, DataType type, bool nullable)
-        : name_(name), id_(id), type_(type), nullable_(nullable) {
+    FieldMeta(FieldName name, FieldId id, DataType type, bool nullable)
+        : name_(std::move(name)), id_(id), type_(type), nullable_(nullable) {
         Assert(!IsVectorDataType(type_));
     }
 
-    FieldMeta(const FieldName& name,
+    FieldMeta(FieldName name,
               FieldId id,
               DataType type,
               int64_t max_length,
               bool nullable)
-        : name_(name),
+        : name_(std::move(name)),
           id_(id),
           type_(type),
-          string_info_(StringInfo{max_length}),
-          nullable_(nullable) {
+          nullable_(nullable),
+          string_info_(StringInfo{max_length}) {
         Assert(IsStringDataType(type_));
     }
 
-    FieldMeta(const FieldName& name,
+    FieldMeta(FieldName name,
               FieldId id,
               DataType type,
               int64_t max_length,
@@ -66,21 +67,21 @@ class FieldMeta {
               bool enable_match,
               bool enable_analyzer,
               std::map<std::string, std::string>& params)
-        : name_(name),
+        : name_(std::move(name)),
           id_(id),
           type_(type),
+          nullable_(nullable),
           string_info_(StringInfo{
-              max_length, enable_match, enable_analyzer, std::move(params)}),
-          nullable_(nullable) {
+              max_length, enable_match, enable_analyzer, std::move(params)}) {
         Assert(IsStringDataType(type_));
     }
 
-    FieldMeta(const FieldName& name,
+    FieldMeta(FieldName name,
               FieldId id,
               DataType type,
               DataType element_type,
               bool nullable)
-        : name_(name),
+        : name_(std::move(name)),
           id_(id),
           type_(type),
           element_type_(element_type),
@@ -90,17 +91,17 @@ class FieldMeta {
 
     // pass in any value for dim for sparse vector is ok as it'll never be used:
     // get_dim() not allowed to be invoked on a sparse vector field.
-    FieldMeta(const FieldName& name,
+    FieldMeta(FieldName name,
               FieldId id,
               DataType type,
               int64_t dim,
               std::optional<knowhere::MetricType> metric_type,
               bool nullable)
-        : name_(name),
+        : name_(std::move(name)),
           id_(id),
           type_(type),
-          vector_info_(VectorInfo{dim, std::move(metric_type)}),
-          nullable_(nullable) {
+          nullable_(nullable),
+          vector_info_(VectorInfo{dim, std::move(metric_type)}) {
         Assert(IsVectorDataType(type_));
         Assert(!nullable);
     }

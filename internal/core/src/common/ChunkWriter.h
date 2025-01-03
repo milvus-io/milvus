@@ -52,7 +52,7 @@ class ChunkWriterBase {
 };
 
 template <typename ArrowType, typename T>
-class ChunkWriter : public ChunkWriterBase {
+class ChunkWriter final : public ChunkWriterBase {
  public:
     ChunkWriter(int dim, bool nullable) : ChunkWriterBase(nullable), dim_(dim) {
     }

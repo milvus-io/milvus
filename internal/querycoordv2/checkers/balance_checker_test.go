@@ -324,20 +324,8 @@ func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
 	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID1)
 	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID2)
 
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            1,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-		},
-	}
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
-	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(channels, segments, nil)
+	mockTarget := meta.NewMockTargetManager(suite.T())
+	suite.checker.targetMgr = mockTarget
 
 	// set collections meta
 	cid1, replicaID1, partitionID1 := 1, 1, 1
@@ -347,8 +335,6 @@ func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
 	partition1 := utils.CreateTestPartition(int64(cid1), int64(partitionID1))
 	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1, partition1)
 	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
-	suite.targetMgr.UpdateCollectionNextTarget(ctx, int64(cid1))
-	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(cid1))
 
 	cid2, replicaID2, partitionID2 := 2, 2, 2
 	collection2 := utils.CreateTestCollection(int64(cid2), int32(replicaID2))
@@ -358,6 +344,17 @@ func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
 	suite.checker.meta.CollectionManager.PutCollection(ctx, collection2, partition2)
 	suite.checker.meta.ReplicaManager.Put(ctx, replica2)
 
+	// test normal balance when one collection has unready target
+	mockTarget.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true)
+	mockTarget.EXPECT().IsCurrentTargetReady(mock.Anything, mock.Anything).Return(false)
+	replicasToBalance := suite.checker.replicasToBalance(ctx)
+	suite.Len(replicasToBalance, 0)
+
+	// test stopping balance with target not ready
+	mockTarget.ExpectedCalls = nil
+	mockTarget.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(false)
+	mockTarget.EXPECT().IsCurrentTargetExist(mock.Anything, int64(cid1), mock.Anything).Return(true)
+	mockTarget.EXPECT().IsCurrentTargetExist(mock.Anything, int64(cid2), mock.Anything).Return(false)
 	mr1 := replica1.CopyForWrite()
 	mr1.AddRONode(1)
 	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
@@ -366,9 +363,8 @@ func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
 	mr2.AddRONode(1)
 	suite.checker.meta.ReplicaManager.Put(ctx, mr2.IntoReplica())
 
-	// test stopping balance
 	idsToBalance := []int64{int64(replicaID1)}
-	replicasToBalance := suite.checker.replicasToBalance(ctx)
+	replicasToBalance = suite.checker.replicasToBalance(ctx)
 	suite.ElementsMatch(idsToBalance, replicasToBalance)
 }
 

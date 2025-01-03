@@ -139,11 +139,29 @@ func (c *Client) RenameCollection(ctx context.Context, option RenameCollectionOp
 	})
 }
 
-func (c *Client) AlterCollection(ctx context.Context, option AlterCollectionOption, callOptions ...grpc.CallOption) error {
+func (c *Client) AlterCollectionProperties(ctx context.Context, option AlterCollectionPropertiesOption, callOptions ...grpc.CallOption) error {
 	req := option.Request()
 
 	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.AlterCollection(ctx, req, callOptions...)
+		return merr.CheckRPCCall(resp, err)
+	})
+}
+
+func (c *Client) DropCollectionProperties(ctx context.Context, option DropCollectionPropertiesOption, callOptions ...grpc.CallOption) error {
+	req := option.Request()
+
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.AlterCollection(ctx, req, callOptions...)
+		return merr.CheckRPCCall(resp, err)
+	})
+}
+
+func (c *Client) AlterCollectionFieldProperty(ctx context.Context, option AlterCollectionFieldPropertiesOption, callOptions ...grpc.CallOption) error {
+	req := option.Request()
+
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.AlterCollectionField(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
 }

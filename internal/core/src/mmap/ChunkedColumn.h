@@ -53,15 +53,15 @@ class ChunkedColumnBase : public ColumnBase {
  public:
     ChunkedColumnBase() = default;
     // memory mode ctor
-    ChunkedColumnBase(const FieldMeta& field_meta) {
+    explicit ChunkedColumnBase(const FieldMeta& field_meta) {
         if (field_meta.is_nullable()) {
             nullable_ = true;
         }
     }
 
-    virtual ~ChunkedColumnBase(){};
+    virtual ~ChunkedColumnBase() = default;
 
-    virtual void
+    void
     AppendBatch(const FieldDataPtr data) override {
         PanicInfo(ErrorCode::Unsupported, "AppendBatch not supported");
     }

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v3/disk"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/config"
@@ -104,8 +105,6 @@ type ComponentParam struct {
 	StreamingCoordGrpcClientCfg GrpcClientConfig
 	StreamingNodeGrpcClientCfg  GrpcClientConfig
 	IntegrationTestCfg          integrationTestConfig
-
-	RuntimeConfig runtimeConfig
 }
 
 // Init initialize once
@@ -1305,6 +1304,7 @@ type proxyConfig struct {
 	SkipAutoIDCheck              ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck        ParamItem `refreshable:"true"`
 	EnablePublicPrivilege        ParamItem `refreshable:"false"`
+	MaxVarCharLength             ParamItem `refreshable:"false"`
 
 	AccessLog AccessLogConfig
 
@@ -1716,6 +1716,14 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall enable public privilege",
 	}
 	p.EnablePublicPrivilege.Init(base.mgr)
+
+	p.MaxVarCharLength = ParamItem{
+		Key:          "proxy.maxVarCharLength",
+		Version:      "2.4.19",            // hotfix
+		DefaultValue: strconv.Itoa(65535), // 64K
+		Doc:          "maximum number of characters for a varchar field; this value is overridden by the value in a pre-existing schema if applicable",
+	}
+	p.MaxVarCharLength.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
@@ -3324,6 +3332,9 @@ type dataCoordConfig struct {
 	ChannelCheckpointMaxLag ParamItem `refreshable:"true"`
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
 
+	// Index related configuration
+	IndexMemSizeEstimateMultiplier ParamItem `refreshable:"true"`
+
 	// Clustering Compaction
 	ClusteringCompactionEnable                 ParamItem `refreshable:"true"`
 	ClusteringCompactionAutoEnable             ParamItem `refreshable:"true"`
@@ -3806,6 +3817,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.LevelZeroCompactionTriggerDeltalogMaxNum.Init(base.mgr)
+
+	p.IndexMemSizeEstimateMultiplier = ParamItem{
+		Key:          "dataCoord.index.memSizeEstimateMultiplier",
+		Version:      "2.4.19",
+		DefaultValue: "2",
+		Doc:          "When the memory size is not setup by index procedure, multiplier to estimate the memory size of index data",
+		Export:       true,
+	}
+	p.IndexMemSizeEstimateMultiplier.Init(base.mgr)
 
 	p.ClusteringCompactionEnable = ParamItem{
 		Key:          "dataCoord.compaction.clustering.enable",
@@ -4850,11 +4870,13 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 	p.TxnDefaultKeepaliveTimeout.Init(base.mgr)
 }
 
+// runtimeConfig is just a private environment value table.
 type runtimeConfig struct {
-	CreateTime RuntimeParamItem
-	UpdateTime RuntimeParamItem
-	Role       RuntimeParamItem
-	NodeID     RuntimeParamItem
+	createTime time.Time
+	updateTime time.Time
+	role       string
+	nodeID     atomic.Int64
+	components map[string]struct{}
 }
 
 type integrationTestConfig struct {

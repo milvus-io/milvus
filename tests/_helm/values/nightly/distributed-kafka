@@ -1,5 +1,7 @@
 cluster:
   enabled: true
+streaming:
+  enabled: true
 common:
   security:
     authorizationEnabled: false

@@ -70,8 +70,8 @@ class TestMilvusClientAlterIndex(TestcaseBase):
         client_w.load_collection(client, collection_name)
         res1 = client_w.describe_index(client, collection_name, index_name=idx_names[0])[0]
         assert res1.get('mmap.enabled', None) is None
-        error = {ct.err_code: 999,
-                 ct.err_msg: "can't alter index on loaded collection, please release the collection first"}
+        error = {ct.err_code: 104,
+                 ct.err_msg: f"can't alter index on loaded collection, please release the collection first: collection already loaded[collection={collection_name}]"}
         # 1. alter index after load
         client_w.alter_index_properties(client, collection_name, idx_names[0], properties={"mmap.enabled": True},
                                         check_task=CheckTasks.err_res, check_items=error)

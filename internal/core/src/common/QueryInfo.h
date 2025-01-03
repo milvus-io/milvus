@@ -24,6 +24,12 @@
 
 namespace milvus {
 
+struct SearchIteratorV2Info {
+    std::string token = "";
+    uint32_t batch_size = 0;
+    std::optional<float> last_bound = std::nullopt;
+};
+
 struct SearchInfo {
     int64_t topk_{0};
     int64_t group_size_{1};
@@ -36,6 +42,7 @@ struct SearchInfo {
     tracer::TraceContext trace_ctx_;
     bool materialized_view_involved = false;
     bool iterative_filter_execution = false;
+    std::optional<SearchIteratorV2Info> iterator_v2_info_ = std::nullopt;
 };
 
 using SearchInfoPtr = std::shared_ptr<SearchInfo>;

@@ -55,6 +55,12 @@ message Array {
   schema.DataType element_type = 3;
 }
 
+message SearchIteratorV2Info {
+  string token = 1;
+  uint32 batch_size = 2;
+  optional float last_bound = 3;
+}
+
 message QueryInfo {
   int64 topk = 1;
   string metric_type = 3;
@@ -67,6 +73,7 @@ message QueryInfo {
   double bm25_avgdl = 10;
   int64 query_field_id =11;
   string hints = 12;
+  optional SearchIteratorV2Info search_iterator_v2_info = 13;
 }
 
 message ColumnInfo {
@@ -78,6 +85,7 @@ message ColumnInfo {
   bool is_partition_key = 6;
   schema.DataType element_type = 7;
   bool is_clustering_key = 8;
+  bool nullable = 9;
 }
 
 message ColumnExpr {
@@ -146,6 +154,16 @@ message JSONContainsExpr {
   string template_variable_name = 5;
 }
 
+message NullExpr {
+  ColumnInfo column_info = 1;
+  enum NullOp {
+    Invalid = 0;
+    IsNull = 1;
+    IsNotNull = 2;
+  }
+  NullOp op = 2;
+}
+
 message UnaryExpr {
   enum UnaryOp {
     Invalid = 0;
@@ -206,6 +224,7 @@ message Expr {
     AlwaysTrueExpr always_true_expr = 12;
     JSONContainsExpr json_contains_expr = 13;
     CallExpr call_expr = 14;
+    NullExpr null_expr = 15;
   };
   bool is_template = 20;
 }

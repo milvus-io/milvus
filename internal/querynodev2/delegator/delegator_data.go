@@ -116,6 +116,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					DeltaPosition: insertData.StartPosition,
 					Level:         datapb.SegmentLevel_L1,
 				},
+				nil,
 			)
 			if err != nil {
 				log.Error("failed to create new segment",
@@ -735,7 +736,7 @@ func (sd *shardDelegator) createDeleteStreamFromStreamingService(ctx context.Con
 	s := streaming.WAL().Read(ctx, streaming.ReadOption{
 		VChannel: position.GetChannelName(),
 		DeliverPolicy: options.DeliverPolicyStartFrom(
-			adaptor.MustGetMessageIDFromMQWrapperIDBytes("pulsar", position.GetMsgID()),
+			adaptor.MustGetMessageIDFromMQWrapperIDBytes(streaming.WAL().WALName(), position.GetMsgID()),
 		),
 		DeliverFilters: []options.DeliverFilter{
 			// only deliver message which timestamp >= position.Timestamp

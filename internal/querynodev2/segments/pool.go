@@ -142,7 +142,7 @@ func initWarmupPool() {
 				runtime.LockOSThread()
 				C.SetThreadName(cgoTagWarmup)
 			}), // lock os thread for cgo thread disposal
-			conc.WithNonBlocking(true), // make warming up non blocking
+			conc.WithNonBlocking(false),
 		)
 
 		warmupPool.Store(pool)

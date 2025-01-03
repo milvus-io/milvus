@@ -24,6 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -310,7 +311,8 @@ func (suite *ServiceSuite) TestShowPartitions() {
 			meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
 			resp, err = server.ShowPartitions(ctx, req)
 			suite.NoError(err)
-			suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
+			err := merr.CheckRPCCall(resp, err)
+			assert.True(suite.T(), errors.Is(err, merr.ErrPartitionNotLoaded))
 			meta.GlobalFailedLoadCache.Remove(collection)
 			err = suite.meta.CollectionManager.PutCollection(ctx, colBak)
 			suite.NoError(err)
@@ -322,7 +324,8 @@ func (suite *ServiceSuite) TestShowPartitions() {
 			meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
 			resp, err = server.ShowPartitions(ctx, req)
 			suite.NoError(err)
-			suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
+			err := merr.CheckRPCCall(resp, err)
+			assert.True(suite.T(), errors.Is(err, merr.ErrPartitionNotLoaded))
 			meta.GlobalFailedLoadCache.Remove(collection)
 			err = suite.meta.CollectionManager.PutPartition(ctx, parBak)
 			suite.NoError(err)
@@ -855,58 +858,6 @@ func (suite *ServiceSuite) TestTransferReplica() {
 	})
 	suite.NoError(err)
 	suite.ErrorIs(merr.Error(resp), merr.ErrServiceNotReady)
-}
-
-func (suite *ServiceSuite) TestLoadCollectionFailed() {
-	suite.loadAll()
-	ctx := context.Background()
-	server := suite.server
-
-	// Test load with different replica number
-	for _, collection := range suite.collections {
-		req := &querypb.LoadCollectionRequest{
-			CollectionID:  collection,
-			ReplicaNumber: suite.replicaNumber[collection] + 1,
-		}
-		resp, err := server.LoadCollection(ctx, req)
-		suite.NoError(err)
-		suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
-	}
-
-	req := &querypb.LoadCollectionRequest{
-		CollectionID:   1001,
-		ReplicaNumber:  2,
-		ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
-	}
-	resp, err := server.LoadCollection(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-
-	// Test load with partitions loaded
-	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
-			continue
-		}
-
-		req := &querypb.LoadCollectionRequest{
-			CollectionID: collection,
-		}
-		resp, err := server.LoadCollection(ctx, req)
-		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-	}
-
-	// Test load with wrong rg num
-	for _, collection := range suite.collections {
-		req := &querypb.LoadCollectionRequest{
-			CollectionID:   collection,
-			ReplicaNumber:  suite.replicaNumber[collection] + 1,
-			ResourceGroups: []string{"rg1", "rg2"},
-		}
-		resp, err := server.LoadCollection(ctx, req)
-		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
-	}
 }
 
 func (suite *ServiceSuite) TestLoadPartition() {

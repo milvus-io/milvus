@@ -57,7 +57,7 @@ const (
 	DefaultRgName           = "__default_resource_group"
 	DefaultDb               = "default"
 	MaxDim                  = 32768
-	MaxLength               = int64(1048576)
+	MaxLength               = int64(65535)
 	MaxCollectionNameLen    = 255
 	DefaultRgCapacity       = 1000000
 	RetentionDuration       = 40   // common.retentionDuration

@@ -150,7 +150,7 @@ TEST_P(ChunkCacheTest, Read) {
             dense_file_name, descriptor, dense_field_meta, mmap_enabled);
         Assert(dense_column->DataByteSize() == dim * N * 4);
     }
-    auto actual_dense = (const float*)(dense_column->Data());
+    auto actual_dense = (const float*)(dense_column->Data(0));
     for (auto i = 0; i < N * dim; i++) {
         AssertInfo(dense_data[i] == actual_dense[i],
                    fmt::format(
@@ -168,7 +168,7 @@ TEST_P(ChunkCacheTest, Read) {
     }
     auto expected_sparse_size = 0;
     auto actual_sparse =
-        (const knowhere::sparse::SparseRow<float>*)(sparse_column->Data());
+        (const knowhere::sparse::SparseRow<float>*)(sparse_column->Data(0));
     for (auto i = 0; i < N; i++) {
         const auto& actual_sparse_row = actual_sparse[i];
         const auto& expect_sparse_row = sparse_data[i];
@@ -215,7 +215,7 @@ TEST_P(ChunkCacheTest, TestMultithreads) {
             Assert(dense_column->DataByteSize() == dim * N * 4);
         }
 
-        auto actual_dense = (const float*)dense_column->Data();
+        auto actual_dense = (const float*)dense_column->Data(0);
         for (auto i = 0; i < N * dim; i++) {
             AssertInfo(
                 dense_data[i] == actual_dense[i],
@@ -232,7 +232,7 @@ TEST_P(ChunkCacheTest, TestMultithreads) {
                 sparse_file_name, descriptor, sparse_field_meta, mmap_enabled);
         }
         auto actual_sparse =
-            (const knowhere::sparse::SparseRow<float>*)sparse_column->Data();
+            (const knowhere::sparse::SparseRow<float>*)sparse_column->Data(0);
         for (auto i = 0; i < N; i++) {
             const auto& actual_sparse_row = actual_sparse[i];
             const auto& expect_sparse_row = sparse_data[i];

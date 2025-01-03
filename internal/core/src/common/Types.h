@@ -217,6 +217,7 @@ using GroupByValueType = std::variant<std::monostate,
                                       bool,
                                       std::string>;
 using ContainsType = proto::plan::JSONContainsExpr_JSONOp;
+using NullExprType = proto::plan::NullExpr_NullOp;
 
 inline bool
 IsPrimaryKeyDataType(DataType data_type) {
@@ -697,6 +698,9 @@ struct fmt::formatter<milvus::OpType> : formatter<string_view> {
                 break;
             case milvus::OpType::OpType_INT_MAX_SENTINEL_DO_NOT_USE_:
                 name = "OpType_INT_MAX_SENTINEL_DO_NOT_USE";
+                break;
+            case milvus::OpType::TextMatch:
+                name = "TextMatch";
                 break;
         }
         return formatter<string_view>::format(name, ctx);

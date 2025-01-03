@@ -50,10 +50,8 @@ func genGroupByBinaryIndex(metricType entity.MetricType) []index.Index {
 
 func genUnsupportedFloatGroupByIndex() []index.Index {
 	idxIvfPq := index.NewIvfPQIndex(entity.L2, 128, 16, 8)
-	idxScann := index.NewSCANNIndex(entity.L2, 16, false)
 	return []index.Index{
 		idxIvfPq,
-		idxScann,
 	}
 }
 
@@ -92,7 +90,6 @@ func prepareDataForGroupBySearch(t *testing.T, loopInsert int, insertNi int, idx
 // -> verify every top passage is the top of whole group
 // output_fields: pk + groupBy
 func TestSearchGroupByFloatDefault(t *testing.T) {
-	t.Skip("https://github.com/milvus-io/milvus/issues/38343")
 	t.Parallel()
 	for _, idx := range genGroupByVectorIndex(entity.L2) {
 		// prepare data
@@ -150,7 +147,6 @@ func TestSearchGroupByFloatDefault(t *testing.T) {
 }
 
 func TestSearchGroupByFloatDefaultCosine(t *testing.T) {
-	t.Skip("https://github.com/milvus-io/milvus/issues/38343")
 	t.Parallel()
 	for _, idx := range genGroupByVectorIndex(entity.COSINE) {
 		// prepare data
@@ -299,7 +295,6 @@ func TestSearchGroupByBinaryDefault(t *testing.T) {
 // default Bounded ConsistencyLevel -> succ ??
 // strong ConsistencyLevel -> error
 func TestSearchGroupByBinaryGrowing(t *testing.T) {
-	t.Skip("https://github.com/milvus-io/milvus/issues/38343")
 	t.Parallel()
 	for _, metricType := range hp.SupportBinIvfFlatMetricType {
 		idxBinIvfFlat := index.NewBinIvfFlatIndex(metricType, 128)
@@ -331,6 +326,7 @@ func TestSearchGroupByBinaryGrowing(t *testing.T) {
 
 // groupBy in growing segments, maybe growing index or brute force
 func TestSearchGroupByFloatGrowing(t *testing.T) {
+	t.Parallel()
 	for _, metricType := range hp.SupportFloatMetricType {
 		idxHnsw := index.NewHNSWIndex(metricType, 8, 96)
 		mc, ctx, collName := prepareDataForGroupBySearch(t, 100, 200, idxHnsw, true)
@@ -384,6 +380,7 @@ func TestSearchGroupByFloatGrowing(t *testing.T) {
 
 // groupBy + pagination
 func TestSearchGroupByPagination(t *testing.T) {
+	t.Parallel()
 	// create index and load
 	idx := index.NewHNSWIndex(entity.COSINE, 8, 96)
 	mc, ctx, collName := prepareDataForGroupBySearch(t, 10, 1000, idx, false)
@@ -444,19 +441,16 @@ func TestSearchGroupByIterator(t *testing.T) {
 
 // groupBy + range search -> not supported
 func TestSearchGroupByRangeSearch(t *testing.T) {
-	t.Skipf("Waiting for support for specifying search parameters")
+	t.Skipf("https://github.com/milvus-io/milvus/issues/38846")
 	idxHnsw := index.NewHNSWIndex(entity.COSINE, 8, 96)
 	mc, ctx, collName := prepareDataForGroupBySearch(t, 1, 1000, idxHnsw, true)
 
 	// groupBy search with range
 	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 
-	// sp, _ := index.NewHNSWIndexSearchParam(50)
-	// sp.AddRadius(0)
-	// sp.AddRangeFilter(0.8)
-
 	// range search
-	_, err := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, queryVec).WithGroupByField(common.DefaultVarcharFieldName).WithANNSField(common.DefaultFloatVecFieldName))
+	_, err := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, queryVec).WithGroupByField(common.DefaultVarcharFieldName).
+		WithANNSField(common.DefaultFloatVecFieldName).WithSearchParam("radius", "0").WithSearchParam("range_filter", "0.8"))
 	common.CheckErr(t, err, false, "Not allowed to do range-search when doing search-group-by")
 }
 

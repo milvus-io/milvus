@@ -2,6 +2,7 @@ package testcases
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -434,8 +435,6 @@ func TestDeletePartitionName(t *testing.T) {
 
 // test delete ids field not pk int64
 func TestDeleteComplexExpr(t *testing.T) {
-	t.Parallel()
-
 	type exprCount struct {
 		expr  string
 		count int
@@ -476,7 +475,13 @@ func TestDeleteComplexExpr(t *testing.T) {
 		{expr: fmt.Sprintf("%s == [0, 1]", common.DefaultDoubleArrayField), count: 0},                                    //  array ==
 		{expr: fmt.Sprintf("array_length(%s) == %d", common.DefaultDoubleArrayField, capacity), count: common.DefaultNb}, //  array_length
 	}
-	for _, exprLimit := range exprLimits {
+	ch := make(chan struct{}, 5)
+	wg := sync.WaitGroup{}
+	testFunc := func(exprLimit exprCount) {
+		defer func() {
+			wg.Done()
+			<-ch
+		}()
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 		mc := createDefaultMilvusClient(ctx, t)
 
@@ -503,6 +508,14 @@ func TestDeleteComplexExpr(t *testing.T) {
 		common.CheckErr(t, err, true)
 		require.Zero(t, resQuery.ResultCount)
 	}
+
+	for _, exprLimit := range exprLimits {
+		exprLimit := exprLimit
+		ch <- struct{}{}
+		wg.Add(1)
+		go testFunc(exprLimit)
+	}
+	wg.Wait()
 }
 
 func TestDeleteInvalidExpr(t *testing.T) {

@@ -81,6 +81,9 @@ class ProtoParser {
     ParseExistExprs(const proto::plan::ExistsExpr& expr_pb);
 
     expr::TypedExprPtr
+    ParseNullExprs(const proto::plan::NullExpr& expr_pb);
+
+    expr::TypedExprPtr
     ParseJsonContainsExprs(const proto::plan::JSONContainsExpr& expr_pb);
 
     expr::TypedExprPtr

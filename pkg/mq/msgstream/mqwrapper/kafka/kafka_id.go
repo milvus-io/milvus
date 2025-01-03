@@ -5,26 +5,32 @@ import (
 	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
 )
 
-type kafkaID struct {
-	messageID int64
+func NewKafkaID(messageID int64) mqcommon.MessageID {
+	return &KafkaID{
+		MessageID: messageID,
+	}
 }
 
-var _ mqcommon.MessageID = &kafkaID{}
-
-func (kid *kafkaID) Serialize() []byte {
-	return SerializeKafkaID(kid.messageID)
+type KafkaID struct {
+	MessageID int64
 }
 
-func (kid *kafkaID) AtEarliestPosition() bool {
-	return kid.messageID <= 0
+var _ mqcommon.MessageID = &KafkaID{}
+
+func (kid *KafkaID) Serialize() []byte {
+	return SerializeKafkaID(kid.MessageID)
 }
 
-func (kid *kafkaID) Equal(msgID []byte) (bool, error) {
-	return kid.messageID == DeserializeKafkaID(msgID), nil
+func (kid *KafkaID) AtEarliestPosition() bool {
+	return kid.MessageID <= 0
 }
 
-func (kid *kafkaID) LessOrEqualThan(msgID []byte) (bool, error) {
-	return kid.messageID <= DeserializeKafkaID(msgID), nil
+func (kid *KafkaID) Equal(msgID []byte) (bool, error) {
+	return kid.MessageID == DeserializeKafkaID(msgID), nil
+}
+
+func (kid *KafkaID) LessOrEqualThan(msgID []byte) (bool, error) {
+	return kid.MessageID <= DeserializeKafkaID(msgID), nil
 }
 
 func SerializeKafkaID(messageID int64) []byte {

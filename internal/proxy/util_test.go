@@ -1063,7 +1063,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 			Status:       merr.Success(),
 			PartitionIDs: []int64{partID},
 		}, nil)
-		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, qc, collID, partID)
 		assert.NoError(t, err)
 		assert.True(t, loaded)
 	})
@@ -1088,7 +1088,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 			Status:       merr.Success(),
 			PartitionIDs: []int64{partID},
 		}, errors.New("error"))
-		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, qc, collID, partID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
 	})
@@ -1116,7 +1116,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 			},
 			PartitionIDs: []int64{partID},
 		}, nil)
-		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, qc, collID, partID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
 	})

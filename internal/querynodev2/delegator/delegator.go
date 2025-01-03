@@ -243,6 +243,7 @@ func (sd *shardDelegator) shallowCopySearchRequest(req *internalpb.SearchRequest
 		GroupSize:          req.GroupSize,
 		FieldId:            req.FieldId,
 		IsTopkReduce:       req.IsTopkReduce,
+		IsRecallEvaluation: req.IsRecallEvaluation,
 	}
 
 	return nodeReq

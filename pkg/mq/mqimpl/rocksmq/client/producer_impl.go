@@ -76,6 +76,20 @@ func (p *producer) Send(message *common.ProducerMessage) (UniqueID, error) {
 	return ids[0], nil
 }
 
+func (p *producer) SendForStreamingService(message *common.ProducerMessage) (UniqueID, error) {
+	payload, err := marshalStreamingMessage(message)
+	if err != nil {
+		return 0, err
+	}
+	ids, err := p.c.server.Produce(p.topic, []server.ProducerMessage{{
+		Payload: payload,
+	}})
+	if err != nil {
+		return 0, err
+	}
+	return ids[0], nil
+}
+
 // Close destroy the topic of this producer in rocksmq
 func (p *producer) Close() {
 	err := p.c.server.DestroyTopic(p.topic)

@@ -31,12 +31,22 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                  const BitsetView& bitset,
                  DataType data_type);
 
+knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
+GetBruteForceSearchIterators(
+    const dataset::SearchDataset& query_ds,
+    const dataset::RawDataset& raw_ds,
+    const SearchInfo& search_info,
+    const std::map<std::string, std::string>& index_info,
+    const BitsetView& bitset,
+    DataType data_type);
+
 SubSearchResult
-BruteForceSearchIterators(const dataset::SearchDataset& query_ds,
-                          const dataset::RawDataset& raw_ds,
-                          const SearchInfo& search_info,
-                          const std::map<std::string, std::string>& index_info,
-                          const BitsetView& bitset,
-                          DataType data_type);
+PackBruteForceSearchIteratorsIntoSubResult(
+    const dataset::SearchDataset& query_ds,
+    const dataset::RawDataset& raw_ds,
+    const SearchInfo& search_info,
+    const std::map<std::string, std::string>& index_info,
+    const BitsetView& bitset,
+    DataType data_type);
 
 }  // namespace milvus::query
