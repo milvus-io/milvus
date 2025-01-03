@@ -84,6 +84,17 @@ var (
 			collectionIDLabelName,
 		})
 
+	DataCoordL0DeleteSize = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "l0_delete_size",
+			Help:      "Delete size of Level zero segment",
+		}, []string{
+			databaseLabelName,
+			collectionIDLabelName,
+		})
+
 	// DataCoordNumStoredRows all metrics will be cleaned up after removing matched collectionID and
 	// segment state labels in CleanupDataCoordNumStoredRows method.
 	DataCoordNumStoredRows = prometheus.NewGaugeVec(
@@ -367,6 +378,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(ImportTaskLatency)
 	registry.MustRegister(DataCoordSizeStoredL0Segment)
 	registry.MustRegister(DataCoordL0DeleteEntriesNum)
+	registry.MustRegister(DataCoordL0DeleteSize)
 	registry.MustRegister(FlushedSegmentFileNum)
 	registry.MustRegister(IndexRequestCounter)
 	registry.MustRegister(IndexTaskNum)
@@ -400,6 +412,9 @@ func CleanupDataCoordWithCollectionID(collectionID int64) {
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
 	DataCoordL0DeleteEntriesNum.DeletePartialMatch(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
+	DataCoordL0DeleteSize.DeletePartialMatch(prometheus.Labels{
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
 }
