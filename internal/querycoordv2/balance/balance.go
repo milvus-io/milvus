@@ -46,10 +46,13 @@ func (segPlan *SegmentAssignPlan) String() string {
 }
 
 type ChannelAssignPlan struct {
-	Channel *meta.DmChannel
-	Replica *meta.Replica
-	From    int64
-	To      int64
+	Channel      *meta.DmChannel
+	Replica      *meta.Replica
+	From         int64
+	To           int64
+	FromScore    int64
+	ToScore      int64
+	ChannelScore int64
 }
 
 func (chanPlan *ChannelAssignPlan) String() string {
