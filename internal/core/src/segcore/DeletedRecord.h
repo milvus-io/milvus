@@ -190,7 +190,7 @@ class DeletedRecord {
         }
 
         auto start_iter = hit_snapshot ? next_iter : accessor.begin();
-        
+
         // accessor.lower_bound(std::make_pair(query_timestamp, 0)) is not reliable here:
         // concurrent delete may append new value while end_iter is the end causing mvcc broken
         auto it = start_iter;
