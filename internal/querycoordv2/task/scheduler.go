@@ -172,6 +172,7 @@ type taskScheduler struct {
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
+	scheduleMu   sync.Mutex           // guards schedule()
 	collKeyLock  *lock.KeyLock[int64] // guards Add()
 	tasks        *ConcurrentMap[UniqueID, struct{}]
 	segmentTasks *ConcurrentMap[replicaSegmentIndex, Task]
@@ -497,6 +498,8 @@ func (scheduler *taskScheduler) Dispatch(node int64) {
 		log.Info("scheduler stopped")
 
 	default:
+		scheduler.scheduleMu.Lock()
+		defer scheduler.scheduleMu.Unlock()
 		scheduler.schedule(node)
 	}
 }
