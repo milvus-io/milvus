@@ -58,8 +58,8 @@ TEST(DeleteMVCC, common_case) {
         BitsetType bitsets(c);
         BitsetTypeView bitsets_view(bitsets);
         auto insert_barrier = c;
-        // query at ts (9)
-        Timestamp query_timestamp = 9;
+        // query at ts (11)
+        Timestamp query_timestamp = 11;
         delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 1, 0, 0, 0, 0, 0, 0, 0, 0};
         for (int i = 0; i < c; i++) {
