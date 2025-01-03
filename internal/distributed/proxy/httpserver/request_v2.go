@@ -48,6 +48,13 @@ type DatabaseReqWithProperties struct {
 
 func (req *DatabaseReqWithProperties) GetDbName() string { return req.DbName }
 
+type DropDatabasePropertiesReq struct {
+	DbName       string   `json:"dbName" binding:"required"`
+	PropertyKeys []string `json:"propertyKeys"`
+}
+
+func (req *DatabaseReqWithProperties) DropDatabasPropertiesReq() string { return req.DbName }
+
 type CollectionNameReq struct {
 	DbName         string   `json:"dbName"`
 	CollectionName string   `json:"collectionName" binding:"required"`
@@ -103,7 +110,7 @@ func (req *RenameCollectionReq) GetDbName() string { return req.DbName }
 type DropCollectionPropertiesReq struct {
 	DbName         string   `json:"dbName"`
 	CollectionName string   `json:"collectionName" binding:"required"`
-	DeleteKeys     []string `json:"deleteKeys"`
+	PropertyKeys   []string `json:"propertyKeys"`
 }
 
 func (req *DropCollectionPropertiesReq) GetDbName() string { return req.DbName }
@@ -243,14 +250,6 @@ type CollectionDataReq struct {
 }
 
 func (req *CollectionDataReq) GetDbName() string { return req.DbName }
-
-type searchParams struct {
-	// not use metricType any more, just for compatibility
-	MetricType    string                 `json:"metricType"`
-	Params        map[string]interface{} `json:"params"`
-	IgnoreGrowing bool                   `json:"ignoreGrowing"`
-	Hints         string                 `json:"hints"`
-}
 
 type SearchReqV2 struct {
 	DbName           string                 `json:"dbName"`
@@ -453,7 +452,7 @@ type DropIndexPropertiesReq struct {
 	DbName         string   `json:"dbName"`
 	CollectionName string   `json:"collectionName" binding:"required"`
 	IndexName      string   `json:"indexName" binding:"required"`
-	DeleteKeys     []string `json:"deleteKeys"`
+	PropertyKeys   []string `json:"propertyKeys"`
 }
 
 func (req *DropIndexPropertiesReq) GetDbName() string { return req.DbName }

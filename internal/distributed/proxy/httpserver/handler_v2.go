@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"reflect"
 	"strconv"
 	"strings"
 
@@ -91,9 +90,11 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 
 	router.POST(DataBaseCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.createDatabase))))
 	router.POST(DataBaseCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqRequiredName{} }, wrapperTraceLog(h.dropDatabase))))
+	router.POST(DataBaseCategory+DropPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DropDatabasePropertiesReq{} }, wrapperTraceLog(h.dropDatabaseProperties))))
 	router.POST(DataBaseCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &EmptyReq{} }, wrapperTraceLog(h.listDatabases))))
 	router.POST(DataBaseCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqRequiredName{} }, wrapperTraceLog(h.describeDatabase))))
 	router.POST(DataBaseCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
+	router.POST(DataBaseCategory+AlterPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
 	// Query
 	router.POST(EntityCategory+QueryAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &QueryReqV2{
@@ -690,7 +691,7 @@ func (h *HandlersV2) dropCollectionProperties(ctx context.Context, c *gin.Contex
 	req := &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		DeleteKeys:     httpReq.DeleteKeys,
+		DeleteKeys:     httpReq.PropertyKeys,
 	}
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterCollection", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
@@ -1118,64 +1119,6 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 	})
 }
 
-// after 2.5.1, all parameters of search_params can be written into one layer
-// no more parameters will be written searchParams.params
-// to ensure compatibility and milvus can still get a json format parameter
-// try to write all the parameters under searchParams into searchParams.Params
-func generateSearchParams(reqSearchParams map[string]interface{}) ([]*commonpb.KeyValuePair, error) {
-	var searchParams []*commonpb.KeyValuePair
-	var params interface{}
-	if val, ok := reqSearchParams[Params]; ok {
-		params = val
-	}
-
-	paramsMap := make(map[string]interface{})
-	if params != nil {
-		var ok bool
-		if paramsMap, ok = params.(map[string]interface{}); !ok {
-			return nil, merr.WrapErrParameterInvalidMsg("searchParams.params must be a dict")
-		}
-	}
-
-	for key, value := range reqSearchParams {
-		if val, ok := paramsMap[key]; ok {
-			if reflect.DeepEqual(val, value) {
-				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("ambiguous parameter: %s, in search_param: %v, in search_param.params: %v", key, value, val))
-			}
-		} else if key != Params {
-			paramsMap[key] = value
-		}
-	}
-
-	bs, _ := json.Marshal(paramsMap)
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: Params, Value: string(bs)})
-	getStringValue := func(value interface{}) (string, error) {
-		switch v := value.(type) {
-		case bool:
-			return strconv.FormatBool(v), nil
-		case string:
-			return v, nil
-		case json.Number:
-			return v.String(), nil
-		default:
-			return "", merr.WrapErrParameterInvalidMsg(fmt.Sprintf("Unexpected data(%v) when generateSearchParams, please check it!", value))
-		}
-	}
-
-	for key, value := range reqSearchParams {
-		if key != Params {
-			stringValue, err := getStringValue(value)
-			if err != nil {
-				return nil, err
-			}
-			searchParams = append(searchParams, &commonpb.KeyValuePair{Key: key, Value: stringValue})
-		}
-	}
-	// need to exposure ParamRoundDecimal in req?
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
-	return searchParams, nil
-}
-
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*SearchReqV2)
 	req := &milvuspb.SearchRequest{
@@ -1209,7 +1152,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		log.Ctx(ctx).Warn("high level restful api, generate SearchParams failed", zap.Error(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(err),
-			HTTPReturnMessage: "err:" + err.Error(),
+			HTTPReturnMessage: err.Error(),
 		})
 		return nil, err
 	}
@@ -1294,7 +1237,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			log.Ctx(ctx).Warn("high level restful api, generate SearchParams failed", zap.Error(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
-				HTTPReturnMessage: "err:" + err.Error(),
+				HTTPReturnMessage: err.Error(),
 			})
 			return nil, err
 		}
@@ -1722,6 +1665,22 @@ func (h *HandlersV2) dropDatabase(ctx context.Context, c *gin.Context, anyReq an
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropDatabase", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DropDatabase(reqCtx, req.(*milvuspb.DropDatabaseRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) dropDatabaseProperties(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*DropDatabasePropertiesReq)
+	req := &milvuspb.AlterDatabaseRequest{
+		DbName:     dbName,
+		DeleteKeys: httpReq.PropertyKeys,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterDatabase", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AlterDatabase(reqCtx, req.(*milvuspb.AlterDatabaseRequest))
 	})
 	if err == nil {
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
@@ -2383,7 +2342,7 @@ func (h *HandlersV2) dropIndexProperties(ctx context.Context, c *gin.Context, an
 	req := &milvuspb.AlterIndexRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		DeleteKeys:     httpReq.DeleteKeys,
+		DeleteKeys:     httpReq.PropertyKeys,
 	}
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterIndex", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
