@@ -1,7 +1,6 @@
 package segcore
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,7 +12,7 @@ func TestConsumeCStatusIntoError(t *testing.T) {
 }
 
 func TestGetLocalUsedSize(t *testing.T) {
-	size, err := GetLocalUsedSize(context.Background(), "")
+	size, err := GetLocalUsedSize("")
 	assert.NoError(t, err)
 	assert.NotNil(t, size)
 }
