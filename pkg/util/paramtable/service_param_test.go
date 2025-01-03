@@ -218,6 +218,7 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, util.MetaStoreTypeEtcd, Params.MetaStoreType.GetValue())
 		assert.Equal(t, 86400*time.Second, Params.SnapshotTTLSeconds.GetAsDuration(time.Second))
 		assert.Equal(t, 3600*time.Second, Params.SnapshotReserveTimeSeconds.GetAsDuration(time.Second))
-		assert.Equal(t, 10000, Params.PaginationSize.GetAsInt())
+		assert.Equal(t, 100000, Params.PaginationSize.GetAsInt())
+		assert.Equal(t, 32, Params.ReadConcurrency.GetAsInt())
 	})
 }
