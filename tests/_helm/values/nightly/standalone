@@ -68,6 +68,12 @@ queryNode:
   profiling:
     enabled: true
   replicas: 2
+  mmap:
+    vectorField: true
+    vectorIndex: true
+    scalarField: true
+    scalarIndex: true
+    growingMmapEnabled: true
 service:
   type: ClusterIP
 standalone:
