@@ -1507,3 +1507,9 @@ func generateExpressionTemplate(params map[string]interface{}) map[string]*schem
 	}
 	return expressionTemplate
 }
+
+func WrapErrorToResponse(err error) *milvuspb.BoolResponse {
+	return &milvuspb.BoolResponse{
+		Status: merr.Status(err),
+	}
+}

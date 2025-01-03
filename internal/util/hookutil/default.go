@@ -59,3 +59,7 @@ var _ hook.Extension = (*DefaultExtension)(nil)
 func (d DefaultExtension) Report(info any) int {
 	return 0
 }
+
+func (d DefaultExtension) ReportRefused(ctx context.Context, req interface{}, resp interface{}, err error, fullMethod string) error {
+	return nil
+}

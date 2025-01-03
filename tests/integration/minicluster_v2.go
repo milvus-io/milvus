@@ -566,6 +566,10 @@ func (r *ReportChanExtension) Report(info any) int {
 	return 1
 }
 
+func (r *ReportChanExtension) ReportRefused(ctx context.Context, req interface{}, resp interface{}, err error, fullMethod string) error {
+	return nil
+}
+
 func (r *ReportChanExtension) GetReportChan() <-chan any {
 	return r.reportChan
 }
