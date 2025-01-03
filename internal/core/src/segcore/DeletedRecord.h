@@ -205,7 +205,12 @@ class DeletedRecord {
             }
             it++;
         }
-        // no need to continue if it.first == query_timestamp, since only timestamps before mvcc_ts are needed
+        while (it != accessor.end() && it->first == query_timestamp) {
+            if (it->second < insert_barrier) {
+                bitset.set(it->second);
+            }
+            it++;
+        }
     }
 
     size_t
