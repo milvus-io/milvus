@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -218,28 +219,33 @@ func (p *CollectionTarget) Ready() bool {
 }
 
 type target struct {
+	keyLock *lock.KeyLock[int64] // guards updateCollectionTarget
 	// just maintain target at collection level
-	collectionTargetMap map[int64]*CollectionTarget
+	collectionTargetMap *typeutil.ConcurrentMap[int64, *CollectionTarget]
 }
 
 func newTarget() *target {
 	return &target{
-		collectionTargetMap: make(map[int64]*CollectionTarget),
+		keyLock:             lock.NewKeyLock[int64](),
+		collectionTargetMap: typeutil.NewConcurrentMap[int64, *CollectionTarget](),
 	}
 }
 
 func (t *target) updateCollectionTarget(collectionID int64, target *CollectionTarget) {
-	if t.collectionTargetMap[collectionID] != nil && target.GetTargetVersion() <= t.collectionTargetMap[collectionID].GetTargetVersion() {
+	t.keyLock.Lock(collectionID)
+	defer t.keyLock.Unlock(collectionID)
+	if old, ok := t.collectionTargetMap.Get(collectionID); ok && old != nil && target.GetTargetVersion() <= old.GetTargetVersion() {
 		return
 	}
 
-	t.collectionTargetMap[collectionID] = target
+	t.collectionTargetMap.Insert(collectionID, target)
 }
 
 func (t *target) removeCollectionTarget(collectionID int64) {
-	delete(t.collectionTargetMap, collectionID)
+	t.collectionTargetMap.Remove(collectionID)
 }
 
 func (t *target) getCollectionTarget(collectionID int64) *CollectionTarget {
-	return t.collectionTargetMap[collectionID]
+	ret, _ := t.collectionTargetMap.Get(collectionID)
+	return ret
 }
