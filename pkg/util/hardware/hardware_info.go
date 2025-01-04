@@ -17,6 +17,8 @@ import (
 	"runtime"
 	"sync"
 
+	"github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors/oserror"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -107,6 +109,10 @@ func GetFreeMemoryCount() uint64 {
 func GetDiskUsage(path string) (float64, float64, error) {
 	diskStats, err := disk.Usage(path)
 	if err != nil {
+		// If the path does not exist, ignore the error and return 0.
+		if errors.Is(err, oserror.ErrNotExist) {
+			return 0, 0, nil
+		}
 		return 0, 0, err
 	}
 	usedGB := float64(diskStats.Used) / 1e9
