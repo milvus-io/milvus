@@ -197,7 +197,8 @@ class TestRestfulSdkCompatibility(TestBase):
         # search data by restful
         rsp = client.vector_search(payload)
         assert rsp['code'] == 0
-        assert len(rsp['data']) == 10
+        assert len(rsp['data']) == 1
+        assert len(rsp['data'][0]) == 10
 
     def test_collection_create_by_sdk_query_vector_by_restful(self):
         """

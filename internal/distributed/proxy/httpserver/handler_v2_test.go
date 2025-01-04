@@ -620,7 +620,7 @@ func TestDocInDocOutSearch(t *testing.T) {
 	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
 		TopK:         int64(3),
 		OutputFields: []string{FieldWordCount},
-		FieldsData:   generateFieldData(),
+		FieldsData:   generateFieldData(schemapb.DataType_Int64),
 		Ids:          generateIDs(schemapb.DataType_Int64, 3),
 		Scores:       DefaultScores,
 	}}, nil).Once()
@@ -2182,7 +2182,7 @@ func TestSearchV2(t *testing.T) {
 	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
 		TopK:         int64(3),
 		OutputFields: outputFields,
-		FieldsData:   generateFieldData(),
+		FieldsData:   generateFieldData(schemapb.DataType_Int64),
 		Ids:          generateIDs(schemapb.DataType_Int64, 3),
 		Scores:       DefaultScores,
 	}}, nil).Once()
@@ -2194,7 +2194,7 @@ func TestSearchV2(t *testing.T) {
 	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
 		TopK:         int64(3),
 		OutputFields: outputFields,
-		FieldsData:   generateFieldData(),
+		FieldsData:   generateFieldData(schemapb.DataType_Int64),
 		Ids:          generateIDs(schemapb.DataType_Int64, 3),
 		Scores:       DefaultScores,
 	}}, nil).Once()
