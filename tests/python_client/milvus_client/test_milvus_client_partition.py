@@ -565,10 +565,8 @@ class TestMilvusClientReleasePartitionInvalid(TestcaseBase):
         client_w.create_collection(client, collection_name, default_dim)
         client_w.release_partitions(client, collection_name, partition_name,
                                     check_task=CheckTasks.err_res, check_items=error)
-        partition_name = ""
-        error = {ct.err_code: 200, ct.err_msg: f"partition not found[partition={partition_name}]"}
-        client_w.release_partitions(client, collection_name, partition_name,
-                                    check_task=CheckTasks.err_res, check_items=error)
+        partition_name = ""  # will release default
+        client_w.release_partitions(client, collection_name, partition_name)
 
 
 class TestMilvusClientReleasePartitionValid(TestcaseBase):
