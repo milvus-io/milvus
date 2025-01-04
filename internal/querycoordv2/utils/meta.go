@@ -153,7 +153,6 @@ func SpawnReplicasWithRG(ctx context.Context, m *meta.Meta, collection int64, re
 	if err != nil {
 		return nil, err
 	}
-
 	// Spawn it in replica manager.
 	replicas, err := m.ReplicaManager.Spawn(ctx, collection, replicaNumInRG, channels)
 	if err != nil {

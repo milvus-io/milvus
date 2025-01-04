@@ -76,8 +76,8 @@ func newIndexTaskStats(s *model.SegmentIndex) *metricsinfo.IndexTaskStats {
 		FailReason:      s.FailReason,
 		IndexSize:       s.IndexSize,
 		IndexVersion:    s.IndexVersion,
-		CreatedUTCTime:  typeutil.TimestampToString(s.CreatedUTCTime),
-		FinishedUTCTime: typeutil.TimestampToString(s.FinishedUTCTime),
+		CreatedUTCTime:  typeutil.TimestampToString(s.CreatedUTCTime * 1000),
+		FinishedUTCTime: typeutil.TimestampToString(s.FinishedUTCTime * 1000),
 	}
 }
 

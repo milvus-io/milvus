@@ -43,8 +43,8 @@ type FlowgraphManager interface {
 	GetFlowgraphCount() int
 	GetCollectionIDs() []int64
 
-	GetChannelsJSON() string
-	GetSegmentsJSON() string
+	GetChannelsJSON(collectionID int64) string
+	GetSegmentsJSON(collectionID int64) string
 	Close()
 }
 
@@ -121,9 +121,12 @@ func (fm *fgManagerImpl) GetCollectionIDs() []int64 {
 }
 
 // GetChannelsJSON  returns all channels in json format.
-func (fm *fgManagerImpl) GetChannelsJSON() string {
+func (fm *fgManagerImpl) GetChannelsJSON(collectionID int64) string {
 	var channels []*metricsinfo.Channel
 	fm.flowgraphs.Range(func(ch string, ds *DataSyncService) bool {
+		if collectionID > 0 && ds.metacache.Collection() != collectionID {
+			return true
+		}
 		latestTimeTick := ds.timetickSender.GetLatestTimestamp(ch)
 		channels = append(channels, &metricsinfo.Channel{
 			Name:           ch,
@@ -143,9 +146,13 @@ func (fm *fgManagerImpl) GetChannelsJSON() string {
 	return string(ret)
 }
 
-func (fm *fgManagerImpl) GetSegmentsJSON() string {
+func (fm *fgManagerImpl) GetSegmentsJSON(collectionID int64) string {
 	var segments []*metricsinfo.Segment
 	fm.flowgraphs.Range(func(ch string, ds *DataSyncService) bool {
+		if collectionID > 0 && ds.metacache.Collection() != collectionID {
+			return true
+		}
+
 		meta := ds.metacache
 		for _, segment := range meta.GetSegmentsBy() {
 			segments = append(segments, &metricsinfo.Segment{

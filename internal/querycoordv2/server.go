@@ -202,7 +202,8 @@ func (s *Server) registerMetricsRequest() {
 	}
 
 	QueryDistAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-		return s.dist.GetDistributionJSON(), nil
+		collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
+		return s.dist.GetDistributionJSON(collectionID), nil
 	}
 
 	QueryTargetAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
@@ -211,11 +212,13 @@ func (s *Server) registerMetricsRequest() {
 		if v.Exists() {
 			scope = meta.TargetScope(v.Int())
 		}
-		return s.targetMgr.GetTargetJSON(ctx, scope), nil
+
+		collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
+		return s.targetMgr.GetTargetJSON(ctx, scope, collectionID), nil
 	}
 
 	QueryReplicasAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-		return s.meta.GetReplicasJSON(ctx), nil
+		return s.meta.GetReplicasJSON(ctx, s.meta), nil
 	}
 
 	QueryResourceGroupsAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {

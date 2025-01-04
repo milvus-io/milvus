@@ -207,7 +207,7 @@ func TestGetChannelDistJSON(t *testing.T) {
 	manager.Update(1, channel1)
 	manager.Update(2, channel2)
 
-	channels := manager.GetChannelDist()
+	channels := manager.GetChannelDist(0)
 	assert.Equal(t, 2, len(channels))
 
 	checkResult := func(channel *metricsinfo.DmChannel) {
