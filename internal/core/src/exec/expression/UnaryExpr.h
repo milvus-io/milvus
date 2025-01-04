@@ -320,6 +320,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       name,
                       segment,
                       expr->column_.field_id_,
+                      expr->column_.nested_path_,
                       active_count,
                       batch_size),
           expr_(expr) {
@@ -377,6 +378,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     template <typename T>
     bool
     CanUseIndexForArray();
+
+    bool
+    CanUseIndexForJson();
 
     VectorPtr
     ExecTextMatch();
