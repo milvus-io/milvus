@@ -48,6 +48,7 @@ type BulkImportOption struct {
 	// optional params
 	PartitionName string `json:"partitionName,omitempty"`
 	APIKey        string `json:"-"`
+	DBName        string `json:"dbName,omitempty"`
 	// cloud extra params
 	ObjectURL string `json:"objectUrl,omitempty"`
 	ClusterID string `json:"clusterId,omitempty"`
@@ -69,6 +70,11 @@ func (opt *BulkImportOption) WithPartition(partitionName string) *BulkImportOpti
 
 func (opt *BulkImportOption) WithAPIKey(key string) *BulkImportOption {
 	opt.APIKey = key
+	return opt
+}
+
+func (opt *BulkImportOption) WithDBName(dbName string) *BulkImportOption {
+	opt.DBName = dbName
 	return opt
 }
 

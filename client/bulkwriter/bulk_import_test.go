@@ -44,7 +44,8 @@ func (s *BulkImportSuite) TestBulkImport() {
 			NewBulkImportOption(svr.URL, "hello_milvus", [][]string{{"files/a.json", "files/b.json"}}).
 				WithPartition("_default").
 				WithOption("backup", "true").
-				WithAPIKey("root:Milvus"),
+				WithAPIKey("root:Milvus").
+				WithDBName("db1"),
 		)
 		s.NoError(err)
 		s.EqualValues(0, resp.Status)
