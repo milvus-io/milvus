@@ -36,6 +36,7 @@ const (
 
 	LeaderGrowTaskLabel   = "leader_grow"
 	LeaderReduceTaskLabel = "leader_reduce"
+	LeaderUpdateTaskLabel = "leader_update"
 
 	UnknownTaskLabel = "unknown"
 
