@@ -26,10 +26,12 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -382,6 +384,32 @@ func (task *SegmentTask) MarshalJSON() ([]byte, error) {
 	return marshalJSON(task)
 }
 
+func (task *SegmentTask) IsFinished(distMgr *meta.DistributionManager) bool {
+	if task.Status() != TaskStatusStarted {
+		return false
+	}
+
+	// for balance segment task, if the segment not found in delegator, instead of waiting for segment to be synced to delegator,
+	// we will skip the release action, and let the balance task finish. then the old segment will be deduplicated
+	// by segment checker after delegator has been synced
+	if GetTaskType(task) == TaskTypeMove {
+		growAction := task.actions[0].(*SegmentAction)
+		newLeader := distMgr.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(task.replica), meta.WithChannelName2LeaderView(growAction.GetShard()))
+		segmentReady := newLeader != nil && newLeader.Segments[growAction.GetSegmentID()] != nil && newLeader.Segments[growAction.GetSegmentID()].NodeID == growAction.Node()
+		log.Info("newLeader", zap.Any("newLeader", newLeader))
+		if growAction.IsFinished(distMgr) && !segmentReady {
+			log.Info("segment is not ready in target node, skip release action",
+				zap.Int64("id", task.ID()),
+				zap.String("channelName", growAction.GetShard()),
+				zap.Int64("segmentID", growAction.GetSegmentID()),
+				zap.Int64("targetNode", growAction.Node()))
+			task.step = len(task.actions)
+		}
+	}
+
+	return task.Step() >= len(task.Actions())
+}
+
 type ChannelTask struct {
 	*baseTask
 }
@@ -438,6 +466,30 @@ func (task *ChannelTask) String() string {
 
 func (task *ChannelTask) MarshalJSON() ([]byte, error) {
 	return marshalJSON(task)
+}
+
+func (task *ChannelTask) IsFinished(distMgr *meta.DistributionManager) bool {
+	if task.Status() != TaskStatusStarted {
+		return false
+	}
+
+	// for balance channel task, if the new delegator is not ready, instead of waiting for the new delegator ready,
+	// we will skip the release action, and let the balance task finish. then the old delegator will be deduplicated
+	// by channel checker after new delegator ready
+	if GetTaskType(task) == TaskTypeMove {
+		growAction := task.actions[0].(*ChannelAction)
+		newLeader := distMgr.LeaderViewManager.GetLeaderShardView(growAction.Node(), growAction.GetShard())
+		newLeaderReady := newLeader != nil && newLeader.UnServiceableError == nil
+		if growAction.IsFinished(distMgr) && !newLeaderReady {
+			log.Info("new shard leader is not ready in target node, skip release action",
+				zap.Int64("id", task.ID()),
+				zap.String("channelName", growAction.GetShard()),
+				zap.Int64("targetNode", growAction.Node()))
+			task.step = len(task.actions)
+		}
+	}
+
+	return task.Step() >= len(task.Actions())
 }
 
 type LeaderTask struct {
