@@ -25,6 +25,21 @@ func SparseVectorDataToPlaceholderGroupBytes(contents [][]byte) []byte {
 	return bytes
 }
 
+func Float32VectorsToPlaceholderGroup(embs [][]float32) *commonpb.PlaceholderGroup {
+	result := make([][]byte, 0, len(embs))
+	for _, floatVector := range embs {
+		result = append(result, floatVectorToByteVector(floatVector))
+	}
+	placeholderGroup := &commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{{
+			Tag:    "$0",
+			Type:   commonpb.PlaceholderType_FloatVector,
+			Values: result,
+		}},
+	}
+	return placeholderGroup
+}
+
 func FieldDataToPlaceholderGroupBytes(fieldData *schemapb.FieldData) ([]byte, error) {
 	placeholderValue, err := fieldDataToPlaceholderValue(fieldData)
 	if err != nil {

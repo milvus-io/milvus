@@ -67,6 +67,9 @@ func newEmbeddingNode(channelName string, schema *schemapb.CollectionSchema) (*e
 		if err != nil {
 			return nil, err
 		}
+		if functionRunner == nil {
+			continue
+		}
 		node.functionRunners[tf.GetId()] = functionRunner
 	}
 	return node, nil

@@ -19,25 +19,27 @@
 package function
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
-type FunctionRunner interface {
-	BatchRun(inputs ...any) ([]any, error)
-
-	GetSchema() *schemapb.FunctionSchema
-	GetOutputFields() []*schemapb.FieldSchema
-}
-
-func NewFunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (FunctionRunner, error) {
-	switch schema.GetType() {
-	case schemapb.FunctionType_BM25:
-		return NewBM25FunctionRunner(coll, schema)
-	case schemapb.FunctionType_TextEmbedding:
-		return nil, nil
-	default:
-		return nil, fmt.Errorf("unknown functionRunner type %s", schema.GetType().String())
+func HasFunctions(functions []*schemapb.FunctionSchema, outputIDs []int64) bool {
+	// Determine whether the column corresponding to outputIDs contains functions, except bm25 function,
+	// if outputIDs is empty, check all cols
+	for _, fSchema := range functions {
+		switch fSchema.GetType() {
+		case schemapb.FunctionType_BM25:
+		case schemapb.FunctionType_Unknown:
+		default:
+			if len(outputIDs) == 0 {
+				return true
+			} else {
+				for _, id := range outputIDs {
+					if fSchema.GetOutputFieldIds()[0] == id {
+						return true
+					}
+				}
+			}
+		}
 	}
+	return false
 }

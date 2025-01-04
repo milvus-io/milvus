@@ -24,20 +24,34 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
-type FunctionRunner interface {
-	BatchRun(inputs ...any) ([]any, error)
-
-	GetSchema() *schemapb.FunctionSchema
-	GetOutputFields() []*schemapb.FieldSchema
+type FunctionBase struct {
+	schema       *schemapb.FunctionSchema
+	outputFields []*schemapb.FieldSchema
 }
 
-func NewFunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (FunctionRunner, error) {
-	switch schema.GetType() {
-	case schemapb.FunctionType_BM25:
-		return NewBM25FunctionRunner(coll, schema)
-	case schemapb.FunctionType_TextEmbedding:
-		return nil, nil
-	default:
-		return nil, fmt.Errorf("unknown functionRunner type %s", schema.GetType().String())
+func NewFunctionBase(coll *schemapb.CollectionSchema, fSchema *schemapb.FunctionSchema) (*FunctionBase, error) {
+	var base FunctionBase
+	base.schema = fSchema
+	for _, fieldName := range fSchema.GetOutputFieldNames() {
+		for _, field := range coll.GetFields() {
+			if field.GetName() == fieldName {
+				base.outputFields = append(base.outputFields, field)
+				break
+			}
+		}
 	}
+
+	if len(base.outputFields) != len(fSchema.GetOutputFieldNames()) {
+		return &base, fmt.Errorf("The collection [%s]'s information is wrong, function [%s]'s outputs does not match the schema",
+			coll.Name, fSchema.Name)
+	}
+	return &base, nil
+}
+
+func (base *FunctionBase) GetSchema() *schemapb.FunctionSchema {
+	return base.schema
+}
+
+func (base *FunctionBase) GetOutputFields() []*schemapb.FieldSchema {
+	return base.outputFields
 }
