@@ -18,6 +18,7 @@ package lock
 
 import (
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -33,8 +34,12 @@ func (m *RefLock) ref() {
 	m.refCounter++
 }
 
-func (m *RefLock) unref() {
-	m.refCounter--
+func (m *RefLock) unref() bool {
+	if m.refCounter > 0 {
+		m.refCounter--
+		return true
+	}
+	return false
 }
 
 func newRefLock() *RefLock {
@@ -46,15 +51,37 @@ func newRefLock() *RefLock {
 }
 
 type KeyLock[K comparable] struct {
-	keyLocksMutex sync.Mutex
-	refLocks      map[K]*RefLock
+	keyLocksMutex        sync.Mutex
+	refLocks             map[K]*RefLock
+	backgroundGCInterval time.Duration
 }
 
 func NewKeyLock[K comparable]() *KeyLock[K] {
+	return NewKeyLockWithGCTime[K](5 * time.Second)
+}
+
+func NewKeyLockWithGCTime[K comparable](gcInterval time.Duration) *KeyLock[K] {
 	keyLock := KeyLock[K]{
-		refLocks: make(map[K]*RefLock),
+		refLocks:             make(map[K]*RefLock),
+		backgroundGCInterval: gcInterval,
 	}
+	keyLock.StartGC()
 	return &keyLock
+}
+
+func (k *KeyLock[K]) StartGC() {
+	go func() {
+		gcTimer := time.NewTimer(k.backgroundGCInterval)
+		for range gcTimer.C {
+			k.keyLocksMutex.Lock()
+			for key, keyLock := range k.refLocks {
+				if keyLock.refCounter == 0 {
+					delete(k.refLocks, key)
+				}
+			}
+			k.keyLocksMutex.Unlock()
+		}
+	}()
 }
 
 func (k *KeyLock[K]) Lock(key K) {
@@ -84,9 +111,10 @@ func (k *KeyLock[K]) Unlock(lockedKey K) {
 		log.Warn("Unlocking non-existing key", zap.Any("key", lockedKey))
 		return
 	}
-	keyLock.unref()
-	if keyLock.refCounter == 0 {
-		delete(k.refLocks, lockedKey)
+	success := keyLock.unref()
+	if !success {
+		log.Warn("Unlocking non-locked key", zap.Any("key", lockedKey))
+		return
 	}
 	keyLock.mutex.Unlock()
 }
@@ -118,9 +146,10 @@ func (k *KeyLock[K]) RUnlock(lockedKey K) {
 		log.Warn("Unlocking non-existing key", zap.Any("key", lockedKey))
 		return
 	}
-	keyLock.unref()
-	if keyLock.refCounter == 0 {
-		delete(k.refLocks, lockedKey)
+	success := keyLock.unref()
+	if !success {
+		log.Warn("Unlocking non-locked key", zap.Any("key", lockedKey))
+		return
 	}
 	keyLock.mutex.RUnlock()
 }
@@ -128,5 +157,11 @@ func (k *KeyLock[K]) RUnlock(lockedKey K) {
 func (k *KeyLock[K]) size() int {
 	k.keyLocksMutex.Lock()
 	defer k.keyLocksMutex.Unlock()
-	return len(k.refLocks)
+	s := 0
+	for _, keyLock := range k.refLocks {
+		if keyLock.refCounter > 0 {
+			s++
+		}
+	}
+	return s
 }
