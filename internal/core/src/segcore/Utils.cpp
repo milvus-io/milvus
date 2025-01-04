@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "arrow/type_fwd.h"
 #include "common/Common.h"
 #include "common/FieldData.h"
 #include "common/Types.h"
@@ -98,6 +99,32 @@ ParsePksFromIDs(std::vector<PkType>& pks,
         case DataType::VARCHAR: {
             auto& source_data = data.str_id().data();
             std::copy(source_data.begin(), source_data.end(), pks.begin());
+            break;
+        }
+        default: {
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported PK {}", data_type));
+        }
+    }
+}
+
+void
+ParsePksFromArray(std::vector<PkType>& pks,
+                  DataType data_type,
+                  arrow::Array* arr) {
+    switch (data_type) {
+        case DataType::INT64: {
+            auto int_arr = static_cast<arrow::Int64Array*>(arr);
+            for (int i = 0; i < int_arr->length(); i++) {
+                pks.at(i) = int_arr->Value(i);
+            }
+            break;
+        }
+        case DataType::VARCHAR: {
+            auto str_arr = static_cast<arrow::StringArray*>(arr);
+            for (int i = 0; i < str_arr->length(); i++) {
+                pks.at(i) = str_arr->GetString(i);
+            }
             break;
         }
         default: {

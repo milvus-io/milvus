@@ -1929,6 +1929,52 @@ ChunkedSegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
     return SegcoreError::success();
 }
 
+SegcoreError
+ChunkedSegmentSealedImpl::Delete(arrow::Array* arr_pks,
+                                 const Timestamp* timestamps_raw) {
+    auto size = arr_pks->length();
+    auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
+    AssertInfo(field_id.get() != -1, "Primary key not found in schema");
+    auto& field_meta = schema_->operator[](field_id);
+    std::vector<PkType> pks(arr_pks->length());
+    ParsePksFromArray(pks, field_meta.get_data_type(), arr_pks);
+
+    // filter out the deletions that the primary key not exists
+    std::vector<std::tuple<Timestamp, PkType>> ordering(size);
+    for (int i = 0; i < size; i++) {
+        ordering[i] = std::make_tuple(timestamps_raw[i], pks[i]);
+    }
+    // if insert_record_ is empty (may be only-load meta but not data for lru-cache at go side),
+    // filtering may cause the deletion lost, skip the filtering to avoid it.
+    if (!insert_record_.empty_pks()) {
+        auto end = std::remove_if(
+            ordering.begin(),
+            ordering.end(),
+            [&](const std::tuple<Timestamp, PkType>& record) {
+                return !insert_record_.contain(std::get<1>(record));
+            });
+        size = end - ordering.begin();
+        ordering.resize(size);
+    }
+    if (size == 0) {
+        return SegcoreError::success();
+    }
+
+    // step 1: sort timestamp
+    std::sort(ordering.begin(), ordering.end());
+    std::vector<PkType> sort_pks(size);
+    std::vector<Timestamp> sort_timestamps(size);
+
+    for (int i = 0; i < size; i++) {
+        auto [t, pk] = ordering[i];
+        sort_timestamps[i] = t;
+        sort_pks[i] = pk;
+    }
+
+    deleted_record_.StreamPush(sort_pks, sort_timestamps.data());
+    return SegcoreError::success();
+}
+
 std::string
 ChunkedSegmentSealedImpl::debug() const {
     std::string log_str;
