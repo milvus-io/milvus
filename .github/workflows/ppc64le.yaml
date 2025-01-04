@@ -1,0 +1,19 @@
+on: [pull_request]
+
+jobs:
+  ppc64le-build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger a Buildkite Build
+        uses: "buildkite/trigger-pipeline-action@v2.3.0"
+        with:
+          buildkite_api_access_token: "bkua_702df6e3ef4a32a8dff371e75e8db64d3286fad0"
+          pipeline: "ibm-14/ppc64le-build"
+          message:  ":github: Triggered from a GitHub Action"
+          build_env_vars: '{"TRIGGERED_FROM_GHA": "true"}'
+          build_meta_data: '{"FOO": "bar"}'
+          ignore_pipeline_branch_filter: 'true'
+          send_pull_request: 'true'
+          wait: 'true'
+          wait_interval: '60'
+          wait_timeout: '7200'
