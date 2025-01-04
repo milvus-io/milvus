@@ -4,7 +4,6 @@ from enum import Enum
 import random
 import time
 import threading
-import os
 import uuid
 import json
 import pandas as pd
@@ -226,6 +225,8 @@ class Op(Enum):
     full_text_search = 'full_text_search'
     hybrid_search = 'hybrid_search'
     query = 'query'
+    growing_count = 'growing_count'
+    sealed_count = 'sealed_count'
     text_match = 'text_match'
     delete = 'delete'
     delete_freshness = 'delete_freshness'
@@ -311,7 +312,7 @@ def exception_handler():
                 else:
                     log_message = f"Error in {function_name}: {log_e}"
                 log.error(log_message)
-                log.error(log_e)
+
                 return Error(e), False
 
         return inner_wrapper
@@ -1363,6 +1364,89 @@ class QueryChecker(Checker):
     def query(self):
         res, result = self.c_wrap.query(self.term_expr, timeout=query_timeout,
                                         check_task=CheckTasks.check_query_not_empty)
+        return res, result
+
+    @exception_handler()
+    def run_task(self):
+        res, result = self.query()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP / 10)
+
+
+class GrowingSegmentCountChecker(Checker):
+    """check count with growing segment operations in a dependent thread"""
+
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("GrowingCountChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema, insert_data=False)
+        res, result = self.c_wrap.create_index(self.float_vector_field_name,
+                                               constants.DEFAULT_INDEX_PARAM,
+                                               timeout=timeout,
+                                               enable_traceback=enable_traceback,
+                                               check_task=CheckTasks.check_nothing)
+        self.c_wrap.load(replica_number=replica_number)  # do load before query
+        self.insert_data(nb=50)
+        self.term_expr = f"{self.int64_field_name} > 0"
+        self.count = len(self.c_wrap.query(self.term_expr, timeout=query_timeout,
+                                           check_task=CheckTasks.check_query_not_empty)[0])
+
+    @trace()
+    def query(self):
+        res, result = self.c_wrap.query(self.term_expr, timeout=query_timeout,
+                                        check_task=CheckTasks.check_query_not_empty)
+        if result:
+            count = len(res)
+            log.info(f"sealed segment count: {count}, expect: {self.count}")
+            if count != self.count:
+                log.info(f"count with growing segment is not same: {count} != {self.count}")
+                result = False
+        return res, result
+
+    @exception_handler()
+    def run_task(self):
+        res, result = self.query()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP / 10)
+
+
+class SealedSegmentCountChecker(Checker):
+    """check count with sealed segment  operations in a dependent thread"""
+
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("SealedCountChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema, insert_data=False)
+        res, result = self.c_wrap.create_index(self.float_vector_field_name,
+                                               constants.DEFAULT_INDEX_PARAM,
+                                               timeout=timeout,
+                                               enable_traceback=enable_traceback,
+                                               check_task=CheckTasks.check_nothing)
+        self.c_wrap.load(replica_number=replica_number)  # do load before query
+        self.insert_data(3000)
+        self.c_wrap.flush()
+        self.insert_data(50)
+        self.term_expr = f"{self.int64_field_name} > 0"
+        self.count = len(self.c_wrap.query(self.term_expr, timeout=query_timeout,
+                                           check_task=CheckTasks.check_query_not_empty)[0])
+    @trace()
+    def query(self):
+        res, result = self.c_wrap.query(self.term_expr, timeout=query_timeout,
+                                        check_task=CheckTasks.check_query_not_empty)
+        if result:
+            count = len(res)
+            log.info(f"sealed segment count: {count}, expect: {self.count}")
+            if count != self.count:
+                log.info(f"count with growing segment is not same: {count} != {self.count}")
+                result = False
         return res, result
 
     @exception_handler()
