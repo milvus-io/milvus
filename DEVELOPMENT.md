@@ -178,7 +178,7 @@ Confirm that your `GOPATH` and `GOBIN` environment variables are correctly set a
 ```shell
 $ go version
 ```
-Note: go >= 1.22 is required to build Milvus.
+Note: go >= 1.22.7 is required to build Milvus.
 
 #### Docker & Docker Compose
 
@@ -225,7 +225,7 @@ The details below outline the software requirements for building on Ubuntu 20.04
 ```bash
 apt update
 wget https://github.com/Kitware/CMake/releases/download/v3.27.9/cmake-3.27.9-linux-aarch64.tar.gz
-tar zxf cmake-3.27.9-linux-aarch64.tar.gz 
+tar zxf cmake-3.27.9-linux-aarch64.tar.gz
 mv cmake-3.27.9-linux-aarch64 /usr/local/cmake
 vi /etc/profile
 export PATH=$PATH:/usr/local/cmake/bin
@@ -248,10 +248,10 @@ python3 --version
 pip3 install conan==1.64.1
 ```
 
-#### Install GO 1.22
+#### Install GO 1.22.10
 
 ```bash
-wget https://go.dev/dl/go1.22.8.linux-arm64.tar.gz
+wget https://go.dev/dl/go1.22.10.linux-arm64.tar.gz
 tar zxf go1.22.8.linux-arm64.tar.gz
 mv ./go /usr/local
 vi /etc/profile
@@ -268,7 +268,7 @@ git checkout v2.3.4
 cd ./milvus
 ```
 
-#### Check OS PAGESIZE 
+#### Check OS PAGESIZE
 
 ```bash
 getconf PAGESIZE
