@@ -5,6 +5,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
@@ -66,6 +67,8 @@ func (s *Server) initBasicComponent(_ context.Context) {
 	if err != nil {
 		panic("open wal manager failed")
 	}
+	// Register the wal manager to the local registry.
+	registry.RegisterLocalWALManager(s.walManager)
 }
 
 // initService initializes the grpc service.

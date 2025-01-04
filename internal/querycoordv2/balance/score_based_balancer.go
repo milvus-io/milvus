@@ -25,10 +25,12 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -149,6 +151,8 @@ func (b *ScoreBasedBalancer) AssignChannel(ctx context.Context, collectionID int
 }
 
 func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan {
+	nodes = filterSQNIfStreamingServiceEnabled(nodes)
+
 	balanceBatchSize := math.MaxInt64
 	if !forceAssign {
 		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
@@ -175,8 +179,18 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 	plans := make([]ChannelAssignPlan, 0, len(channels))
 	for _, ch := range channels {
 		func(ch *meta.DmChannel) {
+			var targetNode *nodeItem
+			if streamingutil.IsStreamingServiceEnabled() {
+				// When streaming service is enabled, we need to assign channel to the node where WAL is located.
+				nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(ch.GetChannelName())
+				if item, ok := nodeItemsMap[nodeID]; ok {
+					targetNode = item
+				}
+			}
 			// for each channel, pick the node with the least score
-			targetNode := queue.pop().(*nodeItem)
+			if targetNode == nil {
+				targetNode = queue.pop().(*nodeItem)
+			}
 			// make sure candidate is always push back
 			defer queue.push(targetNode)
 			scoreChanges := b.calculateChannelScore(ch, collectionID)
@@ -439,52 +453,78 @@ func (b *ScoreBasedBalancer) BalanceReplica(ctx context.Context, replica *meta.R
 			log.Info("balance plan generated", zap.Stringers("nodesInfo", br.NodesInfo()), zap.Stringers("report details", br.records))
 		}
 	}()
+
 	if replica.NodesCount() == 0 {
 		br.AddRecord(StrRecord("replica has no querynode"))
 		return nil, nil
 	}
 
+	stoppingBalance := paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool()
+
+	channelPlans = b.balanceChannels(ctx, br, replica, stoppingBalance)
+	if len(channelPlans) == 0 {
+		segmentPlans = b.balanceSegments(ctx, br, replica, stoppingBalance)
+	}
+	return
+}
+
+func (b *ScoreBasedBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica, stoppingBalance bool) []ChannelAssignPlan {
+	var rwNodes []int64
+	var roNodes []int64
+	if streamingutil.IsStreamingServiceEnabled() {
+		rwNodes, roNodes = replica.GetRWSQNodes(), replica.GetROSQNodes()
+	} else {
+		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
+	}
+
+	if len(rwNodes) == 0 || !b.permitBalanceChannel(replica.GetCollectionID()) {
+		return nil
+	}
+
+	if len(roNodes) != 0 {
+		if !stoppingBalance {
+			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
+			br.AddRecord(StrRecord("stopping balance is disabled"))
+			return nil
+		}
+
+		br.AddRecord(StrRecordf("executing stopping balance: %v", roNodes))
+		return b.genStoppingChannelPlan(ctx, replica, rwNodes, roNodes)
+	}
+
+	if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
+		return b.genChannelPlan(ctx, br, replica, rwNodes)
+	}
+	return nil
+}
+
+func (b *ScoreBasedBalancer) balanceSegments(ctx context.Context, br *balanceReport, replica *meta.Replica, stoppingBalance bool) []SegmentAssignPlan {
 	rwNodes := replica.GetRWNodes()
 	roNodes := replica.GetRONodes()
 
 	if len(rwNodes) == 0 {
 		// no available nodes to balance
 		br.AddRecord(StrRecord("no rwNodes to balance"))
-		return nil, nil
+		return nil
 	}
-
+	if !b.permitBalanceSegment(replica.GetCollectionID()) {
+		return nil
+	}
 	// print current distribution before generating plans
-	segmentPlans, channelPlans = make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
 	if len(roNodes) != 0 {
-		if !paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
+		if !stoppingBalance {
 			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
-			br.AddRecord(StrRecord("stopping balance is disabled"))
-			return nil, nil
+			return nil
 		}
 
 		log.Info("Handle stopping nodes",
 			zap.Any("stopping nodes", roNodes),
 			zap.Any("available nodes", rwNodes),
 		)
-		br.AddRecord(StrRecordf("executing stopping balance: %v", roNodes))
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		if b.permitBalanceChannel(replica.GetCollectionID()) {
-			channelPlans = append(channelPlans, b.genStoppingChannelPlan(ctx, replica, rwNodes, roNodes)...)
-		}
-		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
-			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(ctx, replica, rwNodes, roNodes)...)
-		}
-	} else {
-		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && b.permitBalanceChannel(replica.GetCollectionID()) {
-			channelPlans = append(channelPlans, b.genChannelPlan(ctx, br, replica, rwNodes)...)
-		}
-
-		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
-			segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, br, replica, rwNodes)...)
-		}
+		return b.genStoppingSegmentPlan(ctx, replica, rwNodes, roNodes)
 	}
-
-	return segmentPlans, channelPlans
+	return b.genSegmentPlan(ctx, br, replica, rwNodes)
 }
 
 func (b *ScoreBasedBalancer) genStoppingSegmentPlan(ctx context.Context, replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []SegmentAssignPlan {

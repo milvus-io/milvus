@@ -95,6 +95,10 @@ func TestAssignmentService(t *testing.T) {
 
 	assignmentService.ReportAssignmentError(ctx, types.PChannelInfo{Name: "c1", Term: 1}, errors.New("test"))
 
+	// Repeated report error at the same term should be ignored.
+	assignmentService.ReportAssignmentError(ctx, types.PChannelInfo{Name: "c1", Term: 1}, errors.New("test"))
+	assignmentService.ReportAssignmentError(ctx, types.PChannelInfo{Name: "c1", Term: 1}, errors.New("test"))
+
 	// test close
 	go close(closeCh)
 	time.Sleep(10 * time.Millisecond)

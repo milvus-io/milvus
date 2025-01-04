@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	_ "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -100,7 +101,7 @@ func TestStreamingConsume(t *testing.T) {
 	t.Skip()
 	streaming.Init()
 	defer streaming.Release()
-	ch := make(message.ChanMessageHandler, 10)
+	ch := make(adaptor.ChanMessageHandler, 10)
 	s := streaming.WAL().Read(context.Background(), streaming.ReadOption{
 		VChannel:       vChannel,
 		DeliverPolicy:  options.DeliverPolicyAll(),

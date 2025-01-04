@@ -5,10 +5,6 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var (
@@ -24,8 +20,9 @@ type StatsManager struct {
 	totalStats    InsertMetrics
 	pchannelStats map[string]*InsertMetrics
 	vchannelStats map[string]*InsertMetrics
-	segmentStats  map[int64]*SegmentStats  // map[SegmentID]SegmentStats
-	segmentIndex  map[int64]SegmentBelongs // map[SegmentID]channels
+	segmentStats  map[int64]*SegmentStats       // map[SegmentID]SegmentStats
+	segmentIndex  map[int64]SegmentBelongs      // map[SegmentID]channels
+	pchannelIndex map[string]map[int64]struct{} // map[PChannel]SegmentID
 	sealNotifier  *SealSignalNotifier
 }
 
@@ -46,6 +43,7 @@ func NewStatsManager() *StatsManager {
 		vchannelStats: make(map[string]*InsertMetrics),
 		segmentStats:  make(map[int64]*SegmentStats),
 		segmentIndex:  make(map[int64]SegmentBelongs),
+		pchannelIndex: make(map[string]map[int64]struct{}),
 		sealNotifier:  NewSealSignalNotifier(),
 	}
 }
@@ -62,6 +60,10 @@ func (m *StatsManager) RegisterNewGrowingSegment(belongs SegmentBelongs, segment
 
 	m.segmentStats[segmentID] = stats
 	m.segmentIndex[segmentID] = belongs
+	if _, ok := m.pchannelIndex[belongs.PChannel]; !ok {
+		m.pchannelIndex[belongs.PChannel] = make(map[int64]struct{})
+	}
+	m.pchannelIndex[belongs.PChannel][segmentID] = struct{}{}
 	m.totalStats.Collect(stats.Insert)
 	if _, ok := m.pchannelStats[belongs.PChannel]; !ok {
 		m.pchannelStats[belongs.PChannel] = &InsertMetrics{}
@@ -145,6 +147,10 @@ func (m *StatsManager) UnregisterSealedSegment(segmentID int64) *SegmentStats {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.unregisterSealedSegment(segmentID)
+}
+
+func (m *StatsManager) unregisterSealedSegment(segmentID int64) *SegmentStats {
 	// Must be exist, otherwise it's a bug.
 	info, ok := m.segmentIndex[segmentID]
 	if !ok {
@@ -156,6 +162,13 @@ func (m *StatsManager) UnregisterSealedSegment(segmentID int64) *SegmentStats {
 	m.totalStats.Subtract(stats.Insert)
 	delete(m.segmentStats, segmentID)
 	delete(m.segmentIndex, segmentID)
+	if _, ok := m.pchannelIndex[info.PChannel]; ok {
+		delete(m.pchannelIndex[info.PChannel], segmentID)
+		if len(m.pchannelIndex[info.PChannel]) == 0 {
+			delete(m.pchannelIndex, info.PChannel)
+		}
+	}
+
 	if _, ok := m.pchannelStats[info.PChannel]; ok {
 		m.pchannelStats[info.PChannel].Subtract(stats.Insert)
 		if m.pchannelStats[info.PChannel].BinarySize == 0 {
@@ -171,15 +184,29 @@ func (m *StatsManager) UnregisterSealedSegment(segmentID int64) *SegmentStats {
 	return stats
 }
 
-// SealByTotalGrowingSegmentsSize seals the largest growing segment
-// if the total size of growing segments in ANY vchannel exceeds the threshold.
-func (m *StatsManager) SealByTotalGrowingSegmentsSize() SegmentBelongs {
+// UnregisterAllStatsOnPChannel unregisters all stats on pchannel.
+func (m *StatsManager) UnregisterAllStatsOnPChannel(pchannel string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for vchannel, metrics := range m.vchannelStats {
-		threshold := paramtable.Get().DataCoordCfg.GrowingSegmentsMemSizeInMB.GetAsUint64() * 1024 * 1024
-		if metrics.BinarySize >= threshold {
+	segmentIDs, ok := m.pchannelIndex[pchannel]
+	if !ok {
+		return 0
+	}
+	for segmentID := range segmentIDs {
+		m.unregisterSealedSegment(segmentID)
+	}
+	return len(segmentIDs)
+}
+
+// SealByTotalGrowingSegmentsSize seals the largest growing segment
+// if the total size of growing segments in ANY vchannel exceeds the threshold.
+func (m *StatsManager) SealByTotalGrowingSegmentsSize(vchannelThreshold uint64) *SegmentBelongs {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, metrics := range m.vchannelStats {
+		if metrics.BinarySize >= vchannelThreshold {
 			var (
 				largestSegment     int64  = 0
 				largestSegmentSize uint64 = 0
@@ -190,13 +217,14 @@ func (m *StatsManager) SealByTotalGrowingSegmentsSize() SegmentBelongs {
 					largestSegment = segmentID
 				}
 			}
-			log.Info("seal by total growing segments size", zap.String("vchannel", vchannel),
-				zap.Uint64("vchannelGrowingSize", metrics.BinarySize), zap.Uint64("sealThreshold", threshold),
-				zap.Int64("sealSegment", largestSegment), zap.Uint64("sealSegmentSize", largestSegmentSize))
-			return m.segmentIndex[largestSegment]
+			belongs, ok := m.segmentIndex[largestSegment]
+			if !ok {
+				panic("unrechable: the segmentID should always be found in segmentIndex")
+			}
+			return &belongs
 		}
 	}
-	return SegmentBelongs{}
+	return nil
 }
 
 // InsertOpeatationMetrics is the metrics of insert operation.
