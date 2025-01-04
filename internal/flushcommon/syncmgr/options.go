@@ -15,14 +15,33 @@ import (
 
 func NewSyncTask() *SyncTask {
 	return &SyncTask{
-		isFlush:       false,
 		insertBinlogs: make(map[int64]*datapb.FieldBinlog),
 		statsBinlogs:  make(map[int64]*datapb.FieldBinlog),
 		deltaBinlog:   &datapb.FieldBinlog{},
 		bm25Binlogs:   make(map[int64]*datapb.FieldBinlog),
-		segmentData:   make(map[string][]byte),
-		binlogBlobs:   make(map[int64]*storage.Blob),
 	}
+}
+
+func (t *SyncTask) WithSyncPack(pack *SyncPack) *SyncTask {
+	t.pack = pack
+
+	// legacy code, remove later
+	t.bm25Binlogs = make(map[int64]*datapb.FieldBinlog)
+	t.collectionID = t.pack.collectionID
+	t.partitionID = t.pack.partitionID
+	t.channelName = t.pack.channelName
+	t.segmentID = t.pack.segmentID
+	t.batchRows = t.pack.batchRows
+	// t.metacache = t.pack.metacache
+	// t.schema = t.metacache.Schema()
+	t.startPosition = t.pack.startPosition
+	t.checkpoint = t.pack.checkpoint
+	t.level = t.pack.level
+	t.dataSource = t.pack.dataSource
+	t.tsFrom = t.pack.tsFrom
+	t.tsTo = t.pack.tsTo
+	t.failureCallback = t.pack.errHandler
+	return t
 }
 
 func (t *SyncTask) WithChunkManager(cm storage.ChunkManager) *SyncTask {
@@ -79,12 +98,12 @@ func (t *SyncTask) WithTimeRange(from, to typeutil.Timestamp) *SyncTask {
 }
 
 func (t *SyncTask) WithFlush() *SyncTask {
-	t.isFlush = true
+	t.pack.isFlush = true
 	return t
 }
 
 func (t *SyncTask) WithDrop() *SyncTask {
-	t.isDrop = true
+	t.pack.isDrop = true
 	return t
 }
 
