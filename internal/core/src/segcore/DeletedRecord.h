@@ -128,7 +128,7 @@ class DeletedRecord {
             }
             for (auto& offset : offsets) {
                 auto row_id = offset.get();
-                // if alreay deleted, no need to add new record
+                // if already deleted, no need to add new record
                 if (deleted_mask_.size() > row_id && deleted_mask_[row_id]) {
                     continue;
                 }
@@ -190,17 +190,11 @@ class DeletedRecord {
         }
 
         auto start_iter = hit_snapshot ? next_iter : accessor.begin();
-        auto end_iter =
-            accessor.lower_bound(std::make_pair(query_timestamp, 0));
 
+        // accessor.lower_bound(std::make_pair(query_timestamp, 0)) is not reliable here:
+        // concurrent delete may append new value while end_iter is the end causing mvcc broken
         auto it = start_iter;
-        while (it != accessor.end() && it != end_iter) {
-            if (it->second < insert_barrier) {
-                bitset.set(it->second);
-            }
-            it++;
-        }
-        while (it != accessor.end() && it->first == query_timestamp) {
+        while (it != accessor.end() && it->first <= query_timestamp) {
             if (it->second < insert_barrier) {
                 bitset.set(it->second);
             }
