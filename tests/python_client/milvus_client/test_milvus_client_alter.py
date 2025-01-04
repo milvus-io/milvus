@@ -1,50 +1,16 @@
-import multiprocessing
 import numbers
-import random
-import numpy
-import threading
 import pytest
-import pandas as pd
-import decimal
-from decimal import Decimal, getcontext
-from time import sleep
-import heapq
 
 from base.client_base import TestcaseBase
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
-from common.constants import *
-from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
 from base.high_level_api_wrapper import HighLevelApiWrapper
 client_w = HighLevelApiWrapper()
 
-prefix = "milvus_client_api_index"
-epsilon = ct.epsilon
-default_nb = ct.default_nb
-default_nb_medium = ct.default_nb_medium
-default_nq = ct.default_nq
-default_dim = ct.default_dim
-default_limit = ct.default_limit
-default_search_exp = "id >= 0"
-exp_res = "exp_res"
-default_search_string_exp = "varchar >= \"0\""
-default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
-default_invaild_string_exp = "varchar >= 0"
-default_json_search_exp = "json_field[\"number\"] >= 0"
-perfix_expr = 'varchar like "0%"'
-default_search_field = ct.default_float_vec_field_name
-default_search_params = ct.default_search_params
-default_primary_key_field_name = "id"
+prefix = "alter"
 default_vector_field_name = "vector"
-default_multiple_vector_field_name = "vector_new"
-default_float_field_name = ct.default_float_field_name
-default_bool_field_name = ct.default_bool_field_name
-default_string_field_name = ct.default_string_field_name
-default_int32_array_field_name = ct.default_int32_array_field_name
-default_string_array_field_name = ct.default_string_array_field_name
 
 
 class TestMilvusClientAlterIndex(TestcaseBase):
@@ -71,7 +37,8 @@ class TestMilvusClientAlterIndex(TestcaseBase):
         res1 = client_w.describe_index(client, collection_name, index_name=idx_names[0])[0]
         assert res1.get('mmap.enabled', None) is None
         error = {ct.err_code: 104,
-                 ct.err_msg: f"can't alter index on loaded collection, please release the collection first: collection already loaded[collection={collection_name}]"}
+                 ct.err_msg: f"can't alter index on loaded collection, please release the collection first: "
+                             f"collection already loaded[collection={collection_name}]"}
         # 1. alter index after load
         client_w.alter_index_properties(client, collection_name, idx_names[0], properties={"mmap.enabled": True},
                                         check_task=CheckTasks.err_res, check_items=error)
@@ -308,7 +275,7 @@ class TestMilvusClientAlterCollectionField(TestcaseBase):
 
 class TestMilvusClientAlterDatabase(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
-    # @pytest.mark.skip("reason: need to fix #38469, #38471")
+    # @pytest.mark.skip("reason: need to fix #38469")
     def test_milvus_client_alter_database_default(self):
         """
         target: test alter database
