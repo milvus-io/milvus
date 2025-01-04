@@ -131,6 +131,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     // remote file path
     std::map<std::string, int64_t> remote_paths_to_size_;
+
+    // indicate whether disk file manager is used for building index or load index
+    bool for_loading_index_;
 };
 
 using DiskANNFileManagerImplPtr = std::shared_ptr<DiskFileManagerImpl>;

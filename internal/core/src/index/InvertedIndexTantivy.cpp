@@ -104,7 +104,7 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
 template <typename T>
 InvertedIndexTantivy<T>::~InvertedIndexTantivy() {
     auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        storage::LocalChunkManagerFactory::GetInstance().GetChunkManager();
     auto prefix = path_;
     LOG_INFO("inverted index remove path:{}", path_);
     local_chunk_manager->RemoveDir(prefix);

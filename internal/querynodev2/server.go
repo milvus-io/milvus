@@ -244,7 +244,7 @@ func (node *QueryNode) InitSegcore() error {
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
 
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
-	initcore.InitLocalChunkManager(localDataRootPath)
+	initcore.InitLocalChunkManager(typeutil.QueryNodeRole, localDataRootPath)
 
 	err := initcore.InitRemoteChunkManager(paramtable.Get())
 	if err != nil {
@@ -321,7 +321,7 @@ func (node *QueryNode) Init() error {
 
 		node.factory.Init(paramtable.Get())
 
-		localRootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+		localRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 		localUsedSize, err := segcore.GetLocalUsedSize(node.ctx, localRootPath)
 		if err != nil {
 			log.Warn("get local used size failed", zap.Error(err))

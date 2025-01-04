@@ -62,7 +62,7 @@ func (suite *ReduceSuite) SetupSuite() {
 
 func (suite *ReduceSuite) SetupTest() {
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
-	initcore.InitLocalChunkManager(localDataRootPath)
+	initcore.InitLocalChunkManager(typeutil.QueryNodeRole, localDataRootPath)
 	err := initcore.InitMmapManager(paramtable.Get())
 	suite.NoError(err)
 	ctx := context.Background()
