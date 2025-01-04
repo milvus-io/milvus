@@ -52,6 +52,7 @@ service DataCoord {
   rpc GetSegmentInfoChannel(GetSegmentInfoChannelRequest) returns (milvus.StringResponse){}
 
   rpc SaveBinlogPaths(SaveBinlogPathsRequest) returns (common.Status){}
+  rpc GetDataViewVersions(GetDataViewVersionsRequest) returns (GetDataViewVersionsResponse){}
   rpc GetRecoveryInfo(GetRecoveryInfoRequest) returns (GetRecoveryInfoResponse){}
   rpc GetRecoveryInfoV2(GetRecoveryInfoRequestV2) returns (GetRecoveryInfoResponseV2){}
   rpc GetChannelRecoveryInfo(GetChannelRecoveryInfoRequest) returns (GetChannelRecoveryInfoResponse){}
@@ -460,6 +461,16 @@ message Binlog {
   // log_size represents the size after data serialized.
   // for stats_log, the memory_size always equal log_size.
   int64 memory_size = 7;
+}
+
+message GetDataViewVersionsRequest {
+  common.MsgBase base = 1;
+  repeated int64 collectionIDs = 2;
+}
+
+message GetDataViewVersionsResponse {
+  common.Status status = 1;
+  map<int64, int64> data_view_versions = 2;
 }
 
 message GetRecoveryInfoResponse {
