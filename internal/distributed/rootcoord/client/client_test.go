@@ -105,6 +105,10 @@ func Test_NewClient(t *testing.T) {
 			retCheck(retNotNil, r, err)
 		}
 		{
+			r, err := client.ShowCollectionIDs(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
 			r, err := client.CreatePartition(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
@@ -348,6 +352,10 @@ func Test_NewClient(t *testing.T) {
 	}
 	{
 		rTimeout, err := client.ShowCollections(shortCtx, nil)
+		retCheck(rTimeout, err)
+	}
+	{
+		rTimeout, err := client.ShowCollectionIDs(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
 	{
