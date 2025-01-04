@@ -235,7 +235,7 @@ func newDefaultMockDqlTask() *mockDqlTask {
 }
 
 type simpleMockMsgStream struct {
-	msgChan chan *msgstream.MsgPack
+	msgChan chan *msgstream.ConsumeMsgPack
 
 	msgCount    int
 	msgCountMtx sync.RWMutex
@@ -244,7 +244,7 @@ type simpleMockMsgStream struct {
 func (ms *simpleMockMsgStream) Close() {
 }
 
-func (ms *simpleMockMsgStream) Chan() <-chan *msgstream.MsgPack {
+func (ms *simpleMockMsgStream) Chan() <-chan *msgstream.ConsumeMsgPack {
 	if ms.getMsgCount() <= 0 {
 		ms.msgChan <- nil
 		return ms.msgChan
@@ -253,6 +253,10 @@ func (ms *simpleMockMsgStream) Chan() <-chan *msgstream.MsgPack {
 	defer ms.decreaseMsgCount(1)
 
 	return ms.msgChan
+}
+
+func (ms *simpleMockMsgStream) GetUnmarshalDispatcher() msgstream.UnmarshalDispatcher {
+	return nil
 }
 
 func (ms *simpleMockMsgStream) AsProducer(ctx context.Context, channels []string) {
@@ -286,8 +290,7 @@ func (ms *simpleMockMsgStream) decreaseMsgCount(delta int) {
 func (ms *simpleMockMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) error {
 	defer ms.increaseMsgCount(1)
 
-	ms.msgChan <- pack
-
+	ms.msgChan <- msgstream.BuildConsumeMsgPack(pack)
 	return nil
 }
 
@@ -319,7 +322,7 @@ func (ms *simpleMockMsgStream) SetReplicate(config *msgstream.ReplicateConfig) {
 
 func newSimpleMockMsgStream() *simpleMockMsgStream {
 	return &simpleMockMsgStream{
-		msgChan:  make(chan *msgstream.MsgPack, 1024),
+		msgChan:  make(chan *msgstream.ConsumeMsgPack, 1024),
 		msgCount: 0,
 	}
 }

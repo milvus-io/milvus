@@ -1058,23 +1058,23 @@ func newTickerWithFactory(factory msgstream.Factory) *timetickSync {
 	return ticker
 }
 
-func newChanTimeTickSync(packChan chan *msgstream.MsgPack) *timetickSync {
+func newChanTimeTickSync(packChan chan *msgstream.ConsumeMsgPack) *timetickSync {
 	f := msgstream.NewMockMqFactory()
 	f.NewMsgStreamFunc = func(ctx context.Context) (msgstream.MsgStream, error) {
 		stream := msgstream.NewWastedMockMsgStream()
 		stream.BroadcastFunc = func(pack *msgstream.MsgPack) error {
 			log.Info("mock Broadcast")
-			packChan <- pack
+			packChan <- msgstream.BuildConsumeMsgPack(pack)
 			return nil
 		}
 		stream.BroadcastMarkFunc = func(pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
 			log.Info("mock BroadcastMark")
-			packChan <- pack
+			packChan <- msgstream.BuildConsumeMsgPack(pack)
 			return map[string][]msgstream.MessageID{}, nil
 		}
 		stream.AsProducerFunc = func(channels []string) {
 		}
-		stream.ChanFunc = func() <-chan *msgstream.MsgPack {
+		stream.ChanFunc = func() <-chan *msgstream.ConsumeMsgPack {
 			return packChan
 		}
 		return stream, nil
