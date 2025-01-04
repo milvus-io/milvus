@@ -37,6 +37,9 @@ const (
 	// DefaultServerMaxRecvSize defines the maximum size of data per grpc request can receive by server side.
 	DefaultServerMaxRecvSize = 256 * 1024 * 1024
 
+	// DefaultMaxConcurrentStreams defines the maximum number of concurrent calls on a http2 stream
+	DefaultMaxConcurrentStreams = 1000
+
 	// DefaultClientMaxSendSize defines the maximum size of data per grpc request can send by client side.
 	DefaultClientMaxSendSize = 256 * 1024 * 1024
 
@@ -148,7 +151,8 @@ type GrpcServerConfig struct {
 	ServerMaxSendSize ParamItem `refreshable:"false"`
 	ServerMaxRecvSize ParamItem `refreshable:"false"`
 
-	GracefulStopTimeout ParamItem `refreshable:"true"`
+	MaxConcurrentStreams ParamItem `refreshable:"false"`
+	GracefulStopTimeout  ParamItem `refreshable:"true"`
 }
 
 func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
@@ -199,6 +203,27 @@ func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
 		Export: true,
 	}
 	p.ServerMaxRecvSize.Init(base.mgr)
+
+	maxConcurrentStream := strconv.FormatInt(DefaultMaxConcurrentStreams, 10)
+	p.MaxConcurrentStreams = ParamItem{
+		Key:     "grpc.maxConcurrentStreams",
+		Version: "2.4.8",
+		Formatter: func(v string) string {
+			if v == "" {
+				return maxConcurrentStream
+			}
+			_, err := strconv.Atoi(v)
+			if err != nil {
+				log.Warn("Failed to convert int when parsing grpc.maxConcurrentStreams, set to default",
+					zap.String("role", p.Domain),
+					zap.String("grpc.maxConcurrentStreams", v))
+				return maxConcurrentStream
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.MaxConcurrentStreams.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "grpc.gracefulStopTimeout",
