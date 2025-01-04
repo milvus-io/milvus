@@ -114,12 +114,12 @@ func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
 	})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to pause garbage collection, %s"}`, err.Error())))
+		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to resume garbage collection, %s"}`, err.Error())))
 		return
 	}
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to pause garbage collection, %s"}`, resp.GetReason())))
+		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to resume garbage collection, %s"}`, resp.GetReason())))
 		return
 	}
 	w.WriteHeader(http.StatusOK)
