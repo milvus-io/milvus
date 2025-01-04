@@ -27,6 +27,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"path"
 	"runtime/debug"
 	"strconv"
@@ -47,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -1391,6 +1393,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	maxSegmentSize := uint64(0)
 	predictMemUsage := memUsage
 	predictDiskUsage := diskUsage
+	var predictGpuMemUsage []uint64
 	mmapFieldCount := 0
 	for _, loadInfo := range segmentLoadInfos {
 		collection := loader.manager.Collection.Get(loadInfo.GetCollectionID())
@@ -1413,6 +1416,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		mmapFieldCount += usage.MmapFieldCount
 		predictDiskUsage += usage.DiskSize
 		predictMemUsage += usage.MemorySize
+		predictGpuMemUsage = usage.FieldGpuMemorySize
 		if usage.MemorySize > maxSegmentSize {
 			maxSegmentSize = usage.MemorySize
 		}
@@ -1447,6 +1451,10 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 			paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()))
 	}
 
+	err = checkSegmentGpuMemSize(predictGpuMemUsage, float32(paramtable.Get().GpuConfig.OverloadedMemoryThresholdPercentage.GetAsFloat()))
+	if err != nil {
+		return 0, 0, err
+	}
 	return predictMemUsage - memUsage, predictDiskUsage - diskUsage, nil
 }
 
@@ -1455,6 +1463,7 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 	var segmentMemorySize, segmentDiskSize uint64
 	var indexMemorySize uint64
 	var mmapFieldCount int
+	var fieldGpuMemorySize []uint64
 
 	fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 	for _, fieldIndexInfo := range loadInfo.IndexInfos {
@@ -1499,9 +1508,11 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 					loadInfo.GetSegmentID(),
 					fieldIndexInfo.GetBuildID())
 			}
-
 			indexMemorySize += estimateResult.MaxMemoryCost
 			segmentDiskSize += estimateResult.MaxDiskCost
+			if vecindexmgr.GetVecIndexMgrInstance().IsGPUVecIndex(common.GetIndexType(fieldIndexInfo.IndexParams)) {
+				fieldGpuMemorySize = append(fieldGpuMemorySize, estimateResult.MaxMemoryCost)
+			}
 			if !estimateResult.HasRawData && !isVectorType {
 				shouldCalculateDataSize = true
 			}
@@ -1562,9 +1573,10 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 		segmentMemorySize += uint64(float64(memSize) * expansionFactor)
 	}
 	return &ResourceUsage{
-		MemorySize:     segmentMemorySize + indexMemorySize,
-		DiskSize:       segmentDiskSize,
-		MmapFieldCount: mmapFieldCount,
+		MemorySize:         segmentMemorySize + indexMemorySize,
+		DiskSize:           segmentDiskSize,
+		MmapFieldCount:     mmapFieldCount,
+		FieldGpuMemorySize: fieldGpuMemorySize,
 	}, nil
 }
 
@@ -1686,4 +1698,40 @@ func getBinlogDataMemorySize(fieldBinlog *datapb.FieldBinlog) int64 {
 	}
 
 	return fieldSize
+}
+
+func checkSegmentGpuMemSize(fieldGpuMemSizeList []uint64, OverloadedMemoryThresholdPercentage float32) error {
+	gpuInfos, err := hardware.GetAllGPUMemoryInfo()
+	if err != nil {
+		if len(fieldGpuMemSizeList) == 0 {
+			return nil
+		}
+		return err
+	}
+	var availableGpuMem []uint64
+	var maxGpuMemSize []uint64
+	for _, gpuInfo := range gpuInfos {
+		availableGpuMem = append(availableGpuMem, gpuInfo.TotalMemory-gpuInfo.FreeMemory)
+		maxGpuMemSize = append(maxGpuMemSize, uint64(float32(gpuInfo.TotalMemory)*OverloadedMemoryThresholdPercentage))
+	}
+	currentGpuMem := availableGpuMem
+	for _, fieldGpuMem := range fieldGpuMemSizeList {
+		var minId int = -1
+		var minGpuMem uint64 = math.MaxUint64
+		for i := int(0); i < len(gpuInfos); i++ {
+			GpuiMem := currentGpuMem[i] + fieldGpuMem
+			if GpuiMem < maxGpuMemSize[i] && GpuiMem < minGpuMem {
+				minId = i
+				minGpuMem = GpuiMem
+			}
+		}
+		if minId == -1 {
+			return fmt.Errorf("load segment failed, GPU OOM if loaded, GpuMemUsage(bytes) = %v, availableGpuMem(bytes) = %v, maxGPUMem(bytes) = %v",
+				fieldGpuMem,
+				availableGpuMem,
+				maxGpuMemSize)
+		}
+		currentGpuMem[minId] += minGpuMem
+	}
+	return nil
 }
