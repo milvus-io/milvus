@@ -18,10 +18,12 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cast"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -44,7 +46,10 @@ func Init(opts ...Option) (*Manager, error) {
 	sourceManager := NewManager()
 	if o.FileInfo != nil {
 		s := NewFileSource(o.FileInfo)
-		sourceManager.AddSource(s)
+		err := sourceManager.AddSource(s)
+		if err != nil {
+			log.Fatal("failed to add FileSource config", zap.Error(err))
+		}
 	}
 	if o.EnvKeyFormatter != nil {
 		sourceManager.AddSource(NewEnvSource(o.EnvKeyFormatter))
