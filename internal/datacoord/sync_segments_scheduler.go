@@ -99,7 +99,7 @@ func (sss *SyncSegmentsScheduler) SyncSegmentsForCollections(ctx context.Context
 			continue
 		}
 		for _, channelName := range collInfo.VChannelNames {
-			nodeID, err := sss.channelManager.FindWatcher(channelName)
+			nodeID, err := sss.channelManager.FindWatcher(ctx, channelName)
 			if err != nil {
 				log.Warn("find watcher for channel failed", zap.Int64("collectionID", collID),
 					zap.String("channelName", channelName), zap.Error(err))

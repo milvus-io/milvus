@@ -18,10 +18,12 @@ package channel
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
@@ -40,7 +42,7 @@ type (
 )
 
 type ChannelManager interface {
-	Submit(info *datapb.ChannelWatchInfo) error
+	Submit(ctx context.Context, info *datapb.ChannelWatchInfo) error
 	GetProgress(info *datapb.ChannelWatchInfo) *datapb.ChannelOperationProgressResponse
 	Close()
 	Start()
@@ -88,30 +90,31 @@ func NewChannelManager(pipelineParams *util.PipelineParams, fgManager pipeline.F
 	return &cm
 }
 
-func (m *ChannelManagerImpl) Submit(info *datapb.ChannelWatchInfo) error {
+func (m *ChannelManagerImpl) Submit(ctx context.Context, info *datapb.ChannelWatchInfo) error {
 	channel := info.GetVchan().GetChannelName()
+	log := log.Ctx(ctx).With(zap.Int64("opID", info.GetOpID()), zap.String("channel", channel))
 
 	// skip enqueue the same operation resubmmited by datacoord
 	if runner, ok := m.opRunners.Get(channel); ok {
 		if _, exists := runner.Exist(info.GetOpID()); exists {
-			log.Warn("op already exist, skip", zap.Int64("opID", info.GetOpID()), zap.String("channel", channel))
+			log.Warn("op already exist, skip")
 			return nil
 		}
 	}
 
 	if info.GetState() == datapb.ChannelWatchState_ToWatch &&
 		m.fgManager.HasFlowgraphWithOpID(channel, info.GetOpID()) {
-		log.Warn("Watch op already finished, skip", zap.Int64("opID", info.GetOpID()), zap.String("channel", channel))
+		log.Warn("Watch op already finished, skip")
 		return nil
 	}
 
 	if info.GetState() == datapb.ChannelWatchState_ToRelease &&
 		!m.fgManager.HasFlowgraph(channel) {
-		log.Warn("Release op already finished, skip", zap.Int64("opID", info.GetOpID()), zap.String("channel", channel))
+		log.Warn("Release op already finished, skip")
 		return nil
 	}
 
-	runner := m.getOrCreateRunner(channel)
+	runner := m.getOrCreateRunner(ctx, channel)
 	return runner.Enqueue(info)
 }
 
@@ -224,8 +227,8 @@ func (m *ChannelManagerImpl) handleOpState(opState *opState) {
 	m.finishOp(opState.opID, opState.channel)
 }
 
-func (m *ChannelManagerImpl) getOrCreateRunner(channel string) *opRunner {
-	runner, loaded := m.opRunners.GetOrInsert(channel, NewOpRunner(channel, m.pipelineParams, m.releaseFunc, executeWatch, m.communicateCh))
+func (m *ChannelManagerImpl) getOrCreateRunner(ctx context.Context, channel string) *opRunner {
+	runner, loaded := m.opRunners.GetOrInsert(channel, NewOpRunner(ctx, channel, m.pipelineParams, m.releaseFunc, executeWatch, m.communicateCh))
 	if !loaded {
 		runner.Start()
 	}
@@ -256,9 +259,11 @@ type opRunner struct {
 
 	closeCh lifetime.SafeChan
 	closeWg sync.WaitGroup
+
+	opCtx context.Context
 }
 
-func NewOpRunner(channel string, pipelineParams *util.PipelineParams, releaseF releaseFunc, watchF watchFunc, resultCh chan *opState) *opRunner {
+func NewOpRunner(ctx context.Context, channel string, pipelineParams *util.PipelineParams, releaseF releaseFunc, watchF watchFunc, resultCh chan *opState) *opRunner {
 	return &opRunner{
 		channel:        channel,
 		pipelineParams: pipelineParams,
@@ -268,6 +273,7 @@ func NewOpRunner(channel string, pipelineParams *util.PipelineParams, releaseF r
 		allOps:         make(map[typeutil.UniqueID]*opInfo),
 		resultCh:       resultCh,
 		closeCh:        lifetime.NewSafeChan(),
+		opCtx:          context.WithoutCancel(ctx),
 	}
 }
 
@@ -328,7 +334,7 @@ func (r *opRunner) UnfinishedOpSize() int {
 
 // Execute excutes channel operations, channel state is validated during enqueue
 func (r *opRunner) Execute(info *datapb.ChannelWatchInfo) *opState {
-	log.Info("Start to execute channel operation",
+	log.Ctx(r.opCtx).Info("Start to execute channel operation",
 		zap.String("channel", info.GetVchan().GetChannelName()),
 		zap.Int64("opID", info.GetOpID()),
 		zap.String("state", info.GetState().String()),
@@ -358,7 +364,10 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 		channel: info.GetVchan().GetChannelName(),
 		opID:    info.GetOpID(),
 	}
-	log := log.With(zap.String("channel", opState.channel), zap.Int64("opID", opState.opID))
+	ctx, sp := otel.Tracer(typeutil.DataNodeRole).Start(r.opCtx, "watchWithTimer")
+	defer sp.End()
+	sp.AddEvent(fmt.Sprintf("channel=%s", opState.channel))
+	log := log.Ctx(ctx).With(zap.String("channel", opState.channel), zap.Int64("opID", opState.opID))
 
 	tickler := util.NewTickler()
 	ok := r.updateTickler(info.GetOpID(), tickler)
@@ -373,7 +382,7 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 	)
 
 	watchTimeout := paramtable.Get().DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	startTimer := func(finishWg *sync.WaitGroup) {
@@ -421,7 +430,7 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 	finishWaiter.Add(2)
 	go startTimer(&finishWaiter)
 
-	go func() {
+	watchFuncExec := func() {
 		defer finishWaiter.Done()
 		fg, err := r.watchFunc(ctx, r.pipelineParams, info, tickler)
 		if err != nil {
@@ -432,7 +441,8 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 			opState.fg = fg
 			successSig <- struct{}{}
 		}
-	}()
+	}
+	go watchFuncExec()
 
 	finishWaiter.Wait()
 	return opState
@@ -449,7 +459,10 @@ func (r *opRunner) releaseWithTimer(releaseFunc releaseFunc, channel string, opI
 		finishWaiter sync.WaitGroup
 	)
 
-	log := log.With(zap.Int64("opID", opID), zap.String("channel", channel))
+	ctx, sp := otel.Tracer(typeutil.DataNodeRole).Start(r.opCtx, "releaseWithTimer")
+	defer sp.End()
+	sp.AddEvent(fmt.Sprintf("channel=%s", channel))
+	log := log.Ctx(ctx).With(zap.Int64("opID", opID), zap.String("channel", channel))
 	startTimer := func(finishWaiter *sync.WaitGroup) {
 		defer finishWaiter.Done()
 
@@ -517,6 +530,8 @@ type opState struct {
 
 // executeWatch will always return, won't be stuck, either success or fail.
 func executeWatch(ctx context.Context, pipelineParams *util.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler) (*pipeline.DataSyncService, error) {
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "executeWatch")
+	defer span.End()
 	dataSyncService, err := pipeline.NewDataSyncService(ctx, pipelineParams, info, tickler)
 	if err != nil {
 		return nil, err

@@ -396,8 +396,8 @@ func (t *timetickSync) broadcastDmlChannels(chanNames []string, pack *msgstream.
 }
 
 // BroadcastMarkDmlChannels broadcasts msg pack into dml channels
-func (t *timetickSync) broadcastMarkDmlChannels(chanNames []string, pack *msgstream.MsgPack) (map[string][]byte, error) {
-	return t.dmlChannels.broadcastMark(chanNames, pack)
+func (t *timetickSync) broadcastMarkDmlChannels(ctx context.Context, chanNames []string, pack *msgstream.MsgPack) (map[string][]byte, error) {
+	return t.dmlChannels.broadcastMark(ctx, chanNames, pack)
 }
 
 func (t *timetickSync) getSyncedTimeTick(channel string) Timestamp {

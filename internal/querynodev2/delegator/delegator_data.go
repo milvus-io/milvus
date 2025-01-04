@@ -718,7 +718,7 @@ func (sd *shardDelegator) createStreamFromMsgStream(ctx context.Context, positio
 
 	// Random the subname in case we trying to load same delta at the same time
 	subName := fmt.Sprintf("querynode-delta-loader-%d-%d-%d", paramtable.GetNodeID(), sd.collectionID, rand.Int())
-	log.Info("from dml check point load delete", zap.Any("position", position), zap.String("vChannel", vchannelName), zap.String("subName", subName), zap.Time("positionTs", ts))
+	log.Ctx(ctx).Info("from dml check point load delete", zap.Any("position", position), zap.String("vChannel", vchannelName), zap.String("subName", subName), zap.Time("positionTs", ts))
 	err = stream.AsConsumer(context.TODO(), []string{pChannelName}, subName, mqcommon.SubscriptionPositionUnknown)
 	if err != nil {
 		return nil, stream.Close, err

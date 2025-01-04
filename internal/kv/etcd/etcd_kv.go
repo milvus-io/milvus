@@ -24,6 +24,7 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/kv"
@@ -339,6 +340,9 @@ func (kv *etcdKV) LoadBytesWithRevision(ctx context.Context, key string) ([]stri
 func (kv *etcdKV) Save(ctx context.Context, key, value string) error {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
+	ctx, sp := otel.Tracer("etcdKV").Start(ctx, "Save")
+	defer sp.End()
+	sp.AddEvent(fmt.Sprintf("key=%s", key))
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 	CheckValueSizeAndWarn(key, value)
@@ -381,6 +385,9 @@ func (kv *etcdKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
 	}
 
+	ctx, sp := otel.Tracer("etcdKV").Start(ctx, "MultiSave")
+	defer sp.End()
+	sp.AddEvent(fmt.Sprintf("key count=%d", len(keys)))
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
@@ -417,10 +424,13 @@ func (kv *etcdKV) MultiSaveBytes(ctx context.Context, kvs map[string][]byte) err
 
 // RemoveWithPrefix removes the keys with given prefix.
 func (kv *etcdKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
+	ctx, sp := otel.Tracer("etcdKV").Start(ctx, "RemoveWithPrefix")
+	defer sp.End()
 	start := time.Now()
 	key := path.Join(kv.rootPath, prefix)
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
+	sp.AddEvent(fmt.Sprintf("prefix=%s", key))
 
 	_, err := kv.removeEtcdMeta(ctx, key, clientv3.WithPrefix())
 	CheckElapseAndWarn(start, "Slow etcd operation remove with prefix", zap.String("prefix", prefix))
@@ -429,10 +439,13 @@ func (kv *etcdKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
 
 // Remove removes the key.
 func (kv *etcdKV) Remove(ctx context.Context, key string) error {
+	ctx, sp := otel.Tracer("etcdKV").Start(ctx, "Remove")
+	defer sp.End()
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
+	sp.AddEvent(fmt.Sprintf("key=%s", key))
 
 	_, err := kv.removeEtcdMeta(ctx, key)
 	CheckElapseAndWarn(start, "Slow etcd operation remove", zap.String("key", key))
