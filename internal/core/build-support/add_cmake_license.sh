@@ -9,7 +9,7 @@ fi
 cat ${LICENSE} > /dev/null || exit -1
 
 FILES=`find ${FOLDER} \
-| grep -E "(*CMakeLists.txt$)" \
+| grep "CMakeLists.txt$" \
 | grep -v thirdparty \
 | grep -v cmake_build \
 | grep -v cmake-build \
