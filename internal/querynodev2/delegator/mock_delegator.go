@@ -28,39 +28,6 @@ func (_m *MockShardDelegator) EXPECT() *MockShardDelegator_Expecter {
 	return &MockShardDelegator_Expecter{mock: &_m.Mock}
 }
 
-// AddExcludedSegments provides a mock function with given fields: excludeInfo
-func (_m *MockShardDelegator) AddExcludedSegments(excludeInfo map[int64]uint64) {
-	_m.Called(excludeInfo)
-}
-
-// MockShardDelegator_AddExcludedSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddExcludedSegments'
-type MockShardDelegator_AddExcludedSegments_Call struct {
-	*mock.Call
-}
-
-// AddExcludedSegments is a helper method to define mock.On call
-//   - excludeInfo map[int64]uint64
-func (_e *MockShardDelegator_Expecter) AddExcludedSegments(excludeInfo interface{}) *MockShardDelegator_AddExcludedSegments_Call {
-	return &MockShardDelegator_AddExcludedSegments_Call{Call: _e.mock.On("AddExcludedSegments", excludeInfo)}
-}
-
-func (_c *MockShardDelegator_AddExcludedSegments_Call) Run(run func(excludeInfo map[int64]uint64)) *MockShardDelegator_AddExcludedSegments_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(map[int64]uint64))
-	})
-	return _c
-}
-
-func (_c *MockShardDelegator_AddExcludedSegments_Call) Return() *MockShardDelegator_AddExcludedSegments_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockShardDelegator_AddExcludedSegments_Call) RunAndReturn(run func(map[int64]uint64)) *MockShardDelegator_AddExcludedSegments_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Close provides a mock function with given fields:
 func (_m *MockShardDelegator) Close() {
 	_m.Called()
@@ -134,6 +101,51 @@ func (_c *MockShardDelegator_Collection_Call) Return(_a0 int64) *MockShardDelega
 }
 
 func (_c *MockShardDelegator_Collection_Call) RunAndReturn(run func() int64) *MockShardDelegator_Collection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetCheckPoint provides a mock function with given fields:
+func (_m *MockShardDelegator) GetCheckPoint() uint64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCheckPoint")
+	}
+
+	var r0 uint64
+	if rf, ok := ret.Get(0).(func() uint64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_GetCheckPoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCheckPoint'
+type MockShardDelegator_GetCheckPoint_Call struct {
+	*mock.Call
+}
+
+// GetCheckPoint is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) GetCheckPoint() *MockShardDelegator_GetCheckPoint_Call {
+	return &MockShardDelegator_GetCheckPoint_Call{Call: _e.mock.On("GetCheckPoint")}
+}
+
+func (_c *MockShardDelegator_GetCheckPoint_Call) Run(run func()) *MockShardDelegator_GetCheckPoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_GetCheckPoint_Call) Return(_a0 uint64) *MockShardDelegator_GetCheckPoint_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_GetCheckPoint_Call) RunAndReturn(run func() uint64) *MockShardDelegator_GetCheckPoint_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -985,9 +997,9 @@ func (_c *MockShardDelegator_SyncPartitionStats_Call) RunAndReturn(run func(cont
 	return _c
 }
 
-// SyncTargetVersion provides a mock function with given fields: newVersion, partitions, growingInTarget, sealedInTarget, droppedInTarget, checkpoint
-func (_m *MockShardDelegator) SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition) {
-	_m.Called(newVersion, partitions, growingInTarget, sealedInTarget, droppedInTarget, checkpoint)
+// SyncTargetVersion provides a mock function with given fields: newVersion, partitions, growingInTarget, sealedInTarget, checkpoint
+func (_m *MockShardDelegator) SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, checkpoint *msgpb.MsgPosition) {
+	_m.Called(newVersion, partitions, growingInTarget, sealedInTarget, checkpoint)
 }
 
 // MockShardDelegator_SyncTargetVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncTargetVersion'
@@ -1000,15 +1012,14 @@ type MockShardDelegator_SyncTargetVersion_Call struct {
 //   - partitions []int64
 //   - growingInTarget []int64
 //   - sealedInTarget []int64
-//   - droppedInTarget []int64
 //   - checkpoint *msgpb.MsgPosition
-func (_e *MockShardDelegator_Expecter) SyncTargetVersion(newVersion interface{}, partitions interface{}, growingInTarget interface{}, sealedInTarget interface{}, droppedInTarget interface{}, checkpoint interface{}) *MockShardDelegator_SyncTargetVersion_Call {
-	return &MockShardDelegator_SyncTargetVersion_Call{Call: _e.mock.On("SyncTargetVersion", newVersion, partitions, growingInTarget, sealedInTarget, droppedInTarget, checkpoint)}
+func (_e *MockShardDelegator_Expecter) SyncTargetVersion(newVersion interface{}, partitions interface{}, growingInTarget interface{}, sealedInTarget interface{}, checkpoint interface{}) *MockShardDelegator_SyncTargetVersion_Call {
+	return &MockShardDelegator_SyncTargetVersion_Call{Call: _e.mock.On("SyncTargetVersion", newVersion, partitions, growingInTarget, sealedInTarget, checkpoint)}
 }
 
-func (_c *MockShardDelegator_SyncTargetVersion_Call) Run(run func(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition)) *MockShardDelegator_SyncTargetVersion_Call {
+func (_c *MockShardDelegator_SyncTargetVersion_Call) Run(run func(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, checkpoint *msgpb.MsgPosition)) *MockShardDelegator_SyncTargetVersion_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].([]int64), args[2].([]int64), args[3].([]int64), args[4].([]int64), args[5].(*msgpb.MsgPosition))
+		run(args[0].(int64), args[1].([]int64), args[2].([]int64), args[3].([]int64), args[4].(*msgpb.MsgPosition))
 	})
 	return _c
 }
@@ -1018,40 +1029,7 @@ func (_c *MockShardDelegator_SyncTargetVersion_Call) Return() *MockShardDelegato
 	return _c
 }
 
-func (_c *MockShardDelegator_SyncTargetVersion_Call) RunAndReturn(run func(int64, []int64, []int64, []int64, []int64, *msgpb.MsgPosition)) *MockShardDelegator_SyncTargetVersion_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// TryCleanExcludedSegments provides a mock function with given fields: ts
-func (_m *MockShardDelegator) TryCleanExcludedSegments(ts uint64) {
-	_m.Called(ts)
-}
-
-// MockShardDelegator_TryCleanExcludedSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TryCleanExcludedSegments'
-type MockShardDelegator_TryCleanExcludedSegments_Call struct {
-	*mock.Call
-}
-
-// TryCleanExcludedSegments is a helper method to define mock.On call
-//   - ts uint64
-func (_e *MockShardDelegator_Expecter) TryCleanExcludedSegments(ts interface{}) *MockShardDelegator_TryCleanExcludedSegments_Call {
-	return &MockShardDelegator_TryCleanExcludedSegments_Call{Call: _e.mock.On("TryCleanExcludedSegments", ts)}
-}
-
-func (_c *MockShardDelegator_TryCleanExcludedSegments_Call) Run(run func(ts uint64)) *MockShardDelegator_TryCleanExcludedSegments_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(uint64))
-	})
-	return _c
-}
-
-func (_c *MockShardDelegator_TryCleanExcludedSegments_Call) Return() *MockShardDelegator_TryCleanExcludedSegments_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockShardDelegator_TryCleanExcludedSegments_Call) RunAndReturn(run func(uint64)) *MockShardDelegator_TryCleanExcludedSegments_Call {
+func (_c *MockShardDelegator_SyncTargetVersion_Call) RunAndReturn(run func(int64, []int64, []int64, []int64, *msgpb.MsgPosition)) *MockShardDelegator_SyncTargetVersion_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1085,53 +1063,6 @@ func (_c *MockShardDelegator_UpdateTSafe_Call) Return() *MockShardDelegator_Upda
 }
 
 func (_c *MockShardDelegator_UpdateTSafe_Call) RunAndReturn(run func(uint64)) *MockShardDelegator_UpdateTSafe_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// VerifyExcludedSegments provides a mock function with given fields: segmentID, ts
-func (_m *MockShardDelegator) VerifyExcludedSegments(segmentID int64, ts uint64) bool {
-	ret := _m.Called(segmentID, ts)
-
-	if len(ret) == 0 {
-		panic("no return value specified for VerifyExcludedSegments")
-	}
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(int64, uint64) bool); ok {
-		r0 = rf(segmentID, ts)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// MockShardDelegator_VerifyExcludedSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'VerifyExcludedSegments'
-type MockShardDelegator_VerifyExcludedSegments_Call struct {
-	*mock.Call
-}
-
-// VerifyExcludedSegments is a helper method to define mock.On call
-//   - segmentID int64
-//   - ts uint64
-func (_e *MockShardDelegator_Expecter) VerifyExcludedSegments(segmentID interface{}, ts interface{}) *MockShardDelegator_VerifyExcludedSegments_Call {
-	return &MockShardDelegator_VerifyExcludedSegments_Call{Call: _e.mock.On("VerifyExcludedSegments", segmentID, ts)}
-}
-
-func (_c *MockShardDelegator_VerifyExcludedSegments_Call) Run(run func(segmentID int64, ts uint64)) *MockShardDelegator_VerifyExcludedSegments_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(uint64))
-	})
-	return _c
-}
-
-func (_c *MockShardDelegator_VerifyExcludedSegments_Call) Return(_a0 bool) *MockShardDelegator_VerifyExcludedSegments_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockShardDelegator_VerifyExcludedSegments_Call) RunAndReturn(run func(int64, uint64) bool) *MockShardDelegator_VerifyExcludedSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }
