@@ -19,6 +19,16 @@ class TestMilvusClientV2Base(Base):
     # milvus_client = None
     active_trace = False
 
+    def init_async_milvus_client(self):
+        uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
+        kwargs = {
+            "uri": uri,
+            "user": cf.param_info.param_user,
+            "password": cf.param_info.param_password,
+            "token": cf.param_info.param_token,
+        }
+        self.async_milvus_client_wrap.init_async_client(**kwargs)
+
     def _client(self, active_trace=False):
         """ return MilvusClient instance if connected successfully, otherwise return None"""
         if self.skip_connection:

@@ -34,7 +34,6 @@ class Base:
     database_wrap = None
     tear_down_collection_names = []
     resource_group_list = []
-    high_level_api_wrap = None
     async_milvus_client_wrap = None
     skip_connection = False
 
@@ -167,15 +166,15 @@ class TestcaseBase(Base):
         log.info(f"server version: {server_version}")
         return res
 
-    def init_async_milvus_client(self):
-        uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
-        kwargs = {
-            "uri": uri,
-            "user": cf.param_info.param_user,
-            "password": cf.param_info.param_password,
-            "token": cf.param_info.param_token,
-        }
-        self.async_milvus_client_wrap.init_async_client(**kwargs)
+    # def init_async_milvus_client(self):
+    #     uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
+    #     kwargs = {
+    #         "uri": uri,
+    #         "user": cf.param_info.param_user,
+    #         "password": cf.param_info.param_password,
+    #         "token": cf.param_info.param_token,
+    #     }
+    #     self.async_milvus_client_wrap.init_async_client(**kwargs)
 
     def init_collection_wrap(self, name=None, schema=None, check_task=None, check_items=None,
                              enable_dynamic_field=False, with_json=True, **kwargs):
