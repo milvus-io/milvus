@@ -56,25 +56,24 @@ func statisticOnSegments(ctx context.Context, segments []Segment, segType Segmen
 }
 
 // statistic will do statistics on the historical segments the target segments in historical.
-// if segIDs is not specified, it will search on all the historical segments specified by partIDs.
-// if segIDs is specified, it will only search on the segments specified by the segIDs.
-// if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func StatisticsHistorical(ctx context.Context, manager *Manager, collID int64, partIDs []int64, segIDs []int64) ([]SegmentStats, []Segment, error) {
-	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
+func StatisticsHistorical(ctx context.Context, manager *Manager, segIDs []int64) ([]SegmentStats, error) {
+	segments, err := manager.Segment.GetAndPin(segIDs)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
+	defer manager.Segment.Unpin(segments)
 	result, err := statisticOnSegments(ctx, segments, SegmentTypeSealed)
-	return result, segments, err
+	return result, err
 }
 
 // StatisticStreaming will do statistics all the target segments in streaming
-// if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func StatisticStreaming(ctx context.Context, manager *Manager, collID int64, partIDs []int64, segIDs []int64) ([]SegmentStats, []Segment, error) {
-	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs)
+func StatisticStreaming(ctx context.Context, manager *Manager, segIDs []int64) ([]SegmentStats, error) {
+	segments, err := manager.Segment.GetAndPin(segIDs)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
+	defer manager.Segment.Unpin(segments)
+
 	result, err := statisticOnSegments(ctx, segments, SegmentTypeGrowing)
-	return result, segments, err
+	return result, err
 }
