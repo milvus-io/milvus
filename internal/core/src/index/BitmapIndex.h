@@ -114,7 +114,7 @@ class BitmapIndex : public ScalarIndex<T> {
         return Count();
     }
 
-    BinarySet
+    CreateIndexResultPtr
     Upload(const Config& config = {}) override;
 
     const bool

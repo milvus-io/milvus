@@ -193,10 +193,12 @@ test_run() {
             dtype, config, ctx);
         index->Build();
 
-        auto bs = index->Upload();
-        for (const auto& [key, _] : bs.binary_map_) {
-            index_files.push_back(key);
-        }
+        auto create_index_result = index->Upload();
+        auto memSize = create_index_result->GetMemSize();
+        auto serializedSize = create_index_result->GetSerializedSize();
+        ASSERT_GT(memSize, 0);
+        ASSERT_GT(serializedSize, 0);
+        index_files = create_index_result->GetIndexFiles();
     }
 
     {
@@ -466,10 +468,12 @@ test_string() {
             dtype, config, ctx);
         index->Build();
 
-        auto bs = index->Upload();
-        for (const auto& [key, _] : bs.binary_map_) {
-            index_files.push_back(key);
-        }
+        auto create_index_result = index->Upload();
+        auto memSize = create_index_result->GetMemSize();
+        auto serializedSize = create_index_result->GetSerializedSize();
+        ASSERT_GT(memSize, 0);
+        ASSERT_GT(serializedSize, 0);
+        index_files = create_index_result->GetIndexFiles();
     }
 
     {

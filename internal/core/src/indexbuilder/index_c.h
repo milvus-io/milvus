@@ -17,6 +17,7 @@ extern "C" {
 
 #include <stdint.h>
 #include "common/type_c.h"
+#include "common/protobuf_utils_c.h"
 #include "common/binary_set_c.h"
 #include "indexbuilder/type_c.h"
 
@@ -36,7 +37,7 @@ CStatus
 DeleteIndex(CIndex index);
 
 CStatus
-BuildTextIndex(CBinarySet* c_binary_set,
+BuildTextIndex(ProtoLayoutInterface c_binary_set,
                const uint8_t* serialized_build_index_info,
                const uint64_t len);
 
@@ -131,7 +132,7 @@ AppendOptionalFieldDataPath(CBuildIndexInfo c_build_index_info,
                             const char* c_file_path);
 
 CStatus
-SerializeIndexAndUpLoad(CIndex index, CBinarySet* c_binary_set);
+SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result);
 
 CStatus
 AppendIndexStorageInfo(CBuildIndexInfo c_build_index_info,
