@@ -213,7 +213,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		quitCh:                 make(chan struct{}),
 		factory:                factory,
 		flushCh:                make(chan UniqueID, 1024),
-		notifyIndexChan:        make(chan UniqueID),
+		notifyIndexChan:        make(chan UniqueID, 1024),
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
 		indexNodeCreator:       defaultIndexNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
