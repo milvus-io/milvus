@@ -46,7 +46,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 
 	insertFieldBinlogs := lo.MapToSlice(pack.insertBinlogs, func(_ int64, fieldBinlog *datapb.FieldBinlog) *datapb.FieldBinlog { return fieldBinlog })
 	statsFieldBinlogs := lo.MapToSlice(pack.statsBinlogs, func(_ int64, fieldBinlog *datapb.FieldBinlog) *datapb.FieldBinlog { return fieldBinlog })
-	if len(pack.deltaBinlog.Binlogs) > 0 {
+	if pack.deltaBinlog != nil && len(pack.deltaBinlog.Binlogs) > 0 {
 		deltaFieldBinlogs = append(deltaFieldBinlogs, pack.deltaBinlog)
 	}
 

@@ -153,7 +153,6 @@ func (s *SyncTaskSuite) getSuiteSyncTask(pack *SyncPack) *SyncTask {
 			WithPartitionID(s.partitionID).
 			WithSegmentID(s.segmentID).
 			WithChannelName(s.channelName)).
-		WithSchema(s.schema).
 		WithAllocator(s.allocator).
 		WithChunkManager(s.chunkManager).
 		WithMetaCache(s.metacache)

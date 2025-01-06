@@ -173,13 +173,13 @@ func (bw *BulkPackWriter) writeInserts(ctx context.Context, pack *SyncPack) (map
 
 	logs := make(map[int64]*datapb.FieldBinlog)
 	for fieldID, blob := range binlogBlobs {
-		if binlog, err := bw.writeLog(ctx, blob, common.SegmentInsertLogPath, pack, fieldID, bw.nextID()); err != nil {
+		binlog, err := bw.writeLog(ctx, blob, common.SegmentInsertLogPath, pack, fieldID, bw.nextID())
+		if err != nil {
 			return nil, err
-		} else {
-			logs[fieldID] = &datapb.FieldBinlog{
-				FieldID: fieldID,
-				Binlogs: []*datapb.Binlog{binlog},
-			}
+		}
+		logs[fieldID] = &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Binlogs: []*datapb.Binlog{binlog},
 		}
 	}
 	return logs, nil
@@ -209,18 +209,16 @@ func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[i
 		binlogs = append(binlogs, batchStatsBlob)
 	}
 
-	if pack.isFlush {
-		if pack.level != datapb.SegmentLevel_L0 {
-			mergedStatsBlob, err := serializer.serializeMergedPkStats(pack)
-			if err != nil {
-				return nil, err
-			}
+	if pack.isFlush && pack.level != datapb.SegmentLevel_L0 {
+		mergedStatsBlob, err := serializer.serializeMergedPkStats(pack)
+		if err != nil {
+			return nil, err
+		}
 
-			if mergedStatsBlob, err := bw.writeLog(ctx, mergedStatsBlob, common.SegmentStatslogPath, pack, pkFieldID, int64(storage.CompoundStatsType)); err != nil {
-				return nil, err
-			} else {
-				binlogs = append(binlogs, mergedStatsBlob)
-			}
+		if mergedStatsBlob, err := bw.writeLog(ctx, mergedStatsBlob, common.SegmentStatslogPath, pack, pkFieldID, int64(storage.CompoundStatsType)); err != nil {
+			return nil, err
+		} else {
+			binlogs = append(binlogs, mergedStatsBlob)
 		}
 	}
 
@@ -248,13 +246,13 @@ func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (
 
 	logs := make(map[int64]*datapb.FieldBinlog)
 	for fieldID, blob := range bm25Blobs {
-		if binlog, err := bw.writeLog(ctx, blob, common.SegmentBm25LogPath, pack, fieldID, bw.nextID()); err != nil {
+		binlog, err := bw.writeLog(ctx, blob, common.SegmentBm25LogPath, pack, fieldID, bw.nextID())
+		if err != nil {
 			return nil, err
-		} else {
-			logs[fieldID] = &datapb.FieldBinlog{
-				FieldID: fieldID,
-				Binlogs: []*datapb.Binlog{binlog},
-			}
+		}
+		logs[fieldID] = &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Binlogs: []*datapb.Binlog{binlog},
 		}
 	}
 
@@ -269,18 +267,18 @@ func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (
 					return nil, err
 				}
 				for fieldID, blob := range mergedBM25Blob {
-					if binlog, err := bw.writeLog(ctx, blob, common.SegmentBm25LogPath, pack, fieldID, int64(storage.CompoundStatsType)); err != nil {
+					binlog, err := bw.writeLog(ctx, blob, common.SegmentBm25LogPath, pack, fieldID, int64(storage.CompoundStatsType))
+					if err != nil {
 						return nil, err
-					} else {
-						fieldBinlog, ok := logs[fieldID]
-						if !ok {
-							fieldBinlog = &datapb.FieldBinlog{
-								FieldID: fieldID,
-							}
-							logs[fieldID] = fieldBinlog
-						}
-						fieldBinlog.Binlogs = append(fieldBinlog.Binlogs, binlog)
 					}
+					fieldBinlog, ok := logs[fieldID]
+					if !ok {
+						fieldBinlog = &datapb.FieldBinlog{
+							FieldID: fieldID,
+						}
+						logs[fieldID] = fieldBinlog
+					}
+					fieldBinlog.Binlogs = append(fieldBinlog.Binlogs, binlog)
 				}
 			}
 		}
@@ -301,12 +299,12 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 		return nil, err
 	}
 
-	if deltalog, err := bw.writeLog(ctx, deltaBlob, common.SegmentDeltaLogPath, pack, s.pkField.GetFieldID(), bw.nextID()); err != nil {
+	deltalog, err := bw.writeLog(ctx, deltaBlob, common.SegmentDeltaLogPath, pack, s.pkField.GetFieldID(), bw.nextID())
+	if err != nil {
 		return nil, err
-	} else {
-		return &datapb.FieldBinlog{
-			FieldID: s.pkField.GetFieldID(),
-			Binlogs: []*datapb.Binlog{deltalog},
-		}, nil
 	}
+	return &datapb.FieldBinlog{
+		FieldID: s.pkField.GetFieldID(),
+		Binlogs: []*datapb.Binlog{deltalog},
+	}, nil
 }
