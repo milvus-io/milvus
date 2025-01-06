@@ -50,9 +50,6 @@ type LocalClientRoleConfig struct {
 
 // EnableLocalClientRole init localable roles
 func EnableLocalClientRole(cfg *LocalClientRoleConfig) {
-	if !paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
-		return
-	}
 	if cfg.ServerType != typeutil.StandaloneRole && cfg.ServerType != typeutil.MixtureRole {
 		return
 	}
@@ -61,9 +58,6 @@ func EnableLocalClientRole(cfg *LocalClientRoleConfig) {
 
 // RegisterQueryCoordServer register query coord server
 func RegisterQueryCoordServer(server querypb.QueryCoordServer) {
-	if !enableLocal.EnableQueryCoord {
-		return
-	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&querypb.QueryCoord_ServiceDesc, server, querypb.NewQueryCoordClient)
 	glocalClient.queryCoordClient.Set(&nopCloseQueryCoordClient{newLocalClient})
 	log.Ctx(context.TODO()).Info("register query coord server", zap.Any("enableLocalClient", enableLocal))
@@ -71,9 +65,6 @@ func RegisterQueryCoordServer(server querypb.QueryCoordServer) {
 
 // RegsterDataCoordServer register data coord server
 func RegisterDataCoordServer(server datapb.DataCoordServer) {
-	if !enableLocal.EnableDataCoord {
-		return
-	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&datapb.DataCoord_ServiceDesc, server, datapb.NewDataCoordClient)
 	glocalClient.dataCoordClient.Set(&nopCloseDataCoordClient{newLocalClient})
 	log.Ctx(context.TODO()).Info("register data coord server", zap.Any("enableLocalClient", enableLocal))
@@ -81,9 +72,6 @@ func RegisterDataCoordServer(server datapb.DataCoordServer) {
 
 // RegisterRootCoordServer register root coord server
 func RegisterRootCoordServer(server rootcoordpb.RootCoordServer) {
-	if !enableLocal.EnableRootCoord {
-		return
-	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&rootcoordpb.RootCoord_ServiceDesc, server, rootcoordpb.NewRootCoordClient)
 	glocalClient.rootCoordClient.Set(&nopCloseRootCoordClient{newLocalClient})
 	log.Ctx(context.TODO()).Info("register root coord server", zap.Any("enableLocalClient", enableLocal))
@@ -93,7 +81,7 @@ func RegisterRootCoordServer(server rootcoordpb.RootCoordServer) {
 func GetQueryCoordClient(ctx context.Context) types.QueryCoordClient {
 	var client types.QueryCoordClient
 	var err error
-	if enableLocal.EnableQueryCoord {
+	if enableLocal.EnableQueryCoord && paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
 		client, err = glocalClient.queryCoordClient.GetWithContext(ctx)
 	} else {
 		// TODO: we should make a singleton here. but most unittest rely on a dedicated client.
@@ -109,7 +97,7 @@ func GetQueryCoordClient(ctx context.Context) types.QueryCoordClient {
 func GetDataCoordClient(ctx context.Context) types.DataCoordClient {
 	var client types.DataCoordClient
 	var err error
-	if enableLocal.EnableDataCoord {
+	if enableLocal.EnableDataCoord && paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
 		client, err = glocalClient.dataCoordClient.GetWithContext(ctx)
 	} else {
 		// TODO: we should make a singleton here. but most unittest rely on a dedicated client.
@@ -125,7 +113,7 @@ func GetDataCoordClient(ctx context.Context) types.DataCoordClient {
 func GetRootCoordClient(ctx context.Context) types.RootCoordClient {
 	var client types.RootCoordClient
 	var err error
-	if enableLocal.EnableRootCoord {
+	if enableLocal.EnableRootCoord && paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
 		client, err = glocalClient.rootCoordClient.GetWithContext(ctx)
 	} else {
 		// TODO: we should make a singleton here. but most unittest rely on a dedicated client.
@@ -135,6 +123,15 @@ func GetRootCoordClient(ctx context.Context) types.RootCoordClient {
 		panic(fmt.Sprintf("get root coord client failed: %v", err))
 	}
 	return client
+}
+
+// MustGetLocalRootCoordClientFuture return root coord client future,
+// panic if root coord client is not enabled
+func MustGetLocalRootCoordClientFuture() *syncutil.Future[types.RootCoordClient] {
+	if !enableLocal.EnableRootCoord {
+		panic("root coord client is not enabled")
+	}
+	return glocalClient.rootCoordClient
 }
 
 type nopCloseQueryCoordClient struct {
