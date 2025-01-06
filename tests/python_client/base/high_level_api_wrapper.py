@@ -1,5 +1,7 @@
 import sys
 import time
+from typing import Optional
+
 import timeout_decorator
 from numpy import NaN
 
@@ -41,6 +43,13 @@ class HighLevelApiWrapper:
         return res, check_result
 
     @trace()
+    def close(self, client, check_task=None, check_items=None):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([client.close])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ).run()
+        return res, check_result
+
+    @trace()
     def create_schema(self, client, timeout=None, check_task=None,
                       check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
@@ -53,13 +62,16 @@ class HighLevelApiWrapper:
         return res, check_result
 
     @trace()
-    def create_collection(self, client, collection_name, dimension, timeout=None, check_task=None,
+    def create_collection(self, client, collection_name, dimension=None, primary_field_name='id',
+                          id_type='int', vector_field_name='vector', metric_type='COSINE',
+                          auto_id=False, schema=None, index_params=None, timeout=None, check_task=None,
                           check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
-        kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([client.create_collection, collection_name, dimension], **kwargs)
+        res, check = api_request([client.create_collection, collection_name, dimension, primary_field_name,
+                                  id_type, vector_field_name, metric_type, auto_id, timeout, schema,
+                                  index_params], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        collection_name=collection_name, dimension=dimension,
                                        **kwargs).run()
@@ -85,7 +97,6 @@ class HighLevelApiWrapper:
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.insert, collection_name, data], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
-                                       collection_name=collection_name, data=data,
                                        **kwargs).run()
         return res, check_result
 
@@ -99,6 +110,17 @@ class HighLevelApiWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        collection_name=collection_name, data=data,
                                        **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def get_collection_stats(self, client, collection_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.get_collection_stats, collection_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       collection_name=collection_name, **kwargs).run()
         return res, check_result
 
     @trace()
@@ -219,9 +241,9 @@ class HighLevelApiWrapper:
         return res, check_result
 
     @trace()
-    def list_indexes(self, client, collection_name, check_task=None, check_items=None, **kwargs):
+    def list_indexes(self, client, collection_name, field_name=None, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([client.list_indexes, collection_name], **kwargs)
+        res, check = api_request([client.list_indexes, collection_name, field_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        collection_name=collection_name,
                                        **kwargs).run()
@@ -314,15 +336,12 @@ class HighLevelApiWrapper:
         return res, check_result
 
     @trace()
-    def use_database(self, client, db_name, timeout=None, check_task=None, check_items=None, **kwargs):
-        timeout = TIMEOUT if timeout is None else timeout
-        kwargs.update({"timeout": timeout})
-
+    def create_database(self, client, db_name, properties: Optional[dict] = None, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([client.use_database, db_name], **kwargs)
+        res, check = api_request([client.create_database, db_name, properties], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task,
                                        check_items, check,
-                                       db_name=db_name,
+                                       db_name=db_name, properties=properties,
                                        **kwargs).run()
         return res, check_result
 
@@ -533,10 +552,7 @@ class HighLevelApiWrapper:
 
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.using_database, db_name], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task,
-                                       check_items, check,
-                                       db_name=db_name,
-                                       **kwargs).run()
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
     def create_user(self, user_name, password, timeout=None, check_task=None, check_items=None, **kwargs):
@@ -678,3 +694,128 @@ class HighLevelApiWrapper:
                                        role_name=role_name, object_type=object_type, privilege=privilege,
                                        object_name=object_name, db_name=db_name, **kwargs).run()
         return res, check_result
+
+    @trace()
+    def alter_index_properties(self, client, collection_name, index_name, properties, timeout=None,
+                               check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.alter_index_properties, collection_name, index_name, properties],
+                                 **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def drop_index_properties(self, client, collection_name, index_name, property_keys, timeout=None,
+                               check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.drop_index_properties, collection_name, index_name, property_keys],
+                                 **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def alter_collection_properties(self, client, collection_name, properties, timeout=None,
+                               check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.alter_collection_properties, collection_name, properties],
+                                 **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def drop_collection_properties(self, client, collection_name, property_keys, timeout=None,
+                                    check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.drop_collection_properties, collection_name, property_keys, timeout],
+                                 **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def alter_collection_field(self, client, collection_name, field_name, field_params, timeout=None,
+                                    check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.alter_collection_field, collection_name, field_name, field_params, timeout],
+                                 **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def alter_database_properties(self, client, db_name, properties, timeout=None,
+                               check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.alter_database_properties, db_name, properties], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def drop_database_properties(self, client, db_name, property_keys, timeout=None,
+                                  check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.drop_database_properties, db_name, property_keys], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def create_database(self, client, db_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.create_database, db_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def describe_database(self, client, db_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.describe_database, db_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def drop_database(self, client, db_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.drop_database, db_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def list_databases(self, client, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.list_databases], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+
+
+
+

@@ -10610,7 +10610,7 @@ class TestSearchGroupBy(TestcaseBase):
                 3. search with group by
                 verify: the error code and msg
         """
-        if index in ["HNSW", "IVF_FLAT", "FLAT", "IVF_SQ8", "DISKANN"]:
+        if index in ["HNSW", "IVF_FLAT", "FLAT", "IVF_SQ8", "DISKANN", "SCANN"]:
             pass  # Only HNSW and IVF_FLAT are supported
         else:
             metric = "L2"
@@ -10954,6 +10954,40 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                 check_items={"nq": nq,
                                                              "ids": insert_ids,
                                                              "limit": default_limit})[0]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_hybrid_search_normal_expr(self):
+        """
+        target: test hybrid search normal case
+        method: create connection, collection, insert and search
+        expected: hybrid search successfully with search param templates
+        """
+        # 1. initialize collection with data
+        nq = 10
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True)[0:5]
+        # 2. extract vector field name
+        vector_name_list = cf.extract_vector_field_name_list(collection_w)
+        vector_name_list.append(ct.default_float_vec_field_name)
+        # 3. prepare search params
+        req_list = []
+        weights = [1]
+        vectors = cf.gen_vectors_based_on_vector_type(nq, default_dim, "FLOAT_VECTOR")
+        # 4. get hybrid search req list
+        for i in range(len(vector_name_list)):
+            search_param = {
+                "data": vectors,
+                "anns_field": vector_name_list[i],
+                "param": {"metric_type": "COSINE"},
+                "limit": default_limit,
+                "expr": "int64 > {value_0}",
+                "expr_params": {"value_0": 0}
+            }
+            req = AnnSearchRequest(**search_param)
+            req_list.append(req)
+        # 5. hybrid search
+        collection_w.hybrid_search(req_list, WeightedRanker(*weights), default_limit,
+                                   check_task=CheckTasks.check_search_results,
+                                   check_items={"nq": nq, "ids": insert_ids, "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="issue 32288")
