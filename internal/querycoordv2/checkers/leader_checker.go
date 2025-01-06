@@ -171,13 +171,16 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *met
 			continue
 		}
 
-		// when segment's version in leader view doesn't match segment's version in dist
-		// which means leader view store wrong segment location in leader view, then we should update segment location and segment's version
+		// The routing table on the delegator points to the nodes where segments are loaded. There are two scenarios that require updating the routing table on the delegator:
+		// 1. Missing Segment Routing - The routing table lacks the route for a specific segment.
+		// 2. Outdated Segment Routing - A segment has multiple copies loaded, but the routing table points to a node that does not host the most recently loaded copy.
+		// This ensures the routing table remains accurate and up-to-date, reflecting the latest segment distribution.
 		version, ok := leaderView.Segments[s.GetID()]
-		if !ok || version.GetVersion() != s.Version {
+		if !ok || version.GetNodeID() != s.Node {
 			log.RatedDebug(10, "leader checker append a segment to set",
 				zap.Int64("segmentID", s.GetID()),
 				zap.Int64("nodeID", s.Node))
+
 			action := task.NewLeaderAction(leaderView.ID, s.Node, task.ActionTypeGrow, s.GetInsertChannel(), s.GetID(), time.Now().UnixNano())
 			t := task.NewLeaderSegmentTask(
 				ctx,
