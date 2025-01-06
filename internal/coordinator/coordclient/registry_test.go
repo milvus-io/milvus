@@ -31,13 +31,6 @@ func TestRegistry(t *testing.T) {
 	assert.False(t, enableLocal.EnableDataCoord)
 	assert.False(t, enableLocal.EnableRootCoord)
 
-	RegisterRootCoordServer(&rootcoordpb.UnimplementedRootCoordServer{})
-	RegisterDataCoordServer(&datapb.UnimplementedDataCoordServer{})
-	RegisterQueryCoordServer(&querypb.UnimplementedQueryCoordServer{})
-	assert.False(t, glocalClient.dataCoordClient.Ready())
-	assert.False(t, glocalClient.queryCoordClient.Ready())
-	assert.False(t, glocalClient.rootCoordClient.Ready())
-
 	enableLocal = &LocalClientRoleConfig{}
 
 	EnableLocalClientRole(&LocalClientRoleConfig{

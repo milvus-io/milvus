@@ -33,11 +33,13 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -47,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -84,7 +87,7 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 
 type Opt func(*Core)
 
-type metaKVCreator func() (kv.MetaKv, error)
+type metaKVCreator func() kv.MetaKv
 
 // Core root coordinator core
 type Core struct {
@@ -130,6 +133,8 @@ type Core struct {
 	activateFunc        func() error
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	streamingCoord *streamingcoord.Server
 }
 
 // --------------------- function --------------------------
@@ -327,17 +332,26 @@ func (c *Core) initSession() error {
 func (c *Core) initKVCreator() {
 	if c.metaKVCreator == nil {
 		if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
-			c.metaKVCreator = func() (kv.MetaKv, error) {
+			c.metaKVCreator = func() kv.MetaKv {
 				return tikv.NewTiKV(c.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue(),
-					tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
+					tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 			}
 		} else {
-			c.metaKVCreator = func() (kv.MetaKv, error) {
+			c.metaKVCreator = func() kv.MetaKv {
 				return etcdkv.NewEtcdKV(c.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
-					etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
+					etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 			}
 		}
 	}
+}
+
+func (c *Core) initStreamingCoord() {
+	c.streamingCoord = streamingcoord.NewServerBuilder().
+		WithETCD(c.etcdCli).
+		WithMetaKV(c.metaKVCreator()).
+		WithSession(c.session).
+		WithRootCoordClient(coordclient.MustGetLocalRootCoordClientFuture()).
+		Build()
 }
 
 func (c *Core) initMetaTable(initCtx context.Context) error {
@@ -348,28 +362,20 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 		switch Params.MetaStoreCfg.MetaStoreType.GetValue() {
 		case util.MetaStoreTypeEtcd:
 			log.Ctx(initCtx).Info("Using etcd as meta storage.")
-			var metaKV kv.MetaKv
 			var ss *kvmetestore.SuffixSnapshot
 			var err error
 
-			if metaKV, err = c.metaKVCreator(); err != nil {
-				return err
-			}
-
+			metaKV := c.metaKVCreator()
 			if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, Params.EtcdCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
 				return err
 			}
 			catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
 		case util.MetaStoreTypeTiKV:
 			log.Ctx(initCtx).Info("Using tikv as meta storage.")
-			var metaKV kv.MetaKv
 			var ss *kvmetestore.SuffixSnapshot
 			var err error
 
-			if metaKV, err = c.metaKVCreator(); err != nil {
-				return err
-			}
-
+			metaKV := c.metaKVCreator()
 			if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, Params.TiKVCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
 				return err
 			}
@@ -442,7 +448,6 @@ func (c *Core) initInternal() error {
 	log := log.Ctx(initCtx)
 
 	c.UpdateStateCode(commonpb.StateCode_Initializing)
-	c.initKVCreator()
 
 	if err := c.initIDAllocator(initCtx); err != nil {
 		return err
@@ -470,6 +475,10 @@ func (c *Core) initInternal() error {
 	c.garbageCollector = newBgGarbageCollector(c)
 	c.stepExecutor = newBgStepExecutor(c.ctx)
 
+	if err := c.streamingCoord.Start(c.ctx); err != nil {
+		log.Info("start streaming coord failed", zap.Error(err))
+		return err
+	}
 	if !streamingutil.IsStreamingServiceEnabled() {
 		c.proxyWatcher = proxyutil.NewProxyWatcher(
 			c.etcdCli,
@@ -523,6 +532,8 @@ func (c *Core) Init() error {
 	if err := c.initSession(); err != nil {
 		return err
 	}
+	c.initKVCreator()
+	c.initStreamingCoord()
 
 	if c.enableActiveStandBy {
 		c.activateFunc = func() error {
@@ -814,6 +825,8 @@ func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
 	c.stopExecutor()
 	c.stopScheduler()
+
+	c.streamingCoord.Stop()
 	if c.proxyWatcher != nil {
 		c.proxyWatcher.Stop()
 	}
@@ -3124,4 +3137,9 @@ func (c *Core) getPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGro
 		return nil, err
 	}
 	return allGroups, nil
+}
+
+// RegisterStreamingCoordGRPCService registers the grpc service of streaming coordinator.
+func (s *Core) RegisterStreamingCoordGRPCService(server *grpc.Server) {
+	s.streamingCoord.RegisterGRPCService(server)
 }
