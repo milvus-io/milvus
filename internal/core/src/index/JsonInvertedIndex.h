@@ -31,6 +31,9 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         this->disk_file_manager_ =
             std::make_shared<storage::DiskFileManagerImpl>(ctx);
 
+        if (ctx.for_loading_index) {
+            return;
+        }
         auto prefix = this->disk_file_manager_->GetTextIndexIdentifier();
         constexpr const char* TMP_INVERTED_INDEX_PREFIX =
             "/tmp/milvus/inverted-index/";
