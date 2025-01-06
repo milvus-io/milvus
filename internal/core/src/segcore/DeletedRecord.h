@@ -195,6 +195,19 @@ class DeletedRecord {
             accessor.lower_bound(std::make_pair(query_timestamp, 0));
 
         auto it = start_iter;
+
+        // when end_iter point to skiplist end, concurrent delete may append new value
+        // after lower_bound() called, so end_iter is not logical valid.
+        if (end_iter == accessor.end()) {
+            while (it != accessor.end() && it->first <= query_timestamp) {
+                if (it->second < insert_barrier) {
+                    bitset.set(it->second);
+                }
+                it++;
+            }
+            return;
+        }
+
         while (it != accessor.end() && it != end_iter) {
             if (it->second < insert_barrier) {
                 bitset.set(it->second);
