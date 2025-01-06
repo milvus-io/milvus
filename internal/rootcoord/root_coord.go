@@ -826,7 +826,9 @@ func (c *Core) Stop() error {
 	c.stopExecutor()
 	c.stopScheduler()
 
-	c.streamingCoord.Stop()
+	if c.streamingCoord != nil {
+		c.streamingCoord.Stop()
+	}
 	if c.proxyWatcher != nil {
 		c.proxyWatcher.Stop()
 	}

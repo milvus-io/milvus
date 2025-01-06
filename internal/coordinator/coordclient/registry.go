@@ -58,6 +58,9 @@ func EnableLocalClientRole(cfg *LocalClientRoleConfig) {
 
 // RegisterQueryCoordServer register query coord server
 func RegisterQueryCoordServer(server querypb.QueryCoordServer) {
+	if !enableLocal.EnableQueryCoord {
+		return
+	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&querypb.QueryCoord_ServiceDesc, server, querypb.NewQueryCoordClient)
 	glocalClient.queryCoordClient.Set(&nopCloseQueryCoordClient{newLocalClient})
 	log.Ctx(context.TODO()).Info("register query coord server", zap.Any("enableLocalClient", enableLocal))
@@ -65,6 +68,9 @@ func RegisterQueryCoordServer(server querypb.QueryCoordServer) {
 
 // RegsterDataCoordServer register data coord server
 func RegisterDataCoordServer(server datapb.DataCoordServer) {
+	if !enableLocal.EnableDataCoord {
+		return
+	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&datapb.DataCoord_ServiceDesc, server, datapb.NewDataCoordClient)
 	glocalClient.dataCoordClient.Set(&nopCloseDataCoordClient{newLocalClient})
 	log.Ctx(context.TODO()).Info("register data coord server", zap.Any("enableLocalClient", enableLocal))
@@ -72,6 +78,9 @@ func RegisterDataCoordServer(server datapb.DataCoordServer) {
 
 // RegisterRootCoordServer register root coord server
 func RegisterRootCoordServer(server rootcoordpb.RootCoordServer) {
+	if !enableLocal.EnableRootCoord {
+		return
+	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&rootcoordpb.RootCoord_ServiceDesc, server, rootcoordpb.NewRootCoordClient)
 	glocalClient.rootCoordClient.Set(&nopCloseRootCoordClient{newLocalClient})
 	log.Ctx(context.TODO()).Info("register root coord server", zap.Any("enableLocalClient", enableLocal))
@@ -128,9 +137,6 @@ func GetRootCoordClient(ctx context.Context) types.RootCoordClient {
 // MustGetLocalRootCoordClientFuture return root coord client future,
 // panic if root coord client is not enabled
 func MustGetLocalRootCoordClientFuture() *syncutil.Future[types.RootCoordClient] {
-	if !enableLocal.EnableRootCoord {
-		panic("root coord client is not enabled")
-	}
 	return glocalClient.rootCoordClient
 }
 
