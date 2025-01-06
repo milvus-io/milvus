@@ -27,13 +27,15 @@ GenColumnInfo(
     proto::schema::DataType field_type,
     bool auto_id,
     bool is_pk,
-    proto::schema::DataType element_type = proto::schema::DataType::None) {
+    proto::schema::DataType element_type = proto::schema::DataType::None,
+    bool nullable = false) {
     auto column_info = new proto::plan::ColumnInfo();
     column_info->set_field_id(field_id);
     column_info->set_data_type(field_type);
     column_info->set_is_autoid(auto_id);
     column_info->set_is_primary_key(is_pk);
     column_info->set_element_type(element_type);
+    column_info->set_nullable(nullable);
     return column_info;
 }
 
@@ -63,6 +65,13 @@ GenUnaryRangeExpr(proto::plan::OpType op, T& value) {
     auto generic = GenGenericValue(value);
     unary_range_expr->set_allocated_value(generic);
     return unary_range_expr;
+}
+
+inline auto
+GenNullExpr(NullExprType op) {
+    auto null_expr = new proto::plan::NullExpr();
+    null_expr->set_op(op);
+    return null_expr;
 }
 
 inline auto

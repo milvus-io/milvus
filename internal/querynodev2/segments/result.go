@@ -545,7 +545,9 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			})
 			futures = append(futures, future)
 		}
-		if err := conc.AwaitAll(futures...); err != nil {
+		// Must be BlockOnAll operation here.
+		// If we perform a fast fail here, the cgo struct like `plan` will be used after free, unsafe memory access happens.
+		if err := conc.BlockOnAll(futures...); err != nil {
 			return nil, err
 		}
 
