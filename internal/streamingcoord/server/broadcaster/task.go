@@ -49,15 +49,17 @@ type broadcastTask struct {
 	*typeutil.BackoffWithInstant
 }
 
-// Poll polls the task, return nil if the task is done, otherwise not done.
-// Poll can be repeated called until the task is done.
-func (b *broadcastTask) Poll(ctx context.Context, operator AppendOperator) error {
+// Execute reexecute the task, return nil if the task is done, otherwise not done.
+// Execute can be repeated called until the task is done.
+// Same semantics as the `Poll` operation in eventloop.
+func (b *broadcastTask) Execute(ctx context.Context, operator AppendOperator) error {
 	if len(b.pendingMessages) > 0 {
 		b.logger.Debug("broadcast task is polling to make sent...", zap.Int("pendingMessages", len(b.pendingMessages)))
 		resps := operator.AppendMessages(ctx, b.pendingMessages...)
 		newPendings := make([]message.MutableMessage, 0)
 		for idx, resp := range resps.Responses {
 			if resp.Error != nil {
+				b.logger.Warn("broadcast task append message failed", zap.Int("idx", idx), zap.Error(resp.Error))
 				newPendings = append(newPendings, b.pendingMessages[idx])
 				continue
 			}
@@ -67,7 +69,7 @@ func (b *broadcastTask) Poll(ctx context.Context, operator AppendOperator) error
 		if len(newPendings) == 0 {
 			b.future.Set(&types.BroadcastAppendResult{AppendResults: b.appendResult})
 		}
-		b.logger.Info("broadcast task make a new broadcast done", zap.Int("pendingMessages", len(b.pendingMessages)))
+		b.logger.Info("broadcast task make a new broadcast done", zap.Int("backoffRetryMessages", len(b.pendingMessages)))
 	}
 	if len(b.pendingMessages) == 0 {
 		// There's no more pending message, mark the task as done.

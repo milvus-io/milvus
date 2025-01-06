@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	_ "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/policy" // register the balancer policy
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -69,7 +70,7 @@ func (s *Server) initBasicComponent(ctx context.Context) (err error) {
 	// So we need to recover it.
 	futures = append(futures, conc.Go(func() (struct{}, error) {
 		s.logger.Info("start recovery broadcaster...")
-		broadcaster, err := broadcaster.RecoverBroadcaster(ctx, broadcaster.NewAppendOperator())
+		broadcaster, err := broadcaster.RecoverBroadcaster(ctx, registry.GetAppendOperator())
 		if err != nil {
 			s.logger.Warn("recover broadcaster failed", zap.Error(err))
 			return struct{}{}, err
