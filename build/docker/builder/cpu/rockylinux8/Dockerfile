@@ -43,7 +43,7 @@ RUN dnf -y update && \
 
 
 RUN pip3 install conan==1.64.1
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.21.11.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go 
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.22.10.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go 
 RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- --default-toolchain=1.83 -y
 
