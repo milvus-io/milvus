@@ -11,6 +11,7 @@
 
 #include "SearchOnIndex.h"
 #include "exec/operator/Utils.h"
+#include "CachedSearchIterator.h"
 
 namespace milvus::query {
 void
@@ -26,14 +27,23 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     auto dataset =
         knowhere::GenDataSet(num_queries, dim, search_dataset.query_data);
     dataset->SetIsSparse(is_sparse);
-    if (!milvus::exec::PrepareVectorIteratorsFromIndex(search_conf,
-                                                       num_queries,
-                                                       dataset,
-                                                       search_result,
-                                                       bitset,
-                                                       indexing)) {
-        indexing.Query(dataset, search_conf, bitset, search_result);
+    if (milvus::exec::PrepareVectorIteratorsFromIndex(search_conf,
+                                                      num_queries,
+                                                      dataset,
+                                                      search_result,
+                                                      bitset,
+                                                      indexing)) {
+        return;
     }
+
+    if (search_conf.iterator_v2_info_.has_value()) {
+        auto iter =
+            CachedSearchIterator(indexing, dataset, search_conf, bitset);
+        iter.NextBatch(search_conf, search_result);
+        return;
+    }
+
+    indexing.Query(dataset, search_conf, bitset, search_result);
 }
 
 }  // namespace milvus::query

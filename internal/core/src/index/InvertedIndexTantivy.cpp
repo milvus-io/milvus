@@ -103,6 +103,9 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
 
 template <typename T>
 InvertedIndexTantivy<T>::~InvertedIndexTantivy() {
+    if (wrapper_) {
+        wrapper_->free();
+    }
     auto local_chunk_manager =
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto prefix = path_;
@@ -124,8 +127,10 @@ InvertedIndexTantivy<T>::Serialize(const Config& config) {
         new uint8_t[index_valid_data_length]);
     memcpy(index_valid_data.get(), null_offset.data(), index_valid_data_length);
     BinarySet res_set;
-    res_set.Append(
-        "index_null_offset", index_valid_data, index_valid_data_length);
+    if (index_valid_data_length > 0) {
+        res_set.Append(
+            "index_null_offset", index_valid_data, index_valid_data_length);
+    }
     milvus::Disassemble(res_set);
     return res_set;
 }

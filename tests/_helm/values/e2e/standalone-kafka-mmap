@@ -8,6 +8,8 @@ affinity:
       weight: 1
 cluster:
   enabled: false
+streaming:
+  enabled: true
 dataCoordinator:
   resources:
     limits:
@@ -261,6 +263,7 @@ queryNode:
     vectorIndex: true
     scalarField: true
     scalarIndex: true
+    growingMmapEnabled: true
 rootCoordinator:
   resources:
     limits:

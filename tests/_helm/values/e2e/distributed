@@ -8,6 +8,8 @@ affinity:
       weight: 1
 cluster:
   enabled: true
+streaming:
+  enabled: true
 dataCoordinator:
   resources:
     limits:

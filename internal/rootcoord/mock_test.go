@@ -94,7 +94,7 @@ type mockMetaTable struct {
 	OperatePrivilegeFunc             func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
 	SelectGrantFunc                  func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
 	DropGrantFunc                    func(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error
-	ListPolicyFunc                   func(ctx context.Context, tenant string) ([]string, error)
+	ListPolicyFunc                   func(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error)
 	ListUserRoleFunc                 func(ctx context.Context, tenant string) ([]string, error)
 	DescribeDatabaseFunc             func(ctx context.Context, dbName string) (*model.Database, error)
 	CreatePrivilegeGroupFunc         func(ctx context.Context, groupName string) error
@@ -249,7 +249,7 @@ func (m mockMetaTable) DropGrant(ctx context.Context, tenant string, role *milvu
 	return m.DropGrantFunc(ctx, tenant, role)
 }
 
-func (m mockMetaTable) ListPolicy(ctx context.Context, tenant string) ([]string, error) {
+func (m mockMetaTable) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
 	return m.ListPolicyFunc(ctx, tenant)
 }
 
@@ -542,7 +542,7 @@ func withInvalidMeta() Opt {
 	meta.DropGrantFunc = func(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
 		return errors.New("error mock DropGrant")
 	}
-	meta.ListPolicyFunc = func(ctx context.Context, tenant string) ([]string, error) {
+	meta.ListPolicyFunc = func(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
 		return nil, errors.New("error mock ListPolicy")
 	}
 	meta.ListUserRoleFunc = func(ctx context.Context, tenant string) ([]string, error) {
@@ -712,7 +712,7 @@ func newRocksMqTtSynchronizer() *timetickSync {
 	ctx := context.Background()
 	factory := dependency.NewDefaultFactory(true)
 	chans := map[UniqueID][]string{}
-	ticker := newTimeTickSync(ctx, TestRootCoordID, factory, chans)
+	ticker := newTimeTickSync(context.TODO(), ctx, TestRootCoordID, factory, chans)
 	return ticker
 }
 
@@ -1054,7 +1054,7 @@ func newTickerWithFactory(factory msgstream.Factory) *timetickSync {
 	paramtable.Get().Save(Params.RootCoordCfg.DmlChannelNum.Key, "4")
 	ctx := context.Background()
 	chans := map[UniqueID][]string{}
-	ticker := newTimeTickSync(ctx, TestRootCoordID, factory, chans)
+	ticker := newTimeTickSync(context.TODO(), ctx, TestRootCoordID, factory, chans)
 	return ticker
 }
 

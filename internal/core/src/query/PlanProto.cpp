@@ -55,12 +55,26 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             query_info_proto.materialized_view_involved();
         // currently, iterative filter does not support range search
         if (!search_info.search_params_.contains(RADIUS)) {
-            search_info.iterative_filter_execution =
-                (query_info_proto.hints() == ITERATIVE_FILTER);
+            if (query_info_proto.hints() != "") {
+                if (query_info_proto.hints() == ITERATIVE_FILTER) {
+                    search_info.iterative_filter_execution = true;
+                } else {
+                    // check if hints is valid
+                    PanicInfo(ConfigInvalid,
+                              "hints: {} not supported",
+                              query_info_proto.hints());
+                }
+            }
             if (!search_info.iterative_filter_execution &&
                 search_info.search_params_.contains(HINTS)) {
-                search_info.iterative_filter_execution =
-                    (search_info.search_params_[HINTS] == ITERATIVE_FILTER);
+                if (search_info.search_params_[HINTS] == ITERATIVE_FILTER) {
+                    search_info.iterative_filter_execution = true;
+                } else {
+                    // check if hints is valid
+                    PanicInfo(ConfigInvalid,
+                              "hints: {} not supported",
+                              search_info.search_params_[HINTS]);
+                }
             }
         }
 
@@ -79,6 +93,20 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             search_info.strict_group_size_ =
                 query_info_proto.strict_group_size();
         }
+
+        if (query_info_proto.has_search_iterator_v2_info()) {
+            auto& iterator_v2_info_proto =
+                query_info_proto.search_iterator_v2_info();
+            search_info.iterator_v2_info_ = SearchIteratorV2Info{
+                .token = iterator_v2_info_proto.token(),
+                .batch_size = iterator_v2_info_proto.batch_size(),
+            };
+            if (iterator_v2_info_proto.has_last_bound()) {
+                search_info.iterator_v2_info_->last_bound =
+                    iterator_v2_info_proto.last_bound();
+            }
+        }
+
         return search_info;
     };
 
@@ -288,6 +316,16 @@ ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
 }
 
 expr::TypedExprPtr
+ProtoParser::ParseNullExprs(const proto::plan::NullExpr& expr_pb) {
+    auto& column_info = expr_pb.column_info();
+    auto field_id = FieldId(column_info.field_id());
+    auto data_type = schema[field_id].get_data_type();
+    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    return std::make_shared<milvus::expr::NullExpr>(
+        expr::ColumnInfo(column_info), expr_pb.op());
+}
+
+expr::TypedExprPtr
 ProtoParser::ParseBinaryRangeExprs(
     const proto::plan::BinaryRangeExpr& expr_pb) {
     auto& columnInfo = expr_pb.column_info();
@@ -491,6 +529,10 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         }
         case ppe::kValueExpr: {
             result = ParseValueExprs(expr_pb.value_expr());
+            break;
+        }
+        case ppe::kNullExpr: {
+            result = ParseNullExprs(expr_pb.null_expr());
             break;
         }
         default: {
