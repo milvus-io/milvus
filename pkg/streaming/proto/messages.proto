@@ -248,3 +248,8 @@ message RMQMessageLayout {
     bytes payload                  = 1;  // message body
     map<string, string> properties = 2;  // message properties
 }
+
+// VChannels is a layout to represent the virtual channels for broadcast.
+message VChannels {
+    repeated string vchannels = 1;
+}

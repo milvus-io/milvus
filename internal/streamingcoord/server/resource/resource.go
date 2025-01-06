@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/manager"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -29,6 +30,7 @@ func OptETCD(etcd *clientv3.Client) optResourceInit {
 func OptRootCoordClient(rootCoordClient *syncutil.Future[types.RootCoordClient]) optResourceInit {
 	return func(r *resourceImpl) {
 		r.rootCoordClient = rootCoordClient
+		r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
 	}
 }
 
@@ -48,6 +50,7 @@ func Init(opts ...optResourceInit) {
 	for _, opt := range opts {
 		opt(newR)
 	}
+	assertNotNil(newR.IDAllocator())
 	assertNotNil(newR.RootCoordClient())
 	assertNotNil(newR.ETCD())
 	assertNotNil(newR.StreamingCatalog())
@@ -64,6 +67,7 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
+	idAllocator                idalloc.Allocator
 	rootCoordClient            *syncutil.Future[types.RootCoordClient]
 	etcdClient                 *clientv3.Client
 	streamingCatalog           metastore.StreamingCoordCataLog
@@ -74,6 +78,11 @@ type resourceImpl struct {
 // RootCoordClient returns the root coordinator client.
 func (r *resourceImpl) RootCoordClient() *syncutil.Future[types.RootCoordClient] {
 	return r.rootCoordClient
+}
+
+// IDAllocator returns the IDAllocator client.
+func (r *resourceImpl) IDAllocator() idalloc.Allocator {
+	return r.idAllocator
 }
 
 // StreamingCatalog returns the StreamingCatalog client.
