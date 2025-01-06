@@ -203,10 +203,10 @@ func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[i
 
 	pkFieldID := serializer.pkField.GetFieldID()
 	binlogs := make([]*datapb.Binlog, 0)
-	if batchStatsBlob, err := bw.writeLog(ctx, batchStatsBlob, common.SegmentStatslogPath, pack, pkFieldID, bw.nextID()); err != nil {
+	if binlog, err := bw.writeLog(ctx, batchStatsBlob, common.SegmentStatslogPath, pack, pkFieldID, bw.nextID()); err != nil {
 		return nil, err
 	} else {
-		binlogs = append(binlogs, batchStatsBlob)
+		binlogs = append(binlogs, binlog)
 	}
 
 	if pack.isFlush && pack.level != datapb.SegmentLevel_L0 {
@@ -215,11 +215,11 @@ func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[i
 			return nil, err
 		}
 
-		if mergedStatsBlob, err := bw.writeLog(ctx, mergedStatsBlob, common.SegmentStatslogPath, pack, pkFieldID, int64(storage.CompoundStatsType)); err != nil {
+		binlog, err := bw.writeLog(ctx, mergedStatsBlob, common.SegmentStatslogPath, pack, pkFieldID, int64(storage.CompoundStatsType))
+		if err != nil {
 			return nil, err
-		} else {
-			binlogs = append(binlogs, mergedStatsBlob)
 		}
+		binlogs = append(binlogs, binlog)
 	}
 
 	logs := make(map[int64]*datapb.FieldBinlog)
