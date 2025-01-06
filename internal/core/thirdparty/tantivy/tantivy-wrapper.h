@@ -409,21 +409,23 @@ struct TantivyIndexWrapper {
         return reader_;
     }
 
- private:
-    void
-    check_search() {
-        // TODO
-    }
-
     void
     free() {
         if (writer_ != nullptr) {
             tantivy_free_index_writer(writer_);
+            writer_ = nullptr;
         }
 
         if (reader_ != nullptr) {
             tantivy_free_index_reader(reader_);
+            reader_ = nullptr;
         }
+    }
+
+ private:
+    void
+    check_search() {
+        // TODO
     }
 
  private:
