@@ -21,7 +21,7 @@ require (
 	github.com/go-playground/validator/v10 v10.14.0
 	github.com/gofrs/flock v0.8.1
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/golang/protobuf v1.5.4
+	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/btree v1.1.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.17.9
@@ -252,7 +252,7 @@ replace (
 	github.com/apache/arrow/go/v12 => github.com/milvus-io/arrow/go/v12 v12.0.1
 	github.com/apache/pulsar-client-go => github.com/milvus-io/pulsar-client-go v0.6.10
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
-	github.com/expr-lang/expr => github.com/SimFG/expr v0.0.0-20241029080923-21854792f532
+	github.com/expr-lang/expr => github.com/SimFG/expr v0.0.0-20241226082220-a9a764953bf8
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
 	// github.com/milvus-io/milvus-storage/go => ../milvus-storage/go
 	github.com/ianlancetaylor/cgosymbolizer => github.com/milvus-io/cgosymbolizer v0.0.0-20240722103217-b7dee0e50119
