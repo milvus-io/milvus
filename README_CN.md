@@ -70,7 +70,7 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 请先安装相关依赖。
 
 ```
-go: 1.21
+go: >=1.22.7
 cmake: >=3.18
 gcc: 7.5
 protobuf: >=3.7
