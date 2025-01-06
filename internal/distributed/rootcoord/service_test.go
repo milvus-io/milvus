@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -95,6 +96,9 @@ func (m *mockCore) SetQueryCoordClient(client types.QueryCoordClient) error {
 }
 
 func (m *mockCore) SetProxyCreator(func(ctx context.Context, addr string, nodeID int64) (types.ProxyClient, error)) {
+}
+
+func (m *mockCore) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 }
 
 func (m *mockCore) Register() error {
