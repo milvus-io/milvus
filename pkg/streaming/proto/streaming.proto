@@ -60,18 +60,48 @@ message VersionPair {
     int64 local  = 2;
 }
 
+// BroadcastTaskState is the state of the broadcast task.
+enum BroadcastTaskState {
+    BROADCAST_TASK_STATE_UNKNOWN = 0;  // should never used.
+    BROADCAST_TASK_STATE_PENDING = 1;  // task is pending.
+    BROADCAST_TASK_STATE_DONE = 2;     // task is done, the message is broadcasted, and the persisted task can be cleared.
+}
+
+// BroadcastTask is the task to broadcast the message.
+message BroadcastTask {
+    int64 task_id = 1;                 // task id.
+    messages.Message message = 2;   // message to be broadcast.
+    BroadcastTaskState state = 3;   // state of the task.
+}
+
 //
 // Milvus Service
 //
 
-service StreamingCoordStateService {
+service StreamingNodeStateService {
     rpc GetComponentStates(milvus.GetComponentStatesRequest)
         returns (milvus.ComponentStates) {}
 }
 
-service StreamingNodeStateService {
-    rpc GetComponentStates(milvus.GetComponentStatesRequest)
-        returns (milvus.ComponentStates) {}
+//
+// StreamingCoordBroadcastService
+//
+
+// StreamingCoordBroadcastService is the broadcast service for streaming coord.
+service StreamingCoordBroadcastService {
+    // Broadcast receives broadcast messages from other component and make sure that the message is broadcast to all wal.
+    // It performs an atomic broadcast to all wal, achieve eventual consistency.
+    rpc Broadcast(BroadcastRequest) returns (BroadcastResponse) {}
+}
+
+// BroadcastRequest is the request of the Broadcast RPC.
+message BroadcastRequest {
+    messages.Message message = 1; // message to be broadcast.
+}
+
+// BroadcastResponse is the response of the Broadcast RPC.
+message BroadcastResponse {
+    map<string,ProduceMessageResponseResult> results = 1; 
 }
 
 //

@@ -242,3 +242,8 @@ enum TxnState {
     // the transaction is rollbacked.
     TxnRollbacked = 6;
 }
+
+// VChannels is a layout to represent the virtual channels for broadcast.
+message VChannels {
+    repeated string vchannels = 1;
+}
