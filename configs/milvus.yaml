@@ -1121,6 +1121,8 @@ streaming:
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     backoffInitialInterval: 50ms
     backoffMultiplier: 2 # The multiplier of balance task trigger backoff, 2 by default
+  walBroadcaster:
+    concurrencyRatio: 1 # The concurrency ratio based on number of CPU for wal broadcaster, 1 by default.
   txn:
     defaultKeepaliveTimeout: 10s # The default keepalive timeout for wal txn, 10s by default
 

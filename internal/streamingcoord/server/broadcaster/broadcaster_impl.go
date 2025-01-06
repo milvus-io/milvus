@@ -15,13 +15,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func RecoverBroadcaster(
 	ctx context.Context,
-	appendOperator AppendOperator,
+	appendOperator *syncutil.Future[AppendOperator],
 ) (Broadcaster, error) {
 	logger := resource.Resource().Logger().With(log.FieldComponent("broadcaster"))
 	tasks, err := resource.Resource().StreamingCatalog().ListBroadcastTask(ctx)
@@ -61,7 +63,7 @@ type broadcasterImpl struct {
 	pendingChan            chan *broadcastTask
 	backoffChan            chan *broadcastTask
 	workerChan             chan *broadcastTask
-	appendOperator         AppendOperator
+	appendOperator         *syncutil.Future[AppendOperator] // TODO: we can remove those lazy future in 2.6.0, by remove the msgstream broadcaster.
 }
 
 // Broadcast broadcasts the message to all channels.
@@ -126,21 +128,34 @@ func (b *broadcasterImpl) Close() {
 
 // execute the broadcaster
 func (b *broadcasterImpl) execute() {
-	b.logger.Info("broadcaster start to execute")
+	workers := int(float64(hardware.GetCPUNum()) * paramtable.Get().StreamingCfg.WALBroadcasterConcurrencyRatio.GetAsFloat())
+	if workers < 1 {
+		workers = 1
+	}
+	b.logger.Info("broadcaster start to execute", zap.Int("workerNum", workers))
+
 	defer func() {
 		b.backgroundTaskNotifier.Finish(struct{}{})
 		b.logger.Info("broadcaster execute exit")
 	}()
 
+	// Wait for appendOperator ready
+	appendOperator, err := b.appendOperator.GetWithContext(b.backgroundTaskNotifier.Context())
+	if err != nil {
+		b.logger.Info("broadcaster is closed before appendOperator ready")
+		return
+	}
+	b.logger.Info("broadcaster appendOperator ready, begin to start workers and dispatch")
+
 	// Start n workers to handle the broadcast task.
 	wg := sync.WaitGroup{}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < workers; i++ {
 		i := i
 		// Start n workers to handle the broadcast task.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			b.worker(i)
+			b.worker(i, appendOperator)
 		}()
 	}
 	defer wg.Wait()
@@ -174,8 +189,13 @@ func (b *broadcasterImpl) dispatch() {
 			b.backoffs.Push(task)
 		case <-nextBackOff:
 			// backoff is done, move all the backoff done task into pending to retry.
+			newPops := make([]*broadcastTask, 0)
 			for b.backoffs.Len() > 0 && b.backoffs.Peek().NextInterval() < time.Millisecond {
-				b.pendings = append(b.pendings, b.backoffs.Pop())
+				newPops = append(newPops, b.backoffs.Pop())
+			}
+			if len(newPops) > 0 {
+				// Push the backoff task into pendings front.
+				b.pendings = append(newPops, b.pendings...)
 			}
 		case workerChan <- nextTask:
 			// The task is sent to worker, remove it from pending list.
@@ -184,9 +204,10 @@ func (b *broadcasterImpl) dispatch() {
 	}
 }
 
-func (b *broadcasterImpl) worker(no int) {
+func (b *broadcasterImpl) worker(no int, appendOperator AppendOperator) {
+	logger := b.logger.With(zap.Int("workerNo", no))
 	defer func() {
-		b.logger.Info("broadcaster worker exit", zap.Int("no", no))
+		logger.Info("broadcaster worker exit")
 	}()
 
 	for {
@@ -194,7 +215,7 @@ func (b *broadcasterImpl) worker(no int) {
 		case <-b.backgroundTaskNotifier.Context().Done():
 			return
 		case task := <-b.workerChan:
-			if err := task.Poll(b.backgroundTaskNotifier.Context(), b.appendOperator); err != nil {
+			if err := task.Execute(b.backgroundTaskNotifier.Context(), appendOperator); err != nil {
 				// If the task is not done, repush it into pendings and retry infinitely.
 				select {
 				case <-b.backgroundTaskNotifier.Context().Done():
