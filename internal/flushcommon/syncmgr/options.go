@@ -14,12 +14,7 @@ import (
 )
 
 func NewSyncTask() *SyncTask {
-	return &SyncTask{
-		insertBinlogs: make(map[int64]*datapb.FieldBinlog),
-		statsBinlogs:  make(map[int64]*datapb.FieldBinlog),
-		deltaBinlog:   &datapb.FieldBinlog{},
-		bm25Binlogs:   make(map[int64]*datapb.FieldBinlog),
-	}
+	return new(SyncTask)
 }
 
 func (t *SyncTask) WithSyncPack(pack *SyncPack) *SyncTask {

@@ -19,8 +19,9 @@ package syncmgr
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/allocator"
 )
 
 func TestNextID(t *testing.T) {

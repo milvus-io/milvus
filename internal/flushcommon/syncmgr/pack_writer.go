@@ -20,6 +20,9 @@ import (
 	"context"
 	"path"
 
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -28,8 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/retry"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 )
 
 type PackWriter interface {
@@ -157,7 +158,7 @@ func (bw *BulkPackWriter) writeLog(ctx context.Context, blob *storage.Blob,
 
 func (bw *BulkPackWriter) writeInserts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
 	if len(pack.insertData) == 0 {
-		return nil, nil
+		return make(map[int64]*datapb.FieldBinlog), nil
 	}
 
 	serializer, err := NewStorageSerializer(bw.metaCache)
@@ -186,7 +187,7 @@ func (bw *BulkPackWriter) writeInserts(ctx context.Context, pack *SyncPack) (map
 
 func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
 	if len(pack.insertData) == 0 {
-		return nil, nil
+		return make(map[int64]*datapb.FieldBinlog), nil
 	}
 	serializer, err := NewStorageSerializer(bw.metaCache)
 	if err != nil {
@@ -233,7 +234,7 @@ func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[i
 
 func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
 	if len(pack.bm25Stats) == 0 {
-		return nil, nil
+		return make(map[int64]*datapb.FieldBinlog), nil
 	}
 
 	serializer, err := NewStorageSerializer(bw.metaCache)
@@ -289,7 +290,7 @@ func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (
 
 func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*datapb.FieldBinlog, error) {
 	if pack.deltaData == nil {
-		return nil, nil
+		return &datapb.FieldBinlog{}, nil
 	}
 	s, err := NewStorageSerializer(bw.metaCache)
 	if err != nil {
