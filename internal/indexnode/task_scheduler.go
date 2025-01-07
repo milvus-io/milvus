@@ -44,6 +44,7 @@ type TaskQueue interface {
 	PopActiveTask(tName string) task
 	Enqueue(t task) error
 	GetTaskNum() (int, int)
+	GetUsingSlot() int64
 }
 
 // BaseTaskQueue is a basic instance of TaskQueue.
@@ -83,6 +84,24 @@ func (queue *IndexTaskQueue) addUnissuedTask(t task) error {
 	queue.unissuedTasks.PushBack(t)
 	queue.utBufChan <- 1
 	return nil
+}
+
+func (queue *IndexTaskQueue) GetUsingSlot() int64 {
+	slot := int64(0)
+
+	queue.utLock.Lock()
+	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
+		slot += e.Value.(task).GetSlot()
+	}
+	queue.utLock.Unlock()
+
+	queue.atLock.Lock()
+	defer queue.atLock.Unlock()
+
+	for _, t := range queue.activeTasks {
+		slot += t.GetSlot()
+	}
+	return slot
 }
 
 // PopUnissuedTask pops a task from tasks queue.
@@ -170,35 +189,21 @@ func NewIndexBuildTaskQueue(sched *TaskScheduler) *IndexTaskQueue {
 type TaskScheduler struct {
 	TaskQueue TaskQueue
 
-	buildParallel int
-	wg            sync.WaitGroup
-	ctx           context.Context
-	cancel        context.CancelFunc
+	wg     sync.WaitGroup
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewTaskScheduler creates a new task scheduler of indexing tasks.
 func NewTaskScheduler(ctx context.Context) *TaskScheduler {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
-		ctx:           ctx1,
-		cancel:        cancel,
-		buildParallel: Params.IndexNodeCfg.BuildParallel.GetAsInt(),
+		ctx:    ctx1,
+		cancel: cancel,
 	}
 	s.TaskQueue = NewIndexBuildTaskQueue(s)
 
 	return s
-}
-
-func (sched *TaskScheduler) scheduleIndexBuildTask() []task {
-	ret := make([]task, 0)
-	for i := 0; i < sched.buildParallel; i++ {
-		t := sched.TaskQueue.PopUnissuedTask()
-		if t == nil {
-			return ret
-		}
-		ret = append(ret, t)
-	}
-	return ret
 }
 
 func getStateFromError(err error) indexpb.JobState {
@@ -253,16 +258,10 @@ func (sched *TaskScheduler) indexBuildLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.TaskQueue.utChan():
-			tasks := sched.scheduleIndexBuildTask()
-			var wg sync.WaitGroup
-			for _, t := range tasks {
-				wg.Add(1)
-				go func(group *sync.WaitGroup, t task) {
-					defer group.Done()
-					sched.processTask(t, sched.TaskQueue)
-				}(&wg, t)
-			}
-			wg.Wait()
+			t := sched.TaskQueue.PopUnissuedTask()
+			go func(t task) {
+				sched.processTask(t, sched.TaskQueue)
+			}(t)
 		}
 	}
 }

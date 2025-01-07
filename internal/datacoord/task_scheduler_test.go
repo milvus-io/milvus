@@ -840,7 +840,15 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 	workerManager := session.NewMockWorkerManager(s.T())
-	workerManager.EXPECT().PickClient().Return(s.nodeID, in)
+	workerManager.EXPECT().QuerySlots().RunAndReturn(func() []session.WorkerSlots {
+		return []session.WorkerSlots{
+			{
+				NodeID:         1,
+				TotalSlots:     16,
+				AvailableSlots: 16,
+			},
+		}
+	})
 	workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true)
 
 	mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)),
@@ -972,6 +980,15 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		workerManager := session.NewMockWorkerManager(s.T())
+		workerManager.EXPECT().QuerySlots().RunAndReturn(func() []session.WorkerSlots {
+			return []session.WorkerSlots{
+				{
+					NodeID:         1,
+					TotalSlots:     16,
+					AvailableSlots: 16,
+				},
+			}
+		})
 
 		mt := createMeta(catalog,
 			withAnalyzeMeta(&analyzeMeta{
@@ -1033,6 +1050,15 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in := mocks.NewMockIndexNodeClient(s.T())
 
 		workerManager := session.NewMockWorkerManager(s.T())
+		workerManager.EXPECT().QuerySlots().RunAndReturn(func() []session.WorkerSlots {
+			return []session.WorkerSlots{
+				{
+					NodeID:         1,
+					TotalSlots:     16,
+					AvailableSlots: 16,
+				},
+			}
+		})
 
 		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)),
 			withIndexMeta(&indexMeta{
@@ -1075,14 +1101,12 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
-		// pick client fail --> state: init
-		workerManager.EXPECT().PickClient().Return(0, nil).Once()
-
 		// update version failed --> state: init
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in)
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(errors.New("catalog update version error")).Once()
 
 		// assign task to indexNode fail --> state: retry
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Once()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(&commonpb.Status{
 			Code:      65535,
@@ -1101,6 +1125,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
 		// update state to building failed --> state: retry
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Once()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(errors.New("catalog update building state error")).Once()
@@ -1110,6 +1135,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
 		// assign success --> state: InProgress
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Twice()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
@@ -1163,6 +1189,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
 		// init --> state: InProgress
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Twice()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
@@ -1177,6 +1204,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
 		// init --> state: InProgress
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Twice()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
@@ -1193,6 +1221,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
 		// init --> state: InProgress
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Twice()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
@@ -1204,6 +1233,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
 		// init --> state: InProgress
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Twice()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
@@ -1271,6 +1301,15 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		in := mocks.NewMockIndexNodeClient(s.T())
 		workerManager := session.NewMockWorkerManager(s.T())
+		workerManager.EXPECT().QuerySlots().RunAndReturn(func() []session.WorkerSlots {
+			return []session.WorkerSlots{
+				{
+					NodeID:         1,
+					TotalSlots:     16,
+					AvailableSlots: 16,
+				},
+			}
+		})
 
 		mt := createMeta(catalog,
 			withAnalyzeMeta(&analyzeMeta{
@@ -1361,7 +1400,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		}, nil).Once()
 
 		// assign failed --> retry
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *workerpb.CreateJobV2Request, option ...grpc.CallOption) (*commonpb.Status, error) {
 			indexNodeTasks[request.GetTaskID()]++
@@ -1378,7 +1417,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		}).Once()
 
 		// init --> inProgress
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Twice()
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
 			ID: collID,
@@ -1457,7 +1496,15 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	in := mocks.NewMockIndexNodeClient(s.T())
 
 	workerManager := session.NewMockWorkerManager(s.T())
-	workerManager.EXPECT().PickClient().Return(s.nodeID, in)
+	workerManager.EXPECT().QuerySlots().RunAndReturn(func() []session.WorkerSlots {
+		return []session.WorkerSlots{
+			{
+				NodeID:         1,
+				TotalSlots:     16,
+				AvailableSlots: 16,
+			},
+		}
+	})
 	workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true)
 
 	minNumberOfRowsToBuild := paramtable.Get().DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() + 1
@@ -1923,4 +1970,18 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		resetMetaFunc()
 	})
 	scheduler_isolation.Stop()
+}
+
+func t(nodeslots map[int64]int64) {
+	nodeslots[1] = nodeslots[1] - 1
+}
+
+func (s *taskSchedulerSuite) TestMap() {
+	a := map[int64]int64{
+		1: 100,
+		2: 200,
+	}
+	t(a)
+
+	fmt.Println(a)
 }

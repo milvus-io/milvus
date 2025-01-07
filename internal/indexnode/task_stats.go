@@ -111,17 +111,22 @@ func (st *statsTask) GetState() indexpb.JobState {
 	return st.node.getStatsTaskState(st.req.GetClusterID(), st.req.GetTaskID())
 }
 
+func (st *statsTask) GetSlot() int64 {
+	return st.req.GetTaskSlot()
+}
+
 func (st *statsTask) PreExecute(ctx context.Context) error {
 	ctx, span := otel.Tracer(typeutil.IndexNodeRole).Start(ctx, fmt.Sprintf("Stats-PreExecute-%s-%d", st.req.GetClusterID(), st.req.GetTaskID()))
 	defer span.End()
 
 	st.queueDur = st.tr.RecordSpan()
-	log.Ctx(ctx).Info("Begin to prepare stats task",
+	log.Ctx(ctx).Info("Begin to PreExecute stats task",
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),
 		zap.Int64("collectionID", st.req.GetCollectionID()),
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()),
+		zap.Int64("queue duration(ms)", st.queueDur.Milliseconds()),
 	)
 
 	if err := binlog.DecompressBinLogWithRootPath(st.req.GetStorageConfig().GetRootPath(), storage.InsertBinlog, st.req.GetCollectionID(), st.req.GetPartitionID(),
@@ -152,6 +157,16 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	preExecuteRecordSpan := st.tr.RecordSpan()
+
+	log.Ctx(ctx).Info("successfully PreExecute stats task",
+		zap.String("clusterID", st.req.GetClusterID()),
+		zap.Int64("taskID", st.req.GetTaskID()),
+		zap.Int64("collectionID", st.req.GetCollectionID()),
+		zap.Int64("partitionID", st.req.GetPartitionID()),
+		zap.Int64("segmentID", st.req.GetSegmentID()),
+		zap.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
+	)
 	return nil
 }
 
@@ -171,25 +186,20 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 
 		allBinlogs    = make(map[typeutil.UniqueID]*datapb.FieldBinlog) // All binlog meta of a segment
 		uploadFutures = make([]*conc.Future[any], 0)
-
-		downloadCost     time.Duration
-		serWriteTimeCost time.Duration
-		sortTimeCost     time.Duration
 	)
 
-	downloadStart := time.Now()
 	values, err := st.downloadData(ctx, numRows, writer.GetPkID(), bm25FieldIds)
 	if err != nil {
 		log.Ctx(ctx).Warn("download data failed", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 		return nil, err
 	}
-	downloadCost = time.Since(downloadStart)
 
-	sortStart := time.Now()
+	downloadRecordSpan := st.tr.RecordSpan()
+
 	sort.Slice(values, func(i, j int) bool {
 		return values[i].PK.LT(values[j].PK)
 	})
-	sortTimeCost += time.Since(sortStart)
+	sortRecordSpan := st.tr.RecordSpan()
 
 	for i, v := range values {
 		err := writer.Write(v)
@@ -199,13 +209,11 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		}
 
 		if (i+1)%statsBatchSize == 0 && writer.IsFullWithBinlogMaxSize(st.req.GetBinlogMaxSize()) {
-			serWriteStart := time.Now()
 			binlogNum, kvs, partialBinlogs, err := serializeWrite(ctx, st.req.GetStorageConfig().GetRootPath(), st.req.GetStartLogID()+st.logIDOffset, writer)
 			if err != nil {
 				log.Ctx(ctx).Warn("stats wrong, failed to serialize writer", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 				return nil, err
 			}
-			serWriteTimeCost += time.Since(serWriteStart)
 
 			uploadFutures = append(uploadFutures, st.binlogIO.AsyncUpload(ctx, kvs)...)
 			mergeFieldBinlogs(allBinlogs, partialBinlogs)
@@ -222,13 +230,11 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 	}
 
 	if !writer.FlushAndIsEmpty() {
-		serWriteStart := time.Now()
 		binlogNum, kvs, partialBinlogs, err := serializeWrite(ctx, st.req.GetStorageConfig().GetRootPath(), st.req.GetStartLogID()+st.logIDOffset, writer)
 		if err != nil {
 			log.Ctx(ctx).Warn("stats wrong, failed to serialize writer", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 			return nil, err
 		}
-		serWriteTimeCost += time.Since(serWriteStart)
 		st.logIDOffset += binlogNum
 
 		uploadFutures = append(uploadFutures, st.binlogIO.AsyncUpload(ctx, kvs)...)
@@ -236,20 +242,23 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		flushBatchCount++
 	}
 
+	writeRecordSpan := st.tr.RecordSpan()
+
 	err = conc.AwaitAll(uploadFutures...)
 	if err != nil {
 		log.Ctx(ctx).Warn("stats wrong, failed to upload kvs", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 		return nil, err
 	}
 
-	serWriteStart := time.Now()
+	waitUploadRecordSpan := st.tr.RecordSpan()
+
 	binlogNums, sPath, err := statSerializeWrite(ctx, st.req.GetStorageConfig().GetRootPath(), st.binlogIO, st.req.GetStartLogID()+st.logIDOffset, writer, numRows)
 	if err != nil {
 		log.Ctx(ctx).Warn("stats wrong, failed to serialize write segment stats", zap.Int64("taskID", st.req.GetTaskID()),
 			zap.Int64("remaining row count", numRows), zap.Error(err))
 		return nil, err
 	}
-	serWriteTimeCost += time.Since(serWriteStart)
+	statslogRecordSpan := st.tr.RecordSpan()
 
 	st.logIDOffset += binlogNums
 
@@ -267,7 +276,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		}
 	}
 
-	totalElapse := st.tr.RecordSpan()
+	bm25LogRecordSpan := st.tr.RecordSpan()
 
 	insertLogs := lo.Values(allBinlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
@@ -287,6 +296,8 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		st.req.GetInsertChannel(),
 		int64(len(values)), insertLogs, statsLogs, bm25StatsLogs)
 
+	totalElapse := st.tr.ElapseSpan()
+
 	log.Ctx(ctx).Info("sort segment end",
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),
@@ -298,9 +309,12 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		zap.Int64("old rows", numRows),
 		zap.Int("valid rows", len(values)),
 		zap.Int("binlog batch count", flushBatchCount),
-		zap.Duration("download elapse", downloadCost),
-		zap.Duration("sort elapse", sortTimeCost),
-		zap.Duration("serWrite elapse", serWriteTimeCost),
+		zap.Duration("download elapse", downloadRecordSpan),
+		zap.Duration("sort elapse", sortRecordSpan),
+		zap.Duration("write elapse", writeRecordSpan),
+		zap.Duration("wait upload elapse", waitUploadRecordSpan),
+		zap.Duration("statslog elapse", statslogRecordSpan),
+		zap.Duration("sbm25log elapse", bm25LogRecordSpan),
 		zap.Duration("total elapse", totalElapse))
 	return insertLogs, nil
 }
