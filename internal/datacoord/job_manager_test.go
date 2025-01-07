@@ -106,10 +106,11 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 		loopWg: sync.WaitGroup{},
 		mt:     mt,
 		scheduler: &taskScheduler{
-			allocator: alloc,
-			tasks:     make(map[int64]Task),
-			meta:      mt,
-			taskStats: expirable.NewLRU[UniqueID, Task](512, nil, time.Minute*5),
+			allocator:    alloc,
+			pendingTasks: newFairQueuePolicy(),
+			runningTasks: make(map[UniqueID]Task),
+			meta:         mt,
+			taskStats:    expirable.NewLRU[UniqueID, Task](512, nil, time.Minute*5),
 		},
 		allocator: alloc,
 	}
@@ -122,5 +123,5 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 
 	jm.loopWg.Wait()
 
-	s.Equal(3, len(jm.scheduler.tasks))
+	s.Equal(2, jm.scheduler.pendingTasks.TaskCount())
 }
