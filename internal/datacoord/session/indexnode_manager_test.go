@@ -84,12 +84,12 @@ func TestIndexNodeManager_PickClient(t *testing.T) {
 					Status: merr.Status(err),
 				}, nil),
 				8: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
-					TaskSlots: 1,
-					Status:    merr.Success(),
+					AvailableSlots: 1,
+					Status:         merr.Success(),
 				}, nil),
 				9: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
-					TaskSlots: 10,
-					Status:    merr.Success(),
+					AvailableSlots: 10,
+					Status:         merr.Success(),
 				}, nil),
 			},
 		}
@@ -116,10 +116,10 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 			lock: lock.RWMutex{},
 			nodeClients: map[typeutil.UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
-					Status:     merr.Success(),
-					TaskSlots:  1,
-					JobInfos:   nil,
-					EnableDisk: true,
+					Status:         merr.Success(),
+					AvailableSlots: 1,
+					JobInfos:       nil,
+					EnableDisk:     true,
 				}, nil),
 			},
 		}
@@ -134,10 +134,10 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 			lock: lock.RWMutex{},
 			nodeClients: map[typeutil.UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
-					Status:     merr.Success(),
-					TaskSlots:  1,
-					JobInfos:   nil,
-					EnableDisk: false,
+					Status:         merr.Success(),
+					AvailableSlots: 1,
+					JobInfos:       nil,
+					EnableDisk:     false,
 				}, nil),
 			},
 		}
@@ -176,10 +176,10 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 			lock: lock.RWMutex{},
 			nodeClients: map[typeutil.UniqueID]types.IndexNodeClient{
 				1: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
-					Status:     merr.Status(err),
-					TaskSlots:  0,
-					JobInfos:   nil,
-					EnableDisk: false,
+					Status:         merr.Status(err),
+					AvailableSlots: 0,
+					JobInfos:       nil,
+					EnableDisk:     false,
 				}, nil),
 			},
 		}

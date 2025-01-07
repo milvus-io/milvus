@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 )
 
 func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType) (uint64, error) {
@@ -47,4 +48,16 @@ func mapToKVPairs(m map[string]string) []*commonpb.KeyValuePair {
 		})
 	}
 	return kvs
+}
+
+func calculateNodeSlots() int64 {
+	cpuNum := hardware.GetCPUNum()
+	memory := hardware.GetMemoryCount()
+
+	slot := int64(cpuNum / 2)
+	memorySlot := int64(memory / (8 * 1024 * 1024 * 1024))
+	if slot > memorySlot {
+		slot = memorySlot
+	}
+	return max(slot, 1) * Params.IndexNodeCfg.WorkerSlotUnit.GetAsInt64() * Params.IndexNodeCfg.BuildParallel.GetAsInt64()
 }
