@@ -97,9 +97,6 @@ extraConfigFiles:
     indexCoord:
       scheduler:
         interval: 100
-    indexNode:
-      scheduler:
-        buildParallel: 4
 metrics:
   serviceMonitor:
     enabled: true

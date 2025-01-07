@@ -647,6 +647,9 @@ dataCoord:
     clusteringCompactionUsage: 16 # slot usage of clustering compaction job.
     mixCompactionUsage: 8 # slot usage of mix compaction job.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction job.
+    indexTaskSlotUsage: 256 # slot usage of index task
+    statsTaskSlotUsage: 8 # slot usage of stats task
+    analyzeTaskSlotUsage: 65535 # slot usage of analyze task
   jsonStatsTriggerCount: 10 # jsonkey stats task count per trigger
   jsonStatsTriggerInterval: 10 # jsonkey task interval per trigger
   enabledJSONKeyStatsInSort: false # Indicates whether to enable JSON key stats task with sort
