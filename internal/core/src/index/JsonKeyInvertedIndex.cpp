@@ -92,7 +92,7 @@ JsonKeyInvertedIndex::AddJson(const char* json, int64_t offset) {
     jsmn_parser parser;
     jsmntok_t* tokens = (jsmntok_t*)malloc(16 * sizeof(jsmntok_t));
     if (!tokens) {
-        fprintf(stderr, "Memory allocation failed\n");
+        PanicInfo(ErrorCode::UnexpectedError, "alloc jsmn token failed");
         return;
     }
     int num_tokens = 0;
@@ -224,7 +224,6 @@ JsonKeyInvertedIndex::BuildWithFieldData(
         for (const auto& data : field_datas) {
             total += data->get_null_count();
         }
-        null_offset.reserve(total);
     }
     int64_t offset = 0;
     if (schema_.nullable()) {
@@ -232,10 +231,7 @@ JsonKeyInvertedIndex::BuildWithFieldData(
             auto n = data->get_num_rows();
             for (int i = 0; i < n; i++) {
                 if (!data->is_valid(i)) {
-                    null_offset.push_back(i);
-                    std::string empty = "";
-                    wrapper_->add_multi_data(&empty, 0, offset++);
-                    return;
+                    continue;
                 }
                 AddJson(static_cast<const milvus::Json*>(data->RawValue(i))
                             ->data()
