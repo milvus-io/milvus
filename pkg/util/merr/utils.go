@@ -1233,6 +1233,14 @@ func WrapErrDataNodeSlotExhausted(msg ...string) error {
 	return err
 }
 
+func WrapErrIndexNodeSlotExhausted(msg ...string) error {
+	err := error(ErrIndexNodeSlotExhausted)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
 func WrapErrDuplicatedCompactionTask(msg ...string) error {
 	err := error(ErrDuplicatedCompactionTask)
 	if len(msg) > 0 {
