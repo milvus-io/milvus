@@ -1744,15 +1744,28 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		importFile.Id = idStart + int64(i) + 1
 		return importFile
 	})
+	importCollectionInfo, err := s.handler.GetCollection(ctx, in.GetCollectionID())
+	if err != nil {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("get collection failed, err=%w", err)))
+		return resp, nil
+	}
+	if importCollectionInfo == nil {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("collection %d not found", in.GetCollectionID())))
+		return resp, nil
+	}
 
+	jobID := in.GetJobID()
+	if jobID == 0 {
+		jobID = idStart
+	}
 	startTime := time.Now()
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
-			JobID:          idStart,
+			JobID:          jobID,
 			CollectionID:   in.GetCollectionID(),
 			CollectionName: in.GetCollectionName(),
 			PartitionIDs:   in.GetPartitionIDs(),
-			Vchannels:      in.GetChannelNames(),
+			Vchannels:      importCollectionInfo.VChannelNames,
 			Schema:         in.GetSchema(),
 			TimeoutTs:      timeoutTs,
 			CleanupTs:      math.MaxUint64,
@@ -1760,6 +1773,8 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			Files:          files,
 			Options:        in.GetOptions(),
 			StartTime:      startTime.Format("2006-01-02T15:04:05Z07:00"),
+			ReadyVchannels: in.GetChannelNames(),
+			DataTs:         in.GetDataTimestamp(),
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
@@ -1770,7 +1785,11 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	}
 
 	resp.JobID = fmt.Sprint(job.GetJobID())
-	log.Info("add import job done", zap.Int64("jobID", job.GetJobID()), zap.Any("files", files))
+	log.Info("add import job done",
+		zap.Int64("jobID", job.GetJobID()),
+		zap.Any("files", files),
+		zap.Strings("readyChannels", in.GetChannelNames()),
+	)
 	return resp, nil
 }
 

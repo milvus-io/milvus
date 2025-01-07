@@ -20,11 +20,18 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func newMsgHandler(wbMgr writebuffer.BufferManager) *msgHandlerImpl {
@@ -73,5 +80,28 @@ func (impl *msgHandlerImpl) HandleManualFlush(vchannel string, flushMsg message.
 	if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, flushMsg.Header().GetFlushTs()); err != nil {
 		return errors.Wrap(err, "failed to flush channel")
 	}
+	return nil
+}
+
+func (impl *msgHandlerImpl) HandleImport(ctx context.Context, vchannel string, importMsg *msgpb.ImportMsg) error {
+	client, err := resource.Resource().DataCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	importResp, err := client.ImportV2(ctx, &internalpb.ImportRequestInternal{
+		CollectionID:   importMsg.GetCollectionID(),
+		CollectionName: importMsg.GetCollectionName(),
+		PartitionIDs:   importMsg.GetPartitionIDs(),
+		ChannelNames:   []string{vchannel},
+		Schema:         importMsg.GetSchema(),
+		Files:          lo.Map(importMsg.GetFiles(), util.ConvertInternalImportFile),
+		Options:        funcutil.Map2KeyValuePair(importMsg.GetOptions()),
+		DataTimestamp:  importMsg.GetBase().GetTimestamp(),
+		JobID:          importMsg.GetJobID(),
+	})
+	if err = merr.CheckRPCCall(importResp, err); err != nil {
+		return err
+	}
+	log.Ctx(ctx).Info("import message handled", zap.String("job_id", importResp.GetJobID()))
 	return nil
 }
