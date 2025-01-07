@@ -607,7 +607,11 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 
 	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Sub(totalMemSize)
 
-	task := syncmgr.NewSyncTask().WithAllocator(wb.allocator).WithMetaCache(wb.metaCache).WithSyncPack(pack)
+	task := syncmgr.NewSyncTask().
+		WithAllocator(wb.allocator).
+		WithMetaWriter(wb.metaWriter).
+		WithMetaCache(wb.metaCache).
+		WithSyncPack(pack)
 	return task, nil
 }
 

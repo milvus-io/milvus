@@ -189,14 +189,13 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	}).Return()
 
 	s.Run("without_data", func() {
-		task := s.getSuiteSyncTask(new(SyncPack))
+		task := s.getSuiteSyncTask(new(SyncPack).WithCheckpoint(
+			&msgpb.MsgPosition{
+				ChannelName: s.channelName,
+				MsgID:       []byte{1, 2, 3, 4},
+				Timestamp:   100,
+			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-		task.WithTimeRange(50, 100)
-		task.WithCheckpoint(&msgpb.MsgPosition{
-			ChannelName: s.channelName,
-			MsgID:       []byte{1, 2, 3, 4},
-			Timestamp:   100,
-		})
 
 		err := task.Run(ctx)
 		s.NoError(err)
@@ -204,14 +203,14 @@ func (s *SyncTaskSuite) TestRunNormal() {
 
 	s.Run("with_insert_delete_cp", func() {
 		task := s.getSuiteSyncTask(
-			new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()}))
-		task.WithTimeRange(50, 100)
+			new(SyncPack).
+				WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).
+				WithCheckpoint(&msgpb.MsgPosition{
+					ChannelName: s.channelName,
+					MsgID:       []byte{1, 2, 3, 4},
+					Timestamp:   100,
+				}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-		task.WithCheckpoint(&msgpb.MsgPosition{
-			ChannelName: s.channelName,
-			MsgID:       []byte{1, 2, 3, 4},
-			Timestamp:   100,
-		})
 
 		err := task.Run(ctx)
 		s.NoError(err)
@@ -219,28 +218,30 @@ func (s *SyncTaskSuite) TestRunNormal() {
 
 	s.Run("with_flush", func() {
 		task := s.getSuiteSyncTask(
-			new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).WithFlush())
-		task.WithTimeRange(50, 100)
+			new(SyncPack).
+				WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).
+				WithFlush().
+				WithCheckpoint(&msgpb.MsgPosition{
+					ChannelName: s.channelName,
+					MsgID:       []byte{1, 2, 3, 4},
+					Timestamp:   100,
+				}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-		task.WithCheckpoint(&msgpb.MsgPosition{
-			ChannelName: s.channelName,
-			MsgID:       []byte{1, 2, 3, 4},
-			Timestamp:   100,
-		})
 		err := task.Run(ctx)
 		s.NoError(err)
 	})
 
 	s.Run("with_drop", func() {
 		s.metacache.EXPECT().RemoveSegments(mock.Anything, mock.Anything).Return(nil).Once()
-		task := s.getSuiteSyncTask(new(SyncPack).WithDeleteData(s.getDeleteBuffer()).WithDrop())
-		task.WithTimeRange(50, 100)
+		task := s.getSuiteSyncTask(new(SyncPack).
+			WithDeleteData(s.getDeleteBuffer()).
+			WithDrop().
+			WithCheckpoint(&msgpb.MsgPosition{
+				ChannelName: s.channelName,
+				MsgID:       []byte{1, 2, 3, 4},
+				Timestamp:   100,
+			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-		task.WithCheckpoint(&msgpb.MsgPosition{
-			ChannelName: s.channelName,
-			MsgID:       []byte{1, 2, 3, 4},
-			Timestamp:   100,
-		})
 		err := task.Run(ctx)
 		s.NoError(err)
 	})
@@ -257,14 +258,15 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 	s.Run("pure_delete_l0_flush", func() {
-		task := s.getSuiteSyncTask(new(SyncPack).WithDeleteData(s.getDeleteBuffer()).WithFlush())
-		task.WithTimeRange(50, 100)
+		task := s.getSuiteSyncTask(new(SyncPack).
+			WithDeleteData(s.getDeleteBuffer()).
+			WithFlush().
+			WithCheckpoint(&msgpb.MsgPosition{
+				ChannelName: s.channelName,
+				MsgID:       []byte{1, 2, 3, 4},
+				Timestamp:   100,
+			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-		task.WithCheckpoint(&msgpb.MsgPosition{
-			ChannelName: s.channelName,
-			MsgID:       []byte{1, 2, 3, 4},
-			Timestamp:   100,
-		})
 
 		err := task.Run(ctx)
 		s.NoError(err)
@@ -308,14 +310,13 @@ func (s *SyncTaskSuite) TestRunError() {
 	s.Run("metawrite_fail", func() {
 		s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(errors.New("mocked"))
 
-		task := s.getSuiteSyncTask(new(SyncPack))
+		task := s.getSuiteSyncTask(new(SyncPack).
+			WithCheckpoint(&msgpb.MsgPosition{
+				ChannelName: s.channelName,
+				MsgID:       []byte{1, 2, 3, 4},
+				Timestamp:   100,
+			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1, retry.Attempts(1)))
-		task.WithTimeRange(50, 100)
-		task.WithCheckpoint(&msgpb.MsgPosition{
-			ChannelName: s.channelName,
-			MsgID:       []byte{1, 2, 3, 4},
-			Timestamp:   100,
-		})
 
 		err := task.Run(ctx)
 		s.Error(err)
@@ -327,8 +328,9 @@ func (s *SyncTaskSuite) TestRunError() {
 		s.chunkManager.ExpectedCalls = nil
 		s.chunkManager.EXPECT().RootPath().Return("files")
 		s.chunkManager.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(retry.Unrecoverable(errors.New("mocked")))
-		task := s.getSuiteSyncTask(new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})).WithFailureCallback(handler)
-		task.WithWriteRetryOptions(retry.Attempts(1))
+		task := s.getSuiteSyncTask(new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})).
+			WithFailureCallback(handler).
+			WithWriteRetryOptions(retry.Attempts(1))
 
 		err := task.Run(ctx)
 
