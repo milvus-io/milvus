@@ -3104,7 +3104,7 @@ class TestCollectionSearch(TestcaseBase):
                     assert set(ids).issubset(filter_ids_set)
 
                 # 5. search again with expression template and search hints
-                if expr != "":          # TODO: remove this when issue #12680 is fixed
+                if expr != "":          # TODO: remove this when issue #39013 is fixed
                     search_param = default_search_params.copy()
                     search_param.update({"hints": "iterative_filter"})
                     search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
