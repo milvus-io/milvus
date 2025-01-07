@@ -289,27 +289,27 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(OffsetVector* input) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const ValueType& target_val) {
-            auto executor = [&](size_t offset) {
-                for (int i = 0; i < data[offset].length(); i++) {
-                    auto val = data[offset].template get_data<GetType>(i);
-                    if (val == target_val) {
-                        return true;
-                    }
+        auto executor = [&](size_t offset) {
+            for (int i = 0; i < data[offset].length(); i++) {
+                auto val = data[offset].template get_data<GetType>(i);
+                if (val == target_val) {
+                    return true;
                 }
-                return false;
-            };
-            for (int i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                res[i] = executor(offset);
             }
+            return false;
         };
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = executor(offset);
+        }
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -376,23 +376,23 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(OffsetVector* input) {
             TargetBitmapView valid_res,
             int index,
             const std::unordered_set<ValueType>& term_set) {
-            for (int i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                if (term_set.empty() || index >= data[offset].length()) {
-                    res[i] = false;
-                    continue;
-                }
-                auto value = data[offset].get_data<GetType>(index);
-                res[i] = term_set.find(ValueType(value)) != term_set.end();
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
             }
-        };
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (term_set.empty() || index >= data[offset].length()) {
+                res[i] = false;
+                continue;
+            }
+            auto value = data[offset].get_data<GetType>(index);
+            res[i] = term_set.find(ValueType(value)) != term_set.end();
+        }
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -453,34 +453,34 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(OffsetVector* input) {
             TargetBitmapView valid_res,
             const std::string pointer,
             const ValueType& target_val) {
-            auto executor = [&](size_t i) {
-                auto doc = data[i].doc();
-                auto array = doc.at_pointer(pointer).get_array();
-                if (array.error())
-                    return false;
-                for (auto it = array.begin(); it != array.end(); ++it) {
-                    auto val = (*it).template get<GetType>();
-                    if (val.error()) {
-                        return false;
-                    }
-                    if (val.value() == target_val) {
-                        return true;
-                    }
-                }
+        auto executor = [&](size_t i) {
+            auto doc = data[i].doc();
+            auto array = doc.at_pointer(pointer).get_array();
+            if (array.error())
                 return false;
-            };
-            for (size_t i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
+            for (auto it = array.begin(); it != array.end(); ++it) {
+                auto val = (*it).template get<GetType>();
+                if (val.error()) {
+                    return false;
                 }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
+                if (val.value() == target_val) {
+                    return true;
                 }
-                res[i] = executor(offset);
             }
+            return false;
         };
+        for (size_t i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = executor(offset);
+        }
+    };
     int64_t processed_size;
     if (has_offset_input_) {
         processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
@@ -542,40 +542,40 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(OffsetVector* input) {
             TargetBitmapView valid_res,
             const std::string pointer,
             const std::unordered_set<ValueType>& terms) {
-            auto executor = [&](size_t i) {
-                auto x = data[i].template at<GetType>(pointer);
-                if (x.error()) {
-                    if constexpr (std::is_same_v<GetType, std::int64_t>) {
-                        auto x = data[i].template at<double>(pointer);
-                        if (x.error()) {
-                            return false;
-                        }
-
-                        auto value = x.value();
-                        // if the term set is {1}, and the value is 1.1, we should not return true.
-                        return std::floor(value) == value &&
-                               terms.find(ValueType(value)) != terms.end();
+        auto executor = [&](size_t i) {
+            auto x = data[i].template at<GetType>(pointer);
+            if (x.error()) {
+                if constexpr (std::is_same_v<GetType, std::int64_t>) {
+                    auto x = data[i].template at<double>(pointer);
+                    if (x.error()) {
+                        return false;
                     }
-                    return false;
+
+                    auto value = x.value();
+                    // if the term set is {1}, and the value is 1.1, we should not return true.
+                    return std::floor(value) == value &&
+                           terms.find(ValueType(value)) != terms.end();
                 }
-                return terms.find(ValueType(x.value())) != terms.end();
-            };
-            for (size_t i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                if (terms.empty()) {
-                    res[i] = false;
-                    continue;
-                }
-                res[i] = executor(offset);
+                return false;
             }
+            return terms.find(ValueType(x.value())) != terms.end();
         };
+        for (size_t i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (terms.empty()) {
+                res[i] = false;
+                continue;
+            }
+            res[i] = executor(offset);
+        }
+    };
     int64_t processed_size;
     if (has_offset_input_) {
         processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
@@ -702,19 +702,19 @@ PhyTermFilterExpr::ExecVisitorImplForData(OffsetVector* input) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::unordered_set<T>& vals) {
-            TermElementFuncSet<T> func;
-            for (size_t i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                res[i] = func(vals, data[offset]);
+        TermElementFuncSet<T> func;
+        for (size_t i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
             }
-        };
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            res[i] = func(vals, data[offset]);
+        }
+    };
     int64_t processed_size;
     if (has_offset_input_) {
         processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
