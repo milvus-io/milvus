@@ -718,7 +718,7 @@ func (s *taskSchedulerSuite) createAnalyzeMeta(catalog metastore.DataCoordCatalo
 				SegmentIDs:   s.segmentIDs,
 				TaskID:       2,
 				NodeID:       s.nodeID,
-				State:        indexpb.JobState_JobStateInProgress,
+				State:        indexpb.JobState_JobStateInit,
 				FieldType:    schemapb.DataType_FloatVector,
 			},
 			3: {
@@ -841,7 +841,15 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 	workerManager := session.NewMockWorkerManager(s.T())
-	workerManager.EXPECT().PickClient().Return(s.nodeID, in)
+	workerManager.EXPECT().QuerySlots().RunAndReturn(func() []session.WorkerSlots {
+		return []session.WorkerSlots{
+			{
+				NodeID:         1,
+				TotalSlots:     16,
+				AvailableSlots: 16,
+			},
+		}
+	})
 	workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true)
 
 	mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)),
@@ -854,16 +862,17 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	cm.EXPECT().RootPath().Return("root")
 
 	scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil, nil)
-	s.Equal(9, len(scheduler.tasks))
-	s.Equal(indexpb.JobState_JobStateInit, scheduler.tasks[1].GetState())
-	s.Equal(indexpb.JobState_JobStateInProgress, scheduler.tasks[2].GetState())
-	s.Equal(indexpb.JobState_JobStateRetry, scheduler.tasks[5].GetState())
-	s.Equal(indexpb.JobState_JobStateInit, scheduler.tasks[buildID].GetState())
-	s.Equal(indexpb.JobState_JobStateInProgress, scheduler.tasks[buildID+1].GetState())
-	s.Equal(indexpb.JobState_JobStateInit, scheduler.tasks[buildID+3].GetState())
-	s.Equal(indexpb.JobState_JobStateInProgress, scheduler.tasks[buildID+8].GetState())
-	s.Equal(indexpb.JobState_JobStateInit, scheduler.tasks[buildID+9].GetState())
-	s.Equal(indexpb.JobState_JobStateInit, scheduler.tasks[buildID+10].GetState())
+	s.Equal(6, scheduler.pendingTasks.TaskCount())
+	s.Equal(3, len(scheduler.runningTasks))
+	s.Equal(indexpb.JobState_JobStateInit, scheduler.pendingTasks.Get(1).GetState())
+	s.Equal(indexpb.JobState_JobStateInit, scheduler.pendingTasks.Get(2).GetState())
+	s.Equal(indexpb.JobState_JobStateRetry, scheduler.runningTasks[5].GetState())
+	s.Equal(indexpb.JobState_JobStateInit, scheduler.pendingTasks.Get(buildID).GetState())
+	s.Equal(indexpb.JobState_JobStateInProgress, scheduler.runningTasks[buildID+1].GetState())
+	s.Equal(indexpb.JobState_JobStateInit, scheduler.pendingTasks.Get(buildID+3).GetState())
+	s.Equal(indexpb.JobState_JobStateInProgress, scheduler.runningTasks[buildID+8].GetState())
+	s.Equal(indexpb.JobState_JobStateInit, scheduler.pendingTasks.Get(buildID+9).GetState())
+	s.Equal(indexpb.JobState_JobStateInit, scheduler.pendingTasks.Get(buildID+10).GetState())
 
 	mt.segments.DropSegment(segID + 9)
 
@@ -894,12 +903,13 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	})
 
 	for {
-		scheduler.RLock()
-		taskNum := len(scheduler.tasks)
-		scheduler.RUnlock()
-
-		if taskNum == 0 {
-			break
+		if scheduler.pendingTasks.TaskCount() == 0 {
+			scheduler.runningQueueLock.RLock()
+			taskNum := len(scheduler.runningTasks)
+			scheduler.runningQueueLock.RUnlock()
+			if taskNum == 0 {
+				break
+			}
 		}
 		time.Sleep(time.Second)
 	}
@@ -973,6 +983,15 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		workerManager := session.NewMockWorkerManager(s.T())
+		workerManager.EXPECT().QuerySlots().RunAndReturn(func() []session.WorkerSlots {
+			return []session.WorkerSlots{
+				{
+					NodeID:         1,
+					TotalSlots:     16,
+					AvailableSlots: 16,
+				},
+			}
+		})
 
 		mt := createMeta(catalog,
 			withAnalyzeMeta(&analyzeMeta{
@@ -1011,12 +1030,13 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		workerManager.EXPECT().GetClientByID(mock.Anything).Return(nil, false).Once()
 
 		for {
-			scheduler.RLock()
-			taskNum := len(scheduler.tasks)
-			scheduler.RUnlock()
-
-			if taskNum == 0 {
-				break
+			if scheduler.pendingTasks.TaskCount() == 0 {
+				scheduler.runningQueueLock.RLock()
+				taskNum := len(scheduler.runningTasks)
+				scheduler.runningQueueLock.RUnlock()
+				if taskNum == 0 {
+					break
+				}
 			}
 			time.Sleep(time.Second)
 		}
@@ -1034,6 +1054,15 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in := mocks.NewMockIndexNodeClient(s.T())
 
 		workerManager := session.NewMockWorkerManager(s.T())
+		workerManager.EXPECT().QuerySlots().RunAndReturn(func() []session.WorkerSlots {
+			return []session.WorkerSlots{
+				{
+					NodeID:         1,
+					TotalSlots:     16,
+					AvailableSlots: 16,
+				},
+			}
+		})
 
 		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)),
 			withIndexMeta(&indexMeta{
@@ -1076,14 +1105,12 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
-		// pick client fail --> state: init
-		workerManager.EXPECT().PickClient().Return(0, nil).Once()
-
 		// update version failed --> state: init
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in)
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(errors.New("catalog update version error")).Once()
 
 		// assign task to indexNode fail --> state: retry
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Once()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(&commonpb.Status{
 			Code:      65535,
@@ -1102,6 +1129,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
 		// update state to building failed --> state: retry
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Once()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(errors.New("catalog update building state error")).Once()
@@ -1111,6 +1139,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
 		// assign success --> state: InProgress
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Twice()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
@@ -1164,6 +1193,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
 		// init --> state: InProgress
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Twice()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
@@ -1178,6 +1208,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
 		// init --> state: InProgress
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Twice()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
@@ -1194,6 +1225,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
 		// init --> state: InProgress
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Twice()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
@@ -1205,6 +1237,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
 		// init --> state: InProgress
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Twice()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
@@ -1250,12 +1283,14 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
 		for {
-			scheduler.RLock()
-			taskNum := len(scheduler.tasks)
-			scheduler.RUnlock()
+			if scheduler.pendingTasks.TaskCount() == 0 {
+				scheduler.runningQueueLock.RLock()
+				taskNum := len(scheduler.runningTasks)
+				scheduler.runningQueueLock.RUnlock()
 
-			if taskNum == 0 {
-				break
+				if taskNum == 0 {
+					break
+				}
 			}
 			time.Sleep(time.Second)
 		}
@@ -1272,6 +1307,15 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		in := mocks.NewMockIndexNodeClient(s.T())
 		workerManager := session.NewMockWorkerManager(s.T())
+		workerManager.EXPECT().QuerySlots().RunAndReturn(func() []session.WorkerSlots {
+			return []session.WorkerSlots{
+				{
+					NodeID:         1,
+					TotalSlots:     16,
+					AvailableSlots: 16,
+				},
+			}
+		})
 
 		mt := createMeta(catalog,
 			withAnalyzeMeta(&analyzeMeta{
@@ -1362,7 +1406,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		}, nil).Once()
 
 		// assign failed --> retry
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *workerpb.CreateJobV2Request, option ...grpc.CallOption) (*commonpb.Status, error) {
 			indexNodeTasks[request.GetTaskID()]++
@@ -1379,7 +1423,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		}).Once()
 
 		// init --> inProgress
-		workerManager.EXPECT().PickClient().Return(s.nodeID, in).Once()
+		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Twice()
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
 			ID: collID,
@@ -1415,22 +1459,26 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		}, nil)
 
 		// finished --> done
+		finishCH := make(chan struct{})
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
 		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *workerpb.DropJobsV2Request, option ...grpc.CallOption) (*commonpb.Status, error) {
 			for _, taskID := range request.GetTaskIDs() {
 				indexNodeTasks[taskID]--
+				finishCH <- struct{}{}
 			}
 			return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 		}).Once()
 
 		for {
-			scheduler.RLock()
-			taskNum := len(scheduler.tasks)
-			scheduler.RUnlock()
-
-			if taskNum == 0 {
-				break
+			<-finishCH
+			if scheduler.pendingTasks.TaskCount() == 0 {
+				scheduler.runningQueueLock.RLock()
+				taskNum := len(scheduler.runningTasks)
+				scheduler.runningQueueLock.RUnlock()
+				if taskNum == 0 {
+					break
+				}
 			}
 			time.Sleep(time.Second)
 		}
@@ -1458,7 +1506,15 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	in := mocks.NewMockIndexNodeClient(s.T())
 
 	workerManager := session.NewMockWorkerManager(s.T())
-	workerManager.EXPECT().PickClient().Return(s.nodeID, in)
+	workerManager.EXPECT().QuerySlots().RunAndReturn(func() []session.WorkerSlots {
+		return []session.WorkerSlots{
+			{
+				NodeID:         1,
+				TotalSlots:     16,
+				AvailableSlots: 16,
+			},
+		}
+	})
 	workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true)
 
 	minNumberOfRowsToBuild := paramtable.Get().DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() + 1
@@ -1619,12 +1675,13 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 
 	waitTaskDoneFunc := func(sche *taskScheduler) {
 		for {
-			sche.RLock()
-			taskNum := len(sche.tasks)
-			sche.RUnlock()
-
-			if taskNum == 0 {
-				break
+			if sche.pendingTasks.TaskCount() == 0 {
+				sche.runningQueueLock.RLock()
+				taskNum := len(sche.runningTasks)
+				sche.runningQueueLock.RUnlock()
+				if taskNum == 0 {
+					break
+				}
 			}
 			time.Sleep(time.Second)
 		}
@@ -1680,8 +1737,8 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 				s.NotZero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
 				return merr.Success(), nil
 			}).Once()
-		s.Equal(1, len(scheduler.tasks))
-		s.Equal(indexpb.JobState_JobStateInit, scheduler.tasks[buildID].GetState())
+		s.Equal(1, scheduler.pendingTasks.TaskCount())
+		s.Equal(indexpb.JobState_JobStateInit, scheduler.pendingTasks.Get(buildID).GetState())
 
 		scheduler.Start()
 		waitTaskDoneFunc(scheduler)
@@ -1859,6 +1916,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 
 	s.Run("Submit partitionKeyIsolation is false when MV not enabled", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
 				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, false)
@@ -1884,7 +1942,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		isoCollInfo.Properties[common.PartitionKeyIsolationKey] = "true"
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
-				s.Equal(in.GetIndexRequest().PartitionKeyIsolation, true)
+				s.True(in.GetIndexRequest().PartitionKeyIsolation)
 				return merr.Success(), nil
 			}).Once()
 		t := &indexBuildTask{
@@ -1957,8 +2015,7 @@ func (s *taskSchedulerSuite) Test_reload() {
 		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
 		s.NotNil(scheduler)
 		s.True(mt.segments.segments[1000].isCompacting)
-		task, ok := scheduler.tasks[statsTaskID]
-		s.True(ok)
+		task := scheduler.runningTasks[statsTaskID]
 		s.NotNil(task)
 	})
 
@@ -1994,8 +2051,7 @@ func (s *taskSchedulerSuite) Test_reload() {
 		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
 		s.NotNil(scheduler)
 		s.True(mt.segments.segments[1000].isCompacting)
-		task, ok := scheduler.tasks[statsTaskID]
-		s.False(ok)
+		task := scheduler.pendingTasks.Get(statsTaskID)
 		s.Nil(task)
 	})
 
@@ -2031,8 +2087,7 @@ func (s *taskSchedulerSuite) Test_reload() {
 		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
 		s.NotNil(scheduler)
 		s.True(mt.segments.segments[1000].isCompacting)
-		task, ok := scheduler.tasks[statsTaskID]
-		s.True(ok)
+		task := scheduler.runningTasks[statsTaskID]
 		s.Equal(indexpb.JobState_JobStateFailed, task.GetState())
 	})
 
@@ -2068,8 +2123,7 @@ func (s *taskSchedulerSuite) Test_reload() {
 		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
 		s.NotNil(scheduler)
 		s.False(mt.segments.segments[1000].isCompacting)
-		task, ok := scheduler.tasks[statsTaskID]
-		s.False(ok)
+		task := scheduler.pendingTasks.Get(statsTaskID)
 		s.Nil(task)
 	})
 
@@ -2105,8 +2159,7 @@ func (s *taskSchedulerSuite) Test_reload() {
 		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
 		s.NotNil(scheduler)
 		s.False(mt.segments.segments[1000].isCompacting)
-		task, ok := scheduler.tasks[statsTaskID]
-		s.True(ok)
+		task := scheduler.runningTasks[statsTaskID]
 		s.Equal(indexpb.JobState_JobStateFailed, task.GetState())
 	})
 }
