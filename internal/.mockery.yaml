@@ -38,9 +38,6 @@ packages:
   github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer:
     interfaces:
       Consumer:
-  github.com/milvus-io/milvus/internal/streamingnode/server/flusher:
-    interfaces:
-      FlushMsgHandler:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal:
     interfaces:
       OpenerBuilder:
@@ -91,6 +88,9 @@ packages:
   github.com/milvus-io/milvus/internal/util/searchutil/optimizers:
     interfaces:
       QueryHook:
+#  github.com/milvus-io/milvus/internal/flushcommon/util:
+#    interfaces:
+#      MsgHandler:
   google.golang.org/grpc/resolver:
     interfaces:
       ClientConn:

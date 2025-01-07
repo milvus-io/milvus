@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -71,7 +70,7 @@ type ddNode struct {
 
 	dropMode           atomic.Value
 	compactionExecutor compaction.Executor
-	msgHandler         flusher.MsgHandler
+	msgHandler         util.MsgHandler
 
 	// for recovery
 	growingSegInfo    map[typeutil.UniqueID]*datapb.SegmentInfo // segmentID
@@ -277,6 +276,18 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			} else {
 				logger.Info("handle manual flush message success")
 			}
+		case commonpb.MsgType_Import:
+			importMsg := msg.(*msgstream.ImportMsg)
+			logger := log.With(
+				zap.String("vchannel", ddn.Name()),
+				zap.Int32("msgType", int32(msg.Type())),
+			)
+			logger.Info("receive import message")
+			if err := ddn.msgHandler.HandleImport(context.Background(), ddn.vChannelName, importMsg.ImportMsg); err != nil {
+				logger.Warn("handle import message failed", zap.Error(err))
+			} else {
+				logger.Info("handle import message success")
+			}
 		}
 	}
 
@@ -332,7 +343,7 @@ func (ddn *ddNode) Close() {
 }
 
 func newDDNode(ctx context.Context, collID typeutil.UniqueID, vChannelName string, droppedSegmentIDs []typeutil.UniqueID,
-	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, executor compaction.Executor, handler flusher.MsgHandler,
+	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, executor compaction.Executor, handler util.MsgHandler,
 ) *ddNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())

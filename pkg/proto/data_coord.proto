@@ -617,6 +617,8 @@ message CompactionPlan {
   IDRange pre_allocated_segmentIDs = 18;
   int64 slot_usage = 19;
   int64 max_size = 20;
+  // bf path for importing
+  // collection is importing
 }
 
 message CompactionSegment {
@@ -637,6 +639,7 @@ message CompactionPlanResult {
   repeated CompactionSegment segments = 3;
   string channel = 4;
   CompactionType type = 5;
+  // l0 import file path
 }
 
 message CompactionStateResponse {
@@ -885,6 +888,8 @@ message ImportJob {
   repeated internal.ImportFile files = 14;
   repeated common.KeyValuePair options = 15;
   string start_time = 16;
+  repeated string ready_vchannels = 17;
+  uint64 data_ts = 18;
 }
 
 enum ImportTaskStateV2 {
@@ -893,6 +898,11 @@ enum ImportTaskStateV2 {
   InProgress = 2;
   Failed = 3;
   Completed = 4;
+}
+
+enum ImportTaskSourceV2 {
+  Request = 0;
+  L0Compaction = 1;
 }
 
 message PreImportTask {
@@ -919,6 +929,7 @@ message ImportTaskV2 {
   repeated ImportFileStats file_stats = 9;
   repeated int64 stats_segmentIDs = 10;
   string created_time = 11;
+  ImportTaskSourceV2 source = 12;
 }
 
 enum GcCommand {

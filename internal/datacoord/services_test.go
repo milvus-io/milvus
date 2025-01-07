@@ -1313,6 +1313,12 @@ func TestImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), resp.GetStatus().GetCode())
 		s.stateCode.Store(commonpb.StateCode_Healthy)
+		mockHandler := NewNMockHandler(t)
+		mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+			ID:            1000,
+			VChannelNames: []string{"foo_1v1"},
+		}, nil).Maybe()
+		s.handler = mockHandler
 
 		// parse timeout failed
 		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
@@ -1397,6 +1403,7 @@ func TestImportV2(t *testing.T) {
 					Paths: []string{"a.json"},
 				},
 			},
+			ChannelNames: []string{"foo_1v1"},
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), resp.GetStatus().GetCode())

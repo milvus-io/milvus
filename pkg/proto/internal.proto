@@ -323,7 +323,7 @@ message ImportFile {
 }
 
 message ImportRequestInternal {
-  int64 dbID = 1;
+  int64 dbID = 1 [deprecated=true];
   int64 collectionID = 2;
   string collection_name = 3;
   repeated int64 partitionIDs = 4;
@@ -331,6 +331,8 @@ message ImportRequestInternal {
   schema.CollectionSchema schema = 6;
   repeated ImportFile files = 7;
   repeated common.KeyValuePair options = 8;
+  uint64 data_timestamp = 9;
+  int64 jobID = 10;
 }
 
 message ImportRequest {
