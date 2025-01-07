@@ -754,11 +754,34 @@ func (s *Server) startServerLoop() {
 	}
 }
 
+func (s *Server) startCollectMetaMetrics(ctx context.Context) {
+	s.serverLoopWg.Add(1)
+	go s.collectMetaMetrics(ctx)
+}
+
+func (s *Server) collectMetaMetrics(ctx context.Context) {
+	defer s.serverLoopWg.Done()
+
+	ticker := time.NewTicker(time.Second * 120)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Ctx(s.ctx).Warn("collectMetaMetrics ctx done")
+			return
+		case <-ticker.C:
+			s.meta.statsTaskMeta.updateMetrics()
+			s.meta.indexMeta.updateIndexTasksMetrics()
+		}
+	}
+}
+
 func (s *Server) startTaskScheduler() {
 	s.taskScheduler.Start()
 	s.jobManager.Start()
 
 	s.startIndexService(s.serverLoopCtx)
+	s.startCollectMetaMetrics(s.serverLoopCtx)
 }
 
 func (s *Server) updateSegmentStatistics(ctx context.Context, stats []*commonpb.SegmentStats) {
@@ -1082,6 +1105,7 @@ func (s *Server) Stop() error {
 	log.Info("datacoord garbage collector stopped")
 
 	s.stopServerLoop()
+	log.Info("datacoord stopServerLoop stopped")
 
 	s.importScheduler.Close()
 	s.importChecker.Close()

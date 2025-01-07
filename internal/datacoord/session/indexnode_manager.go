@@ -44,9 +44,16 @@ type WorkerManager interface {
 	RemoveNode(nodeID typeutil.UniqueID)
 	StoppingNode(nodeID typeutil.UniqueID)
 	PickClient() (typeutil.UniqueID, types.IndexNodeClient)
+	QuerySlots() []WorkerSlots
 	ClientSupportDisk() bool
 	GetAllClients() map[typeutil.UniqueID]types.IndexNodeClient
 	GetClientByID(nodeID typeutil.UniqueID) (types.IndexNodeClient, bool)
+}
+
+type WorkerSlots struct {
+	NodeID         int64
+	TotalSlots     int64
+	AvailableSlots int64
 }
 
 // IndexNodeManager is used to manage the client of IndexNode.
@@ -113,6 +120,46 @@ func (nm *IndexNodeManager) AddNode(nodeID typeutil.UniqueID, address string) er
 
 	nm.SetClient(nodeID, nodeClient)
 	return nil
+}
+
+func (nm *IndexNodeManager) QuerySlots() []WorkerSlots {
+	nm.lock.Lock()
+	defer nm.lock.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), querySlotTimeout)
+	defer cancel()
+
+	nodeSlots := make([]WorkerSlots, 0)
+	mu := &sync.Mutex{}
+	wg := &sync.WaitGroup{}
+	for nodeID, client := range nm.nodeClients {
+		if _, ok := nm.stoppingNodes[nodeID]; !ok {
+			wg.Add(1)
+			go func(nodeID int64) {
+				defer wg.Done()
+				resp, err := client.GetJobStats(ctx, &workerpb.GetJobStatsRequest{})
+				if err != nil {
+					log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+					return
+				}
+				if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+					log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID),
+						zap.String("reason", resp.GetStatus().GetReason()))
+					return
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				nodeSlots = append(nodeSlots, WorkerSlots{
+					NodeID:         nodeID,
+					TotalSlots:     resp.GetTotalSlots(),
+					AvailableSlots: resp.GetTaskSlots(),
+				})
+			}(nodeID)
+		}
+	}
+	wg.Wait()
+	log.Ctx(context.TODO()).Debug("query slot done", zap.Any("nodeSlots", nodeSlots))
+	return nodeSlots
 }
 
 func (nm *IndexNodeManager) PickClient() (typeutil.UniqueID, types.IndexNodeClient) {
