@@ -61,6 +61,7 @@ namespace milvus::segcore {
             case DataType::INT64: {                                        \
                 auto col =                                                 \
                     std::dynamic_pointer_cast<SingleChunkColumn>(column);  \
+                auto pks = reinterpret_cast<const int64_t*>(col->Data(0)); \
                 for (int i = 1; i < col->NumRows(); ++i) {                 \
                     assert(pks[i - 1] <= pks[i] &&                         \
                            "INT64 Column is not ordered!");                \
