@@ -356,6 +356,12 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             // does nothing here
             break;
         }
+        case DataType::VECTOR_INT8: {
+            auto length = count * dim;
+            auto obj = vector_array->mutable_int8_vector();
+            obj->resize(length * sizeof(int8));
+            break;
+        }
         default: {
             PanicInfo(DataTypeInvalid,
                       fmt::format("unsupported datatype {}", data_type));
@@ -519,6 +525,13 @@ CreateVectorDataArrayFrom(const void* data_raw,
             vector_array->set_dim(vector_array->sparse_float_vector().dim());
             break;
         }
+        case DataType::VECTOR_INT8: {
+            auto length = count * dim;
+            auto data = reinterpret_cast<const char*>(data_raw);
+            auto obj = vector_array->mutable_int8_vector();
+            obj->assign(data, length * sizeof(int8));
+            break;
+        }
         default: {
             PanicInfo(DataTypeInvalid,
                       fmt::format("unsupported datatype {}", data_type));
@@ -596,6 +609,11 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 }
                 vector_array->set_dim(dst->dim());
                 *dst->mutable_contents() = src.contents();
+            } else if (field_meta.get_data_type() ==
+                       DataType::VECTOR_INT8) {
+                auto data = VEC_FIELD_DATA(src_field_data, int8);
+                auto obj = vector_array->mutable_int8_vector();
+                obj->assign(data, dim * sizeof(int8));
             } else {
                 PanicInfo(DataTypeInvalid,
                           fmt::format("unsupported datatype {}", data_type));

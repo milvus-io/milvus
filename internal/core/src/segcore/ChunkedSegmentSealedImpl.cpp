@@ -1722,7 +1722,15 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
             ret->mutable_vectors()->set_dim(dst->dim());
             break;
         }
-
+        case DataType::VECTOR_INT8: {
+            bulk_subscript_impl(
+                field_meta.get_sizeof(),
+                column.get(),
+                seg_offsets,
+                count,
+                ret->mutable_vectors()->mutable_int8_vector()->data());
+            break;
+        }
         default: {
             PanicInfo(DataTypeInvalid,
                       fmt::format("unsupported data type {}",

@@ -43,7 +43,6 @@
 #include "test_utils/GenExprProto.h"
 #include "expr/ITypeExpr.h"
 #include "plan/PlanNode.h"
-#include "exec/expression/Expr.h"
 #include "segcore/load_index_c.h"
 #include "test_utils/c_api_test_utils.h"
 #include "segcore/vector_index_c.h"
@@ -174,7 +173,7 @@ template <class TraitType>
 std::string
 generate_collection_schema(std::string metric_type, int dim) {
     namespace schema = milvus::proto::schema;
-    GET_SCHEMA_DATA_TYPE_FOR_VECTOR_TRAIT;
+    GET_SCHEMA_DATA_TYPE_FOR_VECTOR_TRAIT
 
     schema::CollectionSchema collection_schema;
     collection_schema.set_name("collection_test");
@@ -326,6 +325,7 @@ TEST(CApiTest, CPlan) {
     Test_CPlan<milvus::FloatVector>(knowhere::metric::L2);
     Test_CPlan<milvus::Float16Vector>(knowhere::metric::L2);
     Test_CPlan<milvus::BFloat16Vector>(knowhere::metric::L2);
+    Test_CPlan<milvus::Int8Vector>(knowhere::metric::L2);
 }
 
 TEST(CApiTest, InsertTest) {
@@ -1783,11 +1783,14 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     testReduceSearchWithExpr<milvus::FloatVector>(10000, 1, 1);
     testReduceSearchWithExpr<milvus::FloatVector>(10000, 10, 10);
     // float16
-    testReduceSearchWithExpr<milvus::Float16Vector>(2, 10, 10, false);
-    testReduceSearchWithExpr<milvus::Float16Vector>(100, 10, 10, false);
+    testReduceSearchWithExpr<milvus::Float16Vector>(2, 10, 10);
+    testReduceSearchWithExpr<milvus::Float16Vector>(100, 10, 10);
     // bfloat16
-    testReduceSearchWithExpr<milvus::BFloat16Vector>(2, 10, 10, false);
-    testReduceSearchWithExpr<milvus::BFloat16Vector>(100, 10, 10, false);
+    testReduceSearchWithExpr<milvus::BFloat16Vector>(2, 10, 10);
+    testReduceSearchWithExpr<milvus::BFloat16Vector>(100, 10, 10);
+    // int8
+    testReduceSearchWithExpr<milvus::Int8Vector>(2, 10, 10);
+    testReduceSearchWithExpr<milvus::Int8Vector>(100, 10, 10);
 }
 
 TEST(CApiTest, ReduceSearchWithExprFilterAll) {
@@ -1796,8 +1799,13 @@ TEST(CApiTest, ReduceSearchWithExprFilterAll) {
     testReduceSearchWithExpr<milvus::FloatVector>(2, 10, 10, true);
     // float16
     testReduceSearchWithExpr<milvus::Float16Vector>(2, 1, 1, true);
+    testReduceSearchWithExpr<milvus::Float16Vector>(2, 10, 10, true);
     // bfloat16
     testReduceSearchWithExpr<milvus::BFloat16Vector>(2, 1, 1, true);
+    testReduceSearchWithExpr<milvus::BFloat16Vector>(2, 10, 10, true);
+    // int8
+    testReduceSearchWithExpr<milvus::Int8Vector>(2, 1, 1, true);
+    testReduceSearchWithExpr<milvus::Int8Vector>(2, 10, 10, true);
 }
 
 TEST(CApiTest, LoadIndexInfo) {
@@ -2053,6 +2061,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     Test_Indexing_Without_Predicate<milvus::FloatVector>();
     Test_Indexing_Without_Predicate<milvus::Float16Vector>();
     Test_Indexing_Without_Predicate<milvus::BFloat16Vector>();
+    Test_Indexing_Without_Predicate<milvus::Int8Vector>();
 }
 
 TEST(CApiTest, Indexing_Expr_Without_Predicate) {
@@ -4373,6 +4382,7 @@ TEST(CApiTest, Range_Search_With_Radius_And_Range_Filter) {
     Test_Range_Search_With_Radius_And_Range_Filter<milvus::FloatVector>();
     Test_Range_Search_With_Radius_And_Range_Filter<milvus::Float16Vector>();
     Test_Range_Search_With_Radius_And_Range_Filter<milvus::BFloat16Vector>();
+    Test_Range_Search_With_Radius_And_Range_Filter<milvus::Int8Vector>();
 }
 
 std::vector<SegOffset>

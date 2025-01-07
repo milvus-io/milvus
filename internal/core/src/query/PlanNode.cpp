@@ -41,6 +41,11 @@ SparseFloatVectorANNS::accept(PlanNodeVisitor& visitor) {
 }
 
 void
+Int8VectorANNS::accept(PlanNodeVisitor& visitor) {
+    visitor.visit(*this);
+}
+
+void
 RetrievePlanNode::accept(PlanNodeVisitor& visitor) {
     visitor.visit(*this);
 }

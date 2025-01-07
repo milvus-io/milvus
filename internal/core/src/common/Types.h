@@ -125,12 +125,12 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
             AssertInfo(dim % 8 == 0, "dim={}", dim);
             return dim / 8;
         }
-        case DataType::VECTOR_FLOAT16: {
+        case DataType::VECTOR_FLOAT16:
             return sizeof(float16) * dim;
-        }
-        case DataType::VECTOR_BFLOAT16: {
+        case DataType::VECTOR_BFLOAT16:
             return sizeof(bfloat16) * dim;
-        }
+        case DataType::VECTOR_INT8:
+            return sizeof(int8) * dim;
         // Not supporting variable length types(such as VECTOR_SPARSE_FLOAT and
         // VARCHAR) here intentionally. We can't easily estimate the size of
         // them. Caller of this method must handle this case themselves and must
@@ -192,6 +192,8 @@ GetDataTypeName(DataType data_type) {
             return "vector_bfloat16";
         case DataType::VECTOR_SPARSE_FLOAT:
             return "vector_sparse_float";
+        case DataType::VECTOR_INT8:
+            return "vector_int8";
         default:
             PanicInfo(DataTypeInvalid, "Unsupported DataType({})", data_type);
     }
@@ -325,7 +327,7 @@ IsSparseFloatVectorDataType(DataType data_type) {
 }
 
 inline bool
-IsInt8VectorDataType(DataType data_type) {
+IsIntVectorDataType(DataType data_type) {
     return data_type == DataType::VECTOR_INT8;
 }
 
@@ -338,7 +340,7 @@ IsFloatVectorDataType(DataType data_type) {
 inline bool
 IsVectorDataType(DataType data_type) {
     return IsBinaryVectorDataType(data_type) ||
-           IsFloatVectorDataType(data_type) || IsInt8VectorDataType(data_type);
+           IsFloatVectorDataType(data_type) || IsIntVectorDataType(data_type);
 }
 
 inline bool
@@ -641,6 +643,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::VECTOR_SPARSE_FLOAT:
                 name = "VECTOR_SPARSE_FLOAT";
+                break;
+            case milvus::DataType::VECTOR_INT8:
+                name = "VECTOR_INT8";
                 break;
         }
         return formatter<string_view>::format(name, ctx);

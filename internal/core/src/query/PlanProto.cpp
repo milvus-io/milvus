@@ -123,6 +123,9 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         } else if (anns_proto.vector_type() ==
                    milvus::proto::plan::VectorType::SparseFloatVector) {
             return std::make_unique<SparseFloatVectorANNS>();
+        } else if (anns_proto.vector_type() ==
+                   milvus::proto::plan::VectorType::Int8Vector) {
+            return std::make_unique<Int8VectorANNS>();
         } else {
             return std::make_unique<FloatVectorANNS>();
         }
