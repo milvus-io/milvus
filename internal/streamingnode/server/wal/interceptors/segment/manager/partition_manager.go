@@ -36,7 +36,9 @@ func newPartitionSegmentManager(
 ) *partitionSegmentManager {
 	return &partitionSegmentManager{
 		mu: sync.Mutex{},
-		logger: log.With(
+		logger: resource.Resource().Logger().With(
+			log.FieldComponent("segment-assigner"),
+			zap.Any("pchannel", pchannel),
 			zap.Any("pchannel", pchannel),
 			zap.String("vchannel", vchannel),
 			zap.Int64("collectionID", collectionID),

@@ -27,9 +27,12 @@ var _ inspector.TimeTickSyncOperator = &timeTickSyncOperator{}
 func newTimeTickSyncOperator(param interceptors.InterceptorBuildParam) *timeTickSyncOperator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &timeTickSyncOperator{
-		ctx:                   ctx,
-		cancel:                cancel,
-		logger:                log.With(zap.Any("pchannel", param.WALImpls.Channel())),
+		ctx:    ctx,
+		cancel: cancel,
+		logger: resource.Resource().Logger().With(
+			log.FieldComponent("timetick-sync"),
+			zap.Any("pchannel", param.WALImpls.Channel()),
+		),
 		pchannel:              param.WALImpls.Channel(),
 		ready:                 make(chan struct{}),
 		interceptorBuildParam: param,
