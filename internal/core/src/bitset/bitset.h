@@ -1154,6 +1154,15 @@ class Bitset
                              count);
     }
 
+    template <typename I, bool R>
+    void
+    append(const BitsetBase<PolicyT, I, R>& other, const size_t offset) {
+        range_checker::le(offset, this->size());
+
+        policy_type::op_copy(
+            other.data(), 0, this->data(), offset, other.size());
+    }
+
     // Append data from another bitset / bitset view
     //   to the end of this bitset.
     template <typename I, bool R>
