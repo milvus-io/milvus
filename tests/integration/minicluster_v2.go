@@ -365,6 +365,7 @@ func (cluster *MiniClusterV2) Start() error {
 	}
 
 	if streamingutil.IsStreamingServiceEnabled() {
+		paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
 		runComponent(cluster.StreamingNode)
 	}
 
