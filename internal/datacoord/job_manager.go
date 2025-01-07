@@ -249,6 +249,7 @@ func (jm *statsJobManager) SubmitStatsTask(originSegmentID, targetSegmentID int6
 	if err != nil {
 		return err
 	}
+	taskSlot := calculateStatsTaskSlot(originSegment.getSegmentSize())
 	t := &indexpb.StatsTask{
 		CollectionID:    originSegment.GetCollectionID(),
 		PartitionID:     originSegment.GetPartitionID(),
@@ -272,7 +273,12 @@ func (jm *statsJobManager) SubmitStatsTask(originSegmentID, targetSegmentID int6
 		}
 		return err
 	}
-	jm.scheduler.enqueue(newStatsTask(t.GetTaskID(), t.GetSegmentID(), t.GetTargetSegmentID(), subJobType))
+	jm.scheduler.enqueue(newStatsTask(t.GetTaskID(), t.GetSegmentID(), t.GetTargetSegmentID(), subJobType, taskSlot))
+	log.Ctx(jm.ctx).Info("submit stats task success", zap.Int64("taskID", taskID),
+		zap.String("subJobType", subJobType.String()),
+		zap.Int64("collectionID", originSegment.GetCollectionID()),
+		zap.Int64("originSegmentID", originSegmentID),
+		zap.Int64("targetSegmentID", targetSegmentID), zap.Int64("taskSlot", taskSlot))
 	return nil
 }
 
