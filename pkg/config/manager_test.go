@@ -217,6 +217,7 @@ func TestCachedConfig(t *testing.T) {
 
 	dir, _ := os.MkdirTemp("", "milvus")
 	yamlFile := path.Join(dir, "milvus.yaml")
+	os.WriteFile(yamlFile, []byte("a.b: aaa"), 0o600)
 	mgr, _ := Init(WithEnvSource(formatKey),
 		WithFilesSource(&FileInfo{
 			Files:           []string{yamlFile},
@@ -229,7 +230,6 @@ func TestCachedConfig(t *testing.T) {
 		}))
 	// test get cached value from file
 	{
-		os.WriteFile(yamlFile, []byte("a.b: aaa"), 0o600)
 		time.Sleep(time.Second)
 		_, exist := mgr.GetCachedValue("a.b")
 		assert.False(t, exist)
