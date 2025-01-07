@@ -116,6 +116,9 @@ func (bw *BulkPackWriter) prefetchIDs(pack *SyncPack) error {
 		}
 	}
 
+	if totalIDCount == 0 {
+		return nil
+	}
 	start, _, err := bw.allocator.Alloc(uint32(totalIDCount))
 	if err != nil {
 		return err
@@ -134,10 +137,9 @@ func (bw *BulkPackWriter) nextID() int64 {
 }
 
 func (bw *BulkPackWriter) writeLog(ctx context.Context, blob *storage.Blob,
-	root string, pack *SyncPack, field, log int64,
+	root, p string, pack *SyncPack,
 ) (*datapb.Binlog, error) {
-	k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, field, log)
-	key := path.Join(bw.chunkManager.RootPath(), root, k)
+	key := path.Join(bw.chunkManager.RootPath(), root, p)
 	err := retry.Do(ctx, func() error {
 		return bw.chunkManager.Write(ctx, key, blob.Value)
 	}, bw.writeRetryOpts...)
@@ -173,7 +175,9 @@ func (bw *BulkPackWriter) writeInserts(ctx context.Context, pack *SyncPack) (map
 
 	logs := make(map[int64]*datapb.FieldBinlog)
 	for fieldID, blob := range binlogBlobs {
-		binlog, err := bw.writeLog(ctx, blob, common.SegmentInsertLogPath, pack, fieldID, bw.nextID())
+
+		k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, fieldID, bw.nextID())
+		binlog, err := bw.writeLog(ctx, blob, common.SegmentInsertLogPath, k, pack)
 		if err != nil {
 			return nil, err
 		}
@@ -203,7 +207,8 @@ func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[i
 
 	pkFieldID := serializer.pkField.GetFieldID()
 	binlogs := make([]*datapb.Binlog, 0)
-	if binlog, err := bw.writeLog(ctx, batchStatsBlob, common.SegmentStatslogPath, pack, pkFieldID, bw.nextID()); err != nil {
+	k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, pkFieldID, bw.nextID())
+	if binlog, err := bw.writeLog(ctx, batchStatsBlob, common.SegmentStatslogPath, k, pack); err != nil {
 		return nil, err
 	} else {
 		binlogs = append(binlogs, binlog)
@@ -215,7 +220,8 @@ func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[i
 			return nil, err
 		}
 
-		binlog, err := bw.writeLog(ctx, mergedStatsBlob, common.SegmentStatslogPath, pack, pkFieldID, int64(storage.CompoundStatsType))
+		k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, pkFieldID, int64(storage.CompoundStatsType))
+		binlog, err := bw.writeLog(ctx, mergedStatsBlob, common.SegmentStatslogPath, k, pack)
 		if err != nil {
 			return nil, err
 		}
@@ -246,7 +252,8 @@ func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (
 
 	logs := make(map[int64]*datapb.FieldBinlog)
 	for fieldID, blob := range bm25Blobs {
-		binlog, err := bw.writeLog(ctx, blob, common.SegmentBm25LogPath, pack, fieldID, bw.nextID())
+		k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, fieldID, bw.nextID())
+		binlog, err := bw.writeLog(ctx, blob, common.SegmentBm25LogPath, k, pack)
 		if err != nil {
 			return nil, err
 		}
@@ -267,7 +274,8 @@ func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (
 					return nil, err
 				}
 				for fieldID, blob := range mergedBM25Blob {
-					binlog, err := bw.writeLog(ctx, blob, common.SegmentBm25LogPath, pack, fieldID, int64(storage.CompoundStatsType))
+					k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, fieldID, int64(storage.CompoundStatsType))
+					binlog, err := bw.writeLog(ctx, blob, common.SegmentBm25LogPath, k, pack)
 					if err != nil {
 						return nil, err
 					}
@@ -299,7 +307,8 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 		return nil, err
 	}
 
-	deltalog, err := bw.writeLog(ctx, deltaBlob, common.SegmentDeltaLogPath, pack, s.pkField.GetFieldID(), bw.nextID())
+	k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, bw.nextID())
+	deltalog, err := bw.writeLog(ctx, deltaBlob, common.SegmentDeltaLogPath, k, pack)
 	if err != nil {
 		return nil, err
 	}
