@@ -782,7 +782,6 @@ func (st *statsTask) createJSONKeyIndex(ctx context.Context,
 			continue
 		}
 		log.Info("field enable json key index, ready to create json key index", zap.Int64("field id", field.GetFieldID()))
-		// create text index and upload the text index files.
 		files, err := getInsertFiles(field.GetFieldID())
 		if err != nil {
 			return err

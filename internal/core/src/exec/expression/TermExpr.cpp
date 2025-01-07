@@ -93,11 +93,6 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 default:
                     PanicInfo(DataTypeInvalid, "unknown data type: {}", type);
             }
-            std::cout << "optimize cost:"
-                      << std::chrono::duration_cast<std::chrono::microseconds>(
-                             std::chrono::steady_clock::now() - start)
-                             .count()
-                      << std::endl;
             break;
         }
         case DataType::ARRAY: {
