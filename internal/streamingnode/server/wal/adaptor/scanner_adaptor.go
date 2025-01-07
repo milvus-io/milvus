@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
@@ -32,7 +33,7 @@ func newScannerAdaptor(
 		panic("vchannel of scanner must be set")
 	}
 	if readOption.MesasgeHandler == nil {
-		readOption.MesasgeHandler = defaultMessageHandler(make(chan message.ImmutableMessage))
+		readOption.MesasgeHandler = adaptor.ChanMessageHandler(make(chan message.ImmutableMessage))
 	}
 	options.GetFilterFunc(readOption.MessageFilter)
 	logger := resource.Resource().Logger().With(
@@ -79,7 +80,7 @@ func (s *scannerAdaptorImpl) Channel() types.PChannelInfo {
 
 // Chan returns the message channel of the scanner.
 func (s *scannerAdaptorImpl) Chan() <-chan message.ImmutableMessage {
-	return s.readOption.MesasgeHandler.(defaultMessageHandler)
+	return s.readOption.MesasgeHandler.(adaptor.ChanMessageHandler)
 }
 
 // Close the scanner, release the underlying resources.
@@ -111,7 +112,7 @@ func (s *scannerAdaptorImpl) executeConsume() {
 	for {
 		// generate the event channel and do the event loop.
 		// TODO: Consume from local cache.
-		handleResult := s.readOption.MesasgeHandler.Handle(wal.HandleParam{
+		handleResult := s.readOption.MesasgeHandler.Handle(message.HandleParam{
 			Ctx:          s.Context(),
 			Upstream:     s.getUpstream(innerScanner),
 			TimeTickChan: s.getTimeTickUpdateChan(timeTickNotifier),

@@ -19,7 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mocks/proto/mock_streamingpb"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_types"
 	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -41,9 +41,9 @@ func TestHandlerClient(t *testing.T) {
 	w.EXPECT().Close().Run(func() {})
 
 	p := mock_producer.NewMockProducer(t)
-	p.EXPECT().Close().Run(func() {})
+	p.EXPECT().Close().RunAndReturn(func() {})
 	c := mock_consumer.NewMockConsumer(t)
-	c.EXPECT().Close().Run(func() {})
+	c.EXPECT().Close().RunAndReturn(func() error { return nil })
 
 	rebalanceTrigger := mock_types.NewMockAssignmentRebalanceTrigger(t)
 	rebalanceTrigger.EXPECT().ReportAssignmentError(mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -104,7 +104,7 @@ func TestHandlerClient(t *testing.T) {
 			options.DeliverFilterTimeTickGT(10),
 			options.DeliverFilterTimeTickGTE(10),
 		},
-		MessageHandler: make(message.ChanMessageHandler),
+		MessageHandler: make(adaptor.ChanMessageHandler),
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)

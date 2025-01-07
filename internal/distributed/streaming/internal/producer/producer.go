@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -77,7 +78,7 @@ type ResumableProducer struct {
 }
 
 // Produce produce a new message to log service.
-func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMessage) (result *producer.ProduceResult, err error) {
+func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMessage) (result *types.AppendResult, err error) {
 	if !p.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, errors.Wrapf(errs.ErrClosed, "produce on closed producer")
 	}
@@ -94,7 +95,7 @@ func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMess
 			return nil, err
 		}
 
-		produceResult, err := producerHandler.Produce(ctx, msg)
+		produceResult, err := producerHandler.Append(ctx, msg)
 		if err == nil {
 			return produceResult, nil
 		}
