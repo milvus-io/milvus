@@ -44,8 +44,8 @@ type Client interface {
 // NewClient creates a new client.
 func NewClient(etcdCli *clientv3.Client) Client {
 	// StreamingCoord is deployed on DataCoord node.
-	role := sessionutil.GetSessionPrefixByRole(typeutil.DataCoordRole)
-	rb := resolver.NewSessionBuilder(etcdCli, role)
+	role := sessionutil.GetSessionPrefixByRole(typeutil.RootCoordRole)
+	rb := resolver.NewSessionExclusiveBuilder(etcdCli, role)
 	dialTimeout := paramtable.Get().StreamingCoordGrpcClientCfg.DialTimeout.GetAsDuration(time.Millisecond)
 	dialOptions := getDialOptions(rb)
 	conn := lazygrpc.NewConn(func(ctx context.Context) (*grpc.ClientConn, error) {
@@ -53,7 +53,7 @@ func NewClient(etcdCli *clientv3.Client) Client {
 		defer cancel()
 		return grpc.DialContext(
 			ctx,
-			resolver.SessionResolverScheme+":///"+typeutil.DataCoordRole,
+			resolver.SessionResolverScheme+":///"+typeutil.RootCoordRole,
 			dialOptions...,
 		)
 	})

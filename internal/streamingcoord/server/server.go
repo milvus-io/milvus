@@ -9,72 +9,76 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	_ "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/policy" // register the balancer policy
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service"
-	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 // Server is the streamingcoord server.
 type Server struct {
+	logger *log.MLogger
+
 	// session of current server.
 	session sessionutil.SessionInterface
 
 	// service level variables.
-	assignmentService     service.AssignmentService
-	componentStateService *componentutil.ComponentStateService // state.
+	assignmentService service.AssignmentService
 
 	// basic component variables can be used at service level.
 	balancer *syncutil.Future[balancer.Balancer]
 }
 
 // Init initializes the streamingcoord server.
-func (s *Server) Init(ctx context.Context) (err error) {
-	log.Info("init streamingcoord server...")
-
-	// Init all underlying component of streamingcoord server.
+func (s *Server) Start(ctx context.Context) (err error) {
+	s.logger.Info("init streamingcoord...")
 	if err := s.initBasicComponent(ctx); err != nil {
-		log.Error("init basic component of streamingcoord server failed", zap.Error(err))
+		s.logger.Warn("init basic component of streamingcoord failed", zap.Error(err))
 		return err
 	}
 	// Init all grpc service of streamingcoord server.
-	s.componentStateService.OnInitialized(s.session.GetServerID())
-	log.Info("streamingcoord server initialized")
+	s.logger.Info("streamingcoord initialized")
 	return nil
 }
 
 // initBasicComponent initialize all underlying dependency for streamingcoord.
-func (s *Server) initBasicComponent(ctx context.Context) error {
-	// Init balancer
-	var err error
-	// Read new incoming topics from configuration, and register it into balancer.
-	newIncomingTopics := util.GetAllTopicsFromConfiguration()
-	balancer, err := balancer.RecoverBalancer(ctx, "pchannel_count_fair", newIncomingTopics.Collect()...)
-	if err != nil {
-		return err
+func (s *Server) initBasicComponent(ctx context.Context) (err error) {
+	if streamingutil.IsStreamingServiceEnabled() {
+		fBalancer := conc.Go(func() (struct{}, error) {
+			s.logger.Info("start recovery balancer...")
+			// Read new incoming topics from configuration, and register it into balancer.
+			newIncomingTopics := util.GetAllTopicsFromConfiguration()
+			balancer, err := balancer.RecoverBalancer(ctx, "pchannel_count_fair", newIncomingTopics.Collect()...)
+			if err != nil {
+				s.logger.Warn("recover balancer failed", zap.Error(err))
+				return struct{}{}, err
+			}
+			s.balancer.Set(balancer)
+			s.logger.Info("recover balancer done")
+			return struct{}{}, nil
+		})
+		return conc.AwaitAll(fBalancer)
 	}
-	s.balancer.Set(balancer)
-	return err
+	return nil
 }
 
-// registerGRPCService register all grpc service to grpc server.
+// RegisterGRPCService register all grpc service to grpc server.
 func (s *Server) RegisterGRPCService(grpcServer *grpc.Server) {
-	streamingpb.RegisterStreamingCoordAssignmentServiceServer(grpcServer, s.assignmentService)
-	streamingpb.RegisterStreamingCoordStateServiceServer(grpcServer, s.componentStateService)
+	if streamingutil.IsStreamingServiceEnabled() {
+		streamingpb.RegisterStreamingCoordAssignmentServiceServer(grpcServer, s.assignmentService)
+	}
 }
 
-// Start starts the streamingcoord server.
-func (s *Server) Start() {
-	// Just do nothing now.
-	log.Info("start streamingcoord server")
-}
-
-// Stop stops the streamingcoord server.
+// Close closes the streamingcoord server.
 func (s *Server) Stop() {
-	s.componentStateService.OnStopping()
-	log.Info("close balancer...")
-	s.balancer.Get().Close()
-	log.Info("streamingcoord server stopped")
+	if s.balancer.Ready() {
+		s.logger.Info("start close balancer...")
+		s.balancer.Get().Close()
+	} else {
+		s.logger.Info("balancer not ready, skip close")
+	}
+	s.logger.Info("streamingcoord server stopped")
 }
