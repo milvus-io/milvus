@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
@@ -45,9 +46,12 @@ func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb
 	}
 	metrics := newProducerMetrics(l.Channel())
 	return &ProduceServer{
-		wal:              l,
-		produceServer:    produceServer,
-		logger:           log.With(zap.String("channel", l.Channel().Name), zap.Int64("term", l.Channel().Term)),
+		wal:           l,
+		produceServer: produceServer,
+		logger: resource.Resource().Logger().With(
+			log.FieldComponent("producer-server"),
+			zap.String("channel", l.Channel().Name),
+			zap.Int64("term", l.Channel().Term)),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse),
 		appendWG:         sync.WaitGroup{},
 		metrics:          metrics,

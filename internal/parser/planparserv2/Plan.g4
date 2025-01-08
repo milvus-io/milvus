@@ -75,14 +75,14 @@ BAND: '&';
 BOR: '|';
 BXOR: '^';
 
-AND: '&&' | 'and';
-OR: '||' | 'or';
+AND: '&&' | 'and' | 'AND';
+OR: '||' | 'or' | 'OR';
 
 ISNULL: 'is null' | 'IS NULL';
 ISNOTNULL: 'is not null' | 'IS NOT NULL';
 
 BNOT: '~';
-NOT: '!' | 'not';
+NOT: '!' | 'not' | 'NOT';
 
 IN: 'in' | 'IN';
 EmptyArray: '[' (Whitespace | Newline)* ']';

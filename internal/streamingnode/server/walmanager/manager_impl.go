@@ -5,6 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -19,7 +20,7 @@ var errWALManagerClosed = status.NewOnShutdownError("wal manager is closed")
 // OpenManager create a wal manager.
 func OpenManager() (Manager, error) {
 	walName := util.MustSelectWALName()
-	log.Info("open wal manager", zap.String("walName", walName))
+	resource.Resource().Logger().Info("open wal manager", zap.String("walName", walName))
 	opener, err := registry.MustGetBuilder(walName).Build()
 	if err != nil {
 		return nil, err
@@ -33,6 +34,7 @@ func newManager(opener wal.Opener) Manager {
 		lifetime: typeutil.NewGenericLifetime[managerState](managerOpenable | managerRemoveable | managerGetable),
 		wltMap:   typeutil.NewConcurrentMap[string, *walLifetime](),
 		opener:   opener,
+		logger:   resource.Resource().Logger().With(log.FieldComponent("wal-manager")),
 	}
 }
 
@@ -42,6 +44,7 @@ type managerImpl struct {
 
 	wltMap *typeutil.ConcurrentMap[string, *walLifetime]
 	opener wal.Opener // wal allocator
+	logger *log.MLogger
 }
 
 // Open opens a wal instance for the channel on this Manager.
@@ -53,10 +56,10 @@ func (m *managerImpl) Open(ctx context.Context, channel types.PChannelInfo) (err
 	defer func() {
 		m.lifetime.Done()
 		if err != nil {
-			log.Warn("open wal failed", zap.Error(err), zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
+			m.logger.Warn("open wal failed", zap.Error(err), zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
 			return
 		}
-		log.Info("open wal success", zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
+		m.logger.Info("open wal success", zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
 	}()
 
 	return m.getWALLifetime(channel.Name).Open(ctx, channel)
@@ -71,10 +74,10 @@ func (m *managerImpl) Remove(ctx context.Context, channel types.PChannelInfo) (e
 	defer func() {
 		m.lifetime.Done()
 		if err != nil {
-			log.Warn("remove wal failed", zap.Error(err), zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
+			m.logger.Warn("remove wal failed", zap.Error(err), zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
 			return
 		}
-		log.Info("remove wal success", zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
+		m.logger.Info("remove wal success", zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
 	}()
 
 	return m.getWALLifetime(channel.Name).Remove(ctx, channel.Term)
@@ -144,7 +147,7 @@ func (m *managerImpl) getWALLifetime(channel string) *walLifetime {
 	}
 
 	// Perform a cas here.
-	newWLT := newWALLifetime(m.opener, channel)
+	newWLT := newWALLifetime(m.opener, channel, m.logger)
 	wlt, loaded := m.wltMap.GetOrInsert(channel, newWLT)
 	// if loaded, lifetime is exist, close the redundant lifetime.
 	if loaded {

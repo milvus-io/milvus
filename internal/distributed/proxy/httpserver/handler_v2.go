@@ -2232,6 +2232,7 @@ func (h *HandlersV2) alterIndexProperties(ctx context.Context, c *gin.Context, a
 	req := &milvuspb.AlterIndexRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
+		IndexName:      httpReq.IndexName,
 	}
 	extraParams := make([]*commonpb.KeyValuePair, 0, len(httpReq.Properties))
 	for key, value := range httpReq.Properties {

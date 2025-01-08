@@ -70,6 +70,7 @@ enum ErrorCode {
     OutOfRange = 2039,
     GcpNativeError = 2040,
     InvalidParameter = 2041,
+    TextIndexNotFound = 2042,
 
     KnowhereError = 2099
 };
