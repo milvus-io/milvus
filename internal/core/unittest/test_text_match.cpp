@@ -782,6 +782,8 @@ TEST(TextMatch, GrowingLoadData) {
     for (int64_t i = 0; i < N; i++) {
         str_col_valid->at(i) = true;
     }
+    // so we cannot match the second row
+    str_col_valid->at(1) = false;
 
     auto storage_config = get_default_local_storage_config();
     auto cm = storage::CreateChunkManager(storage_config);
@@ -805,7 +807,7 @@ TEST(TextMatch, GrowingLoadData) {
     final = ExecuteQueryExpr(expr, segment, N, MAX_TIMESTAMP);
     ASSERT_EQ(final.size(), N);
     ASSERT_TRUE(final[0]);
-    ASSERT_TRUE(final[1]);
+    ASSERT_FALSE(final[1]);
     ASSERT_FALSE(final[2]);
     ASSERT_FALSE(final[3]);
     ASSERT_FALSE(final[4]);
