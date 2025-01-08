@@ -279,6 +279,7 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
             auto index = GetTextIndex(field_id);
             index->BuildIndexFromFieldData(field_data);
             index->Commit();
+            // Reload reader so that the index can be read immediately
             index->Reload();
         }
 
