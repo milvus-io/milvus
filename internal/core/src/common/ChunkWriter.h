@@ -43,6 +43,22 @@ class ChunkWriterBase {
         return target_->get();
     }
 
+    void
+    write_null_bit_maps(
+        const std::vector<std::pair<const uint8_t*, int64_t>>& null_bitmaps) {
+        if (nullable_) {
+            for (auto [data, size] : null_bitmaps) {
+                if (data != nullptr) {
+                    target_->write(data, size);
+                } else {
+                    // have to append always-true bitmap due to arrow optimize this
+                    std::vector<uint8_t> null_bitmap(size, 0xff);
+                    target_->write(null_bitmap.data(), size);
+                }
+            }
+        }
+    }
+
  protected:
     int row_nums_ = 0;
     File* file_ = nullptr;
