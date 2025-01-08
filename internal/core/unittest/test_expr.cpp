@@ -827,7 +827,7 @@ TEST_P(ExprTest, TestBinaryRangeJSON) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     for (auto testcase : testcases) {
         auto check = [&](int64_t value) {
@@ -951,7 +951,7 @@ TEST_P(ExprTest, TestBinaryRangeJSONNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     for (auto testcase : testcases) {
         auto check = [&](int64_t value, bool valid) {
@@ -1070,7 +1070,7 @@ TEST_P(ExprTest, TestExistsJson) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     for (auto testcase : testcases) {
@@ -1147,7 +1147,7 @@ TEST_P(ExprTest, TestExistsJsonNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     for (auto testcase : testcases) {
@@ -1230,16 +1230,17 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
         int64_t val;
         std::vector<std::string> nested_path;
     };
-    std::vector<Testcase> testcases{
-        {10, {"int"}},
-        {20, {"int"}},
-        {30, {"int"}},
-        {40, {"int"}},
-        {10, {"double"}},
-        {20, {"double"}},
-        {30, {"double"}},
-        {40, {"double"}},
-    };
+    std::vector<Testcase> testcases{{10, {"int"}},
+                                    {20, {"int"}},
+                                    {30, {"int"}},
+                                    {40, {"int"}},
+                                    {10, {"double"}},
+                                    {20, {"double"}},
+                                    {30, {"double"}},
+                                    {40, {"double"}},
+                                    {1, {"array", "0"}},
+                                    {2, {"array", "1"}},
+                                    {3, {"array", "2"}}};
 
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
@@ -1263,7 +1264,7 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     std::vector<OpType> ops{
@@ -1341,11 +1342,13 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
 
             for (int i = 0; i < N * num_iters; ++i) {
                 auto ans = final[i];
-                if (testcase.nested_path[0] == "int") {
+                if (testcase.nested_path[0] == "int" ||
+                    testcase.nested_path[0] == "array") {
                     auto val =
                         milvus::Json(simdjson::padded_string(json_col[i]))
                             .template at<int64_t>(pointer)
                             .value();
+
                     auto ref = f(val);
                     ASSERT_EQ(ans, ref);
                     if (i % 2 == 0) {
@@ -1442,16 +1445,17 @@ TEST_P(ExprTest, TestUnaryRangeJsonNullable) {
         int64_t val;
         std::vector<std::string> nested_path;
     };
-    std::vector<Testcase> testcases{
-        {10, {"int"}},
-        {20, {"int"}},
-        {30, {"int"}},
-        {40, {"int"}},
-        {10, {"double"}},
-        {20, {"double"}},
-        {30, {"double"}},
-        {40, {"double"}},
-    };
+    std::vector<Testcase> testcases{{10, {"int"}},
+                                    {20, {"int"}},
+                                    {30, {"int"}},
+                                    {40, {"int"}},
+                                    {10, {"double"}},
+                                    {20, {"double"}},
+                                    {30, {"double"}},
+                                    {40, {"double"}},
+                                    {1, {"array", "0"}},
+                                    {2, {"array", "1"}},
+                                    {3, {"array", "2"}}};
 
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
@@ -1477,7 +1481,7 @@ TEST_P(ExprTest, TestUnaryRangeJsonNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     std::vector<OpType> ops{
@@ -1702,7 +1706,7 @@ TEST_P(ExprTest, TestTermJson) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     for (auto testcase : testcases) {
@@ -1795,7 +1799,7 @@ TEST_P(ExprTest, TestTermJsonNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     for (auto testcase : testcases) {
@@ -11328,7 +11332,7 @@ TEST_P(ExprTest, TestUnaryRangeWithJSON) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     int offset = 0;
@@ -11588,7 +11592,7 @@ TEST_P(ExprTest, TestUnaryRangeWithJSONNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     int offset = 0;
@@ -11894,7 +11898,7 @@ TEST_P(ExprTest, TestTermWithJSON) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     int offset = 0;
@@ -12127,7 +12131,7 @@ TEST_P(ExprTest, TestTermWithJSONNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     int offset = 0;
@@ -12305,7 +12309,7 @@ TEST_P(ExprTest, TestExistsWithJSON) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     int offset = 0;
@@ -12533,7 +12537,7 @@ TEST_P(ExprTest, TestExistsWithJSONNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     int offset = 0;
@@ -13416,7 +13420,7 @@ TEST_P(ExprTest, TestJsonContainsAny) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
@@ -13706,7 +13710,7 @@ TEST_P(ExprTest, TestJsonContainsAnyNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
@@ -14007,7 +14011,7 @@ TEST_P(ExprTest, TestJsonContainsAll) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     std::vector<Testcase<bool>> bool_testcases{{{true, true}, {"bool"}},
@@ -14321,7 +14325,7 @@ TEST_P(ExprTest, TestJsonContainsAllNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     std::vector<Testcase<bool>> bool_testcases{{{true, true}, {"bool"}},
@@ -14645,7 +14649,7 @@ TEST_P(ExprTest, TestJsonContainsArray) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
@@ -15033,7 +15037,7 @@ TEST_P(ExprTest, TestJsonContainsArrayNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     proto::plan::GenericValue generic_a;
@@ -15457,7 +15461,7 @@ TEST_P(ExprTest, TestJsonContainsDiffTypeArray) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     proto::plan::GenericValue int_value;
@@ -15588,7 +15592,7 @@ TEST_P(ExprTest, TestJsonContainsDiffTypeArrayNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
@@ -15723,7 +15727,7 @@ TEST_P(ExprTest, TestJsonContainsDiffType) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     proto::plan::GenericValue int_val;
@@ -15858,7 +15862,7 @@ TEST_P(ExprTest, TestJsonContainsDiffTypeNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 

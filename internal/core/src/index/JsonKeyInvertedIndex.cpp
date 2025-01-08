@@ -15,7 +15,7 @@
 #include "index/JsonKeyInvertedIndex.h"
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
-
+#include "storage/MmapManager.h"
 namespace milvus::index {
 constexpr const char* TMP_JSON_INVERTED_LOG_PREFIX =
     "/tmp/milvus/json-key-inverted-index-log/";
@@ -25,14 +25,17 @@ JsonKeyInvertedIndex::AddInvertedRecord(const std::vector<std::string>& paths,
                                         uint32_t row_id,
                                         uint16_t offset,
                                         uint16_t length) {
-    auto key = std::string("/") + Join(paths, "/");
-    LOG_DEBUG(
-        "insert inverted key: {}, row_id: {}, offset: "
-        "{}, length:{}",
-        key,
-        row_id,
-        offset,
-        length);
+    std::string key = "";
+    if (!paths.empty()) {
+        key = std::string("/") + Join(paths, "/");
+    }
+    // LOG_DEBUG(
+    //     "insert inverted key: {}, row_id: {}, offset: "
+    //     "{}, length:{}",
+    //     key,
+    //     row_id,
+    //     offset,
+    //     length);
     int64_t combine_id = EncodeOffset(row_id, offset, length);
     wrapper_->add_multi_data<std::string>(&key, 1, combine_id);
 }
@@ -70,19 +73,17 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
         int count = current.size;
         int j = 1;
         while (count > 0) {
-            if (tokens[j].size == 0) {
-                count--;
-            } else {
+            count--;
+            if (tokens[j].size != 0) {
                 count += tokens[j].size;
             }
             j++;
         }
         index = j;
-
     } else if (current.type == JSMN_STRING) {
         Assert(current.size == 0);
         AddInvertedRecord(
-            path, offset, current.start, current.end - current.start);
+            path, offset, current.start - 1, current.end - current.start + 2);
         index++;
     }
 }
@@ -131,7 +132,9 @@ JsonKeyInvertedIndex::AddJson(const char* json, int64_t offset) {
 }
 
 JsonKeyInvertedIndex::JsonKeyInvertedIndex(
-    const storage::FileManagerContext& ctx, bool is_load) {
+    const storage::FileManagerContext& ctx, bool is_load)
+    : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
+      last_commit_time_(stdclock::now()) {
     schema_ = ctx.fieldDataMeta.field_schema;
     field_id_ = ctx.fieldDataMeta.field_id;
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
@@ -149,8 +152,31 @@ JsonKeyInvertedIndex::JsonKeyInvertedIndex(
             std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
         d_type_ = TantivyDataType::Keyword;
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
-            field_name.c_str(), d_type_, path_.c_str());
+            field_name.c_str(), d_type_, path_.c_str(), false, false);
     }
+}
+
+JsonKeyInvertedIndex::JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
+                                           const char* unique_id)
+    : commit_interval_in_ms_(commit_interval_in_ms),
+      last_commit_time_(stdclock::now()) {
+    d_type_ = TantivyDataType::Keyword;
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        unique_id, d_type_, "", false, true);
+}
+
+JsonKeyInvertedIndex::JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
+                                           const char* unique_id,
+                                           const std::string& path)
+    : commit_interval_in_ms_(commit_interval_in_ms),
+      last_commit_time_(stdclock::now()) {
+    boost::filesystem::path prefix = path;
+    boost::filesystem::path sub_path = unique_id;
+    path_ = (prefix / sub_path).string();
+    boost::filesystem::create_directories(path_);
+    d_type_ = TantivyDataType::Keyword;
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        unique_id, d_type_, path_.c_str());
 }
 
 IndexStatsPtr
@@ -219,14 +245,14 @@ JsonKeyInvertedIndex::BuildWithFieldData(
     AssertInfo(schema_.data_type() == proto::schema::DataType::JSON,
                "schema data type is {}",
                schema_.data_type());
-    if (schema_.nullable()) {
-        int64_t total = 0;
-        for (const auto& data : field_datas) {
-            total += data->get_null_count();
-        }
-    }
+    BuildWithFieldData(field_datas, schema_.nullable());
+}
+
+void
+JsonKeyInvertedIndex::BuildWithFieldData(
+    const std::vector<FieldDataPtr>& field_datas, bool nullable) {
     int64_t offset = 0;
-    if (schema_.nullable()) {
+    if (nullable) {
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
             for (int i = 0; i < n; i++) {
@@ -251,6 +277,59 @@ JsonKeyInvertedIndex::BuildWithFieldData(
         }
     }
     LOG_INFO("build json key index done for field id:{}", field_id_);
+}
+
+void
+JsonKeyInvertedIndex::AddJSONDatas(size_t n,
+                                   const std::string* jsonDatas,
+                                   const bool* valids,
+                                   int64_t offset_begin) {
+    for (int i = 0; i < n; i++) {
+        auto offset = i + offset_begin;
+        if (valids != nullptr && !valids[i]) {
+            continue;
+        }
+        AddJson(jsonDatas[i].c_str(), offset);
+    }
+    LOG_INFO("build json key index done for AddJSONDatas");
+    if (shouldTriggerCommit()) {
+        Commit();
+    }
+}
+
+void
+JsonKeyInvertedIndex::Finish() {
+    finish();
+}
+
+bool
+JsonKeyInvertedIndex::shouldTriggerCommit() {
+    auto span = (std::chrono::duration<double, std::milli>(
+                     stdclock::now() - last_commit_time_.load()))
+                    .count();
+    return span > commit_interval_in_ms_;
+}
+
+void
+JsonKeyInvertedIndex::Commit() {
+    std::unique_lock<std::mutex> lck(mtx_, std::defer_lock);
+    if (lck.try_lock()) {
+        wrapper_->commit();
+        last_commit_time_.store(stdclock::now());
+    }
+}
+
+void
+JsonKeyInvertedIndex::Reload() {
+    std::unique_lock<std::mutex> lck(mtx_, std::defer_lock);
+    if (lck.try_lock()) {
+        wrapper_->reload();
+    }
+}
+
+void
+JsonKeyInvertedIndex::CreateReader() {
+    wrapper_->create_reader();
 }
 
 }  // namespace milvus::index

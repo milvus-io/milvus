@@ -496,25 +496,13 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(OffsetVector* input) {
     return res_vec;
 }
 
-static void
-pollute_cache(size_t size) {
-    std::vector<char> dummy(size);
-    for (size_t i = 0; i < size; ++i) {
-        dummy[i] = 'x';
-    }
-    volatile char sink = dummy[0];
-}
-
 template <typename ValueType>
 VectorPtr
 PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
-    Assert(segment_->type() == SegmentType::Sealed);
-    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
-                               ? active_count_ - current_data_chunk_pos_
-                               : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     std::unordered_set<ValueType> term_set;
@@ -530,16 +518,21 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
     }
 
     if (cached_index_chunk_id_ != 0) {
-        const auto* sealed_seg =
-            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        const segcore::SegmentInternalInterface* segment = nullptr;
+        if (segment_->type() == SegmentType::Growing) {
+            segment =
+                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
+        } else if (segment_->type() == SegmentType::Sealed) {
+            segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        }
         auto field_id = expr_->column_.field_id_;
-        auto* index = sealed_seg->GetJsonKeyIndex(field_id);
+        auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
 
-        auto filter_func = [sealed_seg, &term_set, &field_id](uint32_t row_id,
+        auto filter_func = [segment, &term_set, &field_id](uint32_t row_id,
                                                               uint16_t offset,
                                                               uint16_t size) {
-            auto json_pair = sealed_seg->GetJsonData(field_id, row_id);
+            auto json_pair = segment->GetJsonData(field_id, row_id);
             if (!json_pair.second) {
                 return false;
             }
@@ -571,7 +564,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(OffsetVector* input) {
                                        std::string_view,
                                        ValueType>;
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id)) {
+    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
         return ExecJsonInVariableByKeyIndex<ValueType>();
     }
 

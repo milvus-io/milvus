@@ -28,7 +28,8 @@
 #include "expr/ITypeExpr.h"
 #include "query/PlanProto.h"
 #include "segcore/SegmentSealedImpl.h"
-
+#include "segcore/SegmentInterface.h"
+#include "segcore/SegmentGrowingImpl.h"
 namespace milvus {
 namespace exec {
 
@@ -1068,6 +1069,10 @@ class SegmentExpr : public Expr {
                 dynamic_cast<const segcore::SegmentSealed*>(segment_);
             Assert(sealed_seg != nullptr);
             if (sealed_seg->GetJsonKeyIndex(field_id) != nullptr) {
+                return true;
+            }
+        } else if (segment_->type() == SegmentType ::Growing) {
+            if (segment_->GetJsonKeyIndex(field_id) != nullptr) {
                 return true;
             }
         }

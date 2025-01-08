@@ -130,10 +130,11 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 		return false
 	}
 
+	if segment.GetTextStatsLogs() == nil {
+		return true
+	}
+
 	for _, fieldID := range fieldIDs {
-		if segment.GetTextStatsLogs() == nil {
-			return true
-		}
 		if segment.GetTextStatsLogs()[fieldID] == nil {
 			return true
 		}
@@ -146,10 +147,12 @@ func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 		segment.GetIsSorted()) {
 		return false
 	}
+
+	if segment.GetJsonKeyStats() == nil {
+		return true
+	}
+
 	for _, fieldID := range fieldIDs {
-		if segment.GetJsonKeyStats() == nil {
-			return true
-		}
 		if segment.GetJsonKeyStats()[fieldID] == nil {
 			return true
 		}

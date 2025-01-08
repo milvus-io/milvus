@@ -43,7 +43,7 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 VectorPtr
 PhyExistsFilterExpr::EvalJsonExistsForDataSegment(OffsetVector* input) {
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id)) {
+    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
         return EvalJsonExistsForDataSegmentForIndex();
     }
     auto real_batch_size =
@@ -102,21 +102,25 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(OffsetVector* input) {
 
 VectorPtr
 PhyExistsFilterExpr::EvalJsonExistsForDataSegmentForIndex() {
-    Assert(segment_->type() == SegmentType::Sealed);
     auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
                                ? active_count_ - current_data_chunk_pos_
                                : batch_size_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (cached_index_chunk_id_ != 0) {
-        const auto* sealed_seg =
-            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        const segcore::SegmentInternalInterface* segment = nullptr;
+        if (segment_->type() == SegmentType::Growing) {
+            segment =
+                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
+        } else if (segment_->type() == SegmentType::Sealed) {
+            segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        }
         auto field_id = expr_->column_.field_id_;
-        auto* index = sealed_seg->GetJsonKeyIndex(field_id);
+        auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [sealed_seg, field_id, pointer](uint32_t row_id,
+        auto filter_func = [segment, field_id, pointer](uint32_t row_id,
                                                            uint16_t offset,
                                                            uint16_t size) {
-            auto json_pair = sealed_seg->GetJsonData(field_id, row_id);
+            auto json_pair = segment->GetJsonData(field_id, row_id);
             if (!json_pair.second) {
                 return false;
             }
