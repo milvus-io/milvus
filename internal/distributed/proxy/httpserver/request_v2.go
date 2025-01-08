@@ -542,3 +542,99 @@ func wrapperReturnDefault() gin.H {
 func wrapperReturnDefaultWithCost(cost int) gin.H {
 	return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}, HTTPReturnCost: cost}
 }
+
+type ResourceGroupNodeFilter struct {
+	NodeLabels map[string]string `json:"node_labels" binding:"required"`
+}
+
+func (req *ResourceGroupNodeFilter) GetNodeLabels() map[string]string {
+	return req.NodeLabels
+}
+
+type ResourceGroupLimit struct {
+	NodeNum int32 `json:"node_num" binding:"required"`
+}
+
+func (req *ResourceGroupLimit) GetNodeNum() int32 {
+	return req.NodeNum
+}
+
+type ResourceGroupTransfer struct {
+	ResourceGroup string `json:"resource_group" binding:"required"`
+}
+
+func (req *ResourceGroupTransfer) GetResourceGroup() string {
+	return req.ResourceGroup
+}
+
+type ResourceGroupConfig struct {
+	Requests     *ResourceGroupLimit      `json:"requests" binding:"required"`
+	Limits       *ResourceGroupLimit      `json:"limits" binding:"required"`
+	TransferFrom []*ResourceGroupTransfer `json:"transfer_from"`
+	TransferTo   []*ResourceGroupTransfer `json:"transfer_to"`
+	NodeFilter   *ResourceGroupNodeFilter `json:"node_filter"`
+}
+
+func (req *ResourceGroupConfig) GetRequests() *ResourceGroupLimit {
+	return req.Requests
+}
+
+func (req *ResourceGroupConfig) GetLimits() *ResourceGroupLimit {
+	return req.Limits
+}
+
+func (req *ResourceGroupConfig) GetTransferFrom() []*ResourceGroupTransfer {
+	return req.TransferFrom
+}
+
+func (req *ResourceGroupConfig) GetTransferTo() []*ResourceGroupTransfer {
+	return req.TransferTo
+}
+
+func (req *ResourceGroupConfig) GetNodeFilter() *ResourceGroupNodeFilter {
+	return req.NodeFilter
+}
+
+type ResourceGroupReq struct {
+	Name   string               `json:"name" binding:"required"`
+	Config *ResourceGroupConfig `json:"config"`
+}
+
+func (req *ResourceGroupReq) GetName() string {
+	return req.Name
+}
+
+func (req *ResourceGroupReq) GetConfig() *ResourceGroupConfig {
+	return req.Config
+}
+
+type UpdateResourceGroupReq struct {
+	ResourceGroups map[string]*ResourceGroupConfig `json:"resource_groups" binding:"required"`
+}
+
+func (req *UpdateResourceGroupReq) GetResourceGroups() map[string]*ResourceGroupConfig {
+	return req.ResourceGroups
+}
+
+type TransferReplicaReq struct {
+	SourceRgName   string `json:"sourceRgName" binding:"required"`
+	TargetRgName   string `json:"targetRgName" binding:"required"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	ReplicaNum     int64  `json:"replicaNum" binding:"required"`
+}
+
+func (req *TransferReplicaReq) GetSourceRgName() string {
+	return req.SourceRgName
+}
+
+func (req *TransferReplicaReq) GetTargetRgName() string {
+	return req.TargetRgName
+}
+
+func (req *TransferReplicaReq) GetCollectionName() string {
+	return req.CollectionName
+}
+
+func (req *TransferReplicaReq) GetReplicaNum() int64 {
+	return req.ReplicaNum
+}
