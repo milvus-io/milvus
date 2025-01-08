@@ -198,6 +198,9 @@ class ArrayChunkWriter : public ChunkWriterBase {
     std::shared_ptr<Chunk>
     finish() override;
 
+    void
+    writeScalarArray(const ScalarArray& scalarArray, uint32_t arr_len);
+
  private:
     const milvus::DataType element_type_;
 };

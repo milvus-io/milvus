@@ -41,6 +41,51 @@ class Array {
         }
     }
 
+    static std::pair<uint32_t, uint32_t> GetArrayInfoFromProto(const ScalarArray& field_data) {
+        uint32_t length = 0;
+        uint32_t byte_size = 0;
+        switch (field_data.data_case()) {
+            case ScalarArray::kBoolData: {
+                length = field_data.bool_data().data().size();
+                byte_size = length;
+                break;
+            }
+            case ScalarArray::kIntData: {
+                length = field_data.int_data().data().size();
+                byte_size = length * sizeof(int32_t);
+                break;
+            }
+            case ScalarArray::kLongData: {
+                length = field_data.long_data().data().size();
+                byte_size = length * sizeof(int64_t);
+                break;
+            }
+            case ScalarArray::kFloatData: {
+                length = field_data.float_data().data().size();
+                byte_size = length * sizeof(float);
+                break;
+            }
+            case ScalarArray::kDoubleData: {
+                length = field_data.double_data().data().size();
+                byte_size = length * sizeof(double);
+                break;
+            }
+            case ScalarArray::kStringData: {
+                length = field_data.string_data().data().size();
+                for(int i = 0; i < length; i++) {
+                    byte_size += field_data.string_data()
+                            .data(i)
+                            .size();
+                }
+                break;
+            }
+            default: {
+                // empty array
+            }
+        }
+        return {length, byte_size};
+    }
+
     Array(char* data,
           int len,
           size_t size,

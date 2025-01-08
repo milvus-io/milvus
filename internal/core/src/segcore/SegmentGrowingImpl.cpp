@@ -368,9 +368,15 @@ SegmentGrowingImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
 }
 
 std::pair<std::vector<std::string_view>, FixedVector<bool>>
-SegmentGrowingImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
+SegmentGrowingImpl::chunk_string_view_impl(FieldId field_id, int64_t chunk_id, std::optional<std::pair<int64_t, int64_t>> offset_len = std::nullopt) const {
     PanicInfo(ErrorCode::NotImplemented,
-              "chunk view impl not implement for growing segment");
+              "chunk string view impl not implement for growing segment");
+}
+
+std::pair<std::vector<ArrayView>, FixedVector<bool>>
+SegmentGrowingImpl::chunk_array_view_impl(FieldId field_id, int64_t chunk_id, std::optional<std::pair<int64_t, int64_t>> offset_len = std::nullopt) const {
+    PanicInfo(ErrorCode::NotImplemented,
+              "chunk array view impl not implement for growing segment");
 }
 
 std::pair<std::vector<std::string_view>, FixedVector<bool>>

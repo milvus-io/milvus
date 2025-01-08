@@ -27,6 +27,13 @@ MemChunkTarget::write(const void* data, size_t size, bool append) {
 }
 
 void
+MemChunkTarget::write(uint32_t value, bool append) {
+    AssertInfo(sizeof(uint32_t) + size_ <= cap_, "can not exceed target capacity");
+    *reinterpret_cast<uint32_t*>(data_ + size_) = value;
+    size_ += append ? sizeof(uint32_t) : 0;
+}
+
+void
 MemChunkTarget::skip(size_t size) {
     size_ += size;
 }
@@ -76,6 +83,25 @@ MmapChunkTarget::write(const void* data, size_t size, bool append) {
     auto n = file_.Write(data, size);
     AssertInfo(n != -1, "failed to write data to file");
     size_ += append ? size : 0;
+}
+
+void
+MmapChunkTarget::write(uint32_t value, bool append) {
+    if (buffer_.sufficient(sizeof(uint32_t))) {
+        buffer_.write(value);
+        size_ += append ? sizeof(uint32_t) : 0;
+        return;
+    }
+    flush();
+    if (buffer_.sufficient(sizeof(uint32_t))) {
+        buffer_.write(value);
+        size_ += append ? sizeof(uint32_t) : 0;
+        return;
+    }
+    // highly impossible to reach, as buffer is at least 16kb
+    auto n = file_.Write(reinterpret_cast<void*>(&value), sizeof(uint32_t));
+    AssertInfo(n != -1, "failed to write data to file");
+    size_ += append ? sizeof(uint32_t) : 0;
 }
 
 void

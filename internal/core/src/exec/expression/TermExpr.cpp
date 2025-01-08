@@ -270,7 +270,7 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(OffsetVector* input) {
     valid_res.set();
 
     AssertInfo(expr_->vals_.size() == 1,
-               "element length in json array must be one");
+               "element length in array array must be one");
     ValueType target_val = GetValueFromProto<ValueType>(expr_->vals_[0]);
 
     auto execute_sub_batch =

@@ -29,7 +29,7 @@ namespace milvus {
 void
 StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     auto size = 0;
-    std::vector<std::string> strs;
+    std::vector<std::string_view> strs;
     std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
     for (auto batch : *data) {
         auto data = batch.ValueOrDie()->column(0);
@@ -39,12 +39,14 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
             strs.emplace_back(str);
             size += str.size();
         }
-        auto null_bitmap_n = (data->length() + 7) / 8;
-        null_bitmaps.emplace_back(data->null_bitmap_data(), null_bitmap_n);
-        size += null_bitmap_n;
+        if (nullable_) {
+            auto null_bitmap_n = (data->length() + 7) / 8;
+            null_bitmaps.emplace_back(data->null_bitmap_data(), null_bitmap_n);
+            size += null_bitmap_n;
+        }
         row_nums_ += array->length();
     }
-    size += sizeof(uint64_t) * (row_nums_ + 1) + MMAP_STRING_PADDING;
+    size += sizeof(uint32_t) * (row_nums_ + 1) + MMAP_STRING_PADDING;
     if (file_) {
         target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
     } else {
@@ -53,19 +55,16 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
 
     // chunk layout: null bitmap, offset1, offset2, ..., offsetn, str1, str2, ..., strn, padding
     // write null bitmaps
-    for (auto [data, size] : null_bitmaps) {
-        if (data == nullptr) {
-            std::vector<uint8_t> null_bitmap(size, 0xff);
-            target_->write(null_bitmap.data(), size);
-        } else {
+    if (nullable_) {
+        for (auto [data, size] : null_bitmaps) {
             target_->write(data, size);
         }
     }
 
     // write data
     int offset_num = row_nums_ + 1;
-    int offset_start_pos = target_->tell() + sizeof(uint64_t) * offset_num;
-    std::vector<uint64_t> offsets;
+    uint32_t offset_start_pos = target_->tell() + sizeof(uint32_t) * offset_num;
+    std::vector<uint32_t> offsets;
 
     for (const auto& str : strs) {
         offsets.push_back(offset_start_pos);
@@ -73,7 +72,7 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     }
     offsets.push_back(offset_start_pos);
 
-    target_->write(offsets.data(), offsets.size() * sizeof(uint64_t));
+    target_->write(offsets.data(), offsets.size() * sizeof(uint32_t));
 
     for (auto str : strs) {
         target_->write(str.data(), str.size());
@@ -93,7 +92,6 @@ StringChunkWriter::finish() {
 void
 JSONChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     auto size = 0;
-
     std::vector<Json> jsons;
     std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
     for (auto batch : *data) {
@@ -105,14 +103,14 @@ JSONChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
             size += json.data().size();
             jsons.push_back(std::move(json));
         }
-        // AssertInfo(data->length() % 8 == 0,
-        //            "String length should be multiple of 8");
-        auto null_bitmap_n = (data->length() + 7) / 8;
-        null_bitmaps.emplace_back(data->null_bitmap_data(), null_bitmap_n);
-        size += null_bitmap_n;
+        if (nullable_) {
+            auto null_bitmap_n = (data->length() + 7) / 8;
+            null_bitmaps.emplace_back(data->null_bitmap_data(), null_bitmap_n);
+            size += null_bitmap_n;
+        }
         row_nums_ += array->length();
     }
-    size += sizeof(uint64_t) * (row_nums_ + 1) + simdjson::SIMDJSON_PADDING;
+    size += sizeof(uint32_t) * (row_nums_ + 1) + simdjson::SIMDJSON_PADDING;
     if (file_) {
         target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
     } else {
@@ -121,26 +119,24 @@ JSONChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
 
     // chunk layout: null bitmaps, offset1, offset2, ... ,json1, json2, ..., jsonn
     // write null bitmaps
-    for (auto [data, size] : null_bitmaps) {
-        if (data == nullptr) {
-            std::vector<uint8_t> null_bitmap(size, 0xff);
-            target_->write(null_bitmap.data(), size);
-        } else {
+    if (nullable_) {
+        for (auto [data, size] : null_bitmaps) {
             target_->write(data, size);
         }
     }
 
-    int offset_num = row_nums_ + 1;
-    int offset_start_pos = target_->tell() + sizeof(uint64_t) * offset_num;
-    std::vector<uint64_t> offsets;
 
+    int offset_num = row_nums_ + 1;
+    uint32_t offset_start_pos = target_->tell() + sizeof(uint32_t) * offset_num;
+    std::vector<uint32_t> offsets;
+    offsets.reserve(offset_num);
     for (const auto& json : jsons) {
         offsets.push_back(offset_start_pos);
         offset_start_pos += json.data().size();
     }
     offsets.push_back(offset_start_pos);
 
-    target_->write(offsets.data(), offsets.size() * sizeof(uint64_t));
+    target_->write(offsets.data(), offset_num * sizeof(uint32_t));
 
     // write data
     for (const auto& json : jsons) {
@@ -159,8 +155,8 @@ JSONChunkWriter::finish() {
 
 void
 ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
+    auto start_create_chunk = std::chrono::system_clock::now();
     auto size = 0;
-
     auto is_string = IsStringDataType(element_type_);
     std::vector<Array> arrays;
     std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
@@ -180,13 +176,15 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
             }
         }
         row_nums_ += array->length();
-        auto null_bitmap_n = (data->length() + 7) / 8;
-        null_bitmaps.emplace_back(data->null_bitmap_data(), null_bitmap_n);
-        size += null_bitmap_n;
+        if (nullable_) {
+            auto null_bitmap_n = (data->length() + 7) / 8;
+            null_bitmaps.emplace_back(data->null_bitmap_data(), null_bitmap_n);
+            size += null_bitmap_n;
+        }
     }
 
     // offsets + lens
-    size += sizeof(uint64_t) * (row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
+    size += sizeof(uint32_t) * (row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
     if (file_) {
         target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
     } else {
@@ -194,21 +192,19 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     }
 
     // chunk layout: nullbitmaps, offsets, elem_off1, elem_off2, .. data1, data2, ..., datan, padding
-    for (auto [data, size] : null_bitmaps) {
-        if (data == nullptr) {
-            std::vector<uint8_t> null_bitmap(size, 0xff);
-            target_->write(null_bitmap.data(), size);
-        } else {
+    if (nullable_) {
+        for (auto [data, size] : null_bitmaps) {
+            AssertInfo(data!=nullptr, "null_bit_data for array chunk cannot be nullptr");
             target_->write(data, size);
         }
     }
 
     int offsets_num = row_nums_ + 1;
     int len_num = row_nums_;
-    uint64_t offset_start_pos =
-        target_->tell() + sizeof(uint64_t) * (offsets_num + len_num);
-    std::vector<uint64_t> offsets(offsets_num);
-    std::vector<uint64_t> lens(len_num);
+    uint32_t offset_start_pos =
+            target_->tell() + sizeof(uint32_t) * (offsets_num + len_num);
+    std::vector<uint32_t> offsets(offsets_num);
+    std::vector<uint32_t> lens(len_num);
     for (auto i = 0; i < arrays.size(); i++) {
         auto& arr = arrays[i];
         offsets[i] = offset_start_pos;
@@ -222,11 +218,11 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
 
     for (int i = 0; i < offsets.size(); i++) {
         if (i == offsets.size() - 1) {
-            target_->write(&offsets[i], sizeof(uint64_t));
+            target_->write(&offsets[i], sizeof(uint32_t));
             break;
         }
-        target_->write(&offsets[i], sizeof(uint64_t));
-        target_->write(&lens[i], sizeof(uint64_t));
+        target_->write(&offsets[i], sizeof(uint32_t));
+        target_->write(&lens[i], sizeof(uint32_t));
     }
 
     for (auto& arr : arrays) {
@@ -236,6 +232,10 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
         }
         target_->write(arr.data(), arr.byte_size());
     }
+    auto create_chunk_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now() - start_create_chunk
+    ).count();
+    LOG_INFO("hc===create_array_chunk_duration:{} ms", create_chunk_ms);
 }
 
 std::shared_ptr<Chunk>
@@ -246,6 +246,52 @@ ArrayChunkWriter::finish() {
     auto [data, size] = target_->get();
     return std::make_shared<ArrayChunk>(
         row_nums_, data, size, element_type_, nullable_);
+}
+
+void
+ArrayChunkWriter::writeScalarArray(const ScalarArray& scalarArray, uint32_t arr_len) {
+    switch(scalarArray.data_case()) {
+        case ScalarArray::kBoolData: {
+            auto bool_array = scalarArray.bool_data().data();
+            target_->write(bool_array.data(), arr_len);
+            break;
+        }
+        case ScalarArray::kIntData: {
+            auto int_array = scalarArray.int_data().data();
+            target_->write(int_array.data(), arr_len);
+            break;
+        }
+        case ScalarArray::kLongData: {
+            auto long_array = scalarArray.long_data().data();
+            target_->write(long_array.data(), arr_len);
+            break;
+        }
+        case ScalarArray::kFloatData: {
+            auto float_array = scalarArray.float_data().data();
+            target_->write(float_array.data(), arr_len);
+            break;
+        }
+        case ScalarArray::kDoubleData: {
+            auto double_array = scalarArray.double_data().data();
+            target_->write(double_array.data(), arr_len);
+            break;
+        }
+        case ScalarArray::kStringData: {
+            auto string_array = scalarArray.string_data().data();
+            uint32_t array_inner_offset = 0;
+            for (int i = 0; i < arr_len; i++) {
+                target_->write(array_inner_offset);
+                array_inner_offset+=string_array[i].size();
+            }
+            for (int i = 0; i < arr_len; i++) {
+                target_->write(string_array[i].data(), string_array[i].size());
+            }
+            break;
+        }
+        default: {
+            // empty array
+        }
+    }
 }
 
 void

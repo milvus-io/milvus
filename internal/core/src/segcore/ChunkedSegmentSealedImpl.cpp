@@ -771,24 +771,38 @@ ChunkedSegmentSealedImpl::chunk_data_impl(FieldId field_id,
         return field_data->Span(chunk_id);
     }
     auto field_data = insert_record_.get_data_base(field_id);
-    AssertInfo(field_data->num_chunk() == 1,
-               "num chunk not equal to 1 for sealed segment");
     // system field
     return field_data->get_span_base(0);
 }
 
-std::pair<std::vector<std::string_view>, FixedVector<bool>>
-ChunkedSegmentSealedImpl::chunk_view_impl(FieldId field_id,
-                                          int64_t chunk_id) const {
+std::pair<std::vector<ArrayView>, FixedVector<bool>>
+ChunkedSegmentSealedImpl::chunk_array_view_impl(FieldId field_id,
+                                          int64_t chunk_id,
+                                          std::optional<std::pair<int64_t, int64_t>> offset_len=std::nullopt) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto it = fields_.find(field_id); it != fields_.end()) {
         auto& field_data = it->second;
-        return field_data->StringViews(chunk_id);
+        return field_data->ArrayViews(chunk_id, offset_len);
     }
     PanicInfo(ErrorCode::UnexpectedError,
-              "chunk_view_impl only used for variable column field ");
+              "chunk_array_view_impl only used for chunk column field ");
+}
+
+std::pair<std::vector<std::string_view>, FixedVector<bool>>
+ChunkedSegmentSealedImpl::chunk_string_view_impl(FieldId field_id,
+                                                 int64_t chunk_id,
+                                                 std::optional<std::pair<int64_t, int64_t>> offset_len=std::nullopt) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto it = fields_.find(field_id); it != fields_.end()) {
+        auto& field_data = it->second;
+        return field_data->StringViews(chunk_id, offset_len);
+    }
+    PanicInfo(ErrorCode::UnexpectedError,
+              "chunk_string_view_impl only used for variable column field ");
 }
 
 std::pair<std::vector<std::string_view>, FixedVector<bool>>

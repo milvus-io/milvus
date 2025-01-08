@@ -114,15 +114,15 @@ if (LINUX OR APPLE)
             test_array.cpp test_array_expr.cpp)
 endif()
 
-if (DEFINED AZURE_BUILD_DIR)
-    set(MILVUS_TEST_FILES
-                ${MILVUS_TEST_FILES}
-                test_azure_chunk_manager.cpp
-            #need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/2119
-                #test_remote_chunk_manager.cpp
-                )
-    include_directories("${AZURE_BUILD_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
-endif()
+#if (DEFINED AZURE_BUILD_DIR)
+#    set(MILVUS_TEST_FILES
+#                ${MILVUS_TEST_FILES}
+#                test_azure_chunk_manager.cpp
+#            #need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/2119
+#                #test_remote_chunk_manager.cpp
+#                )
+#    include_directories("${AZURE_BUILD_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
+#endif()
 
 if (ENABLE_GCP_NATIVE)
     add_definitions(-DENABLE_GCP_NATIVE)

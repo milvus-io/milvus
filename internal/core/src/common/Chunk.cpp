@@ -19,13 +19,25 @@
 namespace milvus {
 
 std::pair<std::vector<std::string_view>, FixedVector<bool>>
-StringChunk::StringViews() {
-    std::vector<std::string_view> ret;
-    ret.reserve(row_nums_);
-    for (int i = 0; i < row_nums_; i++) {
-        ret.emplace_back(data_ + offsets_[i], offsets_[i + 1] - offsets_[i]);
+StringChunk::StringViews(std::optional<std::pair<int64_t, int64_t>> offset_len=std::nullopt) {
+    auto start_offset = 0;
+    auto len = row_nums_;
+    if (offset_len.has_value()) {
+        start_offset = offset_len->first;
+        len = offset_len->second;
+        AssertInfo(start_offset >= 0 && start_offset < row_nums_, "Retrieve string views with out-of-bound offset:{}, len:{}, wrong", start_offset, len);
+        AssertInfo(len > 0 && len <= row_nums_, "Retrieve string views with out-of-bound offset:{}, len:{}, wrong", start_offset, len);
+        AssertInfo(start_offset + len <= row_nums_, "Retrieve string views with out-of-bound offset:{}, len:{}, wrong", start_offset, len);
     }
-    return {ret, valid_};
+
+    std::vector<std::string_view> ret;
+    ret.reserve(len);
+    auto offset = start_offset;
+    for (int i = 0; i < len; i++) {
+        ret.emplace_back(data_ + offsets_[offset], offsets_[offset + 1] - offsets_[offset]);
+        offset+=1;
+    }
+    return {ret, FixedVector<bool>(valid_.begin() + start_offset, valid_.begin() + start_offset + len)};
 }
 
 std::pair<std::vector<std::string_view>, FixedVector<bool>>
@@ -41,37 +53,6 @@ StringChunk::ViewsByOffsets(const FixedVector<int32_t>& offsets) {
         valid_res.emplace_back(isValid(offsets[i]));
     }
     return {ret, valid_res};
-}
-
-void
-ArrayChunk::ConstructViews() {
-    views_.reserve(row_nums_);
-
-    for (int i = 0; i < row_nums_; ++i) {
-        int offset = offsets_lens_[2 * i];
-        int next_offset = offsets_lens_[2 * (i + 1)];
-        int len = offsets_lens_[2 * i + 1];
-        auto data_ptr = data_ + offset;
-        auto offsets_bytes_len = 0;
-        uint32_t* offsets_ptr = nullptr;
-        if (IsStringDataType(element_type_)) {
-            offsets_bytes_len = len * sizeof(uint32_t);
-            offsets_ptr = reinterpret_cast<uint32_t*>(data_ptr);
-        }
-        views_.emplace_back(data_ptr + offsets_bytes_len,
-                            len,
-                            next_offset - offset - offsets_bytes_len,
-                            element_type_,
-                            offsets_ptr);
-    }
-}
-
-SpanBase
-ArrayChunk::Span() const {
-    return SpanBase(views_.data(),
-                    nullable_ ? valid_.data() : nullptr,
-                    views_.size(),
-                    sizeof(ArrayView));
 }
 
 }  // namespace milvus

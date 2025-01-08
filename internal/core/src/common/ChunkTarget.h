@@ -22,6 +22,9 @@ class ChunkTarget {
     write(const void* data, size_t size, bool append = true) = 0;
 
     virtual void
+    write(uint32_t value, bool append = true) = 0;
+
+    virtual void
     skip(size_t size) = 0;
 
     virtual void
@@ -56,6 +59,12 @@ class MmapChunkTarget : public ChunkTarget {
         clear() {
             pos = 0;
         }
+
+        void
+        write(uint32_t value) {
+            *reinterpret_cast<uint32_t*>(buf + pos) = value;
+            pos += sizeof(uint32_t);
+        }
     };
 
  public:
@@ -67,6 +76,9 @@ class MmapChunkTarget : public ChunkTarget {
 
     void
     write(const void* data, size_t size, bool append = true) override;
+
+    void
+    write(uint32_t value, bool append = true) override;
 
     void
     skip(size_t size) override;
@@ -105,6 +117,9 @@ class MemChunkTarget : public ChunkTarget {
 
     void
     write(const void* data, size_t size, bool append = true) override;
+
+    void
+    write(uint32_t value, bool append = true) override;
 
     void
     skip(size_t size) override;
