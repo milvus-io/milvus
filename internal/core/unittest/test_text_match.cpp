@@ -795,8 +795,8 @@ TEST(TextMatch, GrowingLoadData) {
         raw_data,
         cm);
 
-    auto segment = CreateGrowingSegment(schema, empty_index_meta).release();
-    auto status = LoadFieldData(segment, &load_info);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto status = LoadFieldData(segment.get(), &load_info);
     ASSERT_EQ(status.error_code, Success);
     ASSERT_EQ(segment->get_real_count(), N);
     ASSERT_NE(segment->get_field_avg_size(FieldId(101)), 0);
@@ -804,7 +804,7 @@ TEST(TextMatch, GrowingLoadData) {
     // Check whether the text index has been built.
     auto expr = GetTextMatchExpr(schema, "football");
     BitsetType final;
-    final = ExecuteQueryExpr(expr, segment, N, MAX_TIMESTAMP);
+    final = ExecuteQueryExpr(expr, segment.get(), N, MAX_TIMESTAMP);
     ASSERT_EQ(final.size(), N);
     ASSERT_TRUE(final[0]);
     ASSERT_FALSE(final[1]);
