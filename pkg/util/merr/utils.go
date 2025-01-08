@@ -184,6 +184,9 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrChannelLack.code():
 		return commonpb.ErrorCode_MetaFailed
 
+	case ErrCollectionSchemaMismatch.code():
+		return commonpb.ErrorCode_SchemaMismatch
+
 	default:
 		return commonpb.ErrorCode_UnexpectedError
 	}
@@ -544,6 +547,14 @@ func WrapErrCollectionVectorClusteringKeyNotAllowed(collection any, msgAndArgs .
 	if len(msgAndArgs) > 0 {
 		msg := msgAndArgs[0].(string)
 		err = errors.Wrapf(err, msg, msgAndArgs[1:]...)
+	}
+	return err
+}
+
+func WrapErrCollectionSchemaMisMatch(collection any, msg ...string) error {
+	err := wrapFields(ErrCollectionSchemaMismatch, value("collection", collection))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
 }

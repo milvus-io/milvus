@@ -103,6 +103,8 @@ type collectionInfo struct {
 	createdUtcTimestamp   uint64
 	consistencyLevel      commonpb.ConsistencyLevel
 	partitionKeyIsolation bool
+	replicateID           string
+	updateTimestamp       uint64
 }
 
 type databaseInfo struct {
@@ -470,6 +472,32 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	}
 
 	schemaInfo := newSchemaInfoWithLoadFields(collection.Schema, loadFields)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	curVersion := m.collectionCacheVersion[collection.GetCollectionID()]
+	// Compatibility logic: if the rootcoord version is lower(requestTime = 0), update the cache directly.
+	if collection.GetRequestTime() < curVersion && collection.GetRequestTime() != 0 {
+		log.Debug("describe collection timestamp less than version, don't update cache",
+			zap.String("collectionName", collectionName),
+			zap.Uint64("version", collection.GetRequestTime()), zap.Uint64("cache version", curVersion))
+		return &collectionInfo{
+			collID:                collection.CollectionID,
+			schema:                schemaInfo,
+			partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
+			createdTimestamp:      collection.CreatedTimestamp,
+			createdUtcTimestamp:   collection.CreatedUtcTimestamp,
+			consistencyLevel:      collection.ConsistencyLevel,
+			partitionKeyIsolation: isolation,
+			updateTimestamp:       collection.UpdateTimestamp,
+		}, nil
+	}
+	_, dbOk := m.collInfo[database]
+	if !dbOk {
+		m.collInfo[database] = make(map[string]*collectionInfo)
+	}
+
+	replicateID, _ := common.GetReplicateID(collection.Properties)
 	m.collInfo[database][collectionName] = &collectionInfo{
 		collID:                collection.CollectionID,
 		schema:                schemaInfo,
@@ -478,6 +506,8 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		createdUtcTimestamp:   collection.CreatedUtcTimestamp,
 		consistencyLevel:      collection.ConsistencyLevel,
 		partitionKeyIsolation: isolation,
+		replicateID:           replicateID,
+		updateTimestamp:       collection.UpdateTimestamp,
 	}
 
 	log.Ctx(ctx).Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName),

@@ -65,7 +65,8 @@ type upsertTask struct {
 	partitionKeys    *schemapb.FieldData
 	// automatic generate pk as new pk wehen autoID == true
 	// delete task need use the oldIds
-	oldIds *schemapb.IDs
+	oldIds          *schemapb.IDs
+	schemaTimestamp uint64
 }
 
 // TraceCtx returns upsertTask context
@@ -290,6 +291,33 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 			IdField: nil,
 		},
 		Timestamp: it.EndTs(),
+	}
+
+	replicateID, err := GetReplicateID(ctx, it.req.GetDbName(), collectionName)
+	if err != nil {
+		log.Warn("get replicate info failed", zap.String("collectionName", collectionName), zap.Error(err))
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+	}
+	if replicateID != "" {
+		return merr.WrapErrCollectionReplicateMode("upsert")
+	}
+
+	collID, err := globalMetaCache.GetCollectionID(context.Background(), it.req.GetDbName(), collectionName)
+	if err != nil {
+		log.Warn("fail to get collection id", zap.Error(err))
+		return err
+	}
+	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.req.GetDbName(), collectionName, collID)
+	if err != nil {
+		log.Warn("fail to get collection info", zap.Error(err))
+		return err
+	}
+	if it.schemaTimestamp != 0 {
+		if it.schemaTimestamp != colInfo.updateTimestamp {
+			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)
+			log.Warn("collection schema mismatch", zap.String("collectionName", collectionName), zap.Error(err))
+			return err
+		}
 	}
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.req.GetDbName(), collectionName)

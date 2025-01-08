@@ -26,7 +26,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.17.9
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.21
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.22-0.20250117031653-a796005be4f7
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
 	github.com/prometheus/client_golang v1.14.0
@@ -68,7 +68,6 @@ require (
 	github.com/bytedance/sonic v1.12.4
 	github.com/greatroar/blobloom v0.8.0
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
-	github.com/milvus-io/milvus/pkg v0.0.0-00010101000000-000000000000
 	github.com/pkg/errors v0.9.1
 	github.com/shirou/gopsutil/v4 v4.24.10
 	github.com/tidwall/gjson v1.17.3

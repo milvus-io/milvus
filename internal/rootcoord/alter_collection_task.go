@@ -76,7 +76,35 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	ts := a.GetTs()
-	redoTask := newBaseRedoTask(a.core.stepExecutor)
+	return executeAlterCollectionTaskSteps(ctx, a.core, oldColl, oldColl.Properties, newProperties, a.Req, ts)
+}
+
+func (a *alterCollectionTask) GetLockerKey() LockerKey {
+	collection := a.core.getCollectionIDStr(a.ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), a.Req.GetCollectionID())
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(a.Req.GetDbName(), false),
+		NewCollectionLockerKey(collection, true),
+	)
+}
+
+func executeAlterCollectionTaskSteps(ctx context.Context,
+	core *Core,
+	col *model.Collection,
+	oldProperties []*commonpb.KeyValuePair,
+	newProperties []*commonpb.KeyValuePair,
+	request *milvuspb.AlterCollectionRequest,
+	ts Timestamp,
+) error {
+	oldColl := col.Clone()
+	oldColl.Properties = oldProperties
+	newColl := col.Clone()
+	newColl.Properties = newProperties
+	tso, err := core.tsoAllocator.GenerateTSO(1)
+	if err == nil {
+		newColl.UpdateTimestamp = tso
+	}
+	redoTask := newBaseRedoTask(core.stepExecutor)
 	redoTask.AddSyncStep(&AlterCollectionStep{
 		baseStep: baseStep{core: a.core},
 		oldColl:  oldColl,
@@ -185,7 +213,45 @@ func (a *alterCollectionFieldTask) Execute(ctx context.Context) error {
 		return err
 	}
 	ts := a.GetTs()
-	redoTask := newBaseRedoTask(a.core.stepExecutor)
+	return executeAlterCollectionFieldTaskSteps(ctx, a.core, oldColl, oldFieldProperties, a.Req, ts)
+}
+
+func (a *alterCollectionFieldTask) GetLockerKey() LockerKey {
+	collection := a.core.getCollectionIDStr(a.ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), 0)
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(a.Req.GetDbName(), false),
+		NewCollectionLockerKey(collection, true),
+	)
+}
+
+func executeAlterCollectionFieldTaskSteps(ctx context.Context,
+	core *Core,
+	col *model.Collection,
+	oldFieldProperties []*commonpb.KeyValuePair,
+	request *milvuspb.AlterCollectionFieldRequest,
+	ts Timestamp,
+) error {
+	var err error
+	filedName := request.GetFieldName()
+	newFieldProperties := UpdateFieldPropertyParams(oldFieldProperties, request.GetProperties())
+	oldColl := col.Clone()
+	err = ResetFieldProperties(oldColl, filedName, oldFieldProperties)
+	if err != nil {
+		return err
+	}
+	newColl := col.Clone()
+	err = ResetFieldProperties(newColl, filedName, newFieldProperties)
+	if err != nil {
+		return err
+	}
+
+	tso, err := core.tsoAllocator.GenerateTSO(1)
+	if err == nil {
+		newColl.UpdateTimestamp = tso
+	}
+
+	redoTask := newBaseRedoTask(core.stepExecutor)
 	redoTask.AddSyncStep(&AlterCollectionStep{
 		baseStep: baseStep{core: a.core},
 		oldColl:  oldColl,

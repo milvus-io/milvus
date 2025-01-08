@@ -28,6 +28,7 @@ type Collection struct {
 	Properties           []*commonpb.KeyValuePair
 	State                pb.CollectionState
 	EnableDynamicField   bool
+	UpdateTimestamp      uint64
 }
 
 func (c *Collection) Available() bool {
@@ -54,6 +55,8 @@ func (c *Collection) Clone() *Collection {
 		Properties:           common.CloneKeyValuePairs(c.Properties),
 		State:                c.State,
 		EnableDynamicField:   c.EnableDynamicField,
+		Functions:            CloneFunctions(c.Functions),
+		UpdateTimestamp:      c.UpdateTimestamp,
 	}
 }
 
