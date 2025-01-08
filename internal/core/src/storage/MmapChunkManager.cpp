@@ -169,8 +169,10 @@ MmapBlocksHandler::AllocateLargeBlock(const uint64_t size) {
     if (size + Size() > max_disk_limit_) {
         PanicInfo(ErrorCode::MemAllocateSizeNotMatch,
                   "Failed to create a new mmap_block, not enough disk for "
-                  "create a new mmap block. Allocated size: {}, Max size: {} "
+                  "create a new mmap block. To Allocate:{} Allocated size: {}, "
+                  "Max size: {} "
                   "under mmap file_prefix: {}",
+                  size,
                   Size(),
                   max_disk_limit_,
                   mmap_file_prefix_);
