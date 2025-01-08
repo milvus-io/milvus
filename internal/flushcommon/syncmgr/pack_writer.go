@@ -175,7 +175,6 @@ func (bw *BulkPackWriter) writeInserts(ctx context.Context, pack *SyncPack) (map
 
 	logs := make(map[int64]*datapb.FieldBinlog)
 	for fieldID, blob := range binlogBlobs {
-
 		k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, fieldID, bw.nextID())
 		binlog, err := bw.writeLog(ctx, blob, common.SegmentInsertLogPath, k, pack)
 		if err != nil {

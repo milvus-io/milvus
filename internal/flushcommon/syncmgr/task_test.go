@@ -300,8 +300,7 @@ func (s *SyncTaskSuite) TestRunError() {
 		mockAllocator := allocator.NewMockAllocator(s.T())
 		mockAllocator.EXPECT().Alloc(mock.Anything).Return(0, 0, errors.New("mocked"))
 
-		task := s.getSuiteSyncTask(new(SyncPack))
-		task.allocator = mockAllocator
+		task := s.getSuiteSyncTask(new(SyncPack).WithFlush()).WithAllocator(mockAllocator)
 
 		err := task.Run(ctx)
 		s.Error(err)
