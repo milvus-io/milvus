@@ -32,7 +32,7 @@ func RecoverBalancer(
 	}
 	b := &balancerImpl{
 		lifetime:               typeutil.NewLifetime(),
-		logger:                 log.With(zap.String("policy", policy)),
+		logger:                 resource.Resource().Logger().With(log.FieldComponent("balancer"), zap.String("policy", policy)),
 		channelMetaManager:     manager,
 		policy:                 mustGetPolicy(policy),
 		reqCh:                  make(chan *request, 5),

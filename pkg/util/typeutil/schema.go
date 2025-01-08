@@ -389,6 +389,14 @@ func (helper *SchemaHelper) IsFieldLoaded(fieldID int64) bool {
 	return helper.loadFields.Contain(fieldID)
 }
 
+func (helper *SchemaHelper) IsFieldTextMatchEnabled(fieldId int64) bool {
+	sche, err := helper.GetFieldFromID(fieldId)
+	if err != nil {
+		return false
+	}
+	return CreateFieldSchemaHelper(sche).EnableMatch()
+}
+
 func (helper *SchemaHelper) getDefaultJSONField(fieldName string) (*schemapb.FieldSchema, error) {
 	for _, f := range helper.schema.GetFields() {
 		if f.DataType == schemapb.DataType_JSON && f.IsDynamic {

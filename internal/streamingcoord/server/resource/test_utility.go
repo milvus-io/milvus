@@ -5,6 +5,7 @@ package resource
 
 import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/manager"
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 // OptStreamingManagerClient provides streaming manager client to the resource.
@@ -16,7 +17,9 @@ func OptStreamingManagerClient(c manager.ManagerClient) optResourceInit {
 
 // InitForTest initializes the singleton of resources for test.
 func InitForTest(opts ...optResourceInit) {
-	r = &resourceImpl{}
+	r = &resourceImpl{
+		logger: log.With(),
+	}
 	for _, opt := range opts {
 		opt(r)
 	}

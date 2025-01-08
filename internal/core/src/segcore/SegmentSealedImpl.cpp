@@ -61,6 +61,7 @@ namespace milvus::segcore {
             case DataType::INT64: {                                        \
                 auto col =                                                 \
                     std::dynamic_pointer_cast<SingleChunkColumn>(column);  \
+                auto pks = reinterpret_cast<const int64_t*>(col->Data(0)); \
                 for (int i = 1; i < col->NumRows(); ++i) {                 \
                     assert(pks[i - 1] <= pks[i] &&                         \
                            "INT64 Column is not ordered!");                \
@@ -430,11 +431,11 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                                 var_column->Append(*array);
                             }
 
-                            // we stores the offset for each array element, so there is a additional uint64_t for each array element
+                            // we stores the offset for each array element, so there is a additional uint32_t for each array element
                             field_data_size =
-                                array->byte_size() + sizeof(uint64_t);
+                                array->byte_size() + sizeof(uint32_t);
                             stats_.mem_size +=
-                                array->byte_size() + sizeof(uint64_t);
+                                array->byte_size() + sizeof(uint32_t);
                         }
                     }
                     var_column->Seal();
@@ -544,7 +545,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     FieldDataPtr field_data;
     uint64_t total_written = 0;
     std::vector<uint64_t> indices{};
-    std::vector<std::vector<uint64_t>> element_indices{};
+    std::vector<std::vector<uint32_t>> element_indices{};
     FixedVector<bool> valid_data{};
     while (data.channel->pop(field_data)) {
         WriteFieldData(file,
@@ -1714,20 +1715,25 @@ SegmentSealedImpl::find_first(int64_t limit, const BitsetType& bitset) const {
     std::vector<int64_t> seg_offsets;
     seg_offsets.reserve(limit);
 
+    // flip bitset since `find_first` & `find_next` is used to find true.
+    // could be optimized by support find false in bitset.
+    auto flipped = bitset.clone();
+    flipped.flip();
+
     int64_t offset = 0;
-    for (; hit_num < limit && offset < num_rows_.value(); offset++) {
+    std::optional<size_t> result = flipped.find_first();
+    while (result.has_value() && hit_num < limit) {
+        hit_num++;
+        seg_offsets.push_back(result.value());
+        offset = result.value();
         if (offset >= size) {
             // In fact, this case won't happen on sealed segments.
             continue;
         }
-
-        if (!bitset[offset]) {
-            seg_offsets.push_back(offset);
-            hit_num++;
-        }
+        result = flipped.find_next(offset);
     }
 
-    return {seg_offsets, more_hit_than_limit && offset != num_rows_.value()};
+    return {seg_offsets, more_hit_than_limit && result.has_value()};
 }
 
 SegcoreError
