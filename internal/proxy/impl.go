@@ -2610,10 +2610,11 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 				Version:        msgpb.InsertDataVersion_ColumnBased,
 			},
 		},
-		idAllocator:   node.rowIDAllocator,
-		segIDAssigner: node.segAssigner,
-		chMgr:         node.chMgr,
-		chTicker:      node.chTicker,
+		idAllocator:     node.rowIDAllocator,
+		segIDAssigner:   node.segAssigner,
+		chMgr:           node.chMgr,
+		chTicker:        node.chTicker,
+		schemaTimestamp: request.SchemaTimestamp,
 	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
@@ -2847,10 +2848,11 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 			},
 		},
 
-		idAllocator:   node.rowIDAllocator,
-		segIDAssigner: node.segAssigner,
-		chMgr:         node.chMgr,
-		chTicker:      node.chTicker,
+		idAllocator:     node.rowIDAllocator,
+		segIDAssigner:   node.segAssigner,
+		chMgr:           node.chMgr,
+		chTicker:        node.chTicker,
+		schemaTimestamp: request.SchemaTimestamp,
 	}
 
 	log.Debug("Enqueue upsert request in Proxy",
