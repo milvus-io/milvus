@@ -380,7 +380,7 @@ func (c *compactionPlanHandler) schedule(assigner NodeAssigner) []CompactionTask
 
 func (c *compactionPlanHandler) start() {
 	c.loadMeta()
-	c.stopWg.Add(3)
+	c.stopWg.Add(2)
 	go c.loopSchedule()
 	go c.loopClean()
 }
