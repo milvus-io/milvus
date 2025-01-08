@@ -199,6 +199,18 @@ TextMatchIndex::AddTexts(size_t n,
 }
 
 void
+TextMatchIndex::BuildIndexFromFieldData(
+    const std::vector<FieldDataPtr>& field_datas) {
+    int64_t offset = 0;
+    for (const auto& data : field_datas) {
+        auto n = data->get_num_rows();
+        wrapper_->add_data(
+            static_cast<const std::string*>(data->Data()), n, offset);
+        offset += n;
+    }
+}
+
+void
 TextMatchIndex::Finish() {
     finish();
 }

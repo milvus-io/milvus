@@ -274,6 +274,14 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
                 storage::GetByteSizeOfFieldDatas(field_data));
         }
 
+        // build text match index
+        if (field_meta.enable_match()) {
+            auto index = GetTextIndex(field_id);
+            index->BuildIndexFromFieldData(field_data);
+            index->Commit();
+            index->Reload();
+        }
+
         // update the mem size
         stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
 
