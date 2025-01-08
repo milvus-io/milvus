@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/timetick/mock_inspector"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -45,7 +46,10 @@ func TestWalAdaptorReadFail(t *testing.T) {
 }
 
 func TestWALAdaptor(t *testing.T) {
-	resource.InitForTest(t)
+	snMeta := mock_metastore.NewMockStreamingNodeCataLog(t)
+	snMeta.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	snMeta.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snMeta))
 
 	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
 	operator.EXPECT().TimeTickNotifier().Return(inspector.NewTimeTickNotifier())

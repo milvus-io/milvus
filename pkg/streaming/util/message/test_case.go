@@ -7,10 +7,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/proto/messagespb"
 )
 
 func CreateTestInsertMessage(t *testing.T, segmentID int64, totalRows int, timetick uint64, messageID MessageID) MutableMessage {
@@ -102,10 +104,46 @@ func CreateTestInsertMessage(t *testing.T, segmentID int64, totalRows int, timet
 	return msg
 }
 
+func CreateTestDropCollectionMessage(t *testing.T, collectionID int64, timetick uint64, messageID MessageID) MutableMessage {
+	header := &DropCollectionMessageHeader{
+		CollectionId: collectionID,
+	}
+	payload := &msgpb.DropCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DropCollection,
+			MsgID:     collectionID,
+			Timestamp: timetick,
+		},
+		DbName:         "db",
+		CollectionName: "collection",
+		DbID:           1,
+		CollectionID:   collectionID,
+	}
+	msg, err := NewDropCollectionMessageBuilderV1().
+		WithHeader(header).
+		WithBody(payload).
+		WithVChannel("v1").
+		BuildMutable()
+	assert.NoError(t, err)
+	msg.WithTimeTick(timetick)
+	msg.WithLastConfirmed(messageID)
+	return msg
+}
+
 func CreateTestCreateCollectionMessage(t *testing.T, collectionID int64, timetick uint64, messageID MessageID) MutableMessage {
 	header := &CreateCollectionMessageHeader{
 		CollectionId: collectionID,
 		PartitionIds: []int64{2},
+	}
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "ID", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "Vector", DataType: schemapb.DataType_FloatVector},
+		},
+	}
+	schemaBytes, err := proto.Marshal(schema)
+	if err != nil {
+		panic(err)
 	}
 	payload := &msgpb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -118,12 +156,51 @@ func CreateTestCreateCollectionMessage(t *testing.T, collectionID int64, timetic
 		PartitionName:  "partition",
 		DbID:           1,
 		CollectionID:   collectionID,
+		Schema:         schemaBytes,
 	}
 
 	msg, err := NewCreateCollectionMessageBuilderV1().
 		WithHeader(header).
 		WithBody(payload).
 		WithVChannel("v1").
+		BuildMutable()
+	assert.NoError(t, err)
+	msg.WithTimeTick(timetick)
+	msg.WithLastConfirmed(messageID)
+	return msg
+}
+
+func CreateTestCreateSegmentMessage(t *testing.T, collectionID int64, timetick uint64, messageID MessageID) MutableMessage {
+	payload := &CreateSegmentMessageBody{
+		CollectionId: collectionID,
+		Segments: []*messagespb.CreateSegmentInfo{
+			{
+				PartitionId: 1,
+				SegmentId:   1,
+			},
+		},
+	}
+	msg, err := NewCreateSegmentMessageBuilderV2().
+		WithHeader(&CreateSegmentMessageHeader{}).
+		WithBody(payload).
+		WithVChannel("v1").
+		BuildMutable()
+	assert.NoError(t, err)
+	msg.WithTimeTick(timetick)
+	msg.WithLastConfirmed(messageID)
+	return msg
+}
+
+func CreateTestTimeTickSyncMessage(t *testing.T, collectionID int64, timetick uint64, messageID MessageID) MutableMessage {
+	msg, err := NewTimeTickMessageBuilderV1().
+		WithHeader(&TimeTickMessageHeader{}).
+		WithBody(&msgpb.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_TimeTick,
+				Timestamp: timetick,
+			},
+		}).
+		WithAllVChannel().
 		BuildMutable()
 	assert.NoError(t, err)
 	msg.WithTimeTick(timetick)

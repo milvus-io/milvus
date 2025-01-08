@@ -7,6 +7,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
@@ -24,6 +25,7 @@ func TestApply(t *testing.T) {
 	})
 
 	Apply(
+		OptChunkManager(mock_storage.NewMockChunkManager(t)),
 		OptETCD(&clientv3.Client{}),
 		OptRootCoordClient(syncutil.NewFuture[types.RootCoordClient]()),
 		OptDataCoordClient(syncutil.NewFuture[types.DataCoordClient]()),
