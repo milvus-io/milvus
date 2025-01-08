@@ -69,13 +69,12 @@ PayloadReader::init(std::shared_ptr<arrow::io::BufferReader> input,
                ? GetDimensionFromFileMetaData(
                      file_meta->schema()->Column(column_index), column_type_)
                : 1;
-    auto total_num_rows = file_meta->num_rows();
-
     std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
     st = arrow_reader->GetRecordBatchReader(&rb_reader);
     AssertInfo(st.ok(), "get record batch reader");
 
     if (is_field_data) {
+        auto total_num_rows = file_meta->num_rows();
         field_data_ =
             CreateFieldData(column_type_, nullable_, dim_, total_num_rows);
         for (arrow::Result<std::shared_ptr<arrow::RecordBatch>> maybe_batch :
