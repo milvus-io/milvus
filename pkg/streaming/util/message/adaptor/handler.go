@@ -38,17 +38,19 @@ func (d ChanMessageHandler) Close() {
 // NewMsgPackAdaptorHandler create a new message pack adaptor handler.
 func NewMsgPackAdaptorHandler() *MsgPackAdaptorHandler {
 	return &MsgPackAdaptorHandler{
-		base: NewBaseMsgPackAdaptorHandler(),
+		channel: make(chan *msgstream.MsgPack),
+		base:    NewBaseMsgPackAdaptorHandler(),
 	}
 }
 
 type MsgPackAdaptorHandler struct {
-	base *BaseMsgPackAdaptorHandler
+	channel chan *msgstream.MsgPack
+	base    *BaseMsgPackAdaptorHandler
 }
 
 // Chan is the channel for message.
 func (m *MsgPackAdaptorHandler) Chan() <-chan *msgstream.MsgPack {
-	return m.base.Channel
+	return m.channel
 }
 
 // Handle is the callback for handling message.
@@ -63,7 +65,7 @@ func (m *MsgPackAdaptorHandler) Handle(param message.HandleParam) message.Handle
 	for {
 		var sendCh chan<- *msgstream.MsgPack
 		if m.base.PendingMsgPack.Len() != 0 {
-			sendCh = m.base.Channel
+			sendCh = m.channel
 		}
 
 		select {
@@ -100,14 +102,13 @@ func (m *MsgPackAdaptorHandler) Handle(param message.HandleParam) message.Handle
 
 // Close closes the handler.
 func (m *MsgPackAdaptorHandler) Close() {
-	close(m.base.Channel)
+	close(m.channel)
 }
 
 // NewBaseMsgPackAdaptorHandler create a new base message pack adaptor handler.
 func NewBaseMsgPackAdaptorHandler() *BaseMsgPackAdaptorHandler {
 	return &BaseMsgPackAdaptorHandler{
 		Logger:         log.With(),
-		Channel:        make(chan *msgstream.MsgPack),
 		Pendings:       make([]message.ImmutableMessage, 0),
 		PendingMsgPack: typeutil.NewMultipartQueue[*msgstream.MsgPack](),
 	}
@@ -116,7 +117,6 @@ func NewBaseMsgPackAdaptorHandler() *BaseMsgPackAdaptorHandler {
 // BaseMsgPackAdaptorHandler is the handler for message pack.
 type BaseMsgPackAdaptorHandler struct {
 	Logger         *log.MLogger
-	Channel        chan *msgstream.MsgPack
 	Pendings       []message.ImmutableMessage                   // pendings hold the vOld message which has same time tick.
 	PendingMsgPack *typeutil.MultipartQueue[*msgstream.MsgPack] // pendingMsgPack hold unsent msgPack.
 }

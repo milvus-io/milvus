@@ -129,7 +129,7 @@ func (s *sealOperationInspectorImpl) background() {
 			if segmentBelongs == nil {
 				continue
 			}
-			log.Info("seal by total growing segments size", zap.String("vchannel", segmentBelongs.VChannel),
+			s.logger.Info("seal by total growing segments size", zap.String("vchannel", segmentBelongs.VChannel),
 				zap.Uint64("sealThreshold", threshold),
 				zap.Int64("sealSegment", segmentBelongs.SegmentID))
 			if pm, ok := s.managers.Get(segmentBelongs.PChannel); ok {

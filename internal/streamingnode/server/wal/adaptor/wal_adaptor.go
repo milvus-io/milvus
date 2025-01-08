@@ -223,7 +223,7 @@ func (w *walAdaptorImpl) Close() {
 	logger.Info("scanner close done, close inner wal...")
 	w.inner.Close()
 
-	logger.Info("scanner close done, close interceptors...")
+	logger.Info("wal close done, close interceptors...")
 	w.interceptorBuildResult.Close()
 	w.appendExecutionPool.Free()
 
