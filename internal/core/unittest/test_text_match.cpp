@@ -756,7 +756,7 @@ TEST(TextMatch, SealedJieBaNullable) {
 
 // Test that growing segment loading flushed binlogs will build text match index.
 TEST(TextMatch, GrowingLoadData) {
-    int64_t N = 6;
+    int64_t N = 7;
     auto schema = GenTestSchema({}, true);
     schema->AddField(FieldName("RowID"), FieldId(0), DataType::INT64, false);
     schema->AddField(
@@ -764,6 +764,7 @@ TEST(TextMatch, GrowingLoadData) {
     std::vector<std::string> raw_str = {"football, basketball, pingpang",
                                         "swimming, football",
                                         "golf",
+                                        "",
                                         "baseball",
                                         "kungfu, football",
                                         ""};
@@ -807,6 +808,7 @@ TEST(TextMatch, GrowingLoadData) {
     ASSERT_TRUE(final[1]);
     ASSERT_FALSE(final[2]);
     ASSERT_FALSE(final[3]);
-    ASSERT_TRUE(final[4]);
-    ASSERT_FALSE(final[5]);
+    ASSERT_FALSE(final[4]);
+    ASSERT_TRUE(final[5]);
+    ASSERT_FALSE(final[6]);
 }
