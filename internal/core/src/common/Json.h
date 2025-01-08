@@ -241,10 +241,6 @@ class Json {
     template <typename T>
     value_result<T>
     at(uint16_t offset, uint16_t length) const {
-        if constexpr (std::is_same_v<T, std::string_view> ||
-                      std::is_same_v<T, std::string>) {
-            return value_result<T>(T(data_.data() + offset, length));
-        }
         return doc(offset, length).get<T>();
     }
 
