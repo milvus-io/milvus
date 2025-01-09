@@ -865,4 +865,32 @@ MergeFieldData(std::vector<FieldDataPtr>& data_array) {
     return merged_data;
 }
 
+std::vector<FieldDataPtr>
+FetchFieldData(ChunkManager* cm, const std::vector<std::string>& remote_files) {
+    std::vector<FieldDataPtr> field_datas;
+    std::vector<std::string> batch_files;
+    auto FetchRawData = [&]() {
+        auto fds = GetObjectData(cm, batch_files);
+        for (size_t i = 0; i < batch_files.size(); ++i) {
+            auto data = fds[i].get()->GetFieldData();
+            field_datas.emplace_back(data);
+        }
+    };
+
+    auto parallel_degree =
+        uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+
+    for (auto& file : remote_files) {
+        if (batch_files.size() >= parallel_degree) {
+            FetchRawData();
+            batch_files.clear();
+        }
+        batch_files.emplace_back(file);
+    }
+    if (batch_files.size() > 0) {
+        FetchRawData();
+    }
+    return field_datas;
+}
+
 }  // namespace milvus::storage

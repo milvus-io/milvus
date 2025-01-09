@@ -496,7 +496,7 @@ struct TypeTraits<DataType::INT32> {
 
 template <>
 struct TypeTraits<DataType::INT64> {
-    using NativeType = int32_t;
+    using NativeType = int64_t;
     static constexpr DataType TypeKind = DataType::INT64;
     static constexpr bool IsPrimitiveType = true;
     static constexpr bool IsFixedWidth = true;
