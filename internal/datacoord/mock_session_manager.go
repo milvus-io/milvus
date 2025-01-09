@@ -5,8 +5,8 @@ package datacoord
 import (
 	context "context"
 
-	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 	healthcheck "github.com/milvus-io/milvus/internal/util/healthcheck"
+	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
 
 	mock "github.com/stretchr/testify/mock"
 
