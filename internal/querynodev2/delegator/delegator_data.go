@@ -116,6 +116,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					DeltaPosition: insertData.StartPosition,
 					Level:         datapb.SegmentLevel_L1,
 				},
+				nil,
 			)
 			if err != nil {
 				log.Error("failed to create new segment",

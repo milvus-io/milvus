@@ -657,7 +657,7 @@ class ResponseChecker:
     def check_auth_failure(res, actual=True):
         assert actual is False
         if isinstance(res, Error):
-            assert "auth" in res.message
+            assert "auth check failure" in res.message
         else:
             log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
             assert False

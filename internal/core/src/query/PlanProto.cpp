@@ -186,6 +186,8 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             pre_filter_plan();
         }
     } else {
+        // no filter, force set iterative filter hint to false, go with normal vector search path
+        plan_node->search_info_.iterative_filter_execution = false;
         plannode = std::make_shared<milvus::plan::MvccNode>(
             milvus::plan::GetNextPlanNodeId(), sources);
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
@@ -313,6 +315,16 @@ ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
     Assert(data_type == static_cast<DataType>(column_info.data_type()));
     return std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(column_info), expr_pb.op(), expr_pb.value());
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseNullExprs(const proto::plan::NullExpr& expr_pb) {
+    auto& column_info = expr_pb.column_info();
+    auto field_id = FieldId(column_info.field_id());
+    auto data_type = schema[field_id].get_data_type();
+    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    return std::make_shared<milvus::expr::NullExpr>(
+        expr::ColumnInfo(column_info), expr_pb.op());
 }
 
 expr::TypedExprPtr
@@ -519,6 +531,10 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         }
         case ppe::kValueExpr: {
             result = ParseValueExprs(expr_pb.value_expr());
+            break;
+        }
+        case ppe::kNullExpr: {
+            result = ParseNullExprs(expr_pb.null_expr());
             break;
         }
         default: {

@@ -50,9 +50,6 @@ type LocalClientRoleConfig struct {
 
 // EnableLocalClientRole init localable roles
 func EnableLocalClientRole(cfg *LocalClientRoleConfig) {
-	if !paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
-		return
-	}
 	if cfg.ServerType != typeutil.StandaloneRole && cfg.ServerType != typeutil.MixtureRole {
 		return
 	}
@@ -93,7 +90,7 @@ func RegisterRootCoordServer(server rootcoordpb.RootCoordServer) {
 func GetQueryCoordClient(ctx context.Context) types.QueryCoordClient {
 	var client types.QueryCoordClient
 	var err error
-	if enableLocal.EnableQueryCoord {
+	if enableLocal.EnableQueryCoord && paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
 		client, err = glocalClient.queryCoordClient.GetWithContext(ctx)
 	} else {
 		// TODO: we should make a singleton here. but most unittest rely on a dedicated client.
@@ -109,7 +106,7 @@ func GetQueryCoordClient(ctx context.Context) types.QueryCoordClient {
 func GetDataCoordClient(ctx context.Context) types.DataCoordClient {
 	var client types.DataCoordClient
 	var err error
-	if enableLocal.EnableDataCoord {
+	if enableLocal.EnableDataCoord && paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
 		client, err = glocalClient.dataCoordClient.GetWithContext(ctx)
 	} else {
 		// TODO: we should make a singleton here. but most unittest rely on a dedicated client.
@@ -125,7 +122,7 @@ func GetDataCoordClient(ctx context.Context) types.DataCoordClient {
 func GetRootCoordClient(ctx context.Context) types.RootCoordClient {
 	var client types.RootCoordClient
 	var err error
-	if enableLocal.EnableRootCoord {
+	if enableLocal.EnableRootCoord && paramtable.Get().CommonCfg.LocalRPCEnabled.GetAsBool() {
 		client, err = glocalClient.rootCoordClient.GetWithContext(ctx)
 	} else {
 		// TODO: we should make a singleton here. but most unittest rely on a dedicated client.
@@ -135,6 +132,12 @@ func GetRootCoordClient(ctx context.Context) types.RootCoordClient {
 		panic(fmt.Sprintf("get root coord client failed: %v", err))
 	}
 	return client
+}
+
+// MustGetLocalRootCoordClientFuture return root coord client future,
+// panic if root coord client is not enabled
+func MustGetLocalRootCoordClientFuture() *syncutil.Future[types.RootCoordClient] {
+	return glocalClient.rootCoordClient
 }
 
 type nopCloseQueryCoordClient struct {
