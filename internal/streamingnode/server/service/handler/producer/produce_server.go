@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -217,20 +216,9 @@ func (p *ProduceServer) sendProduceResult(reqID int64, appendResult *wal.AppendR
 	}
 	if err != nil {
 		p.logger.Warn("append message to wal failed", zap.Int64("requestID", reqID), zap.Error(err))
-		resp.Response = &streamingpb.ProduceMessageResponse_Error{
-			Error: status.AsStreamingError(err).AsPBError(),
-		}
+		resp.Response = &streamingpb.ProduceMessageResponse_Error{Error: status.AsStreamingError(err).AsPBError()}
 	} else {
-		resp.Response = &streamingpb.ProduceMessageResponse_Result{
-			Result: &streamingpb.ProduceMessageResponseResult{
-				Id: &messagespb.MessageID{
-					Id: appendResult.MessageID.Marshal(),
-				},
-				Timetick:   appendResult.TimeTick,
-				TxnContext: appendResult.TxnCtx.IntoProto(),
-				Extra:      appendResult.Extra,
-			},
-		}
+		resp.Response = &streamingpb.ProduceMessageResponse_Result{Result: appendResult.IntoProto()}
 	}
 
 	// If server context is canceled, it means the stream has been closed.

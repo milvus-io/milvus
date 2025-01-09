@@ -11,12 +11,15 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
+	"github.com/milvus-io/milvus/internal/streamingcoord/client/broadcast"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
@@ -32,8 +35,16 @@ type AssignmentService interface {
 	types.AssignmentDiscoverWatcher
 }
 
+// BroadcastService is the interface of broadcast service.
+type BroadcastService interface {
+	// Broadcast sends a broadcast message to the streaming service.
+	Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
+}
+
 // Client is the interface of log service client.
 type Client interface {
+	Broadcast() BroadcastService
+
 	// Assignment access assignment service.
 	Assignment() AssignmentService
 
@@ -58,10 +69,12 @@ func NewClient(etcdCli *clientv3.Client) Client {
 		)
 	})
 	assignmentService := lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingCoordAssignmentServiceClient)
+	broadcastService := lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingCoordBroadcastServiceClient)
 	return &clientImpl{
 		conn:              conn,
 		rb:                rb,
 		assignmentService: assignment.NewAssignmentService(assignmentService),
+		broadcastService:  broadcast.NewBroadcastService(util.MustSelectWALName(), broadcastService),
 	}
 }
 
