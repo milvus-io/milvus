@@ -40,14 +40,14 @@ func Code(err error) int32 {
 	}
 
 	cause := errors.Cause(err)
-	switch cause := cause.(type) {
+	switch specificErr := cause.(type) {
 	case milvusError:
-		return cause.code()
+		return specificErr.code()
 
 	default:
-		if errors.Is(cause, context.Canceled) {
+		if errors.Is(specificErr, context.Canceled) {
 			return CanceledCode
-		} else if errors.Is(cause, context.DeadlineExceeded) {
+		} else if errors.Is(specificErr, context.DeadlineExceeded) {
 			return TimeoutCode
 		} else {
 			return errUnexpected.code()
@@ -1165,6 +1165,14 @@ func WrapErrClusteringCompactionSubmitTaskFail(taskType string, err error) error
 
 func WrapErrClusteringCompactionMetaError(operation string, err error) error {
 	return wrapFieldsWithDesc(ErrClusteringCompactionMetaError, err.Error(), value("operation", operation))
+}
+
+func WrapErrCleanPartitionStatsFail(msg ...string) error {
+	err := error(ErrCleanPartitionStatsFail)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
 }
 
 func WrapErrAnalyzeTaskNotFound(id int64) error {

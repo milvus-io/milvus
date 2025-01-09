@@ -1258,8 +1258,8 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	// collection not exist
 	resp, err := suite.node.Search(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
-	suite.Contains(resp.GetStatus().GetReason(), merr.ErrCollectionNotFound.Error())
+	suite.Equal(merr.Code(merr.ErrCollectionNotLoaded), resp.GetStatus().GetCode())
+	suite.Contains(resp.GetStatus().GetReason(), merr.ErrCollectionNotLoaded.Error())
 
 	// metric type mismatch
 	LoadMeta := &querypb.LoadMetaInfo{
