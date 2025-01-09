@@ -171,14 +171,15 @@ func (job *LoadCollectionJob) Execute() error {
 		}
 	}
 
+	collectionInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionID())
+	if err != nil {
+		log.Warn("failed to describe collection from RootCoord", zap.Error(err))
+		return err
+	}
+
 	// 2. create replica if not exist
 	replicas := job.meta.ReplicaManager.GetByCollection(job.ctx, req.GetCollectionID())
 	if len(replicas) == 0 {
-		collectionInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionID())
-		if err != nil {
-			return err
-		}
-
 		// API of LoadCollection is wired, we should use map[resourceGroupNames]replicaNumber as input, to keep consistency with `TransferReplica` API.
 		// Then we can implement dynamic replica changed in different resource group independently.
 		_, err = utils.SpawnReplicasWithRG(job.ctx, job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber(), collectionInfo.GetVirtualChannelNames())
@@ -213,6 +214,7 @@ func (job *LoadCollectionJob) Execute() error {
 			FieldIndexID:  req.GetFieldIndexID(),
 			LoadType:      querypb.LoadType_LoadCollection,
 			LoadFields:    req.GetLoadFields(),
+			DbID:          collectionInfo.GetDbId(),
 		},
 		CreatedAt: time.Now(),
 		LoadSpan:  sp,
@@ -371,13 +373,15 @@ func (job *LoadPartitionJob) Execute() error {
 		}
 	}
 
+	collectionInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionID())
+	if err != nil {
+		log.Warn("failed to describe collection from RootCoord", zap.Error(err))
+		return err
+	}
+
 	// 2. create replica if not exist
 	replicas := job.meta.ReplicaManager.GetByCollection(context.TODO(), req.GetCollectionID())
 	if len(replicas) == 0 {
-		collectionInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionID())
-		if err != nil {
-			return err
-		}
 		_, err = utils.SpawnReplicasWithRG(job.ctx, job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber(), collectionInfo.GetVirtualChannelNames())
 		if err != nil {
 			msg := "failed to spawn replica for collection"
@@ -412,6 +416,7 @@ func (job *LoadPartitionJob) Execute() error {
 				FieldIndexID:  req.GetFieldIndexID(),
 				LoadType:      querypb.LoadType_LoadPartition,
 				LoadFields:    req.GetLoadFields(),
+				DbID:          collectionInfo.GetDbId(),
 			},
 			CreatedAt: time.Now(),
 			LoadSpan:  sp,
