@@ -147,6 +147,7 @@ type IndexedField struct {
 	BuildID      int64 `json:"build_id,omitempty,string"`
 	IndexSize    int64 `json:"index_size,omitempty,string"`
 	IsLoaded     bool  `json:"is_loaded,omitempty,string"`
+	HasRawData   bool  `json:"has_raw_data,omitempty"`
 }
 
 type QueryCoordTarget struct {
@@ -195,6 +196,7 @@ type ResourceGroup struct {
 type Replica struct {
 	ID               int64              `json:"ID,omitempty,string"`
 	CollectionID     int64              `json:"collectionID,omitempty,string"`
+	DatabaseID       int64              `json:"database_id,omitempty,string"`
 	RWNodes          []int64            `json:"rw_nodes,omitempty"`
 	ResourceGroup    string             `json:"resource_group,omitempty"`
 	RONodes          []int64            `json:"ro_nodes,omitempty"`
@@ -382,8 +384,8 @@ type ImportTask struct {
 }
 
 type CompactionTask struct {
-	PlanID         int64    `json:"plan_id,omitempty"`
-	CollectionID   int64    `json:"collection_id,omitempty"`
+	PlanID         int64    `json:"plan_id,omitempty,string"`
+	CollectionID   int64    `json:"collection_id,omitempty,string"`
 	Type           string   `json:"type,omitempty"`
 	State          string   `json:"state,omitempty"`
 	FailReason     string   `json:"fail_reason,omitempty"`
@@ -447,7 +449,7 @@ type Collection struct {
 	ConsistencyLevel     string            `json:"consistency_level,omitempty"`
 	Aliases              []string          `json:"aliases,omitempty"`
 	Properties           map[string]string `json:"properties,omitempty"`
-	DBName               string            `json:"db_name,omitempty,string"`
+	DBName               string            `json:"db_name,omitempty"`
 	NumPartitions        int               `json:"num_partitions,omitempty,string"`
 	VirtualChannelNames  []string          `json:"virtual_channel_names,omitempty"`
 	PhysicalChannelNames []string          `json:"physical_channel_names,omitempty"`
@@ -458,7 +460,7 @@ type Collection struct {
 
 type Database struct {
 	DBName           string            `json:"db_name,omitempty"`
-	DBID             int64             `json:"dbID,omitempty"`
+	DBID             int64             `json:"dbID,omitempty,string"`
 	CreatedTimestamp string            `json:"created_timestamp,omitempty"`
 	Properties       map[string]string `json:"properties,omitempty"`
 }
