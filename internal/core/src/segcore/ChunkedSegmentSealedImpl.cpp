@@ -1215,7 +1215,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
                     var_column->GetChunk(i));
                 auto offset = string_chunk->binary_search_string(target);
                 for (; offset != -1 && offset < string_chunk->RowNums() &&
-                       var_column->RawAt(offset) == target;
+                       string_chunk->operator[](offset) == target;
                      ++offset) {
                     auto segment_offset = offset + num_rows_until_chunk;
                     if (condition(segment_offset)) {
