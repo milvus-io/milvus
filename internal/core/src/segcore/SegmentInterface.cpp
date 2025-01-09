@@ -396,8 +396,11 @@ index::TextMatchIndex*
 SegmentInternalInterface::GetTextIndex(FieldId field_id) const {
     std::shared_lock lock(mutex_);
     auto iter = text_indexes_.find(field_id);
-    AssertInfo(iter != text_indexes_.end(),
-               "failed to get text index, text index not found");
+    if (iter == text_indexes_.end()) {
+        throw SegcoreError(
+            ErrorCode::TextIndexNotFound,
+            fmt::format("text index not found for field {}", field_id.get()));
+    }
     return iter->second.get();
 }
 

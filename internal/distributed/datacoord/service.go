@@ -41,8 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
@@ -190,7 +188,6 @@ func (s *Server) startGrpcLoop() {
 				}
 				return s.serverID.Load()
 			}),
-			streamingserviceinterceptor.NewStreamingServiceUnaryServerInterceptor(),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			logutil.StreamTraceLoggerInterceptor,
@@ -201,7 +198,6 @@ func (s *Server) startGrpcLoop() {
 				}
 				return s.serverID.Load()
 			}),
-			streamingserviceinterceptor.NewStreamingServiceStreamServerInterceptor(),
 		)),
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 	}
@@ -210,10 +206,6 @@ func (s *Server) startGrpcLoop() {
 	s.grpcServer = grpc.NewServer(grpcOpts...)
 	indexpb.RegisterIndexCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
-	// register the streaming coord grpc service.
-	if streamingutil.IsStreamingServiceEnabled() {
-		s.dataCoord.RegisterStreamingCoordGRPCService(s.grpcServer)
-	}
 	coordclient.RegisterDataCoordServer(s)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {

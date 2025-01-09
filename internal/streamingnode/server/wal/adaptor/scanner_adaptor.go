@@ -35,7 +35,11 @@ func newScannerAdaptor(
 		readOption.MesasgeHandler = defaultMessageHandler(make(chan message.ImmutableMessage))
 	}
 	options.GetFilterFunc(readOption.MessageFilter)
-	logger := log.With(zap.String("name", name), zap.String("channel", l.Channel().Name))
+	logger := resource.Resource().Logger().With(
+		log.FieldComponent("scanner"),
+		zap.String("name", name),
+		zap.String("channel", l.Channel().Name),
+	)
 	s := &scannerAdaptorImpl{
 		logger:           logger,
 		innerWAL:         l,
