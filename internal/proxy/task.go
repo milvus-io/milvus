@@ -370,7 +370,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	hasPartitionKey := hasParitionKeyModeField(t.schema)
+	hasPartitionKey := hasPartitionKeyModeField(t.schema)
 	if _, err := validatePartitionKeyIsolation(ctx, t.CollectionName, hasPartitionKey, t.GetProperties()...); err != nil {
 		return err
 	}
