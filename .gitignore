@@ -103,5 +103,4 @@ cwrapper_rocksdb_build/
 internal/proto/**/*.pb.go
 internal/core/src/pb/*.pb.h
 internal/core/src/pb/*.pb.cc
-*.pb.go
 **/legacypb/*.pb.go
