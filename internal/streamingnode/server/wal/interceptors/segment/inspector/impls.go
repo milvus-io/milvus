@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -30,6 +31,7 @@ func NewSealedInspector(n *stats.SealSignalNotifier) SealOperationInspector {
 			},
 		}),
 		triggerCh: make(chan string),
+		logger:    resource.Resource().Logger().With(log.FieldComponent("segment-assigner")),
 	}
 	go s.background()
 	return s
@@ -43,6 +45,7 @@ type sealOperationInspectorImpl struct {
 	notifier     *stats.SealSignalNotifier
 	backOffTimer *typeutil.BackoffTimer
 	triggerCh    chan string
+	logger       *log.MLogger
 }
 
 // TriggerSealWaited implements SealInspector.TriggerSealWaited.

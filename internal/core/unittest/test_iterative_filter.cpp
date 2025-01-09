@@ -253,6 +253,47 @@ TEST(IterativeFilter, SealedIndex) {
         CheckFilterSearchResult(
             *search_result, *search_result2, topK, num_queries);
     }
+
+    // no expr
+    {
+        const char* raw_plan = R"(vector_anns: <
+                                        field_id: 100
+                                        query_info: <
+                                          topk: 10
+                                          metric_type: "L2"
+                                          hints: "iterative_filter"
+                                          search_params: "{\"ef\": 50}"
+                                        >
+                                        placeholder_tag: "$0">)";
+        proto::plan::PlanNode plan_node;
+        auto ok =
+            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
+        auto plan = CreateSearchPlanFromPlanNode(*schema, plan_node);
+        auto num_queries = 1;
+        auto seed = 1024;
+        auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+
+        const char* raw_plan2 = R"(vector_anns: <
+                                        field_id: 100
+                                        query_info: <
+                                          topk: 10
+                                          metric_type: "L2"
+                                          search_params: "{\"ef\": 50}"
+                                        >
+                                        placeholder_tag: "$0">)";
+        proto::plan::PlanNode plan_node2;
+        auto ok2 = google::protobuf::TextFormat::ParseFromString(raw_plan2,
+                                                                 &plan_node2);
+        auto plan2 = CreateSearchPlanFromPlanNode(*schema, plan_node2);
+        auto search_result2 =
+            segment->Search(plan2.get(), ph_group.get(), 1L << 63);
+        CheckFilterSearchResult(
+            *search_result, *search_result2, topK, num_queries);
+    }
 }
 
 TEST(IterativeFilter, SealedData) {

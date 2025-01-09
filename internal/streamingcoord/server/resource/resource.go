@@ -7,6 +7,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/manager"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var r *resourceImpl // singleton resource instance
@@ -21,6 +25,13 @@ func OptETCD(etcd *clientv3.Client) optResourceInit {
 	}
 }
 
+// OptRootCoordClient provides the root coordinator client to the resource.
+func OptRootCoordClient(rootCoordClient *syncutil.Future[types.RootCoordClient]) optResourceInit {
+	return func(r *resourceImpl) {
+		r.rootCoordClient = rootCoordClient
+	}
+}
+
 // OptStreamingCatalog provides streaming catalog to the resource.
 func OptStreamingCatalog(catalog metastore.StreamingCoordCataLog) optResourceInit {
 	return func(r *resourceImpl) {
@@ -31,10 +42,13 @@ func OptStreamingCatalog(catalog metastore.StreamingCoordCataLog) optResourceIni
 // Init initializes the singleton of resources.
 // Should be call when streaming node startup.
 func Init(opts ...optResourceInit) {
-	newR := &resourceImpl{}
+	newR := &resourceImpl{
+		logger: log.With(log.FieldModule(typeutil.StreamingCoordRole)),
+	}
 	for _, opt := range opts {
 		opt(newR)
 	}
+	assertNotNil(newR.RootCoordClient())
 	assertNotNil(newR.ETCD())
 	assertNotNil(newR.StreamingCatalog())
 	newR.streamingNodeManagerClient = manager.NewManagerClient(newR.etcdClient)
@@ -50,9 +64,16 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
+	rootCoordClient            *syncutil.Future[types.RootCoordClient]
 	etcdClient                 *clientv3.Client
 	streamingCatalog           metastore.StreamingCoordCataLog
 	streamingNodeManagerClient manager.ManagerClient
+	logger                     *log.MLogger
+}
+
+// RootCoordClient returns the root coordinator client.
+func (r *resourceImpl) RootCoordClient() *syncutil.Future[types.RootCoordClient] {
+	return r.rootCoordClient
 }
 
 // StreamingCatalog returns the StreamingCatalog client.
@@ -68,6 +89,10 @@ func (r *resourceImpl) ETCD() *clientv3.Client {
 // StreamingNodeClient returns the streaming node client.
 func (r *resourceImpl) StreamingNodeManagerClient() manager.ManagerClient {
 	return r.streamingNodeManagerClient
+}
+
+func (r *resourceImpl) Logger() *log.MLogger {
+	return r.logger
 }
 
 // assertNotNil panics if the resource is nil.
