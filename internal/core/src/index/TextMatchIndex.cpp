@@ -198,6 +198,39 @@ TextMatchIndex::AddTexts(size_t n,
     }
 }
 
+// schema_ may not be initialized so we need this `nullable` parameter
+void
+TextMatchIndex::BuildIndexFromFieldData(
+    const std::vector<FieldDataPtr>& field_datas, bool nullable) {
+    int64_t offset = 0;
+    if (nullable) {
+        int64_t total = 0;
+        for (const auto& data : field_datas) {
+            total += data->get_null_count();
+        }
+        null_offset.reserve(total);
+        for (const auto& data : field_datas) {
+            auto n = data->get_num_rows();
+            for (int i = 0; i < n; i++) {
+                if (!data->is_valid(i)) {
+                    null_offset.push_back(i);
+                }
+                wrapper_->add_data(
+                    static_cast<const std::string*>(data->RawValue(i)),
+                    data->is_valid(i) ? 1 : 0,
+                    offset++);
+            }
+        }
+    } else {
+        for (const auto& data : field_datas) {
+            auto n = data->get_num_rows();
+            wrapper_->add_data(
+                static_cast<const std::string*>(data->Data()), n, offset);
+            offset += n;
+        }
+    }
+}
+
 void
 TextMatchIndex::Finish() {
     finish();
