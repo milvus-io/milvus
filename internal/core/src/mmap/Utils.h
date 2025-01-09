@@ -90,7 +90,7 @@ WriteFieldData(File& file,
                const FieldDataPtr& data,
                uint64_t& total_written,
                std::vector<uint64_t>& indices,
-               std::vector<std::vector<uint64_t>>& element_indices,
+               std::vector<std::vector<uint32_t>>& element_indices,
                FixedVector<bool>& valid_data) {
     if (IsVariableDataType(data_type)) {
         // use buffered writer to reduce fwrite/write syscall
@@ -131,8 +131,14 @@ WriteFieldData(File& file,
                     indices.push_back(total_written);
                     auto array = static_cast<const Array*>(data->RawValue(i));
                     bw.Write(array->data(), array->byte_size());
-                    element_indices.emplace_back(array->get_offsets());
                     total_written += array->byte_size();
+                    if (IsVariableDataType(array->get_element_type())) {
+                        element_indices.emplace_back(
+                            array->get_offsets_data(),
+                            array->get_offsets_data() + array->length());
+                    } else {
+                        element_indices.emplace_back();
+                    }
                 }
                 break;
             }
