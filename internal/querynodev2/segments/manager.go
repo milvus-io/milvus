@@ -27,7 +27,7 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/pkg/util/lock"
+
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 
@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/cache"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
