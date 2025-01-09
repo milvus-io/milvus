@@ -5,7 +5,7 @@ package session
 import (
 	context "context"
 
-	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 
 	typeutil "github.com/milvus-io/milvus/pkg/util/typeutil"

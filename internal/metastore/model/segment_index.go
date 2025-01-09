@@ -2,8 +2,8 @@ package model
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
 )
 
 type SegmentIndex struct {

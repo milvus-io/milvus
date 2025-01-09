@@ -10,7 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	_ "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/pulsar"
 	_ "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/rmq"
 )
