@@ -989,11 +989,11 @@ class BitsetView : public BitsetBase<PolicyT,
 
     BitsetView() = default;
     BitsetView(const BitsetView&) = default;
-    BitsetView(BitsetView&&) noexcept = default;
+    BitsetView(BitsetView&&) = default;
     BitsetView&
     operator=(const BitsetView&) = default;
     BitsetView&
-    operator=(BitsetView&&) noexcept = default;
+    operator=(BitsetView&&) = default;
 
     template <typename ImplT, bool R>
     explicit BitsetView(BitsetBase<PolicyT, ImplT, R>& bitset)
@@ -1077,13 +1077,13 @@ class Bitset
     // Do not allow implicit copies (Rust style).
     Bitset(const Bitset&) = delete;
     // Allow default move.
-    Bitset(Bitset&&) noexcept = default;
+    Bitset(Bitset&&) = default;
     // Do not allow implicit copies (Rust style).
     Bitset&
     operator=(const Bitset&) = delete;
     // Allow default move.
     Bitset&
-    operator=(Bitset&&) noexcept = default;
+    operator=(Bitset&&) = default;
 
     template <typename C, bool R>
     explicit Bitset(const BitsetBase<PolicyT, C, R>& other) {

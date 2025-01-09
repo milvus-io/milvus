@@ -10,13 +10,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-func newTestSchema() *schemapb.CollectionSchema {
+func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 	fields := []*schemapb.FieldSchema{
 		{FieldID: 0, Name: "FieldID", IsPrimaryKey: false, Description: "field no.1", DataType: schemapb.DataType_Int64},
 	}
@@ -31,10 +32,13 @@ func newTestSchema() *schemapb.CollectionSchema {
 		}
 		fields = append(fields, newField)
 	}
-	fields = append(fields, &schemapb.FieldSchema{
-		FieldID: 130, Name: common.MetaFieldName, IsPrimaryKey: false, Description: "dynamic field", DataType: schemapb.DataType_JSON,
-		IsDynamic: true,
-	})
+	if EnableDynamicField {
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: 130, Name: common.MetaFieldName, IsPrimaryKey: false, Description: "dynamic field", DataType: schemapb.DataType_JSON,
+			IsDynamic: true,
+		})
+	}
+
 	fields = append(fields, &schemapb.FieldSchema{
 		FieldID: 131, Name: "StringArrayField", IsPrimaryKey: false, Description: "string array field",
 		DataType:    schemapb.DataType_Array,
@@ -46,12 +50,22 @@ func newTestSchema() *schemapb.CollectionSchema {
 		Description:        "schema for test used",
 		AutoID:             true,
 		Fields:             fields,
-		EnableDynamicField: true,
+		EnableDynamicField: EnableDynamicField,
+	}
+}
+
+func enableMatch(schema *schemapb.CollectionSchema) {
+	for _, field := range schema.Fields {
+		if typeutil.IsStringType(field.DataType) {
+			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+				Key: "enable_match", Value: "True",
+			})
+		}
 	}
 }
 
 func newTestSchemaHelper(t *testing.T) *typeutil.SchemaHelper {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(t, err)
 	return schemaHelper
@@ -71,7 +85,7 @@ func assertInvalidExpr(t *testing.T, helper *typeutil.SchemaHelper, exprStr stri
 }
 
 func TestExpr_Term(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
@@ -105,7 +119,7 @@ func TestExpr_Term(t *testing.T) {
 }
 
 func TestExpr_Call(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
@@ -142,7 +156,7 @@ func TestExpr_Call(t *testing.T) {
 }
 
 func TestExpr_Compare(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
@@ -162,7 +176,7 @@ func TestExpr_Compare(t *testing.T) {
 }
 
 func TestExpr_UnaryRange(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
@@ -185,7 +199,7 @@ func TestExpr_UnaryRange(t *testing.T) {
 }
 
 func TestExpr_Like(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
@@ -211,13 +225,18 @@ func TestExpr_Like(t *testing.T) {
 }
 
 func TestExpr_TextMatch(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
 	exprStrs := []string{
 		`text_match(VarCharField, "query")`,
 	}
+	for _, exprStr := range exprStrs {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+
+	enableMatch(schema)
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
 	}
@@ -231,8 +250,51 @@ func TestExpr_TextMatch(t *testing.T) {
 	}
 }
 
+func TestExpr_IsNull(t *testing.T) {
+	schema := newTestSchema(false)
+	schema.EnableDynamicField = false
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	exprStrs := []string{
+		`VarCharField is null`,
+		`VarCharField IS NULL`,
+	}
+	for _, exprStr := range exprStrs {
+		assertValidExpr(t, helper, exprStr)
+	}
+
+	unsupported := []string{
+		`not_exist is null`,
+	}
+	for _, exprStr := range unsupported {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
+func TestExpr_IsNotNull(t *testing.T) {
+	schema := newTestSchema(false)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	exprStrs := []string{
+		`VarCharField is not null`,
+		`VarCharField IS NOT NULL`,
+	}
+	for _, exprStr := range exprStrs {
+		assertValidExpr(t, helper, exprStr)
+	}
+
+	unsupported := []string{
+		`not_exist is not null`,
+	}
+	for _, exprStr := range unsupported {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
 func TestExpr_BinaryRange(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
@@ -275,7 +337,7 @@ func TestExpr_BinaryRange(t *testing.T) {
 }
 
 func TestExpr_castValue(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
@@ -297,7 +359,7 @@ func TestExpr_castValue(t *testing.T) {
 }
 
 func TestExpr_BinaryArith(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
@@ -333,7 +395,7 @@ func TestExpr_BinaryArith(t *testing.T) {
 }
 
 func TestExpr_Value(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
@@ -354,7 +416,7 @@ func TestExpr_Value(t *testing.T) {
 }
 
 func TestExpr_Identifier(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
@@ -381,7 +443,7 @@ func TestExpr_Identifier(t *testing.T) {
 }
 
 func TestExpr_Constant(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
@@ -453,14 +515,16 @@ func TestExpr_Constant(t *testing.T) {
 }
 
 func TestExpr_Combinations(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
 	exprStrs := []string{
 		`not (Int8Field + 1 == 2)`,
 		`(Int16Field - 3 == 4) and (Int32Field * 5 != 6)`,
+		`(Int16Field - 3 == 4) AND (Int32Field * 5 != 6)`,
 		`(Int64Field / 7 != 8) or (Int64Field % 10 == 9)`,
+		`(Int64Field / 7 != 8) OR (Int64Field % 10 == 9)`,
 		`Int64Field > 0 && VarCharField > "0"`,
 		`Int64Field < 0 && VarCharField < "0"`,
 		`A > 50 or B < 40`,
@@ -521,7 +585,7 @@ func TestCreateSparseFloatVectorSearchPlan(t *testing.T) {
 }
 
 func TestExpr_Invalid(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
@@ -629,13 +693,13 @@ func TestExpr_Invalid(t *testing.T) {
 		`not_in_schema or true`,
 		`false or not_in_schema`,
 		`"str" or false`,
-		`BoolField or false`,
-		`Int32Field or Int64Field`,
+		`BoolField OR false`,
+		`Int32Field OR Int64Field`,
 		`not_in_schema and true`,
-		`false and not_in_schema`,
+		`false AND not_in_schema`,
 		`"str" and false`,
 		`BoolField and false`,
-		`Int32Field and Int64Field`,
+		`Int32Field AND Int64Field`,
 		// -------------------- unsupported ----------------------
 		`1 ^ 2`,
 		`1 & 2`,
@@ -713,7 +777,7 @@ func (l *errorListenerTest) Error() error {
 }
 
 func Test_FixErrorListenerNotRemoved(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
@@ -728,7 +792,7 @@ func Test_FixErrorListenerNotRemoved(t *testing.T) {
 }
 
 func Test_handleExpr(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
@@ -739,7 +803,7 @@ func Test_handleExpr(t *testing.T) {
 }
 
 func Test_handleExpr_empty(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
@@ -750,7 +814,7 @@ func Test_handleExpr_empty(t *testing.T) {
 
 // test if handleExpr is thread-safe.
 func Test_handleExpr_17126_26662(t *testing.T) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 	normal := `VarCharField == "abcd\"defg"`
@@ -1124,6 +1188,8 @@ c'`,
 	}
 }
 
+// todo add null test
+
 func Test_JSONContainsAll(t *testing.T) {
 	schema := newTestSchemaHelper(t)
 	expr := ""
@@ -1373,7 +1439,7 @@ func TestConcurrency(t *testing.T) {
 }
 
 func BenchmarkPlanCache(b *testing.B) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(b, err)
 
@@ -1409,7 +1475,7 @@ func randomChineseString(length int) string {
 }
 
 func BenchmarkWithString(b *testing.B) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(b, err)
 
@@ -1448,7 +1514,7 @@ func Test_convertHanToASCII(t *testing.T) {
 }
 
 func BenchmarkTemplateWithString(b *testing.B) {
-	schema := newTestSchema()
+	schema := newTestSchema(true)
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(b, err)
 
