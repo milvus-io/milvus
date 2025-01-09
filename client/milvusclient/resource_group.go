@@ -19,9 +19,13 @@ package milvusclient
 import (
 	"context"
 
+	"github.com/samber/lo"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
+	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -58,6 +62,81 @@ func (c *Client) DropResourceGroup(ctx context.Context, opt DropResourceGroupOpt
 
 	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.DropResourceGroup(ctx, req, callOptions...)
+		return merr.CheckRPCCall(resp, err)
+	})
+
+	return err
+}
+
+func (c *Client) DescribeResourceGroup(ctx context.Context, opt DescribeResourceGroupOption, callOptions ...grpc.CallOption) (*entity.ResourceGroup, error) {
+	req := opt.Request()
+
+	var rg *entity.ResourceGroup
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.DescribeResourceGroup(ctx, req, callOptions...)
+		if err = merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+
+		resultRg := resp.GetResourceGroup()
+		rg = &entity.ResourceGroup{
+			Name:             resultRg.GetName(),
+			Capacity:         resultRg.GetCapacity(),
+			NumAvailableNode: resultRg.GetNumAvailableNode(),
+			NumLoadedReplica: resultRg.GetNumLoadedReplica(),
+			NumOutgoingNode:  resultRg.GetNumOutgoingNode(),
+			NumIncomingNode:  resultRg.GetNumIncomingNode(),
+			Config: &entity.ResourceGroupConfig{
+				Requests: entity.ResourceGroupLimit{
+					NodeNum: resultRg.GetConfig().GetRequests().GetNodeNum(),
+				},
+				Limits: entity.ResourceGroupLimit{
+					NodeNum: resultRg.GetConfig().GetLimits().GetNodeNum(),
+				},
+				TransferFrom: lo.Map(resultRg.GetConfig().GetTransferFrom(), func(transfer *rgpb.ResourceGroupTransfer, i int) *entity.ResourceGroupTransfer {
+					return &entity.ResourceGroupTransfer{
+						ResourceGroup: transfer.GetResourceGroup(),
+					}
+				}),
+				TransferTo: lo.Map(resultRg.GetConfig().GetTransferTo(), func(transfer *rgpb.ResourceGroupTransfer, i int) *entity.ResourceGroupTransfer {
+					return &entity.ResourceGroupTransfer{
+						ResourceGroup: transfer.GetResourceGroup(),
+					}
+				}),
+				NodeFilter: entity.ResourceGroupNodeFilter{
+					NodeLabels: entity.KvPairsMap(resultRg.GetConfig().GetNodeFilter().GetNodeLabels()),
+				},
+			},
+			Nodes: lo.Map(resultRg.GetNodes(), func(node *commonpb.NodeInfo, i int) entity.NodeInfo {
+				return entity.NodeInfo{
+					NodeID:   node.GetNodeId(),
+					Address:  node.GetAddress(),
+					HostName: node.GetHostname(),
+				}
+			}),
+		}
+
+		return nil
+	})
+	return rg, err
+}
+
+func (c *Client) UpdateResourceGroup(ctx context.Context, opt UpdateResourceGroupOption, callOptions ...grpc.CallOption) error {
+	req := opt.Request()
+
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.UpdateResourceGroups(ctx, req, callOptions...)
+		return merr.CheckRPCCall(resp, err)
+	})
+
+	return err
+}
+
+func (c *Client) TransferReplica(ctx context.Context, opt TransferReplicaOption, callOptions ...grpc.CallOption) error {
+	req := opt.Request()
+
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.TransferReplica(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
 

@@ -23,6 +23,7 @@ func adaptImplsToOpener(opener walimpls.OpenerImpls, builders []interceptors.Int
 		idAllocator:         typeutil.NewIDAllocator(),
 		walInstances:        typeutil.NewConcurrentMap[int64, wal.WAL](),
 		interceptorBuilders: builders,
+		logger:              log.With(log.FieldComponent("opener")),
 	}
 }
 
@@ -33,6 +34,7 @@ type openerAdaptorImpl struct {
 	idAllocator         *typeutil.IDAllocator
 	walInstances        *typeutil.ConcurrentMap[int64, wal.WAL] // store all wal instances allocated by these allocator.
 	interceptorBuilders []interceptors.InterceptorBuilder
+	logger              *log.MLogger
 }
 
 // Open opens a wal instance for the channel.
@@ -43,24 +45,24 @@ func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.
 	defer o.lifetime.Done()
 
 	id := o.idAllocator.Allocate()
-	log := log.With(zap.Any("channel", opt.Channel), zap.Int64("id", id))
+	logger := o.logger.With(zap.Any("channel", opt.Channel), zap.Int64("id", id))
 
 	l, err := o.opener.Open(ctx, &walimpls.OpenOption{
 		Channel: opt.Channel,
 	})
 	if err != nil {
-		log.Warn("open wal failed", zap.Error(err))
+		logger.Warn("open wal failed", zap.Error(err))
 		return nil, err
 	}
 
 	// wrap the wal into walExtend with cleanup function and interceptors.
 	wal := adaptImplsToWAL(l, o.interceptorBuilders, func() {
 		o.walInstances.Remove(id)
-		log.Info("wal deleted from opener")
+		logger.Info("wal deleted from opener")
 	})
 
 	o.walInstances.Insert(id, wal)
-	log.Info("new wal created")
+	logger.Info("new wal created")
 	return wal, nil
 }
 
@@ -72,7 +74,7 @@ func (o *openerAdaptorImpl) Close() {
 	// close all wal instances.
 	o.walInstances.Range(func(id int64, l wal.WAL) bool {
 		l.Close()
-		log.Info("close wal by opener", zap.Int64("id", id), zap.Any("channel", l.Channel()))
+		o.logger.Info("close wal by opener", zap.Int64("id", id), zap.Any("channel", l.Channel()))
 		return true
 	})
 	// close the opener

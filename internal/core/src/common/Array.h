@@ -35,6 +35,27 @@ class Array {
 
     ~Array() {
         delete[] data_;
+        if (offsets_ptr_) {
+            // only deallocate offsets for string type array
+            delete[] offsets_ptr_;
+        }
+    }
+
+    Array(char* data,
+          int len,
+          size_t size,
+          DataType element_type,
+          const uint32_t* offsets_ptr)
+        : size_(size), length_(len), element_type_(element_type) {
+        data_ = new char[size];
+        std::copy(data, data + size, data_);
+        if (IsVariableDataType(element_type)) {
+            AssertInfo(offsets_ptr != nullptr,
+                       "For variable type elements in array, offsets_ptr must "
+                       "be non-null");
+            offsets_ptr_ = new uint32_t[len];
+            std::copy(offsets_ptr, offsets_ptr + len, offsets_ptr_);
+        }
     }
 
     explicit Array(const ScalarArray& field_data) {
@@ -97,17 +118,19 @@ class Array {
             case ScalarArray::kStringData: {
                 element_type_ = DataType::STRING;
                 length_ = field_data.string_data().data().size();
-                offsets_.reserve(length_);
+                offsets_ptr_ = new uint32_t[length_];
                 for (int i = 0; i < length_; ++i) {
-                    offsets_.push_back(size_);
-                    size_ += field_data.string_data().data(i).size();
+                    offsets_ptr_[i] = size_;
+                    size_ +=
+                        field_data.string_data()
+                            .data(i)
+                            .size();  //type risk here between uint32_t vs size_t
                 }
-
                 data_ = new char[size_];
                 for (int i = 0; i < length_; ++i) {
                     std::copy_n(field_data.string_data().data(i).data(),
                                 field_data.string_data().data(i).size(),
-                                data_ + offsets_[i]);
+                                data_ + offsets_ptr_[i]);
                 }
                 break;
             }
@@ -117,49 +140,39 @@ class Array {
         }
     }
 
-    Array(char* data,
-          size_t size,
-          DataType element_type,
-          std::vector<uint64_t>&& element_offsets)
-        : size_(size),
-          offsets_(std::move(element_offsets)),
-          element_type_(element_type) {
-        delete[] data_;
-        data_ = new char[size];
-        std::copy(data, data + size, data_);
-        if (IsVariableDataType(element_type_)) {
-            length_ = offsets_.size();
-        } else {
-            // int8, int16, int32 are all promoted to int32
-            if (element_type_ == DataType::INT8 ||
-                element_type_ == DataType::INT16) {
-                length_ = size / sizeof(int32_t);
-            } else {
-                length_ = size / GetDataTypeSize(element_type_);
-            }
-        }
-    }
-
     Array(const Array& array) noexcept
         : length_{array.length_},
           size_{array.size_},
           element_type_{array.element_type_} {
-        delete[] data_;
         data_ = new char[array.size_];
         std::copy(array.data_, array.data_ + array.size_, data_);
-        offsets_ = array.offsets_;
+        if (IsVariableDataType(array.element_type_)) {
+            AssertInfo(array.get_offsets_data() != nullptr,
+                       "for array with variable length elements, offsets_ptr"
+                       "must not be nullptr");
+            offsets_ptr_ = new uint32_t[length_];
+            std::copy_n(array.get_offsets_data(), array.length(), offsets_ptr_);
+        }
     }
 
     Array&
     operator=(const Array& array) {
         delete[] data_;
-
-        data_ = new char[array.size_];
-        std::copy(array.data_, array.data_ + array.size_, data_);
+        if (offsets_ptr_) {
+            delete[] offsets_ptr_;
+        }
         length_ = array.length_;
         size_ = array.size_;
-        offsets_ = array.offsets_;
         element_type_ = array.element_type_;
+        data_ = new char[size_];
+        std::copy(array.data_, array.data_ + size_, data_);
+        if (IsVariableDataType(element_type_)) {
+            AssertInfo(array.get_offsets_data() != nullptr,
+                       "for array with variable length elements, offsets_ptr"
+                       "must not be nullptr");
+            offsets_ptr_ = new uint32_t[length_];
+            std::copy_n(array.get_offsets_data(), array.length(), offsets_ptr_);
+        }
         return *this;
     }
 
@@ -241,10 +254,11 @@ class Array {
                    length_);
         if constexpr (std::is_same_v<T, std::string> ||
                       std::is_same_v<T, std::string_view>) {
-            size_t element_length = (index == length_ - 1)
-                                        ? size_ - offsets_.back()
-                                        : offsets_[index + 1] - offsets_[index];
-            return T(data_ + offsets_[index], element_length);
+            size_t element_length =
+                (index == length_ - 1)
+                    ? size_ - offsets_ptr_[length_ - 1]
+                    : offsets_ptr_[index + 1] - offsets_ptr_[index];
+            return T(data_ + offsets_ptr_[index], element_length);
         }
         if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||
                       std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
@@ -272,14 +286,9 @@ class Array {
         return reinterpret_cast<T*>(data_)[index];
     }
 
-    const std::vector<uint64_t>&
-    get_offsets() const {
-        return offsets_;
-    }
-
-    std::vector<uint64_t>
-    get_offsets_in_copy() const {
-        return offsets_;
+    uint32_t*
+    get_offsets_data() const {
+        return offsets_ptr_;
     }
 
     ScalarArray
@@ -436,32 +445,45 @@ class Array {
     char* data_{nullptr};
     int length_ = 0;
     int size_ = 0;
-    std::vector<uint64_t> offsets_{};
     DataType element_type_ = DataType::NONE;
+    uint32_t* offsets_ptr_{nullptr};
 };
 
 class ArrayView {
  public:
     ArrayView() = default;
 
+    ArrayView(const ArrayView& other)
+        : data_(other.data_),
+          length_(other.length_),
+          size_(other.size_),
+          element_type_(other.element_type_),
+          offsets_ptr_(other.offsets_ptr_) {
+        AssertInfo(data_ != nullptr,
+                   "data pointer for ArrayView cannot be nullptr");
+        if (IsVariableDataType(element_type_)) {
+            AssertInfo(offsets_ptr_ != nullptr,
+                       "for array with variable length elements, offsets_ptr "
+                       "must not be nullptr");
+        }
+    }
+
     ArrayView(char* data,
+              int len,
               size_t size,
               DataType element_type,
-              std::vector<uint64_t>&& element_offsets)
-        : size_(size),
-          offsets_(std::move(element_offsets)),
-          element_type_(element_type) {
-        data_ = data;
+              uint32_t* offsets_ptr)
+        : data_(data),
+          length_(len),
+          size_(size),
+          element_type_(element_type),
+          offsets_ptr_(offsets_ptr) {
+        AssertInfo(data != nullptr,
+                   "data pointer for ArrayView cannot be nullptr");
         if (IsVariableDataType(element_type_)) {
-            length_ = offsets_.size();
-        } else {
-            // int8, int16, int32 are all promoted to int32
-            if (element_type_ == DataType::INT8 ||
-                element_type_ == DataType::INT16) {
-                length_ = size / sizeof(int32_t);
-            } else {
-                length_ = size / GetDataTypeSize(element_type_);
-            }
+            AssertInfo(offsets_ptr != nullptr,
+                       "for array with variable length elements, offsets_ptr "
+                       "must not be nullptr");
         }
     }
 
@@ -475,10 +497,11 @@ class ArrayView {
 
         if constexpr (std::is_same_v<T, std::string> ||
                       std::is_same_v<T, std::string_view>) {
-            size_t element_length = (index == length_ - 1)
-                                        ? size_ - offsets_.back()
-                                        : offsets_[index + 1] - offsets_[index];
-            return T(data_ + offsets_[index], element_length);
+            size_t element_length =
+                (index == length_ - 1)
+                    ? size_ - offsets_ptr_[length_ - 1]
+                    : offsets_ptr_[index + 1] - offsets_ptr_[index];
+            return T(data_ + offsets_ptr_[index], element_length);
         }
         if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||
                       std::is_same_v<T, float> || std::is_same_v<T, double>) {
@@ -580,11 +603,6 @@ class ArrayView {
     data() const {
         return data_;
     }
-    // copy to result
-    std::vector<uint64_t>
-    get_offsets_in_copy() const {
-        return offsets_;
-    }
 
     bool
     is_same_array(const proto::plan::Array& arr2) const {
@@ -661,8 +679,10 @@ class ArrayView {
     char* data_{nullptr};
     int length_ = 0;
     int size_ = 0;
-    std::vector<uint64_t> offsets_{};
     DataType element_type_ = DataType::NONE;
+
+    //offsets ptr
+    uint32_t* offsets_ptr_{nullptr};
 };
 
 }  // namespace milvus

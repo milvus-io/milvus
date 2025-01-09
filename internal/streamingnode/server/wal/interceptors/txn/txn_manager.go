@@ -24,6 +24,7 @@ func NewTxnManager(pchannel types.PChannelInfo) *TxnManager {
 		sessions: make(map[message.TxnID]*TxnSession),
 		closed:   nil,
 		metrics:  metricsutil.NewTxnMetrics(pchannel.Name),
+		logger:   resource.Resource().Logger().With(log.FieldComponent("txn-manager")),
 	}
 }
 
@@ -35,6 +36,7 @@ type TxnManager struct {
 	sessions map[message.TxnID]*TxnSession
 	closed   lifetime.SafeChan
 	metrics  *metricsutil.TxnMetrics
+	logger   *log.MLogger
 }
 
 // BeginNewTxn starts a new transaction with a session.
@@ -120,7 +122,7 @@ func (m *TxnManager) GracefulClose(ctx context.Context) error {
 			m.closed.Close()
 		}
 	}
-	log.Info("there's still txn session in txn manager, waiting for them to be consumed", zap.Int("session count", len(m.sessions)))
+	m.logger.Info("there's still txn session in txn manager, waiting for them to be consumed", zap.Int("session count", len(m.sessions)))
 	m.mu.Unlock()
 
 	select {

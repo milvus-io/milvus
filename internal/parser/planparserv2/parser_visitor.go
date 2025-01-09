@@ -486,6 +486,10 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 	if err != nil {
 		return err
 	}
+	columnInfo := toColumnInfo(column)
+	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
+		return fmt.Errorf("field %v does not enable text match", columnInfo.FieldId)
+	}
 	if !typeutil.IsStringType(column.dataType) {
 		return fmt.Errorf("text match operation on non-string is unsupported")
 	}
@@ -499,7 +503,7 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
-					ColumnInfo: toColumnInfo(column),
+					ColumnInfo: columnInfo,
 					Op:         planpb.OpType_TextMatch,
 					Value:      NewString(queryText),
 				},
