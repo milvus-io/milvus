@@ -141,7 +141,7 @@ func WithReqID(ctx context.Context, reqID int64) context.Context {
 
 // WithModule adds given module field to the logger in ctx
 func WithModule(ctx context.Context, module string) context.Context {
-	fields := []zap.Field{zap.String("module", module)}
+	fields := []zap.Field{zap.String(FieldNameModule, module)}
 	return WithFields(ctx, fields...)
 }
 
