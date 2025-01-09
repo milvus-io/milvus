@@ -56,7 +56,6 @@ func (c *Collection) ShadowClone() *Collection {
 		DBID:                 c.DBID,
 		CollectionID:         c.CollectionID,
 		Name:                 c.Name,
-		DBName:               c.DBName,
 		Description:          c.Description,
 		AutoID:               c.AutoID,
 		Fields:               c.Fields,
@@ -71,7 +70,6 @@ func (c *Collection) ShadowClone() *Collection {
 		Properties:           c.Properties,
 		State:                c.State,
 		EnableDynamicField:   c.EnableDynamicField,
-		Functions:            c.Functions,
 	}
 }
 
