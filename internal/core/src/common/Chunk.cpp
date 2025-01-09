@@ -51,21 +51,18 @@ ArrayChunk::ConstructViews() {
         int offset = offsets_lens_[2 * i];
         int next_offset = offsets_lens_[2 * (i + 1)];
         int len = offsets_lens_[2 * i + 1];
-
         auto data_ptr = data_ + offset;
-        auto offsets_len = 0;
-        std::vector<uint64_t> element_indices = {};
+        auto offsets_bytes_len = 0;
+        uint32_t* offsets_ptr = nullptr;
         if (IsStringDataType(element_type_)) {
-            offsets_len = len * sizeof(uint64_t);
-            std::vector<uint64_t> tmp(
-                reinterpret_cast<uint64_t*>(data_ptr),
-                reinterpret_cast<uint64_t*>(data_ptr + offsets_len));
-            element_indices = std::move(tmp);
+            offsets_bytes_len = len * sizeof(uint32_t);
+            offsets_ptr = reinterpret_cast<uint32_t*>(data_ptr);
         }
-        views_.emplace_back(data_ptr + offsets_len,
-                            next_offset - offset - offsets_len,
+        views_.emplace_back(data_ptr + offsets_bytes_len,
+                            len,
+                            next_offset - offset - offsets_bytes_len,
                             element_type_,
-                            std::move(element_indices));
+                            offsets_ptr);
     }
 }
 

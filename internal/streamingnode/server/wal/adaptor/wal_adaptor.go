@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
@@ -50,6 +51,10 @@ func adaptImplsToWAL(
 		cleanup:      cleanup,
 		writeMetrics: metricsutil.NewWriteMetrics(basicWAL.Channel(), basicWAL.WALName()),
 		scanMetrics:  metricsutil.NewScanMetrics(basicWAL.Channel()),
+		logger: resource.Resource().Logger().With(
+			log.FieldComponent("wal"),
+			zap.Any("channel", basicWAL.Channel()),
+		),
 	}
 	param.WAL.Set(wal)
 	return wal
@@ -68,6 +73,7 @@ type walAdaptorImpl struct {
 	cleanup                func()
 	writeMetrics           *metricsutil.WriteMetrics
 	scanMetrics            *metricsutil.ScanMetrics
+	logger                 *log.MLogger
 }
 
 func (w *walAdaptorImpl) WALName() string {
@@ -193,7 +199,7 @@ func (w *walAdaptorImpl) Available() <-chan struct{} {
 
 // Close overrides Scanner Close function.
 func (w *walAdaptorImpl) Close() {
-	logger := log.With(zap.Any("channel", w.Channel()), zap.String("processing", "WALClose"))
+	logger := w.logger.With(zap.String("processing", "WALClose"))
 	logger.Info("wal begin to close, start graceful close...")
 	// graceful close the interceptors before wal closing.
 	w.interceptorBuildResult.GracefulCloseFunc()

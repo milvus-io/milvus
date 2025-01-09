@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
@@ -79,8 +80,11 @@ func buildNewPartitionManagers(
 		}
 	}
 	m := &partitionSegmentManagers{
-		mu:              sync.Mutex{},
-		logger:          log.With(zap.Any("pchannel", pchannel)),
+		mu: sync.Mutex{},
+		logger: resource.Resource().Logger().With(
+			log.FieldComponent("segment-assigner"),
+			zap.String("pchannel", pchannel.Name),
+		),
 		wal:             wal,
 		pchannel:        pchannel,
 		managers:        managers,
