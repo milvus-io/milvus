@@ -16,6 +16,7 @@ func extractColumnInfo(info *planpb.ColumnInfo) interface{} {
 	js["data_type"] = info.GetDataType().String()
 	js["auto_id"] = info.GetIsAutoID()
 	js["is_pk"] = info.GetIsPrimaryKey()
+	js["nullable"] = info.GetNullable()
 	return js
 }
 
@@ -64,6 +65,8 @@ func (v *ShowExprVisitor) VisitExpr(expr *planpb.Expr) interface{} {
 		js["expr"] = v.VisitValueExpr(realExpr.ValueExpr)
 	case *planpb.Expr_ColumnExpr:
 		js["expr"] = v.VisitColumnExpr(realExpr.ColumnExpr)
+	case *planpb.Expr_NullExpr:
+		js["expr"] = v.VisitNullExpr(realExpr.NullExpr)
 	default:
 		js["expr"] = ""
 	}
@@ -169,6 +172,14 @@ func (v *ShowExprVisitor) VisitColumnExpr(expr *planpb.ColumnExpr) interface{} {
 	js := make(map[string]interface{})
 	js["expr_type"] = "column"
 	js["column_info"] = extractColumnInfo(expr.GetInfo())
+	return js
+}
+
+func (v *ShowExprVisitor) VisitNullExpr(expr *planpb.NullExpr) interface{} {
+	js := make(map[string]interface{})
+	js["expr_type"] = "null"
+	js["op"] = expr.Op.String()
+	js["column_info"] = extractColumnInfo(expr.GetColumnInfo())
 	return js
 }
 
