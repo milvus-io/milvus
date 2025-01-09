@@ -24,7 +24,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -444,7 +443,6 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_meta_saved)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
-		t.result = &datapb.CompactionPlanResult{}
 
 		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).RunAndReturn(func(ctx context.Context, segIDs []int64, isCompacting bool) {
 			s.ElementsMatch(segIDs, t.GetTaskProto().GetInputSegments())
@@ -461,7 +459,6 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_meta_saved)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
-		t.result = &datapb.CompactionPlanResult{}
 
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
@@ -475,7 +472,6 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_completed)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
-		t.result = &datapb.CompactionPlanResult{}
 		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetTaskProto().GetNodeID(), mock.Anything).Return(errors.New("mock error")).Once()
 		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).RunAndReturn(func(ctx context.Context, segIDs []int64, isCompacting bool) {
 			s.ElementsMatch(segIDs, t.GetTaskProto().GetInputSegments())
@@ -491,7 +487,6 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_completed)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
-		t.result = &datapb.CompactionPlanResult{}
 		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetTaskProto().GetNodeID(), mock.Anything).Return(nil).Once()
 		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).RunAndReturn(func(ctx context.Context, segIDs []int64, isCompacting bool) {
 			s.ElementsMatch(segIDs, t.GetTaskProto().GetInputSegments())
@@ -529,40 +524,5 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 
 		got := t.Process()
 		s.True(got)
-	})
-}
-
-func (s *L0CompactionTaskSuite) TestSetterGetter() {
-	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
-	t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
-
-	span := t.GetSpan()
-	s.Nil(span)
-	s.NotPanics(t.EndSpan)
-
-	t.SetSpan(trace.SpanFromContext(context.TODO()))
-	s.NotPanics(t.EndSpan)
-
-	rst := t.GetResult()
-	s.Nil(rst)
-	t.SetResult(&datapb.CompactionPlanResult{PlanID: 19530})
-	s.NotNil(t.GetResult())
-
-	label := t.GetLabel()
-	s.Equal("10-ch-1", label)
-
-	t.updateAndSaveTaskMeta(setStartTime(100))
-	s.EqualValues(100, t.GetTaskProto().GetStartTime())
-
-	t.SetTask(nil)
-	t.SetPlan(&datapb.CompactionPlan{PlanID: 19530})
-	s.NotNil(t.GetPlan())
-
-	s.Run("set NodeID", func() {
-		t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
-
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
-		t.SetNodeID(1000)
-		s.EqualValues(1000, t.GetTaskProto().GetNodeID())
 	})
 }
