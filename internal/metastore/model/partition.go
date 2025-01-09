@@ -1,8 +1,8 @@
 package model
 
 import (
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
 )
 
 type Partition struct {

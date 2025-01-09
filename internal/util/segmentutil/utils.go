@@ -3,8 +3,8 @@ package segmentutil
 import (
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 )
 
 // ReCalcRowCount re-calculates number of rows of `oldSeg` based on its bin log count, and correct its value in its
