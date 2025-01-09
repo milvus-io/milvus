@@ -1389,7 +1389,7 @@ func (d *AsyncWarmupDispatcher) Run(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				default:
-					GetDynamicPool().Submit(task)
+					GetWarmupPool().Submit(task)
 				}
 			}
 

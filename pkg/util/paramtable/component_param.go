@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -4881,11 +4882,11 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 
 // runtimeConfig is just a private environment value table.
 type runtimeConfig struct {
-	createTime time.Time
-	updateTime time.Time
-	role       string
+	createTime atomic.Time
+	updateTime atomic.Time
+	role       atomic.String
 	nodeID     atomic.Int64
-	components map[string]struct{}
+	components typeutil.ConcurrentSet[string]
 }
 
 type integrationTestConfig struct {

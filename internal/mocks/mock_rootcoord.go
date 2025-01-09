@@ -8,6 +8,8 @@ import (
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	grpc "google.golang.org/grpc"
+
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -2659,6 +2661,39 @@ func (_c *RootCoord_Register_Call) Return(_a0 error) *RootCoord_Register_Call {
 }
 
 func (_c *RootCoord_Register_Call) RunAndReturn(run func() error) *RootCoord_Register_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RegisterStreamingCoordGRPCService provides a mock function with given fields: server
+func (_m *RootCoord) RegisterStreamingCoordGRPCService(server *grpc.Server) {
+	_m.Called(server)
+}
+
+// RootCoord_RegisterStreamingCoordGRPCService_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RegisterStreamingCoordGRPCService'
+type RootCoord_RegisterStreamingCoordGRPCService_Call struct {
+	*mock.Call
+}
+
+// RegisterStreamingCoordGRPCService is a helper method to define mock.On call
+//   - server *grpc.Server
+func (_e *RootCoord_Expecter) RegisterStreamingCoordGRPCService(server interface{}) *RootCoord_RegisterStreamingCoordGRPCService_Call {
+	return &RootCoord_RegisterStreamingCoordGRPCService_Call{Call: _e.mock.On("RegisterStreamingCoordGRPCService", server)}
+}
+
+func (_c *RootCoord_RegisterStreamingCoordGRPCService_Call) Run(run func(server *grpc.Server)) *RootCoord_RegisterStreamingCoordGRPCService_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*grpc.Server))
+	})
+	return _c
+}
+
+func (_c *RootCoord_RegisterStreamingCoordGRPCService_Call) Return() *RootCoord_RegisterStreamingCoordGRPCService_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *RootCoord_RegisterStreamingCoordGRPCService_Call) RunAndReturn(run func(*grpc.Server)) *RootCoord_RegisterStreamingCoordGRPCService_Call {
 	_c.Call.Return(run)
 	return _c
 }
