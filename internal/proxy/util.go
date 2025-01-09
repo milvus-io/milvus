@@ -47,7 +47,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
@@ -1299,11 +1298,11 @@ func isCollectionLoaded(ctx context.Context, qc types.QueryCoordClient, collID i
 	return false, nil
 }
 
-func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64, partIDs []int64) (bool, error) {
+func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64, partID int64) (bool, error) {
 	// get all loading collections
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
 		CollectionID: collID,
-		PartitionIDs: partIDs,
+		PartitionIDs: []int64{partID},
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		// qc returns error if partition not loaded
@@ -1313,7 +1312,7 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID in
 		return false, err
 	}
 
-	return funcutil.SliceSetEqual(partIDs, resp.GetPartitionIDs()), nil
+	return true, nil
 }
 
 func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {
