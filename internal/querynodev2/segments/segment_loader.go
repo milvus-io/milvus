@@ -685,10 +685,10 @@ func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*Index
 }
 
 func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) (
-	map[int64]*IndexedFieldInfo,      // indexed info
-	[]*datapb.FieldBinlog,            // fields info
+	map[int64]*IndexedFieldInfo, // indexed info
+	[]*datapb.FieldBinlog, // fields info
 	map[int64]*datapb.TextIndexStats, // text indexed info
-	map[int64]struct{},               // unindexed text fields
+	map[int64]struct{}, // unindexed text fields
 ) {
 	fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 	for _, indexInfo := range loadInfo.IndexInfos {
