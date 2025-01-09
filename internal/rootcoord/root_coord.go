@@ -447,12 +447,6 @@ func (c *Core) initInternal() error {
 	defer initSpan.End()
 	log := log.Ctx(initCtx)
 
-<<<<<<< HEAD
-	c.initKVCreator()
-=======
-	c.UpdateStateCode(commonpb.StateCode_Initializing)
->>>>>>> aceb972963ad8ef56583c64dd6662328f3bbc1d9
-
 	if err := c.initIDAllocator(initCtx); err != nil {
 		return err
 	}
