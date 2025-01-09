@@ -54,7 +54,7 @@ func (c *run) printBanner(w io.Writer) {
 	fmt.Fprintln(w, "  / /|_/ // // /_| |/ / /_/ /\\ \\    ")
 	fmt.Fprintln(w, " /_/  /_/___/____/___/\\____/___/     ")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Welcome to use Milvus!")
+	fmt.Fprintln(w, "Welcome to Milvus!")
 	fmt.Fprintln(w, "Version:   "+BuildTags)
 	fmt.Fprintln(w, "Built:     "+BuildTime)
 	fmt.Fprintln(w, "GitCommit: "+GitCommit)
