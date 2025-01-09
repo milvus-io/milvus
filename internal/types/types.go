@@ -121,8 +121,6 @@ type DataCoord interface {
 type DataCoordComponent interface {
 	DataCoord
 
-	RegisterStreamingCoordGRPCService(s *grpc.Server)
-
 	SetAddress(address string)
 	// SetEtcdClient set EtcdClient for DataCoord
 	// `etcdClient` is a client of etcd
@@ -213,6 +211,8 @@ type RootCoordComponent interface {
 
 	// GetMetrics notifies RootCoordComponent to collect metrics for specified component
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+
+	RegisterStreamingCoordGRPCService(server *grpc.Server)
 }
 
 // ProxyClient is the client interface for proxy server

@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -27,7 +28,7 @@ func NewAssignmentDiscoverServer(
 		streamServer: discoverGrpcServerHelper{
 			streamServer,
 		},
-		logger: log.With(),
+		logger: resource.Resource().Logger().With(log.FieldComponent("assignment-discover-server")),
 	}
 }
 

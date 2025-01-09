@@ -17,12 +17,13 @@ import (
 )
 
 // NewSessionDiscoverer returns a new Discoverer for the milvus session registration.
-func NewSessionDiscoverer(etcdCli *clientv3.Client, prefix string, minimumVersion string) Discoverer {
+func NewSessionDiscoverer(etcdCli *clientv3.Client, prefix string, exclusive bool, minimumVersion string) Discoverer {
 	return &sessionDiscoverer{
 		etcdCli:      etcdCli,
 		prefix:       prefix,
+		exclusive:    exclusive,
 		versionRange: semver.MustParseRange(">=" + minimumVersion),
-		logger:       log.With(zap.String("prefix", prefix), zap.String("expectedVersion", minimumVersion)),
+		logger:       log.With(zap.String("prefix", prefix), zap.Bool("exclusive", exclusive), zap.String("expectedVersion", minimumVersion)),
 		revision:     0,
 		peerSessions: make(map[string]*sessionutil.SessionRaw),
 	}
@@ -32,6 +33,7 @@ func NewSessionDiscoverer(etcdCli *clientv3.Client, prefix string, minimumVersio
 type sessionDiscoverer struct {
 	etcdCli      *clientv3.Client
 	prefix       string
+	exclusive    bool // if exclusive, only one session is allowed, not use the prefix, only use the role directly.
 	logger       *log.MLogger
 	versionRange semver.Range
 	revision     int64
@@ -64,12 +66,15 @@ func (sw *sessionDiscoverer) Discover(ctx context.Context, cb func(VersionedStat
 
 // watch performs the watch on etcd.
 func (sw *sessionDiscoverer) watch(ctx context.Context, cb func(VersionedState) error) error {
+	opts := []clientv3.OpOption{clientv3.WithRev(sw.revision + 1)}
+	if !sw.exclusive {
+		opts = append(opts, clientv3.WithPrefix())
+	}
 	// start a watcher at background.
 	eventCh := sw.etcdCli.Watch(
 		ctx,
 		sw.prefix,
-		clientv3.WithPrefix(),
-		clientv3.WithRev(sw.revision+1),
+		opts...,
 	)
 
 	for {
@@ -124,7 +129,11 @@ func (sw *sessionDiscoverer) handleETCDEvent(resp clientv3.WatchResponse) error 
 
 // initDiscover initializes the discoverer if needed.
 func (sw *sessionDiscoverer) initDiscover(ctx context.Context) error {
-	resp, err := sw.etcdCli.Get(ctx, sw.prefix, clientv3.WithPrefix(), clientv3.WithSerializable())
+	opts := []clientv3.OpOption{clientv3.WithSerializable()}
+	if !sw.exclusive {
+		opts = append(opts, clientv3.WithPrefix())
+	}
+	resp, err := sw.etcdCli.Get(ctx, sw.prefix, opts...)
 	if err != nil {
 		return err
 	}
