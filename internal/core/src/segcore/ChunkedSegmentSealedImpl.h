@@ -391,6 +391,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // whether the segment is sorted by the pk
     bool is_sorted_by_pk_ = false;
+    std::string map_dir_path_;
 };
 
 }  // namespace milvus::segcore

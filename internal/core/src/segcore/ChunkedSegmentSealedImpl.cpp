@@ -50,6 +50,7 @@
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
 #include "storage/DataCodec.h"
+#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/MmapManager.h"
@@ -522,6 +523,8 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
                     std::to_string(field_id.get());
     auto dir = filepath.parent_path();
     std::filesystem::create_directories(dir);
+
+    map_dir_path_ = dir.string();
 
     auto file = File::Open(filepath.string(), O_CREAT | O_TRUNC | O_RDWR);
 
@@ -1314,6 +1317,12 @@ ChunkedSegmentSealedImpl::~ChunkedSegmentSealedImpl() {
     if (mmap_descriptor_ != nullptr) {
         auto mm = storage::MmapManager::GetInstance().GetMmapChunkManager();
         mm->UnRegister(mmap_descriptor_);
+    }
+
+    if (!map_dir_path_.empty()) {
+        storage::LocalChunkManagerSingleton::GetInstance()
+            .GetChunkManager()
+            ->RemoveDir(map_dir_path_);
     }
 }
 
