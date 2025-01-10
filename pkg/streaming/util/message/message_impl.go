@@ -3,7 +3,7 @@ package message
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/proto/messagespb"
 )
 
 type messageImpl struct {
