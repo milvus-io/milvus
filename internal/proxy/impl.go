@@ -5591,6 +5591,9 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	if req.RBACMeta == nil {
+		return merr.Success(), nil
+	}
 
 	result, err := node.rootCoord.RestoreRBAC(ctx, req)
 	if err != nil {
