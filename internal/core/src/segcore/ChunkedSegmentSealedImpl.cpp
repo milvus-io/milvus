@@ -1180,6 +1180,10 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
 
             auto num_chunk = pk_column->num_chunks();
             for (int i = 0; i < num_chunk; ++i) {
+                if (skip_index_.CanSkipBinaryRange(
+                        pk_field_id, i, pk, pk, true, true)) {
+                    continue;
+                }
                 auto src = reinterpret_cast<const int64_t*>(pk_column->Data(i));
                 auto chunk_row_num = pk_column->chunk_row_nums(i);
                 auto it = std::lower_bound(
