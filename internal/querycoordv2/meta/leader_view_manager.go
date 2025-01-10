@@ -331,8 +331,8 @@ func (mgr *LeaderViewManager) GetLeaderView(collectionID int64) []*metricsinfo.L
 			if lv, ok := nodeViews.collectionViews[collectionID]; ok {
 				filteredViews = lv
 			} else {
-				// if collectionID is not found, return empty leader views
-				return leaderViews
+				// skip if collectionID is not found
+				continue
 			}
 		} else {
 			// if collectionID is not set, return all leader views
