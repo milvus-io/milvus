@@ -1591,7 +1591,11 @@ SegmentSealedImpl::bulk_subscript(
         return fill_with_empty(field_id, 0);
     }
 
-    auto column = fields_.at(field_id);
+    std::shared_ptr<SingleChunkColumnBase> column;
+    {
+        std::shared_lock lck(mutex_);
+        column = fields_.at(field_id);
+    }
     auto ret = fill_with_empty(field_id, count);
     if (column->IsNullable()) {
         auto dst = ret->mutable_valid_data()->mutable_data();
