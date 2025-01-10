@@ -1009,7 +1009,7 @@ TEST(TextMatch, GrowingLoadData) {
     ASSERT_NE(segment->get_field_avg_size(FieldId(101)), 0);
 
     // Check whether the text index has been built.
-    auto expr = GetTextMatchExpr(schema, "football");
+    auto expr = GetMatchExpr(schema, "football", OpType::TextMatch);
     BitsetType final;
     final = ExecuteQueryExpr(expr, segment.get(), N, MAX_TIMESTAMP);
     ASSERT_EQ(final.size(), N);
