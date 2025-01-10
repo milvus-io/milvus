@@ -7,7 +7,7 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
-	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
 
 	metautil "github.com/milvus-io/milvus/pkg/util/metautil"
 
@@ -15,9 +15,9 @@ import (
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 
-	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
+	querypb "github.com/milvus-io/milvus/pkg/proto/querypb"
 
-	segcorepb "github.com/milvus-io/milvus/internal/proto/segcorepb"
+	segcorepb "github.com/milvus-io/milvus/pkg/proto/segcorepb"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
 )
