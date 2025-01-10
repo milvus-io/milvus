@@ -11,6 +11,10 @@ func (v *BasePlanVisitor) VisitJSONIdentifier(ctx *JSONIdentifierContext) interf
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitRandomSample(ctx *RandomSampleContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitParens(ctx *ParensContext) interface{} {
 	return v.VisitChildren(ctx)
 }

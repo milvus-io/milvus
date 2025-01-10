@@ -206,6 +206,11 @@ message BinaryArithOpEvalRangeExpr {
   string value_template_variable_name = 7;
 }
 
+message SampleExpr {
+  float sample_factor = 1;
+  Expr expr = 2;
+}
+
 message AlwaysTrueExpr {}
 
 message Expr {
@@ -225,6 +230,7 @@ message Expr {
     JSONContainsExpr json_contains_expr = 13;
     CallExpr call_expr = 14;
     NullExpr null_expr = 15;
+    SampleExpr sample_expr = 16;
   };
   bool is_template = 20;
 }

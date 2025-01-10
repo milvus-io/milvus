@@ -13,6 +13,7 @@ expr:
 	| EmptyArray                                                                 # EmptyArray
 	| expr LIKE StringLiteral                                                    # Like
 	| TEXTMATCH'('Identifier',' StringLiteral')'                                 # TextMatch
+	| RANDOMSAMPLE'(' FloatingConstant (',' expr)? ')'						     # RandomSample
 	| expr POW expr											                     # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                     # Unary
 //	| '(' typeName ')' expr									                     # Cast
@@ -60,6 +61,7 @@ NE: '!=';
 LIKE: 'like' | 'LIKE';
 EXISTS: 'exists' | 'EXISTS';
 TEXTMATCH: 'text_match'|'TEXT_MATCH';
+RANDOMSAMPLE: 'random_sample' | 'RANDOM_SAMPLE';
 
 ADD: '+';
 SUB: '-';

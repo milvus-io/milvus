@@ -513,6 +513,45 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 	}
 }
 
+func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) interface{} {
+	sample_factor, err := strconv.ParseFloat(ctx.FloatingConstant().GetText(), 32)
+	if err != nil {
+		return err
+	}
+
+	if expr := ctx.Expr(); expr != nil {
+		parsed_expr, ok := expr.Accept(v).(*ExprWithType)
+		if !ok {
+			panic("unexpected type")
+		}
+		if err := getError(parsed_expr); err != nil {
+			return err
+		}
+		return &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_SampleExpr{
+					SampleExpr: &planpb.SampleExpr{
+						SampleFactor: float32(sample_factor),
+						Expr:         parsed_expr.expr,
+					},
+				},
+			},
+			dataType: parsed_expr.dataType,
+		}
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_SampleExpr{
+				SampleExpr: &planpb.SampleExpr{
+					SampleFactor: float32(sample_factor),
+					Expr:         nil,
+				},
+			},
+		},
+	}
+}
+
 // VisitTerm translates expr to term plan.
 func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	child := ctx.Expr(0).Accept(v)
