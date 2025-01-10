@@ -26,13 +26,6 @@ JsonKeyInvertedIndex::AddInvertedRecord(const std::vector<std::string>& paths,
                                         uint16_t offset,
                                         uint16_t length) {
     auto key = std::string("/") + Join(paths, "/");
-    LOG_INFO(
-        "insert inverted key: {}, row_id: {}, offset: "
-        "{}, length:{}",
-        key,
-        row_id,
-        offset,
-        length);
     int64_t combine_id = EncodeOffset(row_id, offset, length);
     wrapper_->add_multi_data<std::string>(&key, 1, combine_id);
 }
@@ -148,8 +141,9 @@ JsonKeyInvertedIndex::JsonKeyInvertedIndex(
         std::string field_name =
             std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
         d_type_ = TantivyDataType::Keyword;
+        const int64_t buffer_size = 64 * 1024 * 1024;
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
-            field_name.c_str(), d_type_, path_.c_str());
+            field_name.c_str(), d_type_, path_.c_str(), 1, buffer_size);
     }
 }
 
