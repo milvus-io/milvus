@@ -154,8 +154,12 @@ func (s *RBACBackupTestSuite) TestBackup() {
 	s.Equal(groupName, backupRBACResp.GetRBACMeta().PrivilegeGroups[0].GroupName)
 	s.Equal(2, len(backupRBACResp.GetRBACMeta().PrivilegeGroups[0].Privileges))
 
+	restoreRBACResp, err := s.Cluster.Proxy.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{})
+	s.NoError(err)
+	s.True(merr.Ok(restoreRBACResp))
+
 	// test restore, expect to failed due to role/user already exist
-	restoreRBACResp, err := s.Cluster.Proxy.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{
+	restoreRBACResp, err = s.Cluster.Proxy.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{
 		RBACMeta: backupRBACResp.GetRBACMeta(),
 	})
 	s.NoError(err)
