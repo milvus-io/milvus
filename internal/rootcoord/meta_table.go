@@ -1574,7 +1574,7 @@ func (mt *MetaTable) OperatePrivilegeGroup(groupName string, privileges []*milvu
 			if group.GroupName == p.Name {
 				privileges = append(privileges, group.Privileges...)
 			} else {
-				return merr.WrapErrParameterInvalidMsg("there is no privilege name or privielge group name [%s] defined in system to operate", p.Name)
+				return merr.WrapErrParameterInvalidMsg("there is no privilege name or privilege group name [%s] defined in system to operate", p.Name)
 			}
 		}
 	}
