@@ -192,7 +192,7 @@ func (AzureObjectStorage *AzureObjectStorage) StatObject(ctx context.Context, bu
 
 func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) error {
 	if recursive {
-		pager := AzureObjectStorage.Client.NewContainerClient(bucketName).NewListBlobsFlatPager(&azblob.ListBlobsFlatOptions{
+		pager := AzureObjectStorage.Client.NewContainerClient(bucketName).NewListBlobsHierarchyPager("", &container.ListBlobsHierarchyOptions{
 			Prefix: &prefix,
 		})
 		if pager.More() {
