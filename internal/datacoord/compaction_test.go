@@ -75,7 +75,6 @@ func (s *CompactionPlanHandlerSuite) TestScheduleEmpty() {
 
 func (s *CompactionPlanHandlerSuite) generateInitTasksForSchedule() {
 	task1 := &mixCompactionTask{
-		// plan:     &datapb.CompactionPlan{PlanID: 1, Channel: "ch-1", Type: datapb.CompactionType_MixCompaction},
 		sessions: s.mockSessMgr,
 		meta:     s.mockMeta,
 	}
@@ -88,7 +87,6 @@ func (s *CompactionPlanHandlerSuite) generateInitTasksForSchedule() {
 	})
 
 	task2 := &mixCompactionTask{
-		// plan:     &datapb.CompactionPlan{PlanID: 2, Channel: "ch-1", Type: datapb.CompactionType_MixCompaction},
 		sessions: s.mockSessMgr,
 		meta:     s.mockMeta,
 	}
@@ -101,7 +99,6 @@ func (s *CompactionPlanHandlerSuite) generateInitTasksForSchedule() {
 	})
 
 	task3 := &mixCompactionTask{
-		// plan:     &datapb.CompactionPlan{PlanID: 3, Channel: "ch-2", Type: datapb.CompactionType_MixCompaction},
 		sessions: s.mockSessMgr,
 		meta:     s.mockMeta,
 	}
@@ -114,7 +111,6 @@ func (s *CompactionPlanHandlerSuite) generateInitTasksForSchedule() {
 	})
 
 	task4 := &mixCompactionTask{
-		// plan:     &datapb.CompactionPlan{PlanID: 4, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction},
 		sessions: s.mockSessMgr,
 		meta:     s.mockMeta,
 	}
@@ -525,11 +521,6 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 		Channel: ch,
 		NodeID:  1,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	// t1.plan = &datapb.CompactionPlan{
-	// 	PlanID:  19530,
-	// 	Channel: ch,
-	// 	Type:    datapb.CompactionType_MixCompaction,
-	// }
 
 	t2 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:  19531,
@@ -537,11 +528,6 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 		Channel: ch,
 		NodeID:  1,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	// t2.plan = &datapb.CompactionPlan{
-	// 	PlanID:  19531,
-	// 	Channel: ch,
-	// 	Type:    datapb.CompactionType_MixCompaction,
-	// }
 
 	s.handler.submitTask(t1)
 	s.handler.restoreTask(t2)
@@ -558,11 +544,6 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 		Channel:   "ch-01",
 		State:     datapb.CompactionTaskState_executing,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	// t1.plan = &datapb.CompactionPlan{
-	// 	PlanID:  1,
-	// 	Type:    datapb.CompactionType_MixCompaction,
-	// 	Channel: "ch-01",
-	// }
 
 	t2 := newMixCompactionTask(&datapb.CompactionTask{
 		TriggerID: 1,
@@ -571,11 +552,6 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 		Channel:   "ch-01",
 		State:     datapb.CompactionTaskState_completed,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	// t2.plan = &datapb.CompactionPlan{
-	// 	PlanID:  2,
-	// 	Type:    datapb.CompactionType_MixCompaction,
-	// 	Channel: "ch-01",
-	// }
 
 	t3 := newL0CompactionTask(&datapb.CompactionTask{
 		TriggerID: 1,
@@ -584,11 +560,6 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 		Channel:   "ch-02",
 		State:     datapb.CompactionTaskState_failed,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	// t3.plan = &datapb.CompactionPlan{
-	// 	PlanID:  3,
-	// 	Type:    datapb.CompactionType_Level0DeleteCompaction,
-	// 	Channel: "ch-02",
-	// }
 
 	inTasks := map[int64]CompactionTask{
 		1: t1,
@@ -633,11 +604,6 @@ func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
 		Channel:   "ch-01",
 		State:     datapb.CompactionTaskState_executing,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	// t1.plan = &datapb.CompactionPlan{
-	// 	PlanID:  1,
-	// 	Type:    datapb.CompactionType_MixCompaction,
-	// 	Channel: "ch-01",
-	// }
 
 	s.NoError(s.handler.submitTask(t1))
 
@@ -648,11 +614,6 @@ func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
 		Channel:   "ch-01",
 		State:     datapb.CompactionTaskState_completed,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	// t2.plan = &datapb.CompactionPlan{
-	// 	PlanID:  2,
-	// 	Type:    datapb.CompactionType_MixCompaction,
-	// 	Channel: "ch-01",
-	// }
 
 	s.Error(s.handler.submitTask(t2))
 }
@@ -709,11 +670,6 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		State:            datapb.CompactionTaskState_executing,
 		NodeID:           111,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	// t1.plan = &datapb.CompactionPlan{
-	// 	PlanID: 1, Channel: "ch-1",
-	// 	TimeoutInSeconds: 1,
-	// 	Type:             datapb.CompactionType_MixCompaction,
-	// }
 
 	t2 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:  2,
@@ -722,11 +678,6 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		State:   datapb.CompactionTaskState_executing,
 		NodeID:  111,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	// t2.plan = &datapb.CompactionPlan{
-	// 	PlanID:  2,
-	// 	Channel: "ch-1",
-	// 	Type:    datapb.CompactionType_MixCompaction,
-	// }
 
 	t3 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:  3,
@@ -735,11 +686,6 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		State:   datapb.CompactionTaskState_timeout,
 		NodeID:  111,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	// t3.plan = &datapb.CompactionPlan{
-	// 	PlanID:  3,
-	// 	Channel: "ch-1",
-	// 	Type:    datapb.CompactionType_MixCompaction,
-	// }
 
 	t4 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:  4,
@@ -748,11 +694,6 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		State:   datapb.CompactionTaskState_timeout,
 		NodeID:  111,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	// t4.plan = &datapb.CompactionPlan{
-	// 	PlanID:  4,
-	// 	Channel: "ch-1",
-	// 	Type:    datapb.CompactionType_MixCompaction,
-	// }
 
 	t6 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:  6,
@@ -761,11 +702,6 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		State:   datapb.CompactionTaskState_executing,
 		NodeID:  111,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	// t6.plan = &datapb.CompactionPlan{
-	// 	PlanID:  6,
-	// 	Channel: "ch-2",
-	// 	Type:    datapb.CompactionType_MixCompaction,
-	// }
 
 	inTasks := map[int64]CompactionTask{
 		1: t1,

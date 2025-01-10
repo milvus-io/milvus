@@ -591,8 +591,6 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 }
 
 func (c *compactionPlanHandler) submitTask(t CompactionTask) error {
-	// _, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", t.GetTaskProto().GetType()))
-	// t.SetSpan(span)
 	if err := c.queueTasks.Enqueue(t); err != nil {
 		return err
 	}
@@ -602,8 +600,6 @@ func (c *compactionPlanHandler) submitTask(t CompactionTask) error {
 
 // restoreTask used to restore Task from etcd
 func (c *compactionPlanHandler) restoreTask(t CompactionTask) {
-	// _, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", t.GetTaskProto().GetType()))
-	// t.SetSpan(span)
 	c.executingGuard.Lock()
 	c.executingTasks[t.GetTaskProto().GetPlanID()] = t
 	c.executingGuard.Unlock()
