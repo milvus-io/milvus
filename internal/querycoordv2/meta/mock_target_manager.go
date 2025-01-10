@@ -6,7 +6,7 @@ import (
 	context "context"
 
 	metastore "github.com/milvus-io/milvus/internal/metastore"
-	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
 
 	mock "github.com/stretchr/testify/mock"
 

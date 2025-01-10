@@ -8,7 +8,7 @@ import (
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	mock "github.com/stretchr/testify/mock"
 
-	proxypb "github.com/milvus-io/milvus/internal/proto/proxypb"
+	proxypb "github.com/milvus-io/milvus/pkg/proto/proxypb"
 
 	sessionutil "github.com/milvus-io/milvus/internal/util/sessionutil"
 
