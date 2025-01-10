@@ -101,29 +101,25 @@ func (sna *SlotBasedNodeAssigner) assign(t CompactionTask) bool {
 		sna.slots = sna.cluster.QuerySlots()
 	}
 
-	log := log.Ctx(context.TODO())
+	logger := log.With(
+		zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+		zap.String("type", t.GetTaskProto().GetType().String()),
+		zap.String("vchannel", t.GetTaskProto().GetChannel()))
+
 	nodeID, useSlot := sna.pickAnyNode(t)
 	if nodeID == NullNodeID {
-		log.Info("cannot find datanode for compaction task",
-			zap.Int64("planID", t.GetTaskProto().GetPlanID()),
-			zap.String("type", t.GetTaskProto().GetType().String()),
-			zap.String("vchannel", t.GetTaskProto().GetChannel()))
+		logger.RatedWarn(10, "cannot find datanode for compaction task",
+			zap.Int64("required", t.GetSlotUsage()), zap.Any("available", sna.slots))
 		return false
 	}
 	err := t.SetNodeID(nodeID)
 	if err != nil {
-		log.Info("assignNodeID failed",
-			zap.Int64("planID", t.GetTaskProto().GetPlanID()),
-			zap.String("vchannel", t.GetTaskProto().GetChannel()),
-			zap.Error(err))
+		logger.Warn("assignNodeID failed", zap.Error(err))
 		return false
 	}
 	// update the input nodeSlots
 	sna.slots[nodeID] = sna.slots[nodeID] - useSlot
-	log.Info("assignNodeID success",
-		zap.Int64("planID", t.GetTaskProto().GetPlanID()),
-		zap.String("vchannel", t.GetTaskProto().GetChannel()),
-		zap.Any("nodeID", nodeID))
+	logger.Debug("assignNodeID success", zap.Any("nodeID", nodeID))
 	return true
 }
 
@@ -362,7 +358,6 @@ func (c *compactionPlanHandler) schedule(assigner NodeAssigner) []CompactionTask
 
 		if t.NeedReAssignNodeID() {
 			if ok := assigner.assign(t); !ok {
-				log.RatedWarn(10, "not enough slots for compaction task", zap.Int64("planID", t.GetTaskProto().GetPlanID()))
 				selected = selected[:len(selected)-1]
 				excluded = append(excluded, t)
 				break // 2. no avaiable slots
