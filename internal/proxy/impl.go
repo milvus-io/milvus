@@ -41,10 +41,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/http"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -54,6 +50,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
@@ -6753,10 +6753,10 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	router.GET(http.QCReplicaPath, getQueryComponentMetrics(node, metricsinfo.ReplicaKey))
 	router.GET(http.QCResourceGroupPath, getQueryComponentMetrics(node, metricsinfo.ResourceGroupKey))
 	router.GET(http.QCAllTasksPath, getQueryComponentMetrics(node, metricsinfo.AllTaskKey))
-	router.GET(http.QCSegmentsPath, getQueryComponentMetrics(node, metricsinfo.SegmentKey))
+	router.GET(http.QCSegmentsPath, getQueryComponentMetrics(node, metricsinfo.SegmentKey, metricsinfo.RequestParamsInQC))
 
 	// QueryNode requests that are forwarded from querycoord
-	router.GET(http.QNSegmentsPath, getQueryComponentMetrics(node, metricsinfo.SegmentKey))
+	router.GET(http.QNSegmentsPath, getQueryComponentMetrics(node, metricsinfo.SegmentKey, metricsinfo.RequestParamsInQN))
 	router.GET(http.QNChannelsPath, getQueryComponentMetrics(node, metricsinfo.ChannelKey))
 
 	// DataCoord requests that are forwarded from proxy
@@ -6765,11 +6765,11 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	router.GET(http.DCImportTasksPath, getDataComponentMetrics(node, metricsinfo.ImportTaskKey))
 	router.GET(http.DCBuildIndexTasksPath, getDataComponentMetrics(node, metricsinfo.BuildIndexTaskKey))
 	router.GET(http.IndexListPath, getDataComponentMetrics(node, metricsinfo.IndexKey))
-	router.GET(http.DCSegmentsPath, getDataComponentMetrics(node, metricsinfo.SegmentKey))
+	router.GET(http.DCSegmentsPath, getDataComponentMetrics(node, metricsinfo.SegmentKey, metricsinfo.RequestParamsInDC))
 
 	// Datanode requests that are forwarded from datacoord
 	router.GET(http.DNSyncTasksPath, getDataComponentMetrics(node, metricsinfo.SyncTaskKey))
-	router.GET(http.DNSegmentsPath, getDataComponentMetrics(node, metricsinfo.SegmentKey))
+	router.GET(http.DNSegmentsPath, getDataComponentMetrics(node, metricsinfo.SegmentKey, metricsinfo.RequestParamsInDN))
 	router.GET(http.DNChannelsPath, getDataComponentMetrics(node, metricsinfo.ChannelKey))
 
 	// Database requests

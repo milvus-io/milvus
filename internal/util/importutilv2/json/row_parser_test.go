@@ -72,6 +72,23 @@ func TestRowParser_Parse_Valid(t *testing.T) {
 					},
 				},
 			},
+			{
+				FieldID:  6,
+				Name:     "null_fid",
+				DataType: schemapb.DataType_VarChar,
+				Nullable: true,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_StringData{
+						StringData: "a",
+					},
+				},
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "max_length",
+						Value: "256",
+					},
+				},
+			},
 		},
 	}
 	r, err := NewRowParser(schema)
@@ -185,6 +202,7 @@ func TestRowParser_Parse_Invalid(t *testing.T) {
 		{name: `{"id": 1, "vector": [], "arrayField": [1, 2, 3, 4], "x": 6, "$meta": [], "name": "test"}`, expectErr: "not a JSON object"},
 		{name: `{"id": 1, "vector": [], "arrayField": [1, 2, 3, 4], "x": 8, "$meta": "{\"y\": 8}", "name": "testName"}`, expectErr: "value length 8 exceeds max_length 4"},
 		{name: `{"id": 1, "vector": [], "arrayField": [1, 2, 3, 4, 5], "x": 8, "$meta": "{\"z\": 9}", "name": "test"}`, expectErr: "array capacity 5 exceeds max_capacity 4"},
+		{name: `{"id": 1, "vector": [], "x": 8, "$meta": "{\"z\": 9}", "name": "test"}`, expectErr: "value of field 'arrayField' is missed"},
 	}
 
 	for _, c := range cases {

@@ -8,7 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/server"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/proto/messagespb"
 )
 
 var (
