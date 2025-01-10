@@ -282,14 +282,6 @@ class ChunkedSparseFloatColumn : public ChunkedColumnBase {
             std::dynamic_pointer_cast<SparseFloatVectorChunk>(chunk)->Dim());
     }
 
-    // This is used to advice mmap prefetch, we don't currently support mmap for
-    // sparse float vector thus not implemented for now.
-    size_t
-    DataByteSize() const override {
-        PanicInfo(ErrorCode::Unsupported,
-                  "ByteSize not supported for sparse float column");
-    }
-
     SpanBase
     Span(int64_t chunk_id) const override {
         PanicInfo(ErrorCode::Unsupported,
@@ -303,7 +295,6 @@ class ChunkedSparseFloatColumn : public ChunkedColumnBase {
 
  private:
     int64_t dim_ = 0;
-    std::vector<knowhere::sparse::SparseRow<float>> vec_;
 };
 
 template <typename T>
