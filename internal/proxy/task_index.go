@@ -619,13 +619,13 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 	if len(t.req.GetExtraParams()) > 0 {
 		for _, param := range t.req.GetExtraParams() {
 			if !indexparams.IsConfigableIndexParam(param.GetKey()) {
-				return merr.WrapErrParameterInvalidMsg("%s is not a configable index proptery", param.GetKey())
+				return merr.WrapErrParameterInvalidMsg("%s is not a configable index property", param.GetKey())
 			}
 		}
 	} else if len(t.req.GetDeleteKeys()) > 0 {
 		for _, param := range t.req.GetDeleteKeys() {
 			if !indexparams.IsConfigableIndexParam(param) {
-				return merr.WrapErrParameterInvalidMsg("%s is not a configable index proptery", param)
+				return merr.WrapErrParameterInvalidMsg("%s is not a configable index property", param)
 			}
 		}
 	}
