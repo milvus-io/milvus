@@ -355,15 +355,14 @@ func (c *Core) initStreamingCoord() {
 		Build()
 }
 
-func (c *Core) initMetaTable() error {
-	log := log.Ctx(c.ctx)
+func (c *Core) initMetaTable(initCtx context.Context) error {
 	fn := func() error {
 		var catalog metastore.RootCoordCatalog
 		var err error
 
 		switch Params.MetaStoreCfg.MetaStoreType.GetValue() {
 		case util.MetaStoreTypeEtcd:
-			log.Info("Using etcd as meta storage.")
+			log.Ctx(initCtx).Info("Using etcd as meta storage.")
 			var ss *kvmetestore.SuffixSnapshot
 			var err error
 
@@ -373,7 +372,7 @@ func (c *Core) initMetaTable() error {
 			}
 			catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
 		case util.MetaStoreTypeTiKV:
-			log.Info("Using tikv as meta storage.")
+			log.Ctx(initCtx).Info("Using tikv as meta storage.")
 			var ss *kvmetestore.SuffixSnapshot
 			var err error
 
@@ -393,10 +392,10 @@ func (c *Core) initMetaTable() error {
 		return nil
 	}
 
-	return retry.Do(c.ctx, fn, retry.Attempts(10))
+	return retry.Do(initCtx, fn, retry.Attempts(10))
 }
 
-func (c *Core) initIDAllocator() error {
+func (c *Core) initIDAllocator(initCtx context.Context) error {
 	var tsoKV kv.TxnKV
 	var kvPath string
 	if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
@@ -412,7 +411,7 @@ func (c *Core) initIDAllocator() error {
 	}
 	c.idAllocator = idAllocator
 
-	log.Ctx(c.ctx).Info("id allocator initialized",
+	log.Ctx(initCtx).Info("id allocator initialized",
 		zap.String("root_path", kvPath),
 		zap.String("sub_path", globalIDAllocatorSubPath),
 		zap.String("key", globalIDAllocatorKey))
@@ -420,7 +419,7 @@ func (c *Core) initIDAllocator() error {
 	return nil
 }
 
-func (c *Core) initTSOAllocator() error {
+func (c *Core) initTSOAllocator(initCtx context.Context) error {
 	var tsoKV kv.TxnKV
 	var kvPath string
 	if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
@@ -436,7 +435,7 @@ func (c *Core) initTSOAllocator() error {
 	}
 	c.tsoAllocator = tsoAllocator
 
-	log.Ctx(c.ctx).Info("tso allocator initialized",
+	log.Ctx(initCtx).Info("tso allocator initialized",
 		zap.String("root_path", kvPath),
 		zap.String("sub_path", globalIDAllocatorSubPath),
 		zap.String("key", globalIDAllocatorKey))
@@ -445,18 +444,21 @@ func (c *Core) initTSOAllocator() error {
 }
 
 func (c *Core) initInternal() error {
-	log := log.Ctx(c.ctx)
+	initCtx, initSpan := log.NewIntentContext(typeutil.RootCoordRole, "initInternal")
+	defer initSpan.End()
+	log := log.Ctx(initCtx)
+
 	c.UpdateStateCode(commonpb.StateCode_Initializing)
 
-	if err := c.initIDAllocator(); err != nil {
+	if err := c.initIDAllocator(initCtx); err != nil {
 		return err
 	}
 
-	if err := c.initTSOAllocator(); err != nil {
+	if err := c.initTSOAllocator(initCtx); err != nil {
 		return err
 	}
 
-	if err := c.initMetaTable(); err != nil {
+	if err := c.initMetaTable(initCtx); err != nil {
 		return err
 	}
 
@@ -464,7 +466,7 @@ func (c *Core) initInternal() error {
 
 	c.factory.Init(Params)
 	chanMap := c.meta.ListCollectionPhysicalChannels(c.ctx)
-	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
+	c.chanTimeTick = newTimeTickSync(initCtx, c.ctx, c.session.ServerID, c.factory, chanMap)
 	log.Info("create TimeTick sync done")
 
 	c.proxyClientManager = proxyutil.NewProxyClientManager(c.proxyCreator)
@@ -501,12 +503,12 @@ func (c *Core) initInternal() error {
 	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.queryCoord, c.dataCoord, c.tsoAllocator, c.meta)
 	log.Debug("RootCoord init QuotaCenter done")
 
-	if err := c.initCredentials(); err != nil {
+	if err := c.initCredentials(initCtx); err != nil {
 		return err
 	}
 	log.Info("init credentials done")
 
-	if err := c.initRbac(); err != nil {
+	if err := c.initRbac(initCtx); err != nil {
 		return err
 	}
 
@@ -566,34 +568,33 @@ func (c *Core) Init() error {
 	return initError
 }
 
-func (c *Core) initCredentials() error {
-	log := log.Ctx(c.ctx)
-	credInfo, _ := c.meta.GetCredential(c.ctx, util.UserRoot)
+func (c *Core) initCredentials(initCtx context.Context) error {
+	credInfo, _ := c.meta.GetCredential(initCtx, util.UserRoot)
 	if credInfo == nil {
 		encryptedRootPassword, err := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
 		if err != nil {
-			log.Warn("RootCoord init user root failed", zap.Error(err))
+			log.Ctx(initCtx).Warn("RootCoord init user root failed", zap.Error(err))
 			return err
 		}
-		log.Info("RootCoord init user root")
-		err = c.meta.AddCredential(c.ctx, &internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
+		log.Ctx(initCtx).Info("RootCoord init user root")
+		err = c.meta.AddCredential(initCtx, &internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
 		return err
 	}
 	return nil
 }
 
-func (c *Core) initRbac() error {
+func (c *Core) initRbac(initCtx context.Context) error {
 	var err error
 	// create default roles, including admin, public
 	for _, role := range util.DefaultRoles {
-		err = c.meta.CreateRole(c.ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
+		err = c.meta.CreateRole(initCtx, util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
 		if err != nil && !common.IsIgnorableError(err) {
 			return errors.Wrap(err, "failed to create role")
 		}
 	}
 
 	if Params.ProxyCfg.EnablePublicPrivilege.GetAsBool() {
-		err = c.initPublicRolePrivilege()
+		err = c.initPublicRolePrivilege(initCtx)
 		if err != nil {
 			return err
 		}
@@ -605,7 +606,7 @@ func (c *Core) initRbac() error {
 	return nil
 }
 
-func (c *Core) initPublicRolePrivilege() error {
+func (c *Core) initPublicRolePrivilege(initCtx context.Context) error {
 	// grant privileges for the public role
 	globalPrivileges := []string{
 		commonpb.ObjectPrivilege_PrivilegeDescribeCollection.String(),
@@ -617,7 +618,7 @@ func (c *Core) initPublicRolePrivilege() error {
 
 	var err error
 	for _, globalPrivilege := range globalPrivileges {
-		err = c.meta.OperatePrivilege(c.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		err = c.meta.OperatePrivilege(initCtx, util.DefaultTenant, &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: util.RolePublic},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
 			ObjectName: util.AnyWord,
@@ -632,7 +633,7 @@ func (c *Core) initPublicRolePrivilege() error {
 		}
 	}
 	for _, collectionPrivilege := range collectionPrivileges {
-		err = c.meta.OperatePrivilege(c.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		err = c.meta.OperatePrivilege(initCtx, util.DefaultTenant, &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: util.RolePublic},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 			ObjectName: util.AnyWord,

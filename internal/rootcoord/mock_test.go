@@ -712,7 +712,7 @@ func newRocksMqTtSynchronizer() *timetickSync {
 	ctx := context.Background()
 	factory := dependency.NewDefaultFactory(true)
 	chans := map[UniqueID][]string{}
-	ticker := newTimeTickSync(ctx, TestRootCoordID, factory, chans)
+	ticker := newTimeTickSync(context.TODO(), ctx, TestRootCoordID, factory, chans)
 	return ticker
 }
 
@@ -1054,7 +1054,7 @@ func newTickerWithFactory(factory msgstream.Factory) *timetickSync {
 	paramtable.Get().Save(Params.RootCoordCfg.DmlChannelNum.Key, "4")
 	ctx := context.Background()
 	chans := map[UniqueID][]string{}
-	ticker := newTimeTickSync(ctx, TestRootCoordID, factory, chans)
+	ticker := newTimeTickSync(context.TODO(), ctx, TestRootCoordID, factory, chans)
 	return ticker
 }
 
