@@ -13,7 +13,6 @@ class MilvusConan(ConanFile):
         "lz4/1.9.4#c5afb86edd69ac0df30e3a9e192e43db",
         "snappy/1.1.9#0519333fef284acd04806243de7d3070",
         "lzo/2.10#9517fc1bcc4d4cc229a79806003a1baa",
-        "arrow/15.0.0#0456d916ff25d509e0724c5b219b4c45",
         "openssl/3.1.2#02594c4c0a6e2b4feb3cd15119993597",
         "aws-sdk-cpp/1.9.234#28d6d2c175975900ce292bafe8022c88",
         "googleapis/cci.20221108#65604e1b3b9a6b363044da625b201a2a",
@@ -44,7 +43,7 @@ class MilvusConan(ConanFile):
         "abseil/20230125.3#dad7cc4c83bbd44c1f1cc9cc4d97ac88",
         "roaring/3.0.0#25a703f80eda0764a31ef939229e202d",
         "grpc/1.50.1@milvus/dev#75103960d1cac300cf425ccfccceac08",
-        "rapidjson/cci.20230929#624c0094d741e6a3749d2e44d834b96c"
+        "rapidjson/cci.20230929#624c0094d741e6a3749d2e44d834b96c",
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
@@ -78,6 +77,7 @@ class MilvusConan(ConanFile):
         "fmt:header_only": True,
         "onetbb:tbbmalloc": False,
         "onetbb:tbbproxy": False,
+        "milvus-storage:with_ut": False,
     }
 
     def configure(self):
@@ -91,6 +91,7 @@ class MilvusConan(ConanFile):
     def requirements(self):
         if self.settings.os != "Macos":
             self.requires("libunwind/1.7.2")
+            self.requires("milvus-storage/0.1.0@milvus/dev#5f9c05f603406384793894940798d333")
 
     def imports(self):
         self.copy("*.dylib", "../lib", "lib")

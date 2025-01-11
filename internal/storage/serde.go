@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-storage/go/packed"
 	"github.com/milvus-io/milvus/pkg/common"
 )
 
@@ -946,4 +947,8 @@ func newSimpleArrowRecord(r arrow.Record, schema map[FieldID]schemapb.DataType, 
 		schema:    schema,
 		field2Col: field2Col,
 	}
+}
+
+func NewPackedRecordWriter(path string, schema *arrow.Schema, bufferSize int) (*packed.PackedWriter, error) {
+	return packed.NewPackedWriter(path, schema, bufferSize)
 }

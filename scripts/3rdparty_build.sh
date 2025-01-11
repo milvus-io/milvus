@@ -74,6 +74,16 @@ case "${unameOut}" in
     else
       conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
     fi
+
+    conan install milvus-storage/0.1.0@milvus/dev --install-folder ${ROOT_DIR}/internal/core/output/lib/pkgconfig/ -g pkg_config --build=missing
+
+    ARROW_PC_FILE="${ROOT_DIR}/internal/core/output/lib/pkgconfig/arrow.pc"
+    if [ ! -f "$ARROW_PC_FILE" ]; then
+      echo "Error: $ARROW_PC_FILE not found."
+      exit 1
+    fi
+    sed -i '/^Requires:/c\Requires:' "$ARROW_PC_FILE"
+    
     ;;
   *)
     echo "Cannot build on windows"
