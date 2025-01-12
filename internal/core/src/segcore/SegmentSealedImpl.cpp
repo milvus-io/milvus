@@ -149,7 +149,8 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     if (get_bit(field_data_ready_bitset_, field_id)) {
         fields_.erase(field_id);
         set_bit(field_data_ready_bitset_, field_id, false);
-    } else if (get_bit(binlog_index_bitset_, field_id)) {
+    }
+    if (get_bit(binlog_index_bitset_, field_id)) {
         set_bit(binlog_index_bitset_, field_id, false);
         vector_indexings_.drop_field_indexing(field_id);
     }
@@ -169,8 +170,7 @@ SegmentSealedImpl::WarmupChunkCache(const FieldId field_id, bool mmap_enabled) {
     auto& field_meta = schema_->operator[](field_id);
     AssertInfo(field_meta.is_vector(), "vector field is not vector type");
 
-    if (!get_bit(index_ready_bitset_, field_id) &&
-        !get_bit(binlog_index_bitset_, field_id)) {
+    if (!get_bit(index_ready_bitset_, field_id)) {
         return;
     }
 
@@ -511,21 +511,13 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             }
         }
 
-        bool use_temp_index = false;
         {
-            // update num_rows to build temperate binlog index
+            // update num_rows to build temperate intermin index
             std::unique_lock lck(mutex_);
             update_row_count(num_rows);
         }
 
-        if (generate_interim_index(field_id)) {
-            std::unique_lock lck(mutex_);
-            fields_.erase(field_id);
-            set_bit(field_data_ready_bitset_, field_id, false);
-            use_temp_index = true;
-        }
-
-        if (!use_temp_index) {
+        if (!generate_interim_index(field_id)) {
             std::unique_lock lck(mutex_);
             set_bit(field_data_ready_bitset_, field_id, true);
         }
@@ -645,16 +637,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
         insert_record_.seal_pks();
     }
 
-    bool use_interim_index = false;
-    if (generate_interim_index(field_id)) {
-        std::unique_lock lck(mutex_);
-        // mmap_fields is useless, no change
-        fields_.erase(field_id);
-        set_bit(field_data_ready_bitset_, field_id, false);
-        use_interim_index = true;
-    }
-
-    if (!use_interim_index) {
+    if (!generate_interim_index(field_id)) {
         std::unique_lock lck(mutex_);
         set_bit(field_data_ready_bitset_, field_id, true);
     }
@@ -1570,7 +1553,10 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
         return fill_with_empty(field_id, count);
     }
 
-    if (HasIndex(field_id)) {
+    if (HasFieldData(field_id)) {
+        Assert(get_bit(field_data_ready_bitset_, field_id));
+        return get_raw_data(field_id, field_meta, seg_offsets, count);
+    } else if (HasIndex(field_id)) {
         // if field has load scalar index, reverse raw data from index
         if (!IsVectorDataType(field_meta.get_data_type())) {
             AssertInfo(num_chunk(field_id) == 1,
@@ -1583,11 +1569,9 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
             return get_raw_data(field_id, field_meta, seg_offsets, count);
         }
         return get_vector(field_id, seg_offsets, count);
+    } else {
+        return fill_with_empty(field_id, count);
     }
-
-    Assert(get_bit(field_data_ready_bitset_, field_id));
-
-    return get_raw_data(field_id, field_meta, seg_offsets, count);
 }
 
 std::unique_ptr<DataArray>
@@ -1649,14 +1633,21 @@ SegmentSealedImpl::HasRawData(int64_t field_id) const {
     auto fieldID = FieldId(field_id);
     const auto& field_meta = schema_->operator[](fieldID);
     if (IsVectorDataType(field_meta.get_data_type())) {
-        if (get_bit(index_ready_bitset_, fieldID) |
-            get_bit(binlog_index_bitset_, fieldID)) {
+        if (get_bit(index_ready_bitset_, fieldID)) {
             AssertInfo(vector_indexings_.is_ready(fieldID),
                        "vector index is not ready");
             auto field_indexing = vector_indexings_.get_field_indexing(fieldID);
             auto vec_index = dynamic_cast<index::VectorIndex*>(
                 field_indexing->indexing_.get());
             return vec_index->HasRawData();
+        } else if (get_bit(binlog_index_bitset_, fieldID)) {
+            AssertInfo(vector_indexings_.is_ready(fieldID),
+                       "vector index is not ready");
+            auto field_indexing = vector_indexings_.get_field_indexing(fieldID);
+            auto vec_index = dynamic_cast<index::VectorIndex*>(
+                field_indexing->indexing_.get());
+            return vec_index->HasRawData() ||
+                   get_bit(field_data_ready_bitset_, fieldID);
         }
     } else {
         auto scalar_index = scalar_indexings_.find(fieldID);
@@ -1876,8 +1867,9 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
             return false;
         }
         // check data type
-        // TODO: QianYa when add other data type, please check the SupportInterimIndexDataType method in the go code
         if (field_meta.get_data_type() != DataType::VECTOR_FLOAT &&
+            field_meta.get_data_type() != DataType::VECTOR_FLOAT16 &&
+            field_meta.get_data_type() != DataType::VECTOR_BFLOAT16 &&
             !is_sparse) {
             return false;
         }
@@ -1935,27 +1927,86 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         dataset->SetIsOwner(false);
         dataset->SetIsSparse(is_sparse);
 
-        index::IndexBasePtr vec_index =
-            std::make_unique<index::VectorMemIndex<float>>(
+        index::IndexBasePtr vec_index = nullptr;
+        if (!is_sparse) {
+            size_t data_size;
+            if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
+                data_size = dim * sizeof(knowhere::fp32);
+                knowhere::ViewDataOp view_data = [field_raw_data_ptr = vec_data,
+                                                  data_size =
+                                                      data_size](size_t id) {
+                    return ((const char*)field_raw_data_ptr->Data() +
+                            data_size * id);
+                };
+                vec_index = std::make_unique<index::VectorMemIndex<float>>(
+                    field_binlog_config->GetIndexType(),
+                    index_metric,
+                    knowhere::Version::GetCurrentVersion().VersionNumber(),
+                    view_data);
+            } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
+                data_size = dim * sizeof(knowhere::fp16);
+                knowhere::ViewDataOp view_data = [field_raw_data_ptr = vec_data,
+                                                  data_size =
+                                                      data_size](size_t id) {
+                    return ((const char*)field_raw_data_ptr->Data() +
+                            data_size * id);
+                };
+                vec_index =
+                    std::make_unique<index::VectorMemIndex<knowhere::fp16>>(
+                        field_binlog_config->GetIndexType(),
+                        index_metric,
+                        knowhere::Version::GetCurrentVersion().VersionNumber(),
+                        view_data);
+            } else if (field_meta.get_data_type() ==
+                       DataType::VECTOR_BFLOAT16) {
+                data_size = dim * sizeof(knowhere::bf16);
+                knowhere::ViewDataOp view_data = [field_raw_data_ptr = vec_data,
+                                                  data_size =
+                                                      data_size](size_t id) {
+                    return ((const char*)field_raw_data_ptr->Data() +
+                            data_size * id);
+                };
+                vec_index =
+                    std::make_unique<index::VectorMemIndex<knowhere::bf16>>(
+                        field_binlog_config->GetIndexType(),
+                        index_metric,
+                        knowhere::Version::GetCurrentVersion().VersionNumber(),
+                        view_data);
+            }
+        } else {
+            vec_index = std::make_unique<index::VectorMemIndex<float>>(
                 field_binlog_config->GetIndexType(),
                 index_metric,
                 knowhere::Version::GetCurrentVersion().VersionNumber());
+        }
+        if (vec_index == nullptr) {
+            LOG_INFO("fail to generate intermin index, invalid data type.");
+            return false;
+        }
         vec_index->BuildWithDataset(dataset, build_config);
         if (enable_binlog_index()) {
             std::unique_lock lck(mutex_);
+            if (vec_index->HasRawData()) {
+                // some knowhere view data index not has raw data, still keep it
+                fields_.erase(field_id);
+                set_bit(field_data_ready_bitset_, field_id, false);
+            } else {
+                set_bit(field_data_ready_bitset_, field_id, true);
+            }
+
             vector_indexings_.append_field_indexing(
                 field_id, index_metric, std::move(vec_index));
 
             vec_binlog_config_[field_id] = std::move(field_binlog_config);
             set_bit(binlog_index_bitset_, field_id, true);
             LOG_INFO(
-                "replace binlog with binlog index in segment {}, field {}.",
+                "replace binlog with intermin index in segment {}, field {}.",
                 this->get_segment_id(),
                 field_id.get());
         }
         return true;
     } catch (std::exception& e) {
-        LOG_WARN("fail to generate binlog index, because {}", e.what());
+        LOG_WARN("fail to generate intermin index, because {}", e.what());
         return false;
     }
 }

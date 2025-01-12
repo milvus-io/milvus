@@ -420,11 +420,11 @@ func TestComponentParam(t *testing.T) {
 		chunkRows = Params.ChunkRows.GetAsInt64()
 		assert.Equal(t, int64(8192), chunkRows)
 
-		enableInterimIndex := Params.EnableTempSegmentIndex.GetAsBool()
+		enableInterimIndex := Params.EnableInterminSegmentIndex.GetAsBool()
 		assert.Equal(t, true, enableInterimIndex)
 
 		params.Save("queryNode.segcore.interimIndex.enableIndex", "true")
-		enableInterimIndex = Params.EnableTempSegmentIndex.GetAsBool()
+		enableInterimIndex = Params.EnableInterminSegmentIndex.GetAsBool()
 		assert.Equal(t, true, enableInterimIndex)
 
 		assert.Equal(t, false, Params.KnowhereScoreConsistency.GetAsBool())
