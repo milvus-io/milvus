@@ -52,19 +52,16 @@ SegmentGrowingImpl::mask_with_delete(BitsetTypeView& bitset,
 void
 SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
     //remove the chunk data to reduce memory consumption
-    if (indexing_record_.SyncDataWithIndex(fieldId)) {
-        VectorBase* vec_data_base =
-            dynamic_cast<segcore::ConcurrentVector<FloatVector>*>(
-                insert_record_.get_data_base(fieldId));
-        if (!vec_data_base) {
-            vec_data_base =
-                dynamic_cast<segcore::ConcurrentVector<SparseFloatVector>*>(
-                    insert_record_.get_data_base(fieldId));
-        }
-        if (vec_data_base && vec_data_base->num_chunk() > 0 &&
-            chunk_mutex_.try_lock()) {
-            vec_data_base->clear();
-            chunk_mutex_.unlock();
+    auto& field_meta = schema_->operator[](fieldId);
+    auto data_type = field_meta.get_data_type();
+    if (IsVectorDataType(data_type)) {
+        if (indexing_record_.HasRawData(fieldId)) {
+            auto vec_data_base = insert_record_.get_data_base(fieldId);
+            if (vec_data_base && vec_data_base->num_chunk() > 0 &&
+                chunk_mutex_.try_lock()) {
+                vec_data_base->clear();
+                chunk_mutex_.unlock();
+            }
         }
     }
 }
@@ -102,7 +99,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         AssertInfo(field_id_to_offset.count(field_id),
                    fmt::format("can't find field {}", field_id.get()));
         auto data_offset = field_id_to_offset[field_id];
-        if (!indexing_record_.SyncDataWithIndex(field_id)) {
+        if (!indexing_record_.HasRawData(field_id)) {
             insert_record_.get_data_base(field_id)->set_data_raw(
                 reserved_offset,
                 num_rows,
@@ -242,7 +239,7 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
             continue;
         }
 
-        if (!indexing_record_.SyncDataWithIndex(field_id)) {
+        if (!indexing_record_.HasRawData(field_id)) {
             insert_record_.get_data_base(field_id)->set_data_raw(
                 reserved_offset, field_data);
             if (insert_record_.is_valid_data_exist(field_id)) {
@@ -669,7 +666,7 @@ SegmentGrowingImpl::bulk_subscript_ptr_impl(
     auto& src = *vec;
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        if (IsVariableTypeSupportInChunk<S> && mmap_descriptor_ != nullptr) {
+        if (IsVariableTypeSupportInChunk<S> && src.is_mmap()) {
             dst->at(i) = std::move(T(src.view_element(offset)));
         } else {
             dst->at(i) = std::move(T(src[offset]));
@@ -695,7 +692,7 @@ SegmentGrowingImpl::bulk_subscript_impl(FieldId field_id,
 
     // if index has finished building, grab from index without any
     // synchronization operations.
-    if (indexing_record_.SyncDataWithIndex(field_id)) {
+    if (indexing_record_.HasRawData(field_id)) {
         indexing_record_.GetDataFromIndex(
             field_id, seg_offsets, count, element_sizeof, output_raw);
         return;
@@ -706,7 +703,7 @@ SegmentGrowingImpl::bulk_subscript_impl(FieldId field_id,
         // after the above check but before we grabbed the lock, we should grab
         // from index as the data in chunk may have been removed in
         // try_remove_chunks.
-        if (!indexing_record_.SyncDataWithIndex(field_id)) {
+        if (!indexing_record_.HasRawData(field_id)) {
             auto output_base = reinterpret_cast<char*>(output_raw);
             for (int i = 0; i < count; ++i) {
                 auto dst = output_base + i * element_sizeof;

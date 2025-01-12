@@ -243,10 +243,10 @@ func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 	}
 
 	usage, err := getResourceUsageEstimateOfSegment(s.collection.Schema(), s.LoadInfo(), resourceEstimateFactor{
-		memoryUsageFactor:        1.0,
-		memoryIndexUsageFactor:   1.0,
-		enableTempSegmentIndex:   false,
-		deltaDataExpansionFactor: paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		memoryUsageFactor:          1.0,
+		memoryIndexUsageFactor:     1.0,
+		EnableInterminSegmentIndex: false,
+		deltaDataExpansionFactor:   paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
 	})
 	if err != nil {
 		// Should never failure, if failed, segment should never be loaded.
