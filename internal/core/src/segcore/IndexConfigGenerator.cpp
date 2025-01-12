@@ -24,7 +24,7 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
       is_sparse_(is_sparse) {
     origin_index_type_ = index_meta_.GetIndexType();
     metric_type_ = index_meta_.GeMetricType();
-    // For Dense vector, use IVFFLAT_CC as the growing and temp index type.
+    // For Dense vector, use IVFFLAT_CC/SCANN_with_data_view_refiner(DVR) as the growing and temp index type.
     //
     // For Sparse vector, use SPARSE_WAND_CC for INDEX_SPARSE_WAND index, or use
     // SPARSE_INVERTED_INDEX_CC for INDEX_SPARSE_INVERTED_INDEX/other sparse
@@ -35,13 +35,14 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
     } else if (is_sparse_) {
         index_type_ = knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC;
     } else {
-        index_type_ = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+        index_type_ = config.get_dense_vector_intermin_index_type();
     }
     build_params_[knowhere::meta::METRIC_TYPE] = metric_type_;
     build_params_[knowhere::indexparam::NLIST] =
         std::to_string(config_.get_nlist());
     build_params_[knowhere::indexparam::SSIZE] = std::to_string(
         std::max((int)(config_.get_chunk_rows() / config_.get_nlist()), 48));
+    build_params_[knowhere::indexparam::SUB_DIM] = config_.get_sub_dim();
 
     if (is_sparse) {
         const auto& index_params = index_meta_.GetIndexParams();
@@ -65,6 +66,8 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
 
     search_params_[knowhere::indexparam::NPROBE] =
         std::to_string(config_.get_nprobe());
+    search_params_[knowhere::indexparam::REFINE_RATIO] =
+        config_.get_refine_ratio();
 
     // note for sparse vector index: drop_ratio_build is not allowed for growing
     // segment index.

@@ -24,24 +24,39 @@ using namespace milvus;
 using namespace milvus::segcore;
 namespace pb = milvus::proto;
 
-using Param = std::tuple</*index type*/ std::string, knowhere::MetricType>;
+using Param =
+    std::tuple<DataType,
+               /*index type*/ std::string,
+               knowhere::MetricType,
+               /*dense vector index type*/ std::optional<std::string>>;
 
 class GrowingIndexTest : public ::testing::TestWithParam<Param> {
     void
     SetUp() override {
         auto param = GetParam();
-        index_type = std::get<0>(param);
-        metric_type = std::get<1>(param);
-        if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
-            index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
-            data_type = DataType::VECTOR_FLOAT;
-        } else if (index_type ==
-                       knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
-                   index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
-            data_type = DataType::VECTOR_SPARSE_FLOAT;
+        data_type = std::get<0>(param);
+        index_type = std::get<1>(param);
+        metric_type = std::get<2>(param);
+        dense_vec_intermin_index_type = std::get<3>(param);
+        if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
             is_sparse = true;
+            if (metric_type == knowhere::metric::IP) {
+                intermin_index_with_raw_data = true;
+            } else {
+                intermin_index_with_raw_data = false;
+            }
         } else {
-            ASSERT_TRUE(false);
+            if (!dense_vec_intermin_index_type.has_value()) {
+                dense_vec_intermin_index_type =
+                    knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+            }
+            if (dense_vec_intermin_index_type.value() ==
+                knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
+                intermin_index_with_raw_data = true;
+            } else {
+                // scann dvr index
+                intermin_index_with_raw_data = false;
+            }
         }
     }
 
@@ -49,6 +64,9 @@ class GrowingIndexTest : public ::testing::TestWithParam<Param> {
     std::string index_type;
     knowhere::MetricType metric_type;
     DataType data_type;
+    std::optional<std::string> dense_vec_intermin_index_type =
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+    bool intermin_index_with_raw_data;
     bool is_sparse = false;
 };
 
@@ -56,22 +74,39 @@ INSTANTIATE_TEST_SUITE_P(
     FloatIndexTypeParameters,
     GrowingIndexTest,
     ::testing::Combine(
-        ::testing::Values(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-                          knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC),
-        ::testing::Values(knowhere::metric::L2,
-                          knowhere::metric::COSINE,
-                          knowhere::metric::IP)));
+        ::testing::Values(DataType::VECTOR_FLOAT),
+        ::testing::Values(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT),
+        ::testing::Values(knowhere::metric::COSINE,
+                          knowhere::metric::IP,
+                          knowhere::metric::L2),
+        ::testing::Values(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
+                          knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR)));
 
 INSTANTIATE_TEST_SUITE_P(
     SparseIndexTypeParameters,
     GrowingIndexTest,
     ::testing::Combine(
+        ::testing::Values(DataType::VECTOR_SPARSE_FLOAT),
         // VecIndexConfig will convert INDEX_SPARSE_INVERTED_INDEX/
         // INDEX_SPARSE_WAND to INDEX_SPARSE_INVERTED_INDEX_CC/
         // INDEX_SPARSE_WAND_CC, thus no need to use _CC version here.
         ::testing::Values(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
                           knowhere::IndexEnum::INDEX_SPARSE_WAND),
-        ::testing::Values(knowhere::metric::IP)));
+        ::testing::Values(
+            knowhere::metric::
+                IP),  // when metric == IP, growing segment will keep data in intermin index
+        ::testing::Values(std::nullopt)));
+
+INSTANTIATE_TEST_SUITE_P(
+    HalfFloatIndexTypeParameters,
+    GrowingIndexTest,
+    ::testing::Combine(
+        ::testing::Values(DataType::VECTOR_FLOAT16, DataType::VECTOR_BFLOAT16),
+        ::testing::Values(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                          knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC),
+        ::testing::Values(knowhere::metric::COSINE),
+        ::testing::Values(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
+                          knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR)));
 
 TEST_P(GrowingIndexTest, Correctness) {
     auto schema = std::make_shared<Schema>();
@@ -90,6 +125,17 @@ TEST_P(GrowingIndexTest, Correctness) {
     auto& config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
     config.set_enable_interim_segment_index(true);
+    if (dense_vec_intermin_index_type.has_value()) {
+        config.set_dense_vector_intermin_index_type(
+            dense_vec_intermin_index_type.value());
+        if (dense_vec_intermin_index_type.value() ==
+            knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR) {
+            auto nlist = config.get_nlist();
+            config.set_sub_dim(4);
+            config.set_nprobe(int(0.4 * nlist));
+            config.set_refine_ratio(4.0);
+        }
+    }
     std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
     IndexMetaPtr metaPtr =
         std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
@@ -101,6 +147,12 @@ TEST_P(GrowingIndexTest, Correctness) {
     if (is_sparse) {
         vector_anns->set_vector_type(
             milvus::proto::plan::VectorType::SparseFloatVector);
+    } else if (data_type == DataType::VECTOR_FLOAT16) {
+        vector_anns->set_vector_type(
+            milvus::proto::plan::VectorType::Float16Vector);
+    } else if (data_type == DataType::VECTOR_BFLOAT16) {
+        vector_anns->set_vector_type(
+            milvus::proto::plan::VectorType::BFloat16Vector);
     } else {
         vector_anns->set_vector_type(
             milvus::proto::plan::VectorType::FloatVector);
@@ -119,6 +171,12 @@ TEST_P(GrowingIndexTest, Correctness) {
     if (is_sparse) {
         vector_range_querys->set_vector_type(
             milvus::proto::plan::VectorType::SparseFloatVector);
+    } else if (data_type == DataType::VECTOR_FLOAT16) {
+        vector_range_querys->set_vector_type(
+            milvus::proto::plan::VectorType::Float16Vector);
+    } else if (data_type == DataType::VECTOR_BFLOAT16) {
+        vector_range_querys->set_vector_type(
+            milvus::proto::plan::VectorType::BFloat16Vector);
     } else {
         vector_range_querys->set_vector_type(
             milvus::proto::plan::VectorType::FloatVector);
@@ -129,6 +187,7 @@ TEST_P(GrowingIndexTest, Correctness) {
     range_query_info->set_topk(5);
     range_query_info->set_round_decimal(3);
     range_query_info->set_metric_type(metric_type);
+
     if (PositivelyRelated(metric_type)) {
         range_query_info->set_search_params(
             R"({"nprobe": 10, "radius": 500, "range_filter": 600})");
@@ -154,6 +213,12 @@ TEST_P(GrowingIndexTest, Correctness) {
         if (is_sparse) {
             field_data = segmentImplPtr->get_insert_record()
                              .get_data<milvus::SparseFloatVector>(vec);
+        } else if (data_type == DataType::VECTOR_FLOAT16) {
+            field_data = segmentImplPtr->get_insert_record()
+                             .get_data<milvus::Float16Vector>(vec);
+        } else if (data_type == DataType::VECTOR_BFLOAT16) {
+            field_data = segmentImplPtr->get_insert_record()
+                             .get_data<milvus::BFloat16Vector>(vec);
         } else {
             field_data = segmentImplPtr->get_insert_record()
                              .get_data<milvus::FloatVector>(vec);
@@ -165,17 +230,27 @@ TEST_P(GrowingIndexTest, Correctness) {
         // get_build_threshold(). This value for sparse is 0, thus sparse index
         // will be built since the first chunk. Dense segment buffers the first
         // 2 chunks before building an index in this test case.
-        if (!is_sparse && i < 2) {
+
+        if ((!is_sparse && i < 2) || !intermin_index_with_raw_data) {
             EXPECT_EQ(field_data->num_chunk(),
                       upper_div(inserted, field_data->get_size_per_chunk()));
         } else {
             EXPECT_EQ(field_data->num_chunk(), 0);
         }
-
         auto num_queries = 5;
-        auto ph_group_raw =
-            is_sparse ? CreateSparseFloatPlaceholderGroup(num_queries)
-                      : CreatePlaceholderGroup(num_queries, 128, 1024);
+        namespace ser = milvus::proto::common;
+        ser::PlaceholderGroup ph_group_raw;
+        if (is_sparse) {
+            ph_group_raw = CreateSparseFloatPlaceholderGroup(num_queries);
+        } else if (data_type == DataType::VECTOR_FLOAT16) {
+            ph_group_raw =
+                CreateFloat16PlaceholderGroup(num_queries, 128, 1024);
+        } else if (data_type == DataType::VECTOR_BFLOAT16) {
+            ph_group_raw =
+                CreateBFloat16PlaceholderGroup(num_queries, 128, 1024);
+        } else {
+            ph_group_raw = CreatePlaceholderGroup(num_queries, 128, 1024);
+        }
 
         auto plan = milvus::query::CreateSearchPlanByExpr(
             *schema, plan_str.data(), plan_str.size());
@@ -200,13 +275,10 @@ TEST_P(GrowingIndexTest, Correctness) {
         auto range_sr =
             segment->Search(range_plan.get(), range_ph_group.get(), timestamp);
         ASSERT_EQ(range_sr->total_nq_, num_queries);
-        EXPECT_EQ(sr->unity_topK_, top_k);
-        EXPECT_EQ(sr->distances_.size(), num_queries * top_k);
-        EXPECT_EQ(sr->seg_offsets_.size(), num_queries * top_k);
         for (int j = 0; j < range_sr->seg_offsets_.size(); j++) {
             if (range_sr->seg_offsets_[j] != -1) {
-                EXPECT_TRUE(sr->distances_[j] >= 500.0 &&
-                            sr->distances_[j] <= 600.0);
+                EXPECT_TRUE(range_sr->distances_[j] >= 500.0 &&
+                            range_sr->distances_[j] <= 600.0);
             }
         }
     }
@@ -242,6 +314,10 @@ TEST_P(GrowingIndexTest, GetVector) {
     auto& config = SegcoreConfig::default_config();
     config.set_chunk_rows(1024);
     config.set_enable_interim_segment_index(true);
+    if (dense_vec_intermin_index_type.has_value()) {
+        config.set_dense_vector_intermin_index_type(
+            dense_vec_intermin_index_type.value());
+    }
     std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
     IndexMetaPtr metaPtr =
         std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
@@ -274,6 +350,65 @@ TEST_P(GrowingIndexTest, GetVector) {
                 auto id = ids_ds->GetIds()[i];
                 for (size_t j = 0; j < 128; ++j) {
                     EXPECT_TRUE(vector[i * dim + j] ==
+                                fakevec[(id % per_batch) * dim + j]);
+                }
+            }
+        }
+    } else if (data_type == DataType::VECTOR_FLOAT16) {
+        // GetVector for VECTOR_FLOAT16
+        int64_t per_batch = 5000;
+        int64_t n_batch = 20;
+        int64_t dim = 128;
+        for (int64_t i = 0; i < n_batch; i++) {
+            auto dataset = DataGen(schema, per_batch);
+            auto fakevec = dataset.get_col<float16>(vec);
+            auto offset = segment->PreInsert(per_batch);
+            segment->Insert(offset,
+                            per_batch,
+                            dataset.row_ids_.data(),
+                            dataset.timestamps_.data(),
+                            dataset.raw_);
+            auto num_inserted = (i + 1) * per_batch;
+            auto ids_ds = GenRandomIds(num_inserted);
+            auto result =
+                segment->bulk_subscript(vec, ids_ds->GetIds(), num_inserted);
+            auto vector = result.get()->mutable_vectors()->float16_vector();
+            EXPECT_TRUE(vector.size() == num_inserted * dim * sizeof(float16));
+            for (size_t i = 0; i < num_inserted; ++i) {
+                auto id = ids_ds->GetIds()[i];
+                for (size_t j = 0; j < 128; ++j) {
+                    EXPECT_TRUE(reinterpret_cast<float16*>(
+                                    vector.data())[i * dim + j] ==
+                                fakevec[(id % per_batch) * dim + j]);
+                }
+            }
+        }
+    } else if (data_type == DataType::VECTOR_BFLOAT16) {
+        // GetVector for VECTOR_FLOAT16
+        int64_t per_batch = 5000;
+        int64_t n_batch = 20;
+        int64_t dim = 128;
+        for (int64_t i = 0; i < n_batch; i++) {
+            auto dataset = DataGen(schema, per_batch);
+            auto fakevec = dataset.get_col<bfloat16>(vec);
+            auto offset = segment->PreInsert(per_batch);
+            segment->Insert(offset,
+                            per_batch,
+                            dataset.row_ids_.data(),
+                            dataset.timestamps_.data(),
+                            dataset.raw_);
+            auto num_inserted = (i + 1) * per_batch;
+            auto ids_ds = GenRandomIds(num_inserted);
+            auto result =
+                segment->bulk_subscript(vec, ids_ds->GetIds(), num_inserted);
+
+            auto vector = result.get()->mutable_vectors()->bfloat16_vector();
+            EXPECT_TRUE(vector.size() == num_inserted * dim * sizeof(bfloat16));
+            for (size_t i = 0; i < num_inserted; ++i) {
+                auto id = ids_ds->GetIds()[i];
+                for (size_t j = 0; j < 128; ++j) {
+                    EXPECT_TRUE(reinterpret_cast<bfloat16*>(
+                                    vector.data())[i * dim + j] ==
                                 fakevec[(id % per_batch) * dim + j]);
                 }
             }
