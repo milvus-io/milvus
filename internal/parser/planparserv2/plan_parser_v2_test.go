@@ -250,6 +250,31 @@ func TestExpr_TextMatch(t *testing.T) {
 	}
 }
 
+func TestExpr_PhraseMatch(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	exprStrs := []string{
+		`phrase_match(VarCharField, "phrase")`,
+		`phrase_match(StringField, "phrase")`,
+		`phrase_match(StringField, "phrase", 1)`,
+		`phrase_match(VarCharField, "phrase", 11223)`,
+	}
+	for _, exprStr := range exprStrs {
+		assertValidExpr(t, helper, exprStr)
+	}
+
+	unsupported := []string{
+		`phrase_match(not_exist, "phrase")`,
+		`phrase_match(BoolField, "phrase")`,
+		`phrase_match(StringField, "phrase", -1)`,
+	}
+	for _, exprStr := range unsupported {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
 func TestExpr_IsNull(t *testing.T) {
 	schema := newTestSchema(false)
 	schema.EnableDynamicField = false

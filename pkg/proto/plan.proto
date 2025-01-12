@@ -19,6 +19,7 @@ enum OpType {
   In = 11;          // TODO:: used for term expr
   NotIn = 12;
   TextMatch = 13;   // text match
+  PhraseMatch = 14; // phrase match
 };
 
 enum ArithOpType {
@@ -106,6 +107,7 @@ message UnaryRangeExpr {
   OpType op = 2;
   GenericValue value = 3;
   string template_variable_name = 4;
+  repeated GenericValue extra_values = 5;
 }
 
 message BinaryRangeExpr {
