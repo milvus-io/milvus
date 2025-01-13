@@ -18,8 +18,6 @@ import (
 
 func TestAssignChannelToWALLocatedFirst(t *testing.T) {
 	balancer := mock_balancer.NewMockBalancer(t)
-	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
-
 	balancer.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
 		versions := []typeutil.VersionInt64Pair{
 			{Global: 1, Local: 2},
@@ -46,6 +44,7 @@ func TestAssignChannelToWALLocatedFirst(t *testing.T) {
 		<-ctx.Done()
 		return context.Cause(ctx)
 	})
+	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
 
 	channels := []*meta.DmChannel{
 		{VchannelInfo: &datapb.VchannelInfo{ChannelName: "pchannel_v1"}},

@@ -97,11 +97,15 @@ func (impl *WALFlusherImpl) getRecoveryInfo(ctx context.Context, vchannel string
 			return err
 		}
 		// The channel has been dropped, skip to recover it.
-		if len(resp.GetInfo().GetSeekPosition().GetMsgID()) == 0 && resp.GetInfo().GetSeekPosition().GetTimestamp() == math.MaxUint64 {
+		if isDroppedChannel(resp) {
 			impl.logger.Info("channel has been dropped, the vchannel can not be recovered", zap.String("vchannel", vchannel))
 			return retry.Unrecoverable(errChannelLifetimeUnrecoverable)
 		}
 		return nil
 	}, retry.AttemptAlways())
 	return resp, err
+}
+
+func isDroppedChannel(resp *datapb.GetChannelRecoveryInfoResponse) bool {
+	return len(resp.GetInfo().GetSeekPosition().GetMsgID()) == 0 && resp.GetInfo().GetSeekPosition().GetTimestamp() == math.MaxUint64
 }

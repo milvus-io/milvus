@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
@@ -60,6 +61,11 @@ func TestWAL(t *testing.T) {
 }
 
 func initResourceForTest(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.StreamingCfg.WALWriteAheadBufferKeepalive.Key, "500ms")
+	params.Save(params.StreamingCfg.WALWriteAheadBufferCapacity.Key, "10k")
+
 	rc := idalloc.NewMockRootCoordClient(t)
 	rc.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{}, nil)
 
@@ -345,8 +351,14 @@ func (f *testOneWALFramework) testRead(ctx context.Context, w wal.WAL) ([]messag
 
 	expectedCnt := f.messageCount + len(f.written)
 	msgs := make([]message.ImmutableMessage, 0, expectedCnt)
+	cnt := 5
 	for {
 		msg, ok := <-s.Chan()
+		// make a random slow down to trigger cache expire.
+		if rand.Int31n(10) == 0 && cnt > 0 {
+			cnt--
+			time.Sleep(time.Duration(rand.Int31n(500)+100) * time.Millisecond)
+		}
 		if msg.MessageType() != message.MessageTypeInsert && msg.MessageType() != message.MessageTypeTxn {
 			continue
 		}

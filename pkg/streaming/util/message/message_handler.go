@@ -2,26 +2,20 @@ package message
 
 import (
 	"context"
-
-	"github.com/cockroachdb/errors"
 )
-
-var ErrUpstreamClosed = errors.New("upstream closed")
 
 // HandleParam is the parameter for handler.
 type HandleParam struct {
-	Ctx          context.Context
-	Upstream     <-chan ImmutableMessage
-	Message      ImmutableMessage
-	TimeTickChan <-chan struct{}
+	Ctx      context.Context
+	Upstream <-chan ImmutableMessage
+	Message  ImmutableMessage
 }
 
 // HandleResult is the result of handler.
 type HandleResult struct {
-	Incoming        ImmutableMessage // Not nil if upstream return new message.
-	MessageHandled  bool             // True if Message is handled successfully.
-	TimeTickUpdated bool             // True if TimeTickChan is triggered.
-	Error           error            // Error is context is canceled.
+	Incoming       ImmutableMessage // Not nil if upstream return new message.
+	MessageHandled bool             // True if Message is handled successfully.
+	Error          error            // Error is context is canceled.
 }
 
 // Handler is used to handle message read from log.

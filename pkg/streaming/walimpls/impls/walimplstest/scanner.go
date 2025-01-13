@@ -30,14 +30,20 @@ type scannerImpls struct {
 }
 
 func (s *scannerImpls) executeConsume() {
-	defer close(s.ch)
+	defer func() {
+		close(s.ch)
+		s.Finish(nil)
+	}()
 	for {
 		msg, err := s.datas.ReadAt(s.Context(), s.offset)
 		if err != nil {
-			s.Finish(nil)
 			return
 		}
-		s.ch <- msg
+		select {
+		case <-s.Context().Done():
+			return
+		case s.ch <- msg:
+		}
 		s.offset++
 	}
 }
