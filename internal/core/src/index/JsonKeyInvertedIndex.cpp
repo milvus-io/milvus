@@ -63,9 +63,8 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
         int count = current.size;
         int j = 1;
         while (count > 0) {
-            if (tokens[j].size == 0) {
-                count--;
-            } else {
+            count--;
+            if (tokens[j].size != 0) {
                 count += tokens[j].size;
             }
             j++;
