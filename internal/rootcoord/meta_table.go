@@ -1458,7 +1458,7 @@ func (mt *MetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvu
 	return mt.catalog.RestoreRBAC(mt.ctx, tenant, meta)
 }
 
-// check if the privielge group name is defined by users
+// check if the privilege group name is defined by users
 func (mt *MetaTable) IsCustomPrivilegeGroup(groupName string) (bool, error) {
 	privGroups, err := mt.catalog.ListPrivilegeGroups(mt.ctx)
 	if err != nil {
