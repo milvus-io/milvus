@@ -545,6 +545,12 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 	t.result.OutputFields = t.userOutputFields
+	primaryFieldSchema, err := t.schema.GetPkField()
+	if err != nil {
+		log.Warn("failed to get primary field schema", zap.Error(err))
+		return err
+	}
+	t.result.PrimaryFieldName = primaryFieldSchema.GetName()
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 
 	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() == 0 {
