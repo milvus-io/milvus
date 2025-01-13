@@ -23,7 +23,7 @@ message LoadIndexInfo {
   int64 index_file_size = 16;
 }
 
-message CreateIndexResult {
+message IndexStats {
   int64 mem_size = 1;
   repeated SerializedIndexFileInfo serialized_index_infos = 3;
 }

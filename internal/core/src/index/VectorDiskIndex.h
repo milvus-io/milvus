@@ -46,7 +46,7 @@ class VectorDiskAnnIndex : public VectorIndex {
         return binary_set;
     }
 
-    CreateIndexResultPtr
+    IndexStatsPtr
     Upload(const Config& config = {}) override;
 
     int64_t

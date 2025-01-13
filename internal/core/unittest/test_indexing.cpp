@@ -992,14 +992,11 @@ TEST(Indexing, SearchDiskAnnWithBFloat16) {
 }
 #endif
 
-TEST(Indexing, CreateIndexResult) {
-    using milvus::index::CreateIndexResult;
+TEST(Indexing, IndexStats) {
+    using milvus::index::IndexStats;
     using milvus::index::SerializedIndexFileInfo;
-    auto result =
-        CreateIndexResult::New(16,
-                               std::vector<SerializedIndexFileInfo>{
-                                   SerializedIndexFileInfo{"file1", 100},
-                                   SerializedIndexFileInfo{"file2", 200}});
+    auto result = IndexStats::NewFromSizeMap(
+        16, std::map<std::string, size_t>{{"file1", 100}, {"file2", 200}});
     result->AppendSerializedIndexFileInfo(
         SerializedIndexFileInfo{"file3", 300});
     auto files = result->GetIndexFiles();

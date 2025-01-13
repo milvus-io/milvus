@@ -332,7 +332,7 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 			log.Warn("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
 		}
 	}
-	createIndexResult, err := it.index.UpLoad()
+	indexStats, err := it.index.UpLoad()
 	if err != nil {
 		log.Warn("failed to upload index", zap.Error(err))
 		gcIndex()
@@ -347,20 +347,20 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 	// use serialized size before encoding
 	var serializedSize uint64
 	saveFileKeys := make([]string, 0)
-	for _, indexInfo := range createIndexResult.GetSerializedIndexInfos() {
+	for _, indexInfo := range indexStats.GetSerializedIndexInfos() {
 		serializedSize += uint64(indexInfo.FileSize)
 		parts := strings.Split(indexInfo.FileName, "/")
 		fileKey := parts[len(parts)-1]
 		saveFileKeys = append(saveFileKeys, fileKey)
 	}
 
-	it.node.storeIndexFilesAndStatistic(it.req.GetClusterID(), it.req.GetBuildID(), saveFileKeys, serializedSize, uint64(createIndexResult.MemSize), it.req.GetCurrentIndexVersion())
+	it.node.storeIndexFilesAndStatistic(it.req.GetClusterID(), it.req.GetBuildID(), saveFileKeys, serializedSize, uint64(indexStats.MemSize), it.req.GetCurrentIndexVersion())
 	saveIndexFileDur := it.tr.RecordSpan()
 	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
 	it.tr.Elapse("index building all done")
 	log.Info("Successfully save index files",
 		zap.Uint64("serializedSize", serializedSize),
-		zap.Int64("memSize", createIndexResult.MemSize),
+		zap.Int64("memSize", indexStats.MemSize),
 		zap.Strings("indexFiles", saveFileKeys))
 	return nil
 }

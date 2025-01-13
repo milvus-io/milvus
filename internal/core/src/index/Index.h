@@ -26,7 +26,7 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "index/Meta.h"
-#include "index/CreateIndexResult.h"
+#include "index/IndexStats.h"
 
 namespace milvus::index {
 
@@ -58,7 +58,7 @@ class IndexBase {
     virtual int64_t
     Count() = 0;
 
-    virtual CreateIndexResultPtr
+    virtual IndexStatsPtr
     Upload(const Config& config = {}) = 0;
 
     virtual const bool

@@ -24,7 +24,7 @@ func TestGetLocalUsedSize(t *testing.T) {
 
 func TestProtoLayout(t *testing.T) {
 	layout := CreateProtoLayout()
-	testProto := cgopb.CreateIndexResult{
+	testProto := cgopb.IndexStats{
 		MemSize: 1024,
 		SerializedIndexInfos: []*cgopb.SerializedIndexFileInfo{
 			{
@@ -38,7 +38,7 @@ func TestProtoLayout(t *testing.T) {
 	assert.NoError(t, err)
 	SetProtoLayout(layout, msg)
 
-	resultProto := cgopb.CreateIndexResult{}
+	resultProto := cgopb.IndexStats{}
 	UnmarshalProtoLayout(layout, &resultProto)
 
 	assert.True(t, proto.Equal(&testProto, &resultProto))

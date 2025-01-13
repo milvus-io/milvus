@@ -202,6 +202,6 @@ TEST(Util, dis_closer) {
 
 TEST(Util, ProtoLayout) {
     milvus::ProtoLayout layout;
-    milvus::proto::cgo::CreateIndexResult result;
+    milvus::proto::cgo::IndexStats result;
     EXPECT_TRUE(layout.SerializeAndHoldProto(result));
 }

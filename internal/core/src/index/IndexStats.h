@@ -28,26 +28,30 @@ class SerializedIndexFileInfo {
     int64_t file_size;
 };
 
-class CreateIndexResult;
+class IndexStats;
 
-using CreateIndexResultPtr = std::unique_ptr<CreateIndexResult>;
+using IndexStatsPtr = std::unique_ptr<IndexStats>;
 
-class CreateIndexResult {
+class IndexStats {
  public:
-    // Create a new CreateIndexResult instance.
-    static CreateIndexResultPtr
+    static IndexStatsPtr
+    NewFromSizeMap(int64_t mem_size,
+                   std::map<std::string, int64_t>& index_size_map);
+
+    // Create a new IndexStats instance.
+    static IndexStatsPtr
     New(int64_t mem_size,
         std::vector<SerializedIndexFileInfo>&& serialized_index_infos);
 
-    CreateIndexResult(const CreateIndexResult&) = delete;
+    IndexStats(const IndexStats&) = delete;
 
-    CreateIndexResult(CreateIndexResult&&) = delete;
+    IndexStats(IndexStats&&) = delete;
 
-    CreateIndexResult&
-    operator=(const CreateIndexResult&) = delete;
+    IndexStats&
+    operator=(const IndexStats&) = delete;
 
-    CreateIndexResult&
-    operator=(CreateIndexResult&&) = delete;
+    IndexStats&
+    operator=(IndexStats&&) = delete;
 
     // Append a new serialized index file info into the result.
     void
@@ -67,9 +71,8 @@ class CreateIndexResult {
     GetSerializedSize() const;
 
  private:
-    CreateIndexResult(
-        int64_t mem_size,
-        std::vector<SerializedIndexFileInfo>&& serialized_index_infos);
+    IndexStats(int64_t mem_size,
+               std::vector<SerializedIndexFileInfo>&& serialized_index_infos);
 
     int64_t mem_size_;
     std::vector<SerializedIndexFileInfo> serialized_index_infos_;

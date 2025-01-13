@@ -9,33 +9,42 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "index/CreateIndexResult.h"
+#include "index/IndexStats.h"
 
 namespace milvus::index {
 
-CreateIndexResultPtr
-CreateIndexResult::New(
-    int64_t mem_size,
-    std::vector<SerializedIndexFileInfo>&& serialized_index_infos) {
-    return std::unique_ptr<CreateIndexResult>(
-        new CreateIndexResult(mem_size, std::move(serialized_index_infos)));
+IndexStatsPtr
+IndexStats::NewFromSizeMap(int64_t mem_size,
+                           std::map<std::string, int64_t>& index_size_map) {
+    std::vector<SerializedIndexFileInfo> serialized_index_infos;
+    serialized_index_infos.reserve(index_size_map.size());
+    for (auto& file : index_size_map) {
+        serialized_index_infos.emplace_back(file.first, file.second);
+    }
+    return IndexStats::New(mem_size, std::move(serialized_index_infos));
 }
 
-CreateIndexResult::CreateIndexResult(
+IndexStatsPtr
+IndexStats::New(int64_t mem_size,
+                std::vector<SerializedIndexFileInfo>&& serialized_index_infos) {
+    return std::unique_ptr<IndexStats>(
+        new IndexStats(mem_size, std::move(serialized_index_infos)));
+}
+
+IndexStats::IndexStats(
     int64_t mem_size,
     std::vector<SerializedIndexFileInfo>&& serialized_index_infos)
     : mem_size_(mem_size), serialized_index_infos_(serialized_index_infos) {
 }
 
 void
-CreateIndexResult::AppendSerializedIndexFileInfo(
-    SerializedIndexFileInfo&& info) {
+IndexStats::AppendSerializedIndexFileInfo(SerializedIndexFileInfo&& info) {
     serialized_index_infos_.push_back(std::move(info));
 }
 
 void
-CreateIndexResult::SerializeAt(milvus::ProtoLayout* layout) {
-    milvus::proto::cgo::CreateIndexResult result;
+IndexStats::SerializeAt(milvus::ProtoLayout* layout) {
+    milvus::proto::cgo::IndexStats result;
     result.set_mem_size(mem_size_);
     for (auto& info : serialized_index_infos_) {
         auto serialized_info = result.add_serialized_index_infos();
@@ -43,11 +52,11 @@ CreateIndexResult::SerializeAt(milvus::ProtoLayout* layout) {
         serialized_info->set_file_size(info.file_size);
     }
     AssertInfo(layout->SerializeAndHoldProto(result),
-               "marshal CreateIndexResult failed");
+               "marshal IndexStats failed");
 }
 
 std::vector<std::string>
-CreateIndexResult::GetIndexFiles() const {
+IndexStats::GetIndexFiles() const {
     std::vector<std::string> files;
     for (auto& info : serialized_index_infos_) {
         files.push_back(info.file_name);
@@ -56,12 +65,12 @@ CreateIndexResult::GetIndexFiles() const {
 }
 
 int64_t
-CreateIndexResult::GetMemSize() const {
+IndexStats::GetMemSize() const {
     return mem_size_;
 }
 
 int64_t
-CreateIndexResult::GetSerializedSize() const {
+IndexStats::GetSerializedSize() const {
     int64_t size = 0;
     for (auto& info : serialized_index_infos_) {
         size += info.file_size;
