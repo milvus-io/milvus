@@ -20,41 +20,58 @@
 #include <mutex>
 #include <shared_mutex>
 
+#include "common/Common.h"
 #include "storage/ChunkManager.h"
 #include "storage/LocalChunkManager.h"
+#include "log/Log.h"
 
 namespace milvus::storage {
 
-class LocalChunkManagerSingleton {
- private:
-    LocalChunkManagerSingleton() {
-    }
-
+class LocalChunkManagerFactory {
  public:
-    LocalChunkManagerSingleton(const LocalChunkManagerSingleton&) = delete;
-    LocalChunkManagerSingleton&
-    operator=(const LocalChunkManagerSingleton&) = delete;
-
-    static LocalChunkManagerSingleton&
+    static LocalChunkManagerFactory&
     GetInstance() {
-        static LocalChunkManagerSingleton instance;
+        static LocalChunkManagerFactory instance;
         return instance;
     }
 
     void
-    Init(std::string root_path) {
-        if (lcm_ == nullptr) {
-            lcm_ = std::make_shared<LocalChunkManager>(root_path);
+    AddChunkManager(Role role, std::string root_path) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        if (chunk_managers_.find(role) != chunk_managers_.end()) {
+            PanicInfo(UnexpectedError,
+                      "chunk manager for role {} already exists",
+                      ToString(role));
         }
+        LOG_INFO("add chunk manager for role {}", ToString(role));
+        chunk_managers_[role] = std::make_shared<LocalChunkManager>(root_path);
     }
 
     LocalChunkManagerSPtr
-    GetChunkManager() {
-        return lcm_;
+    GetChunkManager(Role role) const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        auto it = chunk_managers_.find(role);
+        if (it == chunk_managers_.end()) {
+            PanicInfo(UnexpectedError,
+                      "local chunk manager for role:{} not found",
+                      ToString(role));
+        }
+        return it->second;
     }
 
- private:
-    LocalChunkManagerSPtr lcm_ = nullptr;
+    // some situations not need to specify the role
+    // just randomly choose one chunk manager
+    // because local chunk manager no need root_path
+    // and interface use abs paths params
+    LocalChunkManagerSPtr
+    GetChunkManager() const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        Assert(chunk_managers_.size() != 0);
+        return chunk_managers_.begin()->second;
+    }
+
+    mutable std::shared_mutex mutex_;
+    std::unordered_map<Role, LocalChunkManagerSPtr> chunk_managers_;
 };
 
 }  // namespace milvus::storage

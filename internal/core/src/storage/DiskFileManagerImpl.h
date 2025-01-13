@@ -25,6 +25,7 @@
 #include "storage/IndexData.h"
 #include "storage/FileManager.h"
 #include "storage/ChunkManager.h"
+#include "storage/LocalChunkManager.h"
 #include "common/Consts.h"
 
 namespace milvus::storage {
@@ -124,6 +125,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     std::string
     GetRemoteTextLogPath(const std::string& file_name, int64_t slice_num) const;
+
+    LocalChunkManagerSPtr
+    GetLocalChunkManager() const;
 
  private:
     // local file path (abs path)

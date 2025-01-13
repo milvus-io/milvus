@@ -15,6 +15,7 @@
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "common/type_c.h"
+#include "common/Common.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/Meta.h"
@@ -156,7 +157,7 @@ appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
         config["index_files"] = load_index_info->index_files;
 
         milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, remote_chunk_manager);
+            field_meta, index_meta, remote_chunk_manager, true);
         fileManagerContext.set_for_loading_index(true);
 
         load_index_info->index =
@@ -424,8 +425,8 @@ CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
         auto local_chunk_manager =
-            milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                .GetChunkManager();
+            milvus::storage::LocalChunkManagerFactory::GetInstance()
+                .GetChunkManager(milvus::Role::QueryNode);
         auto index_file_path_prefix =
             milvus::storage::GenIndexPathPrefix(local_chunk_manager,
                                                 load_index_info->index_build_id,

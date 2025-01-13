@@ -489,6 +489,7 @@ TEST_P(IndexTest, BuildAndQuery) {
     auto binary_set = index->Upload();
     index.reset();
 
+    file_manager_context.set_for_loading_index(true);
     new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
@@ -554,6 +555,7 @@ TEST_P(IndexTest, Mmap) {
     auto binary_set = index->Upload();
     index.reset();
 
+    file_manager_context.set_for_loading_index(true);
     new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     if (!new_index->IsMmapSupported()) {
@@ -616,6 +618,7 @@ TEST_P(IndexTest, GetVector) {
     for (auto& binary : binary_set.binary_map_) {
         index_files.emplace_back(binary.first);
     }
+    file_manager_context.set_for_loading_index(true);
     new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     load_conf = generate_load_conf(index_type, metric_type, 0);
@@ -796,6 +799,7 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
     auto binary_set = index->Upload();
     index.reset();
 
+    file_manager_context.set_for_loading_index(true);
     auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
@@ -879,6 +883,7 @@ TEST(Indexing, SearchDiskAnnWithFloat16) {
     auto binary_set = index->Upload();
     index.reset();
 
+    file_manager_context.set_for_loading_index(true);
     auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
@@ -961,6 +966,7 @@ TEST(Indexing, SearchDiskAnnWithBFloat16) {
     auto binary_set = index->Upload();
     index.reset();
 
+    file_manager_context.set_for_loading_index(true);
     auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());

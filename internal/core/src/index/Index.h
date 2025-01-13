@@ -71,12 +71,21 @@ class IndexBase {
         return index_type_;
     }
 
+    bool
+    IsLoadingIndex() const {
+        return is_loading_index_;
+    }
+
  protected:
     explicit IndexBase(IndexType index_type)
         : index_type_(std::move(index_type)) {
     }
 
     IndexType index_type_ = "";
+
+    // current index obj is used to build and load index in one class,
+    // this flag is used to indicate whether building index or loading index
+    bool is_loading_index_{false};
 };
 
 using IndexBasePtr = std::unique_ptr<IndexBase>;

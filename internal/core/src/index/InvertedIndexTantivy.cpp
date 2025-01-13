@@ -92,10 +92,11 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
     const storage::FileManagerContext& ctx)
     : ScalarIndex<T>(INVERTED_INDEX_TYPE),
       schema_(ctx.fieldDataMeta.field_schema) {
+    this->is_loading_index_ = ctx.for_loading_index;
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     // push init wrapper to load process
-    if (ctx.for_loading_index) {
+    if (this->is_loading_index_) {
         return;
     }
     InitForBuildIndex();
@@ -107,7 +108,7 @@ InvertedIndexTantivy<T>::~InvertedIndexTantivy() {
         wrapper_->free();
     }
     auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        storage::LocalChunkManagerFactory::GetInstance().GetChunkManager();
     auto prefix = path_;
     LOG_INFO("inverted index remove path:{}", path_);
     local_chunk_manager->RemoveDir(prefix);

@@ -22,7 +22,7 @@ import (
 func TestGrowingSegment(t *testing.T) {
 	paramtable.Init()
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
-	initcore.InitLocalChunkManager(localDataRootPath)
+	initcore.InitLocalChunkManager(typeutil.QueryNodeRole, localDataRootPath)
 	err := initcore.InitMmapManager(paramtable.Get())
 	assert.NoError(t, err)
 

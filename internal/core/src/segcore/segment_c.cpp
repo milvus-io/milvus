@@ -466,6 +466,7 @@ LoadTextIndex(CSegmentInterface c_segment,
 
         milvus::storage::FileManagerContext ctx(
             field_meta, index_meta, remote_chunk_manager);
+        ctx.set_for_loading_index(true);
 
         auto index = std::make_unique<milvus::index::TextMatchIndex>(ctx);
         index->Load(config);

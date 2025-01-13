@@ -46,18 +46,21 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     file_manager_ =
         std::make_shared<storage::DiskFileManagerImpl>(file_manager_context);
     AssertInfo(file_manager_ != nullptr, "create file manager failed!");
-    auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
 
+    is_loading_index_ = file_manager_context.for_loading_index;
     // As we have guarded dup-load in QueryNode,
     // this assertion failed only if the Milvus rebooted in the same pod,
     // need to remove these files then re-load the segment
+    auto local_chunk_manager =
+        storage::LocalChunkManagerFactory::GetInstance().GetChunkManager();
+    auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
+
     if (local_chunk_manager->Exist(local_index_path_prefix)) {
         local_chunk_manager->RemoveDir(local_index_path_prefix);
     }
     CheckCompatible(version);
     local_chunk_manager->CreateDir(local_index_path_prefix);
+
     auto diskann_index_pack =
         knowhere::Pack(std::shared_ptr<knowhere::FileManager>(file_manager_));
     auto get_index_obj = knowhere::IndexFactory::Instance().Create<T>(
@@ -135,7 +138,8 @@ template <typename T>
 void
 VectorDiskAnnIndex<T>::Build(const Config& config) {
     auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        storage::LocalChunkManagerFactory::GetInstance().GetChunkManager(
+            milvus::Role::IndexNode);
     knowhere::Json build_config;
     build_config.update(config);
 
@@ -185,7 +189,8 @@ void
 VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
                                         const Config& config) {
     auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        storage::LocalChunkManagerFactory::GetInstance().GetChunkManager(
+            milvus::Role::IndexNode);
     knowhere::Json build_config;
     build_config.update(config);
     // set data path
@@ -353,7 +358,7 @@ template <typename T>
 void
 VectorDiskAnnIndex<T>::CleanLocalData() {
     auto local_chunk_manager =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        storage::LocalChunkManagerFactory::GetInstance().GetChunkManager();
     local_chunk_manager->RemoveDir(file_manager_->GetLocalIndexObjectPrefix());
     local_chunk_manager->RemoveDir(
         file_manager_->GetLocalRawDataObjectPrefix());

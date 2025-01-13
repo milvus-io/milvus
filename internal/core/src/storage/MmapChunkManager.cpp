@@ -230,7 +230,7 @@ MmapChunkManager::~MmapChunkManager() {
     }
     // clean the mmap dir
     auto cm =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        storage::LocalChunkManagerFactory::GetInstance().GetChunkManager();
     if (cm->Exist(mmap_file_prefix_)) {
         cm->RemoveDir(mmap_file_prefix_);
     }
@@ -312,7 +312,7 @@ MmapChunkManager::MmapChunkManager(std::string root_path,
         std::make_unique<MmapBlocksHandler>(disk_limit, file_size, root_path);
     mmap_file_prefix_ = root_path;
     auto cm =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        storage::LocalChunkManagerFactory::GetInstance().GetChunkManager();
     AssertInfo(cm != nullptr,
                "Fail to get LocalChunkManager, LocalChunkManagerPtr is null");
     if (cm->Exist(root_path)) {

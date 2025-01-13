@@ -48,15 +48,22 @@ namespace milvus::storage {
 DiskFileManagerImpl::DiskFileManagerImpl(
     const FileManagerContext& fileManagerContext)
     : FileManagerImpl(fileManagerContext.fieldDataMeta,
-                      fileManagerContext.indexMeta) {
+                      fileManagerContext.indexMeta,
+                      fileManagerContext.for_loading_index) {
     rcm_ = fileManagerContext.chunkManagerPtr;
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_chunk_manager = GetLocalChunkManager();
     local_chunk_manager->RemoveDir(GetIndexPathPrefixWithBuildID(
         local_chunk_manager, index_meta_.build_id));
+}
+
+LocalChunkManagerSPtr
+DiskFileManagerImpl::GetLocalChunkManager() const {
+    auto role =
+        for_loading_index_ ? milvus::Role::QueryNode : milvus::Role::IndexNode;
+    return LocalChunkManagerFactory::GetInstance().GetChunkManager(role);
 }
 
 bool
@@ -82,7 +89,7 @@ DiskFileManagerImpl::GetRemoteTextLogPath(const std::string& file_name,
 bool
 DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        LocalChunkManagerFactory::GetInstance().GetChunkManager();
     FILEMANAGER_TRY
     if (!local_chunk_manager->Exist(file)) {
         LOG_ERROR("local file {} not exists", file);
@@ -134,7 +141,7 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
 bool
 DiskFileManagerImpl::AddTextLog(const std::string& file) noexcept {
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        LocalChunkManagerFactory::GetInstance().GetChunkManager();
     FILEMANAGER_TRY
     if (!local_chunk_manager->Exist(file)) {
         LOG_ERROR("local file {} not exists", file);
@@ -190,7 +197,7 @@ DiskFileManagerImpl::AddBatchIndexFiles(
     const std::vector<std::string>& remote_files,
     const std::vector<int64_t>& remote_file_sizes) {
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        LocalChunkManagerFactory::GetInstance().GetChunkManager();
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
 
     std::vector<std::future<std::shared_ptr<uint8_t[]>>> futures;
@@ -239,7 +246,7 @@ void
 DiskFileManagerImpl::CacheIndexToDisk(
     const std::vector<std::string>& remote_files) {
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        LocalChunkManagerFactory::GetInstance().GetChunkManager();
 
     std::map<std::string, std::vector<int>> index_slices;
     for (auto& file_path : remote_files) {
@@ -307,7 +314,7 @@ void
 DiskFileManagerImpl::CacheTextLogToDisk(
     const std::vector<std::string>& remote_files) {
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        LocalChunkManagerFactory::GetInstance().GetChunkManager();
 
     std::map<std::string, std::vector<int>> index_slices;
     for (auto& file_path : remote_files) {
@@ -375,8 +382,7 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
     auto segment_id = GetFieldDataMeta().segment_id;
     auto field_id = GetFieldDataMeta().field_id;
 
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_chunk_manager = GetLocalChunkManager();
     std::string local_data_path;
     bool file_created = false;
 
@@ -618,8 +624,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
 
     auto segment_id = GetFieldDataMeta().segment_id;
     auto vec_field_id = GetFieldDataMeta().field_id;
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_chunk_manager = GetLocalChunkManager();
     auto local_data_path = storage::GenFieldRawDataPathPrefix(
                                local_chunk_manager, segment_id, vec_field_id) +
                            std::string(VEC_OPT_FIELDS);
@@ -695,16 +700,14 @@ DiskFileManagerImpl::GetFileName(const std::string& localfile) {
 
 std::string
 DiskFileManagerImpl::GetLocalIndexObjectPrefix() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_chunk_manager = GetLocalChunkManager();
     return GenIndexPathPrefix(
         local_chunk_manager, index_meta_.build_id, index_meta_.index_version);
 }
 
 std::string
 DiskFileManagerImpl::GetLocalTextIndexPrefix() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_chunk_manager = GetLocalChunkManager();
     return GenTextIndexPathPrefix(local_chunk_manager,
                                   index_meta_.build_id,
                                   index_meta_.index_version,
@@ -728,8 +731,7 @@ DiskFileManagerImpl::GetTextIndexIdentifier() {
 
 std::string
 DiskFileManagerImpl::GetLocalRawDataObjectPrefix() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_chunk_manager = GetLocalChunkManager();
     return GenFieldRawDataPathPrefix(
         local_chunk_manager, field_meta_.segment_id, field_meta_.field_id);
 }
@@ -744,7 +746,7 @@ std::optional<bool>
 DiskFileManagerImpl::IsExisted(const std::string& file) noexcept {
     bool isExist = false;
     auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        LocalChunkManagerFactory::GetInstance().GetChunkManager();
     try {
         isExist = local_chunk_manager->Exist(file);
     } catch (std::exception& e) {

@@ -166,6 +166,7 @@ class BitmapIndexTest : public testing::Test {
                                                   field_id);
             ;
         }
+        ctx.set_for_loading_index(true);
         index_ =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
         index_->Load(milvus::tracer::TraceContext{}, config);
