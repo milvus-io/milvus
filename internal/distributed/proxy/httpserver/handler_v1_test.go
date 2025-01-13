@@ -143,8 +143,11 @@ func initHTTPServer(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 ----|----------------|----------------|----------------
 */
 func genAuthMiddleWare(needAuth bool) gin.HandlerFunc {
+	InitMockGlobalMetaCache()
+	proxy.AddRootUserToAdminRole()
 	if needAuth {
 		return func(c *gin.Context) {
+			// proxy.RemoveRootUserFromAdminRole()
 			c.Set(ContextUsername, "")
 			username, password, ok := ParseUsernamePassword(c)
 			if !ok {
@@ -159,6 +162,10 @@ func genAuthMiddleWare(needAuth bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set(ContextUsername, util.UserRoot)
 	}
+}
+
+func InitMockGlobalMetaCache() {
+	proxy.InitEmptyGlobalCache()
 }
 
 func Print(code int32, message string) string {
