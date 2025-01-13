@@ -33,7 +33,7 @@ var (
 	})
 	lockerPoolConfig = &pool.ObjectPoolConfig{
 		LIFO:                     pool.DefaultLIFO,
-		MaxTotal:                 64,
+		MaxTotal:                 -1,
 		MaxIdle:                  64,
 		MinIdle:                  pool.DefaultMinIdle,
 		MinEvictableIdleTime:     pool.DefaultMinEvictableIdleTime,
