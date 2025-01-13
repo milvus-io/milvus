@@ -57,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -1509,12 +1510,22 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			if !estimateResult.HasRawData && !isVectorType {
 				shouldCalculateDataSize = true
 			}
-			if !estimateResult.HasRawData && isVectorType && !fieldSchema.IsFunctionOutput {
-				mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
-				if mmapChunkCache {
-					segmentDiskSize += binlogSize
-				} else {
-					segmentMemorySize += binlogSize
+
+			if !estimateResult.HasRawData && isVectorType {
+				metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, fieldIndexInfo.IndexParams)
+				if err != nil {
+					return nil, errors.Wrapf(err, "failed to estimate resource usage of index, metric type nout found, collection %d, segment %d, indexBuildID %d",
+						loadInfo.GetCollectionID(),
+						loadInfo.GetSegmentID(),
+						fieldIndexInfo.GetBuildID())
+				}
+				if metricType != metric.BM25 {
+					mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
+					if mmapChunkCache {
+						segmentDiskSize += binlogSize
+					} else {
+						segmentMemorySize += binlogSize
+					}
 				}
 			}
 		} else {
