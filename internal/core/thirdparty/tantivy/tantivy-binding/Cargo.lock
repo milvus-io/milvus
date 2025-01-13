@@ -990,6 +990,7 @@ dependencies = [
  "futures",
  "libc",
  "log",
+ "regex",
  "scopeguard",
  "tantivy",
  "zstd-sys",
