@@ -239,6 +239,7 @@ type commonConfig struct {
 	AuthorizationEnabled ParamItem `refreshable:"false"`
 	SuperUsers           ParamItem `refreshable:"true"`
 	DefaultRootPassword  ParamItem `refreshable:"false"`
+	RootShouldBindRole   ParamItem `refreshable:"true"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -667,6 +668,15 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
+
+	p.RootShouldBindRole = ParamItem{
+		Key:          "common.security.rootShouldBindRole",
+		Version:      "2.5.4",
+		Doc:          "Whether the root user should bind a role when the authorization is enabled.",
+		DefaultValue: "false",
+		Export:       true,
+	}
+	p.RootShouldBindRole.Init(base.mgr)
 
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
