@@ -6,9 +6,12 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestLoadStateLoadData(t *testing.T) {
+	paramtable.Init()
 	l := NewLoadStateLock(LoadStateOnlyMeta)
 	// Test Load Data, roll back
 	g, err := l.StartLoadData()
@@ -44,6 +47,7 @@ func TestLoadStateLoadData(t *testing.T) {
 }
 
 func TestStartReleaseData(t *testing.T) {
+	paramtable.Init()
 	l := NewLoadStateLock(LoadStateOnlyMeta)
 	// Test Release Data, nothing to do on only meta.
 	g := l.StartReleaseData()
@@ -104,6 +108,7 @@ func TestStartReleaseData(t *testing.T) {
 }
 
 func TestBlockUntilDataLoadedOrReleased(t *testing.T) {
+	paramtable.Init()
 	l := NewLoadStateLock(LoadStateOnlyMeta)
 	ch := make(chan struct{})
 	go func() {
@@ -122,6 +127,7 @@ func TestBlockUntilDataLoadedOrReleased(t *testing.T) {
 }
 
 func TestStartReleaseAll(t *testing.T) {
+	paramtable.Init()
 	l := NewLoadStateLock(LoadStateOnlyMeta)
 	// Test Release All, nothing to do on only meta.
 	g := l.StartReleaseAll()
@@ -183,7 +189,40 @@ func TestStartReleaseAll(t *testing.T) {
 	assert.Equal(t, LoadStateReleased, l.state)
 }
 
-func TestRLock(t *testing.T) {
+func TestWaitOrPanic(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("normal", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key, "600")
+		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key)
+
+		l := NewLoadStateLock(LoadStateDataLoaded)
+		l.cv.L.Lock()
+		defer l.cv.L.Unlock()
+
+		assert.NotPanics(t, func() {
+			l.waitOrPanic(func(state loadStateEnum) bool {
+				return state == LoadStateDataLoaded
+			})
+		})
+	})
+
+	t.Run("timeout_panic", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key, "1")
+		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key)
+
+		l := NewLoadStateLock(LoadStateOnlyMeta)
+		l.cv.L.Lock()
+
+		assert.Panics(t, func() {
+			l.waitOrPanic(func(state loadStateEnum) bool {
+				return state == LoadStateDataLoaded
+			})
+		})
+	})
+}
+
+func TestPinIf(t *testing.T) {
 	l := NewLoadStateLock(LoadStateOnlyMeta)
 	assert.True(t, l.PinIf(IsNotReleased))
 	l.Unpin()

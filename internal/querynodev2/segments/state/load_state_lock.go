@@ -3,9 +3,12 @@ package state
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type loadStateEnum int
@@ -96,13 +99,7 @@ func (ls *LoadStateLock) Unpin() {
 // PinIfNotReleased pin the segment if the state is not released.
 // grammar suger for PinIf(IsNotReleased).
 func (ls *LoadStateLock) PinIfNotReleased() bool {
-	ls.mu.RLock()
-	defer ls.mu.RUnlock()
-	if ls.state == LoadStateReleased {
-		return false
-	}
-	ls.refCnt.Inc()
-	return true
+	return ls.PinIf(IsNotReleased)
 }
 
 // StartLoadData starts load segment data
@@ -176,26 +173,40 @@ func (ls *LoadStateLock) BlockUntilDataLoadedOrReleased() {
 	ls.cv.L.Lock()
 	defer ls.cv.L.Unlock()
 
-	for ls.state != LoadStateDataLoaded && ls.state != LoadStateReleased {
-		ls.cv.Wait()
-	}
+	ls.waitOrPanic(func(state loadStateEnum) bool {
+		return state == LoadStateDataLoaded || state == LoadStateReleased
+	})
 }
 
 // waitUntilCanReleaseData waits until segment is release data able.
 func (ls *LoadStateLock) waitUntilCanReleaseData() {
-	state := ls.state
-	for state != LoadStateDataLoaded && state != LoadStateOnlyMeta && state != LoadStateReleased {
-		ls.cv.Wait()
-		state = ls.state
-	}
+	ls.waitOrPanic(func(state loadStateEnum) bool {
+		return state == LoadStateDataLoaded || state == LoadStateOnlyMeta || state == LoadStateReleased
+	})
 }
 
 // waitUntilCanReleaseAll waits until segment is releasable.
 func (ls *LoadStateLock) waitUntilCanReleaseAll() {
-	state := ls.state
-	for (state != LoadStateDataLoaded && state != LoadStateOnlyMeta && state != LoadStateReleased) || ls.refCnt.Load() != 0 {
-		ls.cv.Wait()
-		state = ls.state
+	ls.waitOrPanic(func(state loadStateEnum) bool {
+		return (state == LoadStateDataLoaded || state == LoadStateOnlyMeta || state == LoadStateReleased) && ls.refCnt.Load() == 0
+	})
+}
+
+func (ls *LoadStateLock) waitOrPanic(ready func(state loadStateEnum) bool) {
+	ch := make(chan struct{})
+	go func() {
+		defer close(ch)
+		for !ready(ls.state) {
+			ls.cv.Wait()
+		}
+	}()
+
+	maxWaitTime := paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.GetAsDuration(time.Second)
+
+	select {
+	case <-time.After(maxWaitTime):
+		panic(fmt.Sprintf("max WLock wait time(%v) excceeded", maxWaitTime))
+	case <-ch:
 	}
 }
 
