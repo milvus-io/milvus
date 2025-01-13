@@ -1509,7 +1509,7 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			if !estimateResult.HasRawData && !isVectorType {
 				shouldCalculateDataSize = true
 			}
-			if !estimateResult.HasRawData && isVectorType {
+			if !estimateResult.HasRawData && isVectorType && !fieldSchema.IsFunctionOutput {
 				mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
 				if mmapChunkCache {
 					segmentDiskSize += binlogSize

@@ -1054,7 +1054,11 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 				return err
 			}
 			updateIndexInfoSpan := tr.RecordSpan()
-			if !typeutil.IsVectorType(fieldType) || s.HasRawData(indexInfo.GetFieldID()) {
+			// Skip warnup chunk cache when
+			// . scalar data
+			// . index has row data
+			// . vector was function output
+			if !typeutil.IsVectorType(fieldType) || s.HasRawData(indexInfo.GetFieldID()) || fieldSchema.IsFunctionOutput {
 				return nil
 			}
 
