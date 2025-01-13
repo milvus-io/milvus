@@ -4895,6 +4895,10 @@ type streamingConfig struct {
 
 	// txn
 	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
+
+	// write ahead buffer
+	WALWriteAheadBufferCapacity  ParamItem `refreshable:"true"`
+	WALWriteAheadBufferKeepalive ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -4944,6 +4948,23 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 		Export:       true,
 	}
 	p.TxnDefaultKeepaliveTimeout.Init(base.mgr)
+
+	p.WALWriteAheadBufferCapacity = ParamItem{
+		Key:          "streaming.walWriteAheadBuffer.capacity",
+		Version:      "2.6.0",
+		Doc:          "The capacity of write ahead buffer of each wal, 64M by default",
+		DefaultValue: "64m",
+		Export:       true,
+	}
+	p.WALWriteAheadBufferCapacity.Init(base.mgr)
+	p.WALWriteAheadBufferKeepalive = ParamItem{
+		Key:          "streaming.walWriteAheadBuffer.keepalive",
+		Version:      "2.6.0",
+		Doc:          "The keepalive duration for entries in write ahead buffer of each wal, 30s by default",
+		DefaultValue: "30s",
+		Export:       true,
+	}
+	p.WALWriteAheadBufferKeepalive.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

@@ -294,16 +294,16 @@ func newImmutableTxnMesasgeFromWAL(
 		return nil, err
 	}
 	// we don't need to modify the begin message's timetick, but set all the timetick of body messages.
-	for _, m := range body {
-		m.(*immutableMessageImpl).overwriteTimeTick(commit.TimeTick())
-		m.(*immutableMessageImpl).overwriteLastConfirmedMessageID(commit.LastConfirmedMessageID())
+	for idx, m := range body {
+		body[idx] = m.(*immutableMessageImpl).cloneForTxnBody(commit.TimeTick(), commit.LastConfirmedMessageID())
 	}
-	immutableMsg := msg.WithTimeTick(commit.TimeTick()).
+
+	immutableMessage := msg.WithTimeTick(commit.TimeTick()).
 		WithLastConfirmed(commit.LastConfirmedMessageID()).
 		WithTxnContext(*commit.TxnContext()).
 		IntoImmutableMessage(commit.MessageID())
 	return &immutableTxnMessageImpl{
-		immutableMessageImpl: *immutableMsg.(*immutableMessageImpl),
+		immutableMessageImpl: *immutableMessage.(*immutableMessageImpl),
 		begin:                begin,
 		messages:             body,
 		commit:               commit,

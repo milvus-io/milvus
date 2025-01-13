@@ -1131,6 +1131,9 @@ streaming:
     concurrencyRatio: 1 # The concurrency ratio based on number of CPU for wal broadcaster, 1 by default.
   txn:
     defaultKeepaliveTimeout: 10s # The default keepalive timeout for wal txn, 10s by default
+  walWriteAheadBuffer:
+    capacity: 64m # The capacity of write ahead buffer of each wal, 64M by default
+    keepalive: 30s # The keepalive duration for entries in write ahead buffer of each wal, 30s by default
 
 # Any configuration related to the knowhere vector search engine
 knowhere:
