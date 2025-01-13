@@ -69,32 +69,17 @@ type LoadStateLock struct {
 }
 
 // RLockIfNotReleased locks the segment if the state is not released.
-func (ls *LoadStateLock) RLockIf(pred StatePredicate) bool {
-	ls.mu.RLock()
-	if !pred(ls.state) {
-		ls.mu.RUnlock()
-		return false
-	}
-	return true
-}
-
-// RUnlock unlocks the segment.
-func (ls *LoadStateLock) RUnlock() {
-	ls.mu.RUnlock()
-}
-
-// PinIfNotReleased pin the segment into memory, avoid ReleaseAll to release it.
-func (ls *LoadStateLock) PinIfNotReleased() bool {
+func (ls *LoadStateLock) PinIf(pred StatePredicate) bool {
 	ls.mu.RLock()
 	defer ls.mu.RUnlock()
-	if ls.state == LoadStateReleased {
+	if !pred(ls.state) {
 		return false
 	}
 	ls.refCnt.Inc()
 	return true
 }
 
-// Unpin unpin the segment, then segment can be released by ReleaseAll.
+// Unpin unlocks the segment.
 func (ls *LoadStateLock) Unpin() {
 	ls.mu.RLock()
 	defer ls.mu.RUnlock()
@@ -106,6 +91,18 @@ func (ls *LoadStateLock) Unpin() {
 		// notify ReleaseAll to release segment if refcnt is zero.
 		ls.cv.Broadcast()
 	}
+}
+
+// PinIfNotReleased pin the segment if the state is not released.
+// grammar suger for PinIf(IsNotReleased).
+func (ls *LoadStateLock) PinIfNotReleased() bool {
+	ls.mu.RLock()
+	defer ls.mu.RUnlock()
+	if ls.state == LoadStateReleased {
+		return false
+	}
+	ls.refCnt.Inc()
+	return true
 }
 
 // StartLoadData starts load segment data
