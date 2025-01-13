@@ -59,7 +59,7 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 				return
 			}
 			acker.Ack(
-				ack.OptMessageID(msgID),
+				ack.OptImmutableMessage(msg.IntoImmutableMessage(msgID)),
 				ack.OptTxnSession(txnSession),
 			)
 		}()
@@ -204,7 +204,6 @@ func (impl *timeTickAppendInterceptor) appendMsg(
 	if err != nil {
 		return nil, err
 	}
-
 	utility.ReplaceAppendResultTimeTick(ctx, msg.TimeTick())
 	utility.ReplaceAppendResultTxnContext(ctx, msg.TxnContext())
 	return msgID, nil

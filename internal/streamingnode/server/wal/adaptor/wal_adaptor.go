@@ -111,7 +111,6 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 			if notPersistHint := utility.GetNotPersisted(ctx); notPersistHint != nil {
 				// do not persist the message if the hint is set.
-				// only used by time tick sync operator.
 				return notPersistHint.MessageID, nil
 			}
 			metricsGuard.StartWALImplAppend()

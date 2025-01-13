@@ -82,21 +82,17 @@ func (m *TimeTickMetrics) CountSyncTimeTick(isSync bool) {
 	m.mu.Unlock()
 }
 
-func (m *TimeTickMetrics) CountMemoryTimeTickSync(ts uint64) {
+func (m *TimeTickMetrics) CountTimeTickSync(ts uint64, persist bool) {
 	if !m.mu.LockIfNotClosed() {
 		return
 	}
-	m.nonPersistentTimeTickSyncCounter.Inc()
-	m.nonPersistentTimeTickSync.Set(tsoutil.PhysicalTimeSeconds(ts))
-	m.mu.Unlock()
-}
-
-func (m *TimeTickMetrics) CountPersistentTimeTickSync(ts uint64) {
-	if !m.mu.LockIfNotClosed() {
-		return
+	if persist {
+		m.persistentTimeTickSyncCounter.Inc()
+		m.persistentTimeTickSync.Set(tsoutil.PhysicalTimeSeconds(ts))
+	} else {
+		m.nonPersistentTimeTickSyncCounter.Inc()
+		m.nonPersistentTimeTickSync.Set(tsoutil.PhysicalTimeSeconds(ts))
 	}
-	m.persistentTimeTickSyncCounter.Inc()
-	m.persistentTimeTickSync.Set(tsoutil.PhysicalTimeSeconds(ts))
 	m.mu.Unlock()
 }
 

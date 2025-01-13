@@ -23,6 +23,8 @@ type ScannerImpls interface {
 	Name() string
 
 	// Chan returns the channel of message.
+	// If the scanner is failure, the channel will be closed.
+	// And an error will be returned by Error().
 	Chan() <-chan message.ImmutableMessage
 
 	// Error returns the error of scanner failed.
