@@ -16092,7 +16092,8 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
     auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(json_fid, DataType::JSON, {this->json_path.substr(1)}),
         proto::plan::OpType::LessEqual,
-        this->upper_bound);
+        this->upper_bound,
+        {});
     auto plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
     auto final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
@@ -16101,7 +16102,8 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
     unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(json_fid, DataType::JSON, {this->json_path.substr(1)}),
         proto::plan::OpType::GreaterEqual,
-        this->lower_bound);
+        this->lower_bound,
+        {});
     plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
     final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
