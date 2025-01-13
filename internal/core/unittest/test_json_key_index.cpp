@@ -487,3 +487,49 @@ TEST_P(JsonKeyIndexTest, TestJsonContainsAllFunc) {
         }
     }
 }
+
+TEST(GrowingJsonKeyIndexTest, GrowingIndex) {
+    using Index = index::JsonKeyInvertedIndex;
+    auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
+                                         "json",
+                                         "/tmp/test-jsonkey-index/");
+    auto str = R"({"int":)" + std::to_string(1) + R"(,"double":)" +
+               std::to_string(static_cast<double>(1)) + R"(,"string":")" +
+               std::to_string(1) + R"(","bool": true)" +
+               R"(, "array": [1,2,3])" + "}";
+    auto str1 = R"({"int":)" + std::to_string(2) + "}";
+    auto str2 = R"({"int":)" + std::to_string(3) + "}";
+    std::vector<std::string> jsonDatas;
+    jsonDatas.push_back(str);
+    jsonDatas.push_back(str1);
+    jsonDatas.push_back(str2);
+    std::vector<milvus::Json> jsons;
+    for (const auto& jsonData : jsonDatas) {
+        jsons.push_back(milvus::Json(simdjson::padded_string(jsonData)));
+    }
+    index->CreateReader();
+    index->AddJSONDatas(jsonDatas.size(), jsonDatas.data(), nullptr, 0);
+    index->Commit();
+    index->Reload();
+    int64_t checkVal = 1;
+    auto filter_func = [jsons, checkVal](
+                           uint32_t row_id, uint16_t offset, uint16_t size) {
+        auto val = jsons[row_id].template at<int64_t>(offset, size);
+        if (val.error()) {
+            return false;
+        }
+        if (val.value() == checkVal) {
+            return true;
+        }
+        return false;
+    };
+    auto pointer = milvus::Json::pointer({"int"});
+    auto bitset = index->FilterByPath(pointer, jsonDatas.size(), filter_func);
+    ASSERT_EQ(bitset.size(), jsonDatas.size());
+    for (int i = 0; i < bitset.size(); ++i) {
+        auto val = jsons[i].template at<int64_t>(pointer).value();
+        auto ans = bitset[i];
+        auto ref = val == checkVal;
+        ASSERT_EQ(ans, ref);
+    }
+}

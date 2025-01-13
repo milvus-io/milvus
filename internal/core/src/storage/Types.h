@@ -130,6 +130,8 @@ struct MmapConfig {
     uint64_t fix_file_size;
     bool growing_enable_mmap;
     bool scalar_index_enable_mmap;
+    uint64_t json_index_memory_budget;
+    uint64_t json_index_commit_interval;
     bool
     GetEnableGrowingMmap() const {
         return growing_enable_mmap;
@@ -150,6 +152,14 @@ struct MmapConfig {
     GetMmapPath() {
         return mmap_path;
     }
+    uint64_t
+    GetJSONIndexMemoryBudget() const {
+        return json_index_memory_budget;
+    }
+    uint64_t
+    GetJSONIndexCommitInterval() const {
+        return json_index_commit_interval;
+    }
     std::string
     ToString() const {
         std::stringstream ss;
@@ -159,7 +169,10 @@ struct MmapConfig {
            << ", fix_file_size=" << fix_file_size / (1024 * 1024) << "MB"
            << ", growing_enable_mmap=" << std::boolalpha << growing_enable_mmap
            << ", scalar_index_enable_mmap=" << std::boolalpha
-           << scalar_index_enable_mmap << "]";
+           << ", json_index_memory_budget="
+           << json_index_memory_budget / (1024 * 1024) << "MB"
+           << ", json_index_commit_interval=" << json_index_commit_interval
+           << "ms" << scalar_index_enable_mmap << "]";
         return ss.str();
     }
 };

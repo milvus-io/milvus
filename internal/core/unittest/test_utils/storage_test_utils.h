@@ -54,7 +54,11 @@ get_default_mmap_config() {
         .disk_limit =
             uint64_t(2) * uint64_t(1024) * uint64_t(1024) * uint64_t(1024),
         .fix_file_size = uint64_t(4) * uint64_t(1024) * uint64_t(1024),
-        .growing_enable_mmap = false};
+        .growing_enable_mmap = false,
+        .json_index_memory_budget =
+            uint64_t(15) * uint64_t(1024) * uint64_t(1024),
+        .json_index_commit_interval = 200,
+    };
     return mmap_config;
 }
 

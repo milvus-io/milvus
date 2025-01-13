@@ -104,6 +104,8 @@ typedef struct CMmapConfig {
     uint64_t fix_file_size;
     bool growing_enable_mmap;
     bool scalar_index_enable_mmap;
+    uint64_t json_index_memory_budget;
+    uint64_t json_index_commit_interval;
 } CMmapConfig;
 
 typedef struct CTraceConfig {

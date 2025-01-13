@@ -82,6 +82,7 @@ struct TantivyIndexWrapper {
                         TantivyDataType data_type,
                         const char* path,
                         bool inverted_single_semgnent = false,
+                        bool in_ram = false,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
@@ -95,7 +96,8 @@ struct TantivyIndexWrapper {
                                      data_type,
                                      path,
                                      num_threads,
-                                     overall_memory_budget_in_bytes));
+                                     overall_memory_budget_in_bytes,
+                                     in_ram));
         }
         AssertInfo(res.result_->success,
                    "failed to create index: {}",
@@ -138,7 +140,6 @@ struct TantivyIndexWrapper {
         writer_ = res.result_->value.ptr._0;
         path_ = std::string(path);
     }
-
     // create reader.
     void
     create_reader() {

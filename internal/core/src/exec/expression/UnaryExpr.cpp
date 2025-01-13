@@ -810,7 +810,6 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                                ? active_count_ - current_data_chunk_pos_
                                : batch_size_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-
 #define UnaryRangeJSONIndexCompare(cmp)                       \
     do {                                                      \
         auto x = json.at<GetType>(offset, size);              \
@@ -839,11 +838,17 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
     ExprValueType val = GetValueFromProto<ExprValueType>(expr_->val_);
     auto op_type = expr_->op_type_;
     if (cached_index_chunk_id_ != 0) {
-        const auto* sealed_seg =
-            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        const segcore::SegmentInternalInterface* sealed_seg = nullptr;
+        if (segment_->type() == SegmentType::Growing) {
+            sealed_seg =
+                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
+        } else if (segment_->type() == SegmentType::Sealed) {
+            sealed_seg = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        }
         auto field_id = expr_->column_.field_id_;
-        auto* index = sealed_seg->GetJsonKeyIndex(field_id);
+        auto* index = segment_->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
+        Assert(sealed_seg != nullptr);
         auto filter_func = [sealed_seg, field_id, op_type, val](uint32_t row_id,
                                                                 uint16_t offset,
                                                                 uint16_t size) {

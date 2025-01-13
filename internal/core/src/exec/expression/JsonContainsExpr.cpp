@@ -341,7 +341,6 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
                            ExprValueType>;
-    Assert(segment_->type() == SegmentType::Sealed);
     auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
                                ? active_count_ - current_data_chunk_pos_
                                : batch_size_;
@@ -357,8 +356,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
             TargetBitmap(real_batch_size, true));
     }
     if (cached_index_chunk_id_ != 0) {
-        const auto* sealed_seg =
-            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        const segcore::SegmentInternalInterface* sealed_seg = nullptr;
+        if (segment_->type() == SegmentType::Growing) {
+            sealed_seg =
+                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
+        } else if (segment_->type() == SegmentType::Sealed) {
+            sealed_seg = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        }
         auto field_id = expr_->column_.field_id_;
         auto* index = sealed_seg->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
@@ -498,7 +502,6 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(OffsetVector* input) {
 
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
-    Assert(segment_->type() == SegmentType::Sealed);
     auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
                                ? active_count_ - current_data_chunk_pos_
                                : batch_size_;
@@ -514,8 +517,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
             TargetBitmap(real_batch_size, true));
     }
     if (cached_index_chunk_id_ != 0) {
-        const auto* sealed_seg =
-            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        const segcore::SegmentInternalInterface* sealed_seg = nullptr;
+        if (segment_->type() == SegmentType::Growing) {
+            sealed_seg =
+                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
+        } else if (segment_->type() == SegmentType::Sealed) {
+            sealed_seg = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        }
         auto field_id = expr_->column_.field_id_;
         auto* index = sealed_seg->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
@@ -742,7 +750,6 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
                            ExprValueType>;
-    Assert(segment_->type() == SegmentType::Sealed);
     auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
                                ? active_count_ - current_data_chunk_pos_
                                : batch_size_;
@@ -758,8 +765,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
             TargetBitmap(real_batch_size, true));
     }
     if (cached_index_chunk_id_ != 0) {
-        const auto* sealed_seg =
-            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        const segcore::SegmentInternalInterface* sealed_seg = nullptr;
+        if (segment_->type() == SegmentType::Growing) {
+            sealed_seg =
+                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
+        } else if (segment_->type() == SegmentType::Sealed) {
+            sealed_seg = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        }
         auto field_id = expr_->column_.field_id_;
         auto* index = sealed_seg->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
@@ -960,7 +972,6 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(
 
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
-    Assert(segment_->type() == SegmentType::Sealed);
     auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
                                ? active_count_ - current_data_chunk_pos_
                                : batch_size_;
@@ -979,8 +990,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
             TargetBitmap(real_batch_size, true));
     }
     if (cached_index_chunk_id_ != 0) {
-        const auto* sealed_seg =
-            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        const segcore::SegmentInternalInterface* sealed_seg = nullptr;
+        if (segment_->type() == SegmentType::Growing) {
+            sealed_seg =
+                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
+        } else if (segment_->type() == SegmentType::Sealed) {
+            sealed_seg = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        }
         auto field_id = expr_->column_.field_id_;
         auto* index = sealed_seg->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
@@ -1186,7 +1202,6 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(OffsetVector* input) {
 
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
-    Assert(segment_->type() == SegmentType::Sealed);
     auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
                                ? active_count_ - current_data_chunk_pos_
                                : batch_size_;
@@ -1202,8 +1217,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
             TargetBitmap(real_batch_size, true));
     }
     if (cached_index_chunk_id_ != 0) {
-        const auto* sealed_seg =
-            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        const segcore::SegmentInternalInterface* sealed_seg = nullptr;
+        if (segment_->type() == SegmentType::Growing) {
+            sealed_seg =
+                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
+        } else if (segment_->type() == SegmentType::Sealed) {
+            sealed_seg = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        }
         auto field_id = expr_->column_.field_id_;
         auto* index = sealed_seg->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
@@ -1397,7 +1417,6 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(OffsetVector* input) {
 
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
-    Assert(segment_->type() == SegmentType::Sealed);
     auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
                                ? active_count_ - current_data_chunk_pos_
                                : batch_size_;
@@ -1410,8 +1429,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
             TargetBitmap(real_batch_size, true));
     }
     if (cached_index_chunk_id_ != 0) {
-        const auto* sealed_seg =
-            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        const segcore::SegmentInternalInterface* sealed_seg = nullptr;
+        if (segment_->type() == SegmentType::Growing) {
+            sealed_seg =
+                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
+        } else if (segment_->type() == SegmentType::Sealed) {
+            sealed_seg = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        }
         auto field_id = expr_->column_.field_id_;
         auto* index = sealed_seg->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);

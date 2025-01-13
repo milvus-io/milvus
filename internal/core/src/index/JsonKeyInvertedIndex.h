@@ -25,7 +25,14 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
     explicit JsonKeyInvertedIndex(const storage::FileManagerContext& ctx,
                                   bool is_load);
 
-    ~JsonKeyInvertedIndex() override{};
+    explicit JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
+                                  const char* unique_id);
+
+    explicit JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
+                                  const char* unique_id,
+                                  const std::string& path);
+
+    ~JsonKeyInvertedIndex() override {};
 
  public:
     IndexStatsPtr
@@ -41,10 +48,13 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
     FilterByPath(const std::string& path,
                  int32_t row,
                  std::function<bool(uint32_t, uint16_t, uint16_t)> filter) {
+        if (shouldTriggerCommit()) {
+            Commit();
+            Reload();
+        }
         TargetBitmap bitset(row);
         auto array = wrapper_->term_query<std::string>(path);
-        LOG_DEBUG("json key filter size:{}", array.array_.len);
-
+        LOG_INFO("json key filter size:{}", array.array_.len);
         for (size_t j = 0; j < array.array_.len; j++) {
             auto the_offset = array.array_.array[j];
             auto tuple = DecodeOffset(the_offset);
@@ -55,6 +65,24 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
 
         return std::move(bitset);
     }
+
+    void
+    AddJSONDatas(size_t n,
+                 const std::string* jsonDatas,
+                 const bool* valids,
+                 int64_t offset_begin);
+
+    void
+    Finish();
+
+    void
+    Commit();
+
+    void
+    Reload();
+
+    void
+    CreateReader();
 
  private:
     void
@@ -88,7 +116,13 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
         return std::make_tuple(row_id, row_offset, size);
     }
 
+    bool
+    shouldTriggerCommit();
+
  private:
     int64_t field_id_;
+    mutable std::mutex mtx_;
+    std::atomic<stdclock::time_point> last_commit_time_;
+    int64_t commit_interval_in_ms_;
 };
 }  // namespace milvus::index

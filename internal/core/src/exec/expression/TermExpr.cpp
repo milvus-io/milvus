@@ -496,22 +496,12 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(OffsetVector* input) {
     return res_vec;
 }
 
-static void
-pollute_cache(size_t size) {
-    std::vector<char> dummy(size);
-    for (size_t i = 0; i < size; ++i) {
-        dummy[i] = 'x';
-    }
-    volatile char sink = dummy[0];
-}
-
 template <typename ValueType>
 VectorPtr
 PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
-    Assert(segment_->type() == SegmentType::Sealed);
     auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
                                ? active_count_ - current_data_chunk_pos_
                                : batch_size_;
@@ -530,8 +520,13 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
     }
 
     if (cached_index_chunk_id_ != 0) {
-        const auto* sealed_seg =
-            dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        const segcore::SegmentInternalInterface* sealed_seg = nullptr;
+        if (segment_->type() == SegmentType::Growing) {
+            sealed_seg =
+                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
+        } else if (segment_->type() == SegmentType::Sealed) {
+            sealed_seg = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        }
         auto field_id = expr_->column_.field_id_;
         auto* index = sealed_seg->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
