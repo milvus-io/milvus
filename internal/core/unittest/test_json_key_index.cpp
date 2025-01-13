@@ -116,10 +116,12 @@ class JsonKeyIndexTest : public ::testing::TestWithParam<bool> {
         auto build_index = std::make_shared<JsonKeyInvertedIndex>(ctx, false);
         build_index->Build(config);
 
-        auto binary_set = build_index->Upload(config);
-        for (const auto& [key, _] : binary_set.binary_map_) {
-            index_files.push_back(key);
-        }
+        auto create_index_result = build_index->Upload(config);
+        auto memSize = create_index_result->GetMemSize();
+        auto serializedSize = create_index_result->GetSerializedSize();
+        ASSERT_GT(memSize, 0);
+        ASSERT_GT(serializedSize, 0);
+        index_files = create_index_result->GetIndexFiles();
 
         index::CreateIndexInfo index_info{};
         config["index_files"] = index_files;

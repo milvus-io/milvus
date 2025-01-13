@@ -32,7 +32,7 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
                                   const char* unique_id,
                                   const std::string& path);
 
-    ~JsonKeyInvertedIndex() override {};
+    ~JsonKeyInvertedIndex() override{};
 
  public:
     IndexStatsPtr
