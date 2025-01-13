@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -204,6 +205,13 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
+func (it *indexBuildTask) setScalarIndexCompatibilityParams(indexType string) {
+	currentScalarIndexEngineVersion := getCurrentScalarIndexVersion(it.req.GetCurrentScalarIndexVersion())
+	if currentScalarIndexEngineVersion == 0 && indexType == indexparamcheck.IndexINVERTED {
+		it.newIndexParams["inverted_index_single_segment"] = "true"
+	}
+}
+
 func (it *indexBuildTask) Execute(ctx context.Context) error {
 	log := log.Ctx(ctx).With(zap.String("clusterID", it.req.GetClusterID()), zap.Int64("buildID", it.req.GetBuildID()),
 		zap.Int64("collection", it.req.GetCollectionID()), zap.Int64("segmentID", it.req.GetSegmentID()),
@@ -248,6 +256,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		}
 	}
 
+	it.setScalarIndexCompatibilityParams(indexType)
 	// system resource-related parameters, such as memory limits, CPU limits, and disk limits, are appended here to the parameter list
 	if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) && Params.KnowhereConfig.Enable.GetAsBool() {
 		it.newIndexParams, _ = Params.KnowhereConfig.MergeResourceParams(fieldDataSize, paramtable.BuildStage, it.newIndexParams)
