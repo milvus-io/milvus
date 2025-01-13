@@ -63,7 +63,7 @@ ScalarIndexCreator::index_type() {
     return index_type_;
 }
 
-index::CreateIndexResultPtr
+index::IndexStatsPtr
 ScalarIndexCreator::Upload() {
     return index_->Upload();
 }

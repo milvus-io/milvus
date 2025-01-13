@@ -34,7 +34,7 @@ class IndexCreatorBase {
     virtual void
     Load(const milvus::BinarySet&) = 0;
 
-    virtual index::CreateIndexResultPtr
+    virtual index::IndexStatsPtr
     Upload() = 0;
 };
 

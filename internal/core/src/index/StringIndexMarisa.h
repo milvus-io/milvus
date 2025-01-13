@@ -92,7 +92,7 @@ class StringIndexMarisa : public StringIndex {
     std::optional<std::string>
     Reverse_Lookup(size_t offset) const override;
 
-    CreateIndexResultPtr
+    IndexStatsPtr
     Upload(const Config& config = {}) override;
 
     const bool

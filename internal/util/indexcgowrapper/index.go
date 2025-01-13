@@ -43,7 +43,7 @@ type CodecIndex interface {
 	Load([]*Blob) error
 	Delete() error
 	CleanLocalData() error
-	UpLoad() (*cgopb.CreateIndexResult, error)
+	UpLoad() (*cgopb.IndexStats, error)
 }
 
 var _ CodecIndex = (*CgoIndex)(nil)
@@ -144,13 +144,13 @@ func CreateTextIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexI
 	if err := HandleCStatus(&status, "failed to build text index"); err != nil {
 		return nil, err
 	}
-	var createIndexResult cgopb.CreateIndexResult
-	if err := segcore.UnmarshalProtoLayout(result, &createIndexResult); err != nil {
+	var indexStats cgopb.IndexStats
+	if err := segcore.UnmarshalProtoLayout(result, &indexStats); err != nil {
 		return nil, err
 	}
 
 	res := make(map[string]int64)
-	for _, indexInfo := range createIndexResult.GetSerializedIndexInfos() {
+	for _, indexInfo := range indexStats.GetSerializedIndexInfos() {
 		res[indexInfo.FileName] = indexInfo.FileSize
 	}
 	return res, nil
@@ -398,7 +398,7 @@ func (index *CgoIndex) CleanLocalData() error {
 	return HandleCStatus(&status, "failed to clean cached data on disk")
 }
 
-func (index *CgoIndex) UpLoad() (*cgopb.CreateIndexResult, error) {
+func (index *CgoIndex) UpLoad() (*cgopb.IndexStats, error) {
 	result := C.CreateProtoLayout()
 	defer C.ReleaseProtoLayout(result)
 	status := C.SerializeIndexAndUpLoad(index.indexPtr, result)
@@ -406,9 +406,9 @@ func (index *CgoIndex) UpLoad() (*cgopb.CreateIndexResult, error) {
 		return nil, err
 	}
 
-	var createIndexResult cgopb.CreateIndexResult
-	if err := segcore.UnmarshalProtoLayout(result, &createIndexResult); err != nil {
+	var indexStats cgopb.IndexStats
+	if err := segcore.UnmarshalProtoLayout(result, &indexStats); err != nil {
 		return nil, err
 	}
-	return &createIndexResult, nil
+	return &indexStats, nil
 }

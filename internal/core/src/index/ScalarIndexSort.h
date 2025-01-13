@@ -90,7 +90,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
         return (int64_t)data_.size();
     }
 
-    CreateIndexResultPtr
+    IndexStatsPtr
     Upload(const Config& config = {}) override;
 
     const bool

@@ -298,7 +298,7 @@ HybridScalarIndex<T>::SerializeIndexType() {
 }
 
 template <typename T>
-CreateIndexResultPtr
+IndexStatsPtr
 HybridScalarIndex<T>::Upload(const Config& config) {
     auto internal_index = GetInternalIndex();
     auto index_ret = internal_index->Upload(config);

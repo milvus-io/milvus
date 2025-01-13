@@ -78,7 +78,7 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx)
     d_type_ = TantivyDataType::Text;
 }
 
-CreateIndexResultPtr
+IndexStatsPtr
 TextMatchIndex::Upload(const Config& config) {
     finish();
 
@@ -104,6 +104,7 @@ TextMatchIndex::Upload(const Config& config) {
     mem_file_manager_->AddFile(binary_set);
     auto remote_mem_path_to_size =
         mem_file_manager_->GetRemotePathsToFileSize();
+
     std::vector<SerializedIndexFileInfo> index_files;
     index_files.reserve(remote_paths_to_size.size() +
                         remote_mem_path_to_size.size());
@@ -113,10 +114,9 @@ TextMatchIndex::Upload(const Config& config) {
     for (auto& file : remote_mem_path_to_size) {
         index_files.emplace_back(file.first, file.second);
     }
-    return CreateIndexResult::New(
-        mem_file_manager_->GetAddedTotalMemSize() +
-            disk_file_manager_->GetAddedTotalFileSize(),
-        std::move(index_files));
+    return IndexStats::New(mem_file_manager_->GetAddedTotalMemSize() +
+                               disk_file_manager_->GetAddedTotalFileSize(),
+                           std::move(index_files));
 }
 
 void
