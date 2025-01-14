@@ -1208,10 +1208,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 				growingSegments[entry.SegmentID] = &msgpb.MsgPosition{}
 				continue
 			}
-			// QueryCoord only requires the timestamp from the position.
-			growingSegments[entry.SegmentID] = &msgpb.MsgPosition{
-				Timestamp: segment.StartPosition().GetTimestamp(),
-			}
+			growingSegments[entry.SegmentID] = segment.StartPosition()
 			numOfGrowingRows += segment.InsertCount()
 		}
 
