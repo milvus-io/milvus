@@ -35,16 +35,17 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -74,10 +75,10 @@ func newIndexTaskStats(s *model.SegmentIndex) *metricsinfo.IndexTaskStats {
 		BuildID:         s.BuildID,
 		IndexState:      s.IndexState.String(),
 		FailReason:      s.FailReason,
-		IndexSize:       s.IndexSize,
+		IndexSize:       s.IndexMemSize,
 		IndexVersion:    s.IndexVersion,
-		CreatedUTCTime:  typeutil.TimestampToString(s.CreatedUTCTime),
-		FinishedUTCTime: typeutil.TimestampToString(s.FinishedUTCTime),
+		CreatedUTCTime:  typeutil.TimestampToString(s.CreatedUTCTime * 1000),
+		FinishedUTCTime: typeutil.TimestampToString(s.FinishedUTCTime * 1000),
 	}
 }
 
@@ -154,6 +155,9 @@ func (m *indexMeta) reloadFromKV() error {
 		return err
 	}
 	for _, segIdx := range segmentIndexes {
+		if segIdx.IndexMemSize == 0 {
+			segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
+		}
 		m.updateSegmentIndex(segIdx)
 		metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
 	}
@@ -788,7 +792,8 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		segIdx.IndexState = taskInfo.GetState()
 		segIdx.IndexFileKeys = common.CloneStringList(taskInfo.GetIndexFileKeys())
 		segIdx.FailReason = taskInfo.GetFailReason()
-		segIdx.IndexSize = taskInfo.GetSerializedSize()
+		segIdx.IndexSerializedSize = taskInfo.GetSerializedSize()
+		segIdx.IndexMemSize = taskInfo.GetMemSize()
 		segIdx.CurrentIndexVersion = taskInfo.GetCurrentIndexVersion()
 		segIdx.FinishedUTCTime = uint64(time.Now().Unix())
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
@@ -885,8 +890,8 @@ func (m *indexMeta) SetStoredIndexFileSizeMetric(collections map[UniqueID]*colle
 		coll, ok := collections[segmentIdx.CollectionID]
 		if ok {
 			metrics.DataCoordStoredIndexFilesSize.WithLabelValues(coll.DatabaseName, coll.Schema.GetName(),
-				fmt.Sprint(segmentIdx.CollectionID)).Add(float64(segmentIdx.IndexSize))
-			total += segmentIdx.IndexSize
+				fmt.Sprint(segmentIdx.CollectionID)).Add(float64(segmentIdx.IndexSerializedSize))
+			total += segmentIdx.IndexSerializedSize
 		}
 	}
 	return total
@@ -1135,7 +1140,7 @@ func (m *indexMeta) GetSegmentIndexedFields(collectionID UniqueID, segmentID Uni
 				IndexFieldID: index.IndexID,
 				IndexID:      index.IndexID,
 				BuildID:      buildID,
-				IndexSize:    int64(si.IndexSize),
+				IndexSize:    int64(si.IndexSerializedSize),
 			})
 		}
 	}

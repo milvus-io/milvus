@@ -23,13 +23,11 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -359,7 +357,7 @@ func TestGetLeaderView(t *testing.T) {
 	manager.Update(2, leaderView2)
 
 	// Call GetLeaderView
-	leaderViews := manager.GetLeaderView()
+	leaderViews := manager.GetLeaderView(0)
 	jsonOutput, err := json.Marshal(leaderViews)
 	assert.NoError(t, err)
 
@@ -368,7 +366,6 @@ func TestGetLeaderView(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, result, 2)
 
-	log.Info("====", zap.Any("result", result))
 	checkResult := func(lv *metricsinfo.LeaderView) {
 		if lv.LeaderID == 1 {
 			assert.Equal(t, int64(100), lv.CollectionID)
@@ -394,4 +391,10 @@ func TestGetLeaderView(t *testing.T) {
 	for _, lv := range result {
 		checkResult(lv)
 	}
+
+	leaderViews = manager.GetLeaderView(1)
+	assert.Len(t, leaderViews, 0)
+
+	leaderViews = manager.GetLeaderView(100)
+	assert.Len(t, leaderViews, 1)
 }

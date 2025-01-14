@@ -10,15 +10,15 @@ import (
 
 	grpc "google.golang.org/grpc"
 
-	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 
-	proxypb "github.com/milvus-io/milvus/internal/proto/proxypb"
+	proxypb "github.com/milvus-io/milvus/pkg/proto/proxypb"
 
-	rootcoordpb "github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	rootcoordpb "github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 
 	txnkv "github.com/tikv/client-go/v2/txnkv"
 

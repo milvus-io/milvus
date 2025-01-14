@@ -29,8 +29,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -43,8 +43,8 @@ func newCompactionTaskStats(task *datapb.CompactionTask) *metricsinfo.Compaction
 		Type:         task.Type.String(),
 		State:        task.State.String(),
 		FailReason:   task.FailReason,
-		StartTime:    typeutil.TimestampToString(uint64(task.StartTime)),
-		EndTime:      typeutil.TimestampToString(uint64(task.EndTime)),
+		StartTime:    typeutil.TimestampToString(uint64(task.StartTime) * 1000),
+		EndTime:      typeutil.TimestampToString(uint64(task.EndTime) * 1000),
 		TotalRows:    task.TotalRows,
 		InputSegments: lo.Map(task.InputSegments, func(t int64, i int) string {
 			return strconv.FormatInt(t, 10)

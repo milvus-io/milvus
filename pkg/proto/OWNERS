@@ -1,0 +1,25 @@
+filters:
+  ".*":
+    reviewers:
+      - fishpenguin
+      - godchen0212
+      - xige-16
+      - FluorineDog
+      - XuanYang-cn
+      - czs007
+      - bigsheeper
+      - sunby
+    approvers:
+      - maintainers
+
+  "{common|milvus|schema}\\.proto":
+    labels:
+      - area/api
+    approvers:
+      - maintainers
+
+  "{data_coord|index_coord|internal|proxy|query_coord|root_coord|streaming|messages}\\.proto":
+    labels:
+      - area/internal-api
+    approvers:
+      - maintainers

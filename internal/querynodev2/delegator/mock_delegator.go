@@ -5,12 +5,12 @@ package delegator
 import (
 	context "context"
 
-	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
 	mock "github.com/stretchr/testify/mock"
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 
-	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
+	querypb "github.com/milvus-io/milvus/pkg/proto/querypb"
 
 	streamrpc "github.com/milvus-io/milvus/internal/util/streamrpc"
 )
