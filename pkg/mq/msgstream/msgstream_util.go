@@ -147,13 +147,16 @@ func KafkaHealthCheck(clusterStatus *pcommon.MQClusterStatus) {
 
 func GetPorperties(msg TsMsg) map[string]string {
 	properties := map[string]string{}
-
-	properties[common.ChannelTypeKey] = msg.Position().GetChannelName()
+	properties[common.ChannelTypeKey] = msg.VChannel()
 	properties[common.MsgTypeKey] = msg.Type().String()
+	properties[common.MsgIdTypeKey] = strconv.FormatInt(msg.ID(), 10)
+	properties[common.CollectionIDTypeKey] = strconv.FormatInt(msg.CollID(), 10)
 	msgBase, ok := msg.(interface{ GetBase() *commonpb.MsgBase })
 	if ok {
 		properties[common.TimestampTypeKey] = strconv.FormatUint(msgBase.GetBase().GetTimestamp(), 10)
-		properties[common.ReplicateIDTypeKey] = msgBase.GetBase().GetReplicateInfo().GetReplicateID()
+		if msgBase.GetBase().GetReplicateInfo() != nil {
+			properties[common.ReplicateIDTypeKey] = msgBase.GetBase().GetReplicateInfo().GetReplicateID()
+		}
 	}
 
 	return properties

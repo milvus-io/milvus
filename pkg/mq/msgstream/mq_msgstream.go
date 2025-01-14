@@ -472,7 +472,7 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 			}
 
 			pos := &msgpb.MsgPosition{
-				ChannelName: packMsg.GetChannel(),
+				ChannelName: filepath.Base(msg.Topic()),
 				MsgID:       packMsg.GetMessageID(),
 				MsgGroup:    consumer.Subscription(),
 				Timestamp:   packMsg.GetTimestamp(),
@@ -767,7 +767,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 					if len(tempBuffer) > 0 {
 						// if tempBuffer is not empty, use tempBuffer[0] to seek
 						newPos = &msgpb.MsgPosition{
-							ChannelName: tempBuffer[0].GetChannel(),
+							ChannelName: tempBuffer[0].GetPChannel(),
 							MsgID:       tempBuffer[0].GetMessageID(),
 							Timestamp:   currTs,
 							MsgGroup:    consumer.Subscription(),
@@ -776,7 +776,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 					} else if timeTickMsg != nil {
 						// if tempBuffer is empty, use timeTickMsg to seek
 						newPos = &msgpb.MsgPosition{
-							ChannelName: timeTickMsg.GetChannel(),
+							ChannelName: timeTickMsg.GetPChannel(),
 							MsgID:       timeTickMsg.GetMessageID(),
 							Timestamp:   currTs,
 							MsgGroup:    consumer.Subscription(),

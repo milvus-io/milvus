@@ -19,6 +19,7 @@ package msgstream
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"sync"
 
@@ -73,9 +74,11 @@ type PackMsg interface {
 
 	GetSize() int
 	GetTimestamp() uint64
-	GetChannel() string
+	GetVChannel() string
+	GetPChannel() string
 	GetMessageID() []byte
 	GetID() int64
+	GetCollectionID() string
 	GetType() commonpb.MsgType
 	GetReplicateID() string
 
@@ -93,7 +96,11 @@ func (m *UnmarshalledMsg) GetTimestamp() uint64 {
 	return m.msg.BeginTs()
 }
 
-func (m *UnmarshalledMsg) GetChannel() string {
+func (m *UnmarshalledMsg) GetVChannel() string {
+	return m.msg.VChannel()
+}
+
+func (m *UnmarshalledMsg) GetPChannel() string {
 	return m.msg.Position().GetChannelName()
 }
 
@@ -103,6 +110,10 @@ func (m *UnmarshalledMsg) GetMessageID() []byte {
 
 func (m *UnmarshalledMsg) GetID() int64 {
 	return m.msg.ID()
+}
+
+func (m *UnmarshalledMsg) GetCollectionID() string {
+	return strconv.FormatInt(m.msg.CollID(), 10)
 }
 
 func (m *UnmarshalledMsg) GetType() commonpb.MsgType {
@@ -141,22 +152,27 @@ func (m *UnmarshalledMsg) Unmarshal(unmarshalDispatcher UnmarshalDispatcher) (Ts
 // MarshaledMsg pack marshaled tsMsg
 // and parse properties
 type MarshaledMsg struct {
-	msg         common.Message
-	pos         *MsgPosition
-	msgType     MsgType
-	msgID       int64
-	timestamp   uint64
-	vchannel    string
-	replicateID string
-	traceCtx    context.Context
+	msg          common.Message
+	pos          *MsgPosition
+	msgType      MsgType
+	msgID        int64
+	timestamp    uint64
+	vchannel     string
+	collectionID string
+	replicateID  string
+	traceCtx     context.Context
 }
 
 func (m *MarshaledMsg) GetTimestamp() uint64 {
 	return m.timestamp
 }
 
-func (m *MarshaledMsg) GetChannel() string {
+func (m *MarshaledMsg) GetVChannel() string {
 	return m.vchannel
+}
+
+func (m *MarshaledMsg) GetPChannel() string {
+	return filepath.Base(m.msg.Topic())
 }
 
 func (m *MarshaledMsg) GetMessageID() []byte {
@@ -165,6 +181,10 @@ func (m *MarshaledMsg) GetMessageID() []byte {
 
 func (m *MarshaledMsg) GetID() int64 {
 	return m.msgID
+}
+
+func (m *MarshaledMsg) GetCollectionID() string {
+	return m.collectionID
 }
 
 func (m *MarshaledMsg) GetType() commonpb.MsgType {
@@ -205,7 +225,12 @@ func NewMarshaledMsg(msg common.Message, group string) (PackMsg, error) {
 	properties := msg.Properties()
 	vchannel, ok := properties[common.ChannelTypeKey]
 	if !ok {
-		return nil, fmt.Errorf("get channel namse from msg properties failed")
+		return nil, fmt.Errorf("get channel name from msg properties failed")
+	}
+
+	collID, ok := properties[common.CollectionIDTypeKey]
+	if !ok {
+		return nil, fmt.Errorf("get collection ID from msg properties failed")
 	}
 
 	tsStr, ok := properties[common.TimestampTypeKey]
@@ -219,6 +244,17 @@ func NewMarshaledMsg(msg common.Message, group string) (PackMsg, error) {
 		return nil, fmt.Errorf("parse minTs from msg properties failed")
 	}
 
+	idStr, ok := properties[common.MsgIdTypeKey]
+	if !ok {
+		return nil, fmt.Errorf("get msgType from msg properties failed")
+	}
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		log.Warn("parse message properties minTs failed, unknown message", zap.Error(err))
+		return nil, fmt.Errorf("parse minTs from msg properties failed")
+	}
+
 	val, ok := properties[common.MsgTypeKey]
 	if !ok {
 		return nil, fmt.Errorf("get msgType from msg properties failed")
@@ -226,10 +262,12 @@ func NewMarshaledMsg(msg common.Message, group string) (PackMsg, error) {
 	msgType := commonpb.MsgType(commonpb.MsgType_value[val])
 
 	result := &MarshaledMsg{
-		msg:       msg,
-		timestamp: timestamp,
-		msgType:   msgType,
-		vchannel:  vchannel,
+		msg:          msg,
+		msgID:        id,
+		collectionID: collID,
+		timestamp:    timestamp,
+		msgType:      msgType,
+		vchannel:     vchannel,
 	}
 
 	replicateID, ok := properties[common.ReplicateIDTypeKey]

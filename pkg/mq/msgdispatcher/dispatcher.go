@@ -281,12 +281,12 @@ func (d *Dispatcher) groupAndParseMsgs(pack *msgstream.ConsumeMsgPack, unmarshal
 		var vchannel, collectionID string
 
 		if msg.GetType() == commonpb.MsgType_Insert || msg.GetType() == commonpb.MsgType_Delete {
-			vchannel = msg.GetChannel()
+			vchannel = msg.GetVChannel()
 		} else if msg.GetType() == commonpb.MsgType_CreateCollection ||
 			msg.GetType() == commonpb.MsgType_DropCollection ||
 			msg.GetType() == commonpb.MsgType_CreatePartition ||
 			msg.GetType() == commonpb.MsgType_DropPartition {
-			collectionID = msg.GetChannel() // TODO AOIASD
+			collectionID = msg.GetCollectionID()
 		}
 
 		if vchannel == "" {

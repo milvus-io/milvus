@@ -75,10 +75,12 @@ const (
 )
 
 const (
-	MsgTypeKey         = "msg_type"
-	TimestampTypeKey   = "timestamp"
-	ChannelTypeKey     = "vchannel"
-	ReplicateIDTypeKey = "replicate_id"
+	MsgTypeKey          = "msg_type"
+	MsgIdTypeKey        = "msg_id"
+	TimestampTypeKey    = "timestamp"
+	ChannelTypeKey      = "vchannel"
+	CollectionIDTypeKey = "collection_id"
+	ReplicateIDTypeKey  = "replicate_id"
 )
 
 func GetMsgType(msg Message) (commonpb.MsgType, error) {
