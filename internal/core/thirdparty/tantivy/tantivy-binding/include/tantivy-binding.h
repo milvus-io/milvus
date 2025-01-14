@@ -23,6 +23,8 @@ extern "C" {
 
 void free_rust_array(RustArray array);
 
+void print_vector_of_strings(const char *const *ptr, uintptr_t len);
+
 void *tantivy_load_index(const char *path);
 
 void tantivy_free_index_reader(void *ptr);
@@ -114,7 +116,5 @@ void tantivy_index_add_multi_bools(void *ptr, const bool *array, uintptr_t len);
 void tantivy_index_add_multi_keywords(void *ptr, const char *const *array, uintptr_t len);
 
 bool tantivy_index_exist(const char *path);
-
-void print_vector_of_strings(const char *const *ptr, uintptr_t len);
 
 } // extern "C"
