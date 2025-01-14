@@ -23,6 +23,7 @@
 
 #include "common/Types.h"
 #include "common/type_c.h"
+#include "common/VectorTrait.h"
 #include "pb/plan.pb.h"
 #include "segcore/Collection.h"
 #include "segcore/reduce/Reduce.h"
@@ -32,7 +33,6 @@
 #include "futures/future_c.h"
 #include "DataGen.h"
 #include "PbHelper.h"
-#include "c_api_test_utils.h"
 #include "indexbuilder_test_utils.h"
 
 using namespace milvus;
@@ -66,26 +66,30 @@ generate_max_float_query_data(int all_nq, int max_float_nq) {
     return blob;
 }
 
+template <class TraitType = milvus::FloatVector>
 std::string
 generate_query_data(int nq) {
     namespace ser = milvus::proto::common;
+    GET_ELEM_TYPE_FOR_VECTOR_TRAIT
+
     std::default_random_engine e(67);
     int dim = DIM;
-    std::normal_distribution<double> dis(0.0, 1.0);
+    std::uniform_int_distribution<int8_t> dis(-128, 127);
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::FloatVector);
+    value->set_type(TraitType::placeholder_type);
     for (int i = 0; i < nq; ++i) {
-        std::vector<float> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(dis(e));
+        std::vector<elem_type> vec;
+        for (int d = 0; d < dim / TraitType::dim_factor; ++d) {
+            vec.push_back((elem_type)dis(e));
         }
-        value->add_values(vec.data(), vec.size() * sizeof(float));
+        value->add_values(vec.data(), vec.size() * sizeof(elem_type));
     }
     auto blob = raw_group.SerializeAsString();
     return blob;
 }
+
 void
 CheckSearchResultDuplicate(const std::vector<CSearchResult>& results,
                            int group_size = 1) {
@@ -117,13 +121,14 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results,
     }
 }
 
-const char*
+template <class TraitType = milvus::FloatVector>
+const std::string
 get_default_schema_config() {
-    static std::string conf = R"(name: "default-collection"
+    auto fmt = boost::format(R"(name: "default-collection"
                                 fields: <
                                   fieldID: 100
                                   name: "fakevec"
-                                  data_type: FloatVector
+                                  data_type: %1%
                                   type_params: <
                                     key: "dim"
                                     value: "16"
@@ -138,9 +143,9 @@ get_default_schema_config() {
                                   name: "age"
                                   data_type: Int64
                                   is_primary_key: true
-                                >)";
-    static std::string fake_conf = "";
-    return conf.c_str();
+                                >)") %
+               (int(TraitType::data_type));
+    return fmt.str();
 }
 
 const char*

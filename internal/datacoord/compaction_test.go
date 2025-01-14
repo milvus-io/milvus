@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -67,7 +67,9 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 
 func (s *CompactionPlanHandlerSuite) TestScheduleEmpty() {
 	s.SetupTest()
-	s.handler.schedule()
+
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	s.handler.schedule(assigner)
 	s.Empty(s.handler.executingTasks)
 }
 
@@ -228,7 +230,8 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 				s.handler.submitTask(t)
 			}
 
-			gotTasks := s.handler.schedule()
+			assigner := newSlotBasedNodeAssigner(s.cluster)
+			gotTasks := s.handler.schedule(assigner)
 			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
 				return t.GetTaskProto().GetPlanID()
 			}))
@@ -301,8 +304,8 @@ func (s *CompactionPlanHandlerSuite) TestScheduleWithSlotLimit() {
 				t.SetPlan(test.plans[i])
 				s.handler.submitTask(t)
 			}
-
-			gotTasks := s.handler.schedule()
+			assigner := newSlotBasedNodeAssigner(s.cluster)
+			gotTasks := s.handler.schedule(assigner)
 			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
 				return t.GetTaskProto().GetPlanID()
 			}))
@@ -437,8 +440,8 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 			for _, t := range test.tasks {
 				s.handler.submitTask(t)
 			}
-
-			gotTasks := s.handler.schedule()
+			assigner := newSlotBasedNodeAssigner(s.cluster)
+			gotTasks := s.handler.schedule(assigner)
 			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
 				return t.GetTaskProto().GetPlanID()
 			}))
@@ -448,39 +451,40 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 
 func (s *CompactionPlanHandlerSuite) TestPickAnyNode() {
 	s.SetupTest()
-	nodeSlots := map[int64]int64{
+
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	assigner.slots = map[int64]int64{
 		100: 16,
 		101: 23,
 	}
 
 	task1 := newMixCompactionTask(&datapb.CompactionTask{
 		Type: datapb.CompactionType_MixCompaction,
-	}, nil, nil, nil)
+	}, nil, s.mockMeta, nil)
 	task1.slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
-	node, useSlot := pickAnyNode(nodeSlots, task1)
-	s.Equal(int64(101), node)
-	nodeSlots[node] = nodeSlots[node] - useSlot
+	ok := assigner.assign(task1)
+	s.Equal(true, ok)
+	s.Equal(int64(101), task1.GetTaskProto().GetNodeID())
 
 	task2 := newMixCompactionTask(&datapb.CompactionTask{
 		Type: datapb.CompactionType_MixCompaction,
-	}, nil, nil, nil)
+	}, nil, s.mockMeta, nil)
 	task2.slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
-
-	node, useSlot = pickAnyNode(nodeSlots, task2)
-	s.Equal(int64(100), node)
-	nodeSlots[node] = nodeSlots[node] - useSlot
+	ok = assigner.assign(task2)
+	s.Equal(true, ok)
+	s.Equal(int64(100), task2.GetTaskProto().GetNodeID())
 
 	task3 := newMixCompactionTask(&datapb.CompactionTask{
 		Type: datapb.CompactionType_MixCompaction,
-	}, nil, nil, nil)
+	}, nil, s.mockMeta, nil)
 	task3.slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
 
-	node, useSlot = pickAnyNode(nodeSlots, task3)
-	s.Equal(int64(101), node)
-	nodeSlots[node] = nodeSlots[node] - useSlot
+	ok = assigner.assign(task3)
+	s.Equal(true, ok)
+	s.Equal(int64(101), task3.GetTaskProto().GetNodeID())
 
-	node, useSlot = pickAnyNode(map[int64]int64{}, &mixCompactionTask{})
-	s.Equal(int64(NullNodeID), node)
+	ok = assigner.assign(&mixCompactionTask{})
+	s.Equal(false, ok)
 }
 
 func (s *CompactionPlanHandlerSuite) TestPickAnyNodeSlotUsageShouldNotBeZero() {
@@ -491,11 +495,12 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNodeSlotUsageShouldNotBeZero() {
 	}
 	task1 := newMixCompactionTask(&datapb.CompactionTask{
 		Type: datapb.CompactionType_MixCompaction,
-	}, nil, nil, nil)
+	}, nil, s.mockMeta, nil)
 	task1.slotUsage = 0
-	nodeID, useSlot := pickAnyNode(nodeSlots, task1)
-	s.Equal(int64(NullNodeID), nodeID)
-	s.Equal(int64(0), useSlot)
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	assigner.slots = nodeSlots
+	ok := assigner.assign(task1)
+	s.Equal(false, ok)
 }
 
 func (s *CompactionPlanHandlerSuite) TestPickAnyNodeForClusteringTask() {
@@ -509,23 +514,26 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNodeForClusteringTask() {
 
 	task1 := newClusteringCompactionTask(&datapb.CompactionTask{
 		Type: datapb.CompactionType_ClusteringCompaction,
-	}, nil, nil, nil, nil, nil)
+	}, nil, s.mockMeta, nil, nil, nil)
 	task1.slotUsage = paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
 
 	task2 := newClusteringCompactionTask(&datapb.CompactionTask{
 		Type: datapb.CompactionType_ClusteringCompaction,
-	}, nil, nil, nil, nil, nil)
+	}, nil, s.mockMeta, nil, nil, nil)
 	task2.slotUsage = paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
 
 	executingTasks[1] = task1
 	executingTasks[2] = task2
 	s.handler.executingTasks = executingTasks
-	node, useSlot := pickAnyNode(nodeSlots, task1)
-	s.Equal(int64(101), node)
-	nodeSlots[node] = nodeSlots[node] - useSlot
 
-	node, useSlot = pickAnyNode(nodeSlots, task2)
-	s.Equal(int64(NullNodeID), node)
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	assigner.slots = nodeSlots
+	ok := assigner.assign(task1)
+	s.Equal(true, ok)
+	s.Equal(int64(101), task1.GetTaskProto().GetNodeID())
+
+	ok = assigner.assign(task2)
+	s.Equal(false, ok)
 }
 
 func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
@@ -623,7 +631,8 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 		s.handler.submitTask(t)
 	}
 
-	s.handler.schedule()
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	s.handler.schedule(assigner)
 
 	info := s.handler.getCompactionInfo(context.TODO(), 1)
 	s.Equal(1, info.completedCnt)
@@ -804,9 +813,10 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		s.handler.submitTask(t)
 	}
 
-	s.handler.schedule()
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	s.handler.schedule(assigner)
 	// time.Sleep(2 * time.Second)
-	s.handler.checkCompaction()
+	s.handler.checkCompaction(assigner)
 
 	t := s.handler.getCompactionTask(1)
 	s.NotNil(t)
@@ -938,8 +948,10 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 	s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
 
 	s.handler.submitTask(task)
-	s.handler.schedule()
-	err := s.handler.checkCompaction()
+
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	s.handler.schedule(assigner)
+	err := s.handler.checkCompaction(assigner)
 	s.NoError(err)
 }
 
@@ -982,7 +994,9 @@ func (s *CompactionPlanHandlerSuite) TestCleanCompaction() {
 
 		s.handler.executingTasks[1] = task
 		s.Equal(1, len(s.handler.executingTasks))
-		err := s.handler.checkCompaction()
+
+		assigner := newSlotBasedNodeAssigner(s.cluster)
+		err := s.handler.checkCompaction(assigner)
 		s.NoError(err)
 		s.Equal(0, len(s.handler.executingTasks))
 		s.Equal(1, len(s.handler.cleaningTasks))
@@ -1013,8 +1027,9 @@ func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompaction() {
 	s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
 
 	s.handler.executingTasks[1] = task
+	assigner := newSlotBasedNodeAssigner(s.cluster)
 	s.Equal(1, len(s.handler.executingTasks))
-	s.handler.checkCompaction()
+	s.handler.checkCompaction(assigner)
 	s.Equal(0, len(s.handler.executingTasks))
 	s.Equal(1, len(s.handler.cleaningTasks))
 	s.handler.cleanFailedTasks()
@@ -1061,7 +1076,9 @@ func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompactionCommitFail() {
 	s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
 	s.handler.executingTasks[1] = task
 	s.Equal(1, len(s.handler.executingTasks))
-	s.handler.checkCompaction()
+
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	s.handler.checkCompaction(assigner)
 	s.Equal(0, len(task.GetTaskProto().GetResultSegments()))
 
 	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
@@ -1104,8 +1121,10 @@ func (s *CompactionPlanHandlerSuite) TestKeepClean() {
 		s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
 
 		s.handler.executingTasks[1] = task
+
+		assigner := newSlotBasedNodeAssigner(s.cluster)
 		s.Equal(1, len(s.handler.executingTasks))
-		s.handler.checkCompaction()
+		s.handler.checkCompaction(assigner)
 		s.Equal(0, len(s.handler.executingTasks))
 		s.Equal(1, len(s.handler.cleaningTasks))
 		s.handler.cleanFailedTasks()

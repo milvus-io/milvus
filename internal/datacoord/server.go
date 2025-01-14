@@ -47,7 +47,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -56,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -1170,11 +1170,7 @@ func (s *Server) registerMetricsRequest() {
 
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.IndexKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			v := jsonReq.Get(metricsinfo.MetricRequestParamCollectionIDKey)
-			collectionID := int64(0)
-			if v.Exists() {
-				collectionID = v.Int()
-			}
+			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
 			return s.meta.indexMeta.GetIndexJSON(collectionID), nil
 		})
 	log.Ctx(s.ctx).Info("register metrics actions finished")

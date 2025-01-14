@@ -9,7 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -506,6 +506,41 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 					ColumnInfo: columnInfo,
 					Op:         planpb.OpType_TextMatch,
 					Value:      NewString(queryText),
+				},
+			},
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interface{} {
+	column, err := v.translateIdentifier(ctx.Identifier().GetText())
+	if err != nil {
+		return err
+	}
+	if !typeutil.IsStringType(column.dataType) {
+		return fmt.Errorf("phrase match operation on non-string is unsupported")
+	}
+	queryText, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	if err != nil {
+		return err
+	}
+	var slop int64
+	if ctx.IntegerConstant() != nil {
+		slop, err = strconv.ParseInt(ctx.IntegerConstant().GetText(), 10, 64)
+		if err != nil {
+			return err
+		}
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_UnaryRangeExpr{
+				UnaryRangeExpr: &planpb.UnaryRangeExpr{
+					ColumnInfo:  toColumnInfo(column),
+					Op:          planpb.OpType_PhraseMatch,
+					Value:       NewString(queryText),
+					ExtraValues: []*planpb.GenericValue{NewInt(slop)},
 				},
 			},
 		},

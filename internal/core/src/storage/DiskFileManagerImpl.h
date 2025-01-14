@@ -110,6 +110,11 @@ class DiskFileManagerImpl : public FileManagerImpl {
         return GetRemoteIndexObjectPrefix();
     }
 
+    size_t
+    GetAddedTotalFileSize() const {
+        return added_total_file_size_;
+    }
+
  private:
     int64_t
     GetIndexBuildId() {
@@ -131,6 +136,8 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     // remote file path
     std::map<std::string, int64_t> remote_paths_to_size_;
+
+    size_t added_total_file_size_ = 0;
 };
 
 using DiskANNFileManagerImplPtr = std::shared_ptr<DiskFileManagerImpl>;
