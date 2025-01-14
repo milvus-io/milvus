@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.rootcoord;
 
-option go_package="github.com/milvus-io/milvus/internal/proto/rootcoordpb";
+option go_package="github.com/milvus-io/milvus/pkg/proto/rootcoordpb";
 
 import "common.proto";
 import "milvus.proto";

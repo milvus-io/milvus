@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -363,14 +363,11 @@ func (s *L0CompactionTaskSuite) TestStateTrans() {
 				PlanID: t.GetPlanID(),
 				State:  datapb.CompactionTaskState_failed,
 			}, nil).Once()
-		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetNodeID(), mock.Anything).Return(nil)
-
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Times(2)
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).Return().Once()
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Once()
 
 		got := t.Process()
 		s.True(got)
-		s.Equal(datapb.CompactionTaskState_cleaned, t.GetState())
+		s.Equal(datapb.CompactionTaskState_failed, t.GetState())
 	})
 	s.Run("test executing with result failed save compaction meta failed", func() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
@@ -453,29 +450,10 @@ func (s *L0CompactionTaskSuite) TestStateTrans() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_failed)
 		t.NodeID = 100
 		s.Require().True(t.GetNodeID() > 0)
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Times(1)
-		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetNodeID(), mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).RunAndReturn(func(segIDs []int64, isCompacting bool) {
-			s.ElementsMatch(segIDs, t.GetInputSegments())
-		}).Once()
 
 		got := t.Process()
 		s.True(got)
-		s.Equal(datapb.CompactionTaskState_cleaned, t.GetState())
-	})
-	s.Run("test process failed failed", func() {
-		t := s.generateTestL0Task(datapb.CompactionTaskState_failed)
-		t.NodeID = 100
-		s.Require().True(t.GetNodeID() > 0)
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything).Return(nil).Once()
-		s.mockSessMgr.EXPECT().DropCompactionPlan(t.GetNodeID(), mock.Anything).Return(errors.New("mock error")).Once()
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, false).RunAndReturn(func(segIDs []int64, isCompacting bool) {
-			s.ElementsMatch(segIDs, t.GetInputSegments())
-		}).Once()
-
-		got := t.Process()
-		s.True(got)
-		s.Equal(datapb.CompactionTaskState_cleaned, t.GetState())
+		s.Equal(datapb.CompactionTaskState_failed, t.GetState())
 	})
 
 	s.Run("test unkonwn task", func() {

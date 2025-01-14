@@ -3,7 +3,7 @@
 package metacache
 
 import (
-	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
