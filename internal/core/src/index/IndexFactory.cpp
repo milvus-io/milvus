@@ -35,10 +35,13 @@ namespace milvus::index {
 template <typename T>
 ScalarIndexPtr<T>
 IndexFactory::CreatePrimitiveScalarIndex(
-    const IndexType& index_type,
+    const CreateIndexInfo& create_index_info,
     const storage::FileManagerContext& file_manager_context) {
+    auto index_type = create_index_info.index_type;
     if (index_type == INVERTED_INDEX_TYPE) {
-        return std::make_unique<InvertedIndexTantivy<T>>(file_manager_context);
+        return std::make_unique<InvertedIndexTantivy<T>>(
+            file_manager_context,
+            create_index_info.inverted_list_single_segment);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
         return std::make_unique<BitmapIndex<T>>(file_manager_context);
@@ -59,12 +62,14 @@ IndexFactory::CreatePrimitiveScalarIndex(
 template <>
 ScalarIndexPtr<std::string>
 IndexFactory::CreatePrimitiveScalarIndex<std::string>(
-    const IndexType& index_type,
+    const CreateIndexInfo& create_index_info,
     const storage::FileManagerContext& file_manager_context) {
+    auto index_type = create_index_info.index_type;
 #if defined(__linux__) || defined(__APPLE__)
     if (index_type == INVERTED_INDEX_TYPE) {
         return std::make_unique<InvertedIndexTantivy<std::string>>(
-            file_manager_context);
+            file_manager_context,
+            create_index_info.inverted_list_single_segment);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
         return std::make_unique<BitmapIndex<std::string>>(file_manager_context);
@@ -294,37 +299,37 @@ IndexFactory::CreateIndex(
 IndexBasePtr
 IndexFactory::CreatePrimitiveScalarIndex(
     DataType data_type,
-    IndexType index_type,
+    const CreateIndexInfo& create_index_info,
     const storage::FileManagerContext& file_manager_context) {
     switch (data_type) {
         // create scalar index
         case DataType::BOOL:
-            return CreatePrimitiveScalarIndex<bool>(index_type,
+            return CreatePrimitiveScalarIndex<bool>(create_index_info,
                                                     file_manager_context);
         case DataType::INT8:
-            return CreatePrimitiveScalarIndex<int8_t>(index_type,
+            return CreatePrimitiveScalarIndex<int8_t>(create_index_info,
                                                       file_manager_context);
         case DataType::INT16:
-            return CreatePrimitiveScalarIndex<int16_t>(index_type,
+            return CreatePrimitiveScalarIndex<int16_t>(create_index_info,
                                                        file_manager_context);
         case DataType::INT32:
-            return CreatePrimitiveScalarIndex<int32_t>(index_type,
+            return CreatePrimitiveScalarIndex<int32_t>(create_index_info,
                                                        file_manager_context);
         case DataType::INT64:
-            return CreatePrimitiveScalarIndex<int64_t>(index_type,
+            return CreatePrimitiveScalarIndex<int64_t>(create_index_info,
                                                        file_manager_context);
         case DataType::FLOAT:
-            return CreatePrimitiveScalarIndex<float>(index_type,
+            return CreatePrimitiveScalarIndex<float>(create_index_info,
                                                      file_manager_context);
         case DataType::DOUBLE:
-            return CreatePrimitiveScalarIndex<double>(index_type,
+            return CreatePrimitiveScalarIndex<double>(create_index_info,
                                                       file_manager_context);
 
             // create string index
         case DataType::STRING:
         case DataType::VARCHAR:
             return CreatePrimitiveScalarIndex<std::string>(
-                index_type, file_manager_context);
+                create_index_info, file_manager_context);
         default:
             PanicInfo(
                 DataTypeInvalid,
@@ -334,14 +339,15 @@ IndexFactory::CreatePrimitiveScalarIndex(
 
 IndexBasePtr
 IndexFactory::CreateCompositeScalarIndex(
-    IndexType index_type,
+    const CreateIndexInfo& create_index_info,
     const storage::FileManagerContext& file_manager_context) {
+    auto index_type = create_index_info.index_type;
     if (index_type == HYBRID_INDEX_TYPE || index_type == BITMAP_INDEX_TYPE ||
         index_type == INVERTED_INDEX_TYPE) {
         auto element_type = static_cast<DataType>(
             file_manager_context.fieldDataMeta.field_schema.element_type());
         return CreatePrimitiveScalarIndex(
-            element_type, index_type, file_manager_context);
+            element_type, create_index_info, file_manager_context);
     } else {
         PanicInfo(
             Unsupported,
@@ -373,9 +379,9 @@ IndexFactory::CreateScalarIndex(
         case DataType::VARCHAR:
         case DataType::STRING:
             return CreatePrimitiveScalarIndex(
-                data_type, create_index_info.index_type, file_manager_context);
+                data_type, create_index_info, file_manager_context);
         case DataType::ARRAY: {
-            return CreateCompositeScalarIndex(create_index_info.index_type,
+            return CreateCompositeScalarIndex(create_index_info,
                                               file_manager_context);
         }
         case DataType::JSON: {

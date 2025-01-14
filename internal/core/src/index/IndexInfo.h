@@ -26,6 +26,7 @@ struct CreateIndexInfo {
     IndexVersion index_engine_version;
     std::string field_name;
     int64_t dim;
+    bool inverted_list_single_segment;
 };
 
 }  // namespace milvus::index

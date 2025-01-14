@@ -151,8 +151,12 @@ TEST_F(StringIndexMarisaTest, Range) {
 TEST_F(StringIndexMarisaTest, Reverse) {
     auto index_types = GetIndexTypes<std::string>();
     for (const auto& index_type : index_types) {
-        auto index = milvus::index::IndexFactory::GetInstance()
-                         .CreatePrimitiveScalarIndex<std::string>(index_type);
+        CreateIndexInfo create_index_info{
+            .index_type = index_type,
+        };
+        auto index =
+            milvus::index::IndexFactory::GetInstance()
+                .CreatePrimitiveScalarIndex<std::string>(create_index_info);
         index->Build(nb, strs.data());
         assert_reverse<std::string>(index.get(), strs);
     }
