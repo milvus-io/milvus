@@ -5,8 +5,8 @@ package mockrootcoord
 import (
 	context "context"
 
-	etcdpb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
+	etcdpb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
+	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
