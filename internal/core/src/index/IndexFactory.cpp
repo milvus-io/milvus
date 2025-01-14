@@ -41,7 +41,7 @@ IndexFactory::CreatePrimitiveScalarIndex(
     if (index_type == INVERTED_INDEX_TYPE) {
         return std::make_unique<InvertedIndexTantivy<T>>(
             file_manager_context,
-            create_index_info.inverted_list_single_segment);
+            create_index_info.inverted_index_single_segment);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
         return std::make_unique<BitmapIndex<T>>(file_manager_context);
@@ -69,7 +69,7 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
     if (index_type == INVERTED_INDEX_TYPE) {
         return std::make_unique<InvertedIndexTantivy<std::string>>(
             file_manager_context,
-            create_index_info.inverted_list_single_segment);
+            create_index_info.inverted_index_single_segment);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
         return std::make_unique<BitmapIndex<std::string>>(file_manager_context);

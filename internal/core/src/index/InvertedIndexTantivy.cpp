@@ -84,15 +84,15 @@ InvertedIndexTantivy<T>::InitForBuildIndex() {
                   path_);
     }
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        field.c_str(), d_type_, path_.c_str(), inverted_list_single_segment_);
+        field.c_str(), d_type_, path_.c_str(), inverted_index_single_segment_);
 }
 
 template <typename T>
 InvertedIndexTantivy<T>::InvertedIndexTantivy(
-    const storage::FileManagerContext& ctx, bool inverted_list_single_segment)
+    const storage::FileManagerContext& ctx, bool inverted_index_single_segment)
     : ScalarIndex<T>(INVERTED_INDEX_TYPE),
       schema_(ctx.fieldDataMeta.field_schema),
-      inverted_list_single_segment_(inverted_list_single_segment) {
+      inverted_index_single_segment_(inverted_index_single_segment) {
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     // push init wrapper to load process
@@ -417,12 +417,12 @@ InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
     boost::filesystem::create_directories(path_);
     d_type_ = get_tantivy_data_type(schema_);
     std::string field = "test_inverted_index";
-    if (config.contains("inverted_list_single_segment")) {
-        inverted_list_single_segment_ = true;
+    if (config.contains("inverted_index_single_segment")) {
+        inverted_index_single_segment_ = true;
     }
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        field.c_str(), d_type_, path_.c_str(), inverted_list_single_segment_);
-    if (!inverted_list_single_segment_) {
+        field.c_str(), d_type_, path_.c_str(), inverted_index_single_segment_);
+    if (!inverted_index_single_segment_) {
         if (config.find("is_array") != config.end()) {
             // only used in ut.
             auto arr = static_cast<const boost::container::vector<T>*>(values);
@@ -473,8 +473,8 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         case proto::schema::DataType::String:
         case proto::schema::DataType::VarChar: {
             // Generally, we will not build inverted index with single segment except for building index
-            // for query node with older version(2.4). See more comments above `inverted_list_single_segment_`.
-            if (!inverted_list_single_segment_) {
+            // for query node with older version(2.4). See more comments above `inverted_index_single_segment_`.
+            if (!inverted_index_single_segment_) {
                 int64_t offset = 0;
                 if (schema_.nullable()) {
                     for (const auto& data : field_datas) {

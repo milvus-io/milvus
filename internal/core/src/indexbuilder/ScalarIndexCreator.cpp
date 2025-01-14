@@ -30,8 +30,8 @@ ScalarIndexCreator::ScalarIndexCreator(
     if (config.contains("index_type")) {
         index_type_ = config.at("index_type").get<std::string>();
     }
-    if (config.contains("inverted_list_single_segment")) {
-        index_info.inverted_list_single_segment = true;
+    if (config.contains("inverted_index_single_segment")) {
+        index_info.inverted_index_single_segment = true;
     }
     index_info.field_type = dtype_;
     index_info.index_type = index_type();

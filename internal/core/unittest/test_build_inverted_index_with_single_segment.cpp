@@ -131,7 +131,7 @@ class BuildInvertedIndexWithSingleSegmentTest : public ::testing::Test {
     LoadInvertedIndex() {
         auto index = std::make_unique<index::InvertedIndexTantivy<T>>();
         Config cfg;
-        cfg["inverted_list_single_segment"] = true;
+        cfg["inverted_index_single_segment"] = true;
         index->BuildWithRawData(N_, index_column_data_.data(), cfg);
         LoadIndexInfo info{
             .field_id = schema_->get_field_id(FieldName("index")).get(),

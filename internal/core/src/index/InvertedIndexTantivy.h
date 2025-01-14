@@ -39,7 +39,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     }
 
     explicit InvertedIndexTantivy(const storage::FileManagerContext& ctx,
-                                  bool inverted_list_single_segment = false);
+                                  bool inverted_index_single_segment = false);
 
     ~InvertedIndexTantivy();
 
@@ -207,13 +207,13 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // so need to store null_offset in inverted index additionally
     std::vector<size_t> null_offset{};
 
-    // `inverted_list_single_segment_` is used to control whether to build tantivy index with single segment.
+    // `inverted_index_single_segment_` is used to control whether to build tantivy index with single segment.
     //
     // In the older version of milvus, the query node can only read tantivy index built whtin single segment
     // where the newer version builds and reads index of multi segments by default.
     // However, the index may be built from a separate node from the query node where the index buliding node is a
-    // new version while the query node is a older version. So we have this `inverted_list_single_segment_` to control the index
+    // new version while the query node is a older version. So we have this `inverted_index_single_segment_` to control the index
     // building node to build specific type of tantivy index.
-    bool inverted_list_single_segment_;
+    bool inverted_index_single_segment_;
 };
 }  // namespace milvus::index
