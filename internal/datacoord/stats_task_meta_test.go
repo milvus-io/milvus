@@ -25,9 +25,9 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/workerpb"
 )
 
 type statsTaskMetaSuite struct {

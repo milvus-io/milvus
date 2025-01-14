@@ -19,10 +19,10 @@ package querynodev2
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 

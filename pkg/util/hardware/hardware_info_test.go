@@ -47,6 +47,11 @@ func TestGetDiskUsage(t *testing.T) {
 	assert.NoError(t, err)
 	assert.GreaterOrEqual(t, used, 0.0)
 	assert.GreaterOrEqual(t, total, 0.0)
+
+	used, total, err = GetDiskUsage("/dir_not_exist")
+	assert.NoError(t, err)
+	assert.Equal(t, 0.0, used)
+	assert.Equal(t, 0.0, total)
 }
 
 func TestGetIOWait(t *testing.T) {

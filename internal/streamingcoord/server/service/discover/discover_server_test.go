@@ -8,13 +8,15 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/proto/mock_streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestAssignmentDiscover(t *testing.T) {
+	resource.InitForTest()
 	b := mock_balancer.NewMockBalancer(t)
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
 		versions := []typeutil.VersionInt64Pair{

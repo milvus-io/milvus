@@ -186,6 +186,8 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             pre_filter_plan();
         }
     } else {
+        // no filter, force set iterative filter hint to false, go with normal vector search path
+        plan_node->search_info_.iterative_filter_execution = false;
         plannode = std::make_shared<milvus::plan::MvccNode>(
             milvus::plan::GetNextPlanNodeId(), sources);
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};

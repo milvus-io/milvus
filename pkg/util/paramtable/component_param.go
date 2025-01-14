@@ -1305,6 +1305,7 @@ type proxyConfig struct {
 	SkipAutoIDCheck              ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck        ParamItem `refreshable:"true"`
 	EnablePublicPrivilege        ParamItem `refreshable:"false"`
+	MaxVarCharLength             ParamItem `refreshable:"false"`
 
 	AccessLog AccessLogConfig
 
@@ -1716,6 +1717,14 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall enable public privilege",
 	}
 	p.EnablePublicPrivilege.Init(base.mgr)
+
+	p.MaxVarCharLength = ParamItem{
+		Key:          "proxy.maxVarCharLength",
+		Version:      "2.4.19",            // hotfix
+		DefaultValue: strconv.Itoa(65535), // 64K
+		Doc:          "maximum number of characters for a varchar field; this value is overridden by the value in a pre-existing schema if applicable",
+	}
+	p.MaxVarCharLength.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
@@ -4818,6 +4827,9 @@ type streamingConfig struct {
 	WALBalancerBackoffInitialInterval ParamItem `refreshable:"true"`
 	WALBalancerBackoffMultiplier      ParamItem `refreshable:"true"`
 
+	// broadcaster
+	WALBroadcasterConcurrencyRatio ParamItem `refreshable:"false"`
+
 	// txn
 	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
 }
@@ -4850,6 +4862,15 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 		Export:       true,
 	}
 	p.WALBalancerBackoffMultiplier.Init(base.mgr)
+
+	p.WALBroadcasterConcurrencyRatio = ParamItem{
+		Key:          "streaming.walBroadcaster.concurrencyRatio",
+		Version:      "2.5.4",
+		Doc:          `The concurrency ratio based on number of CPU for wal broadcaster, 1 by default.`,
+		DefaultValue: "1",
+		Export:       true,
+	}
+	p.WALBroadcasterConcurrencyRatio.Init(base.mgr)
 
 	// txn
 	p.TxnDefaultKeepaliveTimeout = ParamItem{

@@ -12,15 +12,16 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	internaltypes "github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/idalloc"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -311,6 +312,8 @@ func initializeTestState(t *testing.T) {
 			Status: merr.Success(),
 		}, nil
 	})
+	fDataCoordClient := syncutil.NewFuture[internaltypes.DataCoordClient]()
+	fDataCoordClient.Set(dataCoordClient)
 
 	rootCoordClient := idalloc.NewMockRootCoordClient(t)
 	rootCoordClient.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{
@@ -325,11 +328,13 @@ func initializeTestState(t *testing.T) {
 			},
 		},
 	}, nil)
+	fRootCoordClient := syncutil.NewFuture[internaltypes.RootCoordClient]()
+	fRootCoordClient.Set(rootCoordClient)
 
 	resource.InitForTest(t,
 		resource.OptStreamingNodeCatalog(streamingNodeCatalog),
-		resource.OptDataCoordClient(dataCoordClient),
-		resource.OptRootCoordClient(rootCoordClient),
+		resource.OptDataCoordClient(fDataCoordClient),
+		resource.OptRootCoordClient(fRootCoordClient),
 	)
 	streamingNodeCatalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(
 		[]*streamingpb.SegmentAssignmentMeta{

@@ -28,15 +28,15 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/indexcgopb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -332,7 +332,7 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 			log.Warn("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
 		}
 	}
-	indexFilePath2Size, err := it.index.UpLoad()
+	indexStats, err := it.index.UpLoad()
 	if err != nil {
 		log.Warn("failed to upload index", zap.Error(err))
 		gcIndex()
@@ -347,19 +347,21 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 	// use serialized size before encoding
 	var serializedSize uint64
 	saveFileKeys := make([]string, 0)
-	for filePath, fileSize := range indexFilePath2Size {
-		serializedSize += uint64(fileSize)
-		parts := strings.Split(filePath, "/")
+	for _, indexInfo := range indexStats.GetSerializedIndexInfos() {
+		serializedSize += uint64(indexInfo.FileSize)
+		parts := strings.Split(indexInfo.FileName, "/")
 		fileKey := parts[len(parts)-1]
 		saveFileKeys = append(saveFileKeys, fileKey)
 	}
 
-	it.node.storeIndexFilesAndStatistic(it.req.GetClusterID(), it.req.GetBuildID(), saveFileKeys, serializedSize, it.req.GetCurrentIndexVersion())
-	log.Debug("save index files done", zap.Strings("IndexFiles", saveFileKeys))
+	it.node.storeIndexFilesAndStatistic(it.req.GetClusterID(), it.req.GetBuildID(), saveFileKeys, serializedSize, uint64(indexStats.MemSize), it.req.GetCurrentIndexVersion())
 	saveIndexFileDur := it.tr.RecordSpan()
 	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
 	it.tr.Elapse("index building all done")
-	log.Info("Successfully save index files")
+	log.Info("Successfully save index files",
+		zap.Uint64("serializedSize", serializedSize),
+		zap.Int64("memSize", indexStats.MemSize),
+		zap.Strings("indexFiles", saveFileKeys))
 	return nil
 }
 

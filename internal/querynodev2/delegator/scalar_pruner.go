@@ -4,8 +4,8 @@ import (
 	"github.com/bits-and-blooms/bitset"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
 )
 
 type EvalCtx struct {

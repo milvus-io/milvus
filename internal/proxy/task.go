@@ -30,14 +30,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -1256,8 +1256,9 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 				return merr.WrapErrParameterInvalid("%s should be an integer, but got %T", prop.Key, prop.Value)
 			}
 
-			if value > defaultMaxVarCharLength {
-				return merr.WrapErrParameterInvalid("%s exceeds the maximum allowed value 1048576", prop.Value)
+			defaultMaxVarCharLength := Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
+			if int64(value) > defaultMaxVarCharLength {
+				return merr.WrapErrParameterInvalidMsg("%s exceeds the maximum allowed value %s", prop.Value, strconv.FormatInt(defaultMaxVarCharLength, 10))
 			}
 		}
 	}
@@ -1462,7 +1463,7 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if collLoaded {
-		loaded, err := isPartitionLoaded(ctx, t.queryCoord, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, t.queryCoord, collID, partID)
 		if err != nil {
 			return err
 		}

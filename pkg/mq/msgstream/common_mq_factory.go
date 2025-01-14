@@ -23,13 +23,13 @@ type CommonFactory struct {
 }
 
 // NewMsgStream is used to generate a new Msgstream object
-func (f *CommonFactory) NewMsgStream(ctx context.Context) (ms MsgStream, err error) {
+func (f *CommonFactory) NewMsgStream(initCtx context.Context) (ms MsgStream, err error) {
 	defer wrapError(&err, "NewMsgStream")
-	cli, err := f.Newer(ctx)
+	cli, err := f.Newer(context.TODO())
 	if err != nil {
 		return nil, err
 	}
-	return NewMqMsgStream(context.Background(), f.ReceiveBufSize, f.MQBufSize, cli, f.DispatcherFactory.NewUnmarshalDispatcher())
+	return NewMqMsgStream(initCtx, f.ReceiveBufSize, f.MQBufSize, cli, f.DispatcherFactory.NewUnmarshalDispatcher())
 }
 
 // NewTtMsgStream is used to generate a new TtMsgstream object

@@ -27,12 +27,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -79,30 +79,78 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	newDB := oldDB.Clone()
+	var newProperties []*commonpb.KeyValuePair
 	if (len(a.Req.GetProperties())) > 0 {
 		if ContainsKeyPairArray(a.Req.GetProperties(), oldDB.Properties) {
 			log.Info("skip to alter database due to no changes were detected in the properties", zap.String("databaseName", a.Req.GetDbName()))
 			return nil
 		}
-		ret := MergeProperties(oldDB.Properties, a.Req.GetProperties())
-		newDB.Properties = ret
+		newProperties = MergeProperties(oldDB.Properties, a.Req.GetProperties())
 	} else if (len(a.Req.GetDeleteKeys())) > 0 {
-		ret := DeleteProperties(oldDB.Properties, a.Req.GetDeleteKeys())
-		newDB.Properties = ret
+		newProperties = DeleteProperties(oldDB.Properties, a.Req.GetDeleteKeys())
 	}
 
-	ts := a.GetTs()
-	redoTask := newBaseRedoTask(a.core.stepExecutor)
+	return executeAlterDatabaseTaskSteps(ctx, a.core, oldDB, oldDB.Properties, newProperties, a.ts)
+}
+
+func (a *alterDatabaseTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(a.Req.GetDbName(), true),
+	)
+}
+
+func MergeProperties(oldProps []*commonpb.KeyValuePair, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+	_, existEndTS := common.GetReplicateEndTS(updatedProps)
+	if existEndTS {
+		updatedProps = append(updatedProps, &commonpb.KeyValuePair{
+			Key:   common.ReplicateIDKey,
+			Value: "",
+		})
+	}
+
+	props := make(map[string]string)
+	for _, prop := range oldProps {
+		props[prop.Key] = prop.Value
+	}
+
+	for _, prop := range updatedProps {
+		props[prop.Key] = prop.Value
+	}
+
+	propKV := make([]*commonpb.KeyValuePair, 0)
+
+	for key, value := range props {
+		propKV = append(propKV, &commonpb.KeyValuePair{
+			Key:   key,
+			Value: value,
+		})
+	}
+
+	return propKV
+}
+
+func executeAlterDatabaseTaskSteps(ctx context.Context,
+	core *Core,
+	dbInfo *model.Database,
+	oldProperties []*commonpb.KeyValuePair,
+	newProperties []*commonpb.KeyValuePair,
+	ts Timestamp,
+) error {
+	oldDB := dbInfo.Clone()
+	oldDB.Properties = oldProperties
+	newDB := dbInfo.Clone()
+	newDB.Properties = newProperties
+	redoTask := newBaseRedoTask(core.stepExecutor)
 	redoTask.AddSyncStep(&AlterDatabaseStep{
-		baseStep: baseStep{core: a.core},
+		baseStep: baseStep{core: core},
 		oldDB:    oldDB,
 		newDB:    newDB,
 		ts:       ts,
 	})
 
 	redoTask.AddSyncStep(&expireCacheStep{
-		baseStep: baseStep{core: a.core},
+		baseStep: baseStep{core: core},
 		dbName:   newDB.Name,
 		ts:       ts,
 		// make sure to send the "expire cache" request
@@ -129,7 +177,7 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 			zap.Strings("newResourceGroups", newResourceGroups),
 		)
 		redoTask.AddAsyncStep(NewSimpleStep("", func(ctx context.Context) ([]nestedStep, error) {
-			colls, err := a.core.meta.ListCollections(ctx, oldDB.Name, a.ts, true)
+			colls, err := core.meta.ListCollections(ctx, oldDB.Name, ts, true)
 			if err != nil {
 				log.Ctx(ctx).Warn("failed to trigger update load config for database", zap.Int64("dbID", oldDB.ID), zap.Error(err))
 				return nil, err
@@ -138,7 +186,7 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 				return nil, nil
 			}
 
-			resp, err := a.core.queryCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
+			resp, err := core.queryCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
 				CollectionIDs:  lo.Map(colls, func(coll *model.Collection, _ int) int64 { return coll.CollectionID }),
 				ReplicaNumber:  int32(newReplicaNumber),
 				ResourceGroups: newResourceGroups,
@@ -180,46 +228,9 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 			}
 			msgPack.Msgs = append(msgPack.Msgs, msg)
 			log.Info("send replicate end msg for db", zap.String("db", newDB.Name), zap.String("replicateID", replicateID))
-			return nil, a.core.chanTimeTick.broadcastDmlChannels(a.core.chanTimeTick.listDmlChannels(), msgPack)
+			return nil, core.chanTimeTick.broadcastDmlChannels(core.chanTimeTick.listDmlChannels(), msgPack)
 		}))
 	}
 
 	return redoTask.Execute(ctx)
-}
-
-func (a *alterDatabaseTask) GetLockerKey() LockerKey {
-	return NewLockerKeyChain(
-		NewClusterLockerKey(false),
-		NewDatabaseLockerKey(a.Req.GetDbName(), true),
-	)
-}
-
-func MergeProperties(oldProps []*commonpb.KeyValuePair, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
-	_, existEndTS := common.GetReplicateEndTS(updatedProps)
-	if existEndTS {
-		updatedProps = append(updatedProps, &commonpb.KeyValuePair{
-			Key:   common.ReplicateIDKey,
-			Value: "",
-		})
-	}
-
-	props := make(map[string]string)
-	for _, prop := range oldProps {
-		props[prop.Key] = prop.Value
-	}
-
-	for _, prop := range updatedProps {
-		props[prop.Key] = prop.Value
-	}
-
-	propKV := make([]*commonpb.KeyValuePair, 0)
-
-	for key, value := range props {
-		propKV = append(propKV, &commonpb.KeyValuePair{
-			Key:   key,
-			Value: value,
-		})
-	}
-
-	return propKV
 }

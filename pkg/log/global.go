@@ -16,6 +16,8 @@ package log
 import (
 	"context"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -141,7 +143,7 @@ func WithReqID(ctx context.Context, reqID int64) context.Context {
 
 // WithModule adds given module field to the logger in ctx
 func WithModule(ctx context.Context, module string) context.Context {
-	fields := []zap.Field{zap.String("module", module)}
+	fields := []zap.Field{zap.String(FieldNameModule, module)}
 	return WithFields(ctx, fields...)
 }
 
@@ -157,6 +159,16 @@ func WithFields(ctx context.Context, fields ...zap.Field) context.Context {
 		Logger: zlogger.With(fields...),
 	}
 	return context.WithValue(ctx, CtxLogKey, mLogger)
+}
+
+// NewIntentContext creates a new context with intent information and returns it along with a span.
+func NewIntentContext(name string, intent string) (context.Context, trace.Span) {
+	intentCtx, initSpan := otel.Tracer(name).Start(context.Background(), intent)
+	intentCtx = WithFields(intentCtx,
+		zap.String("role", name),
+		zap.String("intent", intent),
+		zap.String("traceID", initSpan.SpanContext().TraceID().String()))
+	return intentCtx, initSpan
 }
 
 // Ctx returns a logger which will log contextual messages attached in ctx
