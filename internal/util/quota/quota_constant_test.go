@@ -24,7 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 

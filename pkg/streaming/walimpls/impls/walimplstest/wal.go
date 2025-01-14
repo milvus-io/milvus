@@ -6,7 +6,7 @@ package walimplstest
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"

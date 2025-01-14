@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
@@ -53,16 +54,18 @@ type task interface {
 	Execute(ctx context.Context) error
 	WaitToFinish() error
 	NotifyDone(err error)
+	IsFinished() bool
 	SetInQueueDuration()
 	GetLockerKey() LockerKey
 }
 
 type baseTask struct {
-	ctx  context.Context
-	core *Core
-	done chan error
-	ts   Timestamp
-	id   UniqueID
+	ctx        context.Context
+	core       *Core
+	done       chan error
+	isFinished *atomic.Bool
+	ts         Timestamp
+	id         UniqueID
 
 	tr       *timerecord.TimeRecorder
 	queueDur time.Duration
@@ -70,9 +73,10 @@ type baseTask struct {
 
 func newBaseTask(ctx context.Context, core *Core) baseTask {
 	b := baseTask{
-		core: core,
-		done: make(chan error, 1),
-		tr:   timerecord.NewTimeRecorderWithTrace(ctx, "new task"),
+		core:       core,
+		done:       make(chan error, 1),
+		tr:         timerecord.NewTimeRecorderWithTrace(ctx, "new task"),
+		isFinished: atomic.NewBool(false),
 	}
 	b.SetCtx(ctx)
 	return b
@@ -116,10 +120,15 @@ func (b *baseTask) WaitToFinish() error {
 
 func (b *baseTask) NotifyDone(err error) {
 	b.done <- err
+	b.isFinished.Store(true)
 }
 
 func (b *baseTask) SetInQueueDuration() {
 	b.queueDur = b.tr.ElapseSpan()
+}
+
+func (b *baseTask) IsFinished() bool {
+	return b.isFinished.Load()
 }
 
 func (b *baseTask) GetLockerKey() LockerKey {

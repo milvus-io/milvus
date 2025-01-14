@@ -6,7 +6,7 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"

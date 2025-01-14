@@ -8,14 +8,14 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -225,7 +225,11 @@ func (m *partitionSegmentManager) allocNewGrowingSegment(ctx context.Context) (*
 
 	// Transfer the pending segment into growing state.
 	// Alloc the growing segment at datacoord first.
-	resp, err := resource.Resource().DataCoordClient().AllocSegment(ctx, &datapb.AllocSegmentRequest{
+	dc, err := resource.Resource().DataCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := dc.AllocSegment(ctx, &datapb.AllocSegmentRequest{
 		CollectionId: pendingSegment.GetCollectionID(),
 		PartitionId:  pendingSegment.GetPartitionID(),
 		SegmentId:    pendingSegment.GetSegmentID(),

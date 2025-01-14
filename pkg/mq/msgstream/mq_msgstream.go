@@ -78,13 +78,13 @@ type mqMsgStream struct {
 }
 
 // NewMqMsgStream is used to generate a new mqMsgStream object
-func NewMqMsgStream(ctx context.Context,
+func NewMqMsgStream(initCtx context.Context,
 	receiveBufSize int64,
 	bufSize int64,
 	client mqwrapper.Client,
 	unmarshal UnmarshalDispatcher,
 ) (*mqMsgStream, error) {
-	streamCtx, streamCancel := context.WithCancel(ctx)
+	streamCtx, streamCancel := context.WithCancel(context.Background())
 	producers := make(map[string]mqwrapper.Producer)
 	consumers := make(map[string]mqwrapper.Consumer)
 	producerChannels := make([]string, 0)
@@ -108,7 +108,7 @@ func NewMqMsgStream(ctx context.Context,
 		closeRWMutex: &sync.RWMutex{},
 		closed:       0,
 	}
-	ctxLog := log.Ctx(ctx)
+	ctxLog := log.Ctx(initCtx)
 	stream.forceEnableProduce.Store(false)
 	stream.ttMsgEnable.Store(paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool())
 	stream.configEvent = config.NewHandler("enable send tt msg "+fmt.Sprint(streamCounter.Inc()), func(event *config.Event) {
@@ -130,7 +130,7 @@ func NewMqMsgStream(ctx context.Context,
 func (ms *mqMsgStream) AsProducer(ctx context.Context, channels []string) {
 	for _, channel := range channels {
 		if len(channel) == 0 {
-			log.Ctx(ms.ctx).Error("MsgStream asProducer's channel is an empty string")
+			log.Ctx(ctx).Error("MsgStream asProducer's channel is an empty string")
 			break
 		}
 
@@ -149,7 +149,7 @@ func (ms *mqMsgStream) AsProducer(ctx context.Context, channels []string) {
 			ms.producerChannels = append(ms.producerChannels, channel)
 			return nil
 		}
-		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+		err := retry.Do(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
 			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
 			panic(errMsg)
