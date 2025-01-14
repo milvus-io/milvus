@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package milvus.proto.indexcgo;
+option go_package="github.com/milvus-io/milvus/pkg/proto/indexcgopb";
+
+import "common.proto";
+import "schema.proto";
+
+message TypeParams {
+  repeated common.KeyValuePair params = 1;
+}
+
+message IndexParams {
+  repeated common.KeyValuePair params = 1;
+}
+
+// TypeParams & IndexParams will be replaced by MapParams later
+message MapParams {
+  repeated common.KeyValuePair params = 1;
+}
+
+message MapParamsV2 {
+  map<string, string> params = 1;
+}
+
+message Binary {
+  string key = 1;
+  bytes value = 2;
+}
+
+message BinarySet {
+  repeated Binary datas = 1;
+}
+
+// Synchronously modify StorageConfig in index_coord.proto file
+message StorageConfig {
+  string address = 1;
+  string access_keyID = 2;
+  string secret_access_key = 3;
+  bool useSSL = 4;
+  string bucket_name = 5;
+  string root_path = 6;
+  bool useIAM = 7;
+  string IAMEndpoint = 8;
+  string storage_type = 9;
+  bool use_virtual_host = 10;
+  string region = 11;
+  string cloud_provider = 12;
+  int64 request_timeout_ms = 13;
+  string sslCACert = 14;
+  string GcpCredentialJSON = 15;
+}
+
+// Synchronously modify OptionalFieldInfo in index_coord.proto file
+message OptionalFieldInfo {
+  int64 fieldID = 1;
+  string field_name = 2;
+  int32 field_type = 3;
+  repeated string data_paths = 4;
+}
+
+message BuildIndexInfo {
+  string clusterID = 1;
+  int64 buildID = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+  int64 segmentID = 5;
+  int64 index_version = 6;
+  int32 current_index_version = 7;
+  int64 num_rows = 8;
+  int64 dim = 9;
+  string index_file_prefix = 10;
+  repeated string insert_files = 11;
+//  repeated int64 data_ids = 12;
+  schema.FieldSchema field_schema = 12;
+  StorageConfig storage_config = 13;
+  repeated common.KeyValuePair index_params = 14;
+  repeated common.KeyValuePair type_params = 15;
+  string store_path = 16;
+  int64 store_version = 17;
+  string index_store_path = 18;
+  repeated OptionalFieldInfo opt_fields = 19;
+  bool partition_key_isolation = 20;
+}
+
+message LoadTextIndexInfo {
+  int64 FieldID = 1;
+  int64 version = 2;
+  int64 buildID = 3;
+  repeated string files = 4;
+  schema.FieldSchema schema = 5;
+  int64 collectionID = 6;
+  int64 partitionID = 7;
+}

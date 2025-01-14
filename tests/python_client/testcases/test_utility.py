@@ -5384,7 +5384,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
         name = "privilege_group_1"
         self.utility_wrap.create_privilege_group(privilege_group=name)
         privilege_name = "invalid_privilege"
-        error = {"err_code": 1100, "err_msg": f"there is no privilege name or privielge group name [{privilege_name}] "
+        error = {"err_code": 1100, "err_msg": f"there is no privilege name or privilege group name [{privilege_name}] "
                                               f"defined in system to operate: invalid parameter"}
         self.utility_wrap.add_privileges_to_group(privilege_group="privilege_group_1", privileges=[privilege_name], check_task=CheckTasks.err_res, check_items=error)
 
@@ -5483,7 +5483,7 @@ class TestUtilityNegativeRbacPrivilegeGroup(TestcaseBase):
         name = "privilege_group_1"
         self.utility_wrap.create_privilege_group(privilege_group=name)
         privilege_name = "invalid_privilege"
-        error = {"err_code": 1100, "err_msg": f"there is no privilege name or privielge group name [{privilege_name}] "
+        error = {"err_code": 1100, "err_msg": f"there is no privilege name or privilege group name [{privilege_name}] "
                                               f"defined in system to operate: invalid parameter"}
         self.utility_wrap.remove_privileges_from_group(privilege_group="privilege_group_1", privileges=[privilege_name],
                                                        check_task=CheckTasks.err_res, check_items=error)
