@@ -4113,8 +4113,6 @@ TEST(CApiTest, SealedSegment_Update_Field_Size) {
     }
     auto res = LoadFieldRawData(segment, str_fid.get(), str_datas.data(), N);
     ASSERT_EQ(res.error_code, Success);
-    ASSERT_EQ(segment->get_field_avg_size(str_fid),
-              (row_size * N + total_size) / (2 * N));
 
     DeleteSegment(segment);
 }

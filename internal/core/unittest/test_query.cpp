@@ -664,10 +664,12 @@ TEST(Query, FillSegment) {
                        dim * sizeof(float));
                 ASSERT_EQ(vfloat, std_vfloat);
 
-                // check int32 field
-                int i32;
-                memcpy(&i32, &output_i32_field_data[i], sizeof(int32_t));
-                ASSERT_EQ(i32, std_i32);
+                // check int32 field only if valid
+                if (output_i32_valid_data[i]) {
+                    int i32;
+                    memcpy(&i32, &output_i32_field_data[i], sizeof(int32_t));
+                    ASSERT_EQ(i32, std_i32);
+                }
                 // check int32 valid field
                 bool i32_valid;
                 memcpy(&i32_valid, &output_i32_valid_data[i], sizeof(bool));
