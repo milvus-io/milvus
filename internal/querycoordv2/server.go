@@ -191,6 +191,8 @@ func (s *Server) initSession() error {
 }
 
 func (s *Server) Init() error {
+	s.UpdateStateCode(commonpb.StateCode_Initializing)
+
 	log.Info("QueryCoord start init",
 		zap.String("meta-root-path", Params.EtcdCfg.MetaRootPath.GetValue()),
 		zap.String("address", s.address))
@@ -218,7 +220,6 @@ func (s *Server) Init() error {
 		return nil
 	}
 
-	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	return s.initQueryCoord()
 }
 

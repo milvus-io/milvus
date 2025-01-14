@@ -490,6 +490,8 @@ func (c *Core) initInternal() error {
 
 // Init initialize routine
 func (c *Core) Init() error {
+	c.UpdateStateCode(commonpb.StateCode_Initializing)
+
 	var initError error
 	c.factory.Init(Params)
 	if err := c.initSession(); err != nil {
@@ -521,7 +523,6 @@ func (c *Core) Init() error {
 		log.Info("RootCoord enter standby mode successfully")
 	} else {
 		c.initOnce.Do(func() {
-			c.UpdateStateCode(commonpb.StateCode_Initializing)
 			initError = c.initInternal()
 		})
 	}

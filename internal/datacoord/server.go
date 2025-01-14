@@ -318,6 +318,8 @@ func (s *Server) initSession() error {
 
 // Init change server state to Initializing
 func (s *Server) Init() error {
+	s.UpdateStateCode(commonpb.StateCode_Initializing)
+
 	var err error
 	s.factory.Init(Params)
 	if err = s.initSession(); err != nil {
@@ -339,7 +341,6 @@ func (s *Server) Init() error {
 		return nil
 	}
 
-	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	return s.initDataCoord()
 }
 
