@@ -1,8 +1,8 @@
 package producer
 
 import (
-	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 

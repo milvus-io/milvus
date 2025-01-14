@@ -118,7 +118,8 @@ TEST(Float16, ExecWithoutPredicateFlat) {
     auto vec_ptr = dataset.get_col<float16>(vec_fid);
 
     auto num_queries = 5;
-    auto ph_group_raw = CreateFloat16PlaceholderGroup(num_queries, 32, 1024);
+    auto ph_group_raw =
+        CreatePlaceholderGroup<milvus::Float16Vector>(num_queries, 32, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
@@ -274,7 +275,8 @@ TEST(Float16, ExecWithPredicate) {
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
-    auto ph_group_raw = CreateFloat16PlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group_raw =
+        CreatePlaceholderGroup<milvus::Float16Vector>(num_queries, 16, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -354,7 +356,8 @@ TEST(BFloat16, ExecWithoutPredicateFlat) {
     auto vec_ptr = dataset.get_col<bfloat16>(vec_fid);
 
     auto num_queries = 5;
-    auto ph_group_raw = CreateBFloat16PlaceholderGroup(num_queries, 32, 1024);
+    auto ph_group_raw =
+        CreatePlaceholderGroup<milvus::BFloat16Vector>(num_queries, 32, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
@@ -510,7 +513,8 @@ TEST(BFloat16, ExecWithPredicate) {
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
-    auto ph_group_raw = CreateBFloat16PlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group_raw =
+        CreatePlaceholderGroup<milvus::BFloat16Vector>(num_queries, 16, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;

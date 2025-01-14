@@ -73,6 +73,7 @@ MemFileManagerImpl::AddFile(const BinarySet& binary_set) {
         slice_sizes.emplace_back(iter->second->size);
         slice_names.emplace_back(remotePrefix + "/" + iter->first);
         batch_size += iter->second->size;
+        added_total_mem_size_ += iter->second->size;
     }
 
     if (data_slices.size() > 0) {

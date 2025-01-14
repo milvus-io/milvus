@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service"
 	"github.com/milvus-io/milvus/internal/types"
@@ -52,10 +53,13 @@ func (s *ServerBuilder) Build() *Server {
 		resource.OptRootCoordClient(s.rootCoordClient),
 	)
 	balancer := syncutil.NewFuture[balancer.Balancer]()
+	broadcaster := syncutil.NewFuture[broadcaster.Broadcaster]()
 	return &Server{
 		logger:            resource.Resource().Logger().With(log.FieldComponent("server")),
 		session:           s.session,
 		assignmentService: service.NewAssignmentService(balancer),
+		broadcastService:  service.NewBroadcastService(broadcaster),
 		balancer:          balancer,
+		broadcaster:       broadcaster,
 	}
 }

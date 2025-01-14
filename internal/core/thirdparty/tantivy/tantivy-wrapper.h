@@ -577,6 +577,19 @@ struct TantivyIndexWrapper {
         return RustArrayWrapper(std::move(res.result_->value.rust_array._0));
     }
 
+    RustArrayWrapper
+    phrase_match_query(const std::string& query, uint32_t slop) {
+        auto array = tantivy_phrase_match_query(reader_, query.c_str(), slop);
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.phrase_match_query: {}",
+                   res.result_->error);
+        AssertInfo(
+            res.result_->value.tag == Value::Tag::RustArray,
+            "TantivyIndexWrapper.phrase_match_query: invalid result type");
+        return RustArrayWrapper(std::move(res.result_->value.rust_array._0));
+    }
+
  public:
     inline IndexWriter
     get_writer() {

@@ -610,8 +610,9 @@ func TestSearchExpr(t *testing.T) {
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	type mExprExpected struct {
-		expr string
-		ids  []int64
+		expr  string
+		ids   []int64
+		value any
 	}
 
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
@@ -619,8 +620,18 @@ func TestSearchExpr(t *testing.T) {
 		{expr: fmt.Sprintf("%s < 10", common.DefaultInt64FieldName), ids: []int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}},
 		{expr: fmt.Sprintf("%s in [10, 100]", common.DefaultInt64FieldName), ids: []int64{10, 100}},
 	} {
-		resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).
-			WithFilter(_mExpr.expr))
+		resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithFilter(_mExpr.expr))
+		common.CheckErr(t, errSearch, true)
+		for _, res := range resSearch {
+			require.ElementsMatch(t, _mExpr.ids, res.IDs.(*column.ColumnInt64).Data())
+		}
+	}
+	// search with template param
+	for _, _mExpr := range []mExprExpected{
+		{expr: fmt.Sprintf("%s < {v}", common.DefaultInt64FieldName), ids: []int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, value: 10},
+		{expr: fmt.Sprintf("%s in {v}", common.DefaultInt64FieldName), ids: []int64{10, 100}, value: []int64{10, 100}},
+	} {
+		resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithFilter(_mExpr.expr).WithTemplateParam("v", _mExpr.value))
 		common.CheckErr(t, errSearch, true)
 		for _, res := range resSearch {
 			require.ElementsMatch(t, _mExpr.ids, res.IDs.(*column.ColumnInt64).Data())

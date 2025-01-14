@@ -42,10 +42,10 @@ func NewDistributionManager() *DistributionManager {
 // It includes segments, DM channels, and leader views.
 // If there are no segments, channels, or leader views, it returns an empty string.
 // In case of an error during JSON marshaling, it returns the error.
-func (dm *DistributionManager) GetDistributionJSON() string {
-	segments := dm.GetSegmentDist(0)
-	channels := dm.GetChannelDist()
-	leaderView := dm.GetLeaderView()
+func (dm *DistributionManager) GetDistributionJSON(collectionID int64) string {
+	segments := dm.GetSegmentDist(collectionID)
+	channels := dm.GetChannelDist(collectionID)
+	leaderView := dm.GetLeaderView(collectionID)
 
 	dist := &metricsinfo.QueryCoordDist{
 		Segments:    segments,
