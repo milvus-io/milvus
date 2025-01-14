@@ -3,7 +3,7 @@ package types
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 )
 
 const (

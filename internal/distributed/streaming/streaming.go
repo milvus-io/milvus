@@ -78,6 +78,7 @@ type Scanner interface {
 
 // WALAccesser is the interfaces to interact with the milvus write ahead log.
 type WALAccesser interface {
+	// WALName returns the name of the wal.
 	WALName() string
 
 	// Txn returns a transaction for writing records to the log.
@@ -86,6 +87,10 @@ type WALAccesser interface {
 
 	// RawAppend writes a records to the log.
 	RawAppend(ctx context.Context, msgs message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error)
+
+	// BroadcastAppend sends a broadcast message to all target vchannels.
+	// BroadcastAppend guarantees the atomicity written of the messages and eventual consistency.
+	BroadcastAppend(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
 
 	// Read returns a scanner for reading records from the wal.
 	Read(ctx context.Context, opts ReadOption) Scanner

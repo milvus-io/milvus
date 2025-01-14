@@ -567,7 +567,7 @@ dataCoord:
     taskPrioritizer: default
     taskQueueCapacity: 100000 # compaction task queue size
     rpcTimeout: 10
-    maxParallelTaskNum: 10
+    maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
     dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)
     gcInterval: 1800 # The time interval in seconds for compaction gc
     mix:

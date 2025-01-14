@@ -5,8 +5,8 @@ package mocks
 import (
 	context "context"
 
-	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
-	indexpb "github.com/milvus-io/milvus/internal/proto/indexpb"
+	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
+	indexpb "github.com/milvus-io/milvus/pkg/proto/indexpb"
 
 	metastore "github.com/milvus-io/milvus/internal/metastore"
 

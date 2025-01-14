@@ -12,8 +12,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -244,6 +244,31 @@ func TestExpr_TextMatch(t *testing.T) {
 	unsupported := []string{
 		`text_match(not_exist, "query")`,
 		`text_match(BoolField, "query")`,
+	}
+	for _, exprStr := range unsupported {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
+func TestExpr_PhraseMatch(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	exprStrs := []string{
+		`phrase_match(VarCharField, "phrase")`,
+		`phrase_match(StringField, "phrase")`,
+		`phrase_match(StringField, "phrase", 1)`,
+		`phrase_match(VarCharField, "phrase", 11223)`,
+	}
+	for _, exprStr := range exprStrs {
+		assertValidExpr(t, helper, exprStr)
+	}
+
+	unsupported := []string{
+		`phrase_match(not_exist, "phrase")`,
+		`phrase_match(BoolField, "phrase")`,
+		`phrase_match(StringField, "phrase", -1)`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)

@@ -3630,7 +3630,8 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 	p.CompactionMaxParallelTasks = ParamItem{
 		Key:          "dataCoord.compaction.maxParallelTaskNum",
 		Version:      "2.2.12",
-		DefaultValue: "10",
+		DefaultValue: "-1",
+		Doc:          "Deprecated, see datanode.slot.slotCap",
 		Export:       true,
 	}
 	p.CompactionMaxParallelTasks.Init(base.mgr)

@@ -35,6 +35,18 @@ func TestQueryDefault(t *testing.T) {
 	queryRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{insertRes.IDs.Slice(0, 100)})
+
+	// query with limit
+	LimitRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithLimit(10))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 10, LimitRes.ResultCount)
+	require.Equal(t, 10, LimitRes.GetColumn(common.DefaultInt64FieldName).Len())
+
+	// get ids -> same result with query
+	ids := hp.GenColumnData(100, entity.FieldTypeInt64, *hp.TNewDataOption().TWithFieldName(common.DefaultInt64FieldName))
+	getRes, errGet := mc.Get(ctx, client.NewQueryOption(schema.CollectionName).WithIDs(ids))
+	common.CheckErr(t, errGet, true)
+	common.CheckQueryResult(t, getRes.Fields, []column.Column{insertRes.IDs.Slice(0, 100)})
 }
 
 // test query with varchar field filter
@@ -55,6 +67,46 @@ func TestQueryVarcharPkDefault(t *testing.T) {
 	queryRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{insertRes.IDs.Slice(0, 5)})
+
+	// get ids -> same result with query
+	varcharValues := []string{"0", "1", "2", "3", "4"}
+	ids := column.NewColumnVarChar(common.DefaultVarcharFieldName, varcharValues)
+	getRes, errGet := mc.Get(ctx, client.NewQueryOption(schema.CollectionName).WithIDs(ids))
+	common.CheckErr(t, errGet, true)
+	common.CheckQueryResult(t, getRes.Fields, []column.Column{insertRes.IDs.Slice(0, 5)})
+}
+
+// test get with invalid ids
+func TestGetInvalid(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	// create and insert
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+
+	// flush -> index -> load
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	// get ids with varchar ids -> error
+	varcharValues := []string{"0", "1", "2", "3", "4"}
+	ids := column.NewColumnVarChar(common.DefaultVarcharFieldName, varcharValues)
+	_, errGet := mc.Get(ctx, client.NewQueryOption(schema.CollectionName).WithIDs(ids))
+	common.CheckErr(t, errGet, false, "field varchar not exist: invalid parameter")
+
+	// get ids with varchar ids -> error
+	ids = column.NewColumnVarChar(common.DefaultInt64FieldName, varcharValues)
+	_, errGet = mc.Get(ctx, client.NewQueryOption(schema.CollectionName).WithIDs(ids))
+	common.CheckErr(t, errGet, false, "cannot parse expression: int64 in")
+
+	// get ids with non-pk column -> error for empty filter
+	t.Log("https://github.com/milvus-io/milvus/issues/38859")
+	values := []float32{0.0, 1.0}
+	ids2 := column.NewColumnFloat(common.DefaultInt64FieldName, values)
+	_, errGet = mc.Get(ctx, client.NewQueryOption(schema.CollectionName).WithIDs(ids2))
+	common.CheckErr(t, errGet, false, "empty expression should be used with limit")
 }
 
 // query from not existed collection name and partition name
@@ -634,4 +686,133 @@ func TestQueryOutputInvalidOutputFieldCount(t *testing.T) {
 		_, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(queryExpr).WithOutputFields(invalidCount.countField))
 		common.CheckErr(t, err, false, invalidCount.errMsg)
 	}
+}
+
+func TestQueryWithTemplateParam(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields),
+		hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	// query
+	int64Values := make([]int64, 0, 1000)
+	for i := 10; i < 10+1000; i++ {
+		int64Values = append(int64Values, int64(i))
+	}
+	// default
+	queryRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).
+		WithFilter(fmt.Sprintf("%s in {int64Values}", common.DefaultInt64FieldName)).WithTemplateParam("int64Values", int64Values))
+	common.CheckErr(t, err, true)
+	common.CheckQueryResult(t, queryRes.Fields, []column.Column{column.NewColumnInt64(common.DefaultInt64FieldName, int64Values)})
+
+	// cover keys
+	res, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("int64 < {k2}").WithTemplateParam("k2", 10).WithTemplateParam("k2", 5))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 5, res.ResultCount)
+
+	// array contains
+	anyValues := []int64{0.0, 100.0, 10000.0}
+	countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).
+		WithFilter(fmt.Sprintf("json_contains_any (%s, {any_values})", common.DefaultFloatArrayField)).WithTemplateParam("any_values", anyValues).
+		WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, _ := countRes.Fields[0].GetAsInt64(0)
+	require.EqualValues(t, 101, count)
+
+	// dynamic
+	countRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).
+		WithFilter("dynamicNumber % 2 == {v}").WithTemplateParam("v", 0).WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, _ = countRes.Fields[0].GetAsInt64(0)
+	require.EqualValues(t, 1500, count)
+
+	// json['bool']
+	countRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).
+		WithFilter(fmt.Sprintf("%s['bool'] == {v}", common.DefaultJSONFieldName)).
+		WithTemplateParam("v", false).
+		WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, _ = countRes.Fields[0].GetAsInt64(0)
+	require.EqualValues(t, 1500/2, count)
+
+	// bool
+	countRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).
+		WithFilter(fmt.Sprintf("%s == {v}", common.DefaultBoolFieldName)).
+		WithTemplateParam("v", true).
+		WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, _ = countRes.Fields[0].GetAsInt64(0)
+	require.EqualValues(t, common.DefaultNb/2, count)
+
+	// and {expr: fmt.Sprintf("%s >= 1000 && %s < 2000", common.DefaultInt64FieldName, common.DefaultInt64FieldName), count: 1000},
+	res, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).
+		WithFilter(fmt.Sprintf("%s >= {k1} && %s < {k2}", common.DefaultInt64FieldName, common.DefaultInt64FieldName)).
+		WithTemplateParam("v", 0).WithTemplateParam("k1", 1000).
+		WithTemplateParam("k2", 2000))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, 1000, res.ResultCount)
+}
+
+func TestQueryWithTemplateParamInvalid(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec),
+		hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	// query with invalid template
+	// expr := "varchar like 'a%' "
+	_, err2 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("varchar like {key1}").WithTemplateParam("key1", "'a%'"))
+	common.CheckErr(t, err2, false, "mismatched input '{' expecting StringLiteral")
+
+	// no template param
+	_, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("int64 in {key1}"))
+	common.CheckErr(t, err, false, "the value of expression template variable name {key1} is not found")
+
+	// template param with empty expr
+	_, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("").WithTemplateParam("a", 12))
+	common.CheckErr(t, err, false, "empty expression should be used with limit")
+
+	// *** template param with field name key -> error ***
+	_, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("{field} < 10").WithTemplateParam("field", "int64"))
+	common.CheckErr(t, err, false, "cannot parse expression")
+	_, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("{field} < {v}").WithTemplateParam("field", "int64").WithTemplateParam("v", 10))
+	common.CheckErr(t, err, false, "placeholder was not supported between two constants with operator")
+	// exists x
+	_, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("exists {x}").WithTemplateParam("x", "json"))
+	common.CheckErr(t, err, false, "exists operations are only supported on single fields now")
+
+	// compare two fields
+	_, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("{f1} > {f2}").WithTemplateParam("f1", "f1").WithTemplateParam("f2", "f2"))
+	common.CheckErr(t, err, false, "placeholder was not supported between two constants with operator")
+
+	// expr key != template key
+	_, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("int64 in {key1}").WithTemplateParam("key2", []int64{0, 1, 2}))
+	common.CheckErr(t, err, false, "the value of expression template variable name {key1} is not found")
+
+	// template missing some keys
+	_, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("{k1} < int64 < {k2}").WithTemplateParam("k1", 10))
+	common.CheckErr(t, err, false, "the upper value of expression template variable name {k2} is not found")
+
+	// template value type is valid
+	_, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("int64 < {k1}").WithTemplateParam("k1", []int64{0, 1, 3}))
+	common.CheckErr(t, err, false, "cannot cast value to Int64")
+
+	_, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("int64 < {k1}").WithTemplateParam("k1", "10"))
+	common.CheckErr(t, err, false, "cannot cast value to Int64")
+
+	// invalid expr
+	_, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("{name} == 'O'Reilly'").WithTemplateParam("name", common.DefaultVarcharFieldName))
+	common.CheckErr(t, err, false, "cannot parse expression")
+
+	// invalid expr
+	_, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("{_123} > 10").WithTemplateParam("_123", common.DefaultInt64FieldName))
+	common.CheckErr(t, err, false, "cannot parse expression")
 }
