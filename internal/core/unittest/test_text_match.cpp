@@ -20,6 +20,8 @@
 #include "query/PlanProto.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "expr/ITypeExpr.h"
+#include "segcore/segment_c.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -750,4 +752,65 @@ TEST(TextMatch, SealedJieBaNullable) {
         ASSERT_FALSE(final[1]);
         ASSERT_FALSE(final[2]);
     }
+}
+
+// Test that growing segment loading flushed binlogs will build text match index.
+TEST(TextMatch, GrowingLoadData) {
+    int64_t N = 7;
+    auto schema = GenTestSchema({}, true);
+    schema->AddField(FieldName("RowID"), FieldId(0), DataType::INT64, false);
+    schema->AddField(
+        FieldName("Timestamp"), FieldId(1), DataType::INT64, false);
+    std::vector<std::string> raw_str = {"football, basketball, pingpang",
+                                        "swimming, football",
+                                        "golf",
+                                        "",
+                                        "baseball",
+                                        "kungfu, football",
+                                        ""};
+    auto raw_data = DataGen(schema, N);
+    auto str_col = raw_data.raw_->mutable_fields_data()
+                       ->at(1)
+                       .mutable_scalars()
+                       ->mutable_string_data()
+                       ->mutable_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col->at(i) = raw_str[i];
+    }
+    auto str_col_valid =
+        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col_valid->at(i) = true;
+    }
+    // so we cannot match the second row
+    str_col_valid->at(1) = false;
+
+    auto storage_config = get_default_local_storage_config();
+    auto cm = storage::CreateChunkManager(storage_config);
+    auto load_info = PrepareInsertBinlog(
+        1,
+        2,
+        3,
+        storage_config.root_path + "/" + "test_growing_segment_load_data",
+        raw_data,
+        cm);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto status = LoadFieldData(segment.get(), &load_info);
+    ASSERT_EQ(status.error_code, Success);
+    ASSERT_EQ(segment->get_real_count(), N);
+    ASSERT_NE(segment->get_field_avg_size(FieldId(101)), 0);
+
+    // Check whether the text index has been built.
+    auto expr = GetTextMatchExpr(schema, "football");
+    BitsetType final;
+    final = ExecuteQueryExpr(expr, segment.get(), N, MAX_TIMESTAMP);
+    ASSERT_EQ(final.size(), N);
+    ASSERT_TRUE(final[0]);
+    ASSERT_FALSE(final[1]);
+    ASSERT_FALSE(final[2]);
+    ASSERT_FALSE(final[3]);
+    ASSERT_FALSE(final[4]);
+    ASSERT_TRUE(final[5]);
+    ASSERT_FALSE(final[6]);
 }

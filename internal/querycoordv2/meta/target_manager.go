@@ -28,11 +28,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -70,7 +70,7 @@ type TargetManagerInterface interface {
 	SaveCurrentTarget(ctx context.Context, catalog metastore.QueryCoordCatalog)
 	Recover(ctx context.Context, catalog metastore.QueryCoordCatalog) error
 	CanSegmentBeMoved(ctx context.Context, collectionID, segmentID int64) bool
-	GetTargetJSON(ctx context.Context, scope TargetScope) string
+	GetTargetJSON(ctx context.Context, scope TargetScope, collectionID int64) string
 	GetPartitions(ctx context.Context, collectionID int64, scope TargetScope) ([]int64, error)
 	IsCurrentTargetReady(ctx context.Context, collectionID int64) bool
 }
@@ -586,13 +586,13 @@ func (mgr *TargetManager) CanSegmentBeMoved(ctx context.Context, collectionID, s
 	return false
 }
 
-func (mgr *TargetManager) GetTargetJSON(ctx context.Context, scope TargetScope) string {
+func (mgr *TargetManager) GetTargetJSON(ctx context.Context, scope TargetScope, collectionID int64) string {
 	ret := mgr.getTarget(scope)
 	if ret == nil {
 		return ""
 	}
 
-	v, err := json.Marshal(ret.toQueryCoordCollectionTargets())
+	v, err := json.Marshal(ret.toQueryCoordCollectionTargets(collectionID))
 	if err != nil {
 		log.Warn("failed to marshal target", zap.Error(err))
 		return ""

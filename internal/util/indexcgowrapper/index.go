@@ -5,6 +5,7 @@ package indexcgowrapper
 
 #include <stdlib.h>	// free
 #include "indexbuilder/index_c.h"
+#include "common/type_c.h"
 */
 import "C"
 
@@ -21,9 +22,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/indexcgopb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/cgopb"
+	"github.com/milvus-io/milvus/pkg/proto/indexcgopb"
 )
 
 type Blob = storage.Blob
@@ -40,7 +43,7 @@ type CodecIndex interface {
 	Load([]*Blob) error
 	Delete() error
 	CleanLocalData() error
-	UpLoad() (map[string]int64, error)
+	UpLoad() (*cgopb.IndexStats, error)
 }
 
 var _ CodecIndex = (*CgoIndex)(nil)
@@ -135,31 +138,21 @@ func CreateTextIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexI
 			zap.Error(err))
 		return nil, err
 	}
-	var cBinarySet C.CBinarySet
-	status := C.BuildTextIndex(&cBinarySet, (*C.uint8_t)(unsafe.Pointer(&buildIndexInfoBlob[0])), (C.uint64_t)(len(buildIndexInfoBlob)))
+	result := C.CreateProtoLayout()
+	defer C.ReleaseProtoLayout(result)
+	status := C.BuildTextIndex(result, (*C.uint8_t)(unsafe.Pointer(&buildIndexInfoBlob[0])), (C.uint64_t)(len(buildIndexInfoBlob)))
 	if err := HandleCStatus(&status, "failed to build text index"); err != nil {
 		return nil, err
 	}
-
-	defer func() {
-		if cBinarySet != nil {
-			C.DeleteBinarySet(cBinarySet)
-		}
-	}()
-
-	res := make(map[string]int64)
-	indexFilePaths, err := GetBinarySetKeys(cBinarySet)
-	if err != nil {
+	var indexStats cgopb.IndexStats
+	if err := segcore.UnmarshalProtoLayout(result, &indexStats); err != nil {
 		return nil, err
 	}
-	for _, path := range indexFilePaths {
-		size, err := GetBinarySetSize(cBinarySet, path)
-		if err != nil {
-			return nil, err
-		}
-		res[path] = size
-	}
 
+	res := make(map[string]int64)
+	for _, indexInfo := range indexStats.GetSerializedIndexInfos() {
+		res[indexInfo.FileName] = indexInfo.FileSize
+	}
 	return res, nil
 }
 
@@ -405,31 +398,17 @@ func (index *CgoIndex) CleanLocalData() error {
 	return HandleCStatus(&status, "failed to clean cached data on disk")
 }
 
-func (index *CgoIndex) UpLoad() (map[string]int64, error) {
-	var cBinarySet C.CBinarySet
-
-	status := C.SerializeIndexAndUpLoad(index.indexPtr, &cBinarySet)
-	defer func() {
-		if cBinarySet != nil {
-			C.DeleteBinarySet(cBinarySet)
-		}
-	}()
+func (index *CgoIndex) UpLoad() (*cgopb.IndexStats, error) {
+	result := C.CreateProtoLayout()
+	defer C.ReleaseProtoLayout(result)
+	status := C.SerializeIndexAndUpLoad(index.indexPtr, result)
 	if err := HandleCStatus(&status, "failed to serialize index and upload index"); err != nil {
 		return nil, err
 	}
 
-	res := make(map[string]int64)
-	indexFilePaths, err := GetBinarySetKeys(cBinarySet)
-	if err != nil {
+	var indexStats cgopb.IndexStats
+	if err := segcore.UnmarshalProtoLayout(result, &indexStats); err != nil {
 		return nil, err
 	}
-	for _, path := range indexFilePaths {
-		size, err := GetBinarySetSize(cBinarySet, path)
-		if err != nil {
-			return nil, err
-		}
-		res[path] = size
-	}
-
-	return res, nil
+	return &indexStats, nil
 }

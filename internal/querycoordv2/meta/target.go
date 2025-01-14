@@ -22,11 +22,11 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -252,9 +252,12 @@ func (t *target) getCollectionTarget(collectionID int64) *CollectionTarget {
 	return ret
 }
 
-func (t *target) toQueryCoordCollectionTargets() []*metricsinfo.QueryCoordTarget {
+func (t *target) toQueryCoordCollectionTargets(collectionID int64) []*metricsinfo.QueryCoordTarget {
 	targets := make([]*metricsinfo.QueryCoordTarget, 0, t.collectionTargetMap.Len())
 	t.collectionTargetMap.Range(func(k int64, v *CollectionTarget) bool {
+		if collectionID > 0 && collectionID != k {
+			return true
+		}
 		segments := lo.MapToSlice(v.GetAllSegments(), func(k int64, s *datapb.SegmentInfo) *metricsinfo.Segment {
 			return metrics.NewSegmentFrom(s)
 		})

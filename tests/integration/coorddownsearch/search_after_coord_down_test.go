@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -301,6 +302,8 @@ func (s *CoordDownSearch) searchAfterCoordDown() float64 {
 	failedStart := time.Now()
 	s.searchFailed(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
 	log.Info(fmt.Sprintf("=========================Failed search cost: %fs=========================", time.Since(failedStart).Seconds()))
+
+	registry.ResetRegistration()
 
 	log.Info("=========================restart Root Coordinators=========================")
 	c.StartRootCoord()
