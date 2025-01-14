@@ -151,18 +151,14 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
 }
 
 template <typename T>
-BinarySet
+IndexStatsPtr
 ScalarIndexSort<T>::Upload(const Config& config) {
     auto binary_set = Serialize(config);
     file_manager_->AddFile(binary_set);
 
     auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
-    BinarySet ret;
-    for (auto& file : remote_paths_to_size) {
-        ret.Append(file.first, nullptr, file.second);
-    }
-
-    return ret;
+    return IndexStats::NewFromSizeMap(file_manager_->GetAddedTotalMemSize(),
+                                      remote_paths_to_size);
 }
 
 template <typename T>
