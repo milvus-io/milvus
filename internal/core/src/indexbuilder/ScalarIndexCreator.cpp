@@ -30,7 +30,8 @@ ScalarIndexCreator::ScalarIndexCreator(
     if (config.contains("index_type")) {
         index_type_ = config.at("index_type").get<std::string>();
     }
-    // config should have value for milvus::index::SCALAR_INDEX_ENGINE_VERSION for production calling chain
+    // Config should have value for milvus::index::SCALAR_INDEX_ENGINE_VERSION for production calling chain. 
+    // Use value_or(1) for unit test without setting this value
     index_info.scalar_index_engine_version =
         milvus::index::GetValueFromConfig<int32_t>(
             config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
