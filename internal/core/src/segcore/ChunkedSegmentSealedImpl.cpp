@@ -1255,12 +1255,8 @@ ChunkedSegmentSealedImpl::find_first(int64_t limit,
     std::vector<int64_t> seg_offsets;
     seg_offsets.reserve(limit);
 
-    // flip bitset since `find_next` is used to find true.
-    auto flipped = bitset.clone();
-    flipped.flip();
-
     int64_t offset = 0;
-    std::optional<size_t> result = flipped.find_first();
+    std::optional<size_t> result = bitset.find_first(false);
     while (result.has_value() && hit_num < limit) {
         hit_num++;
         seg_offsets.push_back(result.value());
@@ -1269,7 +1265,7 @@ ChunkedSegmentSealedImpl::find_first(int64_t limit,
             // In fact, this case won't happen on sealed segments.
             continue;
         }
-        result = flipped.find_next(offset);
+        result = bitset.find_next(offset, false);
     }
 
     return {seg_offsets, more_hit_than_limit && result.has_value()};
