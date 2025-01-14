@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -253,9 +254,10 @@ type commonConfig struct {
 	MetricsPort ParamItem `refreshable:"false"`
 
 	// lock related params
-	EnableLockMetrics        ParamItem `refreshable:"false"`
-	LockSlowLogInfoThreshold ParamItem `refreshable:"true"`
-	LockSlowLogWarnThreshold ParamItem `refreshable:"true"`
+	EnableLockMetrics           ParamItem `refreshable:"false"`
+	LockSlowLogInfoThreshold    ParamItem `refreshable:"true"`
+	LockSlowLogWarnThreshold    ParamItem `refreshable:"true"`
+	MaxWLockConditionalWaitTime ParamItem `refreshable:"true"`
 
 	StorageScheme             ParamItem `refreshable:"false"`
 	EnableStorageV2           ParamItem `refreshable:"false"`
@@ -751,6 +753,15 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.LockSlowLogWarnThreshold.Init(base.mgr)
+
+	p.MaxWLockConditionalWaitTime = ParamItem{
+		Key:          "common.locks.maxWLockConditionalWaitTime",
+		Version:      "2.5.4",
+		DefaultValue: "600",
+		Doc:          "maximum seconds for waiting wlock conditional",
+		Export:       true,
+	}
+	p.MaxWLockConditionalWaitTime.Init(base.mgr)
 
 	p.EnableStorageV2 = ParamItem{
 		Key:          "common.storage.enablev2",
@@ -1304,6 +1315,7 @@ type proxyConfig struct {
 	SkipAutoIDCheck              ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck        ParamItem `refreshable:"true"`
 	EnablePublicPrivilege        ParamItem `refreshable:"false"`
+	MaxVarCharLength             ParamItem `refreshable:"false"`
 
 	AccessLog AccessLogConfig
 
@@ -1715,6 +1727,14 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall enable public privilege",
 	}
 	p.EnablePublicPrivilege.Init(base.mgr)
+
+	p.MaxVarCharLength = ParamItem{
+		Key:          "proxy.maxVarCharLength",
+		Version:      "2.4.19",            // hotfix
+		DefaultValue: strconv.Itoa(65535), // 64K
+		Doc:          "maximum number of characters for a varchar field; this value is overridden by the value in a pre-existing schema if applicable",
+	}
+	p.MaxVarCharLength.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
@@ -3620,7 +3640,8 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 	p.CompactionMaxParallelTasks = ParamItem{
 		Key:          "dataCoord.compaction.maxParallelTaskNum",
 		Version:      "2.2.12",
-		DefaultValue: "10",
+		DefaultValue: "-1",
+		Doc:          "Deprecated, see datanode.slot.slotCap",
 		Export:       true,
 	}
 	p.CompactionMaxParallelTasks.Init(base.mgr)
@@ -4817,6 +4838,9 @@ type streamingConfig struct {
 	WALBalancerBackoffInitialInterval ParamItem `refreshable:"true"`
 	WALBalancerBackoffMultiplier      ParamItem `refreshable:"true"`
 
+	// broadcaster
+	WALBroadcasterConcurrencyRatio ParamItem `refreshable:"false"`
+
 	// txn
 	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
 }
@@ -4850,6 +4874,15 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 	}
 	p.WALBalancerBackoffMultiplier.Init(base.mgr)
 
+	p.WALBroadcasterConcurrencyRatio = ParamItem{
+		Key:          "streaming.walBroadcaster.concurrencyRatio",
+		Version:      "2.5.4",
+		Doc:          `The concurrency ratio based on number of CPU for wal broadcaster, 1 by default.`,
+		DefaultValue: "1",
+		Export:       true,
+	}
+	p.WALBroadcasterConcurrencyRatio.Init(base.mgr)
+
 	// txn
 	p.TxnDefaultKeepaliveTimeout = ParamItem{
 		Key:          "streaming.txn.defaultKeepaliveTimeout",
@@ -4863,11 +4896,11 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 
 // runtimeConfig is just a private environment value table.
 type runtimeConfig struct {
-	createTime time.Time
-	updateTime time.Time
-	role       string
+	createTime atomic.Time
+	updateTime atomic.Time
+	role       atomic.String
 	nodeID     atomic.Int64
-	components map[string]struct{}
+	components typeutil.ConcurrentSet[string]
 }
 
 type integrationTestConfig struct {

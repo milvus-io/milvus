@@ -22,8 +22,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -207,7 +207,7 @@ func TestGetChannelDistJSON(t *testing.T) {
 	manager.Update(1, channel1)
 	manager.Update(2, channel2)
 
-	channels := manager.GetChannelDist()
+	channels := manager.GetChannelDist(0)
 	assert.Equal(t, 2, len(channels))
 
 	checkResult := func(channel *metricsinfo.DmChannel) {

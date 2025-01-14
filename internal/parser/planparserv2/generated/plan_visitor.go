@@ -25,6 +25,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#LogicalOr.
 	VisitLogicalOr(ctx *LogicalOrContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#IsNotNull.
+	VisitIsNotNull(ctx *IsNotNullContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#MulDivMod.
 	VisitMulDivMod(ctx *MulDivModContext) interface{}
 
@@ -64,6 +67,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#AddSub.
 	VisitAddSub(ctx *AddSubContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#PhraseMatch.
+	VisitPhraseMatch(ctx *PhraseMatchContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Relational.
 	VisitRelational(ctx *RelationalContext) interface{}
 
@@ -102,6 +108,9 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#BitAnd.
 	VisitBitAnd(ctx *BitAndContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#IsNull.
+	VisitIsNull(ctx *IsNullContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#Power.
 	VisitPower(ctx *PowerContext) interface{}

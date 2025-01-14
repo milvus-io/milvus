@@ -96,7 +96,7 @@ pipeline {
                 axes {
                     axis {
                         name 'milvus_deployment_option'
-                        values 'standalone', 'distributed-pulsar', 'distributed-kafka', 'standalone-authentication', 'standalone-one-pod'
+                        values 'standalone', 'distributed-pulsar', 'distributed-kafka', 'standalone-authentication'
                     }
                 }
                 stages {

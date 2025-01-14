@@ -567,7 +567,7 @@ dataCoord:
     taskPrioritizer: default
     taskQueueCapacity: 100000 # compaction task queue size
     rpcTimeout: 10
-    maxParallelTaskNum: 10
+    maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
     dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)
     gcInterval: 1800 # The time interval in seconds for compaction gc
     mix:
@@ -863,6 +863,7 @@ common:
     threshold:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
+    maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
   storage:
     scheme: s3
     enablev2: false
@@ -1121,6 +1122,8 @@ streaming:
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     backoffInitialInterval: 50ms
     backoffMultiplier: 2 # The multiplier of balance task trigger backoff, 2 by default
+  walBroadcaster:
+    concurrencyRatio: 1 # The concurrency ratio based on number of CPU for wal broadcaster, 1 by default.
   txn:
     defaultKeepaliveTimeout: 10s # The default keepalive timeout for wal txn, 10s by default
 

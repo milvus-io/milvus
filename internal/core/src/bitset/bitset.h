@@ -546,23 +546,26 @@ class BitsetBase {
         return as_derived();
     }
 
-    // Find the index of the first bit set to true.
+    // Find the index of the first bit set to either true (default), or false.
     inline std::optional<size_t>
-    find_first() const {
+    find_first(const bool is_set = true) const {
         return policy_type::op_find(
-            this->data(), this->offset(), this->size(), 0);
+            this->data(), this->offset(), this->size(), 0, is_set);
     }
 
-    // Find the index of the first bit set to true, starting from a given bit index.
+    // Find the index of the first bit set to either true (default), or false, starting from a given bit index.
     inline std::optional<size_t>
-    find_next(const size_t starting_bit_idx) const {
+    find_next(const size_t starting_bit_idx, const bool is_set = true) const {
         const size_t size_v = this->size();
         if (starting_bit_idx + 1 >= size_v) {
             return std::nullopt;
         }
 
-        return policy_type::op_find(
-            this->data(), this->offset(), this->size(), starting_bit_idx + 1);
+        return policy_type::op_find(this->data(),
+                                    this->offset(),
+                                    this->size(),
+                                    starting_bit_idx + 1,
+                                    is_set);
     }
 
     // Read multiple bits starting from a given bit index.
@@ -989,11 +992,11 @@ class BitsetView : public BitsetBase<PolicyT,
 
     BitsetView() = default;
     BitsetView(const BitsetView&) = default;
-    BitsetView(BitsetView&&) noexcept = default;
+    BitsetView(BitsetView&&) = default;
     BitsetView&
     operator=(const BitsetView&) = default;
     BitsetView&
-    operator=(BitsetView&&) noexcept = default;
+    operator=(BitsetView&&) = default;
 
     template <typename ImplT, bool R>
     explicit BitsetView(BitsetBase<PolicyT, ImplT, R>& bitset)
@@ -1077,13 +1080,13 @@ class Bitset
     // Do not allow implicit copies (Rust style).
     Bitset(const Bitset&) = delete;
     // Allow default move.
-    Bitset(Bitset&&) noexcept = default;
+    Bitset(Bitset&&) = default;
     // Do not allow implicit copies (Rust style).
     Bitset&
     operator=(const Bitset&) = delete;
     // Allow default move.
     Bitset&
-    operator=(Bitset&&) noexcept = default;
+    operator=(Bitset&&) = default;
 
     template <typename C, bool R>
     explicit Bitset(const BitsetBase<PolicyT, C, R>& other) {

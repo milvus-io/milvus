@@ -1,6 +1,6 @@
 package planparserv2
 
-import "github.com/milvus-io/milvus/internal/proto/planpb"
+import "github.com/milvus-io/milvus/pkg/proto/planpb"
 
 type LogicalExprVisitor interface {
 	VisitExpr(expr *planpb.Expr) interface{}

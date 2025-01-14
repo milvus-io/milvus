@@ -12,12 +12,16 @@ packages:
   github.com/milvus-io/milvus/internal/streamingcoord/server/balancer:
     interfaces:
       Balancer:
-  github.com/milvus-io/milvus/internal/streamingnode/client/manager:
+  github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster:
     interfaces:
-      ManagerClient:
+      AppendOperator:
   github.com/milvus-io/milvus/internal/streamingcoord/client:
     interfaces:
       Client:
+      BroadcastService:
+  github.com/milvus-io/milvus/internal/streamingnode/client/manager:
+    interfaces:
+      ManagerClient:
   github.com/milvus-io/milvus/internal/streamingnode/client/handler:
     interfaces:
       HandlerClient:
@@ -46,10 +50,10 @@ packages:
       InterceptorWithReady:
       InterceptorBuilder:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector:
-   interfaces:
+    interfaces:
       SealOperator:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector:
-   interfaces:
+    interfaces:
       TimeTickSyncOperator:
   google.golang.org/grpc:
     interfaces:

@@ -191,21 +191,35 @@ VariableLengthChunk<Array>::set(const Array* src,
         begin,
         size_);
     size_t total_size = 0;
-    size_t padding_size = 0;
     for (auto i = 0; i < length; i++) {
-        total_size += src[i].byte_size() + padding_size;
+        total_size += src[i].byte_size();
     }
+    if (length > 0 && IsVariableDataType(src[0].get_element_type())) {
+        for (auto i = 0; i < length; i++) {
+            total_size += (src[i].length() * sizeof(uint32_t));
+        }
+    }
+
     auto buf = (char*)mcm->Allocate(mmap_descriptor_, total_size);
     AssertInfo(buf != nullptr, "failed to allocate memory from mmap_manager.");
-    for (auto i = 0, offset = 0; i < length; i++) {
-        auto data_size = src[i].byte_size() + padding_size;
-        char* data_ptr = buf + offset;
-        std::copy(src[i].data(), src[i].data() + src[i].byte_size(), data_ptr);
-        data_[i + begin] = ArrayView(data_ptr,
-                                     data_size,
-                                     src[i].get_element_type(),
-                                     src[i].get_offsets_in_copy());
-        offset += data_size;
+    char* data_ptr = buf;
+    for (auto i = 0; i < length; i++) {
+        int length = src[i].length();
+        uint32_t* src_offsets_ptr = src[i].get_offsets_data();
+        auto element_type = src[i].get_element_type();
+        // need copy offsets for variable types
+        uint32_t* target_offsets_ptr = nullptr;
+        if (IsVariableDataType(element_type)) {
+            target_offsets_ptr = reinterpret_cast<uint32_t*>(data_ptr);
+            std::copy(
+                src_offsets_ptr, src_offsets_ptr + length, target_offsets_ptr);
+            data_ptr += length * sizeof(uint32_t);
+        }
+        auto data_size = src[i].byte_size();
+        std::copy(src[i].data(), src[i].data() + data_size, data_ptr);
+        data_[i + begin] = ArrayView(
+            data_ptr, length, data_size, element_type, target_offsets_ptr);
+        data_ptr += data_size;
     }
 }
 

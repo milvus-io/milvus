@@ -274,6 +274,16 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
                 storage::GetByteSizeOfFieldDatas(field_data));
         }
 
+        // build text match index
+        if (field_meta.enable_match()) {
+            auto index = GetTextIndex(field_id);
+            index->BuildIndexFromFieldData(field_data,
+                                           field_meta.is_nullable());
+            index->Commit();
+            // Reload reader so that the index can be read immediately
+            index->Reload();
+        }
+
         // update the mem size
         stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
 
@@ -863,7 +873,11 @@ SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
                              int64_t offset_begin) {
     std::unique_lock lock(mutex_);
     auto iter = text_indexes_.find(field_id);
-    AssertInfo(iter != text_indexes_.end(), "text index not found");
+    if (iter == text_indexes_.end()) {
+        throw SegcoreError(
+            ErrorCode::TextIndexNotFound,
+            fmt::format("text index not found for field {}", field_id.get()));
+    }
     iter->second->AddTexts(n, texts, texts_valid_data, offset_begin);
 }
 

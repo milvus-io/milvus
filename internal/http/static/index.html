@@ -41,7 +41,8 @@
             font-size: 1.25em;
         }
         .card input,
-        .card button {
+        .card button,
+        .card textarea {
             width: 100%;
             box-sizing: border-box;
             padding: 10px;
@@ -49,6 +50,18 @@
             border: 1px solid #ccc;
             border-radius: 3px;
             font-size: 1em;
+        }
+        .card textarea {
+            resize: vertical;
+            overflow-y: auto;
+        }
+        #auth {
+            resize: none;
+            max-height: 50px;
+        }
+        #code {
+            min-height: 100px;
+            max-height: 200px;
         }
         .card button {
             background-color: #007bff;
@@ -58,6 +71,30 @@
         }
         .card button:hover {
             background-color: #0056b3;
+        }
+        .input-group {
+            position: relative;
+        }
+        .history {
+            max-height: 200px;
+            overflow-x: auto;
+            overflow-y: auto;
+            position: absolute;
+            top: 0;
+            left: -320px;
+            display: none;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 5px;
+            background-color: #f9f9f9;
+            width: 300px;
+            z-index: 100;
+        }
+        .history div {
+            padding: 5px;
+        }
+        .history div:hover {
+            background-color: #e9ecef;
         }
         .result {
             text-align: left;
@@ -84,7 +121,6 @@
             height: 35%;
             margin: 0px;
         }
-
         .hint p {
             width: 100%;
             height: 100%;
@@ -111,8 +147,16 @@
 <div class="container">
     <div class="card">
         <h2>Input</h2>
-        <input type="text" id="auth" placeholder="Enter auth" onkeydown="handleEnter(event, 'code')">
-        <input type="text" id="code" placeholder="Enter code" onkeydown="handleEnter(event, 'submitButton')">
+        <!-- <input type="text" id="auth" placeholder="Enter auth" onkeydown="handleEnter(event, 'code')">
+        <input type="text" id="code" placeholder="Enter code" onkeydown="handleEnter(event, 'submitButton')"> -->
+        <div class="input-group">
+            <div class="history" id="history1"></div>
+            <textarea id="auth" placeholder="Enter auth" onkeydown="handleEnter(event, 'code')"></textarea>
+        </div>
+        <div class="input-group">
+            <div class="history" id="history2"></div>
+            <textarea id="code" placeholder="Enter code" onkeydown="handleEnter(event, 'submitButton')"></textarea>
+        </div>
         <button id="submitButton" onclick="submitForm()">Submit</button>
     </div>
     <div class="card result" id="result">
@@ -135,6 +179,10 @@ Currently, the objects injected by expr include: <code>param</code>, <code>proxy
 3. Functions with multiple return values cannot be chained.</p>
 </div>
 <script>
+    const inputBoxes = document.querySelectorAll('textarea');
+    const histories = [...document.querySelectorAll('.history')];
+    let historiesData = [[], []];
+
     function handleEnter(event, nextElementId) {
         if (event.key === 'Enter') {
             event.preventDefault();
@@ -146,8 +194,26 @@ Currently, the objects injected by expr include: <code>param</code>, <code>proxy
     }
 
     function submitForm() {
+        hideAllHistories();
         const auth = document.getElementById('auth').value;
         const code = document.getElementById('code').value;
+
+        if (!isBalanced(code)) {
+            alert('There is an error in the expression. Check whether the brackets and quotation marks are missing.');
+            return;
+        }
+
+        inputBoxes.forEach((inputBox, index) => {
+            const inputValue = inputBox.value.trim();
+            if (inputValue === '') {
+                return;
+            }
+            if (inputValue && !historiesData[index].includes(inputValue)) {
+                historiesData[index].push(inputValue);
+                updateHistory(index);
+            }
+            histories[index].style.display = 'none';
+        });
 
         if (auth && code) {
             const xhr = new XMLHttpRequest();
@@ -164,6 +230,76 @@ Currently, the objects injected by expr include: <code>param</code>, <code>proxy
         } else {
             alert('Please fill in both fields.');
         }
+    }
+
+    inputBoxes.forEach((inputBox, index) => {
+        inputBox.addEventListener('focus', () => {
+            hideAllHistories();
+            if (inputBox.value === '' && historiesData[index].length > 0) {
+                histories[index].style.display = 'block';
+                updateHistory(index);
+            }
+        });
+
+        inputBox.addEventListener('blur', () => {
+            setTimeout(() => {
+                histories[index].style.display = 'none';
+            }, 500);
+        });
+
+        inputBox.addEventListener('input', () => {
+            hideAllHistories();
+            if (!inputBox.value && historiesData[index].length > 0) {
+                histories[index].style.display = 'block';
+            }
+        });
+    });
+
+    function updateHistory(index) {
+        if (historiesData[index].length > 0) {
+            histories[index].innerHTML = historiesData[index].map(item =>
+                `<div onclick="fillInput(${index}, '${item}')">${item}</div>`
+            ).join('');
+            histories[index].style.display = 'block';
+        } else {
+            console.log('no history');
+            histories[index].style.display = 'none';
+        }
+    }
+
+    function fillInput(index, value) {
+        inputBoxes[index].value = value;
+        histories[index].style.display = 'none';
+    }
+
+    function hideAllHistories() {
+        histories.forEach(history => {
+            history.style.display = 'none';
+        });
+    }
+
+    function isBalanced(input) {
+        const stack = [];
+        const pairs = {
+            "'": "'",
+            '"': '"',
+            '(': ')',
+            '[': ']',
+            '{': '}',
+        };
+
+        for (let char of input) {
+            if (pairs[char]) {
+                stack.push(char);
+            }
+            else if (Object.values(pairs).includes(char)) {
+                if (stack.length === 0 || pairs[stack.pop()] !== char) {
+                    return false;
+                }
+            }
+        }
+
+        return stack.length === 0;
     }
 </script>
 </body>

@@ -796,11 +796,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
 template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(OffsetVector* input) {
-    if (expr_->op_type_ == proto::plan::OpType::TextMatch) {
+    if (expr_->op_type_ == proto::plan::OpType::TextMatch ||
+        expr_->op_type_ == proto::plan::OpType::PhraseMatch) {
         if (has_offset_input_) {
             PanicInfo(
                 OpTypeInvalid,
-                fmt::format("text match does not support iterative filter"));
+                fmt::format("match query does not support iterative filter"));
         }
         return ExecTextMatch();
     }
@@ -905,10 +906,10 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
                                  : batch_size_;
                 overflow_check_pos_ += batch_size;
             }
-            auto valid = (input != nullptr)
-                             ? ProcessChunksForValidByOffsets<T>(
-                                   CanUseIndex<T>(), *input)
-                             : ProcessChunksForValid<T>(CanUseIndex<T>());
+            auto valid =
+                (input != nullptr)
+                    ? ProcessChunksForValidByOffsets<T>(is_index_mode_, *input)
+                    : ProcessChunksForValid<T>(is_index_mode_);
             auto res_vec = std::make_shared<ColumnVector>(
                 TargetBitmap(batch_size), std::move(valid));
             TargetBitmapView res(res_vec->GetRawData(), batch_size);
@@ -1089,8 +1090,33 @@ VectorPtr
 PhyUnaryRangeFilterExpr::ExecTextMatch() {
     using Index = index::TextMatchIndex;
     auto query = GetValueFromProto<std::string>(expr_->val_);
-    auto func = [](Index* index, const std::string& query) -> TargetBitmap {
-        return index->MatchQuery(query);
+    int64_t slop = 0;
+    if (expr_->op_type_ == proto::plan::PhraseMatch) {
+        // It should be larger than 0 in normal cases. Check it incase of receiving old version proto.
+        if (expr_->extra_values_.size() > 0) {
+            slop = GetValueFromProto<int64_t>(expr_->extra_values_[0]);
+        }
+        if (slop < 0 || slop > std::numeric_limits<uint32_t>::max()) {
+            throw SegcoreError(
+                ErrorCode::InvalidParameter,
+                fmt::format(
+                    "Slop {} is invalid in phrase match query. Should be "
+                    "within [0, UINT32_MAX].",
+                    slop));
+        }
+    }
+    auto op_type = expr_->op_type_;
+    auto func = [op_type, slop](Index* index,
+                                const std::string& query) -> TargetBitmap {
+        if (op_type == proto::plan::OpType::TextMatch) {
+            return index->MatchQuery(query);
+        } else if (op_type == proto::plan::OpType::PhraseMatch) {
+            return index->PhraseMatchQuery(query, slop);
+        } else {
+            PanicInfo(OpTypeInvalid,
+                      "unsupported operator type for match query: {}",
+                      op_type);
+        }
     };
     auto res = ProcessTextMatchIndex(func, query);
     return res;

@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -91,6 +94,7 @@ func (suite *SegmentSuite) SetupTest() {
 				},
 			},
 		},
+		nil,
 	)
 	suite.Require().NoError(err)
 
@@ -122,6 +126,7 @@ func (suite *SegmentSuite) SetupTest() {
 			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 			Level:         datapb.SegmentLevel_Legacy,
 		},
+		nil,
 	)
 	suite.Require().NoError(err)
 
@@ -221,4 +226,23 @@ func (suite *SegmentSuite) TestSegmentReleased() {
 
 func TestSegment(t *testing.T) {
 	suite.Run(t, new(SegmentSuite))
+}
+
+func TestWarmupDispatcher(t *testing.T) {
+	d := NewWarmupDispatcher()
+	ctx := context.Background()
+	go d.Run(ctx)
+
+	completed := atomic.NewInt64(0)
+	taskCnt := 10000
+	for i := 0; i < taskCnt; i++ {
+		d.AddTask(func() (any, error) {
+			completed.Inc()
+			return nil, nil
+		})
+	}
+
+	assert.Eventually(t, func() bool {
+		return completed.Load() == int64(taskCnt)
+	}, 10*time.Second, time.Second)
 }
