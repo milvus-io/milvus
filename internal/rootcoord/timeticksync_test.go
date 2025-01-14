@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -42,7 +42,7 @@ func TestTimetickSync(t *testing.T) {
 
 	paramtable.Get().Save(Params.RootCoordCfg.DmlChannelNum.Key, "2")
 	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, "rootcoord-dml")
-	ttSync := newTimeTickSync(ctx, sourceID, factory, nil)
+	ttSync := newTimeTickSync(context.TODO(), ctx, sourceID, factory, nil)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -120,7 +120,7 @@ func TestMultiTimetickSync(t *testing.T) {
 
 	paramtable.Get().Save(Params.RootCoordCfg.DmlChannelNum.Key, "1")
 	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, "rootcoord-dml")
-	ttSync := newTimeTickSync(ctx, UniqueID(0), factory, nil)
+	ttSync := newTimeTickSync(context.TODO(), ctx, UniqueID(0), factory, nil)
 
 	var wg sync.WaitGroup
 
@@ -190,7 +190,7 @@ func TestTimetickSyncWithExistChannels(t *testing.T) {
 
 	chans[UniqueID(100)] = []string{"by-dev-rootcoord-dml_4", "by-dev-rootcoord-dml_8"}
 	chans[UniqueID(102)] = []string{"by-dev-rootcoord-dml_2", "by-dev-rootcoord-dml_9"}
-	ttSync := newTimeTickSync(ctx, sourceID, factory, chans)
+	ttSync := newTimeTickSync(context.TODO(), ctx, sourceID, factory, chans)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -237,12 +237,12 @@ func TestTimetickSyncInvalidName(t *testing.T) {
 	chans := map[UniqueID][]string{}
 	chans[UniqueID(100)] = []string{"rootcoord-dml4"}
 	assert.Panics(t, func() {
-		newTimeTickSync(ctx, sourceID, factory, chans)
+		newTimeTickSync(context.TODO(), ctx, sourceID, factory, chans)
 	})
 
 	chans = map[UniqueID][]string{}
 	chans[UniqueID(102)] = []string{"rootcoord-dml_a"}
 	assert.Panics(t, func() {
-		newTimeTickSync(ctx, sourceID, factory, chans)
+		newTimeTickSync(context.TODO(), ctx, sourceID, factory, chans)
 	})
 }

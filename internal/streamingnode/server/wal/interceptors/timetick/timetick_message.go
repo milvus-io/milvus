@@ -21,7 +21,7 @@ func NewTimeTickMsg(ts uint64, lastConfirmedMessageID message.MessageID, sourceI
 				commonpbutil.WithSourceID(sourceID),
 			),
 		}).
-		WithBroadcast().
+		WithAllVChannel().
 		BuildMutable()
 	if err != nil {
 		return nil, err

@@ -30,18 +30,18 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
-	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 func init() {
@@ -106,22 +106,8 @@ func newMockWAL(t *testing.T, vchannels []string, maybe bool) *mock_wal.MockWAL 
 }
 
 func newTestFlusher(t *testing.T, maybe bool) flusher.Flusher {
-	wbMgr := writebuffer.NewMockBufferManager(t)
-	register := wbMgr.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	removeChannel := wbMgr.EXPECT().RemoveChannel(mock.Anything).Return()
-	start := wbMgr.EXPECT().Start().Return()
-	stop := wbMgr.EXPECT().Stop().Return()
-	if maybe {
-		register.Maybe()
-		removeChannel.Maybe()
-		start.Maybe()
-		stop.Maybe()
-	}
 	m := mocks.NewChunkManager(t)
-	params := getPipelineParams(m)
-	params.SyncMgr = syncmgr.NewMockSyncManager(t)
-	params.WriteBufferManager = wbMgr
-	return newFlusherWithParam(params)
+	return NewFlusher(m)
 }
 
 func TestFlusher_RegisterPChannel(t *testing.T) {
@@ -146,10 +132,16 @@ func TestFlusher_RegisterPChannel(t *testing.T) {
 	rootcoord.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).
 		Return(&rootcoordpb.GetPChannelInfoResponse{Collections: collectionsInfo}, nil)
 	datacoord := newMockDatacoord(t, maybe)
+
+	fDatacoord := syncutil.NewFuture[types.DataCoordClient]()
+	fDatacoord.Set(datacoord)
+
+	fRootcoord := syncutil.NewFuture[types.RootCoordClient]()
+	fRootcoord.Set(rootcoord)
 	resource.InitForTest(
 		t,
-		resource.OptRootCoordClient(rootcoord),
-		resource.OptDataCoordClient(datacoord),
+		resource.OptRootCoordClient(fRootcoord),
+		resource.OptDataCoordClient(fDatacoord),
 	)
 
 	f := newTestFlusher(t, maybe)
@@ -182,9 +174,11 @@ func TestFlusher_RegisterVChannel(t *testing.T) {
 	}
 
 	datacoord := newMockDatacoord(t, maybe)
+	fDatacoord := syncutil.NewFuture[types.DataCoordClient]()
+	fDatacoord.Set(datacoord)
 	resource.InitForTest(
 		t,
-		resource.OptDataCoordClient(datacoord),
+		resource.OptDataCoordClient(fDatacoord),
 	)
 
 	f := newTestFlusher(t, maybe)
@@ -220,9 +214,11 @@ func TestFlusher_Concurrency(t *testing.T) {
 	}
 
 	datacoord := newMockDatacoord(t, maybe)
+	fDatacoord := syncutil.NewFuture[types.DataCoordClient]()
+	fDatacoord.Set(datacoord)
 	resource.InitForTest(
 		t,
-		resource.OptDataCoordClient(datacoord),
+		resource.OptDataCoordClient(fDatacoord),
 	)
 
 	f := newTestFlusher(t, maybe)

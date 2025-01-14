@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -47,9 +46,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -58,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -164,9 +162,6 @@ type Server struct {
 	// manage ways that data coord access other coord
 	broker broker.Broker
 
-	// streamingcoord server is embedding in datacoord now.
-	streamingCoord *streamingcoord.Server
-
 	metricsRequest *metricsinfo.MetricsRequest
 }
 
@@ -214,7 +209,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		quitCh:                 make(chan struct{}),
 		factory:                factory,
 		flushCh:                make(chan UniqueID, 1024),
-		notifyIndexChan:        make(chan UniqueID),
+		notifyIndexChan:        make(chan UniqueID, 1024),
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
 		indexNodeCreator:       defaultIndexNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
@@ -313,12 +308,6 @@ func (s *Server) Init() error {
 	if err := s.initKV(); err != nil {
 		return err
 	}
-	if streamingutil.IsStreamingServiceEnabled() {
-		s.streamingCoord = streamingcoord.NewServerBuilder().
-			WithETCD(s.etcdCli).
-			WithMetaKV(s.kv).
-			WithSession(s.session).Build()
-	}
 	if s.enableActiveStandBy {
 		s.activateFunc = func() error {
 			log.Info("DataCoord switch from standby to active, activating")
@@ -328,11 +317,6 @@ func (s *Server) Init() error {
 			}
 			s.startDataCoord()
 			log.Info("DataCoord startup success")
-
-			if s.streamingCoord != nil {
-				s.streamingCoord.Start()
-				log.Info("StreamingCoord stratup successfully at standby mode")
-			}
 			return nil
 		}
 		s.stateCode.Store(commonpb.StateCode_StandBy)
@@ -341,10 +325,6 @@ func (s *Server) Init() error {
 	}
 
 	return s.initDataCoord()
-}
-
-func (s *Server) RegisterStreamingCoordGRPCService(server *grpc.Server) {
-	s.streamingCoord.RegisterGRPCService(server)
 }
 
 func (s *Server) initDataCoord() error {
@@ -383,15 +363,6 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		log.Error("data coordinator id allocator initialize failed", zap.Error(err))
 		return err
-	}
-
-	// Initialize streaming coordinator.
-	if streamingutil.IsStreamingServiceEnabled() {
-
-		if err = s.streamingCoord.Init(context.TODO()); err != nil {
-			return err
-		}
-		log.Info("init streaming coordinator done")
 	}
 
 	s.handler = newServerHandler(s)
@@ -454,10 +425,6 @@ func (s *Server) Start() error {
 	if !s.enableActiveStandBy {
 		s.startDataCoord()
 		log.Info("DataCoord startup successfully")
-		if s.streamingCoord != nil {
-			s.streamingCoord.Start()
-			log.Info("StreamingCoord stratup successfully")
-		}
 	}
 
 	return nil
@@ -1111,12 +1078,6 @@ func (s *Server) Stop() error {
 	s.garbageCollector.close()
 	log.Info("datacoord garbage collector stopped")
 
-	if s.streamingCoord != nil {
-		log.Info("StreamingCoord stoping...")
-		s.streamingCoord.Stop()
-		log.Info("StreamingCoord stopped")
-	}
-
 	s.stopServerLoop()
 
 	s.importScheduler.Close()
@@ -1212,11 +1173,7 @@ func (s *Server) registerMetricsRequest() {
 
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.IndexKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			v := jsonReq.Get(metricsinfo.MetricRequestParamCollectionIDKey)
-			collectionID := int64(0)
-			if v.Exists() {
-				collectionID = v.Int()
-			}
+			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
 			return s.meta.indexMeta.GetIndexJSON(collectionID), nil
 		})
 	log.Ctx(s.ctx).Info("register metrics actions finished")
