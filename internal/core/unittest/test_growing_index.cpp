@@ -66,6 +66,9 @@ INSTANTIATE_TEST_SUITE_P(
     SparseIndexTypeParameters,
     GrowingIndexTest,
     ::testing::Combine(
+        // VecIndexConfig will convert INDEX_SPARSE_INVERTED_INDEX/
+        // INDEX_SPARSE_WAND to INDEX_SPARSE_INVERTED_INDEX_CC/
+        // INDEX_SPARSE_WAND_CC, thus no need to use _CC version here.
         ::testing::Values(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
                           knowhere::IndexEnum::INDEX_SPARSE_WAND),
         ::testing::Values(knowhere::metric::IP)));
@@ -313,6 +316,68 @@ TEST_P(GrowingIndexTest, GetVector) {
                     EXPECT_TRUE(actual_row[j].id == expected_row[j].id);
                     EXPECT_TRUE(actual_row[j].val == expected_row[j].val);
                 }
+            }
+        }
+    }
+}
+
+TEST_P(GrowingIndexTest, GetVector_EmptySparseVector) {
+    if (data_type != DataType::VECTOR_SPARSE_FLOAT) {
+        return;
+    }
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto random = schema->AddDebugField("random", DataType::DOUBLE);
+    auto vec = schema->AddDebugField("embeddings", data_type, 128, metric_type);
+    schema->set_primary_field_id(pk);
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", index_type}, {"metric_type", metric_type}};
+    std::map<std::string, std::string> type_params = {{"dim", "128"}};
+    FieldIndexMeta fieldIndexMeta(
+        vec, std::move(index_params), std::move(type_params));
+    auto& config = SegcoreConfig::default_config();
+    config.set_chunk_rows(1024);
+    config.set_enable_interim_segment_index(true);
+    std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
+    IndexMetaPtr metaPtr =
+        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+    auto segment_growing = CreateGrowingSegment(schema, metaPtr);
+    auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
+
+    int64_t per_batch = 5000;
+    int64_t n_batch = 20;
+    int64_t dim = 128;
+    for (int64_t i = 0; i < n_batch; i++) {
+        auto dataset =
+            DataGen(schema, per_batch, 42, 0, 1, 10, false, true, false, true);
+        auto fakevec = dataset.get_col<knowhere::sparse::SparseRow<float>>(vec);
+        auto offset = segment->PreInsert(per_batch);
+        segment->Insert(offset,
+                        per_batch,
+                        dataset.row_ids_.data(),
+                        dataset.timestamps_.data(),
+                        dataset.raw_);
+        auto num_inserted = (i + 1) * per_batch;
+        auto ids_ds = GenRandomIds(num_inserted);
+        auto result =
+            segment->bulk_subscript(vec, ids_ds->GetIds(), num_inserted);
+
+        auto vector =
+            result.get()->mutable_vectors()->sparse_float_vector().contents();
+        EXPECT_TRUE(result.get()
+                        ->mutable_vectors()
+                        ->sparse_float_vector()
+                        .contents_size() == num_inserted);
+        auto sparse_rows = SparseBytesToRows(vector);
+        for (size_t i = 0; i < num_inserted; ++i) {
+            auto id = ids_ds->GetIds()[i];
+            auto actual_row = sparse_rows[i];
+            auto expected_row = fakevec[(id % per_batch)];
+            EXPECT_TRUE(actual_row.size() == expected_row.size());
+            for (size_t j = 0; j < actual_row.size(); ++j) {
+                EXPECT_TRUE(actual_row[j].id == expected_row[j].id);
+                EXPECT_TRUE(actual_row[j].val == expected_row[j].val);
             }
         }
     }
