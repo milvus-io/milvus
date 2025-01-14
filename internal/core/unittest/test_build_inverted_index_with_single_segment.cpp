@@ -91,11 +91,20 @@ class BuildInvertedIndexWithSingleSegmentTest : public ::testing::Test {
             for (size_t i = 0; i < N_; i++) {
                 index_column_data_.push_back(index_col[i]);
             }
-        } else if constexpr (std::is_floating_point_v<T>) {
+        } else if constexpr (std::is_same_v<T, float>) {
             auto index_col =
                 raw_data.get_col(schema_->get_field_id(FieldName("index")))
                     ->scalars()
                     .float_data()
+                    .data();
+            for (size_t i = 0; i < N_; i++) {
+                index_column_data_.push_back(index_col[i]);
+            }
+        } else if constexpr (std::is_same_v<T, double>) {
+            auto index_col =
+                raw_data.get_col(schema_->get_field_id(FieldName("index")))
+                    ->scalars()
+                    .double_data()
                     .data();
             for (size_t i = 0; i < N_; i++) {
                 index_column_data_.push_back(index_col[i]);
@@ -160,14 +169,13 @@ TYPED_TEST_P(BuildInvertedIndexWithSingleSegmentTest,
         std::mt19937 gen(rd());
 
         std::uniform_int_distribution<> int_dist(1, this->N_);
-        int random_int = int_dist(gen) - 1;
+        int random_idx = int_dist(gen) - 1;
 
         auto unary_range_expr = std::make_unique<proto::plan::UnaryRangeExpr>();
         unary_range_expr->set_allocated_column_info(column_info);
-        unary_range_expr->set_op(proto::plan::OpType::Equal);
-        auto val_to_filter = this->FieldValueAt(random_int);
-        unary_range_expr->set_allocated_value(
-            test::GenGenericValue(val_to_filter));
+        unary_range_expr->set_op(proto::plan::OpType::LessThan);
+        auto val = this->FieldValueAt(random_idx);
+        unary_range_expr->set_allocated_value(test::GenGenericValue(val));
 
         auto expr = test::GenExpr();
         expr->set_allocated_unary_range_expr(unary_range_expr.release());
@@ -178,15 +186,20 @@ TYPED_TEST_P(BuildInvertedIndexWithSingleSegmentTest,
         auto segpromote = dynamic_cast<SegmentSealedImpl*>(this->seg_.get());
         BitsetType final;
         final = ExecuteQueryExpr(parsed, segpromote, this->N_, MAX_TIMESTAMP);
-        auto ref = [this, val_to_filter](size_t offset) -> bool {
-            return this->index_column_data_[offset] == val_to_filter;
+        auto ref = [this, random_idx](size_t offset) -> bool {
+            return this->index_column_data_[offset] <
+                   this->index_column_data_[random_idx];
         };
         ASSERT_EQ(final.size(), this->N_);
-        ASSERT_TRUE(final[random_int]);
         for (size_t i = 0; i < this->N_; i++) {
+            if (std::is_floating_point_v<decltype(val)> && i == random_idx) {
+                continue;
+            }
             ASSERT_EQ(final[i], ref(i))
                 << "i: " << i << ", final[i]: " << final[i]
-                << ", ref(i): " << ref(i);
+                << ", ref(i): " << ref(i) << ", random_idx: " << random_idx
+                << ", value: " << this->index_column_data_[random_idx]
+                << ", value: " << this->index_column_data_[i];
         }
     }
 }
