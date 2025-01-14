@@ -170,6 +170,8 @@ func (index *CgoIndex) Build(dataset *Dataset) error {
 		return index.buildBFloat16VecIndex(dataset)
 	case schemapb.DataType_BinaryVector:
 		return index.buildBinaryVecIndex(dataset)
+	case schemapb.DataType_Int8Vector:
+		return index.buildInt8VecIndex(dataset)
 	case schemapb.DataType_Bool:
 		return index.buildBoolIndex(dataset)
 	case schemapb.DataType_Int8:
@@ -221,6 +223,12 @@ func (index *CgoIndex) buildBinaryVecIndex(dataset *Dataset) error {
 	vectors := dataset.Data[keyRawArr].([]byte)
 	status := C.BuildBinaryVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
 	return HandleCStatus(&status, "failed to build binary vector index")
+}
+
+func (index *CgoIndex) buildInt8VecIndex(dataset *Dataset) error {
+	vectors := dataset.Data[keyRawArr].([]int8)
+	status := C.BuildInt8VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.int8_t)(&vectors[0]))
+	return HandleCStatus(&status, "failed to build int8 vector index")
 }
 
 // TODO: investigate if we can pass an bool array to cgo.
