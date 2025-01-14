@@ -356,7 +356,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 				BuildID:             info.GetBuildID(),
 				IndexParams:         info.GetIndexParams(),
 				IndexFilePaths:      info.GetIndexFilePaths(),
-				IndexSize:           int64(info.GetSerializedSize()),
+				IndexSize:           int64(info.GetMemSize()),
 				IndexVersion:        info.GetIndexVersion(),
 				NumRows:             info.GetNumRows(),
 				CurrentIndexVersion: info.GetCurrentIndexVersion(),

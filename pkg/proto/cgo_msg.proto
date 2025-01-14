@@ -22,3 +22,13 @@ message LoadIndexInfo {
   int32 index_engine_version = 15;
   int64 index_file_size = 16;
 }
+
+message IndexStats {
+  int64 mem_size = 1;
+  repeated SerializedIndexFileInfo serialized_index_infos = 3;
+}
+
+message SerializedIndexFileInfo {
+  string file_name = 1;
+  int64 file_size = 2;
+}
