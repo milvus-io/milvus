@@ -1374,16 +1374,6 @@ func (m *meta) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
 	m.segments.SetAllocations(segmentID, allocations)
 }
 
-// SetSegmentsAllocations set Segments allocations, will overwrite ALL original allocations
-// Note that allocations is not persisted in KV store
-func (m *meta) SetSegmentsAllocations(segmentsAllocations map[int64][]*Allocation) {
-	m.Lock()
-	defer m.Unlock()
-	for segmentID, allocations := range segmentsAllocations {
-		m.segments.SetAllocations(segmentID, allocations)
-	}
-}
-
 // SetCurrentRows set current row count for segment with provided `segmentID`
 // Note that currRows is not persisted in KV store
 func (m *meta) SetCurrentRows(segmentID UniqueID, rows int64) {
