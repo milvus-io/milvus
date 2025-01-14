@@ -206,8 +206,8 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 }
 
 func (it *indexBuildTask) setScalarIndexCompatibilityParams(indexType string) {
-	currentScalarIndexEngineVersion := getCurrentScalarIndexVersion(it.req.GetCurrentScalarIndexVersion())
-	if currentScalarIndexEngineVersion == 0 && indexType == indexparamcheck.IndexINVERTED {
+	it.req.CurrentScalarIndexVersion = getCurrentScalarIndexVersion(it.req.GetCurrentScalarIndexVersion())
+	if it.req.CurrentScalarIndexVersion == 0 && indexType == indexparamcheck.IndexINVERTED {
 		it.newIndexParams["inverted_index_single_segment"] = "true"
 	}
 }
@@ -363,7 +363,15 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		saveFileKeys = append(saveFileKeys, fileKey)
 	}
 
-	it.node.storeIndexFilesAndStatistic(it.req.GetClusterID(), it.req.GetBuildID(), saveFileKeys, serializedSize, uint64(indexStats.MemSize), it.req.GetCurrentIndexVersion())
+	it.node.storeIndexFilesAndStatistic(
+		it.req.GetClusterID(),
+		it.req.GetBuildID(),
+		saveFileKeys,
+		serializedSize,
+		uint64(indexStats.MemSize),
+		it.req.GetCurrentIndexVersion(),
+		it.req.GetCurrentScalarIndexVersion(),
+	)
 	saveIndexFileDur := it.tr.RecordSpan()
 	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
 	it.tr.Elapse("index building all done")
