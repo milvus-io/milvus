@@ -127,6 +127,18 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 	}
 	for fieldName, fieldID := range r.name2FieldID {
 		if _, ok = row[fieldID]; !ok {
+			if r.id2Field[fieldID].GetNullable() {
+				row[fieldID] = nil
+			}
+			if r.id2Field[fieldID].GetDefaultValue() != nil {
+				data, err := nullutil.GetDefaultValue(r.id2Field[fieldID])
+				if err != nil {
+					return nil, err
+				}
+				row[fieldID] = data
+			}
+		}
+		if _, ok = row[fieldID]; !ok {
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("value of field '%s' is missed", fieldName))
 		}
 	}

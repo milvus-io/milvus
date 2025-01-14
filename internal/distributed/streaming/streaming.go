@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
@@ -17,6 +18,8 @@ var singleton WALAccesser = nil
 func Init() {
 	c, _ := kvfactory.GetEtcdAndPath()
 	singleton = newWALAccesser(c)
+	// Add the wal accesser to the broadcaster registry for making broadcast operation.
+	registry.Register(registry.AppendOperatorTypeStreaming, singleton)
 }
 
 // Release releases the resources of the wal accesser.
@@ -84,6 +87,10 @@ type WALAccesser interface {
 
 	// RawAppend writes a records to the log.
 	RawAppend(ctx context.Context, msgs message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error)
+
+	// BroadcastAppend sends a broadcast message to all target vchannels.
+	// BroadcastAppend guarantees the atomicity written of the messages and eventual consistency.
+	BroadcastAppend(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
 
 	// Read returns a scanner for reading records from the wal.
 	Read(ctx context.Context, opts ReadOption) Scanner

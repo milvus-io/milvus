@@ -86,17 +86,21 @@ const (
 
 	MetricRequestParamTargetScopeKey = "target_scope"
 
-	MetricRequestParamINKey = "in"
-
 	MetricRequestParamCollectionIDKey = "collection_id"
+
+	MetricRequestParamINKey  = "in"
+	MetricsRequestParamsInDC = "dc"
+	MetricsRequestParamsInQC = "qc"
+	MetricsRequestParamsInDN = "dn"
+	MetricsRequestParamsInQN = "qn"
 )
 
-var MetricRequestParamINValue = map[string]struct{}{
-	"dc": {},
-	"qc": {},
-	"dn": {},
-	"qn": {},
-}
+var (
+	RequestParamsInDC = &commonpb.KeyValuePair{Key: MetricRequestParamINKey, Value: MetricsRequestParamsInDC}
+	RequestParamsInQC = &commonpb.KeyValuePair{Key: MetricRequestParamINKey, Value: MetricsRequestParamsInQC}
+	RequestParamsInDN = &commonpb.KeyValuePair{Key: MetricRequestParamINKey, Value: MetricsRequestParamsInDN}
+	RequestParamsInQN = &commonpb.KeyValuePair{Key: MetricRequestParamINKey, Value: MetricsRequestParamsInQN}
+)
 
 type MetricsRequestAction func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error)
 
@@ -170,6 +174,14 @@ func ParseMetricRequestType(jsonRet gjson.Result) (string, error) {
 	}
 
 	return "", fmt.Errorf("%s or %s not found in request", MetricTypeKey, MetricRequestTypeKey)
+}
+
+func GetCollectionIDFromRequest(jsonReq gjson.Result) int64 {
+	v := jsonReq.Get(MetricRequestParamCollectionIDKey)
+	if !v.Exists() {
+		return 0
+	}
+	return v.Int()
 }
 
 // ConstructRequestByMetricType constructs a request according to the metric type

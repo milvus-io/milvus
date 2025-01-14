@@ -2,18 +2,27 @@ package streamingcoord
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
 
 // NewCataLog creates a new catalog instance
+// streamingcoord-meta
+// ├── broadcast
+// │   ├── task-1
+// │   └── task-2
+// └── pchannel
+//
+//	├── pchannel-1
+//	└── pchannel-2
 func NewCataLog(metaKV kv.MetaKv) metastore.StreamingCoordCataLog {
 	return &catalog{
 		metaKV: metaKV,
@@ -27,7 +36,7 @@ type catalog struct {
 
 // ListPChannels returns all pchannels
 func (c *catalog) ListPChannel(ctx context.Context) ([]*streamingpb.PChannelMeta, error) {
-	keys, values, err := c.metaKV.LoadWithPrefix(ctx, PChannelMeta)
+	keys, values, err := c.metaKV.LoadWithPrefix(ctx, PChannelMetaPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +69,41 @@ func (c *catalog) SavePChannels(ctx context.Context, infos []*streamingpb.PChann
 	})
 }
 
+func (c *catalog) ListBroadcastTask(ctx context.Context) ([]*streamingpb.BroadcastTask, error) {
+	keys, values, err := c.metaKV.LoadWithPrefix(ctx, BroadcastTaskPrefix)
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]*streamingpb.BroadcastTask, 0, len(values))
+	for k, value := range values {
+		info := &streamingpb.BroadcastTask{}
+		err = proto.Unmarshal([]byte(value), info)
+		if err != nil {
+			return nil, errors.Wrapf(err, "unmarshal broadcast task %s failed", keys[k])
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
+}
+
+func (c *catalog) SaveBroadcastTask(ctx context.Context, task *streamingpb.BroadcastTask) error {
+	key := buildBroadcastTaskPath(task.TaskId)
+	if task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
+		return c.metaKV.Remove(ctx, key)
+	}
+	v, err := proto.Marshal(task)
+	if err != nil {
+		return errors.Wrapf(err, "marshal broadcast task failed")
+	}
+	return c.metaKV.Save(ctx, key, string(v))
+}
+
 // buildPChannelInfoPath builds the path for pchannel info.
 func buildPChannelInfoPath(name string) string {
-	return PChannelMeta + "/" + name
+	return PChannelMetaPrefix + name
+}
+
+// buildBroadcastTaskPath builds the path for broadcast task.
+func buildBroadcastTaskPath(id int64) string {
+	return BroadcastTaskPrefix + strconv.FormatInt(id, 10)
 }

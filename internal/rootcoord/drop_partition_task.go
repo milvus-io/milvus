@@ -25,10 +25,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
 )
 
 type dropPartitionTask struct {
@@ -67,49 +67,10 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
-	redoTask := newBaseRedoTask(t.core.stepExecutor)
-
-	redoTask.AddSyncStep(&expireCacheStep{
-		baseStep:        baseStep{core: t.core},
-		dbName:          t.Req.GetDbName(),
-		collectionNames: []string{t.collMeta.Name},
-		collectionID:    t.collMeta.CollectionID,
-		partitionName:   t.Req.GetPartitionName(),
-		ts:              t.GetTs(),
-		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropPartition)},
-	})
-	redoTask.AddSyncStep(&changePartitionStateStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: t.collMeta.CollectionID,
-		partitionID:  partID,
-		state:        pb.PartitionState_PartitionDropping,
-		ts:           t.GetTs(),
-	})
-
-	redoTask.AddAsyncStep(&deletePartitionDataStep{
-		baseStep: baseStep{core: t.core},
-		pchans:   t.collMeta.PhysicalChannelNames,
-		vchans:   t.collMeta.VirtualChannelNames,
-		partition: &model.Partition{
-			PartitionID:   partID,
-			PartitionName: t.Req.GetPartitionName(),
-			CollectionID:  t.collMeta.CollectionID,
-		},
-		isSkip: t.Req.GetBase().GetReplicateInfo().GetIsReplicate(),
-	})
-	redoTask.AddAsyncStep(newConfirmGCStep(t.core, t.collMeta.CollectionID, partID))
-	redoTask.AddAsyncStep(&removePartitionMetaStep{
-		baseStep:     baseStep{core: t.core},
-		dbID:         t.collMeta.DBID,
-		collectionID: t.collMeta.CollectionID,
-		partitionID:  partID,
-		// This ts is less than the ts when we notify data nodes to drop partition, but it's OK since we have already
-		// marked this partition as deleted. If we want to make this ts greater than the notification's ts, we should
-		// wrap a step who will have these children and connect them with ts.
-		ts: t.GetTs(),
-	})
-
-	return redoTask.Execute(ctx)
+	return executeDropPartitionTaskSteps(ctx, t.core,
+		t.Req.GetPartitionName(), partID,
+		t.collMeta, t.Req.GetDbName(),
+		t.Req.GetBase().GetReplicateInfo().GetIsReplicate(), t.GetTs())
 }
 
 func (t *dropPartitionTask) GetLockerKey() LockerKey {
@@ -119,4 +80,58 @@ func (t *dropPartitionTask) GetLockerKey() LockerKey {
 		NewDatabaseLockerKey(t.Req.GetDbName(), false),
 		NewCollectionLockerKey(collection, true),
 	)
+}
+
+func executeDropPartitionTaskSteps(ctx context.Context,
+	core *Core,
+	partitionName string,
+	partitionID UniqueID,
+	col *model.Collection,
+	dbName string,
+	isReplicate bool,
+	ts Timestamp,
+) error {
+	redoTask := newBaseRedoTask(core.stepExecutor)
+
+	redoTask.AddSyncStep(&expireCacheStep{
+		baseStep:        baseStep{core: core},
+		dbName:          dbName,
+		collectionNames: []string{col.Name},
+		collectionID:    col.CollectionID,
+		partitionName:   partitionName,
+		ts:              ts,
+		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropPartition)},
+	})
+	redoTask.AddSyncStep(&changePartitionStateStep{
+		baseStep:     baseStep{core: core},
+		collectionID: col.CollectionID,
+		partitionID:  partitionID,
+		state:        pb.PartitionState_PartitionDropping,
+		ts:           ts,
+	})
+
+	redoTask.AddAsyncStep(&deletePartitionDataStep{
+		baseStep: baseStep{core: core},
+		pchans:   col.PhysicalChannelNames,
+		vchans:   col.VirtualChannelNames,
+		partition: &model.Partition{
+			PartitionID:   partitionID,
+			PartitionName: partitionName,
+			CollectionID:  col.CollectionID,
+		},
+		isSkip: isReplicate,
+	})
+	redoTask.AddAsyncStep(newConfirmGCStep(core, col.CollectionID, partitionID))
+	redoTask.AddAsyncStep(&removePartitionMetaStep{
+		baseStep:     baseStep{core: core},
+		dbID:         col.DBID,
+		collectionID: col.CollectionID,
+		partitionID:  partitionID,
+		// This ts is less than the ts when we notify data nodes to drop partition, but it's OK since we have already
+		// marked this partition as deleted. If we want to make this ts greater than the notification's ts, we should
+		// wrap a step who will have these children and connect them with ts.
+		ts: ts,
+	})
+
+	return redoTask.Execute(ctx)
 }

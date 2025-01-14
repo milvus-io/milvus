@@ -94,3 +94,49 @@ func (t *BackoffTimer) NextInterval() time.Duration {
 	}
 	return t.configFetcher.DefaultInterval()
 }
+
+// NewBackoffWithInstant creates a new backoff with instant
+func NewBackoffWithInstant(fetcher BackoffTimerConfigFetcher) *BackoffWithInstant {
+	cfg := fetcher.BackoffConfig()
+	defaultInterval := fetcher.DefaultInterval()
+	backoff := backoff.NewExponentialBackOff()
+	backoff.InitialInterval = cfg.InitialInterval
+	backoff.Multiplier = cfg.Multiplier
+	backoff.MaxInterval = cfg.MaxInterval
+	backoff.MaxElapsedTime = defaultInterval
+	backoff.Stop = defaultInterval
+	backoff.Reset()
+	return &BackoffWithInstant{
+		backoff:     backoff,
+		nextInstant: time.Now(),
+	}
+}
+
+// BackoffWithInstant is a backoff with instant.
+// A instant can be recorded with `UpdateInstantWithNextBackOff`
+// NextInstant can be used to make priority decision.
+type BackoffWithInstant struct {
+	backoff     *backoff.ExponentialBackOff
+	nextInstant time.Time
+}
+
+// NextInstant returns the next instant
+func (t *BackoffWithInstant) NextInstant() time.Time {
+	return t.nextInstant
+}
+
+// NextInterval returns the next interval
+func (t *BackoffWithInstant) NextInterval() time.Duration {
+	return time.Until(t.nextInstant)
+}
+
+// NextTimer returns the next timer and the duration of the timer
+func (t *BackoffWithInstant) NextTimer() (<-chan time.Time, time.Duration) {
+	next := time.Until(t.nextInstant)
+	return time.After(next), next
+}
+
+// UpdateInstantWithNextBackOff updates the next instant with next backoff
+func (t *BackoffWithInstant) UpdateInstantWithNextBackOff() {
+	t.nextInstant = time.Now().Add(t.backoff.NextBackOff())
+}

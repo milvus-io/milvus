@@ -6,9 +6,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 func TestApply(t *testing.T) {
@@ -16,7 +17,7 @@ func TestApply(t *testing.T) {
 
 	Apply()
 	Apply(OptETCD(&clientv3.Client{}))
-	Apply(OptRootCoordClient(mocks.NewMockRootCoordClient(t)))
+	Apply(OptRootCoordClient(syncutil.NewFuture[types.RootCoordClient]()))
 
 	assert.Panics(t, func() {
 		Done()
@@ -24,8 +25,8 @@ func TestApply(t *testing.T) {
 
 	Apply(
 		OptETCD(&clientv3.Client{}),
-		OptRootCoordClient(mocks.NewMockRootCoordClient(t)),
-		OptDataCoordClient(mocks.NewMockDataCoordClient(t)),
+		OptRootCoordClient(syncutil.NewFuture[types.RootCoordClient]()),
+		OptDataCoordClient(syncutil.NewFuture[types.DataCoordClient]()),
 		OptStreamingNodeCatalog(mock_metastore.NewMockStreamingNodeCataLog(t)),
 	)
 	Done()

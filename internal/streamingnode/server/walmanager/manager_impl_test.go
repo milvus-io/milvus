@@ -12,10 +12,12 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 func TestMain(m *testing.M) {
@@ -25,7 +27,11 @@ func TestMain(m *testing.M) {
 
 func TestManager(t *testing.T) {
 	rootcoord := mocks.NewMockRootCoordClient(t)
+	fRootcoord := syncutil.NewFuture[internaltypes.RootCoordClient]()
+	fRootcoord.Set(rootcoord)
 	datacoord := mocks.NewMockDataCoordClient(t)
+	fDatacoord := syncutil.NewFuture[internaltypes.DataCoordClient]()
+	fDatacoord.Set(datacoord)
 
 	flusher := mock_flusher.NewMockFlusher(t)
 	flusher.EXPECT().RegisterPChannel(mock.Anything, mock.Anything).Return(nil)
@@ -33,8 +39,8 @@ func TestManager(t *testing.T) {
 	resource.InitForTest(
 		t,
 		resource.OptFlusher(flusher),
-		resource.OptRootCoordClient(rootcoord),
-		resource.OptDataCoordClient(datacoord),
+		resource.OptRootCoordClient(fRootcoord),
+		resource.OptDataCoordClient(fDatacoord),
 	)
 
 	opener := mock_wal.NewMockOpener(t)
