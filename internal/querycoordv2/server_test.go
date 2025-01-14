@@ -34,8 +34,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	coordMocks "github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -47,6 +45,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -319,7 +319,19 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 	suite.server, err = suite.newQueryCoord()
 	suite.NoError(err)
 	mockRootCoord := coordMocks.NewMockRootCoordClient(suite.T())
+	mockRootCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			StateCode: commonpb.StateCode_Healthy,
+		},
+		Status: merr.Success(),
+	}, nil).Maybe()
 	mockDataCoord := coordMocks.NewMockDataCoordClient(suite.T())
+	mockDataCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			StateCode: commonpb.StateCode_Healthy,
+		},
+		Status: merr.Success(),
+	}, nil).Maybe()
 
 	mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status: merr.Success(),
@@ -610,7 +622,19 @@ func (suite *ServerSuite) hackServer() {
 
 func (suite *ServerSuite) hackBroker(server *Server) {
 	mockRootCoord := coordMocks.NewMockRootCoordClient(suite.T())
+	mockRootCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			StateCode: commonpb.StateCode_Healthy,
+		},
+		Status: merr.Success(),
+	}, nil).Maybe()
 	mockDataCoord := coordMocks.NewMockDataCoordClient(suite.T())
+	mockDataCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			StateCode: commonpb.StateCode_Healthy,
+		},
+		Status: merr.Success(),
+	}, nil).Maybe()
 
 	for _, collection := range suite.collections {
 		mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{

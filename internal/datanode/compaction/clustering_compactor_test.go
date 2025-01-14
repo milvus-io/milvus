@@ -19,6 +19,7 @@ package compaction
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,9 +33,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -228,6 +229,81 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 		}
 	}
 	s.Equal(2, totalBinlogNum/len(schema.GetFields()))
+	s.Equal(1, statsBinlogNum)
+	s.Equal(totalRowNum, statsRowNum)
+}
+
+func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit() {
+	schema := genCollectionSchema()
+	var segmentID int64 = 1001
+	segWriter, err := NewSegmentWriter(schema, 1000, segmentID, PartitionID, CollectionID)
+	s.Require().NoError(err)
+	for i := 0; i < 10240; i++ {
+		v := storage.Value{
+			PK:        storage.NewInt64PrimaryKey(int64(i)),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Value:     genRow(int64(i)),
+		}
+		err = segWriter.Write(&v)
+		s.Require().NoError(err)
+	}
+	segWriter.FlushAndIsFull()
+
+	kvs, fBinlogs, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
+	s.NoError(err)
+	var one sync.Once
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, strings []string) ([][]byte, error) {
+			// 32m, only two buffers can be generated
+			one.Do(func() {
+				s.task.memoryBufferSize = 32 * 1024 * 1024
+			})
+			return lo.Values(kvs), nil
+		})
+
+	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
+		{
+			SegmentID:    segmentID,
+			FieldBinlogs: lo.Values(fBinlogs),
+		},
+	}
+
+	s.task.plan.Schema = genCollectionSchema()
+	s.task.plan.ClusteringKeyField = 100
+	s.task.plan.PreferSegmentRows = 3000
+	s.task.plan.MaxSegmentRows = 3000
+
+	// 8+8+8+4+7+4*4=51
+	// 51*1024 = 52224
+	// writer will automatically flush after 1024 rows.
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "52223")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key, "1")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key)
+
+	compactionResult, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Equal(2, len(s.task.clusterBuffers))
+	s.Equal(4, len(compactionResult.GetSegments()))
+	totalBinlogNum := 0
+	totalRowNum := int64(0)
+	for _, fb := range compactionResult.GetSegments()[0].GetInsertLogs() {
+		for _, b := range fb.GetBinlogs() {
+			totalBinlogNum++
+			if fb.GetFieldID() == 100 {
+				totalRowNum += b.GetEntriesNum()
+			}
+		}
+	}
+	statsBinlogNum := 0
+	statsRowNum := int64(0)
+	for _, sb := range compactionResult.GetSegments()[0].GetField2StatslogPaths() {
+		for _, b := range sb.GetBinlogs() {
+			statsBinlogNum++
+			statsRowNum += b.GetEntriesNum()
+		}
+	}
+	s.Equal(3, totalBinlogNum/len(schema.GetFields()))
 	s.Equal(1, statsBinlogNum)
 	s.Equal(totalRowNum, statsRowNum)
 }

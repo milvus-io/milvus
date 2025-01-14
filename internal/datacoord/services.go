@@ -32,8 +32,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -41,6 +39,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -112,17 +112,19 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	}
 	timeOfSeal, _ := tsoutil.ParseTS(ts)
 
-	sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, req.GetCollectionID(), req.GetSegmentIDs())
-	if err != nil {
-		return &datapb.FlushResponse{
-			Status: merr.Status(errors.Wrapf(err, "failed to flush collection %d",
-				req.GetCollectionID())),
-		}, nil
-	}
-
 	sealedSegmentsIDDict := make(map[UniqueID]bool)
-	for _, sealedSegmentID := range sealedSegmentIDs {
-		sealedSegmentsIDDict[sealedSegmentID] = true
+
+	for _, channel := range coll.VChannelNames {
+		sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, channel, req.GetSegmentIDs())
+		if err != nil {
+			return &datapb.FlushResponse{
+				Status: merr.Status(errors.Wrapf(err, "failed to flush collection %d",
+					req.GetCollectionID())),
+			}, nil
+		}
+		for _, sealedSegmentID := range sealedSegmentIDs {
+			sealedSegmentsIDDict[sealedSegmentID] = true
+		}
 	}
 
 	segments := s.meta.GetSegmentsOfCollection(req.GetCollectionID())
@@ -167,7 +169,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 
 	log.Info("flush response with segments",
 		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64s("sealSegments", sealedSegmentIDs),
+		zap.Int64s("sealSegments", lo.Keys(sealedSegmentsIDDict)),
 		zap.Int("flushedSegmentsCount", len(flushSegmentIDs)),
 		zap.Time("timeOfSeal", timeOfSeal),
 		zap.Uint64("flushTs", ts),
@@ -177,7 +179,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		Status:          merr.Success(),
 		DbID:            req.GetDbID(),
 		CollectionID:    req.GetCollectionID(),
-		SegmentIDs:      sealedSegmentIDs,
+		SegmentIDs:      lo.Keys(sealedSegmentsIDDict),
 		TimeOfSeal:      timeOfSeal.Unix(),
 		FlushSegmentIDs: flushSegmentIDs,
 		FlushTs:         ts,
@@ -202,7 +204,6 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			zap.Int64("partitionID", r.GetPartitionID()),
 			zap.String("channelName", r.GetChannelName()),
 			zap.Uint32("count", r.GetCount()),
-			zap.String("segment level", r.GetLevel().String()),
 		)
 
 		// Load the collection info from Root Coordinator, if it is not found in server meta.
@@ -507,10 +508,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		// Set segment state
 		if req.GetDropped() {
 			// segmentManager manages growing segments
-			s.segmentManager.DropSegment(ctx, req.GetSegmentID())
+			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
 			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
 		} else if req.GetFlushed() {
-			s.segmentManager.DropSegment(ctx, req.GetSegmentID())
+			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
 			// set segment to SegmentState_Flushing
 			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Flushing))
 		}
@@ -1014,7 +1015,7 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 // it may include SystemMetrics, Topology metrics, etc.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log := log.Ctx(ctx)
-	if err := merr.CheckHealthyStandby(s.GetStateCode()); err != nil {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &milvuspb.GetMetricsResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -1446,10 +1447,7 @@ func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeT
 
 	s.updateSegmentStatistics(segmentStats)
 
-	if err := s.segmentManager.ExpireAllocations(channel, ts); err != nil {
-		log.Warn("failed to expire allocations", zap.Error(err))
-		return err
-	}
+	s.segmentManager.ExpireAllocations(channel, ts)
 
 	flushableIDs, err := s.segmentManager.GetFlushableSegments(ctx, channel, ts)
 	if err != nil {

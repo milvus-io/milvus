@@ -31,11 +31,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	ms "github.com/milvus-io/milvus/pkg/mq/msgstream"
+	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -103,7 +103,7 @@ func (t *createCollectionTask) validate() error {
 	if t.Req.GetNumPartitions() > 0 {
 		newPartNum = t.Req.GetNumPartitions()
 	}
-	return checkGeneralCapacity(t.ctx, 1, newPartNum, t.Req.GetShardsNum(), t.core, t.ts)
+	return checkGeneralCapacity(t.ctx, 1, newPartNum, t.Req.GetShardsNum(), t.core)
 }
 
 // checkMaxCollectionsPerDB DB properties take precedence over quota configurations for max collections.
@@ -567,6 +567,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 func (t *createCollectionTask) GetLockerKey() LockerKey {
 	return NewLockerKeyChain(
 		NewClusterLockerKey(false),
-		NewDatabaseLockerKey(t.Req.GetDbName(), true),
+		NewDatabaseLockerKey(t.Req.GetDbName(), false),
+		NewCollectionLockerKey(t.Req.GetCollectionName(), true),
 	)
 }

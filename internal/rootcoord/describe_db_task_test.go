@@ -25,8 +25,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util"
 )
 
@@ -48,7 +48,7 @@ func Test_describeDatabaseTask_Execute(t *testing.T) {
 	t.Run("describe with empty database name", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
-			Return(model.NewDefaultDatabase(), nil)
+			Return(model.NewDefaultDatabase(nil), nil)
 		core := newTestCore(withMeta(meta))
 
 		task := &describeDBTask{

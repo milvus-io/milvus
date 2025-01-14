@@ -24,7 +24,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -33,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -116,6 +116,17 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 	// 1. no stopping balance and auto balance is disabled, return empty collections for balance
 	// 2. when balancer isn't active, skip auto balance
 	if !Params.QueryCoordCfg.AutoBalance.GetAsBool() || !b.IsActive() {
+		return nil
+	}
+
+	// Before performing balancing, check the CurrentTarget/LeaderView/Distribution for all collections.
+	// If any collection has unready info, skip the balance operation to avoid inconsistencies.
+	notReadyCollections := lo.Filter(loadedCollections, func(cid int64, _ int) bool {
+		// todo: should also check distribution and leader view in the future
+		return !b.targetMgr.IsCurrentTargetReady(cid)
+	})
+	if len(notReadyCollections) > 0 {
+		log.RatedInfo(10, "skip normal balance, cause collection not ready for balance", zap.Int64s("collectionIDs", notReadyCollections))
 		return nil
 	}
 

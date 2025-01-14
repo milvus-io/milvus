@@ -31,9 +31,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	kvmock "github.com/milvus-io/milvus/internal/kv/mocks"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -450,6 +450,48 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Watching)
 		s.checkAssignment(m, 1, "ch2", Watching)
+	})
+	s.Run("advance watching channels released during check", func() {
+		idx := int64(19530)
+		mockAlloc := globalIDAllocator.NewMockGlobalIDAllocator(s.T())
+		mockAlloc.EXPECT().AllocOne().
+			RunAndReturn(func() (int64, error) {
+				idx++
+				return idx, nil
+			})
+		chNodes := map[string]int64{
+			"ch1": 1,
+			"ch2": 1,
+		}
+		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToWatch)
+		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, mockAlloc)
+		s.Require().NoError(err)
+		s.checkAssignment(m, 1, "ch1", ToWatch)
+		s.checkAssignment(m, 1, "ch2", ToWatch)
+
+		m.AdvanceChannelState(ctx)
+		s.checkAssignment(m, 1, "ch1", Watching)
+		s.checkAssignment(m, 1, "ch2", Watching)
+
+		// Release belfore check return
+		s.mockCluster.EXPECT().CheckChannelOperationProgress(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
+			if info.GetVchan().GetChannelName() == "ch1" {
+				m.Release(1, "ch1")
+				s.checkAssignment(m, 1, "ch1", ToRelease)
+				rwChannel, found := m.GetChannel(nodeID, "ch1")
+				s.True(found)
+				metaInfo := rwChannel.GetWatchInfo()
+				s.Require().EqualValues(metaInfo.GetOpID(), 19531)
+				log.Info("Trying to check this info", zap.Any("meta info", rwChannel.GetWatchInfo()))
+			}
+			log.Info("Trying to check this info", zap.Any("rpc info", info))
+			return &datapb.ChannelOperationProgressResponse{State: datapb.ChannelWatchState_WatchSuccess, Progress: 100}, nil
+		}).Twice()
+		m.AdvanceChannelState(ctx)
+
+		s.checkAssignment(m, 1, "ch1", ToRelease)
+		s.checkAssignment(m, 1, "ch2", Watched)
 	})
 	s.Run("advance watching channels check ErrNodeNotFound", func() {
 		chNodes := map[string]int64{

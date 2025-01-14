@@ -7,8 +7,19 @@ from common import common_func as cf
 from common.common_type import CheckTasks, Connect_Object_Name
 # from common.code_mapping import ErrorCode, ErrorMessage
 from pymilvus import Collection, Partition, ResourceGroupInfo
-from utils.api_request import Error
 import check.param_check as pc
+
+
+class Error:
+    def __init__(self, error):
+        self.code = getattr(error, 'code', -1)
+        self.message = getattr(error, 'message', str(error))
+
+    def __str__(self):
+        return f"Error(code={self.code}, message={self.message})"
+
+    def __repr__(self):
+        return f"Error(code={self.code}, message={self.message})"
 
 
 class ResponseChecker:
@@ -103,6 +114,9 @@ class ResponseChecker:
         elif self.check_task == CheckTasks.check_describe_collection_property:
             # describe collection interface(high level api) response check
             result = self.check_describe_collection_property(self.response, self.func_name, self.check_items)
+        elif self.check_task == CheckTasks.check_collection_fields_properties:
+            # check field properties in describe collection response
+            result = self.check_collection_fields_properties(self.response, self.func_name, self.check_items)
 
         # Add check_items here if something new need verify
 
@@ -239,6 +253,32 @@ class ResponseChecker:
         assert res["fields"][0]["field_id"] == 100 and (res["fields"][0]["type"] == 5 or 21)
         assert res["fields"][1]["field_id"] == 101 and res["fields"][1]["type"] == 101
 
+        return True
+
+    @staticmethod
+    def check_collection_fields_properties(res, func_name, check_items):
+        """
+        According to the check_items to check collection field properties of res, which return from func_name
+        :param res: actual response of client.describe_collection()
+        :type res: Collection
+
+        :param func_name: describe_collection
+        :type func_name: str
+
+        :param check_items: which field properties expected to be checked, like max_length etc.
+        :type check_items: dict, {field_name: {field_properties}, ...}
+        """
+        exp_func_name = "describe_collection"
+        if func_name != exp_func_name:
+            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+        if len(check_items) == 0:
+            raise Exception("No expect values found in the check task")
+        if check_items.get("collection_name", None) is not None:
+            assert res["collection_name"] == check_items.get("collection_name")
+        for key in check_items.keys():
+            for field in res["fields"]:
+                if field["name"] == key:
+                    assert field['params'].items() >= check_items[key].items()
         return True
 
     @staticmethod

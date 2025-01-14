@@ -237,6 +237,22 @@ var (
 			nodeIDLabelName,
 			channelNameLabelName,
 		})
+
+	DataNodeCompactionDeleteCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "compaction_delete_count",
+			Help:      "Number of delete entries in compaction",
+		}, []string{collectionIDLabelName})
+
+	DataNodeCompactionMissingDeleteCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "compaction_missing_delete_count",
+			Help:      "Number of missing deletes in compaction",
+		}, []string{collectionIDLabelName})
 )
 
 // RegisterDataNode registers DataNode metrics
@@ -261,6 +277,8 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	// compaction related
 	registry.MustRegister(DataNodeCompactionLatency)
 	registry.MustRegister(DataNodeCompactionLatencyInQueue)
+	registry.MustRegister(DataNodeCompactionDeleteCount)
+	registry.MustRegister(DataNodeCompactionMissingDeleteCount)
 	// deprecated metrics
 	registry.MustRegister(DataNodeForwardDeleteMsgTimeTaken)
 	registry.MustRegister(DataNodeNumProducers)
@@ -296,6 +314,14 @@ func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel 
 
 	DataNodeFlowGraphBufferDataSize.Delete(prometheus.Labels{
 		nodeIDLabelName:       fmt.Sprint(nodeID),
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
+
+	DataNodeCompactionDeleteCount.Delete(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
+
+	DataNodeCompactionMissingDeleteCount.Delete(prometheus.Labels{
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
 }

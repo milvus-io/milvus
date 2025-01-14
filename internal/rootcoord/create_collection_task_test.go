@@ -32,9 +32,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -246,23 +246,7 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{1: {1, 2}})
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
 			Return(&model.Database{Name: "db1"}, nil).Once()
-
-		meta.On("GetDatabaseByID",
-			mock.Anything, mock.Anything, mock.Anything,
-		).Return(&model.Database{
-			Name: "default",
-		}, nil)
-		meta.On("GetCollectionByID",
-			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-		).Return(&model.Collection{
-			Name:      "default",
-			ShardsNum: 2,
-			Partitions: []*model.Partition{
-				{
-					PartitionID: 1,
-				},
-			},
-		}, nil)
+		meta.EXPECT().GetGeneralCount(mock.Anything).Return(1)
 
 		core := newTestCore(withMeta(meta))
 
@@ -295,8 +279,7 @@ func Test_createCollectionTask_validate(t *testing.T) {
 					},
 				},
 			}, nil).Once()
-		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).
-			Return(nil, errors.New("mock"))
+		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 
 		core := newTestCore(withMeta(meta))
 		task := createCollectionTask{
@@ -636,12 +619,13 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
-	).Return(model.NewDefaultDatabase(), nil)
+	).Return(model.NewDefaultDatabase(nil), nil)
 	meta.On("ListAllAvailCollections",
 		mock.Anything,
 	).Return(map[int64][]int64{
 		util.DefaultDBID: {1, 2},
 	}, nil)
+	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)
@@ -662,8 +646,6 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 	})
 
 	t.Run("invalid schema", func(t *testing.T) {
-		meta.On("GetDatabaseByID", mock.Anything,
-			mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 		core := newTestCore(withMeta(meta))
 		collectionName := funcutil.GenRandomStr()
 		task := &createCollectionTask{
@@ -692,8 +674,6 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		}
 		marshaledSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		meta.On("GetDatabaseByID", mock.Anything,
-			mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 		core := newTestCore(withInvalidIDAllocator(), withMeta(meta))
 
 		task := createCollectionTask{
@@ -716,8 +696,6 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		field1 := funcutil.GenRandomStr()
 
 		ticker := newRocksMqTtSynchronizer()
-		meta.On("GetDatabaseByID", mock.Anything,
-			mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 
 		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
 
@@ -1050,14 +1028,13 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
-	).Return(model.NewDefaultDatabase(), nil)
+	).Return(model.NewDefaultDatabase(nil), nil)
 	meta.On("ListAllAvailCollections",
 		mock.Anything,
 	).Return(map[int64][]int64{
 		util.DefaultDBID: {1, 2},
 	}, nil)
-	meta.On("GetDatabaseByID", mock.Anything,
-		mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
+	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)

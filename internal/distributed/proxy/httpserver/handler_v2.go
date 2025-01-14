@@ -22,14 +22,16 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -63,9 +65,9 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(CollectionCategory+ReleaseAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.releaseCollection))))
 
 	router.POST(DataBaseCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.createDatabase))))
-	router.POST(DataBaseCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.dropDatabase))))
+	router.POST(DataBaseCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqRequiredName{} }, wrapperTraceLog(h.dropDatabase))))
 	router.POST(DataBaseCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &EmptyReq{} }, wrapperTraceLog(h.listDatabases))))
-	router.POST(DataBaseCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.describeDatabase))))
+	router.POST(DataBaseCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqRequiredName{} }, wrapperTraceLog(h.describeDatabase))))
 	router.POST(DataBaseCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
 	// Query
 	router.POST(EntityCategory+QueryAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
@@ -142,7 +144,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	// privilege group
 	router.POST(PrivilegeGroupCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.createPrivilegeGroup))))
 	router.POST(PrivilegeGroupCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.dropPrivilegeGroup))))
-	router.POST(PrivilegeGroupCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.listPrivilegeGroups))))
+	router.POST(PrivilegeGroupCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.listPrivilegeGroups))))
 	router.POST(PrivilegeGroupCategory+AddPrivilegesToGroupAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.addPrivilegesToGroup))))
 	router.POST(PrivilegeGroupCategory+RemovePrivilegesFromGroupAction, timeoutMiddleware(wrapperPost(func() any { return &PrivilegeGroupReq{} }, wrapperTraceLog(h.removePrivilegesFromGroup))))
 
@@ -281,6 +283,7 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 		if !ignoreErr {
 			HTTPReturn(c, http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 		}
+		hookutil.GetExtension().ReportRefused(ctx, req, WrapErrorToResponse(merr.ErrNeedAuthenticate), nil, c.FullPath())
 		return merr.ErrNeedAuthenticate
 	}
 	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
@@ -288,6 +291,7 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 		if !ignoreErr {
 			HTTPReturn(c, http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
 		}
+		hookutil.GetExtension().ReportRefused(ctx, req, WrapErrorToResponse(authErr), nil, c.FullPath())
 		return authErr
 	}
 
@@ -313,6 +317,7 @@ func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAu
 		_, err := CheckLimiter(ctx, req, pxy)
 		if err != nil {
 			log.Warn("high level restful api, fail to check limiter", zap.Error(err), zap.String("method", fullMethod))
+			hookutil.GetExtension().ReportRefused(ctx, req, WrapErrorToResponse(merr.ErrHTTPRateLimit), nil, c.FullPath())
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
 				HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + err.Error(),
@@ -325,13 +330,15 @@ func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAu
 	if !ok {
 		username = ""
 	}
-	response, err := proxy.HookInterceptor(ctx, req, username.(string), fullMethod, handler)
+
+	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, c.Keys), req, username.(string), fullMethod, handler)
 	if err == nil {
 		status, ok := requestutil.GetStatusFromResponse(response)
 		if ok {
 			err = merr.Error(status)
 		}
 	}
+
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err))
 		if !ignoreErr {
@@ -622,6 +629,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		QueryParams:           []*commonpb.KeyValuePair{},
 		UseDefaultConsistency: true,
 	}
+	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
 	c.Set(ContextRequest, req)
 	if httpReq.Offset > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
@@ -713,6 +721,7 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 		PartitionName:  httpReq.PartitionName,
 		Expr:           httpReq.Filter,
 	}
+	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
 	c.Set(ContextRequest, req)
 	if req.Expr == "" {
 		body, _ := c.Get(gin.BodyBytesKey)
@@ -925,7 +934,7 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 	})
 }
 
-func generateSearchParams(ctx context.Context, c *gin.Context, reqSearchParams searchParams) []*commonpb.KeyValuePair {
+func generateSearchParams(reqSearchParams searchParams) []*commonpb.KeyValuePair {
 	var searchParams []*commonpb.KeyValuePair
 	if reqSearchParams.Params == nil {
 		reqSearchParams.Params = make(map[string]any)
@@ -965,7 +974,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 
-	searchParams := generateSearchParams(ctx, c, httpReq.SearchParams)
+	searchParams := generateSearchParams(httpReq.SearchParams)
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
@@ -982,6 +991,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	req.SearchParams = searchParams
 	req.PlaceholderGroup = placeholderGroup
+	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Search", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
 	})
@@ -1034,7 +1044,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	body, _ := c.Get(gin.BodyBytesKey)
 	searchArray := gjson.Get(string(body.([]byte)), "search").Array()
 	for i, subReq := range httpReq.Search {
-		searchParams := generateSearchParams(ctx, c, subReq.SearchParams)
+		searchParams := generateSearchParams(subReq.SearchParams)
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(subReq.Limit), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(subReq.Offset), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: subReq.GroupByField})
@@ -1058,6 +1068,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			PartitionNames:   httpReq.PartitionNames,
 			SearchParams:     searchParams,
 		}
+		searchReq.ExprTemplateValues = generateExpressionTemplate(subReq.ExprParams)
 		req.Requests = append(req.Requests, searchReq)
 	}
 	bs, _ := json.Marshal(httpReq.Rerank.Params)

@@ -31,11 +31,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -142,13 +142,13 @@ func TestRun(t *testing.T) {
 
 		mockDataCoord := mocks.NewMockDataCoordClient(t)
 		mockDataCoord.EXPECT().Close().Return(nil)
-		svr.newDataCoordClient = func() types.DataCoordClient {
+		svr.newDataCoordClient = func(_ context.Context) types.DataCoordClient {
 			return mockDataCoord
 		}
 
 		mockQueryCoord := mocks.NewMockQueryCoordClient(t)
 		mockQueryCoord.EXPECT().Close().Return(nil)
-		svr.newQueryCoordClient = func() types.QueryCoordClient {
+		svr.newQueryCoordClient = func(_ context.Context) types.QueryCoordClient {
 			return mockQueryCoord
 		}
 
@@ -238,7 +238,7 @@ func TestServerRun_DataCoordClientInitErr(t *testing.T) {
 
 		mockDataCoord := mocks.NewMockDataCoordClient(t)
 		mockDataCoord.EXPECT().Close().Return(nil)
-		server.newDataCoordClient = func() types.DataCoordClient {
+		server.newDataCoordClient = func(_ context.Context) types.DataCoordClient {
 			return mockDataCoord
 		}
 		err = server.Prepare()
@@ -268,7 +268,7 @@ func TestServerRun_DataCoordClientStartErr(t *testing.T) {
 
 		mockDataCoord := mocks.NewMockDataCoordClient(t)
 		mockDataCoord.EXPECT().Close().Return(nil)
-		server.newDataCoordClient = func() types.DataCoordClient {
+		server.newDataCoordClient = func(_ context.Context) types.DataCoordClient {
 			return mockDataCoord
 		}
 		err = server.Prepare()
@@ -298,7 +298,7 @@ func TestServerRun_QueryCoordClientInitErr(t *testing.T) {
 
 		mockQueryCoord := mocks.NewMockQueryCoordClient(t)
 		mockQueryCoord.EXPECT().Close().Return(nil)
-		server.newQueryCoordClient = func() types.QueryCoordClient {
+		server.newQueryCoordClient = func(_ context.Context) types.QueryCoordClient {
 			return mockQueryCoord
 		}
 		err = server.Prepare()
@@ -328,7 +328,7 @@ func TestServer_QueryCoordClientStartErr(t *testing.T) {
 
 		mockQueryCoord := mocks.NewMockQueryCoordClient(t)
 		mockQueryCoord.EXPECT().Close().Return(nil)
-		server.newQueryCoordClient = func() types.QueryCoordClient {
+		server.newQueryCoordClient = func(_ context.Context) types.QueryCoordClient {
 			return mockQueryCoord
 		}
 		err = server.Prepare()

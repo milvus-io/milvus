@@ -31,11 +31,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -543,6 +543,11 @@ func (m *CollectionManager) putPartition(partitions []*Partition, withSave bool)
 	return nil
 }
 
+func (m *CollectionManager) updateLoadMetrics() {
+	metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(lo.Filter(lo.Values(m.collections), func(coll *Collection, _ int) bool { return coll.LoadPercentage == 100 }))))
+	metrics.QueryCoordNumPartitions.WithLabelValues().Set(float64(len(lo.Filter(lo.Values(m.partitions), func(part *Partition, _ int) bool { return part.LoadPercentage == 100 }))))
+}
+
 func (m *CollectionManager) UpdatePartitionLoadPercent(partitionID int64, loadPercent int32) error {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
@@ -592,9 +597,7 @@ func (m *CollectionManager) UpdateCollectionLoadPercent(collectionID int64) (int
 		// if collection becomes loaded, clear it's recoverTimes in load info
 		newCollection.RecoverTimes = 0
 
-		// TODO: what if part of the collection has been unloaded? Now we decrease the metric only after
-		// 	`ReleaseCollection` is triggered. Maybe it's hard to make this metric really accurate.
-		metrics.QueryCoordNumCollections.WithLabelValues().Inc()
+		defer m.updateLoadMetrics()
 		elapsed := time.Since(newCollection.CreatedAt)
 		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
 		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Collection %d loaded", newCollection.CollectionID)))
@@ -620,6 +623,7 @@ func (m *CollectionManager) RemoveCollection(collectionID typeutil.UniqueID) err
 		delete(m.collectionPartitions, collectionID)
 	}
 	metrics.CleanQueryCoordMetricsWithCollectionID(collectionID)
+	m.updateLoadMetrics()
 	return nil
 }
 
@@ -631,7 +635,8 @@ func (m *CollectionManager) RemovePartition(collectionID typeutil.UniqueID, part
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
-	return m.removePartition(collectionID, partitionIDs...)
+	err := m.removePartition(collectionID, partitionIDs...)
+	return err
 }
 
 func (m *CollectionManager) removePartition(collectionID typeutil.UniqueID, partitionIDs ...typeutil.UniqueID) error {
@@ -644,6 +649,7 @@ func (m *CollectionManager) removePartition(collectionID typeutil.UniqueID, part
 		delete(m.partitions, id)
 		delete(partitions, id)
 	}
+	m.updateLoadMetrics()
 
 	return nil
 }

@@ -23,12 +23,12 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -72,7 +72,7 @@ func TestServerSuite(t *testing.T) {
 	suite.Run(t, new(ServerSuite))
 }
 
-func genMsg(msgType commonpb.MsgType, ch string, t Timestamp, sourceID int64) *msgstream.DataNodeTtMsg {
+func genMsg(msgType commonpb.MsgType, ch string, t Timestamp, sourceID int64, segmentID int64) *msgstream.DataNodeTtMsg {
 	return &msgstream.DataNodeTtMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{0},
@@ -85,7 +85,7 @@ func genMsg(msgType commonpb.MsgType, ch string, t Timestamp, sourceID int64) *m
 			},
 			ChannelName:   ch,
 			Timestamp:     t,
-			SegmentsStats: []*commonpb.SegmentStats{{SegmentID: 2, NumRows: 100}},
+			SegmentsStats: []*commonpb.SegmentStats{{SegmentID: segmentID, NumRows: 100}},
 		},
 	}
 }
@@ -123,7 +123,7 @@ func (s *ServerSuite) TestHandleDataNodeTtMsg() {
 	s.Equal(1, len(segment.allocations))
 
 	ts := tsoutil.AddPhysicalDurationOnTs(assign.ExpireTime, -3*time.Minute)
-	msg := genMsg(commonpb.MsgType_DataNodeTt, chanName, ts, sourceID)
+	msg := genMsg(commonpb.MsgType_DataNodeTt, chanName, ts, sourceID, assign.GetSegID())
 	msg.SegmentsStats = append(msg.SegmentsStats, &commonpb.SegmentStats{
 		SegmentID: assign.GetSegID(),
 		NumRows:   1,
@@ -135,7 +135,7 @@ func (s *ServerSuite) TestHandleDataNodeTtMsg() {
 			s.EqualValues(chanName, channel)
 			s.EqualValues(sourceID, nodeID)
 			s.Equal(1, len(segments))
-			s.EqualValues(2, segments[0].GetID())
+			s.EqualValues(assign.GetSegID(), segments[0].GetID())
 
 			return fmt.Errorf("mock error")
 		}).Once()
@@ -146,7 +146,7 @@ func (s *ServerSuite) TestHandleDataNodeTtMsg() {
 	s.NoError(err)
 
 	tt := tsoutil.AddPhysicalDurationOnTs(assign.ExpireTime, 48*time.Hour)
-	msg = genMsg(commonpb.MsgType_DataNodeTt, chanName, tt, sourceID)
+	msg = genMsg(commonpb.MsgType_DataNodeTt, chanName, tt, sourceID, assign.GetSegID())
 	msg.SegmentsStats = append(msg.SegmentsStats, &commonpb.SegmentStats{
 		SegmentID: assign.GetSegID(),
 		NumRows:   1,
@@ -162,9 +162,10 @@ func (s *ServerSuite) initSuiteForTtChannel() {
 	s.testServer.startDataNodeTtLoop(s.testServer.serverLoopCtx)
 
 	s.testServer.meta.AddCollection(&collectionInfo{
-		ID:         1,
-		Schema:     newTestSchema(),
-		Partitions: []int64{10},
+		ID:            1,
+		Schema:        newTestSchema(),
+		Partitions:    []int64{10},
+		VChannelNames: []string{"ch-1", "ch-2"},
 	})
 }
 
@@ -184,19 +185,6 @@ func (s *ServerSuite) TestDataNodeTtChannel_ExpireAfterTt() {
 		signal         = make(chan struct{})
 		collID   int64 = 1
 	)
-	mockCluster := NewMockCluster(s.T())
-	mockCluster.EXPECT().Close().Once()
-	mockCluster.EXPECT().Flush(mock.Anything, sourceID, chanName, mock.Anything).RunAndReturn(
-		func(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error {
-			s.EqualValues(chanName, channel)
-			s.EqualValues(sourceID, nodeID)
-			s.Equal(1, len(segments))
-			s.EqualValues(2, segments[0].GetID())
-
-			signal <- struct{}{}
-			return nil
-		}).Once()
-	s.testServer.cluster = mockCluster
 	s.mockChMgr.EXPECT().Match(sourceID, chanName).Return(true).Once()
 
 	resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
@@ -219,14 +207,32 @@ func (s *ServerSuite) TestDataNodeTtChannel_ExpireAfterTt() {
 	s.Require().NotNil(segment)
 	s.Equal(1, len(segment.allocations))
 
+	mockCluster := NewMockCluster(s.T())
+	mockCluster.EXPECT().Close().Once()
+	mockCluster.EXPECT().Flush(mock.Anything, sourceID, chanName, mock.Anything).RunAndReturn(
+		func(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error {
+			s.EqualValues(chanName, channel)
+			s.EqualValues(sourceID, nodeID)
+			s.Equal(1, len(segments))
+			s.EqualValues(assignedSegmentID, segments[0].GetID())
+
+			signal <- struct{}{}
+			return nil
+		}).Once()
+	s.testServer.cluster = mockCluster
+
 	msgPack := msgstream.MsgPack{}
 	tt := tsoutil.AddPhysicalDurationOnTs(resp.SegIDAssignments[0].ExpireTime, 48*time.Hour)
-	msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", tt, sourceID)
+	msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", tt, sourceID, assignedSegmentID)
 	msgPack.Msgs = append(msgPack.Msgs, msg)
 	err = ttMsgStream.Produce(&msgPack)
 	s.Require().NoError(err)
 
-	<-signal
+	select {
+	case <-signal:
+	case <-time.After(10 * time.Second):
+		s.Fail("test timeout")
+	}
 	segment = s.testServer.meta.GetHealthySegment(assignedSegmentID)
 	s.NotNil(segment)
 	s.Equal(0, len(segment.allocations))
@@ -308,7 +314,7 @@ func (s *ServerSuite) TestDataNodeTtChannel_FlushWithDiffChan() {
 	s.Require().True(merr.Ok(resp2.GetStatus()))
 
 	msgPack := msgstream.MsgPack{}
-	msg := genMsg(commonpb.MsgType_DataNodeTt, chanName, assign.ExpireTime, sourceID)
+	msg := genMsg(commonpb.MsgType_DataNodeTt, chanName, assign.ExpireTime, sourceID, assign.GetSegID())
 	msg.SegmentsStats = append(msg.SegmentsStats, &commonpb.SegmentStats{
 		SegmentID: assign.GetSegID(),
 		NumRows:   1,
@@ -317,7 +323,11 @@ func (s *ServerSuite) TestDataNodeTtChannel_FlushWithDiffChan() {
 	err = ttMsgStream.Produce(&msgPack)
 	s.NoError(err)
 
-	<-signal
+	select {
+	case <-signal:
+	case <-time.After(10 * time.Second):
+		s.Fail("test timeout")
+	}
 }
 
 func (s *ServerSuite) TestDataNodeTtChannel_SegmentFlushAfterTt() {
@@ -381,7 +391,7 @@ func (s *ServerSuite) TestDataNodeTtChannel_SegmentFlushAfterTt() {
 	s.Require().True(merr.Ok(resp2.GetStatus()))
 
 	msgPack := msgstream.MsgPack{}
-	msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime, 9999)
+	msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime, 9999, assign.GetSegID())
 	msg.SegmentsStats = append(msg.SegmentsStats, &commonpb.SegmentStats{
 		SegmentID: assign.GetSegID(),
 		NumRows:   1,
@@ -773,7 +783,7 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 	s.testServer.cluster = mockCluster
 
 	schema := newTestSchema()
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
+	s.testServer.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}, VChannelNames: []string{"channel-1"}})
 	allocations, err := s.testServer.segmentManager.AllocSegment(context.TODO(), 0, 1, "channel-1", 1)
 	s.NoError(err)
 	s.EqualValues(1, len(allocations))

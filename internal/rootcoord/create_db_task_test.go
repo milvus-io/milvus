@@ -54,7 +54,7 @@ func Test_CreateDBTask_Prepare(t *testing.T) {
 		cfgMaxDatabaseNum := Params.RootCoordCfg.MaxDatabaseNum.GetAsInt()
 		dbs := make([]*model.Database, 0, cfgMaxDatabaseNum)
 		for i := 0; i < cfgMaxDatabaseNum; i++ {
-			dbs = append(dbs, model.NewDefaultDatabase())
+			dbs = append(dbs, model.NewDefaultDatabase(nil))
 		}
 		meta.On("ListDatabases",
 			mock.Anything,
@@ -81,7 +81,7 @@ func Test_CreateDBTask_Prepare(t *testing.T) {
 		meta.On("ListDatabases",
 			mock.Anything,
 			mock.Anything).
-			Return([]*model.Database{model.NewDefaultDatabase()}, nil)
+			Return([]*model.Database{model.NewDefaultDatabase(nil)}, nil)
 
 		core := newTestCore(withMeta(meta), withValidIDAllocator())
 		paramtable.Get().Save(Params.RootCoordCfg.MaxDatabaseNum.Key, strconv.Itoa(10))

@@ -22,7 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 )
 
 func TestImportManager(t *testing.T) {
@@ -64,6 +64,13 @@ func TestImportManager(t *testing.T) {
 	tasks = manager.GetBy(WithStates(datapb.ImportTaskStateV2_Completed))
 	assert.Equal(t, 1, len(tasks))
 	assert.Equal(t, task2.GetTaskID(), tasks[0].GetTaskID())
+
+	// check idempotency
+	manager.Add(task2)
+	tasks = manager.GetBy(WithStates(datapb.ImportTaskStateV2_Completed))
+	assert.Equal(t, 1, len(tasks))
+	assert.Equal(t, task2.GetTaskID(), tasks[0].GetTaskID())
+	assert.True(t, task2 == tasks[0])
 
 	manager.Update(task1.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed))
 	task := manager.Get(task1.GetTaskID())

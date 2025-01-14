@@ -47,10 +47,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
 	"github.com/milvus-io/milvus-storage/go/storage/options"
-	"github.com/milvus-io/milvus/internal/proto/cgopb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
@@ -60,6 +56,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/cgopb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
@@ -1361,7 +1361,8 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 		IndexFiles:         indexInfo.GetIndexFilePaths(),
 		IndexEngineVersion: indexInfo.GetCurrentIndexVersion(),
 		IndexStoreVersion:  indexInfo.GetIndexStoreVersion(),
-		IndexFileSize:      indexInfo.GetIndexSize(),
+		// TODO: For quickly fixing, we add the multiplier here, but those logic should be put at the datacoord after we add the mem size for each index.
+		IndexFileSize: int64(paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsFloat() * float64(indexInfo.GetIndexSize())),
 	}
 
 	// 2.

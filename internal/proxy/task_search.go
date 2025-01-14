@@ -16,13 +16,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -63,6 +63,7 @@ type searchTask struct {
 	mustUsePartitionKey    bool
 	resultSizeInsufficient bool
 	isTopkReduce           bool
+	isRecallEvaluation     bool
 
 	userOutputFields  []string
 	userDynamicFields []string
@@ -463,6 +464,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		return err
 	}
 
+	metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.PlaceholderGroup, int(t.request.GetNq()))))
 	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
 	t.SearchRequest.Topk = queryInfo.GetTopk()
 	t.SearchRequest.MetricType = queryInfo.GetMetricType()
@@ -620,9 +622,13 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	t.queryChannelsTs = make(map[string]uint64)
 	t.relatedDataSize = 0
 	isTopkReduce := false
+	isRecallEvaluation := false
 	for _, r := range toReduceResults {
 		if r.GetIsTopkReduce() {
 			isTopkReduce = true
+		}
+		if r.GetIsRecallEvaluation() {
+			isRecallEvaluation = true
 		}
 		t.relatedDataSize += r.GetCostAggregation().GetTotalRelatedDataSize()
 		for ch, ts := range r.GetChannelsMvcc() {
@@ -702,6 +708,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	}
 	t.resultSizeInsufficient = resultSizeInsufficient
 	t.isTopkReduce = isTopkReduce
+	t.isRecallEvaluation = isRecallEvaluation
 	t.result.CollectionName = t.collectionName
 	t.fillInFieldInfo()
 
@@ -714,7 +721,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	}
 	t.result.Results.OutputFields = t.userOutputFields
 	t.result.CollectionName = t.request.GetCollectionName()
-
+	t.result.Results.PrimaryFieldName = primaryFieldSchema.GetName()
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 
 	log.Debug("Search post execute done",

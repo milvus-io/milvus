@@ -32,16 +32,17 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -58,7 +59,7 @@ type Cache interface {
 	// GetCollectionName get collection's name and database by id
 	GetCollectionName(ctx context.Context, database string, collectionID int64) (string, error)
 	// GetCollectionInfo get collection's information by name or collection id, such as schema, and etc.
-	GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionBasicInfo, error)
+	GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionInfo, error)
 	// GetPartitionID get partition's identifier of specific collection.
 	GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error)
 	// GetPartitions get all partitions' id of specific collection.
@@ -92,13 +93,6 @@ type Cache interface {
 	GetDatabaseInfo(ctx context.Context, database string) (*databaseInfo, error)
 	// AllocID is only using on requests that need to skip timestamp allocation, don't overuse it.
 	AllocID(ctx context.Context) (int64, error)
-}
-type collectionBasicInfo struct {
-	collID                typeutil.UniqueID
-	createdTimestamp      uint64
-	createdUtcTimestamp   uint64
-	consistencyLevel      commonpb.ConsistencyLevel
-	partitionKeyIsolation bool
 }
 
 type collectionInfo struct {
@@ -267,20 +261,7 @@ type partitionInfo struct {
 	partitionID         typeutil.UniqueID
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
-}
-
-// getBasicInfo get a basic info by deep copy.
-func (info *collectionInfo) getBasicInfo() *collectionBasicInfo {
-	// Do a deep copy for all fields.
-	basicInfo := &collectionBasicInfo{
-		collID:                info.collID,
-		createdTimestamp:      info.createdTimestamp,
-		createdUtcTimestamp:   info.createdUtcTimestamp,
-		consistencyLevel:      info.consistencyLevel,
-		partitionKeyIsolation: info.partitionKeyIsolation,
-	}
-
-	return basicInfo
+	isDefault           bool
 }
 
 func (info *collectionInfo) isCollectionCached() bool {
@@ -368,6 +349,7 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCo
 	if err != nil {
 		return err
 	}
+	expr.Register("cache", globalMetaCache)
 
 	// The privilege info is a little more. And to get this info, the query operation of involving multiple table queries is required.
 	resp, err := rootCoord.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
@@ -458,12 +440,14 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return nil, merr.WrapErrParameterInvalidMsg("partition names and timestamps number is not aligned, response: %s", partitions.String())
 	}
 
+	defaultPartitionName := Params.CommonCfg.DefaultPartitionName.GetValue()
 	infos := lo.Map(partitions.GetPartitionIDs(), func(partitionID int64, idx int) *partitionInfo {
 		return &partitionInfo{
 			name:                partitions.PartitionNames[idx],
 			partitionID:         partitions.PartitionIDs[idx],
 			createdTimestamp:    partitions.CreatedTimestamps[idx],
 			createdUtcTimestamp: partitions.CreatedUtcTimestamps[idx],
+			isDefault:           partitions.PartitionNames[idx] == defaultPartitionName,
 		}
 	})
 
@@ -568,7 +552,7 @@ func (m *MetaCache) GetCollectionName(ctx context.Context, database string, coll
 	return collInfo.schema.Name, nil
 }
 
-func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionBasicInfo, error) {
+func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionInfo, error) {
 	collInfo, ok := m.getCollection(database, collectionName, 0)
 
 	method := "GetCollectionInfo"
@@ -583,11 +567,11 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, coll
 			return nil, err
 		}
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		return collInfo.getBasicInfo(), nil
+		return collInfo, nil
 	}
 
 	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
-	return collInfo.getBasicInfo(), nil
+	return collInfo, nil
 }
 
 // GetCollectionInfo returns the collection information related to provided collection name
@@ -661,6 +645,14 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionNa
 		return nil, err
 	}
 
+	if partitionName == "" {
+		for _, info := range partitions.partitionInfos {
+			if info.isDefault {
+				return info, nil
+			}
+		}
+	}
+
 	info, ok := partitions.name2Info[partitionName]
 	if !ok {
 		return nil, merr.WrapErrPartitionNotFound(partitionName)
@@ -718,30 +710,14 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 	if err != nil {
 		return nil, err
 	}
-	resp := &milvuspb.DescribeCollectionResponse{
-		Status: coll.Status,
-		Schema: &schemapb.CollectionSchema{
-			Name:               coll.Schema.Name,
-			Description:        coll.Schema.Description,
-			AutoID:             coll.Schema.AutoID,
-			Fields:             make([]*schemapb.FieldSchema, 0),
-			EnableDynamicField: coll.Schema.EnableDynamicField,
-		},
-		CollectionID:         coll.CollectionID,
-		VirtualChannelNames:  coll.VirtualChannelNames,
-		PhysicalChannelNames: coll.PhysicalChannelNames,
-		CreatedTimestamp:     coll.CreatedTimestamp,
-		CreatedUtcTimestamp:  coll.CreatedUtcTimestamp,
-		ConsistencyLevel:     coll.ConsistencyLevel,
-		DbName:               coll.GetDbName(),
-		Properties:           coll.Properties,
-	}
+	userFields := make([]*schemapb.FieldSchema, 0)
 	for _, field := range coll.Schema.Fields {
 		if field.FieldID >= common.StartOfUserFieldID {
-			resp.Schema.Fields = append(resp.Schema.Fields, field)
+			userFields = append(userFields, field)
 		}
 	}
-	return resp, nil
+	coll.Schema.Fields = userFields
+	return coll, nil
 }
 
 func (m *MetaCache) showPartitions(ctx context.Context, dbName string, collectionName string, collectionID UniqueID) (*milvuspb.ShowPartitionsResponse, error) {

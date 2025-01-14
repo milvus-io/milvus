@@ -30,11 +30,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -538,7 +538,7 @@ func (c *SessionManagerImpl) CheckDNHealth(ctx context.Context) *healthcheck.Res
 				return
 			}
 
-			if len(checkHealthResp.Reasons) > 0 {
+			if checkHealthResp != nil && len(checkHealthResp.Reasons) > 0 {
 				wlock.Lock()
 				result.AppendResult(healthcheck.GetHealthCheckResultFromResp(checkHealthResp))
 				wlock.Unlock()

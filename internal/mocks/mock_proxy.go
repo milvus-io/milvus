@@ -10,13 +10,13 @@ import (
 
 	federpb "github.com/milvus-io/milvus-proto/go-api/v2/federpb"
 
-	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 
-	proxypb "github.com/milvus-io/milvus/internal/proto/proxypb"
+	proxypb "github.com/milvus-io/milvus/pkg/proto/proxypb"
 
 	types "github.com/milvus-io/milvus/internal/types"
 )
@@ -195,6 +195,61 @@ func (_c *MockProxy_AlterCollection_Call) Return(_a0 *commonpb.Status, _a1 error
 }
 
 func (_c *MockProxy_AlterCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterCollectionRequest) (*commonpb.Status, error)) *MockProxy_AlterCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// AlterCollectionField provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) AlterCollectionField(_a0 context.Context, _a1 *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionFieldRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterCollectionFieldRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_AlterCollectionField_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterCollectionField'
+type MockProxy_AlterCollectionField_Call struct {
+	*mock.Call
+}
+
+// AlterCollectionField is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AlterCollectionFieldRequest
+func (_e *MockProxy_Expecter) AlterCollectionField(_a0 interface{}, _a1 interface{}) *MockProxy_AlterCollectionField_Call {
+	return &MockProxy_AlterCollectionField_Call{Call: _e.mock.On("AlterCollectionField", _a0, _a1)}
+}
+
+func (_c *MockProxy_AlterCollectionField_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AlterCollectionFieldRequest)) *MockProxy_AlterCollectionField_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AlterCollectionFieldRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_AlterCollectionField_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_AlterCollectionField_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_AlterCollectionField_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error)) *MockProxy_AlterCollectionField_Call {
 	_c.Call.Return(run)
 	return _c
 }

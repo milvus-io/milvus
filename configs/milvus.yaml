@@ -339,6 +339,9 @@ queryCoord:
   rowCountFactor: 0.4 # the row count weight used when balancing segments among queryNodes
   segmentCountFactor: 0.4 # the segment count weight used when balancing segments among queryNodes
   globalSegmentCountFactor: 0.1 # the segment count weight used when balancing segments among queryNodes
+  # the channel count weight used when balancing channels among queryNodes, 
+  # 		A higher value reduces the likelihood of assigning channels from the same collection to the same QueryNode. Set to 1 to disable this feature.
+  collectionChannelCountFactor: 10
   segmentCountMaxSteps: 50 # segment count based plan generator max steps
   rowCountMaxSteps: 50 # segment count based plan generator max steps
   randomMaxSteps: 10 # segment count based plan generator max steps
@@ -586,6 +589,8 @@ dataCoord:
       maxClusterSizeRatio: 10 # maximum cluster size / avg size in Kmeans train
       maxClusterSize: 5g # maximum cluster size in Kmeans train
   syncSegmentsInterval: 300 # The time interval for regularly syncing segments
+  index:
+    memSizeEstimateMultiplier: 2 # When the memory size is not setup by index procedure, multiplier to estimate the memory size of index data
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.
@@ -669,7 +674,7 @@ dataNode:
   slot:
     slotCap: 16 # The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode
   clusteringCompaction:
-    memoryBufferRatio: 0.1 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.
+    memoryBufferRatio: 0.3 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.
     workPoolSize: 8 # worker pool size for one clustering compaction job.
   ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address
   port: 21124 # TCP port of dataNode
@@ -796,17 +801,17 @@ common:
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
-    defaultRootPassword: Milvus # default password for root user
+    defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
     rbac:
-      overrideBuiltInPrivilgeGroups:
+      overrideBuiltInPrivilegeGroups:
         enabled: false # Whether to override build-in privilege groups
       cluster:
         readonly:
-          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups # Cluster level readonly privileges
+          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups # Cluster level readonly privileges
         readwrite:
-          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups # Cluster level readwrite privileges
+          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups # Cluster level readwrite privileges
         admin:
-          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups,BackupRBAC,RestoreRBAC,CreateDatabase,DropDatabase,CreateOwnership,DropOwnership,ManageOwnership,CreateResourceGroup,DropResourceGroup,UpdateUser,RenameCollection # Cluster level admin privileges
+          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups,BackupRBAC,RestoreRBAC,CreateDatabase,DropDatabase,CreateOwnership,DropOwnership,ManageOwnership,CreateResourceGroup,DropResourceGroup,UpdateUser,RenameCollection,CreatePrivilegeGroup,DropPrivilegeGroup,OperatePrivilegeGroup # Cluster level admin privileges
       database:
         readonly:
           privileges: ShowCollections,DescribeDatabase # Database level readonly privileges
@@ -846,6 +851,9 @@ common:
   usePartitionKeyAsClusteringKey: false # if true, do clustering compaction and segment prune on partition key field
   useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
   enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction
+  localRPCEnabled: false # enable local rpc for internal communication when mix or standalone mode.
+  sync:
+    taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

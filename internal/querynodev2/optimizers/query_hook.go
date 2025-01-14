@@ -7,11 +7,11 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -28,6 +28,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 	// no hook applied or disabled, just return
 	if queryHook == nil || !paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
 		req.Req.IsTopkReduce = false
+		req.Req.IsRecallEvaluation = false
 		return req, nil
 	}
 
@@ -70,6 +71,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			common.DataTypeKey:     int32(plan.GetVectorAnns().GetVectorType()),
 			common.WithOptimizeKey: paramtable.Get().AutoIndexConfig.EnableOptimize.GetAsBool() && req.GetReq().GetIsTopkReduce() && queryInfo.GetGroupByFieldId() < 0,
 			common.CollectionKey:   req.GetReq().GetCollectionID(),
+			common.RecallEvalKey:   req.GetReq().GetIsRecallEvaluation(),
 		}
 		if withFilter && channelNum > 1 {
 			params[common.ChannelNumKey] = channelNum
@@ -90,6 +92,11 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		}
 		req.Req.SerializedExprPlan = serializedExprPlan
 		req.Req.IsTopkReduce = isTopkReduce
+		if isRecallEvaluation, ok := params[common.RecallEvalKey]; ok {
+			req.Req.IsRecallEvaluation = isRecallEvaluation.(bool) && queryInfo.GetGroupByFieldId() < 0
+		} else {
+			req.Req.IsRecallEvaluation = false
+		}
 		log.Debug("optimized search params done", zap.Any("queryInfo", queryInfo))
 	default:
 		log.Warn("not supported node type", zap.String("nodeType", fmt.Sprintf("%T", plan.GetNode())))

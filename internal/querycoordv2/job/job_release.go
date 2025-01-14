@@ -24,8 +24,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
@@ -33,6 +31,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 )
 
 type ReleaseCollectionJob struct {
@@ -112,8 +112,6 @@ func (job *ReleaseCollectionJob) Execute() error {
 		proxyutil.SetMsgType(commonpb.MsgType_ReleaseCollection))
 
 	waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
-	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
-	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(len(toRelease)))
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	return nil
@@ -196,7 +194,6 @@ func (job *ReleasePartitionJob) Execute() error {
 			log.Warn("failed to remove replicas", zap.Error(err))
 		}
 		job.targetObserver.ReleaseCollection(req.GetCollectionID())
-		metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 		// try best discard cache
 		// shall not affect releasing if failed
 		job.proxyManager.InvalidateCollectionMetaCache(job.ctx,
@@ -216,6 +213,5 @@ func (job *ReleasePartitionJob) Execute() error {
 		job.targetObserver.ReleasePartition(req.GetCollectionID(), toRelease...)
 		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID(), toRelease...)
 	}
-	metrics.QueryCoordNumPartitions.WithLabelValues().Sub(float64(len(toRelease)))
 	return nil
 }

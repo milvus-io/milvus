@@ -26,9 +26,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 )
 
 func Test_alterDatabaseTask_Prepare(t *testing.T) {
@@ -211,5 +211,40 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 			Key:   common.CollectionAutoCompactionKey,
 			Value: "true",
 		})
+	})
+
+	t.Run("test delete collection props", func(t *testing.T) {
+		oldProps := []*commonpb.KeyValuePair{
+			{
+				Key:   common.CollectionTTLConfigKey,
+				Value: "1",
+			},
+		}
+
+		deleteKeys := []string{
+			common.CollectionAutoCompactionKey,
+		}
+
+		ret := DeleteProperties(oldProps, deleteKeys)
+
+		assert.Contains(t, ret, &commonpb.KeyValuePair{
+			Key:   common.CollectionTTLConfigKey,
+			Value: "1",
+		})
+
+		oldProps2 := []*commonpb.KeyValuePair{
+			{
+				Key:   common.CollectionTTLConfigKey,
+				Value: "1",
+			},
+		}
+
+		deleteKeys2 := []string{
+			common.CollectionTTLConfigKey,
+		}
+
+		ret2 := DeleteProperties(oldProps2, deleteKeys2)
+
+		assert.Empty(t, ret2)
 	})
 }

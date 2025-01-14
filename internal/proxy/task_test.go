@@ -38,12 +38,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -3573,6 +3573,204 @@ func TestPartitionKey(t *testing.T) {
 		queryTask.request.PartitionNames = partitionNames
 		err = queryTask.PreExecute(ctx)
 		assert.Error(t, err)
+	})
+}
+
+func TestDefaultPartition(t *testing.T) {
+	rc := NewRootCoordMock()
+
+	defer rc.Close()
+	qc := getQueryCoordClient()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+
+	ctx := context.Background()
+
+	mgr := newShardClientMgr()
+	err := InitMetaCache(ctx, rc, qc, mgr)
+	assert.NoError(t, err)
+
+	shardsNum := common.DefaultShardsNum
+	prefix := "TestInsertTaskWithPartitionKey"
+	collectionName := prefix + funcutil.GenRandomStr()
+
+	fieldName2Type := make(map[string]schemapb.DataType)
+	fieldName2Type["int64_field"] = schemapb.DataType_Int64
+	fieldName2Type["varChar_field"] = schemapb.DataType_VarChar
+	fieldName2Type["fvec_field"] = schemapb.DataType_FloatVector
+	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	t.Run("create collection", func(t *testing.T) {
+		createCollectionTask := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         "",
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				ShardsNum:      shardsNum,
+			},
+			ctx:       ctx,
+			rootCoord: rc,
+			result:    nil,
+			schema:    nil,
+		}
+		err = createCollectionTask.PreExecute(ctx)
+		assert.NoError(t, err)
+		err = createCollectionTask.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	assert.NoError(t, err)
+
+	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
+	factory := newSimpleMockMsgStreamFactory()
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, factory)
+	defer chMgr.removeAllDMLStream()
+
+	_, err = chMgr.getOrCreateDmlStream(collectionID)
+	assert.NoError(t, err)
+	pchans, err := chMgr.getChannels(collectionID)
+	assert.NoError(t, err)
+
+	interval := time.Millisecond * 10
+	tso := newMockTsoAllocator()
+
+	ticker := newChannelsTimeTicker(ctx, interval, []string{}, newGetStatisticsFunc(pchans), tso)
+	_ = ticker.start()
+	defer ticker.close()
+
+	idAllocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())
+	assert.NoError(t, err)
+	_ = idAllocator.Start()
+	defer idAllocator.Close()
+
+	segAllocator, err := newSegIDAssigner(ctx, &mockDataCoord{expireTime: Timestamp(2500)}, getLastTick1)
+	assert.NoError(t, err)
+	segAllocator.Init()
+	_ = segAllocator.Start()
+	defer segAllocator.Close()
+
+	nb := 10
+	fieldID := common.StartOfUserFieldID
+	fieldDatas := make([]*schemapb.FieldData, 0)
+	for fieldName, dataType := range fieldName2Type {
+		fieldData := generateFieldData(dataType, fieldName, nb)
+		fieldData.FieldId = int64(fieldID)
+		fieldDatas = append(fieldDatas, generateFieldData(dataType, fieldName, nb))
+		fieldID++
+	}
+
+	t.Run("Insert", func(t *testing.T) {
+		it := &insertTask{
+			insertMsg: &BaseInsertTask{
+				BaseMsg: msgstream.BaseMsg{},
+				InsertRequest: &msgpb.InsertRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:  commonpb.MsgType_Insert,
+						MsgID:    0,
+						SourceID: paramtable.GetNodeID(),
+					},
+					CollectionName: collectionName,
+					FieldsData:     fieldDatas,
+					NumRows:        uint64(nb),
+					Version:        msgpb.InsertDataVersion_ColumnBased,
+				},
+			},
+
+			Condition: NewTaskCondition(ctx),
+			ctx:       ctx,
+			result: &milvuspb.MutationResult{
+				Status:       merr.Success(),
+				IDs:          nil,
+				SuccIndex:    nil,
+				ErrIndex:     nil,
+				Acknowledged: false,
+				InsertCnt:    0,
+				DeleteCnt:    0,
+				UpsertCnt:    0,
+				Timestamp:    0,
+			},
+			idAllocator:   idAllocator,
+			segIDAssigner: segAllocator,
+			chMgr:         chMgr,
+			chTicker:      ticker,
+			vChannels:     nil,
+			pChannels:     nil,
+			schema:        nil,
+		}
+
+		it.insertMsg.PartitionName = ""
+		assert.NoError(t, it.OnEnqueue())
+		assert.NoError(t, it.PreExecute(ctx))
+		assert.NoError(t, it.Execute(ctx))
+		assert.NoError(t, it.PostExecute(ctx))
+	})
+
+	t.Run("Upsert", func(t *testing.T) {
+		hash := testutils.GenerateHashKeys(nb)
+		ut := &upsertTask{
+			ctx:       ctx,
+			Condition: NewTaskCondition(ctx),
+			baseMsg: msgstream.BaseMsg{
+				HashValues: hash,
+			},
+			req: &milvuspb.UpsertRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_Upsert),
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				),
+				CollectionName: collectionName,
+				FieldsData:     fieldDatas,
+				NumRows:        uint32(nb),
+			},
+
+			result: &milvuspb.MutationResult{
+				Status: merr.Success(),
+				IDs: &schemapb.IDs{
+					IdField: nil,
+				},
+			},
+			idAllocator:   idAllocator,
+			segIDAssigner: segAllocator,
+			chMgr:         chMgr,
+			chTicker:      ticker,
+		}
+
+		ut.req.PartitionName = ""
+		assert.NoError(t, ut.OnEnqueue())
+		assert.NoError(t, ut.PreExecute(ctx))
+		assert.NoError(t, ut.Execute(ctx))
+		assert.NoError(t, ut.PostExecute(ctx))
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		dt := &deleteTask{
+			Condition: NewTaskCondition(ctx),
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				Expr:           "int64_field in [0, 1]",
+			},
+			ctx: ctx,
+			primaryKeys: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1}}},
+			},
+			idAllocator:  idAllocator,
+			chMgr:        chMgr,
+			chTicker:     ticker,
+			collectionID: collectionID,
+			vChannels:    []string{"test-channel"},
+		}
+
+		dt.req.PartitionName = ""
+		assert.NoError(t, dt.PreExecute(ctx))
+		assert.NoError(t, dt.Execute(ctx))
+		assert.NoError(t, dt.PostExecute(ctx))
 	})
 }
 

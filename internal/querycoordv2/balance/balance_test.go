@@ -22,11 +22,11 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -174,7 +174,7 @@ func (suite *BalanceTestSuite) TestAssignChannel() {
 					suite.mockScheduler.EXPECT().GetChannelTaskDelta(c.nodeIDs[i], int64(-1)).Return(c.deltaCnts[i])
 				}
 			}
-			plans := suite.roundRobinBalancer.AssignChannel(c.assignments, c.nodeIDs, false)
+			plans := suite.roundRobinBalancer.AssignChannel(1, c.assignments, c.nodeIDs, false)
 			suite.ElementsMatch(c.expectPlans, plans)
 		})
 	}

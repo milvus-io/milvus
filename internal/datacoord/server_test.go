@@ -46,15 +46,15 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -822,52 +822,10 @@ func TestServer_getSystemInfoMetrics(t *testing.T) {
 	}
 }
 
-type spySegmentManager struct {
-	spyCh chan struct{}
-}
-
-// AllocSegment allocates rows and record the allocation.
-func (s *spySegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error) {
-	panic("not implemented") // TODO: Implement
-}
-
-func (s *spySegmentManager) allocSegmentForImport(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int64, taskID int64) (*Allocation, error) {
-	panic("not implemented") // TODO: Implement
-}
-
-// DropSegment drops the segment from manager.
-func (s *spySegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
-}
-
-// FlushImportSegments set importing segment state to Flushed.
-func (s *spySegmentManager) FlushImportSegments(ctx context.Context, collectionID UniqueID, segmentIDs []UniqueID) error {
-	panic("not implemented")
-}
-
-// SealAllSegments seals all segments of collection with collectionID and return sealed segments
-func (s *spySegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error) {
-	panic("not implemented") // TODO: Implement
-}
-
-// GetFlushableSegments returns flushable segment ids
-func (s *spySegmentManager) GetFlushableSegments(ctx context.Context, channel string, ts Timestamp) ([]UniqueID, error) {
-	panic("not implemented") // TODO: Implement
-}
-
-// ExpireAllocations notifies segment status to expire old allocations
-func (s *spySegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
-	panic("not implemented") // TODO: Implement
-}
-
-// DropSegmentsOfChannel drops all segments in a channel
-func (s *spySegmentManager) DropSegmentsOfChannel(ctx context.Context, channel string) {
-	s.spyCh <- struct{}{}
-}
-
 func TestDropVirtualChannel(t *testing.T) {
 	t.Run("normal DropVirtualChannel", func(t *testing.T) {
-		spyCh := make(chan struct{}, 1)
-		svr := newTestServer(t, WithSegmentManager(&spySegmentManager{spyCh: spyCh}))
+		segmentManager := NewMockManager(t)
+		svr := newTestServer(t, WithSegmentManager(segmentManager))
 
 		defer closeTestServer(t, svr)
 
@@ -994,11 +952,10 @@ func TestDropVirtualChannel(t *testing.T) {
 			}
 			req.Segments = append(req.Segments, seg2Drop)
 		}
+		segmentManager.EXPECT().DropSegmentsOfChannel(mock.Anything, mock.Anything).Return()
 		resp, err := svr.DropVirtualChannel(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-
-		<-spyCh
 
 		// resend
 		resp, err = svr.DropVirtualChannel(ctx, req)

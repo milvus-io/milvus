@@ -29,8 +29,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
@@ -59,16 +59,8 @@ func Test_NewServer(t *testing.T) {
 		assert.NotNil(t, server)
 
 		mdc := mocks.NewMockDataCoordClient(t)
-		mdc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
-			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-		}, nil)
 
 		mrc := mocks.NewMockRootCoordClient(t)
-		mrc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
-			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-		}, nil)
 
 		mqc := getQueryCoord()
 		successStatus := merr.Success()

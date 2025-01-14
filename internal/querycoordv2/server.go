@@ -41,8 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -53,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -62,6 +61,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -221,6 +222,22 @@ func (s *Server) Init() error {
 }
 
 func (s *Server) initQueryCoord() error {
+	// wait for master init or healthy
+	log.Info("QueryCoord try to wait for RootCoord ready")
+	if err := componentutil.WaitForComponentHealthy(s.ctx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200); err != nil {
+		log.Error("QueryCoord wait for RootCoord ready failed", zap.Error(err))
+		return errors.Wrap(err, "RootCoord not ready")
+	}
+	log.Info("QueryCoord report RootCoord ready")
+
+	// wait for master init or healthy
+	log.Info("QueryCoord try to wait for DataCoord ready")
+	if err := componentutil.WaitForComponentHealthy(s.ctx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200); err != nil {
+		log.Error("QueryCoord wait for DataCoord ready failed", zap.Error(err))
+		return errors.Wrap(err, "DataCoord not ready")
+	}
+	log.Info("QueryCoord report DataCoord ready")
+
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	log.Info("start init querycoord", zap.Any("State", commonpb.StateCode_Initializing))
 	// Init KV and ID allocator

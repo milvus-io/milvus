@@ -36,11 +36,11 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -627,6 +627,41 @@ func TestServer_AlterIndex(t *testing.T) {
 		assert.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 
 		req.Params[0].Value = "true"
+	})
+
+	t.Run("delete_params", func(t *testing.T) {
+		deleteReq := &indexpb.AlterIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			DeleteKeys:   []string{common.MmapEnabledKey},
+		}
+		resp, err := s.AlterIndex(ctx, deleteReq)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+		describeResp, err := s.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			Timestamp:    createTS,
+		})
+		assert.NoError(t, merr.CheckRPCCall(describeResp, err))
+		for _, param := range describeResp.IndexInfos[0].GetUserIndexParams() {
+			assert.NotEqual(t, common.MmapEnabledKey, param.GetKey())
+		}
+	})
+	t.Run("update_and_delete_params", func(t *testing.T) {
+		updateAndDeleteReq := &indexpb.AlterIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			Params: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MmapEnabledKey,
+					Value: "true",
+				},
+			},
+			DeleteKeys: []string{common.MmapEnabledKey},
+		}
+		resp, err := s.AlterIndex(ctx, updateAndDeleteReq)
+		assert.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 	})
 
 	t.Run("success", func(t *testing.T) {

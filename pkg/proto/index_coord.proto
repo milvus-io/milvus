@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package milvus.proto.index;
 
-option go_package = "github.com/milvus-io/milvus/internal/proto/indexpb";
+option go_package = "github.com/milvus-io/milvus/pkg/proto/indexpb";
 
 import "common.proto";
 import "internal.proto";
@@ -170,6 +170,7 @@ message AlterIndexRequest {
     int64 collectionID = 1;
     string index_name = 2;
     repeated common.KeyValuePair params = 3;
+    repeated string delete_keys = 4;
 }
 
 message GetIndexInfoRequest {

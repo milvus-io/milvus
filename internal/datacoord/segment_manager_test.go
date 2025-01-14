@@ -32,9 +32,11 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestManagerOptions(t *testing.T) {
@@ -142,19 +144,25 @@ func TestAllocSegment(t *testing.T) {
 	})
 
 	t.Run("alloc clear unhealthy segment", func(t *testing.T) {
-		allocations1, err := segmentManager.AllocSegment(ctx, collID, 100, "c1", 100)
+		vchannel := "c1"
+		partitionID := int64(100)
+		allocations1, err := segmentManager.AllocSegment(ctx, collID, partitionID, vchannel, 100)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations1))
-		assert.EqualValues(t, 1, len(segmentManager.segments))
+		segments, ok := segmentManager.channel2Growing.Get(vchannel)
+		assert.True(t, ok)
+		assert.EqualValues(t, 1, segments.Len())
 
 		err = meta.SetState(allocations1[0].SegmentID, commonpb.SegmentState_Dropped)
 		assert.NoError(t, err)
 
-		allocations2, err := segmentManager.AllocSegment(ctx, collID, 100, "c1", 100)
+		allocations2, err := segmentManager.AllocSegment(ctx, collID, partitionID, vchannel, 100)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations2))
 		// clear old healthy and alloc new
-		assert.EqualValues(t, 1, len(segmentManager.segments))
+		segments, ok = segmentManager.channel2Growing.Get(vchannel)
+		assert.True(t, ok)
+		assert.EqualValues(t, 1, segments.Len())
 		assert.NotEqual(t, allocations1[0].SegmentID, allocations2[0].SegmentID)
 	})
 }
@@ -217,7 +225,8 @@ func TestLastExpireReset(t *testing.T) {
 	meta.SetCurrentRows(segmentID1, bigRows)
 	meta.SetCurrentRows(segmentID2, bigRows)
 	meta.SetCurrentRows(segmentID3, smallRows)
-	segmentManager.tryToSealSegment(expire1, channelName)
+	err = segmentManager.tryToSealSegment(expire1, channelName)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.SegmentState_Sealed, meta.GetSegment(segmentID1).GetState())
 	assert.Equal(t, commonpb.SegmentState_Sealed, meta.GetSegment(segmentID2).GetState())
 	assert.Equal(t, commonpb.SegmentState_Growing, meta.GetSegment(segmentID3).GetState())
@@ -270,11 +279,14 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 	assert.NoError(t, err)
 	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 
+	vchannel := "ch0"
+	partitionID := int64(100)
+
 	sealedSegment := &datapb.SegmentInfo{
 		ID:             1,
 		CollectionID:   collID,
-		PartitionID:    0,
-		InsertChannel:  "",
+		PartitionID:    partitionID,
+		InsertChannel:  vchannel,
 		State:          commonpb.SegmentState_Sealed,
 		MaxRowNum:      100,
 		LastExpireTime: 1000,
@@ -282,8 +294,8 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 	growingSegment := &datapb.SegmentInfo{
 		ID:             2,
 		CollectionID:   collID,
-		PartitionID:    0,
-		InsertChannel:  "",
+		PartitionID:    partitionID,
+		InsertChannel:  vchannel,
 		State:          commonpb.SegmentState_Growing,
 		MaxRowNum:      100,
 		LastExpireTime: 1000,
@@ -291,8 +303,8 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 	flushedSegment := &datapb.SegmentInfo{
 		ID:             3,
 		CollectionID:   collID,
-		PartitionID:    0,
-		InsertChannel:  "",
+		PartitionID:    partitionID,
+		InsertChannel:  vchannel,
 		State:          commonpb.SegmentState_Flushed,
 		MaxRowNum:      100,
 		LastExpireTime: 1000,
@@ -304,9 +316,14 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 	err = meta.AddSegment(context.TODO(), NewSegmentInfo(flushedSegment))
 	assert.NoError(t, err)
 
-	segmentManager, _ := newSegmentManager(meta, mockAllocator)
-	segments := segmentManager.segments
-	assert.EqualValues(t, 2, len(segments))
+	segmentManager, err := newSegmentManager(meta, mockAllocator)
+	assert.NoError(t, err)
+	growing, ok := segmentManager.channel2Growing.Get(vchannel)
+	assert.True(t, ok)
+	assert.EqualValues(t, 1, growing.Len())
+	sealed, ok := segmentManager.channel2Sealed.Get(vchannel)
+	assert.True(t, ok)
+	assert.EqualValues(t, 1, sealed.Len())
 }
 
 func TestSaveSegmentsToMeta(t *testing.T) {
@@ -323,7 +340,7 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, len(allocations))
-	_, err = segmentManager.SealAllSegments(context.Background(), collID, nil)
+	_, err = segmentManager.SealAllSegments(context.Background(), "c1", nil)
 	assert.NoError(t, err)
 	segment := meta.GetHealthySegment(allocations[0].SegmentID)
 	assert.NotNil(t, segment)
@@ -345,7 +362,7 @@ func TestSaveSegmentsToMetaWithSpecificSegments(t *testing.T) {
 	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, len(allocations))
-	_, err = segmentManager.SealAllSegments(context.Background(), collID, []int64{allocations[0].SegmentID})
+	_, err = segmentManager.SealAllSegments(context.Background(), "c1", []int64{allocations[0].SegmentID})
 	assert.NoError(t, err)
 	segment := meta.GetHealthySegment(allocations[0].SegmentID)
 	assert.NotNil(t, segment)
@@ -364,14 +381,14 @@ func TestDropSegment(t *testing.T) {
 	assert.NoError(t, err)
 	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 	segmentManager, _ := newSegmentManager(meta, mockAllocator)
-	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
+	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 100, "c1", 1000)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, len(allocations))
 	segID := allocations[0].SegmentID
 	segment := meta.GetHealthySegment(segID)
 	assert.NotNil(t, segment)
 
-	segmentManager.DropSegment(context.Background(), segID)
+	segmentManager.DropSegment(context.Background(), "c1", segID)
 	segment = meta.GetHealthySegment(segID)
 	assert.NotNil(t, segment)
 }
@@ -433,8 +450,7 @@ func TestExpireAllocation(t *testing.T) {
 	segment := meta.GetHealthySegment(id)
 	assert.NotNil(t, segment)
 	assert.EqualValues(t, 100, len(segment.allocations))
-	err = segmentManager.ExpireAllocations("ch1", maxts)
-	assert.NoError(t, err)
+	segmentManager.ExpireAllocations("ch1", maxts)
 	segment = meta.GetHealthySegment(id)
 	assert.NotNil(t, segment)
 	assert.EqualValues(t, 0, len(segment.allocations))
@@ -456,7 +472,7 @@ func TestGetFlushableSegments(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
 
-		ids, err := segmentManager.SealAllSegments(context.TODO(), collID, nil)
+		ids, err := segmentManager.SealAllSegments(context.TODO(), "c1", nil)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(ids))
 		assert.EqualValues(t, allocations[0].SegmentID, ids[0])
@@ -750,6 +766,7 @@ func TestAllocationPool(t *testing.T) {
 }
 
 func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
+	partitionID := int64(100)
 	type fields struct {
 		meta     *meta
 		segments []UniqueID
@@ -772,15 +789,17 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 							1: {
 								SegmentInfo: &datapb.SegmentInfo{
 									ID:            1,
+									PartitionID:   partitionID,
 									InsertChannel: "ch1",
-									State:         commonpb.SegmentState_Flushed,
+									State:         commonpb.SegmentState_Sealed,
 								},
 							},
 							2: {
 								SegmentInfo: &datapb.SegmentInfo{
 									ID:            2,
+									PartitionID:   partitionID,
 									InsertChannel: "ch2",
-									State:         commonpb.SegmentState_Flushed,
+									State:         commonpb.SegmentState_Growing,
 								},
 							},
 						},
@@ -802,13 +821,15 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 							1: {
 								SegmentInfo: &datapb.SegmentInfo{
 									ID:            1,
+									PartitionID:   partitionID,
 									InsertChannel: "ch1",
-									State:         commonpb.SegmentState_Dropped,
+									State:         commonpb.SegmentState_Sealed,
 								},
 							},
 							2: {
 								SegmentInfo: &datapb.SegmentInfo{
 									ID:            2,
+									PartitionID:   partitionID,
 									InsertChannel: "ch2",
 									State:         commonpb.SegmentState_Growing,
 								},
@@ -827,11 +848,36 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &SegmentManager{
-				meta:     tt.fields.meta,
-				segments: tt.fields.segments,
+				meta:            tt.fields.meta,
+				channelLock:     lock.NewKeyLock[string](),
+				channel2Growing: typeutil.NewConcurrentMap[string, typeutil.UniqueSet](),
+				channel2Sealed:  typeutil.NewConcurrentMap[string, typeutil.UniqueSet](),
+			}
+			for _, segmentID := range tt.fields.segments {
+				segmentInfo := tt.fields.meta.GetSegment(segmentID)
+				channel := tt.args.channel
+				if segmentInfo != nil {
+					channel = segmentInfo.GetInsertChannel()
+				}
+				if segmentInfo == nil || segmentInfo.GetState() == commonpb.SegmentState_Growing {
+					growing, _ := s.channel2Growing.GetOrInsert(channel, typeutil.NewUniqueSet())
+					growing.Insert(segmentID)
+				} else if segmentInfo.GetState() == commonpb.SegmentState_Sealed {
+					sealed, _ := s.channel2Sealed.GetOrInsert(channel, typeutil.NewUniqueSet())
+					sealed.Insert(segmentID)
+				}
 			}
 			s.DropSegmentsOfChannel(context.TODO(), tt.args.channel)
-			assert.ElementsMatch(t, tt.want, s.segments)
+			all := make([]int64, 0)
+			s.channel2Sealed.Range(func(_ string, segments typeutil.UniqueSet) bool {
+				all = append(all, segments.Collect()...)
+				return true
+			})
+			s.channel2Growing.Range(func(_ string, segments typeutil.UniqueSet) bool {
+				all = append(all, segments.Collect()...)
+				return true
+			})
+			assert.ElementsMatch(t, tt.want, all)
 		})
 	}
 }

@@ -838,3 +838,24 @@ func (s *NumRowsWithSchemaSuite) TestErrorCases() {
 func TestNumRowsWithSchema(t *testing.T) {
 	suite.Run(t, new(NumRowsWithSchemaSuite))
 }
+
+func TestString2KeyValuePair(t *testing.T) {
+	t.Run("normal", func(t *testing.T) {
+		kvs, err := String2KeyValuePair("{\"key\": \"value\"}")
+		assert.NoError(t, err)
+		assert.Len(t, kvs, 1)
+		assert.Equal(t, "key", kvs[0].Key)
+		assert.Equal(t, "value", kvs[0].Value)
+	})
+
+	t.Run("err", func(t *testing.T) {
+		_, err := String2KeyValuePair("{aa}")
+		assert.Error(t, err)
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		kvs, err := String2KeyValuePair("{}")
+		assert.NoError(t, err)
+		assert.Len(t, kvs, 0)
+	})
+}

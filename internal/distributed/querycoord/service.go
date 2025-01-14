@@ -31,17 +31,15 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
-	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	qc "github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -169,45 +167,22 @@ func (s *Server) init() error {
 
 	// --- Master Server Client ---
 	if s.rootCoord == nil {
-		s.rootCoord, err = rcc.NewClient(s.loopCtx)
-		if err != nil {
-			log.Error("QueryCoord try to new RootCoord client failed", zap.Error(err))
-			panic(err)
-		}
+		s.rootCoord = coordclient.GetRootCoordClient(s.loopCtx)
 	}
 
 	// wait for master init or healthy
-	log.Info("QueryCoord try to wait for RootCoord ready")
-	err = componentutil.WaitForComponentHealthy(s.loopCtx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		log.Error("QueryCoord wait for RootCoord ready failed", zap.Error(err))
-		panic(err)
-	}
-
 	if err := s.SetRootCoord(s.rootCoord); err != nil {
 		panic(err)
 	}
-	log.Info("QueryCoord report RootCoord ready")
 
 	// --- Data service client ---
 	if s.dataCoord == nil {
-		s.dataCoord, err = dcc.NewClient(s.loopCtx)
-		if err != nil {
-			log.Error("QueryCoord try to new DataCoord client failed", zap.Error(err))
-			panic(err)
-		}
+		s.dataCoord = coordclient.GetDataCoordClient(s.loopCtx)
 	}
 
-	log.Info("QueryCoord try to wait for DataCoord ready")
-	err = componentutil.WaitForComponentHealthy(s.loopCtx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		log.Error("QueryCoord wait for DataCoord ready failed", zap.Error(err))
-		panic(err)
-	}
 	if err := s.SetDataCoord(s.dataCoord); err != nil {
 		panic(err)
 	}
-	log.Info("QueryCoord report DataCoord ready")
 
 	if err := s.queryCoord.Init(); err != nil {
 		return err
@@ -258,6 +233,7 @@ func (s *Server) startGrpcLoop() {
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 	)
 	querypb.RegisterQueryCoordServer(s.grpcServer, s)
+	coordclient.RegisterQueryCoordServer(s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {

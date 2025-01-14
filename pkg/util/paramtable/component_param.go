@@ -269,6 +269,11 @@ type commonConfig struct {
 
 	HealthCheckInterval   ParamItem `refreshable:"true"`
 	HealthCheckRPCTimeout ParamItem `refreshable:"true"`
+
+	// Local RPC enabled for milvus internal communication when mix or standalone mode.
+	LocalRPCEnabled ParamItem `refreshable:"false"`
+
+	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -650,8 +655,8 @@ like the old password verification when updating the credential`,
 	p.DefaultRootPassword = ParamItem{
 		Key:          "common.security.defaultRootPassword",
 		Version:      "2.4.7",
-		Doc:          "default password for root user",
-		DefaultValue: "Milvus",
+		Doc:          "default password for root user. The maximum length is 72 characters, and double quotes are required.",
+		DefaultValue: "\"Milvus\"",
 		Export:       true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
@@ -934,6 +939,24 @@ This helps Milvus-CDC synchronize incremental data`,
 		Doc:          `RPC timeout for health check request`,
 	}
 	p.HealthCheckRPCTimeout.Init(base.mgr)
+
+	p.LocalRPCEnabled = ParamItem{
+		Key:          "common.localRPCEnabled",
+		Version:      "2.4.18",
+		DefaultValue: "false",
+		Doc:          `enable local rpc for internal communication when mix or standalone mode.`,
+		Export:       true,
+	}
+	p.LocalRPCEnabled.Init(base.mgr)
+
+	p.SyncTaskPoolReleaseTimeoutSeconds = ParamItem{
+		Key:          "common.sync.taskPoolReleaseTimeoutSeconds",
+		DefaultValue: "60",
+		Version:      "2.4.18",
+		Doc:          "The maximum time to wait for the task to finish and release resources in the pool",
+		Export:       true,
+	}
+	p.SyncTaskPoolReleaseTimeoutSeconds.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -1134,6 +1157,7 @@ type rootCoordConfig struct {
 	MaxGeneralCapacity          ParamItem `refreshable:"true"`
 	GracefulStopTimeout         ParamItem `refreshable:"true"`
 	UseLockScheduler            ParamItem `refreshable:"true"`
+	DefaultDBProperties         ParamItem `refreshable:"false"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -1217,6 +1241,15 @@ Segments with smaller size than this parameter will not be indexed, and will be 
 		Export:       false,
 	}
 	p.UseLockScheduler.Init(base.mgr)
+
+	p.DefaultDBProperties = ParamItem{
+		Key:          "rootCoord.defaultDBProperties",
+		Version:      "2.4.16",
+		DefaultValue: "{}",
+		Doc:          "default db properties, should be a json string",
+		Export:       false,
+	}
+	p.DefaultDBProperties.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1270,6 +1303,7 @@ type proxyConfig struct {
 	SkipAutoIDCheck              ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck        ParamItem `refreshable:"true"`
 	EnablePublicPrivilege        ParamItem `refreshable:"false"`
+	MaxVarCharLength             ParamItem `refreshable:"false"`
 
 	AccessLog AccessLogConfig
 
@@ -1344,8 +1378,15 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.MaxPasswordLength = ParamItem{
 		Key:          "proxy.maxPasswordLength",
-		DefaultValue: "256",
+		DefaultValue: "72", // bcrypt max length
 		Version:      "2.0.0",
+		Formatter: func(v string) string {
+			n := getAsInt(v)
+			if n <= 0 || n > 72 {
+				return "72"
+			}
+			return v
+		},
 		PanicIfEmpty: true,
 	}
 	p.MaxPasswordLength.Init(base.mgr)
@@ -1657,6 +1698,14 @@ please adjust in embedded Milvus: false`,
 	}
 	p.EnablePublicPrivilege.Init(base.mgr)
 
+	p.MaxVarCharLength = ParamItem{
+		Key:          "proxy.maxVarCharLength",
+		Version:      "2.4.19",            // hotfix
+		DefaultValue: strconv.Itoa(65535), // 64K
+		Doc:          "maximum number of characters for a varchar field; this value is overridden by the value in a pre-existing schema if applicable",
+	}
+	p.MaxVarCharLength.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -1741,6 +1790,7 @@ type queryCoordConfig struct {
 	RowCountFactor                      ParamItem `refreshable:"true"`
 	SegmentCountFactor                  ParamItem `refreshable:"true"`
 	GlobalSegmentCountFactor            ParamItem `refreshable:"true"`
+	CollectionChannelCountFactor        ParamItem `refreshable:"true"`
 	SegmentCountMaxSteps                ParamItem `refreshable:"true"`
 	RowCountMaxSteps                    ParamItem `refreshable:"true"`
 	RandomMaxSteps                      ParamItem `refreshable:"true"`
@@ -1787,8 +1837,9 @@ type queryCoordConfig struct {
 
 	CollectionObserverInterval         ParamItem `refreshable:"false"`
 	CheckExecutedFlagInterval          ParamItem `refreshable:"false"`
-	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
 	CollectionBalanceSegmentBatchSize  ParamItem `refreshable:"true"`
+	CollectionBalanceChannelBatchSize  ParamItem `refreshable:"true"`
+	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
 	ClusterLevelLoadReplicaNumber      ParamItem `refreshable:"true"`
 	ClusterLevelLoadResourceGroups     ParamItem `refreshable:"true"`
 }
@@ -1905,6 +1956,17 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.GlobalSegmentCountFactor.Init(base.mgr)
+
+	p.CollectionChannelCountFactor = ParamItem{
+		Key:          "queryCoord.collectionChannelCountFactor",
+		Version:      "2.4.18",
+		DefaultValue: "10",
+		PanicIfEmpty: true,
+		Doc: `the channel count weight used when balancing channels among queryNodes, 
+		A higher value reduces the likelihood of assigning channels from the same collection to the same QueryNode. Set to 1 to disable this feature.`,
+		Export: true,
+	}
+	p.CollectionChannelCountFactor.Init(base.mgr)
 
 	p.SegmentCountMaxSteps = ParamItem{
 		Key:          "queryCoord.segmentCountMaxSteps",
@@ -2327,6 +2389,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.CollectionBalanceSegmentBatchSize.Init(base.mgr)
+
+	p.CollectionBalanceChannelBatchSize = ParamItem{
+		Key:          "queryCoord.collectionBalanceChannelBatchSize",
+		Version:      "2.4.18",
+		DefaultValue: "1",
+		Doc:          "the max balance task number for channel at each round",
+		Export:       false,
+	}
+	p.CollectionBalanceChannelBatchSize.Init(base.mgr)
 
 	p.ClusterLevelLoadReplicaNumber = ParamItem{
 		Key:          "queryCoord.clusterLevelLoadReplicaNumber",
@@ -3221,6 +3292,9 @@ type dataCoordConfig struct {
 	ChannelCheckpointMaxLag ParamItem `refreshable:"true"`
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
 
+	// Index related configuration
+	IndexMemSizeEstimateMultiplier ParamItem `refreshable:"true"`
+
 	// Clustering Compaction
 	ClusteringCompactionEnable                 ParamItem `refreshable:"true"`
 	ClusteringCompactionAutoEnable             ParamItem `refreshable:"true"`
@@ -3696,6 +3770,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.LevelZeroCompactionTriggerDeltalogMaxNum.Init(base.mgr)
+
+	p.IndexMemSizeEstimateMultiplier = ParamItem{
+		Key:          "dataCoord.index.memSizeEstimateMultiplier",
+		Version:      "2.4.19",
+		DefaultValue: "2",
+		Doc:          "When the memory size is not setup by index procedure, multiplier to estimate the memory size of index data",
+		Export:       true,
+	}
+	p.IndexMemSizeEstimateMultiplier.Init(base.mgr)
 
 	p.ClusteringCompactionEnable = ParamItem{
 		Key:          "dataCoord.compaction.clustering.enable",
@@ -4547,7 +4630,7 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.clusteringCompaction.memoryBufferRatio",
 		Version:      "2.4.6",
 		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.",
-		DefaultValue: "0.1",
+		DefaultValue: "0.3",
 		PanicIfEmpty: false,
 		Export:       true,
 	}

@@ -28,7 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -299,6 +299,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 			dbID:             100,
 			createdTimestamp: 1,
 		}, nil)
+		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{}, nil)
 		globalMetaCache = mockCache
 
 		limiter := limiterMock{rate: 100}
@@ -437,6 +438,41 @@ func TestGetInfo(t *testing.T) {
 		}
 	})
 
+	t.Run("fail to get collection schema", func(t *testing.T) {
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+			dbID:             100,
+			createdTimestamp: 1,
+		}, nil).Once()
+		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Once()
+		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
+
+		_, _, err := getCollectionAndPartitionID(ctx, &milvuspb.InsertRequest{
+			DbName:         "foo",
+			CollectionName: "coo",
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("partition key mode", func(t *testing.T) {
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+			dbID:             100,
+			createdTimestamp: 1,
+		}, nil).Once()
+		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Once()
+		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			hasPartitionKeyField: true,
+		}, nil).Once()
+
+		db, col2par, err := getCollectionAndPartitionID(ctx, &milvuspb.InsertRequest{
+			DbName:         "foo",
+			CollectionName: "coo",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int64(100), db)
+		assert.NotNil(t, col2par[1])
+		assert.Equal(t, 0, len(col2par[1]))
+	})
+
 	t.Run("fail to get partition", func(t *testing.T) {
 		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
 			dbID:             100,
@@ -467,11 +503,12 @@ func TestGetInfo(t *testing.T) {
 			dbID:             100,
 			createdTimestamp: 1,
 		}, nil).Times(3)
+		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{}, nil).Times(1)
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(10), nil).Times(3)
 		mockCache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{
 			name:        "p1",
 			partitionID: 100,
-		}, nil).Twice()
+		}, nil).Times(3)
 		{
 			db, col2par, err := getCollectionAndPartitionID(ctx, &milvuspb.InsertRequest{
 				DbName:         "foo",
@@ -491,7 +528,7 @@ func TestGetInfo(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equal(t, int64(100), db)
 			assert.NotNil(t, col2par[10])
-			assert.Equal(t, 0, len(col2par[10]))
+			assert.Equal(t, int64(100), col2par[10][0])
 		}
 		{
 			db, col2par, err := getCollectionAndPartitionIDs(ctx, &milvuspb.SearchRequest{

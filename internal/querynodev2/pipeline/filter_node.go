@@ -118,8 +118,8 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 		// check segment whether excluded
 		ok := fNode.delegator.VerifyExcludedSegments(insertMsg.SegmentID, insertMsg.EndTimestamp)
 		if !ok {
-			m := fmt.Sprintf("Segment excluded, id: %d", insertMsg.GetSegmentID())
-			return merr.WrapErrSegmentLack(insertMsg.GetSegmentID(), m)
+			m := fmt.Sprintf("skip msg due to segment=%d has been excluded", insertMsg.GetSegmentID())
+			return merr.WrapErrServiceInternal(m)
 		}
 		return nil
 

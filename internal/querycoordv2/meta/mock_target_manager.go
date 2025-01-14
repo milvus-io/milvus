@@ -4,7 +4,7 @@ package meta
 
 import (
 	metastore "github.com/milvus-io/milvus/internal/metastore"
-	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
 
 	mock "github.com/stretchr/testify/mock"
 
@@ -560,6 +560,48 @@ func (_c *MockTargetManager_IsCurrentTargetExist_Call) Return(_a0 bool) *MockTar
 }
 
 func (_c *MockTargetManager_IsCurrentTargetExist_Call) RunAndReturn(run func(int64, int64) bool) *MockTargetManager_IsCurrentTargetExist_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// IsCurrentTargetReady provides a mock function with given fields: collectionID
+func (_m *MockTargetManager) IsCurrentTargetReady(collectionID int64) bool {
+	ret := _m.Called(collectionID)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(int64) bool); ok {
+		r0 = rf(collectionID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockTargetManager_IsCurrentTargetReady_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsCurrentTargetReady'
+type MockTargetManager_IsCurrentTargetReady_Call struct {
+	*mock.Call
+}
+
+// IsCurrentTargetReady is a helper method to define mock.On call
+//   - collectionID int64
+func (_e *MockTargetManager_Expecter) IsCurrentTargetReady(collectionID interface{}) *MockTargetManager_IsCurrentTargetReady_Call {
+	return &MockTargetManager_IsCurrentTargetReady_Call{Call: _e.mock.On("IsCurrentTargetReady", collectionID)}
+}
+
+func (_c *MockTargetManager_IsCurrentTargetReady_Call) Run(run func(collectionID int64)) *MockTargetManager_IsCurrentTargetReady_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockTargetManager_IsCurrentTargetReady_Call) Return(_a0 bool) *MockTargetManager_IsCurrentTargetReady_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTargetManager_IsCurrentTargetReady_Call) RunAndReturn(run func(int64) bool) *MockTargetManager_IsCurrentTargetReady_Call {
 	_c.Call.Return(run)
 	return _c
 }

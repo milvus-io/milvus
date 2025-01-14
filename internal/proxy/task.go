@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -30,13 +31,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -81,6 +82,7 @@ const (
 	DescribeAliasTaskName         = "DescribeAliasTask"
 	ListAliasesTaskName           = "ListAliasesTask"
 	AlterCollectionTaskName       = "AlterCollectionTask"
+	AlterCollectionFieldTaskName  = "AlterCollectionFieldTask"
 	UpsertTaskName                = "UpsertTask"
 	CreateResourceGroupTaskName   = "CreateResourceGroupTask"
 	UpdateResourceGroupsTaskName  = "UpdateResourceGroupsTask"
@@ -916,6 +918,15 @@ func hasLazyLoadProp(props ...*commonpb.KeyValuePair) bool {
 	return false
 }
 
+func hasPropInDeletekeys(keys []string) string {
+	for _, key := range keys {
+		if key == common.MmapEnabledKey || key == common.LazyLoadEnableKey {
+			return key
+		}
+	}
+	return ""
+}
+
 func validatePartitionKeyIsolation(colName string, isPartitionKeyEnabled bool, props ...*commonpb.KeyValuePair) (bool, error) {
 	iso, err := common.IsPartitionKeyIsolationKvEnabled(props...)
 	if err != nil {
@@ -943,19 +954,37 @@ func validatePartitionKeyIsolation(colName string, isPartitionKeyEnabled bool, p
 }
 
 func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
+	if len(t.GetProperties()) > 0 && len(t.GetDeleteKeys()) > 0 {
+		return merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
+	}
+
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
 	}
 
 	t.CollectionID = collectionID
-	if hasMmapProp(t.Properties...) || hasLazyLoadProp(t.Properties...) {
-		loaded, err := isCollectionLoaded(ctx, t.queryCoord, t.CollectionID)
-		if err != nil {
-			return err
+
+	if len(t.GetProperties()) > 0 {
+		if hasMmapProp(t.Properties...) || hasLazyLoadProp(t.Properties...) {
+			loaded, err := isCollectionLoaded(ctx, t.queryCoord, t.CollectionID)
+			if err != nil {
+				return err
+			}
+			if loaded {
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
+			}
 		}
-		if loaded {
-			return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
+	} else if len(t.GetDeleteKeys()) > 0 {
+		key := hasPropInDeletekeys(t.DeleteKeys)
+		if key != "" {
+			loaded, err := isCollectionLoaded(ctx, t.queryCoord, t.CollectionID)
+			if err != nil {
+				return err
+			}
+			if loaded {
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not delete mmap properties if collection loaded")
+			}
 		}
 	}
 
@@ -1025,6 +1054,163 @@ func (t *alterCollectionTask) Execute(ctx context.Context) error {
 }
 
 func (t *alterCollectionTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type alterCollectionFieldTask struct {
+	baseTask
+	Condition
+	*milvuspb.AlterCollectionFieldRequest
+	ctx        context.Context
+	rootCoord  types.RootCoordClient
+	result     *commonpb.Status
+	queryCoord types.QueryCoordClient
+	dataCoord  types.DataCoordClient
+}
+
+func (t *alterCollectionFieldTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *alterCollectionFieldTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *alterCollectionFieldTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *alterCollectionFieldTask) Name() string {
+	return AlterCollectionTaskName
+}
+
+func (t *alterCollectionFieldTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *alterCollectionFieldTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *alterCollectionFieldTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *alterCollectionFieldTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *alterCollectionFieldTask) OnEnqueue() error {
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_AlterCollectionField
+	t.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+const (
+	MmapEnabledKey = "mmap_enabled"
+)
+
+var allowedProps = []string{
+	common.MaxLengthKey,
+	common.MmapEnabledKey,
+}
+
+func IsKeyAllowed(key string) bool {
+	for _, allowedKey := range allowedProps {
+		if key == allowedKey {
+			return true
+		}
+	}
+	return false
+}
+
+func updatePropertiesKeys(oldProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+	props := make(map[string]string)
+	for _, prop := range oldProps {
+		var updatedKey string
+		if prop.Key == MmapEnabledKey {
+			updatedKey = common.MmapEnabledKey
+		} else {
+			updatedKey = prop.Key
+		}
+		props[updatedKey] = prop.Value
+	}
+
+	propKV := make([]*commonpb.KeyValuePair, 0)
+	for key, value := range props {
+		propKV = append(propKV, &commonpb.KeyValuePair{
+			Key:   key,
+			Value: value,
+		})
+	}
+
+	return propKV
+}
+
+func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
+	if err != nil {
+		return err
+	}
+	t.Properties = updatePropertiesKeys(t.Properties)
+	for _, prop := range t.Properties {
+		if !IsKeyAllowed(prop.Key) {
+			return merr.WrapErrParameterInvalidMsg("%s does not allow update in collection field param", prop.Key)
+		}
+		// Check the value type based on the key
+		switch prop.Key {
+		case common.MmapEnabledKey:
+			collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
+			if err != nil {
+				return err
+			}
+			loaded, err1 := isCollectionLoaded(ctx, t.queryCoord, collectionID)
+			if err1 != nil {
+				return err1
+			}
+			if loaded {
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter collection field properties if collection loaded")
+			}
+
+		case common.MaxLengthKey:
+			IsStringType := false
+			fieldName := ""
+			var dataType int32
+			for _, field := range collSchema.Fields {
+				if field.GetName() == t.FieldName && (typeutil.IsStringType(field.DataType) || typeutil.IsArrayContainStringElementType(field.DataType, field.ElementType)) {
+					IsStringType = true
+					fieldName = field.GetName()
+					dataType = int32(field.DataType)
+				}
+			}
+			if !IsStringType {
+				return merr.WrapErrParameterInvalid(fieldName, "%s can not modify the maxlength for non-string types", schemapb.DataType_name[dataType])
+			}
+			value, err := strconv.Atoi(prop.Value)
+			if err != nil {
+				return merr.WrapErrParameterInvalid("%s should be an integer, but got %T", prop.Key, prop.Value)
+			}
+
+			defaultMaxVarCharLength := Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
+			if int64(value) > defaultMaxVarCharLength {
+				return merr.WrapErrParameterInvalidMsg("%s exceeds the maximum allowed value %s", prop.Value, strconv.FormatInt(defaultMaxVarCharLength, 10))
+			}
+		}
+	}
+
+	return nil
+}
+
+func (t *alterCollectionFieldTask) Execute(ctx context.Context) error {
+	var err error
+	t.result, err = t.rootCoord.AlterCollectionField(ctx, t.AlterCollectionFieldRequest)
+	return merr.CheckRPCCall(t.result, err)
+}
+
+func (t *alterCollectionFieldTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
@@ -1196,7 +1382,7 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if collLoaded {
-		loaded, err := isPartitionLoaded(ctx, t.queryCoord, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, t.queryCoord, collID, partID)
 		if err != nil {
 			return err
 		}

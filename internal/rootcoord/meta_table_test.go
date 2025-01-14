@@ -32,10 +32,10 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	"github.com/milvus-io/milvus/pkg/common"
+	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -460,7 +460,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 		meta := &MetaTable{
 			catalog: catalog,
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
 		}
@@ -480,7 +480,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 		meta := &MetaTable{
 			catalog: catalog,
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
 		}
@@ -548,7 +548,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 				},
 			},
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 		}
 		ctx := context.Background()
@@ -569,7 +569,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 				},
 			},
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 		}
 		meta.aliases.insert(util.DefaultDBName, "alias", 100)
@@ -596,7 +596,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 				},
 			},
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 		}
 		meta.names.insert(util.DefaultDBName, "name", 100)
@@ -618,7 +618,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		).Return(nil, errors.New("error mock GetCollectionByName"))
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			names:   newNameDb(),
 			aliases: newNameDb(),
@@ -639,7 +639,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		).Return(&model.Collection{State: pb.CollectionState_CollectionDropped}, nil)
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			names:   newNameDb(),
 			aliases: newNameDb(),
@@ -669,7 +669,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			names:   newNameDb(),
 			aliases: newNameDb(),
@@ -687,7 +687,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		ctx := context.Background()
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			names:   newNameDb(),
 			aliases: newNameDb(),
@@ -1206,7 +1206,7 @@ func TestMetaTable_reload(t *testing.T) {
 		catalog.On("ListDatabases",
 			mock.Anything,
 			mock.Anything,
-		).Return([]*model.Database{model.NewDefaultDatabase()}, nil)
+		).Return([]*model.Database{model.NewDefaultDatabase(nil)}, nil)
 		catalog.On("ListCollections",
 			mock.Anything,
 			mock.Anything,
@@ -1508,7 +1508,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 	t.Run("new collection name already exist-1", func(t *testing.T) {
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			names:   newNameDb(),
 			aliases: newNameDb(),
@@ -1535,7 +1535,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 		).Return(nil, errors.New("error mock GetCollectionByID"))
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			catalog: catalog,
 			names:   newNameDb(),
@@ -1565,7 +1565,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			catalog: catalog,
 			names:   newNameDb(),
@@ -1592,7 +1592,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 		).Return(nil, merr.WrapErrCollectionNotFound("error"))
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 				"db1":              model.NewDatabase(2, "db1", pb.DatabaseState_DatabaseCreated, nil),
 			},
 			catalog: catalog,
@@ -1622,7 +1622,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 		).Return(nil, merr.WrapErrCollectionNotFound("error"))
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 				"db1":              model.NewDatabase(2, "db1", pb.DatabaseState_DatabaseCreated, nil),
 			},
 			catalog: catalog,
@@ -1659,7 +1659,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 		).Return(nil, merr.WrapErrCollectionNotFound("error"))
 		meta := &MetaTable{
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 			catalog: catalog,
 			names:   newNameDb(),
@@ -1911,7 +1911,7 @@ func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
 				1: {CollectionID: 1},
 			},
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 			},
 		}
 
@@ -1925,7 +1925,7 @@ func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
 		mt := &MetaTable{
 			names: newNameDb(),
 			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: model.NewDefaultDatabase(),
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
 				"db2":              model.NewDatabase(2, "db2", pb.DatabaseState_DatabaseCreated, nil),
 			},
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{

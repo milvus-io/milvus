@@ -5,7 +5,7 @@ package proxy
 import (
 	context "context"
 
-	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
 	mock "github.com/stretchr/testify/mock"
 
 	typeutil "github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -165,19 +165,23 @@ func (_c *MockCache_GetCollectionID_Call) RunAndReturn(run func(context.Context,
 }
 
 // GetCollectionInfo provides a mock function with given fields: ctx, database, collectionName, collectionID
-func (_m *MockCache) GetCollectionInfo(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionBasicInfo, error) {
+func (_m *MockCache) GetCollectionInfo(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionInfo, error) {
 	ret := _m.Called(ctx, database, collectionName, collectionID)
 
-	var r0 *collectionBasicInfo
+	if len(ret) == 0 {
+		panic("no return value specified for GetCollectionInfo")
+	}
+
+	var r0 *collectionInfo
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64) (*collectionBasicInfo, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64) (*collectionInfo, error)); ok {
 		return rf(ctx, database, collectionName, collectionID)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64) *collectionBasicInfo); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64) *collectionInfo); ok {
 		r0 = rf(ctx, database, collectionName, collectionID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*collectionBasicInfo)
+			r0 = ret.Get(0).(*collectionInfo)
 		}
 	}
 
@@ -211,12 +215,12 @@ func (_c *MockCache_GetCollectionInfo_Call) Run(run func(ctx context.Context, da
 	return _c
 }
 
-func (_c *MockCache_GetCollectionInfo_Call) Return(_a0 *collectionBasicInfo, _a1 error) *MockCache_GetCollectionInfo_Call {
+func (_c *MockCache_GetCollectionInfo_Call) Return(_a0 *collectionInfo, _a1 error) *MockCache_GetCollectionInfo_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockCache_GetCollectionInfo_Call) RunAndReturn(run func(context.Context, string, string, int64) (*collectionBasicInfo, error)) *MockCache_GetCollectionInfo_Call {
+func (_c *MockCache_GetCollectionInfo_Call) RunAndReturn(run func(context.Context, string, string, int64) (*collectionInfo, error)) *MockCache_GetCollectionInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

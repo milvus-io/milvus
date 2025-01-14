@@ -25,8 +25,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -184,8 +185,14 @@ func (m *ReplicaManager) put(replicas ...*Replica) error {
 // putReplicaInMemory puts replicas into in-memory map and collIDToReplicaIDs.
 func (m *ReplicaManager) putReplicaInMemory(replicas ...*Replica) {
 	for _, replica := range replicas {
+		if oldReplica, ok := m.replicas[replica.GetID()]; ok {
+			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(oldReplica.GetResourceGroup()).Dec()
+			metrics.QueryCoordReplicaRONodeTotal.Add(-float64(oldReplica.RONodesCount()))
+		}
 		// update in-memory replicas.
 		m.replicas[replica.GetID()] = replica
+		metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Inc()
+		metrics.QueryCoordReplicaRONodeTotal.Add(float64(replica.RONodesCount()))
 
 		// update collIDToReplicaIDs.
 		if m.coll2Replicas[replica.GetCollectionID()] == nil {
@@ -277,6 +284,8 @@ func (m *ReplicaManager) RemoveCollection(collectionID typeutil.UniqueID) error 
 	if collReplicas, ok := m.coll2Replicas[collectionID]; ok {
 		// Remove all replica of collection and remove collection from collIDToReplicaIDs.
 		for _, replica := range collReplicas.replicas {
+			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
+			metrics.QueryCoordReplicaRONodeTotal.Add(-float64(replica.RONodesCount()))
 			delete(m.replicas, replica.GetID())
 		}
 		delete(m.coll2Replicas, collectionID)
@@ -299,8 +308,12 @@ func (m *ReplicaManager) removeReplicas(collectionID typeutil.UniqueID, replicas
 		return err
 	}
 
-	for _, replica := range replicas {
-		delete(m.replicas, replica)
+	for _, replicaID := range replicas {
+		if replica, ok := m.replicas[replicaID]; ok {
+			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
+			metrics.QueryCoordReplicaRONodeTotal.Add(float64(-replica.RONodesCount()))
+			delete(m.replicas, replicaID)
+		}
 	}
 
 	if m.coll2Replicas[collectionID].removeReplicas(replicas...) {

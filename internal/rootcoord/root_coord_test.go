@@ -32,16 +32,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/healthcheck"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -1027,6 +1027,34 @@ func TestRootCoord_RenameCollection(t *testing.T) {
 	})
 }
 
+func TestRootCoord_ListPolicy(t *testing.T) {
+	t.Run("expand privilege groups", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		c := newTestCore(withHealthyCode(), withMeta(meta))
+		ctx := context.Background()
+
+		meta.EXPECT().ListPolicy(util.DefaultTenant).Return([]*milvuspb.GrantEntity{
+			{
+				ObjectName: "*",
+				Object: &milvuspb.ObjectEntity{
+					Name: "Global",
+				},
+				Role:    &milvuspb.RoleEntity{Name: "role"},
+				Grantor: &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "CollectionAdmin"}},
+			},
+		}, nil)
+
+		meta.EXPECT().ListPrivilegeGroups().Return([]*milvuspb.PrivilegeGroupInfo{}, nil)
+
+		meta.EXPECT().ListUserRole(util.DefaultTenant).Return([]string{}, nil)
+
+		resp, err := c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
+		assert.Equal(t, len(Params.RbacConfig.GetDefaultPrivilegeGroup("CollectionAdmin").Privileges), len(resp.PolicyInfos))
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+}
+
 func TestRootCoord_ShowConfigurations(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		ctx := context.Background()
@@ -1778,14 +1806,44 @@ func TestRootCoord_RBACError(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
 		mockMeta := c.meta.(*mockMetaTable)
-		mockMeta.ListPolicyFunc = func(tenant string) ([]string, error) {
-			return []string{}, nil
+		mockMeta.ListPolicyFunc = func(tenant string) ([]*milvuspb.GrantEntity, error) {
+			return []*milvuspb.GrantEntity{{
+				ObjectName: "*",
+				Object: &milvuspb.ObjectEntity{
+					Name: "Global",
+				},
+				Role:    &milvuspb.RoleEntity{Name: "role"},
+				Grantor: &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "CustomGroup"}},
+			}}, nil
 		}
 		resp, err = c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		mockMeta.ListPolicyFunc = func(tenant string) ([]string, error) {
-			return []string{}, errors.New("mock error")
+		mockMeta.ListPrivilegeGroupsFunc = func() ([]*milvuspb.PrivilegeGroupInfo, error) {
+			return []*milvuspb.PrivilegeGroupInfo{
+				{
+					GroupName:  "CollectionAdmin",
+					Privileges: []*milvuspb.PrivilegeEntity{{Name: "CreateCollection"}},
+				},
+			}, nil
+		}
+		resp, err = c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		mockMeta.IsCustomPrivilegeGroupFunc = func(groupName string) (bool, error) {
+			return true, nil
+		}
+		resp, err = c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		mockMeta.ListPolicyFunc = func(tenant string) ([]*milvuspb.GrantEntity, error) {
+			return []*milvuspb.GrantEntity{}, errors.New("mock error")
+		}
+		mockMeta.ListPrivilegeGroupsFunc = func() ([]*milvuspb.PrivilegeGroupInfo, error) {
+			return []*milvuspb.PrivilegeGroupInfo{}, errors.New("mock error")
+		}
+		mockMeta.IsCustomPrivilegeGroupFunc = func(groupName string) (bool, error) {
+			return false, errors.New("mock error")
 		}
 	})
 }
@@ -1897,29 +1955,6 @@ func TestCore_InitRBAC(t *testing.T) {
 
 		err := c.initRbac()
 		assert.NoError(t, err)
-	})
-
-	t.Run("init default privilege groups", func(t *testing.T) {
-		clusterReadWrite := `SelectOwnership,SelectUser,DescribeResourceGroup`
-		meta := mockrootcoord.NewIMetaTable(t)
-		c := newTestCore(withHealthyCode(), withMeta(meta))
-
-		Params.Save(Params.RbacConfig.Enabled.Key, "true")
-		Params.Save(Params.RbacConfig.ClusterReadWritePrivileges.Key, clusterReadWrite)
-
-		defer func() {
-			Params.Reset(Params.RbacConfig.Enabled.Key)
-			Params.Reset(Params.RbacConfig.ClusterReadWritePrivileges.Key)
-		}()
-
-		builtinGroups := c.initBuiltinPrivilegeGroups()
-		fmt.Println(builtinGroups)
-		assert.Equal(t, len(util.BuiltinPrivilegeGroups), len(builtinGroups))
-		for _, group := range builtinGroups {
-			if group.GroupName == "ClusterReadWrite" {
-				assert.Equal(t, len(group.Privileges), 3)
-			}
-		}
 	})
 }
 

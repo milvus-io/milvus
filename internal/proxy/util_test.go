@@ -37,12 +37,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -1063,7 +1063,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 			Status:       merr.Success(),
 			PartitionIDs: []int64{partID},
 		}, nil)
-		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, qc, collID, partID)
 		assert.NoError(t, err)
 		assert.True(t, loaded)
 	})
@@ -1088,7 +1088,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 			Status:       merr.Success(),
 			PartitionIDs: []int64{partID},
 		}, errors.New("error"))
-		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, qc, collID, partID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
 	})
@@ -1116,7 +1116,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 			},
 			PartitionIDs: []int64{partID},
 		}, nil)
-		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, qc, collID, partID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
 	})
@@ -2671,4 +2671,166 @@ func TestValidateLoadFieldsList(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestComputeRecall(t *testing.T) {
+	t.Run("normal case1", func(t *testing.T) {
+		result1 := &schemapb.SearchResultData{
+			NumQueries: 3,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{
+						Data: []string{"11", "9", "8", "5", "3", "1"},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.1},
+			Topks:  []int64{2, 2, 2},
+		}
+
+		gt := &schemapb.SearchResultData{
+			NumQueries: 3,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{
+						Data: []string{"11", "10", "8", "5", "3", "1"},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.98, 0.8, 0.5, 0.3, 0.1},
+			Topks:  []int64{2, 2, 2},
+		}
+
+		err := computeRecall(result1, gt)
+		assert.NoError(t, err)
+		assert.Equal(t, result1.Recalls[0], float32(0.5))
+		assert.Equal(t, result1.Recalls[1], float32(1.0))
+		assert.Equal(t, result1.Recalls[2], float32(1.0))
+	})
+
+	t.Run("normal case2", func(t *testing.T) {
+		result1 := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{11, 9, 8, 5, 3, 1, 34, 23, 22, 21},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.8, 0.7, 0.6, 0.5, 0.4},
+			Topks:  []int64{5, 5},
+		}
+
+		gt := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{11, 9, 6, 5, 4, 1, 34, 23, 22, 20},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.8, 0.7, 0.6, 0.5, 0.4},
+			Topks:  []int64{5, 5},
+		}
+
+		err := computeRecall(result1, gt)
+		assert.NoError(t, err)
+		assert.Equal(t, result1.Recalls[0], float32(0.6))
+		assert.Equal(t, result1.Recalls[1], float32(0.8))
+	})
+
+	t.Run("not match size", func(t *testing.T) {
+		result1 := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{11, 9, 8, 5, 3, 1, 34, 23, 22, 21},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.8, 0.7, 0.6, 0.5, 0.4},
+			Topks:  []int64{5, 5},
+		}
+
+		gt := &schemapb.SearchResultData{
+			NumQueries: 1,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{11, 9, 6, 5, 4},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3},
+			Topks:  []int64{5},
+		}
+
+		err := computeRecall(result1, gt)
+		assert.Error(t, err)
+	})
+
+	t.Run("not match type1", func(t *testing.T) {
+		result1 := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{11, 9, 8, 5, 3, 1, 34, 23, 22, 21},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.8, 0.7, 0.6, 0.5, 0.4},
+			Topks:  []int64{5, 5},
+		}
+
+		gt := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{
+						Data: []string{"11", "10", "8", "5", "3", "1", "23", "22", "21", "20"},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.8, 0.7, 0.6, 0.5, 0.4},
+			Topks:  []int64{5, 5},
+		}
+
+		err := computeRecall(result1, gt)
+		assert.Error(t, err)
+	})
+
+	t.Run("not match type2", func(t *testing.T) {
+		result1 := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{
+						Data: []string{"11", "10", "8", "5", "3", "1", "23", "22", "21", "20"},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.8, 0.7, 0.6, 0.5, 0.4},
+			Topks:  []int64{5, 5},
+		}
+
+		gt := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{11, 9, 8, 5, 3, 1, 34, 23, 22, 21},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.8, 0.5, 0.3, 0.8, 0.7, 0.6, 0.5, 0.4},
+			Topks:  []int64{5, 5},
+		}
+
+		err := computeRecall(result1, gt)
+		assert.Error(t, err)
+	})
 }

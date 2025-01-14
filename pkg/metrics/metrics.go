@@ -87,6 +87,8 @@ const (
 	segmentPruneLabelName    = "segment_prune_label"
 	stageLabelName           = "compaction_stage"
 	nodeIDLabelName          = "node_id"
+	NodeIDLabelName          = nodeIDLabelName
+	nodeHostLabelName        = "node_host"
 	statusLabelName          = "status"
 	indexTaskStatusLabelName = "index_task_status"
 	msgTypeLabelName         = "msg_type"
@@ -97,7 +99,7 @@ const (
 	queryTypeLabelName       = "query_type"
 	collectionName           = "collection_name"
 	databaseLabelName        = "db_name"
-	resourceGroupLabelName   = "rg"
+	ResourceGroupLabelName   = "rg"
 	indexName                = "index_name"
 	isVectorIndex            = "is_vector_index"
 	segmentStateLabelName    = "segment_state"

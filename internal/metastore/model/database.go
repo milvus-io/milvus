@@ -4,8 +4,8 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/util"
 )
 
@@ -31,8 +31,8 @@ func NewDatabase(id int64, name string, state pb.DatabaseState, properties []*co
 	}
 }
 
-func NewDefaultDatabase() *Database {
-	return NewDatabase(util.DefaultDBID, util.DefaultDBName, pb.DatabaseState_DatabaseCreated, nil)
+func NewDefaultDatabase(prop []*commonpb.KeyValuePair) *Database {
+	return NewDatabase(util.DefaultDBID, util.DefaultDBName, pb.DatabaseState_DatabaseCreated, prop)
 }
 
 func (c *Database) Available() bool {

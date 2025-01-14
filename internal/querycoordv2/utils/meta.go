@@ -89,7 +89,7 @@ func RecoverReplicaOfCollection(m *meta.Meta, collectionID typeutil.UniqueID) {
 	logger := log.With(zap.Int64("collectionID", collectionID))
 	rgNames := m.ReplicaManager.GetResourceGroupByCollection(collectionID)
 	if rgNames.Len() == 0 {
-		logger.Error("no resource group found for collection", zap.Int64("collectionID", collectionID))
+		logger.Error("no resource group found for collection")
 		return
 	}
 	rgs, err := m.ResourceManager.GetNodesOfMultiRG(rgNames.Collect())

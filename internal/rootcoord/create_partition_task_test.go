@@ -20,15 +20,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
@@ -62,14 +61,7 @@ func Test_createPartitionTask_Prepare(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(coll.Clone(), nil)
-		meta.On("ListAllAvailCollections",
-			mock.Anything,
-		).Return(map[int64][]int64{
-			1: {1, 2},
-		}, nil)
-		meta.On("GetDatabaseByID",
-			mock.Anything, mock.Anything, mock.Anything,
-		).Return(nil, errors.New("mock"))
+		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 
 		core := newTestCore(withMeta(meta))
 		task := &createPartitionTask{

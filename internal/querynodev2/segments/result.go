@@ -27,11 +27,11 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -56,12 +56,16 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 
 	channelsMvcc := make(map[string]uint64)
 	isTopkReduce := false
+	isRecallEvaluation := false
 	for _, r := range results {
 		for ch, ts := range r.GetChannelsMvcc() {
 			channelsMvcc[ch] = ts
 		}
 		if r.GetIsTopkReduce() {
 			isTopkReduce = true
+		}
+		if r.GetIsRecallEvaluation() {
+			isRecallEvaluation = true
 		}
 		// shouldn't let new SearchResults.MetricType to be empty, though the req.MetricType is empty
 		if metricType == "" {
@@ -116,6 +120,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	searchResults.ChannelsMvcc = channelsMvcc
 	searchResults.IsTopkReduce = isTopkReduce
+	searchResults.IsRecallEvaluation = isRecallEvaluation
 	return searchResults, nil
 }
 
@@ -669,7 +674,9 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			})
 			futures = append(futures, future)
 		}
-		if err := conc.AwaitAll(futures...); err != nil {
+		// Must be BlockOnAll operation here.
+		// If we perform a fast fail here, the cgo struct like `plan` will be used after free, unsafe memory access happens.
+		if err := conc.BlockOnAll(futures...); err != nil {
 			return nil, err
 		}
 

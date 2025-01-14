@@ -317,8 +317,12 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		// insert to _default partition
 		partitionTag := it.req.GetPartitionName()
 		if len(partitionTag) <= 0 {
-			partitionTag = Params.CommonCfg.DefaultPartitionName.GetValue()
-			it.req.PartitionName = partitionTag
+			pinfo, err := globalMetaCache.GetPartitionInfo(ctx, it.req.GetDbName(), collectionName, "")
+			if err != nil {
+				log.Warn("get partition info failed", zap.String("collectionName", collectionName), zap.Error(err))
+				return err
+			}
+			it.req.PartitionName = pinfo.name
 		}
 	}
 

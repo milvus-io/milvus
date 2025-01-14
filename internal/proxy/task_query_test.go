@@ -32,10 +32,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -993,7 +993,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		}
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil).Once()
@@ -1002,7 +1002,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.True(t, skip)
 
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Bounded,
 			}, nil).Once()
@@ -1010,7 +1010,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.True(t, skip)
 
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Strong,
 			}, nil).Once()
@@ -1020,7 +1020,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 
 	t.Run("request consistency level", func(t *testing.T) {
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil).Times(3)
@@ -1092,7 +1092,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		mockMetaCache.ExpectedCalls = nil
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, fmt.Errorf("mock error"))
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil)

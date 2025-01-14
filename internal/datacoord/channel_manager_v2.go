@@ -28,9 +28,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -510,10 +510,9 @@ func (m *ChannelManagerImplV2) advanceToNotifies(ctx context.Context, toNotifies
 			continue
 		}
 		nodeID := nodeAssign.NodeID
-
 		var (
-			succeededChannels = make([]RWChannel, 0, channelCount)
-			failedChannels    = make([]RWChannel, 0, channelCount)
+			succeededChannels = 0
+			failedChannels    = 0
 			futures           = make([]*conc.Future[any], 0, channelCount)
 		)
 
@@ -530,31 +529,42 @@ func (m *ChannelManagerImplV2) advanceToNotifies(ctx context.Context, toNotifies
 
 			future := getOrCreateIOPool().Submit(func() (any, error) {
 				err := m.Notify(ctx, nodeID, tmpWatchInfo)
-				return innerCh, err
+				return poolResult{
+					ch:   innerCh,
+					opID: tmpWatchInfo.GetOpID(),
+				}, err
 			})
 			futures = append(futures, future)
 		}
 
 		for _, f := range futures {
-			ch, err := f.Await()
+			got, err := f.Await()
+			res := got.(poolResult)
+
 			if err != nil {
-				failedChannels = append(failedChannels, ch.(RWChannel))
+				log.Ctx(ctx).Warn("Failed to notify channel operations to datanode",
+					zap.Int64("assignment", nodeAssign.NodeID),
+					zap.Int("operation count", channelCount),
+					zap.String("channel name", res.ch.GetName()),
+					zap.Error(err),
+				)
+				failedChannels++
 			} else {
-				succeededChannels = append(succeededChannels, ch.(RWChannel))
+				succeededChannels++
 				advanced = true
 			}
+
+			m.mu.Lock()
+			m.store.UpdateState(err == nil, nodeID, res.ch, res.opID)
+			m.mu.Unlock()
 		}
 
 		log.Info("Finish to notify channel operations to datanode",
 			zap.Int64("assignment", nodeAssign.NodeID),
 			zap.Int("operation count", channelCount),
-			zap.Int("success count", len(succeededChannels)),
-			zap.Int("failure count", len(failedChannels)),
+			zap.Int("success count", succeededChannels),
+			zap.Int("failure count", failedChannels),
 		)
-		m.mu.Lock()
-		m.store.UpdateState(false, failedChannels...)
-		m.store.UpdateState(true, succeededChannels...)
-		m.mu.Unlock()
 	}
 
 	return advanced
@@ -563,6 +573,7 @@ func (m *ChannelManagerImplV2) advanceToNotifies(ctx context.Context, toNotifies
 type poolResult struct {
 	successful bool
 	ch         RWChannel
+	opID       int64
 }
 
 func (m *ChannelManagerImplV2) advanceToChecks(ctx context.Context, toChecks []*NodeChannelInfo) bool {
@@ -583,13 +594,15 @@ func (m *ChannelManagerImplV2) advanceToChecks(ctx context.Context, toChecks []*
 
 		for _, ch := range nodeAssign.Channels {
 			innerCh := ch
+			tmpWatchInfo := proto.Clone(innerCh.GetWatchInfo()).(*datapb.ChannelWatchInfo)
 
 			future := getOrCreateIOPool().Submit(func() (any, error) {
-				successful, got := m.Check(ctx, nodeID, innerCh.GetWatchInfo())
+				successful, got := m.Check(ctx, nodeID, tmpWatchInfo)
 				if got {
 					return poolResult{
 						successful: successful,
 						ch:         innerCh,
+						opID:       tmpWatchInfo.GetOpID(),
 					}, nil
 				}
 				return nil, errors.New("Got results with no progress")
@@ -602,7 +615,7 @@ func (m *ChannelManagerImplV2) advanceToChecks(ctx context.Context, toChecks []*
 			if err == nil {
 				m.mu.Lock()
 				result := got.(poolResult)
-				m.store.UpdateState(result.successful, result.ch)
+				m.store.UpdateState(result.successful, nodeID, result.ch, result.opID)
 				m.mu.Unlock()
 
 				advanced = true

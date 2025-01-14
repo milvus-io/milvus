@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/proto/etcdpb"
 )
 
 var (
@@ -59,5 +59,5 @@ func TestDatabaseCloneAndEqual(t *testing.T) {
 
 func TestDatabaseAvailable(t *testing.T) {
 	assert.True(t, dbModel.Available())
-	assert.True(t, NewDefaultDatabase().Available())
+	assert.True(t, NewDefaultDatabase(nil).Available())
 }

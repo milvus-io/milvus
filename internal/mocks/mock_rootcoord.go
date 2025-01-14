@@ -8,15 +8,15 @@ import (
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 
-	proxypb "github.com/milvus-io/milvus/internal/proto/proxypb"
+	proxypb "github.com/milvus-io/milvus/pkg/proto/proxypb"
 
-	rootcoordpb "github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	rootcoordpb "github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 
 	txnkv "github.com/tikv/client-go/v2/txnkv"
 
@@ -252,6 +252,65 @@ func (_c *RootCoord_AlterCollection_Call) Return(_a0 *commonpb.Status, _a1 error
 }
 
 func (_c *RootCoord_AlterCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterCollectionRequest) (*commonpb.Status, error)) *RootCoord_AlterCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// AlterCollectionField provides a mock function with given fields: _a0, _a1
+func (_m *RootCoord) AlterCollectionField(_a0 context.Context, _a1 *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AlterCollectionField")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionFieldRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterCollectionFieldRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoord_AlterCollectionField_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterCollectionField'
+type RootCoord_AlterCollectionField_Call struct {
+	*mock.Call
+}
+
+// AlterCollectionField is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AlterCollectionFieldRequest
+func (_e *RootCoord_Expecter) AlterCollectionField(_a0 interface{}, _a1 interface{}) *RootCoord_AlterCollectionField_Call {
+	return &RootCoord_AlterCollectionField_Call{Call: _e.mock.On("AlterCollectionField", _a0, _a1)}
+}
+
+func (_c *RootCoord_AlterCollectionField_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AlterCollectionFieldRequest)) *RootCoord_AlterCollectionField_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AlterCollectionFieldRequest))
+	})
+	return _c
+}
+
+func (_c *RootCoord_AlterCollectionField_Call) Return(_a0 *commonpb.Status, _a1 error) *RootCoord_AlterCollectionField_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RootCoord_AlterCollectionField_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error)) *RootCoord_AlterCollectionField_Call {
 	_c.Call.Return(run)
 	return _c
 }

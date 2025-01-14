@@ -34,15 +34,15 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
@@ -61,8 +61,6 @@ const (
 
 	// enableMultipleVectorFields indicates whether to enable multiple vector fields.
 	enableMultipleVectorFields = true
-
-	defaultMaxVarCharLength = 65535
 
 	defaultMaxArrayCapacity = 4096
 
@@ -264,7 +262,7 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 		tagSize := len(partitionTag)
 		for i := 1; i < tagSize; i++ {
 			c := partitionTag[i]
-			if c != '_' && !isAlpha(c) && !isNumber(c) {
+			if c != '_' && !isAlpha(c) && !isNumber(c) && c != '-' {
 				msg := invalidMsg + "Partition name can only contain numbers, letters and underscores."
 				return errors.New(msg)
 			}
@@ -362,8 +360,10 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 		if err != nil {
 			return err
 		}
+
+		defaultMaxVarCharLength := Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
 		if maxLengthPerRow > defaultMaxVarCharLength || maxLengthPerRow <= 0 {
-			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, 65535]")
+			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, %d]", defaultMaxVarCharLength)
 		}
 		exist = true
 	}
@@ -946,31 +946,6 @@ func ValidatePrivilege(entity string) error {
 	return validateName(entity, "Privilege")
 }
 
-func ValidateBuiltInPrivilegeGroup(entity string, dbName string, collectionName string) error {
-	if !util.IsBuiltinPrivilegeGroup(entity) {
-		return nil
-	}
-	switch {
-	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Cluster.String()):
-		if !util.IsAnyWord(dbName) || !util.IsAnyWord(collectionName) {
-			return merr.WrapErrParameterInvalidMsg("dbName and collectionName should be * for the cluster level privilege: %s", entity)
-		}
-		return nil
-	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Database.String()):
-		if collectionName != "" && collectionName != util.AnyWord {
-			return merr.WrapErrParameterInvalidMsg("collectionName should be * for the database level privilege: %s", entity)
-		}
-		return nil
-	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Collection.String()):
-		if util.IsAnyWord(dbName) && !util.IsAnyWord(collectionName) && collectionName != "" {
-			return merr.WrapErrParameterInvalidMsg("please specify database name for the collection level privilege: %s", entity)
-		}
-		return nil
-	default:
-		return nil
-	}
-}
-
 func GetCurUserFromContext(ctx context.Context) (string, error) {
 	return contextutil.GetCurUserFromContext(ctx)
 }
@@ -1077,6 +1052,75 @@ func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int
 		}
 	}
 	return pkNames, fieldIDs
+}
+
+func recallCal[T string | int64](results []T, gts []T) float32 {
+	hit := 0
+	total := 0
+	for _, r := range results {
+		total++
+		for _, gt := range gts {
+			if r == gt {
+				hit++
+				break
+			}
+		}
+	}
+	return float32(hit) / float32(total)
+}
+
+func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResultData) error {
+	if results.GetNumQueries() != gts.GetNumQueries() {
+		return fmt.Errorf("num of queries is inconsistent between search results(%d) and ground truth(%d)", results.GetNumQueries(), gts.GetNumQueries())
+	}
+
+	switch results.GetIds().GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		switch gts.GetIds().GetIdField().(type) {
+		case *schemapb.IDs_IntId:
+			currentResultIndex := int64(0)
+			currentGTIndex := int64(0)
+			recalls := make([]float32, 0, results.GetNumQueries())
+			for i := 0; i < int(results.GetNumQueries()); i++ {
+				currentResultTopk := results.GetTopks()[i]
+				currentGTTopk := gts.GetTopks()[i]
+				recalls = append(recalls, recallCal(results.GetIds().GetIntId().GetData()[currentResultIndex:currentResultIndex+currentResultTopk],
+					gts.GetIds().GetIntId().GetData()[currentGTIndex:currentGTIndex+currentGTTopk]))
+				currentResultIndex += currentResultTopk
+				currentGTIndex += currentGTTopk
+			}
+			results.Recalls = recalls
+			return nil
+		case *schemapb.IDs_StrId:
+			return fmt.Errorf("pk type is inconsistent between search results(int64) and ground truth(string)")
+		default:
+			return fmt.Errorf("unsupported pk type")
+		}
+
+	case *schemapb.IDs_StrId:
+		switch gts.GetIds().GetIdField().(type) {
+		case *schemapb.IDs_StrId:
+			currentResultIndex := int64(0)
+			currentGTIndex := int64(0)
+			recalls := make([]float32, 0, results.GetNumQueries())
+			for i := 0; i < int(results.GetNumQueries()); i++ {
+				currentResultTopk := results.GetTopks()[i]
+				currentGTTopk := gts.GetTopks()[i]
+				recalls = append(recalls, recallCal(results.GetIds().GetStrId().GetData()[currentResultIndex:currentResultIndex+currentResultTopk],
+					gts.GetIds().GetStrId().GetData()[currentGTIndex:currentGTIndex+currentGTTopk]))
+				currentResultIndex += currentResultTopk
+				currentGTIndex += currentGTTopk
+			}
+			results.Recalls = recalls
+			return nil
+		case *schemapb.IDs_IntId:
+			return fmt.Errorf("pk type is inconsistent between search results(string) and ground truth(int64)")
+		default:
+			return fmt.Errorf("unsupported pk type")
+		}
+	default:
+		return fmt.Errorf("unsupported pk type")
+	}
 }
 
 // Support wildcard in output fields:
@@ -1229,27 +1273,21 @@ func isCollectionLoaded(ctx context.Context, qc types.QueryCoordClient, collID i
 	return false, nil
 }
 
-func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64, partIDs []int64) (bool, error) {
+func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64, partID int64) (bool, error) {
 	// get all loading collections
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
 		CollectionID: collID,
-		PartitionIDs: nil,
+		PartitionIDs: []int64{partID},
 	})
-	if err != nil {
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		// qc returns error if partition not loaded
+		if errors.Is(err, merr.ErrPartitionNotLoaded) {
+			return false, nil
+		}
 		return false, err
 	}
-	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return false, merr.Error(resp.GetStatus())
-	}
 
-	for _, loadedPartID := range resp.GetPartitionIDs() {
-		for _, partID := range partIDs {
-			if partID == loadedPartID {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
+	return true, nil
 }
 
 func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {

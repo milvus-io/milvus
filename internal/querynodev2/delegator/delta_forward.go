@@ -28,8 +28,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -37,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -176,13 +176,11 @@ func (sd *shardDelegator) forwardL0RemoteLoad(ctx context.Context,
 		LoadScope:     querypb.LoadScope_Delta,
 		Schema:        req.GetSchema(),
 		IndexInfoList: req.GetIndexInfoList(),
+		Version:       req.GetVersion(),
 	})
 }
 
 func (sd *shardDelegator) getLevel0Deltalogs(partitionID int64) []*datapb.FieldBinlog {
-	sd.level0Mut.Lock()
-	defer sd.level0Mut.Unlock()
-
 	level0Segments := sd.segmentManager.GetBy(
 		segments.WithLevel(datapb.SegmentLevel_L0),
 		segments.WithChannel(sd.vchannelName))

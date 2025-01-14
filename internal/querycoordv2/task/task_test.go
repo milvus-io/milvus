@@ -34,15 +34,15 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/kv"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -1808,6 +1808,96 @@ func (suite *TaskSuite) TestBalanceChannelWithL0SegmentTask() {
 	// old delegator removed
 	suite.scheduler.preProcess(task)
 	suite.Equal(2, task.step)
+}
+
+func (suite *TaskSuite) TestCalculateTaskDelta() {
+	ctx := context.Background()
+	scheduler := suite.newScheduler()
+
+	mockTarget := meta.NewMockTargetManager(suite.T())
+	mockTarget.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything).Return(&datapb.SegmentInfo{
+		NumOfRows: 100,
+	})
+	scheduler.targetMgr = mockTarget
+
+	coll := int64(1001)
+	nodeID := int64(1)
+	channelName := "channel-1"
+	segmentID := int64(1)
+	// add segment task for collection
+	task1, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll,
+		suite.replica,
+		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", segmentID, querypb.DataScope_Historical),
+	)
+	suite.NoError(err)
+	err = scheduler.Add(task1)
+	suite.NoError(err)
+	task2, err := NewChannelTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll,
+		suite.replica,
+		NewChannelAction(nodeID, ActionTypeGrow, channelName),
+	)
+	suite.NoError(err)
+	err = scheduler.Add(task2)
+	suite.NoError(err)
+
+	coll2 := int64(1005)
+	nodeID2 := int64(2)
+	channelName2 := "channel-2"
+	segmentID2 := int64(2)
+	task3, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll2,
+		suite.replica,
+		NewSegmentActionWithScope(nodeID2, ActionTypeGrow, "", segmentID2, querypb.DataScope_Historical),
+	)
+	suite.NoError(err)
+	err = scheduler.Add(task3)
+	suite.NoError(err)
+	task4, err := NewChannelTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll2,
+		suite.replica,
+		NewChannelAction(nodeID2, ActionTypeGrow, channelName2),
+	)
+	suite.NoError(err)
+	err = scheduler.Add(task4)
+	suite.NoError(err)
+
+	// check task delta with collectionID and nodeID
+	suite.Equal(100, scheduler.GetSegmentTaskDelta(nodeID, coll))
+	suite.Equal(1, scheduler.GetChannelTaskDelta(nodeID, coll))
+	suite.Equal(100, scheduler.GetSegmentTaskDelta(nodeID2, coll2))
+	suite.Equal(1, scheduler.GetChannelTaskDelta(nodeID2, coll2))
+
+	// check task delta with collectionID=-1
+	suite.Equal(100, scheduler.GetSegmentTaskDelta(nodeID, -1))
+	suite.Equal(1, scheduler.GetChannelTaskDelta(nodeID, -1))
+	suite.Equal(100, scheduler.GetSegmentTaskDelta(nodeID2, -1))
+	suite.Equal(1, scheduler.GetChannelTaskDelta(nodeID2, -1))
+
+	// check task delta with nodeID=-1
+	suite.Equal(100, scheduler.GetSegmentTaskDelta(-1, coll))
+	suite.Equal(1, scheduler.GetChannelTaskDelta(-1, coll))
+	suite.Equal(100, scheduler.GetSegmentTaskDelta(-1, coll))
+	suite.Equal(1, scheduler.GetChannelTaskDelta(-1, coll))
+
+	// check task delta with nodeID=-1 and collectionID=-1
+	suite.Equal(200, scheduler.GetSegmentTaskDelta(-1, -1))
+	suite.Equal(2, scheduler.GetChannelTaskDelta(-1, -1))
+	suite.Equal(200, scheduler.GetSegmentTaskDelta(-1, -1))
+	suite.Equal(2, scheduler.GetChannelTaskDelta(-1, -1))
 }
 
 func TestTask(t *testing.T) {

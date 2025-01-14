@@ -30,8 +30,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
@@ -621,7 +621,7 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 
 	mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
 	mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-		&collectionBasicInfo{
+		&collectionInfo{
 			collID:           collID,
 			consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 		}, nil)

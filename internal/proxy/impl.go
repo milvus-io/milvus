@@ -37,10 +37,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -49,6 +45,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
@@ -117,41 +117,46 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	log.Info("received request to invalidate collection meta cache")
 
 	collectionName := request.CollectionName
-	collectionID := request.CollectionID
 	msgType := request.GetBase().GetMsgType()
 	var aliasName []string
 
 	if globalMetaCache != nil {
 		switch msgType {
-		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias, commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
+		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias:
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
 				globalMetaCache.DeprecateShardCache(request.GetDbName(), collectionName)
 			}
-			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+			invalidateCollectionAliasShardCache(ctx, request)
+			log.Info("complete to invalidate collection meta cache with collection name", zap.String("type", request.GetBase().GetMsgType().String()))
+		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
+			// All the request from query use collectionID
+			invalidateCollectionAliasShardCache(ctx, request)
+			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
+		case commonpb.MsgType_CreatePartition, commonpb.MsgType_DropPartition:
+			if request.GetPartitionName() == "" {
+				log.Warn("invalidate collection meta cache failed. partitionName is empty")
+				return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
 			}
-			log.Info("complete to invalidate collection meta cache with collection name", zap.String("collectionName", collectionName))
-		case commonpb.MsgType_DropPartition:
-			if collectionName != "" && request.GetPartitionName() != "" {
-				globalMetaCache.RemovePartition(ctx, request.GetDbName(), request.GetCollectionName(), request.GetPartitionName())
-			} else {
-				log.Warn("invalidate collection meta cache failed. collectionName or partitionName is empty",
-					zap.String("collectionName", collectionName),
-					zap.String("partitionName", request.GetPartitionName()))
-				return merr.Status(merr.WrapErrPartitionNotFound(request.GetPartitionName(), "partition name not specified")), nil
-			}
+			// no need to deprecate shard cache because shard won't change when create or drop partition
+			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
+			// drop all the alias as well
+			invalidateCollectionAliasShardCache(ctx, request)
+			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
+		case commonpb.MsgType_AlterCollection, commonpb.MsgType_AlterCollectionField:
+			if collectionName != "" {
+				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
+			}
+			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		default:
 			log.Warn("receive unexpected msgType of invalidate collection meta cache", zap.String("msgType", request.GetBase().GetMsgType().String()))
 
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
 			}
-			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
-			}
+			invalidateCollectionAliasShardCache(ctx, request)
 		}
 	}
 
@@ -171,6 +176,15 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	log.Info("complete to invalidate collection meta cache")
 
 	return merr.Success(), nil
+}
+
+func invalidateCollectionAliasShardCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) {
+	if request.CollectionID != UniqueID(0) {
+		aliasName := globalMetaCache.RemoveCollectionsByID(ctx, request.CollectionID)
+		for _, name := range aliasName {
+			globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
+		}
+	}
 }
 
 // InvalidateCollectionMetaCache invalidate the meta cache of specific collection.
@@ -1247,6 +1261,72 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 
 	log.Info(
 		rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(act); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+		return merr.Status(err), nil
+	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", act.BeginTs()),
+		zap.Uint64("EndTs", act.EndTs()),
+		zap.Uint64("timestamp", request.Base.Timestamp))
+
+	if err := act.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", act.BeginTs()),
+			zap.Uint64("EndTs", act.EndTs()))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcDone(method),
+		zap.Uint64("BeginTs", act.BeginTs()),
+		zap.Uint64("EndTs", act.EndTs()))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return act.result, nil
+}
+
+func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollectionField")
+	defer sp.End()
+	method := "AlterCollectionField"
+	tr := timerecord.NewTimeRecorder(method)
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+
+	act := &alterCollectionFieldTask{
+		ctx:                         ctx,
+		Condition:                   NewTaskCondition(ctx),
+		AlterCollectionFieldRequest: request,
+		rootCoord:                   node.rootCoord,
+		queryCoord:                  node.queryCoord,
+		dataCoord:                   node.dataCoord,
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("fieldName", request.FieldName),
+		zap.Any("props", request.Properties))
+
+	log.Info(rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(act); err != nil {
 		log.Warn(
@@ -2887,12 +2967,13 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	optimizedSearch := true
 	resultSizeInsufficient := false
 	isTopkReduce := false
+	isRecallEvaluation := false
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeInsufficient, isTopkReduce, err = node.search(ctx, request, optimizedSearch)
-		if merr.Ok(rsp.GetStatus()) && resultSizeInsufficient && isTopkReduce && optimizedSearch && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
+		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false)
+		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeInsufficient, isTopkReduce, err = node.search(ctx, request, optimizedSearch)
+			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -2910,6 +2991,23 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		if errors.Is(merr.Error(rsp.GetStatus()), merr.ErrInconsistentRequery) {
 			return true, merr.Error(rsp.GetStatus())
 		}
+		// search for ground truth and compute recall
+		if isRecallEvaluation && merr.Ok(rsp.GetStatus()) {
+			var rspGT *milvuspb.SearchResults
+			rspGT, _, _, _, err = node.search(ctx, request, false, true)
+			metrics.ProxyRecallSearchCount.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				metrics.SearchLabel,
+				request.GetCollectionName(),
+			).Inc()
+			if merr.Ok(rspGT.GetStatus()) {
+				return false, computeRecall(rsp.GetResults(), rspGT.GetResults())
+			}
+			if errors.Is(merr.Error(rspGT.GetStatus()), merr.ErrInconsistentRequery) {
+				return true, merr.Error(rspGT.GetStatus())
+			}
+			return false, merr.Error(rspGT.GetStatus())
+		}
 		return false, nil
 	})
 	if err2 != nil {
@@ -2918,7 +3016,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	return rsp, err
 }
 
-func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error) {
+func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.SearchLabel).
@@ -2933,7 +3031,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
-		}, false, false, nil
+		}, false, false, false, nil
 	}
 
 	method := "Search"
@@ -2954,7 +3052,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		if err != nil {
 			return &milvuspb.SearchResults{
 				Status: merr.Status(err),
-			}, false, false, nil
+			}, false, false, false, nil
 		}
 
 		request.PlaceholderGroup = placeholderGroupBytes
@@ -2968,8 +3066,9 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 				commonpbutil.WithMsgType(commonpb.MsgType_Search),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
-			ReqID:        paramtable.GetNodeID(),
-			IsTopkReduce: optimizedSearch,
+			ReqID:              paramtable.GetNodeID(),
+			IsTopkReduce:       optimizedSearch,
+			IsRecallEvaluation: isRecallEvaluation,
 		},
 		request:                request,
 		tr:                     timerecord.NewTimeRecorder("search"),
@@ -3023,7 +3122,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
-		}, false, false, nil
+		}, false, false, false, nil
 	}
 	tr.CtxRecord(ctx, "search request enqueue")
 
@@ -3049,7 +3148,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
-		}, false, false, nil
+		}, false, false, false, nil
 	}
 
 	span := tr.CtxRecord(ctx, "wait search result")
@@ -3106,7 +3205,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
 	}
-	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, nil
+	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, qt.isRecallEvaluation, nil
 }
 
 func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
@@ -4542,6 +4641,7 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	defer sp.End()
 
 	log := log.Ctx(ctx).With(
+		zap.String("collectionName", req.GetCollectionName()),
 		zap.Int64("collectionID", req.GetCollectionID()))
 
 	log.Info("received ManualCompaction request")
@@ -4549,6 +4649,16 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
+	}
+
+	// before v2.4.18, manual compact request only pass collectionID, should correct sdk's behavior to pass collectionName
+	if req.GetCollectionName() != "" {
+		var err error
+		req.CollectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
 	}
 
 	resp, err := node.dataCoord.ManualCompaction(ctx, req)
@@ -5264,10 +5374,6 @@ func (node *Proxy) validateOperatePrivilegeV2Params(req *milvuspb.OperatePrivile
 	if err := ValidatePrivilege(req.Grantor.Privilege.Name); err != nil {
 		return err
 	}
-	// validate built-in privilege group params
-	if err := ValidateBuiltInPrivilegeGroup(req.Grantor.Privilege.Name, req.DbName, req.CollectionName); err != nil {
-		return err
-	}
 	if req.Type != milvuspb.OperatePrivilegeType_Grant && req.Type != milvuspb.OperatePrivilegeType_Revoke {
 		return merr.WrapErrParameterInvalidMsg("the type in the request not grant or revoke")
 	}
@@ -5480,6 +5586,9 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 	log.Debug("RestoreRBAC", zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
+	}
+	if req.RBACMeta == nil {
+		return merr.Success(), nil
 	}
 
 	result, err := node.rootCoord.RestoreRBAC(ctx, req)

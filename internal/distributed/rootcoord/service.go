@@ -31,17 +31,16 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
-	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -72,8 +71,8 @@ type Server struct {
 	dataCoord  types.DataCoordClient
 	queryCoord types.QueryCoordClient
 
-	newDataCoordClient  func() types.DataCoordClient
-	newQueryCoordClient func() types.QueryCoordClient
+	newDataCoordClient  func(ctx context.Context) types.DataCoordClient
+	newQueryCoordClient func(ctx context.Context) types.QueryCoordClient
 }
 
 func (s *Server) DescribeDatabase(ctx context.Context, request *rootcoordpb.DescribeDatabaseRequest) (*rootcoordpb.DescribeDatabaseResponse, error) {
@@ -157,21 +156,8 @@ func (s *Server) Prepare() error {
 }
 
 func (s *Server) setClient() {
-	s.newDataCoordClient = func() types.DataCoordClient {
-		dsClient, err := dcc.NewClient(s.ctx)
-		if err != nil {
-			panic(err)
-		}
-		return dsClient
-	}
-
-	s.newQueryCoordClient = func() types.QueryCoordClient {
-		qsClient, err := qcc.NewClient(s.ctx)
-		if err != nil {
-			panic(err)
-		}
-		return qsClient
-	}
+	s.newDataCoordClient = coordclient.GetDataCoordClient
+	s.newQueryCoordClient = coordclient.GetQueryCoordClient
 }
 
 // Run initializes and starts RootCoord's grpc service.
@@ -234,7 +220,7 @@ func (s *Server) init() error {
 
 	if s.newDataCoordClient != nil {
 		log.Info("RootCoord start to create DataCoord client")
-		dataCoord := s.newDataCoordClient()
+		dataCoord := s.newDataCoordClient(s.ctx)
 		s.dataCoord = dataCoord
 		if err := s.rootCoord.SetDataCoordClient(dataCoord); err != nil {
 			panic(err)
@@ -243,7 +229,7 @@ func (s *Server) init() error {
 
 	if s.newQueryCoordClient != nil {
 		log.Info("RootCoord start to create QueryCoord client")
-		queryCoord := s.newQueryCoordClient()
+		queryCoord := s.newQueryCoordClient(s.ctx)
 		s.queryCoord = queryCoord
 		if err := s.rootCoord.SetQueryCoordClient(queryCoord); err != nil {
 			panic(err)
@@ -305,6 +291,7 @@ func (s *Server) startGrpcLoop() {
 		)),
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()))
 	rootcoordpb.RegisterRootCoordServer(s.grpcServer, s)
+	coordclient.RegisterRootCoordServer(s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {
@@ -532,6 +519,10 @@ func (s *Server) ListPolicy(ctx context.Context, request *internalpb.ListPolicyR
 
 func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return s.rootCoord.AlterCollection(ctx, request)
+}
+
+func (s *Server) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
+	return s.rootCoord.AlterCollectionField(ctx, request)
 }
 
 func (s *Server) RenameCollection(ctx context.Context, request *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {

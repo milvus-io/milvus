@@ -24,10 +24,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
@@ -211,7 +211,7 @@ func (s *taskScheduler) run() {
 		ok := s.process(taskID)
 		if !ok {
 			s.taskLock.Unlock(taskID)
-			log.Ctx(s.ctx).Info("there is no idle indexing node, wait a minute...")
+			log.Ctx(s.ctx).Info("there is no idle indexing node, waiting for retry...")
 			break
 		}
 		s.taskLock.Unlock(taskID)
