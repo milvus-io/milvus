@@ -30,10 +30,11 @@ ScalarIndexCreator::ScalarIndexCreator(
     if (config.contains("index_type")) {
         index_type_ = config.at("index_type").get<std::string>();
     }
+    // config should have value for milvus::index::SCALAR_INDEX_ENGINE_VERSION for production calling chain
     index_info.scalar_index_engine_version =
         milvus::index::GetValueFromConfig<int32_t>(
             config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
-            .value();
+            .value_or(0);
 
     index_info.field_type = dtype_;
     index_info.index_type = index_type();
