@@ -49,14 +49,14 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -1633,20 +1633,20 @@ func TestGetRecoveryInfo(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
-			SegmentID:      seg4.ID,
-			CollectionID:   0,
-			PartitionID:    0,
-			NumRows:        100,
-			IndexID:        0,
-			BuildID:        0,
-			NodeID:         0,
-			IndexVersion:   1,
-			IndexState:     commonpb.IndexState_Finished,
-			FailReason:     "",
-			IsDeleted:      false,
-			CreatedUTCTime: 0,
-			IndexFileKeys:  nil,
-			IndexSize:      0,
+			SegmentID:           seg4.ID,
+			CollectionID:        0,
+			PartitionID:         0,
+			NumRows:             100,
+			IndexID:             0,
+			BuildID:             0,
+			NodeID:              0,
+			IndexVersion:        1,
+			IndexState:          commonpb.IndexState_Finished,
+			FailReason:          "",
+			IsDeleted:           false,
+			CreatedUTCTime:      0,
+			IndexFileKeys:       nil,
+			IndexSerializedSize: 0,
 		})
 
 		req := &datapb.GetRecoveryInfoRequest{
