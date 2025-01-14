@@ -284,12 +284,14 @@ func (node *QueryNode) registerMetricsRequest() {
 
 	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return getSegmentJSON(node), nil
+			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
+			return getSegmentJSON(node, collectionID), nil
 		})
 
 	node.metricsRequest.RegisterMetricsRequest(metricsinfo.ChannelKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return getChannelJSON(node), nil
+			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
+			return getChannelJSON(node, collectionID), nil
 		})
 	log.Ctx(node.ctx).Info("register metrics actions finished")
 }

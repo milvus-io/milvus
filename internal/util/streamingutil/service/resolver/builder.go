@@ -28,9 +28,15 @@ func NewChannelAssignmentBuilder(w types.AssignmentDiscoverWatcher) Builder {
 }
 
 // NewSessionBuilder creates a new resolver builder.
+// Multiple sessions are allowed, use the role as prefix.
 func NewSessionBuilder(c *clientv3.Client, role string) Builder {
-	// TODO: use 2.5.0 after 2.5.0 released.
-	return newBuilder(SessionResolverScheme, discoverer.NewSessionDiscoverer(c, role, "2.4.0"))
+	return newBuilder(SessionResolverScheme, discoverer.NewSessionDiscoverer(c, role, false, "2.4.0"))
+}
+
+// NewSessionExclusiveBuilder creates a new resolver builder with exclusive.
+// Only one session is allowed, not use the prefix, only use the role directly.
+func NewSessionExclusiveBuilder(c *clientv3.Client, role string) Builder {
+	return newBuilder(SessionResolverScheme, discoverer.NewSessionDiscoverer(c, role, true, "2.4.0"))
 }
 
 // newBuilder creates a new resolver builder.

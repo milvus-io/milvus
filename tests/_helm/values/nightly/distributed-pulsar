@@ -72,6 +72,7 @@ queryNode:
     vectorIndex: true
     scalarField: true
     scalarIndex: true
+    growingMmapEnabled: true
 service:
   type: ClusterIP
 standalone:

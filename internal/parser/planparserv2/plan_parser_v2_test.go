@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -460,7 +460,9 @@ func TestExpr_Combinations(t *testing.T) {
 	exprStrs := []string{
 		`not (Int8Field + 1 == 2)`,
 		`(Int16Field - 3 == 4) and (Int32Field * 5 != 6)`,
+		`(Int16Field - 3 == 4) AND (Int32Field * 5 != 6)`,
 		`(Int64Field / 7 != 8) or (Int64Field % 10 == 9)`,
+		`(Int64Field / 7 != 8) OR (Int64Field % 10 == 9)`,
 		`Int64Field > 0 && VarCharField > "0"`,
 		`Int64Field < 0 && VarCharField < "0"`,
 		`A > 50 or B < 40`,
@@ -629,13 +631,13 @@ func TestExpr_Invalid(t *testing.T) {
 		`not_in_schema or true`,
 		`false or not_in_schema`,
 		`"str" or false`,
-		`BoolField or false`,
-		`Int32Field or Int64Field`,
+		`BoolField OR false`,
+		`Int32Field OR Int64Field`,
 		`not_in_schema and true`,
-		`false and not_in_schema`,
+		`false AND not_in_schema`,
 		`"str" and false`,
 		`BoolField and false`,
-		`Int32Field and Int64Field`,
+		`Int32Field AND Int64Field`,
 		// -------------------- unsupported ----------------------
 		`1 ^ 2`,
 		`1 & 2`,

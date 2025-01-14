@@ -223,9 +223,10 @@ PhyTermFilterExpr::ExecPkTermImpl() {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     valid_res.set();
 
-    for (size_t i = 0; i < real_batch_size; ++i) {
-        res[i] = cached_bits_[current_data_chunk_pos_++];
-    }
+    auto current_chunk_view =
+        cached_bits_.view(current_data_chunk_pos_, real_batch_size);
+    res |= current_chunk_view;
+    current_data_chunk_pos_ += real_batch_size;
 
     return res_vec;
 }

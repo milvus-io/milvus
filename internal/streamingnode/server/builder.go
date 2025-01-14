@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/kv"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 // ServerBuilder is used to build a server.
@@ -18,8 +19,8 @@ import (
 type ServerBuilder struct {
 	etcdClient   *clientv3.Client
 	grpcServer   *grpc.Server
-	rc           types.RootCoordClient
-	dc           types.DataCoordClient
+	rc           *syncutil.Future[types.RootCoordClient]
+	dc           *syncutil.Future[types.DataCoordClient]
 	session      *sessionutil.Session
 	kv           kv.MetaKv
 	chunkManager storage.ChunkManager
@@ -49,13 +50,13 @@ func (b *ServerBuilder) WithGRPCServer(svr *grpc.Server) *ServerBuilder {
 }
 
 // WithRootCoordClient sets root coord client to the server builder.
-func (b *ServerBuilder) WithRootCoordClient(rc types.RootCoordClient) *ServerBuilder {
+func (b *ServerBuilder) WithRootCoordClient(rc *syncutil.Future[types.RootCoordClient]) *ServerBuilder {
 	b.rc = rc
 	return b
 }
 
 // WithDataCoordClient sets data coord client to the server builder.
-func (b *ServerBuilder) WithDataCoordClient(dc types.DataCoordClient) *ServerBuilder {
+func (b *ServerBuilder) WithDataCoordClient(dc *syncutil.Future[types.DataCoordClient]) *ServerBuilder {
 	b.dc = dc
 	return b
 }

@@ -248,6 +248,12 @@ queryNode:
     requests:
       cpu: "0.5"
       memory: 500Mi
+  mmap:
+    vectorField: true
+    vectorIndex: true
+    scalarField: true
+    scalarIndex: true
+    growingMmapEnabled: true
 rootCoordinator:
   resources:
     limits:

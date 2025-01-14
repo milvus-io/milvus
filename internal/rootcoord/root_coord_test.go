@@ -33,15 +33,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -1356,6 +1357,7 @@ func TestCore_startTimeTickLoop(t *testing.T) {
 func TestRootcoord_EnableActiveStandby(t *testing.T) {
 	randVal := rand.Int()
 	paramtable.Init()
+	registry.ResetRegistration()
 	Params.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
 	// Need to reset global etcd to follow new path
 	kvfactory.CloseEtcdClient()
@@ -1416,6 +1418,7 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 func TestRootcoord_DisableActiveStandby(t *testing.T) {
 	randVal := rand.Int()
 	paramtable.Init()
+	registry.ResetRegistration()
 	Params.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
 	// Need to reset global etcd to follow new path
 	kvfactory.CloseEtcdClient()
@@ -2071,7 +2074,7 @@ func TestCore_InitRBAC(t *testing.T) {
 			Params.Reset(Params.ProxyCfg.EnablePublicPrivilege.Key)
 		}()
 
-		err := c.initRbac()
+		err := c.initRbac(context.TODO())
 		assert.NoError(t, err)
 	})
 
@@ -2092,7 +2095,7 @@ func TestCore_InitRBAC(t *testing.T) {
 			Params.Reset(Params.ProxyCfg.EnablePublicPrivilege.Key)
 		}()
 
-		err := c.initRbac()
+		err := c.initRbac(context.TODO())
 		assert.NoError(t, err)
 	})
 }

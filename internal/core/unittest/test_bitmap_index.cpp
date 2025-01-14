@@ -134,7 +134,6 @@ class BitmapIndexTest : public testing::Test {
             log_path, serialized_bytes.data(), serialized_bytes.size());
 
         storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager_);
-        std::vector<std::string> index_files;
 
         Config config;
         config["index_type"] = milvus::index::BITMAP_INDEX_TYPE;
@@ -145,10 +144,12 @@ class BitmapIndexTest : public testing::Test {
                 type_, config, ctx);
         build_index->Build();
 
-        auto binary_set = build_index->Upload();
-        for (const auto& [key, _] : binary_set.binary_map_) {
-            index_files.push_back(key);
-        }
+        auto create_index_result = build_index->Upload();
+        auto memSize = create_index_result->GetMemSize();
+        auto serializedSize = create_index_result->GetSerializedSize();
+        ASSERT_GT(memSize, 0);
+        ASSERT_GT(serializedSize, 0);
+        auto index_files = create_index_result->GetIndexFiles();
 
         index::CreateIndexInfo index_info{};
         index_info.index_type = milvus::index::BITMAP_INDEX_TYPE;

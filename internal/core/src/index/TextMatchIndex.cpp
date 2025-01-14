@@ -78,7 +78,7 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx)
     d_type_ = TantivyDataType::Text;
 }
 
-BinarySet
+IndexStatsPtr
 TextMatchIndex::Upload(const Config& config) {
     finish();
 
@@ -98,21 +98,25 @@ TextMatchIndex::Upload(const Config& config) {
         }
     }
 
-    BinarySet ret;
-
     auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
-    for (auto& file : remote_paths_to_size) {
-        ret.Append(file.first, nullptr, file.second);
-    }
+
     auto binary_set = Serialize(config);
     mem_file_manager_->AddFile(binary_set);
     auto remote_mem_path_to_size =
         mem_file_manager_->GetRemotePathsToFileSize();
-    for (auto& file : remote_mem_path_to_size) {
-        ret.Append(file.first, nullptr, file.second);
-    }
 
-    return ret;
+    std::vector<SerializedIndexFileInfo> index_files;
+    index_files.reserve(remote_paths_to_size.size() +
+                        remote_mem_path_to_size.size());
+    for (auto& file : remote_paths_to_size) {
+        index_files.emplace_back(file.first, file.second);
+    }
+    for (auto& file : remote_mem_path_to_size) {
+        index_files.emplace_back(file.first, file.second);
+    }
+    return IndexStats::New(mem_file_manager_->GetAddedTotalMemSize() +
+                               disk_file_manager_->GetAddedTotalFileSize(),
+                           std::move(index_files));
 }
 
 void
@@ -195,6 +199,39 @@ TextMatchIndex::AddTexts(size_t n,
     wrapper_->add_data(texts, n, offset_begin);
     if (shouldTriggerCommit()) {
         Commit();
+    }
+}
+
+// schema_ may not be initialized so we need this `nullable` parameter
+void
+TextMatchIndex::BuildIndexFromFieldData(
+    const std::vector<FieldDataPtr>& field_datas, bool nullable) {
+    int64_t offset = 0;
+    if (nullable) {
+        int64_t total = 0;
+        for (const auto& data : field_datas) {
+            total += data->get_null_count();
+        }
+        null_offset.reserve(total);
+        for (const auto& data : field_datas) {
+            auto n = data->get_num_rows();
+            for (int i = 0; i < n; i++) {
+                if (!data->is_valid(i)) {
+                    null_offset.push_back(i);
+                }
+                wrapper_->add_data(
+                    static_cast<const std::string*>(data->RawValue(i)),
+                    data->is_valid(i) ? 1 : 0,
+                    offset++);
+            }
+        }
+    } else {
+        for (const auto& data : field_datas) {
+            auto n = data->get_num_rows();
+            wrapper_->add_data(
+                static_cast<const std::string*>(data->Data()), n, offset);
+            offset += n;
+        }
     }
 }
 

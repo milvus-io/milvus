@@ -33,21 +33,20 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -59,6 +58,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
@@ -85,7 +88,7 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 
 type Opt func(*Core)
 
-type metaKVCreator func() (kv.MetaKv, error)
+type metaKVCreator func() kv.MetaKv
 
 // Core root coordinator core
 type Core struct {
@@ -131,6 +134,8 @@ type Core struct {
 	activateFunc        func() error
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	streamingCoord *streamingcoord.Server
 }
 
 // --------------------- function --------------------------
@@ -328,50 +333,50 @@ func (c *Core) initSession() error {
 func (c *Core) initKVCreator() {
 	if c.metaKVCreator == nil {
 		if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
-			c.metaKVCreator = func() (kv.MetaKv, error) {
+			c.metaKVCreator = func() kv.MetaKv {
 				return tikv.NewTiKV(c.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue(),
-					tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
+					tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 			}
 		} else {
-			c.metaKVCreator = func() (kv.MetaKv, error) {
+			c.metaKVCreator = func() kv.MetaKv {
 				return etcdkv.NewEtcdKV(c.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
-					etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
+					etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 			}
 		}
 	}
 }
 
-func (c *Core) initMetaTable() error {
-	log := log.Ctx(c.ctx)
+func (c *Core) initStreamingCoord() {
+	c.streamingCoord = streamingcoord.NewServerBuilder().
+		WithETCD(c.etcdCli).
+		WithMetaKV(c.metaKVCreator()).
+		WithSession(c.session).
+		WithRootCoordClient(coordclient.MustGetLocalRootCoordClientFuture()).
+		Build()
+}
+
+func (c *Core) initMetaTable(initCtx context.Context) error {
 	fn := func() error {
 		var catalog metastore.RootCoordCatalog
 		var err error
 
 		switch Params.MetaStoreCfg.MetaStoreType.GetValue() {
 		case util.MetaStoreTypeEtcd:
-			log.Info("Using etcd as meta storage.")
-			var metaKV kv.MetaKv
+			log.Ctx(initCtx).Info("Using etcd as meta storage.")
 			var ss *kvmetestore.SuffixSnapshot
 			var err error
 
-			if metaKV, err = c.metaKVCreator(); err != nil {
-				return err
-			}
-
+			metaKV := c.metaKVCreator()
 			if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, Params.EtcdCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
 				return err
 			}
 			catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
 		case util.MetaStoreTypeTiKV:
-			log.Info("Using tikv as meta storage.")
-			var metaKV kv.MetaKv
+			log.Ctx(initCtx).Info("Using tikv as meta storage.")
 			var ss *kvmetestore.SuffixSnapshot
 			var err error
 
-			if metaKV, err = c.metaKVCreator(); err != nil {
-				return err
-			}
-
+			metaKV := c.metaKVCreator()
 			if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, Params.TiKVCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
 				return err
 			}
@@ -387,10 +392,10 @@ func (c *Core) initMetaTable() error {
 		return nil
 	}
 
-	return retry.Do(c.ctx, fn, retry.Attempts(10))
+	return retry.Do(initCtx, fn, retry.Attempts(10))
 }
 
-func (c *Core) initIDAllocator() error {
+func (c *Core) initIDAllocator(initCtx context.Context) error {
 	var tsoKV kv.TxnKV
 	var kvPath string
 	if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
@@ -406,7 +411,7 @@ func (c *Core) initIDAllocator() error {
 	}
 	c.idAllocator = idAllocator
 
-	log.Ctx(c.ctx).Info("id allocator initialized",
+	log.Ctx(initCtx).Info("id allocator initialized",
 		zap.String("root_path", kvPath),
 		zap.String("sub_path", globalIDAllocatorSubPath),
 		zap.String("key", globalIDAllocatorKey))
@@ -414,7 +419,7 @@ func (c *Core) initIDAllocator() error {
 	return nil
 }
 
-func (c *Core) initTSOAllocator() error {
+func (c *Core) initTSOAllocator(initCtx context.Context) error {
 	var tsoKV kv.TxnKV
 	var kvPath string
 	if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
@@ -430,7 +435,7 @@ func (c *Core) initTSOAllocator() error {
 	}
 	c.tsoAllocator = tsoAllocator
 
-	log.Ctx(c.ctx).Info("tso allocator initialized",
+	log.Ctx(initCtx).Info("tso allocator initialized",
 		zap.String("root_path", kvPath),
 		zap.String("sub_path", globalIDAllocatorSubPath),
 		zap.String("key", globalIDAllocatorKey))
@@ -439,19 +444,21 @@ func (c *Core) initTSOAllocator() error {
 }
 
 func (c *Core) initInternal() error {
-	log := log.Ctx(c.ctx)
+	initCtx, initSpan := log.NewIntentContext(typeutil.RootCoordRole, "initInternal")
+	defer initSpan.End()
+	log := log.Ctx(initCtx)
+
 	c.UpdateStateCode(commonpb.StateCode_Initializing)
-	c.initKVCreator()
 
-	if err := c.initIDAllocator(); err != nil {
+	if err := c.initIDAllocator(initCtx); err != nil {
 		return err
 	}
 
-	if err := c.initTSOAllocator(); err != nil {
+	if err := c.initTSOAllocator(initCtx); err != nil {
 		return err
 	}
 
-	if err := c.initMetaTable(); err != nil {
+	if err := c.initMetaTable(initCtx); err != nil {
 		return err
 	}
 
@@ -459,7 +466,7 @@ func (c *Core) initInternal() error {
 
 	c.factory.Init(Params)
 	chanMap := c.meta.ListCollectionPhysicalChannels(c.ctx)
-	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
+	c.chanTimeTick = newTimeTickSync(initCtx, c.ctx, c.session.ServerID, c.factory, chanMap)
 	log.Info("create TimeTick sync done")
 
 	c.proxyClientManager = proxyutil.NewProxyClientManager(c.proxyCreator)
@@ -469,6 +476,10 @@ func (c *Core) initInternal() error {
 	c.garbageCollector = newBgGarbageCollector(c)
 	c.stepExecutor = newBgStepExecutor(c.ctx)
 
+	if err := c.streamingCoord.Start(c.ctx); err != nil {
+		log.Info("start streaming coord failed", zap.Error(err))
+		return err
+	}
 	if !streamingutil.IsStreamingServiceEnabled() {
 		c.proxyWatcher = proxyutil.NewProxyWatcher(
 			c.etcdCli,
@@ -492,12 +503,12 @@ func (c *Core) initInternal() error {
 	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.queryCoord, c.dataCoord, c.tsoAllocator, c.meta)
 	log.Debug("RootCoord init QuotaCenter done")
 
-	if err := c.initCredentials(); err != nil {
+	if err := c.initCredentials(initCtx); err != nil {
 		return err
 	}
 	log.Info("init credentials done")
 
-	if err := c.initRbac(); err != nil {
+	if err := c.initRbac(initCtx); err != nil {
 		return err
 	}
 
@@ -522,6 +533,8 @@ func (c *Core) Init() error {
 	if err := c.initSession(); err != nil {
 		return err
 	}
+	c.initKVCreator()
+	c.initStreamingCoord()
 
 	if c.enableActiveStandBy {
 		c.activateFunc = func() error {
@@ -555,34 +568,33 @@ func (c *Core) Init() error {
 	return initError
 }
 
-func (c *Core) initCredentials() error {
-	log := log.Ctx(c.ctx)
-	credInfo, _ := c.meta.GetCredential(c.ctx, util.UserRoot)
+func (c *Core) initCredentials(initCtx context.Context) error {
+	credInfo, _ := c.meta.GetCredential(initCtx, util.UserRoot)
 	if credInfo == nil {
 		encryptedRootPassword, err := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
 		if err != nil {
-			log.Warn("RootCoord init user root failed", zap.Error(err))
+			log.Ctx(initCtx).Warn("RootCoord init user root failed", zap.Error(err))
 			return err
 		}
-		log.Info("RootCoord init user root")
-		err = c.meta.AddCredential(c.ctx, &internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
+		log.Ctx(initCtx).Info("RootCoord init user root")
+		err = c.meta.AddCredential(initCtx, &internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
 		return err
 	}
 	return nil
 }
 
-func (c *Core) initRbac() error {
+func (c *Core) initRbac(initCtx context.Context) error {
 	var err error
 	// create default roles, including admin, public
 	for _, role := range util.DefaultRoles {
-		err = c.meta.CreateRole(c.ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
+		err = c.meta.CreateRole(initCtx, util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
 		if err != nil && !common.IsIgnorableError(err) {
 			return errors.Wrap(err, "failed to create role")
 		}
 	}
 
 	if Params.ProxyCfg.EnablePublicPrivilege.GetAsBool() {
-		err = c.initPublicRolePrivilege()
+		err = c.initPublicRolePrivilege(initCtx)
 		if err != nil {
 			return err
 		}
@@ -594,7 +606,7 @@ func (c *Core) initRbac() error {
 	return nil
 }
 
-func (c *Core) initPublicRolePrivilege() error {
+func (c *Core) initPublicRolePrivilege(initCtx context.Context) error {
 	// grant privileges for the public role
 	globalPrivileges := []string{
 		commonpb.ObjectPrivilege_PrivilegeDescribeCollection.String(),
@@ -606,7 +618,7 @@ func (c *Core) initPublicRolePrivilege() error {
 
 	var err error
 	for _, globalPrivilege := range globalPrivileges {
-		err = c.meta.OperatePrivilege(c.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		err = c.meta.OperatePrivilege(initCtx, util.DefaultTenant, &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: util.RolePublic},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
 			ObjectName: util.AnyWord,
@@ -621,7 +633,7 @@ func (c *Core) initPublicRolePrivilege() error {
 		}
 	}
 	for _, collectionPrivilege := range collectionPrivileges {
-		err = c.meta.OperatePrivilege(c.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		err = c.meta.OperatePrivilege(initCtx, util.DefaultTenant, &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: util.RolePublic},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 			ObjectName: util.AnyWord,
@@ -755,6 +767,10 @@ func (c *Core) startInternal() error {
 	sessionutil.SaveServerInfo(typeutil.RootCoordRole, c.session.ServerID)
 	log.Info("rootcoord startup successfully")
 
+	// regster the core as a appendoperator for broadcast service.
+	// TODO: should be removed at 2.6.0.
+	// Add the wal accesser to the broadcaster registry for making broadcast operation.
+	registry.Register(registry.AppendOperatorTypeMsgstream, newMsgStreamAppendOperator(c))
 	return nil
 }
 
@@ -814,6 +830,10 @@ func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
 	c.stopExecutor()
 	c.stopScheduler()
+
+	if c.streamingCoord != nil {
+		c.streamingCoord.Stop()
+	}
 	if c.proxyWatcher != nil {
 		c.proxyWatcher.Stop()
 	}
@@ -2219,33 +2239,7 @@ func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredenti
 		}
 	}()
 
-	redoTask := newBaseRedoTask(c.stepExecutor)
-	redoTask.AddSyncStep(NewSimpleStep("delete credential meta data", func(ctx context.Context) ([]nestedStep, error) {
-		err := c.meta.DeleteCredential(ctx, in.Username)
-		if err != nil {
-			ctxLog.Warn("delete credential meta data failed", zap.Error(err))
-		}
-		return nil, err
-	}))
-	redoTask.AddAsyncStep(NewSimpleStep("delete credential cache", func(ctx context.Context) ([]nestedStep, error) {
-		err := c.ExpireCredCache(ctx, in.Username)
-		if err != nil {
-			ctxLog.Warn("delete credential cache failed", zap.Error(err))
-		}
-		return nil, err
-	}))
-	redoTask.AddAsyncStep(NewSimpleStep("delete user role cache for the user", func(ctx context.Context) ([]nestedStep, error) {
-		err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-			OpType: int32(typeutil.CacheDeleteUser),
-			OpKey:  in.Username,
-		})
-		if err != nil {
-			ctxLog.Warn("delete user role cache failed for the user", zap.Error(err))
-		}
-		return nil, err
-	}))
-
-	err := redoTask.Execute(ctx)
+	err := executeDeleteCredentialTaskSteps(ctx, c, in.Username)
 	if err != nil {
 		errMsg := "fail to execute task when deleting the user"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -2360,35 +2354,7 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 			return merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_DropRoleFailure), nil
 		}
 	}
-	redoTask := newBaseRedoTask(c.stepExecutor)
-	redoTask.AddSyncStep(NewSimpleStep("drop role meta data", func(ctx context.Context) ([]nestedStep, error) {
-		err := c.meta.DropRole(ctx, util.DefaultTenant, in.RoleName)
-		if err != nil {
-			ctxLog.Warn("drop role mata data failed", zap.Error(err))
-		}
-		return nil, err
-	}))
-	redoTask.AddAsyncStep(NewSimpleStep("drop the privilege list of this role", func(ctx context.Context) ([]nestedStep, error) {
-		if !in.ForceDrop {
-			return nil, nil
-		}
-		err := c.meta.DropGrant(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName})
-		if err != nil {
-			ctxLog.Warn("drop the privilege list failed for the role", zap.Error(err))
-		}
-		return nil, err
-	}))
-	redoTask.AddAsyncStep(NewSimpleStep("drop role cache", func(ctx context.Context) ([]nestedStep, error) {
-		err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-			OpType: int32(typeutil.CacheDropRole),
-			OpKey:  in.RoleName,
-		})
-		if err != nil {
-			ctxLog.Warn("delete user role cache failed for the role", zap.Error(err))
-		}
-		return nil, err
-	}))
-	err := redoTask.Execute(ctx)
+	err := executeDropRoleTaskSteps(ctx, c, in.RoleName, in.ForceDrop)
 	if err != nil {
 		errMsg := "fail to execute task when dropping the role"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -2432,37 +2398,7 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 		}
 	}
 
-	redoTask := newBaseRedoTask(c.stepExecutor)
-	redoTask.AddSyncStep(NewSimpleStep("operate user role meta data", func(ctx context.Context) ([]nestedStep, error) {
-		err := c.meta.OperateUserRole(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, &milvuspb.RoleEntity{Name: in.RoleName}, in.Type)
-		if err != nil && !common.IsIgnorableError(err) {
-			ctxLog.Warn("operate user role mata data failed", zap.Error(err))
-			return nil, err
-		}
-		return nil, nil
-	}))
-	redoTask.AddAsyncStep(NewSimpleStep("operate user role cache", func(ctx context.Context) ([]nestedStep, error) {
-		var opType int32
-		switch in.Type {
-		case milvuspb.OperateUserRoleType_AddUserToRole:
-			opType = int32(typeutil.CacheAddUserToRole)
-		case milvuspb.OperateUserRoleType_RemoveUserFromRole:
-			opType = int32(typeutil.CacheRemoveUserFromRole)
-		default:
-			errMsg := "invalid operate type for the OperateUserRole api"
-			ctxLog.Warn(errMsg, zap.Any("in", in))
-			return nil, nil
-		}
-		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-			OpType: opType,
-			OpKey:  funcutil.EncodeUserRoleCache(in.Username, in.RoleName),
-		}); err != nil {
-			ctxLog.Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
-			return nil, err
-		}
-		return nil, nil
-	}))
-	err := redoTask.Execute(ctx)
+	err := executeOperateUserRoleTaskSteps(ctx, c, in)
 	if err != nil {
 		errMsg := "fail to execute task when operate the user and role"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -2677,82 +2613,7 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 		}
 	}
 
-	privName = in.Entity.Grantor.Privilege.Name
-
-	redoTask := newBaseRedoTask(c.stepExecutor)
-	redoTask.AddSyncStep(NewSimpleStep("operate privilege meta data", func(ctx context.Context) ([]nestedStep, error) {
-		if !util.IsAnyWord(privName) {
-			// set up privilege name for metastore
-			dbPrivName, err := c.getMetastorePrivilegeName(ctx, privName)
-			if err != nil {
-				return nil, err
-			}
-			in.Entity.Grantor.Privilege.Name = dbPrivName
-		}
-
-		err := c.meta.OperatePrivilege(ctx, util.DefaultTenant, in.Entity, in.Type)
-		if err != nil && !common.IsIgnorableError(err) {
-			ctxLog.Warn("fail to operate the privilege", zap.Any("in", in), zap.Error(err))
-			return nil, err
-		}
-		return nil, nil
-	}))
-	redoTask.AddAsyncStep(NewSimpleStep("operate privilege cache", func(ctx context.Context) ([]nestedStep, error) {
-		// set back to expand privilege group
-		in.Entity.Grantor.Privilege.Name = privName
-		var opType int32
-		switch in.Type {
-		case milvuspb.OperatePrivilegeType_Grant:
-			opType = int32(typeutil.CacheGrantPrivilege)
-		case milvuspb.OperatePrivilegeType_Revoke:
-			opType = int32(typeutil.CacheRevokePrivilege)
-		default:
-			log.Warn("invalid operate type for the OperatePrivilege api", zap.Any("in", in))
-			return nil, nil
-		}
-		grants := []*milvuspb.GrantEntity{in.Entity}
-
-		allGroups, err := c.getPrivilegeGroups(ctx)
-		if err != nil {
-			return nil, err
-		}
-		groups := lo.SliceToMap(allGroups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
-			return group.GroupName, group.Privileges
-		})
-		expandGrants, err := c.expandPrivilegeGroups(ctx, grants, groups)
-		if err != nil {
-			return nil, err
-		}
-		// if there is same grant in the other privilege groups, the grant should not be removed from the cache
-		if in.Type == milvuspb.OperatePrivilegeType_Revoke {
-			metaGrants, err := c.meta.SelectGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
-				Role:   in.Entity.Role,
-				DbName: in.Entity.DbName,
-			})
-			if err != nil {
-				return nil, err
-			}
-			metaExpandGrants, err := c.expandPrivilegeGroups(ctx, metaGrants, groups)
-			if err != nil {
-				return nil, err
-			}
-			expandGrants = lo.Filter(expandGrants, func(g1 *milvuspb.GrantEntity, _ int) bool {
-				return !lo.ContainsBy(metaExpandGrants, func(g2 *milvuspb.GrantEntity) bool {
-					return proto.Equal(g1, g2)
-				})
-			})
-		}
-		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-			OpType: opType,
-			OpKey:  funcutil.PolicyForPrivileges(expandGrants),
-		}); err != nil {
-			log.Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
-			return nil, err
-		}
-		return nil, nil
-	}))
-
-	err := redoTask.Execute(ctx)
+	err := executeOperatePrivilegeTaskSteps(ctx, c, in)
 	if err != nil {
 		errMsg := "fail to execute task when operating the privilege"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -2985,25 +2846,7 @@ func (c *Core) RestoreRBAC(ctx context.Context, in *milvuspb.RestoreRBACMetaRequ
 		return merr.Status(err), nil
 	}
 
-	redoTask := newBaseRedoTask(c.stepExecutor)
-	redoTask.AddSyncStep(NewSimpleStep("restore rbac meta data", func(ctx context.Context) ([]nestedStep, error) {
-		if err := c.meta.RestoreRBAC(ctx, util.DefaultTenant, in.RBACMeta); err != nil {
-			ctxLog.Warn("fail to restore rbac meta data", zap.Any("in", in), zap.Error(err))
-			return nil, err
-		}
-		return nil, nil
-	}))
-	redoTask.AddAsyncStep(NewSimpleStep("operate privilege cache", func(ctx context.Context) ([]nestedStep, error) {
-		if err := c.proxyClientManager.RefreshPolicyInfoCache(c.ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-			OpType: int32(typeutil.CacheRefresh),
-		}); err != nil {
-			ctxLog.Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
-			return nil, err
-		}
-		return nil, nil
-	}))
-
-	err := redoTask.Execute(ctx)
+	err := executeRestoreRBACTaskSteps(ctx, c, in)
 	if err != nil {
 		errMsg := "fail to execute task when restore rbac meta data"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -3232,127 +3075,7 @@ func (c *Core) OperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePr
 		return merr.Status(err), nil
 	}
 
-	redoTask := newBaseRedoTask(c.stepExecutor)
-	redoTask.AddSyncStep(NewSimpleStep("operate privilege group", func(ctx context.Context) ([]nestedStep, error) {
-		groups, err := c.meta.ListPrivilegeGroups(ctx)
-		if err != nil && !common.IsIgnorableError(err) {
-			ctxLog.Warn("fail to list privilege groups", zap.Error(err))
-			return nil, err
-		}
-		currGroups := lo.SliceToMap(groups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
-			return group.GroupName, group.Privileges
-		})
-
-		// get roles granted to the group
-		roles, err := c.meta.GetPrivilegeGroupRoles(ctx, in.GroupName)
-		if err != nil {
-			return nil, err
-		}
-
-		newGroups := make(map[string][]*milvuspb.PrivilegeEntity)
-		for k, v := range currGroups {
-			if k != in.GroupName {
-				newGroups[k] = v
-				continue
-			}
-			switch in.Type {
-			case milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup:
-				newPrivs := lo.Union(v, in.Privileges)
-				newGroups[k] = lo.UniqBy(newPrivs, func(p *milvuspb.PrivilegeEntity) string {
-					return p.Name
-				})
-
-				// check if privileges are the same object type
-				objectTypes := lo.SliceToMap(newPrivs, func(p *milvuspb.PrivilegeEntity) (string, struct{}) {
-					return util.GetObjectType(p.Name), struct{}{}
-				})
-				if len(objectTypes) > 1 {
-					return nil, errors.New("privileges are not the same object type")
-				}
-			case milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup:
-				newPrivs, _ := lo.Difference(v, in.Privileges)
-				newGroups[k] = newPrivs
-			default:
-				return nil, errors.New("invalid operate type")
-			}
-		}
-
-		rolesToRevoke := []*milvuspb.GrantEntity{}
-		rolesToGrant := []*milvuspb.GrantEntity{}
-		compareGrants := func(a, b *milvuspb.GrantEntity) bool {
-			return a.Role.Name == b.Role.Name &&
-				a.Object.Name == b.Object.Name &&
-				a.ObjectName == b.ObjectName &&
-				a.Grantor.User.Name == b.Grantor.User.Name &&
-				a.Grantor.Privilege.Name == b.Grantor.Privilege.Name &&
-				a.DbName == b.DbName
-		}
-		for _, role := range roles {
-			grants, err := c.meta.SelectGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
-				Role:   role,
-				DbName: util.AnyWord,
-			})
-			if err != nil {
-				return nil, err
-			}
-			currGrants, err := c.expandPrivilegeGroups(ctx, grants, currGroups)
-			if err != nil {
-				return nil, err
-			}
-			newGrants, err := c.expandPrivilegeGroups(ctx, grants, newGroups)
-			if err != nil {
-				return nil, err
-			}
-
-			toRevoke := lo.Filter(currGrants, func(item *milvuspb.GrantEntity, _ int) bool {
-				return !lo.ContainsBy(newGrants, func(newItem *milvuspb.GrantEntity) bool {
-					return compareGrants(item, newItem)
-				})
-			})
-
-			toGrant := lo.Filter(newGrants, func(item *milvuspb.GrantEntity, _ int) bool {
-				return !lo.ContainsBy(currGrants, func(currItem *milvuspb.GrantEntity) bool {
-					return compareGrants(item, currItem)
-				})
-			})
-
-			rolesToRevoke = append(rolesToRevoke, toRevoke...)
-			rolesToGrant = append(rolesToGrant, toGrant...)
-		}
-
-		if len(rolesToRevoke) > 0 {
-			opType := int32(typeutil.CacheRevokePrivilege)
-			if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-				OpType: opType,
-				OpKey:  funcutil.PolicyForPrivileges(rolesToRevoke),
-			}); err != nil {
-				ctxLog.Warn("fail to refresh policy info cache for revoke privileges in operate privilege group", zap.Any("in", in), zap.Error(err))
-				return nil, err
-			}
-		}
-
-		if len(rolesToGrant) > 0 {
-			opType := int32(typeutil.CacheGrantPrivilege)
-			if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-				OpType: opType,
-				OpKey:  funcutil.PolicyForPrivileges(rolesToGrant),
-			}); err != nil {
-				ctxLog.Warn("fail to refresh policy info cache for grants privilege in operate privilege group", zap.Any("in", in), zap.Error(err))
-				return nil, err
-			}
-		}
-		return nil, nil
-	}))
-
-	redoTask.AddSyncStep(NewSimpleStep("operate privilege group meta data", func(ctx context.Context) ([]nestedStep, error) {
-		err := c.meta.OperatePrivilegeGroup(ctx, in.GroupName, in.Privileges, in.Type)
-		if err != nil && !common.IsIgnorableError(err) {
-			ctxLog.Warn("fail to operate privilege group", zap.Error(err))
-		}
-		return nil, err
-	}))
-
-	err := redoTask.Execute(ctx)
+	err := executeOperatePrivilegeGroupTaskSteps(ctx, c, in)
 	if err != nil {
 		errMsg := "fail to execute task when operate privilege group"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -3421,4 +3144,9 @@ func (c *Core) getPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGro
 		return nil, err
 	}
 	return allGroups, nil
+}
+
+// RegisterStreamingCoordGRPCService registers the grpc service of streaming coordinator.
+func (s *Core) RegisterStreamingCoordGRPCService(server *grpc.Server) {
+	s.streamingCoord.RegisterGRPCService(server)
 }
