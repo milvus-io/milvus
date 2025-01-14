@@ -315,10 +315,11 @@ struct BitWiseBitsetPolicy {
     op_find(const data_type* const data,
             const size_t start,
             const size_t size,
-            const size_t starting_idx) {
+            const size_t starting_idx,
+            const bool is_set) {
         for (size_t i = starting_idx; i < size; i++) {
             const auto proxy = get_proxy(data, start + i);
-            if (proxy) {
+            if (proxy == is_set) {
                 return i;
             }
         }
