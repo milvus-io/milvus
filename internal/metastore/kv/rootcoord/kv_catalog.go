@@ -18,11 +18,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
+	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -1418,7 +1418,7 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 			log.Warn("failed to restore rbac, try to rollback", zap.Error(err))
 			// roll back role
 			for _, role := range needRollbackRole {
-				err = kc.DropRole(ctx, tenant, role.Name)
+				err = kc.DropRole(ctx, tenant, role.GetName())
 				if err != nil {
 					log.Warn("failed to rollback roles after restore failed", zap.Error(err))
 				}
@@ -1434,7 +1434,7 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 
 			for _, user := range needRollbackUser {
 				// roll back user
-				err = kc.DropCredential(ctx, user.User)
+				err = kc.DropCredential(ctx, user.GetUser())
 				if err != nil {
 					log.Warn("failed to rollback users after restore failed", zap.Error(err))
 				}
@@ -1442,7 +1442,7 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 
 			// roll back privilege group
 			for _, group := range needRollbackPrivilegeGroups {
-				err = kc.DropPrivilegeGroup(ctx, group.GroupName)
+				err = kc.DropPrivilegeGroup(ctx, group.GetGroupName())
 				if err != nil {
 					log.Warn("failed to rollback privilege groups after restore failed", zap.Error(err))
 				}
@@ -1456,7 +1456,7 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 		return err
 	}
 	existRoleMap := lo.SliceToMap(existRoles, func(entity *milvuspb.RoleResult) (string, struct{}) { return entity.GetRole().GetName(), struct{}{} })
-	for _, role := range meta.Roles {
+	for _, role := range meta.GetRoles() {
 		if _, ok := existRoleMap[role.GetName()]; ok {
 			log.Warn("failed to restore, role already exists", zap.String("role", role.GetName()))
 			err = errors.Newf("role [%s] already exists", role.GetName())
@@ -1474,11 +1474,11 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 	if err != nil {
 		return err
 	}
-	existPrivGroupMap := lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GroupName, struct{}{} })
-	for _, group := range meta.PrivilegeGroups {
-		if _, ok := existPrivGroupMap[group.GroupName]; ok {
-			log.Warn("failed to restore, privilege group already exists", zap.String("group", group.GroupName))
-			err = errors.Newf("privilege group [%s] already exists", group.GroupName)
+	existPrivGroupMap := lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GetGroupName(), struct{}{} })
+	for _, group := range meta.GetPrivilegeGroups() {
+		if _, ok := existPrivGroupMap[group.GetGroupName()]; ok {
+			log.Ctx(ctx).Warn("failed to restore, privilege group already exists", zap.String("group", group.GetGroupName()))
+			err = errors.Newf("privilege group [%s] already exists", group.GetGroupName())
 			return err
 		}
 		err = kc.SavePrivilegeGroup(ctx, group)
@@ -1493,9 +1493,9 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 	if err != nil {
 		return err
 	}
-	existPrivGroupMap = lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GroupName, struct{}{} })
-	for _, grant := range meta.Grants {
-		privName := grant.Grantor.Privilege.Name
+	existPrivGroupMap = lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GetGroupName(), struct{}{} })
+	for _, grant := range meta.GetGrants() {
+		privName := grant.GetGrantor().GetPrivilege().GetName()
 		if util.IsPrivilegeNameDefined(privName) {
 			grant.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(privName)
 		} else if _, ok := existPrivGroupMap[privName]; ok {
@@ -1518,7 +1518,7 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 		return err
 	}
 	existUserMap := lo.SliceToMap(existUser, func(entity *milvuspb.UserResult) (string, struct{}) { return entity.GetUser().GetName(), struct{}{} })
-	for _, user := range meta.Users {
+	for _, user := range meta.GetUsers() {
 		if _, ok := existUserMap[user.GetUser()]; ok {
 			log.Info("failed to restore, user already exists", zap.String("user", user.GetUser()))
 			err = errors.Newf("user [%s] already exists", user.GetUser())
@@ -1526,8 +1526,8 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 		}
 		// restore user
 		err = kc.CreateCredential(ctx, &model.Credential{
-			Username:          user.User,
-			EncryptedPassword: user.Password,
+			Username:          user.GetUser(),
+			EncryptedPassword: user.GetPassword(),
 		})
 		if err != nil {
 			return err
@@ -1536,9 +1536,9 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 
 		// restore user role mapping
 		entity := &milvuspb.UserEntity{
-			Name: user.User,
+			Name: user.GetUser(),
 		}
-		for _, role := range user.Roles {
+		for _, role := range user.GetRoles() {
 			err = kc.AlterUserRole(ctx, tenant, entity, role, milvuspb.OperateUserRoleType_AddUserToRole)
 			if err != nil {
 				return err
