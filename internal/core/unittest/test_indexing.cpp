@@ -731,6 +731,10 @@ TEST_P(IndexTest, GetVector_EmptySparseVector) {
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
     EXPECT_EQ(vec_index->Count(), NB);
 
+    if (!vec_index->HasRawData()) {
+        return;
+    }
+
     auto ids_ds = GenRandomIds(NB);
     auto sparse_rows = vec_index->GetSparseVector(ids_ds);
     for (size_t i = 0; i < NB; ++i) {
