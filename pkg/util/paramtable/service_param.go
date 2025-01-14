@@ -550,7 +550,7 @@ Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 	p.MaxDispatcherNumPerPchannel = ParamItem{
 		Key:          "mq.dispatcher.maxDispatcherNumPerPchannel",
 		Version:      "2.4.19",
-		DefaultValue: "10",
+		DefaultValue: "5",
 		Doc:          `The maximum number of dispatchers per physical channel, primarily to limit the number of consumers and prevent performance issues(e.g., during recovery when a large number of channels are watched).`,
 		Export:       true,
 	}
@@ -559,7 +559,7 @@ Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 	p.RetrySleep = ParamItem{
 		Key:          "mq.dispatcher.retrySleep",
 		Version:      "2.4.19",
-		DefaultValue: "5",
+		DefaultValue: "3",
 		Doc:          `register retry sleep time in seconds`,
 		Export:       true,
 	}
@@ -568,7 +568,7 @@ Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 	p.RetryTimeout = ParamItem{
 		Key:          "mq.dispatcher.retryTimeout",
 		Version:      "2.4.19",
-		DefaultValue: "300",
+		DefaultValue: "60",
 		Doc:          `register retry timeout in seconds`,
 		Export:       true,
 	}

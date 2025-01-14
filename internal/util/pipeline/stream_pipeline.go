@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -131,7 +132,7 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 		})
 		if err != nil {
 			log.Warn("dispatcher register failed", zap.String("channel", position.ChannelName), zap.Error(err))
-			return errors.Is(err, msgdispatcher.ErrTooManyConsumers), err
+			return errors.Is(err, merr.ErrTooManyConsumers), err
 		}
 		return false, nil
 	}, retry.Sleep(paramtable.Get().MQCfg.RetrySleep.GetAsDuration(time.Second)), // 5 seconds
