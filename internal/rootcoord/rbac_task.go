@@ -27,9 +27,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -179,7 +179,7 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, in *milvu
 		}
 		grants := []*milvuspb.GrantEntity{in.Entity}
 
-		allGroups, err := core.getPrivilegeGroups(ctx)
+		allGroups, err := core.getDefaultAndCustomPrivilegeGroups(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -275,12 +275,12 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 					return p.Name
 				})
 
-				// check if privileges are the same object type
-				objectTypes := lo.SliceToMap(newPrivs, func(p *milvuspb.PrivilegeEntity) (string, struct{}) {
-					return util.GetObjectType(p.Name), struct{}{}
+				// check if privileges are the same privilege level
+				privilegeLevels := lo.SliceToMap(newPrivs, func(p *milvuspb.PrivilegeEntity) (string, struct{}) {
+					return util.GetPrivilegeLevel(p.Name), struct{}{}
 				})
-				if len(objectTypes) > 1 {
-					return nil, errors.New("privileges are not the same object type")
+				if len(privilegeLevels) > 1 {
+					return nil, errors.New("privileges are not the same privilege level")
 				}
 			case milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup:
 				newPrivs, _ := lo.Difference(v, in.Privileges)

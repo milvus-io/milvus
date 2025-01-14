@@ -33,9 +33,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -170,6 +170,15 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionInit() {
 }
 
 func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
+	dblobs, err := getInt64DeltaBlobs(
+		1,
+		[]int64{100},
+		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)},
+	)
+	s.Require().NoError(err)
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{"1"}).
+		Return([][]byte{dblobs.GetValue()}, nil).Once()
+
 	schema := genCollectionSchema()
 	var segmentID int64 = 1001
 	segWriter, err := NewSegmentWriter(schema, 1000, compactionBatchSize, segmentID, PartitionID, CollectionID, []int64{})
@@ -193,6 +202,9 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 		{
 			SegmentID:    segmentID,
 			FieldBinlogs: lo.Values(fBinlogs),
+			Deltalogs: []*datapb.FieldBinlog{
+				{Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "1"}}},
+			},
 		},
 	}
 
@@ -236,6 +248,12 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 	s.Equal(2, totalBinlogNum/len(schema.GetFields()))
 	s.Equal(1, statsBinlogNum)
 	s.Equal(totalRowNum, statsRowNum)
+
+	s.EqualValues(10239,
+		lo.SumBy(compactionResult.GetSegments(), func(seg *datapb.CompactionSegment) int64 {
+			return seg.GetNumOfRows()
+		}),
+	)
 }
 
 func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit() {

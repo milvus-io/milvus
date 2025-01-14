@@ -28,7 +28,7 @@ packages:
     interfaces:
       AssignmentDiscoverWatcher:
       AssignmentRebalanceTrigger:
-  github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb:
+  github.com/milvus-io/milvus/pkg/proto/streamingpb:
     interfaces:
       StreamingNodeHandlerService_ConsumeServer:
       StreamingNodeHandlerService_ProduceServer:

@@ -26,12 +26,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -932,7 +932,8 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 							IndexName:           s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
 							IndexParams:         indexParams,
 							IndexFilePaths:      indexFilePaths,
-							SerializedSize:      segIdx.IndexSize,
+							SerializedSize:      segIdx.IndexSerializedSize,
+							MemSize:             segIdx.IndexMemSize,
 							IndexVersion:        segIdx.IndexVersion,
 							NumRows:             segIdx.NumRows,
 							CurrentIndexVersion: segIdx.CurrentIndexVersion,

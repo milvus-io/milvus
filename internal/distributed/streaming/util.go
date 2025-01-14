@@ -8,6 +8,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
 
+type (
+	AppendResponses = types.AppendResponses
+	AppendResponse  = types.AppendResponse
+)
+
 // AppendMessagesToWAL appends messages to the wal.
 // It it a helper utility function to append messages to the wal.
 // If the messages is belong to one vchannel, it will be sent as a transaction.
@@ -26,7 +31,7 @@ func (u *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.Mu
 
 	// Otherwise append the messages concurrently.
 	mu := &sync.Mutex{}
-	resp := newAppendResponseN(len(msgs))
+	resp := types.NewAppendResponseN(len(msgs))
 
 	wg := &sync.WaitGroup{}
 	wg.Add(len(dispatchedMessages))
@@ -39,7 +44,7 @@ func (u *walAccesserImpl) AppendMessages(ctx context.Context, msgs ...message.Mu
 			singleResp := u.appendToVChannel(ctx, vchannel, msgs...)
 			mu.Lock()
 			for i, idx := range idxes {
-				resp.fillResponseAtIdx(singleResp.Responses[i], idx)
+				resp.FillResponseAtIdx(singleResp.Responses[i], idx)
 			}
 			mu.Unlock()
 			return struct{}{}, nil
@@ -76,9 +81,9 @@ func (u *walAccesserImpl) dispatchMessages(msgs ...message.MutableMessage) (map[
 // appendToVChannel appends the messages to the specified vchannel.
 func (u *walAccesserImpl) appendToVChannel(ctx context.Context, vchannel string, msgs ...message.MutableMessage) AppendResponses {
 	if len(msgs) == 0 {
-		return newAppendResponseN(0)
+		return types.NewAppendResponseN(0)
 	}
-	resp := newAppendResponseN(len(msgs))
+	resp := types.NewAppendResponseN(len(msgs))
 
 	// if only one message here, append it directly, no more goroutine needed.
 	// at most time, there's only one message here.
@@ -86,7 +91,7 @@ func (u *walAccesserImpl) appendToVChannel(ctx context.Context, vchannel string,
 	// we should optimize the message-format, make it into one; but not the goroutine count.
 	if len(msgs) == 1 {
 		appendResult, err := u.appendToWAL(ctx, msgs[0])
-		resp.fillResponseAtIdx(AppendResponse{
+		resp.FillResponseAtIdx(AppendResponse{
 			AppendResult: appendResult,
 			Error:        err,
 		}, 0)
@@ -99,7 +104,7 @@ func (u *walAccesserImpl) appendToVChannel(ctx context.Context, vchannel string,
 		VChannel: vchannel,
 	})
 	if err != nil {
-		resp.fillAllError(err)
+		resp.FillAllError(err)
 		return resp
 	}
 
@@ -115,7 +120,7 @@ func (u *walAccesserImpl) appendToVChannel(ctx context.Context, vchannel string,
 			defer wg.Done()
 			if err := txn.Append(ctx, msg); err != nil {
 				mu.Lock()
-				resp.fillResponseAtIdx(AppendResponse{
+				resp.FillResponseAtIdx(AppendResponse{
 					Error: err,
 				}, i)
 				mu.Unlock()
@@ -129,73 +134,17 @@ func (u *walAccesserImpl) appendToVChannel(ctx context.Context, vchannel string,
 	// and fill the error with the first error.
 	if err := resp.UnwrapFirstError(); err != nil {
 		_ = txn.Rollback(ctx) // rollback failure can be ignored.
-		resp.fillAllError(err)
+		resp.FillAllError(err)
 		return resp
 	}
 
 	// commit the transaction and fill the response.
 	appendResult, err := txn.Commit(ctx)
-	resp.fillAllResponse(AppendResponse{
+	resp.FillAllResponse(AppendResponse{
 		AppendResult: appendResult,
 		Error:        err,
 	})
 	return resp
-}
-
-// newAppendResponseN creates a new append response.
-func newAppendResponseN(n int) AppendResponses {
-	return AppendResponses{
-		Responses: make([]AppendResponse, n),
-	}
-}
-
-// AppendResponse is the response of one append operation.
-type AppendResponse struct {
-	AppendResult *types.AppendResult
-	Error        error
-}
-
-// AppendResponses is the response of append operation.
-type AppendResponses struct {
-	Responses []AppendResponse
-}
-
-func (a AppendResponses) MaxTimeTick() uint64 {
-	var maxTimeTick uint64
-	for _, r := range a.Responses {
-		if r.AppendResult != nil && r.AppendResult.TimeTick > maxTimeTick {
-			maxTimeTick = r.AppendResult.TimeTick
-		}
-	}
-	return maxTimeTick
-}
-
-// UnwrapFirstError returns the first error in the responses.
-func (a AppendResponses) UnwrapFirstError() error {
-	for _, r := range a.Responses {
-		if r.Error != nil {
-			return r.Error
-		}
-	}
-	return nil
-}
-
-// fillAllError fills all the responses with the same error.
-func (a *AppendResponses) fillAllError(err error) {
-	for i := range a.Responses {
-		a.Responses[i].Error = err
-	}
-}
-
-// fillResponseAtIdx fill the response at idx
-func (a *AppendResponses) fillResponseAtIdx(resp AppendResponse, idx int) {
-	a.Responses[idx] = resp
-}
-
-func (a *AppendResponses) fillAllResponse(resp AppendResponse) {
-	for i := range a.Responses {
-		a.Responses[i] = resp
-	}
 }
 
 // applyOpt applies the append options to the message.

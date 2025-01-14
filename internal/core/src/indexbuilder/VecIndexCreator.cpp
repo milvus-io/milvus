@@ -84,7 +84,7 @@ VecIndexCreator::Query(const milvus::DatasetPtr& dataset,
     return search_result;
 }
 
-BinarySet
+index::IndexStatsPtr
 VecIndexCreator::Upload() {
     return index_->Upload();
 }

@@ -17,11 +17,33 @@
 package lock
 
 import (
+	"context"
 	"sync"
 
+	pool "github.com/jolestar/go-commons-pool/v2"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+)
+
+var (
+	ctx             = context.Background()
+	lockPoolFactory = pool.NewPooledObjectFactorySimple(func(ctx2 context.Context) (interface{}, error) {
+		return newRefLock(), nil
+	})
+	lockerPoolConfig = &pool.ObjectPoolConfig{
+		LIFO:                     pool.DefaultLIFO,
+		MaxTotal:                 -1,
+		MaxIdle:                  64,
+		MinIdle:                  pool.DefaultMinIdle,
+		MinEvictableIdleTime:     pool.DefaultMinEvictableIdleTime,
+		SoftMinEvictableIdleTime: pool.DefaultSoftMinEvictableIdleTime,
+		NumTestsPerEvictionRun:   pool.DefaultNumTestsPerEvictionRun,
+		EvictionPolicyName:       pool.DefaultEvictionPolicyName,
+		EvictionContext:          ctx,
+		BlockWhenExhausted:       false,
+	}
+	refLockPoolPool = pool.NewObjectPool(ctx, lockPoolFactory, lockerPoolConfig)
 )
 
 type RefLock struct {
@@ -33,8 +55,12 @@ func (m *RefLock) ref() {
 	m.refCounter++
 }
 
-func (m *RefLock) unref() {
-	m.refCounter--
+func (m *RefLock) unref() bool {
+	if m.refCounter > 0 {
+		m.refCounter--
+		return true
+	}
+	return false
 }
 
 func newRefLock() *RefLock {
@@ -66,7 +92,14 @@ func (k *KeyLock[K]) Lock(key K) {
 		k.keyLocksMutex.Unlock()
 		keyLock.mutex.Lock()
 	} else {
-		newKLock := newRefLock()
+		obj, err := refLockPoolPool.BorrowObject(ctx)
+		if err != nil {
+			log.Ctx(ctx).Error("BorrowObject failed", zap.Error(err))
+			k.keyLocksMutex.Unlock()
+			return
+		}
+		newKLock := obj.(*RefLock)
+		// newKLock := newRefLock()
 		newKLock.mutex.Lock()
 		k.refLocks[key] = newKLock
 		newKLock.ref()
@@ -86,6 +119,7 @@ func (k *KeyLock[K]) Unlock(lockedKey K) {
 	}
 	keyLock.unref()
 	if keyLock.refCounter == 0 {
+		_ = refLockPoolPool.ReturnObject(ctx, keyLock)
 		delete(k.refLocks, lockedKey)
 	}
 	keyLock.mutex.Unlock()
@@ -100,7 +134,14 @@ func (k *KeyLock[K]) RLock(key K) {
 		k.keyLocksMutex.Unlock()
 		keyLock.mutex.RLock()
 	} else {
-		newKLock := newRefLock()
+		obj, err := refLockPoolPool.BorrowObject(ctx)
+		if err != nil {
+			log.Ctx(ctx).Error("BorrowObject failed", zap.Error(err))
+			k.keyLocksMutex.Unlock()
+			return
+		}
+		newKLock := obj.(*RefLock)
+		// newKLock := newRefLock()
 		newKLock.mutex.RLock()
 		k.refLocks[key] = newKLock
 		newKLock.ref()
@@ -120,6 +161,7 @@ func (k *KeyLock[K]) RUnlock(lockedKey K) {
 	}
 	keyLock.unref()
 	if keyLock.refCounter == 0 {
+		_ = refLockPoolPool.ReturnObject(ctx, keyLock)
 		delete(k.refLocks, lockedKey)
 	}
 	keyLock.mutex.RUnlock()
