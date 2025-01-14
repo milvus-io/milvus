@@ -6,9 +6,9 @@ use futures::executor::block_on;
 use libc::c_char;
 use log::info;
 use tantivy::schema::{
-    Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, FAST, INDEXED,
+    Field, IndexRecordOption, OwnedValue, Schema, TextFieldIndexing, TextOptions, FAST, INDEXED,
 };
-use tantivy::{doc, Document, Index, IndexWriter, SingleSegmentIndexWriter};
+use tantivy::{doc, tokenizer, Document, Index, IndexWriter, TantivyDocument};
 
 use crate::data_type::TantivyDataType;
 
@@ -55,7 +55,10 @@ impl IndexWriterWrapper {
         overall_memory_budget_in_bytes: usize,
     ) -> Result<IndexWriterWrapper> {
         init_log();
-        info!("create index writer, field_name: {}, data_type: {:?}", field_name, data_type);
+        info!(
+            "create index writer, field_name: {}, data_type: {:?}",
+            field_name, data_type
+        );
         let mut schema_builder = Schema::builder();
         let field = schema_builder_add_field(&mut schema_builder, &field_name, data_type);
         // We cannot build direct connection from rows in multi-segments to milvus row data. So we have this doc_id field.
@@ -78,7 +81,10 @@ impl IndexWriterWrapper {
         path: String,
     ) -> Result<IndexWriterWrapper> {
         init_log();
-        info!("create single segment index writer, field_name: {}, data_type: {:?}", field_name, data_type);
+        info!(
+            "create single segment index writer, field_name: {}, data_type: {:?}",
+            field_name, data_type
+        );
         let mut schema_builder = Schema::builder();
         let field = schema_builder_add_field(&mut schema_builder, &field_name, data_type);
         let schema = schema_builder.build();
@@ -165,70 +171,70 @@ impl IndexWriterWrapper {
     }
 
     pub fn add_multi_i8s(&mut self, datas: &[i8], offset: i64) -> Result<()> {
-        let mut document = Document::default();
+        let mut document = TantivyDocument::default();
         for data in datas {
-            document.add_field_value(self.field, *data as i64);
+            document.add_field_value(self.field, &(*data as i64));
         }
         document.add_i64(self.id_field.unwrap(), offset);
         self.index_writer_add_document(document)
     }
 
     pub fn add_multi_i16s(&mut self, datas: &[i16], offset: i64) -> Result<()> {
-        let mut document = Document::default();
+        let mut document = TantivyDocument::default();
         for data in datas {
-            document.add_field_value(self.field, *data as i64);
+            document.add_field_value(self.field, &(*data as i64));
         }
         document.add_i64(self.id_field.unwrap(), offset);
         self.index_writer_add_document(document)
     }
 
     pub fn add_multi_i32s(&mut self, datas: &[i32], offset: i64) -> Result<()> {
-        let mut document = Document::default();
+        let mut document = TantivyDocument::default();
         for data in datas {
-            document.add_field_value(self.field, *data as i64);
+            document.add_field_value(self.field, &(*data as i64));
         }
         document.add_i64(self.id_field.unwrap(), offset);
         self.index_writer_add_document(document)
     }
 
     pub fn add_multi_i64s(&mut self, datas: &[i64], offset: i64) -> Result<()> {
-        let mut document = Document::default();
+        let mut document = TantivyDocument::default();
         for data in datas {
-            document.add_field_value(self.field, *data);
+            document.add_field_value(self.field, data);
         }
         document.add_i64(self.id_field.unwrap(), offset);
         self.index_writer_add_document(document)
     }
 
     pub fn add_multi_f32s(&mut self, datas: &[f32], offset: i64) -> Result<()> {
-        let mut document = Document::default();
+        let mut document = TantivyDocument::default();
         for data in datas {
-            document.add_field_value(self.field, *data as f64);
+            document.add_field_value(self.field, &(*data as f64));
         }
         document.add_i64(self.id_field.unwrap(), offset);
         self.index_writer_add_document(document)
     }
 
     pub fn add_multi_f64s(&mut self, datas: &[f64], offset: i64) -> Result<()> {
-        let mut document = Document::default();
+        let mut document = TantivyDocument::default();
         for data in datas {
-            document.add_field_value(self.field, *data);
+            document.add_field_value(self.field, data);
         }
         document.add_i64(self.id_field.unwrap(), offset);
         self.index_writer_add_document(document)
     }
 
     pub fn add_multi_bools(&mut self, datas: &[bool], offset: i64) -> Result<()> {
-        let mut document = Document::default();
+        let mut document = TantivyDocument::default();
         for data in datas {
-            document.add_field_value(self.field, *data);
+            document.add_field_value(self.field, data);
         }
         document.add_i64(self.id_field.unwrap(), offset);
         self.index_writer_add_document(document)
     }
 
     pub fn add_multi_keywords(&mut self, datas: &[*const c_char], offset: i64) -> Result<()> {
-        let mut document = Document::default();
+        let mut document = TantivyDocument::default();
         for element in datas {
             let data = unsafe { CStr::from_ptr(*element) };
             document.add_field_value(self.field, data.to_str()?);
