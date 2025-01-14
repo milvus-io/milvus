@@ -281,6 +281,8 @@ func (scheduler *taskScheduler) Add(task Task) error {
 		scheduler.segmentTasks[index] = task
 	}
 
+	scheduler.updateTaskMetrics()
+	log.Ctx(task.Context()).Info("task added", zap.String("task", task.String()))
 	task.RecordStartTs()
 	return nil
 }
