@@ -18,9 +18,9 @@ package msgdispatcher
 
 import (
 	"context"
+	"fmt"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -29,11 +29,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
-
-var ErrTooManyConsumers = errors.New("consumer number limit exceeded")
 
 type (
 	Pos     = msgpb.MsgPosition
@@ -82,8 +81,9 @@ func (c *client) Register(ctx context.Context, vchannel string, pos *Pos, subPos
 		go manager.Run()
 	}
 	// Check if the consumer number limit has been reached.
-	if manager.Num() >= paramtable.Get().MQCfg.MaxDispatcherNumPerPchannel.GetAsInt() {
-		return nil, ErrTooManyConsumers
+	limit := paramtable.Get().MQCfg.MaxDispatcherNumPerPchannel.GetAsInt()
+	if manager.Num() >= limit {
+		return nil, merr.WrapErrTooManyConsumers(vchannel, fmt.Sprintf("limit=%d", limit))
 	}
 	// Begin to register
 	ch, err := manager.Add(ctx, vchannel, pos, subPos)

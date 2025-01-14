@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -56,7 +57,7 @@ func newDmInputNode(initCtx context.Context, dispatcherClient msgdispatcher.Clie
 			input, err = dispatcherClient.Register(initCtx, dmNodeConfig.vChannelName, seekPos, common.SubscriptionPositionUnknown)
 			if err != nil {
 				log.Warn("datanode consume failed", zap.Error(err))
-				return errors.Is(err, msgdispatcher.ErrTooManyConsumers), err
+				return errors.Is(err, merr.ErrTooManyConsumers), err
 			}
 			return false, nil
 		}, retry.Sleep(paramtable.Get().MQCfg.RetrySleep.GetAsDuration(time.Second)), // 5 seconds
@@ -76,7 +77,7 @@ func newDmInputNode(initCtx context.Context, dispatcherClient msgdispatcher.Clie
 			input, err = dispatcherClient.Register(initCtx, dmNodeConfig.vChannelName, nil, common.SubscriptionPositionEarliest)
 			if err != nil {
 				log.Warn("datanode consume failed", zap.Error(err))
-				return errors.Is(err, msgdispatcher.ErrTooManyConsumers), err
+				return errors.Is(err, merr.ErrTooManyConsumers), err
 			}
 			return false, nil
 		}, retry.Sleep(paramtable.Get().MQCfg.RetrySleep.GetAsDuration(time.Second)), // 5 seconds
