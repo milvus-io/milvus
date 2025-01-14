@@ -17,9 +17,11 @@
 #include "index/IndexFactory.h"
 #include <cstdlib>
 #include <memory>
+#include <string>
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
 #include "common/Types.h"
+#include "index/JsonFlatIndex.h"
 #include "index/VectorMemIndex.h"
 #include "index/Utils.h"
 #include "index/Meta.h"
@@ -389,6 +391,11 @@ IndexFactory::CreateJsonIndex(
     const storage::FileManagerContext& file_manager_context) {
     AssertInfo(index_type == INVERTED_INDEX_TYPE,
                "Invalid index type for json index");
+
+    if (nested_path.empty()) {
+        // nested path is empty, use json flat index
+        return std::make_unique<JsonFlatIndex>(file_manager_context);
+    }
     switch (cast_dtype) {
         case DataType::BOOL:
             return std::make_unique<index::JsonInvertedIndex<bool>>(

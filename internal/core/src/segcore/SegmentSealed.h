@@ -17,6 +17,7 @@
 
 #include "common/LoadInfo.h"
 #include "index/JsonInvertedIndex.h"
+#include "index/JsonFlatIndex.h"
 #include "pb/segcore.pb.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Types.h"
@@ -61,18 +62,6 @@ class SegmentSealed : public SegmentInternalInterface {
         return SegmentType::Sealed;
     }
 
-    index::IndexBase*
-    chunk_index_impl(FieldId field_id,
-                     std::string path,
-                     int64_t chunk_id) const override {
-        JSONIndexKey key;
-        key.field_id = field_id;
-        key.nested_path = path;
-        AssertInfo(json_indexings_.find(key) != json_indexings_.end(),
-                   "Cannot find json index with path: " + path);
-        return json_indexings_.at(key).get();
-    }
-
     virtual bool
     HasIndex(FieldId field_id) const override = 0;
     bool
@@ -83,11 +72,30 @@ class SegmentSealed : public SegmentInternalInterface {
         key.field_id = field_id;
         key.nested_path = path;
         auto index = json_indexings_.find(key);
-        return index != json_indexings_.end() &&
+        bool has_index = index != json_indexings_.end() &&
                data_type == index->second->JsonCastType();
+        return has_index || HasIndex(field_id);
     }
 
  protected:
+    virtual const index::IndexBase*
+    chunk_index_impl(FieldId field_id, int64_t chunk_id) const override = 0;
+
+    const index::IndexBase*
+    chunk_index_impl(FieldId field_id,
+                     std::string path,
+                     int64_t chunk_id) const override {
+        JSONIndexKey key;
+        key.field_id = field_id;
+        key.nested_path = path;
+        // AssertInfo(json_indexings_.find(key) != json_indexings_.end(),
+        //            "Cannot find json index with path: " + path);
+        if (json_indexings_.find(key) != json_indexings_.end()) {
+            return json_indexings_.at(key).get();
+        }
+        return chunk_index_impl(field_id, chunk_id);
+    }
+
     struct JSONIndexKey {
         FieldId field_id;
         std::string nested_path;

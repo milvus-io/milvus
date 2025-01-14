@@ -7,7 +7,7 @@ use libc::c_char;
 use log::info;
 use tantivy::schema::{
     Field, IndexRecordOption, OwnedValue, Schema, SchemaBuilder, TextFieldIndexing, TextOptions,
-    FAST, INDEXED,
+    FAST, INDEXED, STRING,
 };
 use tantivy::{
     doc, tokenizer, Document, Index, IndexWriter, SingleSegmentIndexWriter, TantivyDocument,
@@ -46,6 +46,7 @@ fn schema_builder_add_field(
         TantivyDataType::Text => {
             panic!("text should be indexed with analyzer");
         }
+        TantivyDataType::JSON => schema_builder.add_json_field(&field_name, STRING | FAST),
     }
 }
 
@@ -174,6 +175,15 @@ impl IndexWriterWrapper {
             self.field => data,
             self.id_field.unwrap() => offset,
         ))
+    }
+
+    pub fn add_json(&mut self, data: &str, offset: i64) -> Result<()> {
+        let j = serde_json::from_str::<serde_json::Value>(data)?;
+        let _ = self.index_writer_add_document(doc!(
+            self.field => j,
+            self.id_field.unwrap() => offset,
+        ))?;
+        Ok(())
     }
 
     pub fn add_array_i8s(&mut self, datas: &[i8], offset: i64) -> Result<()> {
