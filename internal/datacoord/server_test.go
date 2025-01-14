@@ -2462,7 +2462,7 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 	svr.SetTiKVClient(globalTestTikv)
 
 	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-		return newMockDataNodeClient(0, nil)
+		return mocks.NewMockDataNodeClient(t), nil
 	}
 	svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 		return newMockRootCoordClient(), nil
@@ -2513,17 +2513,11 @@ func closeTestServer(t *testing.T, svr *Server) {
 
 func Test_CheckHealth(t *testing.T) {
 	getSessionManager := func(isHealthy bool) *session.DataNodeManagerImpl {
-		var client *mockDataNodeClient
+		var client *mocks.MockDataNodeClient
 		if isHealthy {
-			client = &mockDataNodeClient{
-				id:    1,
-				state: commonpb.StateCode_Healthy,
-			}
+			client = mocks.NewMockDataNodeClient(t)
 		} else {
-			client = &mockDataNodeClient{
-				id:    1,
-				state: commonpb.StateCode_Abnormal,
-			}
+			client = mocks.NewMockDataNodeClient(t)
 		}
 
 		sm := session.NewDataNodeManagerImpl(session.WithDataNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {

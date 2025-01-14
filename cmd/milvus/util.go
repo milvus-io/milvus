@@ -124,7 +124,7 @@ func removePidFile(lock *flock.Flock) {
 
 func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 	alias, enableRootCoord, enableQueryCoord, enableIndexCoord, enableDataCoord, enableQueryNode,
-		enableDataNode, enableIndexNode, enableProxy, enableStreamingNode := formatFlags(args, flags)
+		enableDataNode, enableProxy, enableStreamingNode := formatFlags(args, flags)
 
 	serverType := args[2]
 	role := roles.NewMilvusRoles()
@@ -146,8 +146,6 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableDataNode = true
 	case typeutil.IndexCoordRole:
 		role.EnableIndexCoord = true
-	case typeutil.IndexNodeRole:
-		role.EnableIndexNode = true
 	case typeutil.StreamingNodeRole:
 		streamingutil.MustEnableStreamingService()
 		role.EnableStreamingNode = true
@@ -159,7 +157,6 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableDataCoord = true
 		role.EnableDataNode = true
 		role.EnableIndexCoord = true
-		role.EnableIndexNode = true
 		if streamingutil.IsStreamingServiceEnabled() {
 			role.EnableStreamingNode = true
 		}
@@ -172,7 +169,6 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableIndexCoord = enableIndexCoord
 		role.EnableQueryNode = enableQueryNode
 		role.EnableDataNode = enableDataNode
-		role.EnableIndexNode = enableIndexNode
 		role.EnableProxy = enableProxy
 		role.EnableStreamingNode = enableStreamingNode
 	default:
@@ -184,7 +180,7 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 }
 
 func formatFlags(args []string, flags *flag.FlagSet) (alias string, enableRootCoord, enableQueryCoord,
-	enableIndexCoord, enableDataCoord, enableQueryNode, enableDataNode, enableIndexNode, enableProxy bool,
+	enableIndexCoord, enableDataCoord, enableQueryNode, enableDataNode, enableProxy bool,
 	enableStreamingNode bool,
 ) {
 	flags.StringVar(&alias, "alias", "", "set alias")
@@ -196,7 +192,6 @@ func formatFlags(args []string, flags *flag.FlagSet) (alias string, enableRootCo
 
 	flags.BoolVar(&enableQueryNode, typeutil.QueryNodeRole, false, "enable query node")
 	flags.BoolVar(&enableDataNode, typeutil.DataNodeRole, false, "enable data node")
-	flags.BoolVar(&enableIndexNode, typeutil.IndexNodeRole, false, "enable index node")
 	flags.BoolVar(&enableProxy, typeutil.ProxyRole, false, "enable proxy node")
 	flags.BoolVar(&enableStreamingNode, typeutil.StreamingNodeRole, false, "enable streaming node")
 

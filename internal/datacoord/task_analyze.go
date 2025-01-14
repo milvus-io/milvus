@@ -227,7 +227,7 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 	return true
 }
 
-func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeClient) bool {
+func (at *analyzeTask) AssignTask(ctx context.Context, client types.DataNodeClient) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
@@ -256,7 +256,7 @@ func (at *analyzeTask) setResult(result *workerpb.AnalyzeResult) {
 	at.taskInfo = result
 }
 
-func (at *analyzeTask) QueryResult(ctx context.Context, client types.IndexNodeClient) {
+func (at *analyzeTask) QueryResult(ctx context.Context, client types.DataNodeClient) {
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	resp, err := client.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
@@ -296,7 +296,7 @@ func (at *analyzeTask) QueryResult(ctx context.Context, client types.IndexNodeCl
 	at.SetState(indexpb.JobState_JobStateRetry, "analyze result is not in info response")
 }
 
-func (at *analyzeTask) DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool {
+func (at *analyzeTask) DropTaskOnWorker(ctx context.Context, client types.DataNodeClient) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{

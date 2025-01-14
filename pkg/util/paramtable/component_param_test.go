@@ -63,7 +63,7 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(DefaultGracefulStopTimeout))
 		assert.Equal(t, params.QueryNodeCfg.GracefulStopTimeout.GetAsInt64(), Params.GracefulStopTimeout.GetAsInt64())
-		assert.Equal(t, params.IndexNodeCfg.GracefulStopTimeout.GetAsInt64(), Params.GracefulStopTimeout.GetAsInt64())
+		assert.Equal(t, params.DataNodeCfg.GracefulStopTimeout.GetAsInt64(), Params.GracefulStopTimeout.GetAsInt64())
 		t.Logf("default grafeful stop timeout = %d", Params.GracefulStopTimeout.GetAsInt())
 		params.Save(Params.GracefulStopTimeout.Key, "50")
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(50))
@@ -601,8 +601,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})
 
-	t.Run("test indexNodeConfig", func(t *testing.T) {
-		Params := &params.IndexNodeCfg
+	t.Run("test indexConfig", func(t *testing.T) {
+		Params := &params.DataNodeCfg
 		params.Save(Params.GracefulStopTimeout.Key, "50")
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(50))
 
@@ -659,8 +659,8 @@ func TestCachedParam(t *testing.T) {
 	Init()
 	params := Get()
 
-	assert.True(t, params.IndexNodeCfg.EnableDisk.GetAsBool())
-	assert.True(t, params.IndexNodeCfg.EnableDisk.GetAsBool())
+	assert.True(t, params.DataNodeCfg.EnableDisk.GetAsBool())
+	assert.True(t, params.DataNodeCfg.EnableDisk.GetAsBool())
 
 	assert.Equal(t, 256*1024*1024, params.QueryCoordGrpcServerCfg.ServerMaxRecvSize.GetAsInt())
 	assert.Equal(t, 256*1024*1024, params.QueryCoordGrpcServerCfg.ServerMaxRecvSize.GetAsInt())

@@ -470,13 +470,13 @@ func (s *DataNodeServicesSuite) TestShowConfigurations() {
 	// test closed server
 	node := &DataNode{}
 	node.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
-	node.stateCode.Store(commonpb.StateCode_Abnormal)
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
 	resp, err := node.ShowConfigurations(s.ctx, req)
 	s.Assert().NoError(err)
 	s.Assert().False(merr.Ok(resp.GetStatus()))
 
-	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	resp, err = node.ShowConfigurations(s.ctx, req)
 	s.Assert().NoError(err)
 	s.Assert().True(merr.Ok(resp.GetStatus()))
@@ -490,12 +490,12 @@ func (s *DataNodeServicesSuite) TestGetMetrics() {
 	node.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
 	node.flowgraphManager = pipeline.NewFlowgraphManager()
 	// server is closed
-	node.stateCode.Store(commonpb.StateCode_Abnormal)
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	resp, err := node.GetMetrics(s.ctx, &milvuspb.GetMetricsRequest{})
 	s.Assert().NoError(err)
 	s.Assert().False(merr.Ok(resp.GetStatus()))
 
-	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	// failed to parse metric type
 	invalidRequest := "invalid request"

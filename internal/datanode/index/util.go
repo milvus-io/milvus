@@ -14,14 +14,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package index
 
+/*
+#cgo pkg-config: milvus_core
+
+#include <stdlib.h>
+#include <stdint.h>
+#include "common/init_c.h"
+#include "segcore/segcore_init_c.h"
+#include "indexbuilder/init_c.h"
+*/
+import "C"
 import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
+
+func getCurrentIndexVersion(v int32) int32 {
+	cCurrent := int32(C.GetCurrentIndexVersion())
+	if cCurrent < v {
+		return cCurrent
+	}
+	return v
+}
 
 func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType) (uint64, error) {
 	switch dataType {

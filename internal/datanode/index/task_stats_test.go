@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package index
 
 import (
 	"context"
@@ -119,9 +119,10 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 
 		ctx, cancel := context.WithCancel(context.Background())
 
-		testTaskKey := taskKey{ClusterID: s.clusterID, TaskID: 100}
-		node := &IndexNode{statsTasks: map[taskKey]*statsTaskInfo{testTaskKey: {segID: 1}}}
-		task := newStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
+		testTaskKey := Key{ClusterID: s.clusterID, TaskID: 100}
+		manager := NewManager(ctx)
+		manager.LoadOrStoreStatsTask(s.clusterID, testTaskKey.TaskID, &StatsTaskInfo{SegID: 1})
+		task := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
 			CollectionID:    s.collectionID,
 			PartitionID:     s.partitionID,
 			ClusterID:       s.clusterID,
@@ -130,7 +131,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			InsertLogs:      lo.Values(fBinlogs),
 			Schema:          s.schema,
 			NumRows:         1,
-		}, node, s.mockBinlogIO)
+		}, manager, s.mockBinlogIO)
 		err = task.PreExecute(ctx)
 		s.Require().NoError(err)
 		binlog, err := task.sortSegment(ctx)
@@ -138,11 +139,11 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 		s.Equal(5, len(binlog))
 
 		// check bm25 log
-		s.Equal(1, len(node.statsTasks))
-		for key, task := range node.statsTasks {
+		s.Equal(1, len(manager.statsTasks))
+		for key, task := range manager.statsTasks {
 			s.Equal(testTaskKey.ClusterID, key.ClusterID)
 			s.Equal(testTaskKey.TaskID, key.TaskID)
-			s.Equal(1, len(task.bm25Logs))
+			s.Equal(1, len(task.Bm25Logs))
 		}
 	})
 
@@ -163,9 +164,10 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 
 		ctx, cancel := context.WithCancel(context.Background())
 
-		testTaskKey := taskKey{ClusterID: s.clusterID, TaskID: 100}
-		node := &IndexNode{statsTasks: map[taskKey]*statsTaskInfo{testTaskKey: {segID: 1}}}
-		task := newStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
+		testTaskKey := Key{ClusterID: s.clusterID, TaskID: 100}
+		manager := NewManager(ctx)
+		manager.LoadOrStoreStatsTask(s.clusterID, testTaskKey.TaskID, &StatsTaskInfo{SegID: 1})
+		task := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
 			CollectionID:    s.collectionID,
 			PartitionID:     s.partitionID,
 			ClusterID:       s.clusterID,
@@ -174,7 +176,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			InsertLogs:      lo.Values(fBinlogs),
 			Schema:          s.schema,
 			NumRows:         1,
-		}, node, s.mockBinlogIO)
+		}, manager, s.mockBinlogIO)
 		err = task.PreExecute(ctx)
 		s.Require().NoError(err)
 		_, err = task.sortSegment(ctx)

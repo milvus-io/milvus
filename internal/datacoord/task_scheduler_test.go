@@ -781,7 +781,7 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 	// catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 
-	in := mocks.NewMockIndexNodeClient(s.T())
+	in := mocks.NewMockDataNodeClient(s.T())
 	in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, request *workerpb.QueryJobsV2Request, option ...grpc.CallOption) (*workerpb.QueryJobsV2Response, error) {
@@ -1030,7 +1030,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().DropAnalyzeTask(mock.Anything, mock.Anything).Return(nil)
 
-		in := mocks.NewMockIndexNodeClient(s.T())
+		in := mocks.NewMockDataNodeClient(s.T())
 
 		workerManager := session.NewMockWorkerManager(s.T())
 
@@ -1269,7 +1269,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		indexNodeTasks := make(map[int64]int)
 
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
-		in := mocks.NewMockIndexNodeClient(s.T())
+		in := mocks.NewMockDataNodeClient(s.T())
 		workerManager := session.NewMockWorkerManager(s.T())
 
 		mt := createMeta(catalog,
@@ -1454,7 +1454,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	ctx := context.Background()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
-	in := mocks.NewMockIndexNodeClient(s.T())
+	in := mocks.NewMockDataNodeClient(s.T())
 
 	workerManager := session.NewMockWorkerManager(s.T())
 	workerManager.EXPECT().PickClient().Return(s.nodeID, in)

@@ -14,11 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package datanode
 
 import (
 	"context"
-	"os"
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -29,104 +29,40 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-func TestComponentState(t *testing.T) {
-	var (
-		factory = &mockFactory{
-			chunkMgr: &mockChunkmgr{},
-		}
-		ctx = context.TODO()
-	)
-	paramtable.Init()
-	in := NewIndexNode(ctx, factory)
-	in.SetEtcdClient(getEtcdClient())
-	state, err := in.GetComponentStates(ctx, nil)
-	assert.NoError(t, err)
-	assert.Equal(t, state.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Abnormal)
-
-	assert.Nil(t, in.Init())
-	state, err = in.GetComponentStates(ctx, nil)
-	assert.NoError(t, err)
-	assert.Equal(t, state.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Initializing)
-
-	assert.Nil(t, in.Start())
-	state, err = in.GetComponentStates(ctx, nil)
-	assert.NoError(t, err)
-	assert.Equal(t, state.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Healthy)
-
-	assert.Nil(t, in.Stop())
-	assert.Nil(t, in.Stop())
-	state, err = in.GetComponentStates(ctx, nil)
-	assert.NoError(t, err)
-	assert.Equal(t, state.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Abnormal)
-}
-
-func TestGetTimeTickChannel(t *testing.T) {
-	var (
-		factory = &mockFactory{
-			chunkMgr: &mockChunkmgr{},
-		}
-		ctx = context.TODO()
-	)
-	paramtable.Init()
-	in := NewIndexNode(ctx, factory)
-	ret, err := in.GetTimeTickChannel(ctx, nil)
-	assert.NoError(t, err)
-	assert.Equal(t, ret.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-}
-
-func TestGetStatisticChannel(t *testing.T) {
-	var (
-		factory = &mockFactory{
-			chunkMgr: &mockChunkmgr{},
-		}
-		ctx = context.TODO()
-	)
-	paramtable.Init()
-	in := NewIndexNode(ctx, factory)
-
-	ret, err := in.GetStatisticsChannel(ctx, nil)
-	assert.NoError(t, err)
-	assert.Equal(t, ret.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-}
-
 func TestIndexTaskWhenStoppingNode(t *testing.T) {
-	var (
-		factory = &mockFactory{
-			chunkMgr: &mockChunkmgr{},
-		}
-		ctx = context.TODO()
-	)
+	ctx := context.TODO()
 	paramtable.Init()
-	in := NewIndexNode(ctx, factory)
+	manager := index.NewManager(ctx)
 
-	in.loadOrStoreIndexTask("cluster-1", 1, &indexTaskInfo{
-		state: commonpb.IndexState_InProgress,
+	manager.LoadOrStoreIndexTask("cluster-1", 1, &index.IndexTaskInfo{
+		State: commonpb.IndexState_InProgress,
 	})
-	in.loadOrStoreIndexTask("cluster-2", 2, &indexTaskInfo{
-		state: commonpb.IndexState_Finished,
+	manager.LoadOrStoreIndexTask("cluster-2", 2, &index.IndexTaskInfo{
+		State: commonpb.IndexState_Finished,
 	})
 
-	assert.True(t, in.hasInProgressTask())
+	assert.True(t, manager.HasInProgressTask())
 	go func() {
 		time.Sleep(2 * time.Second)
-		in.storeIndexTaskState("cluster-1", 1, commonpb.IndexState_Finished, "")
+		manager.StoreIndexTaskState("cluster-1", 1, commonpb.IndexState_Finished, "")
 	}()
 	noTaskChan := make(chan struct{})
 	go func() {
-		in.waitTaskFinish()
+		manager.WaitTaskFinish()
 		close(noTaskChan)
 	}()
 	select {
@@ -136,46 +72,7 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 	}
 }
 
-func TestGetSetAddress(t *testing.T) {
-	var (
-		factory = &mockFactory{
-			chunkMgr: &mockChunkmgr{},
-		}
-		ctx = context.TODO()
-	)
-	paramtable.Init()
-	in := NewIndexNode(ctx, factory)
-	in.SetAddress("address")
-	assert.Equal(t, "address", in.GetAddress())
-}
-
-func TestInitErr(t *testing.T) {
-	// var (
-	// 	factory = &mockFactory{}
-	// 	ctx     = context.TODO()
-	// )
-	// in, err := NewIndexNode(ctx, factory)
-	// assert.NoError(t, err)
-	// in.SetEtcdClient(getEtcdClient())
-	// assert.Error(t, in.Init())
-}
-
-func setup() {
-	startEmbedEtcd()
-}
-
-func teardown() {
-	stopEmbedEtcd()
-}
-
-func TestMain(m *testing.M) {
-	setup()
-	code := m.Run()
-	teardown()
-	os.Exit(code)
-}
-
-type IndexNodeSuite struct {
+type IndexServiceSuite struct {
 	suite.Suite
 
 	collID        int64
@@ -184,17 +81,17 @@ type IndexNodeSuite struct {
 	fieldID       int64
 	logID         int64
 	numRows       int64
-	data          []*Blob
-	in            *IndexNode
+	data          []*storage.Blob
+	in            *DataNode
 	storageConfig *indexpb.StorageConfig
 	cm            storage.ChunkManager
 }
 
-func Test_IndexNodeSuite(t *testing.T) {
-	suite.Run(t, new(IndexNodeSuite))
+func Test_IndexServiceSuite(t *testing.T) {
+	suite.Run(t, new(IndexServiceSuite))
 }
 
-func (s *IndexNodeSuite) SetupTest() {
+func (s *IndexServiceSuite) SetupTest() {
 	s.collID = 1
 	s.partID = 2
 	s.segID = 3
@@ -202,37 +99,35 @@ func (s *IndexNodeSuite) SetupTest() {
 	s.logID = 10000
 	s.numRows = 3000
 	paramtable.Init()
-	Params.MinioCfg.RootPath.SwapTempValue("indexnode-ut")
+	paramtable.Get().MinioCfg.RootPath.SwapTempValue("index-service-ut")
 
 	var err error
 	s.data, err = generateTestData(s.collID, s.partID, s.segID, 3000)
 	s.NoError(err)
 
 	s.storageConfig = &indexpb.StorageConfig{
-		Address:           Params.MinioCfg.Address.GetValue(),
-		AccessKeyID:       Params.MinioCfg.AccessKeyID.GetValue(),
-		SecretAccessKey:   Params.MinioCfg.SecretAccessKey.GetValue(),
-		UseSSL:            Params.MinioCfg.UseSSL.GetAsBool(),
-		SslCACert:         Params.MinioCfg.SslCACert.GetValue(),
-		BucketName:        Params.MinioCfg.BucketName.GetValue(),
-		RootPath:          Params.MinioCfg.RootPath.GetValue(),
-		UseIAM:            Params.MinioCfg.UseIAM.GetAsBool(),
-		IAMEndpoint:       Params.MinioCfg.IAMEndpoint.GetValue(),
-		StorageType:       Params.CommonCfg.StorageType.GetValue(),
-		Region:            Params.MinioCfg.Region.GetValue(),
-		UseVirtualHost:    Params.MinioCfg.UseVirtualHost.GetAsBool(),
-		CloudProvider:     Params.MinioCfg.CloudProvider.GetValue(),
-		RequestTimeoutMs:  Params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
-		GcpCredentialJSON: Params.MinioCfg.GcpCredentialJSON.GetValue(),
+		Address:           paramtable.Get().MinioCfg.Address.GetValue(),
+		AccessKeyID:       paramtable.Get().MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKey:   paramtable.Get().MinioCfg.SecretAccessKey.GetValue(),
+		UseSSL:            paramtable.Get().MinioCfg.UseSSL.GetAsBool(),
+		SslCACert:         paramtable.Get().MinioCfg.SslCACert.GetValue(),
+		BucketName:        paramtable.Get().MinioCfg.BucketName.GetValue(),
+		RootPath:          paramtable.Get().MinioCfg.RootPath.GetValue(),
+		UseIAM:            paramtable.Get().MinioCfg.UseIAM.GetAsBool(),
+		IAMEndpoint:       paramtable.Get().MinioCfg.IAMEndpoint.GetValue(),
+		StorageType:       paramtable.Get().CommonCfg.StorageType.GetValue(),
+		Region:            paramtable.Get().MinioCfg.Region.GetValue(),
+		UseVirtualHost:    paramtable.Get().MinioCfg.UseVirtualHost.GetAsBool(),
+		CloudProvider:     paramtable.Get().MinioCfg.CloudProvider.GetValue(),
+		RequestTimeoutMs:  paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt64(),
+		GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
 	}
 
 	var (
-		factory = &mockFactory{
-			chunkMgr: &mockChunkmgr{},
-		}
-		ctx = context.TODO()
+		factory = dependency.NewMockFactory(s.T())
+		ctx     = context.TODO()
 	)
-	s.in = NewIndexNode(ctx, factory)
+	s.in = NewDataNode(ctx, factory)
 
 	err = s.in.Init()
 	s.NoError(err)
@@ -252,16 +147,16 @@ func (s *IndexNodeSuite) SetupTest() {
 	}
 }
 
-func (s *IndexNodeSuite) TearDownSuite() {
-	err := s.cm.RemoveWithPrefix(context.Background(), "indexnode-ut")
+func (s *IndexServiceSuite) TearDownSuite() {
+	err := s.cm.RemoveWithPrefix(context.Background(), "index-service-ut")
 	s.NoError(err)
-	Params.MinioCfg.RootPath.SwapTempValue("files")
+	paramtable.Get().MinioCfg.RootPath.SwapTempValue("files")
 
 	err = s.in.Stop()
 	s.NoError(err)
 }
 
-func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
+func (s *IndexServiceSuite) Test_CreateIndexJob_Compatibility() {
 	s.Run("create vec index", func() {
 		ctx := context.Background()
 
@@ -271,7 +166,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 			s.NoError(err)
 			req := &workerpb.CreateJobRequest{
 				ClusterID:       "cluster1",
-				IndexFilePrefix: "indexnode-ut/index_files",
+				IndexFilePrefix: "index-service-ut/index_files",
 				BuildID:         buildID,
 				DataPaths:       []string{dataPath},
 				IndexVersion:    1,
@@ -332,7 +227,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 			buildID := int64(2)
 			req := &workerpb.CreateJobRequest{
 				ClusterID:       "cluster1",
-				IndexFilePrefix: "indexnode-ut/index_files",
+				IndexFilePrefix: "index-service-ut/index_files",
 				BuildID:         buildID,
 				DataPaths:       nil,
 				IndexVersion:    1,
@@ -401,7 +296,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 			buildID := int64(3)
 			req := &workerpb.CreateJobRequest{
 				ClusterID:       "cluster1",
-				IndexFilePrefix: "indexnode-ut/index_files",
+				IndexFilePrefix: "index-service-ut/index_files",
 				BuildID:         buildID,
 				IndexVersion:    1,
 				StorageConfig:   s.storageConfig,
@@ -473,7 +368,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 	})
 }
 
-func (s *IndexNodeSuite) Test_CreateIndexJob_ScalarIndex() {
+func (s *IndexServiceSuite) Test_CreateIndexJob_ScalarIndex() {
 	ctx := context.Background()
 
 	s.Run("int64 inverted", func() {
@@ -483,7 +378,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_ScalarIndex() {
 		s.NoError(err)
 		req := &workerpb.CreateJobRequest{
 			ClusterID:       "cluster1",
-			IndexFilePrefix: "indexnode-ut/index_files",
+			IndexFilePrefix: "index-service-ut/index_files",
 			BuildID:         buildID,
 			DataPaths:       []string{dataPath},
 			IndexVersion:    1,
@@ -534,7 +429,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_ScalarIndex() {
 	})
 }
 
-func (s *IndexNodeSuite) Test_CreateAnalyzeTask() {
+func (s *IndexServiceSuite) Test_CreateAnalyzeTask() {
 	ctx := context.Background()
 
 	s.Run("normal case", func() {
@@ -605,7 +500,7 @@ func (s *IndexNodeSuite) Test_CreateAnalyzeTask() {
 	})
 }
 
-func (s *IndexNodeSuite) Test_CreateStatsTask() {
+func (s *IndexServiceSuite) Test_CreateStatsTask() {
 	ctx := context.Background()
 
 	fieldBinlogs := make([]*datapb.FieldBinlog, 0)
@@ -686,4 +581,149 @@ func (s *IndexNodeSuite) Test_CreateStatsTask() {
 		err = merr.Error(status)
 		s.NoError(err)
 	})
+}
+
+func generateTestSchema() *schemapb.CollectionSchema {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.TimeStampField, Name: "ts", DataType: schemapb.DataType_Int64},
+		{FieldID: common.RowIDField, Name: "rowid", DataType: schemapb.DataType_Int64},
+		{FieldID: 100, Name: "bool", DataType: schemapb.DataType_Bool},
+		{FieldID: 101, Name: "int8", DataType: schemapb.DataType_Int8},
+		{FieldID: 102, Name: "int16", DataType: schemapb.DataType_Int16},
+		{FieldID: 103, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 104, Name: "float", DataType: schemapb.DataType_Float},
+		{FieldID: 105, Name: "double", DataType: schemapb.DataType_Double},
+		{FieldID: 106, Name: "varchar", DataType: schemapb.DataType_VarChar},
+		{FieldID: 107, Name: "string", DataType: schemapb.DataType_String},
+		{FieldID: 108, Name: "array", DataType: schemapb.DataType_Array},
+		{FieldID: 109, Name: "json", DataType: schemapb.DataType_JSON},
+		{FieldID: 110, Name: "int32", DataType: schemapb.DataType_Int32},
+		{FieldID: 111, Name: "floatVector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "8"},
+		}},
+		{FieldID: 112, Name: "binaryVector", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "8"},
+		}},
+		{FieldID: 113, Name: "float16Vector", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "8"},
+		}},
+		{FieldID: 114, Name: "bf16Vector", DataType: schemapb.DataType_BFloat16Vector, TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "8"},
+		}},
+		{FieldID: 115, Name: "sparseFloatVector", DataType: schemapb.DataType_SparseFloatVector, TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "28433"},
+		}},
+	}}
+
+	return schema
+}
+
+func generateTestData(collID, partID, segID int64, num int) ([]*storage.Blob, error) {
+	insertCodec := storage.NewInsertCodecWithSchema(&etcdpb.CollectionMeta{ID: collID, Schema: generateTestSchema()})
+
+	var (
+		field0 []int64
+		field1 []int64
+
+		field10 []bool
+		field11 []int8
+		field12 []int16
+		field13 []int64
+		field14 []float32
+		field15 []float64
+		field16 []string
+		field17 []string
+		field18 []*schemapb.ScalarField
+		field19 [][]byte
+
+		field101 []int32
+		field102 []float32
+		field103 []byte
+
+		field104 []byte
+		field105 []byte
+		field106 [][]byte
+	)
+
+	for i := 1; i <= num; i++ {
+		field0 = append(field0, int64(i))
+		field1 = append(field1, int64(i))
+		field10 = append(field10, true)
+		field11 = append(field11, int8(i))
+		field12 = append(field12, int16(i))
+		field13 = append(field13, int64(i))
+		field14 = append(field14, float32(i))
+		field15 = append(field15, float64(i))
+		field16 = append(field16, fmt.Sprint(i))
+		field17 = append(field17, fmt.Sprint(i))
+
+		arr := &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{Data: []int32{int32(i), int32(i), int32(i)}},
+			},
+		}
+		field18 = append(field18, arr)
+
+		field19 = append(field19, []byte{byte(i)})
+		field101 = append(field101, int32(i))
+
+		f102 := make([]float32, 8)
+		for j := range f102 {
+			f102[j] = float32(i)
+		}
+
+		field102 = append(field102, f102...)
+		field103 = append(field103, 0xff)
+
+		f104 := make([]byte, 16)
+		for j := range f104 {
+			f104[j] = byte(i)
+		}
+		field104 = append(field104, f104...)
+		field105 = append(field105, f104...)
+
+		field106 = append(field106, typeutil.CreateSparseFloatRow([]uint32{0, uint32(18 * i), uint32(284 * i)}, []float32{1.1, 0.3, 2.4}))
+	}
+
+	data := &storage.InsertData{Data: map[int64]storage.FieldData{
+		common.RowIDField:     &storage.Int64FieldData{Data: field0},
+		common.TimeStampField: &storage.Int64FieldData{Data: field1},
+
+		100: &storage.BoolFieldData{Data: field10},
+		101: &storage.Int8FieldData{Data: field11},
+		102: &storage.Int16FieldData{Data: field12},
+		103: &storage.Int64FieldData{Data: field13},
+		104: &storage.FloatFieldData{Data: field14},
+		105: &storage.DoubleFieldData{Data: field15},
+		106: &storage.StringFieldData{Data: field16},
+		107: &storage.StringFieldData{Data: field17},
+		108: &storage.ArrayFieldData{Data: field18},
+		109: &storage.JSONFieldData{Data: field19},
+		110: &storage.Int32FieldData{Data: field101},
+		111: &storage.FloatVectorFieldData{
+			Data: field102,
+			Dim:  8,
+		},
+		112: &storage.BinaryVectorFieldData{
+			Data: field103,
+			Dim:  8,
+		},
+		113: &storage.Float16VectorFieldData{
+			Data: field104,
+			Dim:  8,
+		},
+		114: &storage.BFloat16VectorFieldData{
+			Data: field105,
+			Dim:  8,
+		},
+		115: &storage.SparseFloatVectorFieldData{
+			SparseFloatArray: schemapb.SparseFloatArray{
+				Dim:      28433,
+				Contents: field106,
+			},
+		},
+	}}
+
+	blobs, err := insertCodec.Serialize(partID, segID, data)
+	return blobs, err
 }

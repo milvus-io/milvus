@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
+
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
@@ -160,6 +162,7 @@ func (s *Server) startGrpcLoop() {
 	grpcOpts = append(grpcOpts, utils.EnableInternalTLS("DataNode"))
 	s.grpcServer = grpc.NewServer(grpcOpts...)
 	datapb.RegisterDataNodeServer(s.grpcServer, s)
+	workerpb.RegisterIndexNodeServer(s.grpcServer, s)
 
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
@@ -409,4 +412,36 @@ func (s *Server) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest) (*
 
 func (s *Server) DropCompactionPlan(ctx context.Context, req *datapb.DropCompactionPlanRequest) (*commonpb.Status, error) {
 	return s.datanode.DropCompactionPlan(ctx, req)
+}
+
+// CreateJob sends the create index request to DataNode.
+func (s *Server) CreateJob(ctx context.Context, req *workerpb.CreateJobRequest) (*commonpb.Status, error) {
+	return s.datanode.CreateJob(ctx, req)
+}
+
+// QueryJobs queries index jobs statues
+func (s *Server) QueryJobs(ctx context.Context, req *workerpb.QueryJobsRequest) (*workerpb.QueryJobsResponse, error) {
+	return s.datanode.QueryJobs(ctx, req)
+}
+
+// DropJobs drops index build jobs
+func (s *Server) DropJobs(ctx context.Context, req *workerpb.DropJobsRequest) (*commonpb.Status, error) {
+	return s.datanode.DropJobs(ctx, req)
+}
+
+// GetJobStats gets job's statistics
+func (s *Server) GetJobStats(ctx context.Context, req *workerpb.GetJobStatsRequest) (*workerpb.GetJobStatsResponse, error) {
+	return s.datanode.GetJobStats(ctx, req)
+}
+
+func (s *Server) CreateJobV2(ctx context.Context, request *workerpb.CreateJobV2Request) (*commonpb.Status, error) {
+	return s.datanode.CreateJobV2(ctx, request)
+}
+
+func (s *Server) QueryJobsV2(ctx context.Context, request *workerpb.QueryJobsV2Request) (*workerpb.QueryJobsV2Response, error) {
+	return s.datanode.QueryJobsV2(ctx, request)
+}
+
+func (s *Server) DropJobsV2(ctx context.Context, request *workerpb.DropJobsV2Request) (*commonpb.Status, error) {
+	return s.datanode.DropJobsV2(ctx, request)
 }

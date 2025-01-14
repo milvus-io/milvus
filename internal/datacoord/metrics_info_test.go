@@ -20,6 +20,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/mocks"
+
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/gjson"
@@ -52,18 +54,6 @@ func (c *mockMetricDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb
 	return c.mock()
 }
 
-type mockMetricIndexNodeClient struct {
-	types.IndexNodeClient
-	mock func() (*milvuspb.GetMetricsResponse, error)
-}
-
-func (m *mockMetricIndexNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	if m.mock == nil {
-		return m.IndexNodeClient.GetMetrics(ctx, req)
-	}
-	return m.mock()
-}
-
 func TestGetDataNodeMetrics(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
@@ -79,7 +69,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	assert.Error(t, err)
 
 	creator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-		return newMockDataNodeClient(100, nil)
+		return mocks.NewMockDataNodeClient(t), nil
 	}
 
 	// mock datanode client
@@ -142,7 +132,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 	assert.Error(t, err)
 
 	// return error
-	info, err := svr.getIndexNodeMetrics(ctx, req, &mockMetricIndexNodeClient{mock: func() (*milvuspb.GetMetricsResponse, error) {
+	info, err := svr.getIndexNodeMetrics(ctx, req, &mockMetricDataNodeClient{mock: func() (*milvuspb.GetMetricsResponse, error) {
 		return nil, errors.New("mock error")
 	}})
 	assert.NoError(t, err)
@@ -150,7 +140,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 
 	// failed
 	mockErr := errors.New("mocked error")
-	info, err = svr.getIndexNodeMetrics(ctx, req, &mockMetricIndexNodeClient{
+	info, err = svr.getIndexNodeMetrics(ctx, req, &mockMetricDataNodeClient{
 		mock: func() (*milvuspb.GetMetricsResponse, error) {
 			return &milvuspb.GetMetricsResponse{
 				Status:        merr.Status(mockErr),
@@ -163,7 +153,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
 
 	// return unexpected
-	info, err = svr.getIndexNodeMetrics(ctx, req, &mockMetricIndexNodeClient{
+	info, err = svr.getIndexNodeMetrics(ctx, req, &mockMetricDataNodeClient{
 		mock: func() (*milvuspb.GetMetricsResponse, error) {
 			return &milvuspb.GetMetricsResponse{
 				Status:        merr.Success(),
@@ -177,7 +167,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
 
 	// success
-	info, err = svr.getIndexNodeMetrics(ctx, req, &mockMetricIndexNodeClient{
+	info, err = svr.getIndexNodeMetrics(ctx, req, &mockMetricDataNodeClient{
 		mock: func() (*milvuspb.GetMetricsResponse, error) {
 			nodeID = UniqueID(100)
 

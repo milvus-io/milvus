@@ -499,19 +499,6 @@ indexCoord:
   segment:
     minSegmentNumRowsToEnableIndex: 1024 # It's a threshold. When the segment num rows is less than this value, the segment will not be indexed
 
-indexNode:
-  scheduler:
-    buildParallel: 1
-  enableDisk: true # enable index node build disk vector index
-  maxDiskUsagePercentage: 95
-  ip:  # TCP/IP address of indexNode. If not specified, use the first unicastable address
-  port: 21121 # TCP port of indexNode
-  grpc:
-    serverMaxSendSize: 536870912 # The maximum size of each RPC request that the indexNode can send, unit: byte
-    serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the indexNode can receive, unit: byte
-    clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on indexNode can send, unit: byte
-    clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on indexNode can receive, unit: byte
-
 dataCoord:
   channel:
     watchTimeoutInterval: 300 # Timeout on watching channels (in seconds). Datanode tickler update watch progress will reset timeout timer.
@@ -694,6 +681,10 @@ dataNode:
   bloomFilterApplyParallelFactor: 4 # parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM
   storage:
     deltalog: json # deltalog format, options: [json, parquet]
+  scheduler:
+    buildParallel: 1
+  enableDisk: true # enable build disk vector index
+  maxDiskUsagePercentage: 95
   ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address
   port: 21124 # TCP port of dataNode
   grpc:

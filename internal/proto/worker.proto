@@ -13,12 +13,6 @@ import "index_coord.proto";
 
 
 service IndexNode {
-  rpc GetComponentStates(milvus.GetComponentStatesRequest)
-      returns (milvus.ComponentStates) {
-  }
-  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest)
-      returns (milvus.StringResponse) {
-  }
   rpc CreateJob(CreateJobRequest) returns (common.Status) {
   }
   rpc QueryJobs(QueryJobsRequest) returns (QueryJobsResponse) {
@@ -27,15 +21,6 @@ service IndexNode {
   }
   rpc GetJobStats(GetJobStatsRequest) returns (GetJobStatsResponse) {
   }
-
-  rpc ShowConfigurations(internal.ShowConfigurationsRequest)
-      returns (internal.ShowConfigurationsResponse) {
-  }
-  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
-  rpc GetMetrics(milvus.GetMetricsRequest)
-      returns (milvus.GetMetricsResponse) {
-  }
-
   rpc CreateJobV2(CreateJobV2Request) returns (common.Status) {
   }
   rpc QueryJobsV2(QueryJobsV2Request) returns (QueryJobsV2Response) {

@@ -211,7 +211,7 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 	return true
 }
 
-func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClient) bool {
+func (st *statsTask) AssignTask(ctx context.Context, client types.DataNodeClient) bool {
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
@@ -234,7 +234,7 @@ func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClien
 	return true
 }
 
-func (st *statsTask) QueryResult(ctx context.Context, client types.IndexNodeClient) {
+func (st *statsTask) QueryResult(ctx context.Context, client types.DataNodeClient) {
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
 	resp, err := client.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
@@ -270,7 +270,7 @@ func (st *statsTask) QueryResult(ctx context.Context, client types.IndexNodeClie
 	st.SetState(indexpb.JobState_JobStateRetry, "stats task is not in info response")
 }
 
-func (st *statsTask) DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool {
+func (st *statsTask) DropTaskOnWorker(ctx context.Context, client types.DataNodeClient) bool {
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
 	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{

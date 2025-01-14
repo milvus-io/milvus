@@ -14,24 +14,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package index
 
 import (
 	"context"
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var (
 	errCancel      = fmt.Errorf("canceled")
-	diskUsageRatio = 4.0
+	DiskUsageRatio = 4.0
 )
 
-type Blob = storage.Blob
+type Key struct {
+	ClusterID string
+	TaskID    typeutil.UniqueID
+}
 
-type task interface {
+type Task interface {
 	Ctx() context.Context
 	Name() string
 	OnEnqueue(context.Context) error

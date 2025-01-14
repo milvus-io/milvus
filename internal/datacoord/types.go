@@ -35,9 +35,9 @@ type Task interface {
 	GetFailReason() string
 	UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error
 	UpdateMetaBuildingState(meta *meta) error
-	AssignTask(ctx context.Context, client types.IndexNodeClient) bool
-	QueryResult(ctx context.Context, client types.IndexNodeClient)
-	DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool
+	AssignTask(ctx context.Context, client types.DataNodeClient) bool
+	QueryResult(ctx context.Context, client types.DataNodeClient)
+	DropTaskOnWorker(ctx context.Context, client types.DataNodeClient) bool
 	SetJobInfo(meta *meta) error
 	SetQueueTime(time.Time)
 	GetQueueTime() time.Time

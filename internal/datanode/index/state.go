@@ -14,45 +14,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package index
 
-import (
-	"math/rand"
-	"testing"
+type TaskState int32
 
-	"github.com/stretchr/testify/suite"
+const (
+	TaskStateNormal  TaskState = 0
+	TaskStateAbandon TaskState = 1
+	TaskStateRetry   TaskState = 2
+	TaskStateFailed  TaskState = 3
 )
 
-type utilSuite struct {
-	suite.Suite
+var TaskStateNames = map[TaskState]string{
+	0: "Normal",
+	1: "Abandon",
+	2: "Retry",
+	3: "Failed",
 }
 
-func (s *utilSuite) Test_mapToKVPairs() {
-	indexParams := map[string]string{
-		"index_type": "IVF_FLAT",
-		"dim":        "128",
-		"nlist":      "1024",
+func (x TaskState) String() string {
+	ret, ok := TaskStateNames[x]
+	if !ok {
+		return "None"
 	}
-
-	s.Equal(3, len(mapToKVPairs(indexParams)))
-}
-
-func Test_utilSuite(t *testing.T) {
-	suite.Run(t, new(utilSuite))
-}
-
-func generateFloats(num int) []float32 {
-	data := make([]float32, num)
-	for i := 0; i < num; i++ {
-		data[i] = rand.Float32()
-	}
-	return data
-}
-
-func generateLongs(num int) []int64 {
-	data := make([]int64, num)
-	for i := 0; i < num; i++ {
-		data[i] = rand.Int63()
-	}
-	return data
+	return ret
 }

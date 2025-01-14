@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
-	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -147,7 +146,6 @@ type Server struct {
 	activateFunc        func() error
 
 	dataNodeCreator        session.DataNodeCreatorFunc
-	indexNodeCreator       session.IndexNodeCreatorFunc
 	rootCoordClientCreator rootCoordCreatorFunc
 	// indexCoord             types.IndexCoord
 
@@ -210,7 +208,6 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		flushCh:                make(chan UniqueID, 1024),
 		notifyIndexChan:        make(chan UniqueID, 1024),
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
-		indexNodeCreator:       defaultIndexNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
 		metricsCacheManager:    metricsinfo.NewMetricsCacheManager(),
 		enableActiveStandBy:    Params.DataCoordCfg.EnableActiveStandby.GetAsBool(),
@@ -225,11 +222,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 }
 
 func defaultDataNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-	return datanodeclient.NewClient(ctx, addr, nodeID)
-}
-
-func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error) {
-	return indexnodeclient.NewClient(ctx, addr, nodeID, Params.DataCoordCfg.WithCredential.GetAsBool())
+	return datanodeclient.NewClient(ctx, addr, nodeID, Params.DataCoordCfg.WithCredential.GetAsBool())
 }
 
 func defaultRootCoordCreatorFunc(ctx context.Context) (types.RootCoordClient, error) {
@@ -517,10 +510,6 @@ func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (type
 	s.dataNodeCreator = f
 }
 
-func (s *Server) SetIndexNodeCreator(f func(context.Context, string, int64) (types.IndexNodeClient, error)) {
-	s.indexNodeCreator = f
-}
-
 func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
 	cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(s.ctx)
@@ -688,7 +677,7 @@ func (s *Server) initJobManager() {
 
 func (s *Server) initIndexNodeManager() {
 	if s.indexNodeManager == nil {
-		s.indexNodeManager = session.NewNodeManager(s.ctx, s.indexNodeCreator)
+		s.indexNodeManager = session.NewNodeManager(s.ctx, s.dataNodeCreator)
 	}
 }
 

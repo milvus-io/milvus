@@ -41,8 +41,6 @@ import (
 	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
 	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
-	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
-	grpcindexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	grpcproxy "github.com/milvus-io/milvus/internal/distributed/proxy"
 	grpcproxyclient "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	grpcquerycoord "github.com/milvus-io/milvus/internal/distributed/querycoord"
@@ -114,12 +112,10 @@ type MiniClusterV2 struct {
 	ProxyClient     types.ProxyClient
 	DataNodeClient  types.DataNodeClient
 	QueryNodeClient types.QueryNodeClient
-	IndexNodeClient types.IndexNodeClient
 
 	DataNode      *grpcdatanode.Server
 	StreamingNode *streamingnode.Server
 	QueryNode     *grpcquerynode.Server
-	IndexNode     *grpcindexnode.Server
 
 	MetaWatcher    MetaWatcher
 	ptmu           sync.Mutex
@@ -186,14 +182,12 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 	params.ProxyGrpcServerCfg.IP = "localhost"
 	params.QueryNodeGrpcServerCfg.IP = "localhost"
 	params.DataNodeGrpcServerCfg.IP = "localhost"
-	params.IndexNodeGrpcServerCfg.IP = "localhost"
 	params.StreamingNodeGrpcServerCfg.IP = "localhost"
 	params.Save(params.RootCoordGrpcServerCfg.Port.Key, fmt.Sprint(ports[0]))
 	params.Save(params.DataCoordGrpcServerCfg.Port.Key, fmt.Sprint(ports[1]))
 	params.Save(params.QueryCoordGrpcServerCfg.Port.Key, fmt.Sprint(ports[2]))
 	params.Save(params.DataNodeGrpcServerCfg.Port.Key, fmt.Sprint(ports[3]))
 	params.Save(params.QueryNodeGrpcServerCfg.Port.Key, fmt.Sprint(ports[4]))
-	params.Save(params.IndexNodeGrpcServerCfg.Port.Key, fmt.Sprint(ports[5]))
 	params.Save(params.ProxyGrpcServerCfg.Port.Key, fmt.Sprint(ports[6]))
 
 	// setup clients
@@ -214,15 +208,11 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 	if err != nil {
 		return nil, err
 	}
-	cluster.DataNodeClient, err = grpcdatanodeclient.NewClient(ctx, paramtable.Get().DataNodeGrpcClientCfg.GetAddress(), 0)
+	cluster.DataNodeClient, err = grpcdatanodeclient.NewClient(ctx, paramtable.Get().DataNodeGrpcClientCfg.GetAddress(), 0, false)
 	if err != nil {
 		return nil, err
 	}
 	cluster.QueryNodeClient, err = grpcquerynodeclient.NewClient(ctx, paramtable.Get().QueryNodeGrpcClientCfg.GetAddress(), 0)
-	if err != nil {
-		return nil, err
-	}
-	cluster.IndexNodeClient, err = grpcindexnodeclient.NewClient(ctx, paramtable.Get().IndexNodeGrpcClientCfg.GetAddress(), 0, false)
 	if err != nil {
 		return nil, err
 	}
@@ -262,10 +252,6 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 		}
 	}
 	cluster.QueryNode, err = grpcquerynode.NewServer(ctx, cluster.factory)
-	if err != nil {
-		return nil, err
-	}
-	cluster.IndexNode, err = grpcindexnode.NewServer(ctx, cluster.factory)
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +335,6 @@ func (cluster *MiniClusterV2) Start() error {
 	runComponent(cluster.QueryCoord)
 	runComponent(cluster.DataNode)
 	runComponent(cluster.QueryNode)
-	runComponent(cluster.IndexNode)
 	runComponent(cluster.Proxy)
 
 	ctx2, cancel := context.WithTimeout(context.Background(), time.Second*120)
@@ -489,9 +474,6 @@ func (cluster *MiniClusterV2) Stop() error {
 	if streamingutil.IsStreamingServiceEnabled() {
 		streaming.Release()
 	}
-
-	cluster.IndexNode.Stop()
-	log.Info("mini cluster indexNode stopped")
 
 	cluster.EtcdCli.KV.Delete(cluster.ctx, params.EtcdCfg.RootPath.GetValue(), clientv3.WithPrefix())
 	defer cluster.EtcdCli.Close()

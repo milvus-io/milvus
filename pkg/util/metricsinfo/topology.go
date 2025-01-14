@@ -95,9 +95,8 @@ type IndexCoordTopology struct {
 
 // DataClusterTopology shows the topology between DataCoord and DataNodes
 type DataClusterTopology struct {
-	Self                DataCoordInfos   `json:"self"`
-	ConnectedDataNodes  []DataNodeInfos  `json:"connected_data_nodes"`
-	ConnectedIndexNodes []IndexNodeInfos `json:"connected_index_nodes"`
+	Self               DataCoordInfos  `json:"self"`
+	ConnectedDataNodes []DataNodeInfos `json:"connected_data_nodes"`
 }
 
 // DataCoordTopology shows the whole metrics of index cluster

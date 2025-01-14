@@ -151,7 +151,6 @@ type MilvusRoles struct {
 	EnableDataCoord     bool `env:"ENABLE_DATA_COORD"`
 	EnableDataNode      bool `env:"ENABLE_DATA_NODE"`
 	EnableIndexCoord    bool `env:"ENABLE_INDEX_COORD"`
-	EnableIndexNode     bool `env:"ENABLE_INDEX_NODE"`
 	EnableStreamingNode bool `env:"ENABLE_STREAMING_NODE"`
 
 	Local    bool
@@ -230,17 +229,6 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, wg *sync.
 func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
 	wg.Add(1)
 	return runComponent(ctx, localMsg, wg, components.NewIndexCoord, func(registry *prometheus.Registry) {})
-}
-
-func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
-	wg.Add(1)
-	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
-	indexDataLocalPath := filepath.Join(rootPath, typeutil.IndexNodeRole)
-	cleanLocalDir(indexDataLocalPath)
-	cleanLocalDir(TmpInvertedIndexPrefix)
-	cleanLocalDir(TmpTextLogPrefix)
-
-	return runComponent(ctx, localMsg, wg, components.NewIndexNode, metrics.RegisterIndexNode)
 }
 
 func (mr *MilvusRoles) setupLogger() {
@@ -409,7 +397,6 @@ func (mr *MilvusRoles) Run() {
 		mr.EnableDataCoord,
 		mr.EnableDataNode,
 		mr.EnableIndexCoord,
-		mr.EnableIndexNode,
 		mr.EnableStreamingNode,
 	}
 	enableComponents = lo.Filter(enableComponents, func(v bool, _ int) bool {
@@ -440,7 +427,7 @@ func (mr *MilvusRoles) Run() {
 
 	componentMap := make(map[string]component)
 	var rootCoord, queryCoord, indexCoord, dataCoord component
-	var proxy, dataNode, indexNode, queryNode, streamingNode component
+	var proxy, dataNode, queryNode, streamingNode component
 	if mr.EnableRootCoord {
 		rootCoord = mr.runRootCoord(ctx, local, &wg)
 		componentMap[typeutil.RootCoordRole] = rootCoord
@@ -475,11 +462,6 @@ func (mr *MilvusRoles) Run() {
 		dataNode = mr.runDataNode(ctx, local, &wg)
 		componentMap[typeutil.DataNodeRole] = dataNode
 		paramtable.SetLocalComponentEnabled(typeutil.DataNodeRole)
-	}
-	if mr.EnableIndexNode {
-		indexNode = mr.runIndexNode(ctx, local, &wg)
-		componentMap[typeutil.IndexNodeRole] = indexNode
-		paramtable.SetLocalComponentEnabled(typeutil.IndexNodeRole)
 	}
 
 	if mr.EnableProxy {
@@ -565,7 +547,7 @@ func (mr *MilvusRoles) Run() {
 	log.Info("All coordinators have stopped")
 
 	// stop nodes
-	nodes := []component{queryNode, indexNode, dataNode, streamingNode}
+	nodes := []component{queryNode, dataNode, streamingNode}
 	for idx, node := range nodes {
 		if node != nil {
 			log.Info("stop node", zap.Int("idx", idx), zap.Any("node", node))
@@ -607,9 +589,6 @@ func (mr *MilvusRoles) GetRoles() []string {
 	}
 	if mr.EnableIndexCoord {
 		roles = append(roles, typeutil.IndexCoordRole)
-	}
-	if mr.EnableIndexNode {
-		roles = append(roles, typeutil.IndexNodeRole)
 	}
 	return roles
 }

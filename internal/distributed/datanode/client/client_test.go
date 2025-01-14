@@ -20,23 +20,27 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
+
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func Test_NewClient(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
-	client, err := NewClient(ctx, "", 1)
+	client, err := NewClient(ctx, "", 1, false)
 	assert.Nil(t, client)
 	assert.Error(t, err)
 
-	client, err = NewClient(ctx, "test", 2)
+	client, err = NewClient(ctx, "test", 2, false)
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
@@ -88,39 +92,148 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r14, err)
 	}
 
-	client.(*Client).grpcClient = &mock.GRPCClientBase[datapb.DataNodeClient]{
-		GetGrpcClientErr: errors.New("dummy"),
-	}
+	client.(*Client).grpcClient = mocks.NewMockGrpcClient[DataNodeClient](t)
 
-	newFunc1 := func(cc *grpc.ClientConn) datapb.DataNodeClient {
-		return &mock.GrpcDataNodeClient{Err: nil}
+	newFunc1 := func(cc *grpc.ClientConn) DataNodeClient {
+		return DataNodeClient{
+			DataNodeClient:  mocks.NewMockDataNodeClient(t),
+			IndexNodeClient: mocks.NewMockDataNodeClient(t),
+		}
 	}
 	client.(*Client).grpcClient.SetNewGrpcClientFunc(newFunc1)
 
 	checkFunc(false)
 
-	client.(*Client).grpcClient = &mock.GRPCClientBase[datapb.DataNodeClient]{
-		GetGrpcClientErr: nil,
-	}
+	client.(*Client).grpcClient = mocks.NewMockGrpcClient[DataNodeClient](t)
 
-	newFunc2 := func(cc *grpc.ClientConn) datapb.DataNodeClient {
-		return &mock.GrpcDataNodeClient{Err: errors.New("dummy")}
+	newFunc2 := func(cc *grpc.ClientConn) DataNodeClient {
+		return DataNodeClient{
+			DataNodeClient:  mocks.NewMockDataNodeClient(t),
+			IndexNodeClient: mocks.NewMockDataNodeClient(t),
+		}
 	}
 
 	client.(*Client).grpcClient.SetNewGrpcClientFunc(newFunc2)
 
 	checkFunc(false)
 
-	client.(*Client).grpcClient = &mock.GRPCClientBase[datapb.DataNodeClient]{
-		GetGrpcClientErr: nil,
-	}
+	client.(*Client).grpcClient = mocks.NewMockGrpcClient[DataNodeClient](t)
 
-	newFunc3 := func(cc *grpc.ClientConn) datapb.DataNodeClient {
-		return &mock.GrpcDataNodeClient{Err: nil}
+	newFunc3 := func(cc *grpc.ClientConn) DataNodeClient {
+		return DataNodeClient{
+			DataNodeClient:  mocks.NewMockDataNodeClient(t),
+			IndexNodeClient: mocks.NewMockDataNodeClient(t),
+		}
 	}
 	client.(*Client).grpcClient.SetNewGrpcClientFunc(newFunc3)
 
 	checkFunc(true)
+
+	err = client.Close()
+	assert.NoError(t, err)
+}
+
+func TestIndexClient(t *testing.T) {
+	ctx := context.Background()
+	client, err := NewClient(ctx, "localhost:1234", 1, false)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+
+	mockIN := mocks.NewMockDataNodeClient(t)
+
+	mockGrpcClient := mocks.NewMockGrpcClient[DataNodeClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	client.(*Client).grpcClient = mockGrpcClient
+
+	t.Run("GetComponentStates", func(t *testing.T) {
+		mockIN.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := client.GetComponentStates(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("GetStatisticsChannel", func(t *testing.T) {
+		mockIN.EXPECT().GetStatisticsChannel(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := client.GetStatisticsChannel(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreatJob", func(t *testing.T) {
+		mockIN.EXPECT().CreateJob(mock.Anything, mock.Anything).Return(nil, nil)
+
+		req := &workerpb.CreateJobRequest{
+			ClusterID: "0",
+			BuildID:   0,
+		}
+		_, err := client.CreateJob(ctx, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("QueryJob", func(t *testing.T) {
+		mockIN.EXPECT().QueryJobs(mock.Anything, mock.Anything).Return(nil, nil)
+
+		req := &workerpb.QueryJobsRequest{}
+		_, err := client.QueryJobs(ctx, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("DropJob", func(t *testing.T) {
+		mockIN.EXPECT().DropJobs(mock.Anything, mock.Anything).Return(nil, nil)
+
+		req := &workerpb.DropJobsRequest{}
+		_, err := client.DropJobs(ctx, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("ShowConfigurations", func(t *testing.T) {
+		mockIN.EXPECT().ShowConfigurations(mock.Anything, mock.Anything).Return(nil, nil)
+
+		req := &internalpb.ShowConfigurationsRequest{
+			Pattern: "",
+		}
+		_, err := client.ShowConfigurations(ctx, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("GetMetrics", func(t *testing.T) {
+		mockIN.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, nil)
+
+		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+		assert.NoError(t, err)
+		_, err = client.GetMetrics(ctx, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("GetJobStats", func(t *testing.T) {
+		mockIN.EXPECT().GetJobStats(mock.Anything, mock.Anything).Return(nil, nil)
+
+		req := &workerpb.GetJobStatsRequest{}
+		_, err := client.GetJobStats(ctx, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreateJobV2", func(t *testing.T) {
+		mockIN.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(nil, nil)
+
+		req := &workerpb.CreateJobV2Request{}
+		_, err := client.CreateJobV2(ctx, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("QueryJobsV2", func(t *testing.T) {
+		mockIN.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(nil, nil)
+
+		req := &workerpb.QueryJobsV2Request{}
+		_, err := client.QueryJobsV2(ctx, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("DropJobsV2", func(t *testing.T) {
+		mockIN.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(nil, nil)
+
+		req := &workerpb.DropJobsV2Request{}
+		_, err := client.DropJobsV2(ctx, req)
+		assert.NoError(t, err)
+	})
 
 	err = client.Close()
 	assert.NoError(t, err)
