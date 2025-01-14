@@ -523,6 +523,8 @@ func (c *Core) registerMetricsRequest() {
 
 // Init initialize routine
 func (c *Core) Init() error {
+	c.UpdateStateCode(commonpb.StateCode_Initializing)
+
 	log := log.Ctx(c.ctx)
 	var initError error
 	c.registerMetricsRequest()
@@ -558,7 +560,6 @@ func (c *Core) Init() error {
 		log.Info("RootCoord enter standby mode successfully")
 	} else {
 		c.initOnce.Do(func() {
-			c.UpdateStateCode(commonpb.StateCode_Initializing)
 			initError = c.initInternal()
 		})
 	}

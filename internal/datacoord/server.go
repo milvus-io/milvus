@@ -297,6 +297,8 @@ func (s *Server) initSession() error {
 
 // Init change server state to Initializing
 func (s *Server) Init() error {
+	s.UpdateStateCode(commonpb.StateCode_Initializing)
+
 	log := log.Ctx(s.ctx)
 	var err error
 	s.registerMetricsRequest()
@@ -323,7 +325,6 @@ func (s *Server) Init() error {
 		return nil
 	}
 
-	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	return s.initDataCoord()
 }
 

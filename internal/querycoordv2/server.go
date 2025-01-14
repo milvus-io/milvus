@@ -248,6 +248,8 @@ func (s *Server) registerMetricsRequest() {
 }
 
 func (s *Server) Init() error {
+	s.UpdateStateCode(commonpb.StateCode_Initializing)
+
 	log := log.Ctx(s.ctx)
 	log.Info("QueryCoord start init",
 		zap.String("meta-root-path", Params.EtcdCfg.MetaRootPath.GetValue()),
@@ -278,7 +280,6 @@ func (s *Server) Init() error {
 		return nil
 	}
 
-	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	return s.initQueryCoord()
 }
 
