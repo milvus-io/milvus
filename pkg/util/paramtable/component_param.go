@@ -2518,6 +2518,7 @@ type queryNodeConfig struct {
 	// loader
 	IoPoolSize             ParamItem `refreshable:"false"`
 	DeltaDataExpansionRate ParamItem `refreshable:"true"`
+	DiskSizeFetchInterval  ParamItem `refreshable:"false"`
 
 	// schedule task policy.
 	SchedulePolicyName                    ParamItem `refreshable:"false"`
@@ -3133,6 +3134,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "the expansion rate for deltalog physical size to actual memory usage",
 	}
 	p.DeltaDataExpansionRate.Init(base.mgr)
+
+	p.DiskSizeFetchInterval = ParamItem{
+		Key:          "querynode.diskSizeFetchInterval",
+		Version:      "2.5.0",
+		DefaultValue: "60",
+		Doc:          "The time interval in seconds for retrieving disk usage.",
+	}
+	p.DiskSizeFetchInterval.Init(base.mgr)
 
 	// schedule read task policy.
 	p.SchedulePolicyName = ParamItem{
