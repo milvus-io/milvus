@@ -144,7 +144,7 @@ func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*Segmen
 
 	// apply criterion
 	candidates := s.getCandidates(criterion)
-	var result []*SegmentInfo
+	result := make([]*SegmentInfo, 0, len(candidates))
 	for _, segment := range candidates {
 		if criterion.Match(segment) {
 			result = append(result, segment)
