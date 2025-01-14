@@ -147,6 +147,10 @@ RustResult tantivy_create_index(const char *field_name,
                                 uintptr_t num_threads,
                                 uintptr_t overall_memory_budget_in_bytes);
 
+RustResult tantivy_create_index_with_single_segment(const char *field_name,
+                                                    TantivyDataType data_type,
+                                                    const char *path);
+
 void tantivy_free_index_writer(void *ptr);
 
 RustResult tantivy_finish_index(void *ptr);
@@ -160,77 +164,139 @@ RustResult tantivy_index_add_int8s(void *ptr,
                                    uintptr_t len,
                                    int64_t offset_begin);
 
+RustResult tantivy_index_add_int8s_by_single_segment_writer(void *ptr,
+                                                            const int8_t *array,
+                                                            uintptr_t len);
+
 RustResult tantivy_index_add_int16s(void *ptr,
                                     const int16_t *array,
                                     uintptr_t len,
                                     int64_t offset_begin);
+
+RustResult tantivy_index_add_int16s_by_single_segment_writer(void *ptr,
+                                                             const int16_t *array,
+                                                             uintptr_t len);
 
 RustResult tantivy_index_add_int32s(void *ptr,
                                     const int32_t *array,
                                     uintptr_t len,
                                     int64_t offset_begin);
 
+RustResult tantivy_index_add_int32s_by_single_segment_writer(void *ptr,
+                                                             const int32_t *array,
+                                                             uintptr_t len);
+
 RustResult tantivy_index_add_int64s(void *ptr,
                                     const int64_t *array,
                                     uintptr_t len,
                                     int64_t offset_begin);
+
+RustResult tantivy_index_add_int64s_by_single_segment_writer(void *ptr,
+                                                             const int64_t *array,
+                                                             uintptr_t len);
 
 RustResult tantivy_index_add_f32s(void *ptr,
                                   const float *array,
                                   uintptr_t len,
                                   int64_t offset_begin);
 
+RustResult tantivy_index_add_f32s_by_single_segment_writer(void *ptr,
+                                                           const float *array,
+                                                           uintptr_t len);
+
 RustResult tantivy_index_add_f64s(void *ptr,
                                   const double *array,
                                   uintptr_t len,
                                   int64_t offset_begin);
+
+RustResult tantivy_index_add_f64s_by_single_segment_writer(void *ptr,
+                                                           const double *array,
+                                                           uintptr_t len);
 
 RustResult tantivy_index_add_bools(void *ptr,
                                    const bool *array,
                                    uintptr_t len,
                                    int64_t offset_begin);
 
+RustResult tantivy_index_add_bools_by_single_segment_writer(void *ptr,
+                                                            const bool *array,
+                                                            uintptr_t len);
+
 RustResult tantivy_index_add_string(void *ptr, const char *s, int64_t offset);
+
+RustResult tantivy_index_add_string_by_single_segment_writer(void *ptr, const char *s);
 
 RustResult tantivy_index_add_multi_int8s(void *ptr,
                                          const int8_t *array,
                                          uintptr_t len,
                                          int64_t offset);
 
+RustResult tantivy_index_add_multi_int8s_by_single_segment_writer(void *ptr,
+                                                                  const int8_t *array,
+                                                                  uintptr_t len);
+
 RustResult tantivy_index_add_multi_int16s(void *ptr,
                                           const int16_t *array,
                                           uintptr_t len,
                                           int64_t offset);
+
+RustResult tantivy_index_add_multi_int16s_by_single_segment_writer(void *ptr,
+                                                                   const int16_t *array,
+                                                                   uintptr_t len);
 
 RustResult tantivy_index_add_multi_int32s(void *ptr,
                                           const int32_t *array,
                                           uintptr_t len,
                                           int64_t offset);
 
+RustResult tantivy_index_add_multi_int32s_by_single_segment_writer(void *ptr,
+                                                                   const int32_t *array,
+                                                                   uintptr_t len);
+
 RustResult tantivy_index_add_multi_int64s(void *ptr,
                                           const int64_t *array,
                                           uintptr_t len,
                                           int64_t offset);
+
+RustResult tantivy_index_add_multi_int64s_by_single_segment_writer(void *ptr,
+                                                                   const int64_t *array,
+                                                                   uintptr_t len);
 
 RustResult tantivy_index_add_multi_f32s(void *ptr,
                                         const float *array,
                                         uintptr_t len,
                                         int64_t offset);
 
+RustResult tantivy_index_add_multi_f32s_by_single_segment_writer(void *ptr,
+                                                                 const float *array,
+                                                                 uintptr_t len);
+
 RustResult tantivy_index_add_multi_f64s(void *ptr,
                                         const double *array,
                                         uintptr_t len,
                                         int64_t offset);
+
+RustResult tantivy_index_add_multi_f64s_by_single_segment_writer(void *ptr,
+                                                                 const double *array,
+                                                                 uintptr_t len);
 
 RustResult tantivy_index_add_multi_bools(void *ptr,
                                          const bool *array,
                                          uintptr_t len,
                                          int64_t offset);
 
+RustResult tantivy_index_add_multi_bools_by_single_segment_writer(void *ptr,
+                                                                  const bool *array,
+                                                                  uintptr_t len);
+
 RustResult tantivy_index_add_multi_keywords(void *ptr,
                                             const char *const *array,
                                             uintptr_t len,
                                             int64_t offset);
+
+RustResult tantivy_index_add_multi_keywords_by_single_segment_writer(void *ptr,
+                                                                     const char *const *array,
+                                                                     uintptr_t len);
 
 RustResult tantivy_create_text_writer(const char *field_name,
                                       const char *path,

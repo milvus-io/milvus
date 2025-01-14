@@ -81,15 +81,22 @@ struct TantivyIndexWrapper {
     TantivyIndexWrapper(const char* field_name,
                         TantivyDataType data_type,
                         const char* path,
+                        bool inverted_single_semgnent = false,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
-        auto res = RustResultWrapper(
-            tantivy_create_index(field_name,
-                                 data_type,
-                                 path,
-                                 num_threads,
-                                 overall_memory_budget_in_bytes));
+        RustResultWrapper res;
+        if (inverted_single_semgnent) {
+            res = RustResultWrapper(tantivy_create_index_with_single_segment(
+                field_name, data_type, path));
+        } else {
+            res = RustResultWrapper(
+                tantivy_create_index(field_name,
+                                     data_type,
+                                     path,
+                                     num_threads,
+                                     overall_memory_budget_in_bytes));
+        }
         AssertInfo(res.result_->success,
                    "failed to create index: {}",
                    res.result_->error);
@@ -329,6 +336,193 @@ struct TantivyIndexWrapper {
             }
             auto res = RustResultWrapper(tantivy_index_add_multi_keywords(
                 writer_, views.data(), len, offset));
+            AssertInfo(res.result_->success,
+                       "failed to add multi keywords: {}",
+                       res.result_->error);
+            return;
+        }
+
+        throw fmt::format(
+            "InvertedIndex.add_multi_data: unsupported data type: {}",
+            typeid(T).name());
+    }
+
+    template <typename T>
+    void
+    add_data_by_single_segment_writer(const T* array, uintptr_t len) {
+        assert(!finished_);
+
+        if constexpr (std::is_same_v<T, bool>) {
+            auto res = RustResultWrapper(
+                tantivy_index_add_bools_by_single_segment_writer(
+                    writer_, array, len));
+            AssertInfo(res.result_->success,
+                       "failed to add bools: {}",
+                       res.result_->error);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, int8_t>) {
+            auto res = RustResultWrapper(
+                tantivy_index_add_int8s_by_single_segment_writer(
+                    writer_, array, len));
+            AssertInfo(res.result_->success,
+                       "failed to add int8s: {}",
+                       res.result_->error);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, int16_t>) {
+            auto res = RustResultWrapper(
+                tantivy_index_add_int16s_by_single_segment_writer(
+                    writer_, array, len));
+            AssertInfo(res.result_->success,
+                       "failed to add int16s: {}",
+                       res.result_->error);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, int32_t>) {
+            auto res = RustResultWrapper(
+                tantivy_index_add_int32s_by_single_segment_writer(
+                    writer_, array, len));
+            AssertInfo(res.result_->success,
+                       "failed to add int32s: {}",
+                       res.result_->error);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, int64_t>) {
+            auto res = RustResultWrapper(
+                tantivy_index_add_int64s_by_single_segment_writer(
+                    writer_, array, len));
+            AssertInfo(res.result_->success,
+                       "failed to add int64s: {}",
+                       res.result_->error);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, float>) {
+            auto res = RustResultWrapper(
+                tantivy_index_add_f32s_by_single_segment_writer(
+                    writer_, array, len));
+            AssertInfo(res.result_->success,
+                       "failed to add f32s: {}",
+                       res.result_->error);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, double>) {
+            auto res = RustResultWrapper(
+                tantivy_index_add_f64s_by_single_segment_writer(
+                    writer_, array, len));
+            AssertInfo(res.result_->success,
+                       "failed to add f64s: {}",
+                       res.result_->error);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, std::string>) {
+            // TODO: not very efficient, a lot of overhead due to rust-ffi call.
+            for (uintptr_t i = 0; i < len; i++) {
+                auto res = RustResultWrapper(
+                    tantivy_index_add_string_by_single_segment_writer(
+                        writer_,
+                        static_cast<const std::string*>(array)[i].c_str()));
+                AssertInfo(res.result_->success,
+                           "failed to add string: {}",
+                           res.result_->error);
+            }
+            return;
+        }
+
+        throw fmt::format("InvertedIndex.add_data: unsupported data type: {}",
+                          typeid(T).name());
+    }
+
+    template <typename T>
+    void
+    add_multi_data_by_single_segment_writer(const T* array, uintptr_t len) {
+        assert(!finished_);
+
+        if constexpr (std::is_same_v<T, bool>) {
+            auto res = RustResultWrapper(
+                tantivy_index_add_multi_bools_by_single_segment_writer(
+                    writer_, array, len));
+            AssertInfo(res.result_->success,
+                       "failed to add multi bools: {}",
+                       res.result_->error);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, int8_t>) {
+            auto res = RustResultWrapper(
+                tantivy_index_add_multi_int8s_by_single_segment_writer(
+                    writer_, array, len));
+            AssertInfo(res.result_->success,
+                       "failed to add multi int8s: {}",
+                       res.result_->error);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, int16_t>) {
+            auto res = RustResultWrapper(
+                tantivy_index_add_multi_int16s_by_single_segment_writer(
+                    writer_, array, len));
+            AssertInfo(res.result_->success,
+                       "failed to add multi int16s: {}",
+                       res.result_->error);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, int32_t>) {
+            auto res = RustResultWrapper(
+                tantivy_index_add_multi_int32s_by_single_segment_writer(
+                    writer_, array, len));
+            AssertInfo(res.result_->success,
+                       "failed to add multi int32s: {}",
+                       res.result_->error);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, int64_t>) {
+            auto res = RustResultWrapper(
+                tantivy_index_add_multi_int64s_by_single_segment_writer(
+                    writer_, array, len));
+            AssertInfo(res.result_->success,
+                       "failed to add multi int64s: {}",
+                       res.result_->error);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, float>) {
+            auto res = RustResultWrapper(
+                tantivy_index_add_multi_f32s_by_single_segment_writer(
+                    writer_, array, len));
+            AssertInfo(res.result_->success,
+                       "failed to add multi f32s: {}",
+                       res.result_->error);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, double>) {
+            auto res = RustResultWrapper(
+                tantivy_index_add_multi_f64s_by_single_segment_writer(
+                    writer_, array, len));
+            AssertInfo(res.result_->success,
+                       "failed to add multi f64s: {}",
+                       res.result_->error);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, std::string>) {
+            std::vector<const char*> views;
+            for (uintptr_t i = 0; i < len; i++) {
+                views.push_back(array[i].c_str());
+            }
+            auto res = RustResultWrapper(
+                tantivy_index_add_multi_keywords_by_single_segment_writer(
+                    writer_, views.data(), len));
             AssertInfo(res.result_->success,
                        "failed to add multi keywords: {}",
                        res.result_->error);
