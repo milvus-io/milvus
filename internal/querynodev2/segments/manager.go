@@ -356,16 +356,16 @@ type segmentManager struct {
 	// releaseCallback is the callback function when a segment is released.
 	releaseCallback func(s Segment)
 
-	growingOnReleasingSegments typeutil.UniqueSet
-	sealedOnReleasingSegments  typeutil.UniqueSet
+	growingOnReleasingSegments *typeutil.ConcurrentSet[int64]
+	sealedOnReleasingSegments  *typeutil.ConcurrentSet[int64]
 }
 
 func NewSegmentManager() *segmentManager {
 	return &segmentManager{
 		globalSegments:             newSegments(),
 		secondaryIndex:             newSecondarySegmentIndex(),
-		growingOnReleasingSegments: typeutil.NewUniqueSet(),
-		sealedOnReleasingSegments:  typeutil.NewUniqueSet(),
+		growingOnReleasingSegments: typeutil.NewConcurrentSet[int64](),
+		sealedOnReleasingSegments:  typeutil.NewConcurrentSet[int64](),
 	}
 }
 
