@@ -104,15 +104,20 @@ func (s *RBACBackupTestSuite) TestBackup() {
 	createRole(roleName)
 
 	// grant collection level search privilege to role test_role
-	operatePrivilege(roleName, "Search", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
+	operatePrivilege(roleName, "Search", util.AnyWord, util.DefaultDBName, milvuspb.OperatePrivilegeType_Grant)
 
-	// create privielge group test_group
+	// create privilege group test_group
 	groupName := "test_group"
 	createPrivGroupResp, err := s.Cluster.Proxy.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
 		GroupName: groupName,
 	})
 	s.NoError(err)
 	s.True(merr.Ok(createPrivGroupResp))
+
+	collectionPrivileges := []*milvuspb.PrivilegeEntity{{Name: "Query"}, {Name: "Insert"}}
+	for _, p := range collectionPrivileges {
+		s.Equal(milvuspb.PrivilegeLevel_Collection.String(), util.GetPrivilegeLevel(p.Name))
+	}
 
 	// add query and insert privilege to group test_group
 	addPrivsToGroupResp, err := s.Cluster.Proxy.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
@@ -124,7 +129,7 @@ func (s *RBACBackupTestSuite) TestBackup() {
 	s.True(merr.Ok(addPrivsToGroupResp))
 
 	// grant privilege group test_group to role test_role
-	operatePrivilege(roleName, groupName, util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
+	operatePrivilege(roleName, groupName, util.AnyWord, util.DefaultDBName, milvuspb.OperatePrivilegeType_Grant)
 
 	userName := "test_user"
 	passwd := "test_passwd"
@@ -166,10 +171,10 @@ func (s *RBACBackupTestSuite) TestBackup() {
 	s.False(merr.Ok(restoreRBACResp))
 
 	// revoke privilege search from role test_role before dropping the role
-	operatePrivilege(roleName, "Search", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Revoke)
+	operatePrivilege(roleName, "Search", util.AnyWord, util.DefaultDBName, milvuspb.OperatePrivilegeType_Revoke)
 
 	// revoke privilege group test_group from role test_role before dropping the role
-	operatePrivilege(roleName, groupName, util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Revoke)
+	operatePrivilege(roleName, groupName, util.AnyWord, util.DefaultDBName, milvuspb.OperatePrivilegeType_Revoke)
 
 	// drop privilege group test_group
 	dropPrivGroupResp, err := s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
@@ -206,9 +211,9 @@ func (s *RBACBackupTestSuite) TestBackup() {
 	s.Equal(backupRBACResp2.GetRBACMeta().String(), backupRBACResp.GetRBACMeta().String())
 
 	// clean rbac meta
-	operatePrivilege(roleName, "Search", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Revoke)
+	operatePrivilege(roleName, "Search", util.AnyWord, util.DefaultDBName, milvuspb.OperatePrivilegeType_Revoke)
 
-	operatePrivilege(roleName, groupName, util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Revoke)
+	operatePrivilege(roleName, groupName, util.AnyWord, util.DefaultDBName, milvuspb.OperatePrivilegeType_Revoke)
 
 	dropPrivGroupResp2, err := s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
 		GroupName: groupName,
