@@ -61,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -157,7 +158,9 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 
 func (node *QueryNode) initSession() error {
 	minimalIndexVersion, currentIndexVersion := getIndexEngineVersion()
-	node.session = sessionutil.NewSession(node.ctx, sessionutil.WithIndexEngineVersion(minimalIndexVersion, currentIndexVersion))
+	node.session = sessionutil.NewSession(node.ctx,
+		sessionutil.WithIndexEngineVersion(minimalIndexVersion, currentIndexVersion),
+		sessionutil.WithScalarIndexEngineVersion(common.MinimalScalarIndexEngineVersion, common.CurrentScalarIndexEngineVersion))
 	if node.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}

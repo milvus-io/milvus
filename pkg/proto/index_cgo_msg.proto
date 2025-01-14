@@ -81,6 +81,7 @@ message BuildIndexInfo {
   string index_store_path = 18;
   repeated OptionalFieldInfo opt_fields = 19;
   bool partition_key_isolation = 20;
+  int32 current_scalar_index_version = 21;
 }
 
 message LoadTextIndexInfo {
