@@ -730,7 +730,7 @@ func (sd *shardDelegator) createStreamFromMsgStream(ctx context.Context, positio
 	}
 
 	dispatcher := msgstream.NewSimpleMsgDispatcher(stream, func(pm msgstream.PackMsg) bool {
-		if pm.GetType() != commonpb.MsgType_Delete || pm.GetChannel() != vchannelName {
+		if pm.GetType() != commonpb.MsgType_Delete || pm.GetVChannel() != vchannelName {
 			return false
 		}
 		return true
