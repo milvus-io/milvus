@@ -13,6 +13,8 @@ import (
 
 type loadStateEnum int
 
+func noop() {}
+
 // LoadState represent the state transition of segment.
 // LoadStateOnlyMeta: segment is created with meta, but not loaded.
 // LoadStateDataLoading: segment is loading data.
@@ -123,85 +125,77 @@ func (ls *LoadStateLock) StartLoadData() (LoadStateLockGuard, error) {
 
 // StartReleaseData wait until the segment is releasable and starts releasing segment data.
 func (ls *LoadStateLock) StartReleaseData() (g LoadStateLockGuard) {
-	ls.cv.L.Lock()
-	defer ls.cv.L.Unlock()
-
-	ls.waitUntilCanReleaseData()
-
-	switch ls.state {
-	case LoadStateDataLoaded:
-		ls.state = LoadStateDataReleasing
-		ls.cv.Broadcast()
-		return newLoadStateLockGuard(ls, LoadStateDataLoaded, LoadStateOnlyMeta)
-	case LoadStateOnlyMeta:
-		// already transit to target state, do nothing.
-		return nil
-	case LoadStateReleased:
-		// do nothing for empty segment.
-		return nil
-	default:
-		panic(fmt.Sprintf("unreachable code: invalid state when releasing data, %s", ls.state.String()))
-	}
+	ls.waitOrPanic(ls.canReleaseData, func() {
+		switch ls.state {
+		case LoadStateDataLoaded:
+			ls.state = LoadStateDataReleasing
+			ls.cv.Broadcast()
+			g = newLoadStateLockGuard(ls, LoadStateDataLoaded, LoadStateOnlyMeta)
+		case LoadStateOnlyMeta:
+			// already transit to target state, do nothing.
+			g = nil
+		case LoadStateReleased:
+			// do nothing for empty segment.
+			g = nil
+		default:
+			panic(fmt.Sprintf("unreachable code: invalid state when releasing data, %s", ls.state.String()))
+		}
+	})
+	return g
 }
 
 // StartReleaseAll wait until the segment is releasable and starts releasing all segment.
 func (ls *LoadStateLock) StartReleaseAll() (g LoadStateLockGuard) {
-	ls.cv.L.Lock()
-	defer ls.cv.L.Unlock()
+	ls.waitOrPanic(ls.canReleaseAll, func() {
+		switch ls.state {
+		case LoadStateDataLoaded:
+			ls.state = LoadStateReleased
+			ls.cv.Broadcast()
+			g = newNopLoadStateLockGuard()
+		case LoadStateOnlyMeta:
+			ls.state = LoadStateReleased
+			ls.cv.Broadcast()
+			g = newNopLoadStateLockGuard()
+		case LoadStateReleased:
+			// already transit to target state, do nothing.
+			g = nil
+		default:
+			panic(fmt.Sprintf("unreachable code: invalid state when releasing data, %s", ls.state.String()))
+		}
+	})
 
-	ls.waitUntilCanReleaseAll()
-
-	switch ls.state {
-	case LoadStateDataLoaded:
-		ls.state = LoadStateReleased
-		ls.cv.Broadcast()
-		return newNopLoadStateLockGuard()
-	case LoadStateOnlyMeta:
-		ls.state = LoadStateReleased
-		ls.cv.Broadcast()
-		return newNopLoadStateLockGuard()
-	case LoadStateReleased:
-		// already transit to target state, do nothing.
-		return nil
-	default:
-		panic(fmt.Sprintf("unreachable code: invalid state when releasing data, %s", ls.state.String()))
-	}
+	return g
 }
 
 // blockUntilDataLoadedOrReleased blocks until the segment is loaded or released.
 func (ls *LoadStateLock) BlockUntilDataLoadedOrReleased() {
-	ls.cv.L.Lock()
-	defer ls.cv.L.Unlock()
-
 	ls.waitOrPanic(func(state loadStateEnum) bool {
 		return state == LoadStateDataLoaded || state == LoadStateReleased
-	})
+	}, noop)
 }
 
 // waitUntilCanReleaseData waits until segment is release data able.
-func (ls *LoadStateLock) waitUntilCanReleaseData() {
-	ls.waitOrPanic(func(state loadStateEnum) bool {
-		return state == LoadStateDataLoaded || state == LoadStateOnlyMeta || state == LoadStateReleased
-	})
+func (ls *LoadStateLock) canReleaseData(state loadStateEnum) bool {
+	return state == LoadStateDataLoaded || state == LoadStateOnlyMeta || state == LoadStateReleased
 }
 
 // waitUntilCanReleaseAll waits until segment is releasable.
-func (ls *LoadStateLock) waitUntilCanReleaseAll() {
-	ls.waitOrPanic(func(state loadStateEnum) bool {
-		return (state == LoadStateDataLoaded || state == LoadStateOnlyMeta || state == LoadStateReleased) && ls.refCnt.Load() == 0
-	})
+func (ls *LoadStateLock) canReleaseAll(state loadStateEnum) bool {
+	return (state == LoadStateDataLoaded || state == LoadStateOnlyMeta || state == LoadStateReleased) && ls.refCnt.Load() == 0
 }
 
-func (ls *LoadStateLock) waitOrPanic(ready func(state loadStateEnum) bool) {
+func (ls *LoadStateLock) waitOrPanic(ready func(state loadStateEnum) bool, then func()) {
 	ch := make(chan struct{})
+	maxWaitTime := paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.GetAsDuration(time.Second)
 	go func() {
+		ls.cv.L.Lock()
+		defer ls.cv.L.Unlock()
 		defer close(ch)
 		for !ready(ls.state) {
 			ls.cv.Wait()
 		}
+		then()
 	}()
-
-	maxWaitTime := paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.GetAsDuration(time.Second)
 
 	select {
 	case <-time.After(maxWaitTime):
