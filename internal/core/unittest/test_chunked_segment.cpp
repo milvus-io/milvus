@@ -33,7 +33,7 @@
 #include "query/SearchOnSealed.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentSealed.h"
-#include "segcore/SegmentSealedImpl.h"
+
 #include "segcore/Types.h"
 #include "test_utils/DataGen.h"
 #include <memory>
@@ -180,7 +180,6 @@ class TestChunkSegment : public testing::Test {
             -1,
             segcore::SegcoreConfig::default_config(),
             false,
-            true,
             true);
         test_data_count = 10000;
 
