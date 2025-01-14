@@ -35,6 +35,8 @@ func TestIsScalarMmapIndex(t *testing.T) {
 func TestIsVectorMmapIndex(t *testing.T) {
 	t.Run("vector index", func(t *testing.T) {
 		assert.True(t, IsVectorMmapIndex(IndexFaissIDMap))
+		assert.True(t, IsVectorMmapIndex(IndexSparseInverted))
+		assert.True(t, IsVectorMmapIndex(IndexSparseWand))
 		assert.False(t, IsVectorMmapIndex(IndexINVERTED))
 	})
 }

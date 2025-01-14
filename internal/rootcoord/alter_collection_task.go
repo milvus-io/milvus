@@ -27,10 +27,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -145,7 +145,6 @@ func DeleteProperties(oldProps []*commonpb.KeyValuePair, deleteKeys []string) []
 	for key, value := range propsMap {
 		propKV = append(propKV, &commonpb.KeyValuePair{Key: key, Value: value})
 	}
-	log.Info("Alter Collection Drop Properties", zap.Any("newProperties", propKV))
 	return propKV
 }
 

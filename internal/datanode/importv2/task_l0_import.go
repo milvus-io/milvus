@@ -29,10 +29,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -223,7 +223,11 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 		if err != nil {
 			return nil, nil, err
 		}
-		future := t.syncMgr.SyncData(t.ctx, syncTask)
+		future, err := t.syncMgr.SyncData(t.ctx, syncTask)
+		if err != nil {
+			log.Error("failed to sync l0 delete data", WrapLogFields(t, zap.Error(err))...)
+			return nil, nil, err
+		}
 		futures = append(futures, future)
 		syncTasks = append(syncTasks, syncTask)
 	}

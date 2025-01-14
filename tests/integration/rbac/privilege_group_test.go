@@ -68,7 +68,7 @@ func (s *PrivilegeGroupTestSuite) TestBuiltinPrivilegeGroup() {
 	resp, _ = s.operatePrivilege(ctx, roleName, "Admin", commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
 	s.True(merr.Ok(resp))
 
-	for _, builtinGroup := range lo.Keys(util.BuiltinPrivilegeGroups) {
+	for _, builtinGroup := range paramtable.Get().RbacConfig.GetDefaultPrivilegeGroupNames() {
 		resp, _ = s.operatePrivilege(ctx, roleName, builtinGroup, commonpb.ObjectType_Global.String(), milvuspb.OperatePrivilegeType_Grant)
 		s.False(merr.Ok(resp))
 	}
@@ -157,7 +157,7 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2BuiltinPrivilegeGroup() {
 	s.NoError(err)
 	s.True(merr.Ok(createRoleResp))
 
-	for _, builtinGroup := range lo.Keys(util.BuiltinPrivilegeGroups) {
+	for _, builtinGroup := range paramtable.Get().RbacConfig.GetDefaultPrivilegeGroupNames() {
 		resp, _ := s.operatePrivilegeV2(ctx, roleName, builtinGroup, util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
 		s.True(merr.Ok(resp))
 	}
@@ -268,7 +268,8 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 	selectResp, _ = s.validateGrants(ctx, role, commonpb.ObjectType_Global.String(), util.AnyWord, util.AnyWord)
 	s.Len(selectResp.GetEntities(), 2)
 
-	// add different object type privileges to group1 is not allowed
+	// add different privilege group level privileges to group1 is not allowed
+	s.Equal(milvuspb.PrivilegeLevel_Database.String(), util.GetPrivilegeLevel("CreateCollection"))
 	resp, _ = s.Cluster.Proxy.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
 		GroupName:  "group1",
 		Type:       milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup,
@@ -314,7 +315,7 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 	// Validate the group was dropped
 	listResp, err := s.Cluster.Proxy.ListPrivilegeGroups(ctx, &milvuspb.ListPrivilegeGroupsRequest{})
 	s.NoError(err)
-	s.Equal(len(util.BuiltinPrivilegeGroups), len(listResp.PrivilegeGroups))
+	s.Equal(len(paramtable.Get().RbacConfig.GetDefaultPrivilegeGroupNames()), len(listResp.PrivilegeGroups))
 
 	// validate edge cases
 	resp, _ = s.operatePrivilegeV2(ctx, role, util.AnyWord, util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)

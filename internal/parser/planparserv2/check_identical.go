@@ -3,7 +3,7 @@ package planparserv2
 import (
 	"reflect"
 
-	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 

@@ -30,21 +30,20 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type mixCompactionTask struct {
 	allocator.Allocator
-	binlogIO  io.BinlogIO
-	currentTs typeutil.Timestamp
+	binlogIO    io.BinlogIO
+	currentTime time.Time
 
 	plan *datapb.CompactionPlan
 
@@ -71,14 +70,14 @@ func NewMixCompactionTask(
 ) *mixCompactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
 	return &mixCompactionTask{
-		ctx:       ctx1,
-		cancel:    cancel,
-		binlogIO:  binlogIO,
-		Allocator: alloc,
-		plan:      plan,
-		tr:        timerecord.NewTimeRecorder("mergeSplit compaction"),
-		currentTs: tsoutil.GetCurrentTime(),
-		done:      make(chan struct{}, 1),
+		ctx:         ctx1,
+		cancel:      cancel,
+		binlogIO:    binlogIO,
+		Allocator:   alloc,
+		plan:        plan,
+		tr:          timerecord.NewTimeRecorder("mergeSplit compaction"),
+		currentTime: time.Now(),
+		done:        make(chan struct{}, 1),
 	}
 }
 
@@ -140,20 +139,7 @@ func (t *mixCompactionTask) mergeSplit(
 	log := log.With(zap.Int64("planID", t.GetPlanID()))
 
 	mWriter := NewMultiSegmentWriter(t.binlogIO, t.Allocator, t.plan, t.maxRows, t.partitionID, t.collectionID)
-
-	isValueDeleted := func(v *storage.Value) bool {
-		ts, ok := delta[v.PK.GetValue()]
-		// insert task and delete task has the same ts when upsert
-		// here should be < instead of <=
-		// to avoid the upsert data to be deleted after compact
-		if ok && uint64(v.Timestamp) < ts {
-			return true
-		}
-		return false
-	}
-
-	deletedRowCount := int64(0)
-	expiredRowCount := int64(0)
+	entityFilter := newEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(t.plan.GetSchema())
 	if err != nil {
@@ -189,14 +175,7 @@ func (t *mixCompactionTask) mergeSplit(
 				}
 			}
 			v := iter.Value()
-			if isValueDeleted(v) {
-				deletedRowCount++
-				continue
-			}
-
-			// Filtering expired entity
-			if isExpiredEntity(t.plan.GetCollectionTtl(), t.currentTs, typeutil.Timestamp(v.Timestamp)) {
-				expiredRowCount++
+			if entityFilter.Filtered(v.PK.GetValue(), typeutil.Timestamp(v.Timestamp)) {
 				continue
 			}
 
@@ -213,12 +192,20 @@ func (t *mixCompactionTask) mergeSplit(
 		return nil, err
 	}
 
+	deletedRowCount := int64(entityFilter.GetDeletedCount())
+	expiredRowCount := int64(entityFilter.GetExpiredCount())
+	deltalogDeleteEntriesCount := len(delta)
 	totalElapse := t.tr.RecordSpan()
 	log.Info("compact mergeSplit end",
 		zap.Int64s("mergeSplit to segments", lo.Keys(mWriter.cachedMeta)),
 		zap.Int64("deleted row count", deletedRowCount),
 		zap.Int64("expired entities", expiredRowCount),
+		zap.Int("deltalog delete entries count", deltalogDeleteEntriesCount),
+		zap.Int("missing delete count", entityFilter.GetMissingDeleteCount()),
 		zap.Duration("total elapse", totalElapse))
+
+	metrics.DataNodeCompactionDeleteCount.WithLabelValues(fmt.Sprint(t.collectionID)).Add(float64(deltalogDeleteEntriesCount))
+	metrics.DataNodeCompactionMissingDeleteCount.WithLabelValues(fmt.Sprint(t.collectionID)).Add(float64(entityFilter.GetMissingDeleteCount()))
 
 	return res, nil
 }

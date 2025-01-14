@@ -589,6 +589,8 @@ dataCoord:
       maxClusterSizeRatio: 10 # maximum cluster size / avg size in Kmeans train
       maxClusterSize: 5g # maximum cluster size in Kmeans train
   syncSegmentsInterval: 300 # The time interval for regularly syncing segments
+  index:
+    memSizeEstimateMultiplier: 2 # When the memory size is not setup by index procedure, multiplier to estimate the memory size of index data
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.
@@ -801,7 +803,7 @@ common:
     superUsers: 
     defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
     rbac:
-      overrideBuiltInPrivilgeGroups:
+      overrideBuiltInPrivilegeGroups:
         enabled: false # Whether to override build-in privilege groups
       cluster:
         readonly:
@@ -850,6 +852,8 @@ common:
   useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
   enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction
   localRPCEnabled: false # enable local rpc for internal communication when mix or standalone mode.
+  sync:
+    taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

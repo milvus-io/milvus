@@ -28,23 +28,92 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-func isExpiredEntity(ttl int64, now, ts typeutil.Timestamp) bool {
-	// entity expire is not enabled if duration <= 0
-	if ttl <= 0 {
-		return false
+type EntityFilter struct {
+	deletedPkTs map[interface{}]typeutil.Timestamp // pk2ts
+	ttl         int64                              // nanoseconds
+	currentTime time.Time
+
+	expiredCount int
+	deletedCount int
+}
+
+func newEntityFilter(deletedPkTs map[interface{}]typeutil.Timestamp, ttl int64, currTime time.Time) *EntityFilter {
+	if deletedPkTs == nil {
+		deletedPkTs = make(map[interface{}]typeutil.Timestamp)
+	}
+	return &EntityFilter{
+		deletedPkTs: deletedPkTs,
+		ttl:         ttl,
+		currentTime: currTime,
+	}
+}
+
+func (filter *EntityFilter) Filtered(pk any, ts typeutil.Timestamp) bool {
+	if filter.isEntityDeleted(pk, ts) {
+		filter.deletedCount++
+		return true
 	}
 
-	pts, _ := tsoutil.ParseTS(ts)
-	pnow, _ := tsoutil.ParseTS(now)
-	expireTime := pts.Add(time.Duration(ttl))
-	return expireTime.Before(pnow)
+	// Filtering expired entity
+	if filter.isEntityExpired(ts) {
+		filter.expiredCount++
+		return true
+	}
+	return false
+}
+
+func (filter *EntityFilter) GetExpiredCount() int {
+	return filter.expiredCount
+}
+
+func (filter *EntityFilter) GetDeletedCount() int {
+	return filter.deletedCount
+}
+
+func (filter *EntityFilter) GetDeltalogDeleteCount() int {
+	return len(filter.deletedPkTs)
+}
+
+func (filter *EntityFilter) GetMissingDeleteCount() int {
+	diff := filter.GetDeltalogDeleteCount() - filter.GetDeletedCount()
+	if diff < 0 {
+		diff = 0
+	}
+	return diff
+}
+
+func (filter *EntityFilter) isEntityDeleted(pk interface{}, pkTs typeutil.Timestamp) bool {
+	if deleteTs, ok := filter.deletedPkTs[pk]; ok {
+		// insert task and delete task has the same ts when upsert
+		// here should be < instead of <=
+		// to avoid the upsert data to be deleted after compact
+		if pkTs < deleteTs {
+			return true
+		}
+	}
+	return false
+}
+
+func (filter *EntityFilter) isEntityExpired(entityTs typeutil.Timestamp) bool {
+	// entity expire is not enabled if duration <= 0
+	if filter.ttl <= 0 {
+		return false
+	}
+	entityTime, _ := tsoutil.ParseTS(entityTs)
+
+	// this dur can represents 292 million years before or after 1970, enough for milvus
+	// ttl calculation
+	dur := filter.currentTime.UnixMilli() - entityTime.UnixMilli()
+
+	// filter.ttl is nanoseconds
+	return filter.ttl/int64(time.Millisecond) <= dur
 }
 
 func mergeDeltalogs(ctx context.Context, io io.BinlogIO, dpaths map[typeutil.UniqueID][]string) (map[interface{}]typeutil.Timestamp, error) {
@@ -83,9 +152,7 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, dpaths map[typeutil.Uni
 		}
 	}
 
-	log.Info("compact mergeDeltalogs end",
-		zap.Int("deleted pk counts", len(pk2ts)))
-
+	log.Info("compact mergeDeltalogs end", zap.Int("delete entries counts", len(pk2ts)))
 	return pk2ts, nil
 }
 

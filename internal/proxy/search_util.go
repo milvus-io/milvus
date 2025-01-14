@@ -13,8 +13,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -234,7 +234,7 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 
 	useRegexp := Params.ProxyCfg.PartitionNameRegexp.GetAsBool()
 
-	partitionsSet := typeutil.NewSet[int64]()
+	partitionsSet := typeutil.NewUniqueSet()
 	for _, partitionName := range partitionNames {
 		if useRegexp {
 			// Legacy feature, use partition name as regexp
@@ -259,9 +259,7 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 				// TODO change after testcase updated: return nil, merr.WrapErrPartitionNotFound(partitionName)
 				return nil, fmt.Errorf("partition name %s not found", partitionName)
 			}
-			if !partitionsSet.Contain(partitionID) {
-				partitionsSet.Insert(partitionID)
-			}
+			partitionsSet.Insert(partitionID)
 		}
 	}
 	return partitionsSet.Collect(), nil
@@ -339,11 +337,12 @@ func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 
 	for _, sub := range req.GetRequests() {
 		subReq := &milvuspb.SubSearchRequest{
-			Dsl:              sub.GetDsl(),
-			PlaceholderGroup: sub.GetPlaceholderGroup(),
-			DslType:          sub.GetDslType(),
-			SearchParams:     sub.GetSearchParams(),
-			Nq:               sub.GetNq(),
+			Dsl:                sub.GetDsl(),
+			PlaceholderGroup:   sub.GetPlaceholderGroup(),
+			DslType:            sub.GetDslType(),
+			SearchParams:       sub.GetSearchParams(),
+			Nq:                 sub.GetNq(),
+			ExprTemplateValues: sub.GetExprTemplateValues(),
 		}
 		ret.SubReqs = append(ret.SubReqs, subReq)
 	}

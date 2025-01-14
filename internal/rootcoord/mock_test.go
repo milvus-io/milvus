@@ -31,12 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -44,6 +38,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -93,7 +93,7 @@ type mockMetaTable struct {
 	OperatePrivilegeFunc             func(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
 	SelectGrantFunc                  func(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
 	DropGrantFunc                    func(tenant string, role *milvuspb.RoleEntity) error
-	ListPolicyFunc                   func(tenant string) ([]string, error)
+	ListPolicyFunc                   func(tenant string) ([]*milvuspb.GrantEntity, error)
 	ListUserRoleFunc                 func(tenant string) ([]string, error)
 	DescribeDatabaseFunc             func(ctx context.Context, dbName string) (*model.Database, error)
 	CreatePrivilegeGroupFunc         func(groupName string) error
@@ -248,7 +248,7 @@ func (m mockMetaTable) DropGrant(tenant string, role *milvuspb.RoleEntity) error
 	return m.DropGrantFunc(tenant, role)
 }
 
-func (m mockMetaTable) ListPolicy(tenant string) ([]string, error) {
+func (m mockMetaTable) ListPolicy(tenant string) ([]*milvuspb.GrantEntity, error) {
 	return m.ListPolicyFunc(tenant)
 }
 
@@ -540,7 +540,7 @@ func withInvalidMeta() Opt {
 	meta.DropGrantFunc = func(tenant string, role *milvuspb.RoleEntity) error {
 		return errors.New("error mock DropGrant")
 	}
-	meta.ListPolicyFunc = func(tenant string) ([]string, error) {
+	meta.ListPolicyFunc = func(tenant string) ([]*milvuspb.GrantEntity, error) {
 		return nil, errors.New("error mock ListPolicy")
 	}
 	meta.ListUserRoleFunc = func(tenant string) ([]string, error) {

@@ -123,9 +123,14 @@ func (fs *FileSource) loadFromFile() error {
 	configFiles = fs.files
 	fs.RUnlock()
 
+	notExistsNum := 0
 	for _, configFile := range configFiles {
 		if _, err := os.Stat(configFile); err != nil {
-			continue
+			if os.IsNotExist(err) {
+				notExistsNum++
+				continue
+			}
+			return err
 		}
 
 		yamlReader.SetConfigFile(configFile)
@@ -160,6 +165,10 @@ func (fs *FileSource) loadFromFile() error {
 			newConfig[key] = str
 			newConfig[formatKey(key)] = str
 		}
+	}
+	// not allow all config files missing, return error for this case
+	if notExistsNum == len(configFiles) {
+		return errors.Newf("all config files not exists, files: %v", configFiles)
 	}
 
 	return fs.update(newConfig)

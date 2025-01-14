@@ -28,10 +28,10 @@ import (
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -77,7 +77,7 @@ type RWChannelStore interface {
 	Update(op *ChannelOpSet) error
 
 	// UpdateState is used by StateChannelStore only
-	UpdateState(isSuccessful bool, channels ...RWChannel)
+	UpdateState(isSuccessful bool, nodeID int64, channel RWChannel, opID int64)
 	// SegLegacyChannelByNode is used by StateChannelStore only
 	SetLegacyChannelByNode(nodeIDs ...int64)
 }
@@ -565,7 +565,7 @@ func (c *ChannelStore) GetNodeChannelsBy(nodeSelector NodeSelector, channelSelec
 	return nil
 }
 
-func (c *ChannelStore) UpdateState(isSuccessful bool, channels ...RWChannel) {
+func (c *ChannelStore) UpdateState(isSuccessful bool, nodeID int64, channel RWChannel, opID int64) {
 	log.Error("ChannelStore doesn't implement UpdateState")
 }
 

@@ -5,8 +5,8 @@ package mockrootcoord
 import (
 	context "context"
 
-	etcdpb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
+	etcdpb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
+	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
@@ -1894,19 +1894,19 @@ func (_c *IMetaTable_ListDatabases_Call) RunAndReturn(run func(context.Context, 
 }
 
 // ListPolicy provides a mock function with given fields: tenant
-func (_m *IMetaTable) ListPolicy(tenant string) ([]string, error) {
+func (_m *IMetaTable) ListPolicy(tenant string) ([]*milvuspb.GrantEntity, error) {
 	ret := _m.Called(tenant)
 
-	var r0 []string
+	var r0 []*milvuspb.GrantEntity
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) ([]string, error)); ok {
+	if rf, ok := ret.Get(0).(func(string) ([]*milvuspb.GrantEntity, error)); ok {
 		return rf(tenant)
 	}
-	if rf, ok := ret.Get(0).(func(string) []string); ok {
+	if rf, ok := ret.Get(0).(func(string) []*milvuspb.GrantEntity); ok {
 		r0 = rf(tenant)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
+			r0 = ret.Get(0).([]*milvuspb.GrantEntity)
 		}
 	}
 
@@ -1937,12 +1937,12 @@ func (_c *IMetaTable_ListPolicy_Call) Run(run func(tenant string)) *IMetaTable_L
 	return _c
 }
 
-func (_c *IMetaTable_ListPolicy_Call) Return(_a0 []string, _a1 error) *IMetaTable_ListPolicy_Call {
+func (_c *IMetaTable_ListPolicy_Call) Return(_a0 []*milvuspb.GrantEntity, _a1 error) *IMetaTable_ListPolicy_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *IMetaTable_ListPolicy_Call) RunAndReturn(run func(string) ([]string, error)) *IMetaTable_ListPolicy_Call {
+func (_c *IMetaTable_ListPolicy_Call) RunAndReturn(run func(string) ([]*milvuspb.GrantEntity, error)) *IMetaTable_ListPolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }

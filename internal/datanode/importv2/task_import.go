@@ -28,11 +28,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -235,7 +235,11 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 			if err != nil {
 				return nil, nil, err
 			}
-			future := t.syncMgr.SyncData(t.ctx, syncTask)
+			future, err := t.syncMgr.SyncData(t.ctx, syncTask)
+			if err != nil {
+				log.Error("sync data failed", WrapLogFields(t, zap.Error(err))...)
+				return nil, nil, err
+			}
 			futures = append(futures, future)
 			syncTasks = append(syncTasks, syncTask)
 		}

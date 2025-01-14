@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
+	querypb "github.com/milvus-io/milvus/pkg/proto/querypb"
 	mock "github.com/stretchr/testify/mock"
 )
 

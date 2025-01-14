@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.rootcoord;
 
-option go_package="github.com/milvus-io/milvus/internal/proto/rootcoordpb";
+option go_package="github.com/milvus-io/milvus/pkg/proto/rootcoordpb";
 
 import "common.proto";
 import "milvus.proto";
@@ -233,4 +233,5 @@ message AlterDatabaseRequest {
   string db_name = 2;
   string db_id = 3;
   repeated common.KeyValuePair properties = 4;
+  repeated string delete_keys = 5;
 }

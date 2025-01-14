@@ -31,13 +31,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -1109,6 +1109,10 @@ func (t *alterCollectionFieldTask) OnEnqueue() error {
 	return nil
 }
 
+const (
+	MmapEnabledKey = "mmap_enabled"
+)
+
 var allowedProps = []string{
 	common.MaxLengthKey,
 	common.MmapEnabledKey,
@@ -1123,12 +1127,35 @@ func IsKeyAllowed(key string) bool {
 	return false
 }
 
+func updatePropertiesKeys(oldProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+	props := make(map[string]string)
+	for _, prop := range oldProps {
+		var updatedKey string
+		if prop.Key == MmapEnabledKey {
+			updatedKey = common.MmapEnabledKey
+		} else {
+			updatedKey = prop.Key
+		}
+		props[updatedKey] = prop.Value
+	}
+
+	propKV := make([]*commonpb.KeyValuePair, 0)
+	for key, value := range props {
+		propKV = append(propKV, &commonpb.KeyValuePair{
+			Key:   key,
+			Value: value,
+		})
+	}
+
+	return propKV
+}
+
 func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
 	}
-
+	t.Properties = updatePropertiesKeys(t.Properties)
 	for _, prop := range t.Properties {
 		if !IsKeyAllowed(prop.Key) {
 			return merr.WrapErrParameterInvalidMsg("%s does not allow update in collection field param", prop.Key)
@@ -1147,6 +1174,7 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			if loaded {
 				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter collection field properties if collection loaded")
 			}
+
 		case common.MaxLengthKey:
 			IsStringType := false
 			fieldName := ""
@@ -1166,8 +1194,9 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 				return merr.WrapErrParameterInvalid("%s should be an integer, but got %T", prop.Key, prop.Value)
 			}
 
-			if value > defaultMaxVarCharLength {
-				return merr.WrapErrParameterInvalid("%s exceeds the maximum allowed value 65535", prop.Value)
+			defaultMaxVarCharLength := Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
+			if int64(value) > defaultMaxVarCharLength {
+				return merr.WrapErrParameterInvalidMsg("%s exceeds the maximum allowed value %s", prop.Value, strconv.FormatInt(defaultMaxVarCharLength, 10))
 			}
 		}
 	}
@@ -1353,7 +1382,7 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if collLoaded {
-		loaded, err := isPartitionLoaded(ctx, t.queryCoord, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, t.queryCoord, collID, partID)
 		if err != nil {
 			return err
 		}

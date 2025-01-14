@@ -12,8 +12,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -185,6 +185,20 @@ func TestAlterDatabase(t *testing.T) {
 
 	err = task.Execute(context.Background())
 	assert.Nil(t, err)
+
+	task1 := &alterDatabaseTask{
+		AlterDatabaseRequest: &milvuspb.AlterDatabaseRequest{
+			Base:       &commonpb.MsgBase{},
+			DbName:     "test_alter_database",
+			DeleteKeys: []string{common.MmapEnabledKey},
+		},
+		rootCoord: rc,
+	}
+	err1 := task1.PreExecute(context.Background())
+	assert.Nil(t, err1)
+
+	err1 = task1.Execute(context.Background())
+	assert.Nil(t, err1)
 }
 
 func TestDescribeDatabase(t *testing.T) {

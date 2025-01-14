@@ -25,8 +25,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -184,22 +184,37 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		return true
 	}
 
-	var compactionFromExist func(segID UniqueID) bool
+	callCount := 0
 
-	compactionFromExist = func(segID UniqueID) bool {
-		compactionFrom := validSegmentInfos[segID].GetCompactionFrom()
-		if len(compactionFrom) == 0 || !isValid(compactionFrom...) {
+	var compactionFromExistWithCache func(segID UniqueID) bool
+	compactionFromExistWithCache = func(segID UniqueID) bool {
+		compactionFromExistMap := make(map[int64]bool)
+		var compactionFromExist func(segID UniqueID) bool
+
+		compactionFromExist = func(segID UniqueID) bool {
+			callCount++
+			if valid, ok := compactionFromExistMap[segID]; ok {
+				return valid
+			}
+			compactionFrom := validSegmentInfos[segID].GetCompactionFrom()
+			if len(compactionFrom) == 0 || !isValid(compactionFrom...) {
+				compactionFromExistMap[segID] = false
+				return false
+			}
+			for _, fromID := range compactionFrom {
+				if flushedIDs.Contain(fromID) || newFlushedIDs.Contain(fromID) {
+					compactionFromExistMap[segID] = true
+					return true
+				}
+				if compactionFromExist(fromID) {
+					compactionFromExistMap[segID] = true
+					return true
+				}
+			}
+			compactionFromExistMap[segID] = false
 			return false
 		}
-		for _, fromID := range compactionFrom {
-			if flushedIDs.Contain(fromID) || newFlushedIDs.Contain(fromID) {
-				return true
-			}
-			if compactionFromExist(fromID) {
-				return true
-			}
-		}
-		return false
+		return compactionFromExist(segID)
 	}
 
 	segmentIndexed := func(segID UniqueID) bool {
@@ -214,7 +229,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 				newFlushedIDs.Insert(id)
 				continue
 			}
-			if segmentIndexed(id) && !compactionFromExist(id) {
+			if segmentIndexed(id) && !compactionFromExistWithCache(id) {
 				newFlushedIDs.Insert(id)
 			} else {
 				for _, fromID := range compactionFrom {
@@ -231,7 +246,6 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		flushedIDs = newFlushedIDs
 		newFlushedIDs = make(typeutil.UniqueSet)
 	}
-
 	flushedIDs = newFlushedIDs
 
 	log.Info("GetQueryVChanPositions",
@@ -242,6 +256,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		zap.Int("result growing", len(growingIDs)),
 		zap.Int("result L0", len(levelZeroIDs)),
 		zap.Any("partition stats", partStatsVersionsMap),
+		zap.Int("callCount", callCount),
 	)
 
 	return &datapb.VchannelInfo{

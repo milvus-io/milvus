@@ -8,7 +8,7 @@ import uuid
 from functools import singledispatch
 import numpy as np
 import pandas as pd
-import jax.numpy as jnp
+from ml_dtypes import bfloat16
 from sklearn import preprocessing
 from npy_append_array import NpyAppendArray
 from faker import Faker
@@ -20,7 +20,7 @@ from common import common_type as ct
 from utils.util_log import test_log as log
 from customize.milvus_operator import MilvusOperator
 import pickle
-import tensorflow as tf
+
 fake = Faker()
 """" Methods of processing data """
 
@@ -35,6 +35,11 @@ def to_serializable(val):
 def ts_float32(val):
     """Used if *val* is an instance of numpy.float32."""
     return np.float64(val)
+
+try:
+    RNG = np.random.default_rng(seed=0)
+except ValueError as e:
+    RNG = None
 
 
 class ParamInfo:
@@ -1037,10 +1042,18 @@ def get_dim_by_schema(schema=None):
             return dim
     return None
 
+def gen_varchar_data(length: int, nb: int, text_mode=False):
+    if text_mode:
+        return [fake.text() for _ in range(nb)]
+    else:
+        return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
+
+
 
 def gen_data_by_collection_field(field, nb=None, start=None):
     # if nb is None, return one data, else return a list of data
     data_type = field.dtype
+    enable_analyzer = field.params.get("enable_analyzer", False)
     if data_type == DataType.BOOL:
         if nb is None:
             return random.choice([True, False])
@@ -1076,8 +1089,8 @@ def gen_data_by_collection_field(field, nb=None, start=None):
         max_length = min(20, max_length-1)
         length = random.randint(0, max_length)
         if nb is None:
-            return "".join([chr(random.randint(97, 122)) for _ in range(length)])
-        return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
+            return gen_varchar_data(length=length, nb=1, text_mode=enable_analyzer)[0]
+        return gen_varchar_data(length=length, nb=nb, text_mode=enable_analyzer)
     if data_type == DataType.JSON:
         if nb is None:
             return {"name": fake.name(), "address": fake.address()}
@@ -1091,22 +1104,23 @@ def gen_data_by_collection_field(field, nb=None, start=None):
     if data_type == DataType.BFLOAT16_VECTOR:
         dim = field.params['dim']
         if nb is None:
-            raw_vector = [random.random() for _ in range(dim)]
-            bf16_vector = jnp.array(raw_vector, dtype=jnp.bfloat16)
-            bf16_vector = np.array(bf16_vector).view(np.uint8).tolist()
-            return bytes(bf16_vector)
-        bf16_vectors = []
-        for i in range(nb):
-            raw_vector = [random.random() for _ in range(dim)]
-            bf16_vector = jnp.array(raw_vector, dtype=jnp.bfloat16)
-            bf16_vector = np.array(bf16_vector).view(np.uint8).tolist()
-            bf16_vectors.append(bytes(bf16_vector))
-        return bf16_vectors
+            return RNG.uniform(size=dim).astype(bfloat16)
+        return [RNG.uniform(size=dim).astype(bfloat16) for _ in range(int(nb))]
+        # if nb is None:
+        #     raw_vector = [random.random() for _ in range(dim)]
+        #     bf16_vector = np.array(raw_vector, dtype=bfloat16).view(np.uint8).tolist()
+        #     return bytes(bf16_vector)
+        # bf16_vectors = []
+        # for i in range(nb):
+        #     raw_vector = [random.random() for _ in range(dim)]
+        #     bf16_vector = np.array(raw_vector, dtype=bfloat16).view(np.uint8).tolist()
+        #     bf16_vectors.append(bytes(bf16_vector))
+        # return bf16_vectors
     if data_type == DataType.FLOAT16_VECTOR:
         dim = field.params['dim']
         if nb is None:
-            return [random.random() for i in range(dim)]
-        return [[random.random() for i in range(dim)] for _ in range(nb)]
+            return np.array([random.random() for _ in range(int(dim))], dtype=np.float16)
+        return [np.array([random.random() for _ in range(int(dim))], dtype=np.float16) for _ in range(int(nb))]
     if data_type == DataType.BINARY_VECTOR:
         dim = field.params['dim']
         if nb is None:
@@ -1114,9 +1128,21 @@ def gen_data_by_collection_field(field, nb=None, start=None):
             binary_byte = bytes(np.packbits(raw_vector, axis=-1).tolist())
             return binary_byte
         return [bytes(np.packbits([random.randint(0, 1) for _ in range(dim)], axis=-1).tolist()) for _ in range(nb)]
+    if data_type == DataType.SPARSE_FLOAT_VECTOR:
+        if nb is None:
+            return gen_sparse_vectors(nb=1)[0]
+        return gen_sparse_vectors(nb=nb)
     if data_type == DataType.ARRAY:
         max_capacity = field.params['max_capacity']
         element_type = field.element_type
+        if element_type == DataType.INT8:
+            if nb is None:
+                return [random.randint(-128, 127) for _ in range(max_capacity)]
+            return [[random.randint(-128, 127) for _ in range(max_capacity)] for _ in range(nb)]
+        if element_type == DataType.INT16:
+            if nb is None:
+                return [random.randint(-32768, 32767) for _ in range(max_capacity)]
+            return [[random.randint(-32768, 32767) for _ in range(max_capacity)] for _ in range(nb)]
         if element_type == DataType.INT32:
             if nb is None:
                 return [random.randint(-2147483648, 2147483647) for _ in range(max_capacity)]
@@ -1135,6 +1161,11 @@ def gen_data_by_collection_field(field, nb=None, start=None):
             if nb is None:
                 return [np.float32(random.random()) for _ in range(max_capacity)]
             return [[np.float32(random.random()) for _ in range(max_capacity)] for _ in range(nb)]
+        if element_type == DataType.DOUBLE:
+            if nb is None:
+                return [np.float64(random.random()) for _ in range(max_capacity)]
+            return [[np.float64(random.random()) for _ in range(max_capacity)] for _ in range(nb)]
+
         if element_type == DataType.VARCHAR:
             max_length = field.params['max_length']
             max_length = min(20, max_length - 1)
@@ -1142,7 +1173,6 @@ def gen_data_by_collection_field(field, nb=None, start=None):
             if nb is None:
                 return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)]
             return [["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)] for _ in range(nb)]
-
     return None
 
 
@@ -2095,7 +2125,7 @@ def gen_bf16_vectors(num, dim):
     for _ in range(num):
         raw_vector = [random.random() for _ in range(dim)]
         raw_vectors.append(raw_vector)
-        bf16_vector = tf.cast(raw_vector, dtype=tf.bfloat16).numpy()
+        bf16_vector = np.array(raw_vector, dtype=bfloat16)
         bf16_vectors.append(bf16_vector)
 
     return raw_vectors, bf16_vectors
