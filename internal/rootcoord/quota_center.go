@@ -1189,7 +1189,6 @@ func (q *QuotaCenter) resetAllCurrentRates() error {
 					}
 					return limitVal
 				}
-				q.rateLimiter.GetOrCreateDatabaseLimiters(dbID, newParamLimiterFunc(internalpb.RateScope_Database, allOps))
 				q.rateLimiter.GetOrCreateCollectionLimiters(dbID, collectionID,
 					newParamLimiterFunc(internalpb.RateScope_Database, allOps),
 					newParamLimiterFuncWithLimitFunc(internalpb.RateScope_Collection, allOps, getCollectionLimitVal))
