@@ -40,6 +40,7 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "google/protobuf/message_lite.h"
+#include "index/JsonFlatIndex.h"
 #include "index/VectorMemIndex.h"
 #include "mmap/ChunkedColumn.h"
 #include "mmap/Utils.h"
@@ -179,7 +180,8 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         !get_bit(index_ready_bitset_, field_id),
         "scalar index has been exist at " + std::to_string(field_id.get()));
 
-    if (field_meta.get_data_type() == DataType::JSON) {
+    if (field_meta.get_data_type() == DataType::JSON &&
+        info.index_params.find(JSON_PATH) != info.index_params.end()) {
         auto path = info.index_params.at(JSON_PATH);
         JSONIndexKey key;
         key.nested_path = path;

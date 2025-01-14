@@ -28,6 +28,8 @@
 #include "exec/expression/Utils.h"
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
+#include "index/Index.h"
+#include "index/JsonFlatIndex.h"
 #include "log/Log.h"
 #include "query/PlanProto.h"
 
@@ -784,14 +786,29 @@ class SegmentExpr : public Expr {
             // executing costs quite much time.
             if (cached_index_chunk_id_ != i) {
                 Index* index_ptr = nullptr;
+                // Executor for JsonFlatIndex. Must outlive index_ptr. Only used for JSON type.
+                std::shared_ptr<
+                    index::JsonFlatIndexQueryExecutor<IndexInnerType>>
+                    executor;
 
                 if (field_type_ == DataType::JSON) {
                     auto pointer = milvus::Json::pointer(nested_path_);
 
-                    const Index& index =
-                        segment_->chunk_scalar_index<IndexInnerType>(
-                            field_id_, pointer, i);
-                    index_ptr = const_cast<Index*>(&index);
+                    auto index =
+                        segment_->chunk_json_index(field_id_, pointer, i);
+
+                    // check if it is a json flat index, if so, create a json flat index query executor
+                    auto json_flat_index =
+                        dynamic_cast<const index::JsonFlatIndex*>(index);
+                    if (json_flat_index) {
+                        executor =
+                            json_flat_index->create_executor<IndexInnerType>(
+                                pointer);
+                        index_ptr = executor.get();
+                    } else {
+                        auto json_index = const_cast<index::IndexBase*>(index);
+                        index_ptr = dynamic_cast<Index*>(json_index);
+                    }
                 } else {
                     const Index& index =
                         segment_->chunk_scalar_index<IndexInnerType>(field_id_,
