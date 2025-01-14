@@ -1595,7 +1595,11 @@ SegmentSealedImpl::bulk_subscript(
         return fill_with_empty(field_id, 0);
     }
 
-    auto column = fields_.at(field_id);
+    std::shared_ptr<SingleChunkColumnBase> column;
+    {
+        std::shared_lock lck(mutex_);
+        column = fields_.at(field_id);
+    }
     auto ret = fill_with_empty(field_id, count);
     if (column->IsNullable()) {
         auto dst = ret->mutable_valid_data()->mutable_data();
@@ -1719,20 +1723,25 @@ SegmentSealedImpl::find_first(int64_t limit, const BitsetType& bitset) const {
     std::vector<int64_t> seg_offsets;
     seg_offsets.reserve(limit);
 
+    // flip bitset since `find_first` & `find_next` is used to find true.
+    // could be optimized by support find false in bitset.
+    auto flipped = bitset.clone();
+    flipped.flip();
+
     int64_t offset = 0;
-    for (; hit_num < limit && offset < num_rows_.value(); offset++) {
+    std::optional<size_t> result = flipped.find_first();
+    while (result.has_value() && hit_num < limit) {
+        hit_num++;
+        seg_offsets.push_back(result.value());
+        offset = result.value();
         if (offset >= size) {
             // In fact, this case won't happen on sealed segments.
             continue;
         }
-
-        if (!bitset[offset]) {
-            seg_offsets.push_back(offset);
-            hit_num++;
-        }
+        result = flipped.find_next(offset);
     }
 
-    return {seg_offsets, more_hit_than_limit && offset != num_rows_.value()};
+    return {seg_offsets, more_hit_than_limit && result.has_value()};
 }
 
 SegcoreError
