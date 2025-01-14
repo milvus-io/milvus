@@ -26,13 +26,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
@@ -619,13 +619,13 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 	if len(t.req.GetExtraParams()) > 0 {
 		for _, param := range t.req.GetExtraParams() {
 			if !indexparams.IsConfigableIndexParam(param.GetKey()) {
-				return merr.WrapErrParameterInvalidMsg("%s is not a configable index proptery", param.GetKey())
+				return merr.WrapErrParameterInvalidMsg("%s is not a configable index property", param.GetKey())
 			}
 		}
 	} else if len(t.req.GetDeleteKeys()) > 0 {
 		for _, param := range t.req.GetDeleteKeys() {
 			if !indexparams.IsConfigableIndexParam(param) {
-				return merr.WrapErrParameterInvalidMsg("%s is not a configable index proptery", param)
+				return merr.WrapErrParameterInvalidMsg("%s is not a configable index property", param)
 			}
 		}
 	}

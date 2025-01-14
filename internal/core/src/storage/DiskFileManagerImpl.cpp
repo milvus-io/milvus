@@ -94,6 +94,7 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
 
     auto fileName = GetFileName(file);
     auto fileSize = local_chunk_manager->Size(file);
+    added_total_file_size_ += fileSize;
 
     std::vector<std::string> batch_remote_files;
     std::vector<int64_t> remote_file_sizes;
@@ -146,6 +147,7 @@ DiskFileManagerImpl::AddTextLog(const std::string& file) noexcept {
 
     auto fileName = GetFileName(file);
     auto fileSize = local_chunk_manager->Size(file);
+    added_total_file_size_ += fileSize;
 
     std::vector<std::string> batch_remote_files;
     std::vector<int64_t> remote_file_sizes;

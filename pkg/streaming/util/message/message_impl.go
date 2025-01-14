@@ -3,7 +3,7 @@ package message
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/proto/messagespb"
 )
 
 type messageImpl struct {
@@ -141,13 +141,70 @@ func (m *messageImpl) BarrierTimeTick() uint64 {
 }
 
 // VChannel returns the vchannel of current message.
-// If the message is broadcasted, the vchannel will be empty.
+// If the message is a all channel message, it will return "".
+// If the message is a broadcast message, it will panic.
 func (m *messageImpl) VChannel() string {
+	m.assertNotBroadcast()
+
 	value, ok := m.properties.Get(messageVChannel)
 	if !ok {
 		return ""
 	}
 	return value
+}
+
+// BroadcastVChannels returns the vchannels of current message that want to broadcast.
+// If the message is not a broadcast message, it will panic.
+func (m *messageImpl) BroadcastVChannels() []string {
+	m.assertBroadcast()
+
+	value, _ := m.properties.Get(messageVChannels)
+	vcs := &messagespb.VChannels{}
+	if err := DecodeProto(value, vcs); err != nil {
+		panic("can not decode vchannels")
+	}
+	return vcs.Vchannels
+}
+
+// SplitIntoMutableMessage splits the current broadcast message into multiple messages.
+func (m *messageImpl) SplitIntoMutableMessage() []MutableMessage {
+	vchannels := m.BroadcastVChannels()
+
+	vchannelExist := make(map[string]struct{}, len(vchannels))
+	msgs := make([]MutableMessage, 0, len(vchannels))
+	for _, vchannel := range vchannels {
+		newPayload := make([]byte, len(m.payload))
+		copy(newPayload, m.payload)
+
+		newProperties := make(propertiesImpl, len(m.properties))
+		for key, val := range m.properties {
+			if key != messageVChannels {
+				newProperties.Set(key, val)
+			}
+		}
+		newProperties.Set(messageVChannel, vchannel)
+		if _, ok := vchannelExist[vchannel]; ok {
+			panic("there's a bug in the message codes, duplicate vchannel in broadcast message")
+		}
+		msgs = append(msgs, &messageImpl{
+			payload:    newPayload,
+			properties: newProperties,
+		})
+		vchannelExist[vchannel] = struct{}{}
+	}
+	return msgs
+}
+
+func (m *messageImpl) assertNotBroadcast() {
+	if m.properties.Exist(messageVChannels) {
+		panic("current message is a broadcast message")
+	}
+}
+
+func (m *messageImpl) assertBroadcast() {
+	if !m.properties.Exist(messageVChannels) {
+		panic("current message is not a broadcast message")
+	}
 }
 
 type immutableMessageImpl struct {

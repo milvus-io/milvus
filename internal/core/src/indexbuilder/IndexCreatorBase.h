@@ -13,6 +13,7 @@
 
 #include <memory>
 #include "common/Types.h"
+#include "index/Index.h"
 #include "storage/FileManager.h"
 
 namespace milvus::indexbuilder {
@@ -33,7 +34,7 @@ class IndexCreatorBase {
     virtual void
     Load(const milvus::BinarySet&) = 0;
 
-    virtual BinarySet
+    virtual index::IndexStatsPtr
     Upload() = 0;
 };
 

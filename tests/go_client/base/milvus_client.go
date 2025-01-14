@@ -262,3 +262,9 @@ func (mc *MilvusClient) Query(ctx context.Context, option client.QueryOption, ca
 	resultSet, err := mc.mClient.Query(ctx, option, callOptions...)
 	return resultSet, err
 }
+
+// Get get from collection
+func (mc *MilvusClient) Get(ctx context.Context, option client.QueryOption, callOptions ...grpc.CallOption) (client.ResultSet, error) {
+	resultSet, err := mc.mClient.Get(ctx, option, callOptions...)
+	return resultSet, err
+}

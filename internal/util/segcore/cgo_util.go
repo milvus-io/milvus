@@ -21,6 +21,7 @@ package segcore
 
 #include "segcore/collection_c.h"
 #include "common/type_c.h"
+#include "common/protobuf_utils_c.h"
 #include "segcore/segment_c.h"
 #include "storage/storage_c.h"
 */
@@ -28,6 +29,7 @@ import "C"
 
 import (
 	"math"
+	"reflect"
 	"unsafe"
 
 	"google.golang.org/protobuf/proto"
@@ -47,6 +49,13 @@ func ConsumeCStatusIntoError(status *C.CStatus) error {
 	errorMsg := C.GoString(status.error_msg)
 	C.free(unsafe.Pointer(status.error_msg))
 	return merr.SegcoreError(int32(errorCode), errorMsg)
+}
+
+func UnmarshalProtoLayout(protoLayout any, msg proto.Message) error {
+	layout := unsafe.Pointer(reflect.ValueOf(protoLayout).Pointer())
+	cProtoLayout := (*C.ProtoLayout)(layout)
+	blob := (*(*[math.MaxInt32]byte)(cProtoLayout.blob))[:int(cProtoLayout.size):int(cProtoLayout.size)]
+	return proto.Unmarshal(blob, msg)
 }
 
 // unmarshalCProto unmarshal the proto from C memory
