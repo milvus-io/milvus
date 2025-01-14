@@ -327,6 +327,9 @@ func (d *dmlChannels) broadcastMark(chanNames []string, pack *msgstream.MsgPack)
 					result[cn] = id.Serialize()
 				}
 			}
+		} else {
+			dms.mutex.RUnlock()
+			return nil, errors.Newf("channel not in use: %s", chanName)
 		}
 		dms.mutex.RUnlock()
 	}
