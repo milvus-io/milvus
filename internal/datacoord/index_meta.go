@@ -245,6 +245,21 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 }
 
 func checkJsonParams(index *model.Index, req *indexpb.CreateIndexRequest) bool {
+	jsonPath1, err := getIndexParam(index.IndexParams, common.JSONPathKey)
+	hasJsonPath1 := err == nil
+	jsonPath2, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
+	hasJsonPath2 := err == nil
+
+	if hasJsonPath1 != hasJsonPath2 {
+		// if one is json path index but another is json flat index, return false
+		return false
+	}
+
+	if !hasJsonPath1 {
+		// if both are not json path index, return true
+		return true
+	}
+
 	castType1, err := getIndexParam(index.IndexParams, common.JSONCastTypeKey)
 	if err != nil {
 		return false
@@ -253,11 +268,6 @@ func checkJsonParams(index *model.Index, req *indexpb.CreateIndexRequest) bool {
 	if err != nil || castType1 != castType2 {
 		return false
 	}
-	jsonPath1, err := getIndexParam(index.IndexParams, common.JSONPathKey)
-	if err != nil {
-		return false
-	}
-	jsonPath2, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
 	return err == nil && jsonPath1 == jsonPath2
 }
 
@@ -362,7 +372,8 @@ func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 			continue
 		}
 		if req.IndexName == index.IndexName {
-			if req.FieldID == index.FieldID && checkParams(index, req) && (!isJson || checkJsonParams(index, req)) {
+			if req.FieldID == index.FieldID && checkParams(index, req) &&
+				/*only check json params when it is json index*/ (!isJson || checkJsonParams(index, req)) {
 				return index.IndexID, nil
 			}
 			errMsg := "at most one distinct index is allowed per field"
@@ -375,16 +386,12 @@ func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 		}
 		if req.FieldID == index.FieldID {
 			if isJson {
-				// if it is json index, check if json paths are same
+				// only check json path if both are json path index
 				jsonPath1, err := getIndexParam(index.IndexParams, common.JSONPathKey)
-				if err != nil {
-					return 0, err
-				}
+				hasJsonPath1 := err == nil
 				jsonPath2, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
-				if err != nil {
-					return 0, err
-				}
-				if jsonPath1 != jsonPath2 {
+				hasJsonPath2 := err == nil
+				if hasJsonPath1 && hasJsonPath2 && jsonPath1 != jsonPath2 {
 					continue
 				}
 			}
@@ -1076,6 +1083,7 @@ func (m *indexMeta) AreAllDiskIndex(collectionID int64, schema *schemapb.Collect
 		return t.FieldID, GetIndexType(t.IndexParams)
 	})
 	vectorFieldsWithDiskIndex := lo.Filter(vectorFields, func(field *schemapb.FieldSchema, _ int) bool {
+
 		if indexType, ok := fieldIndexTypes[field.FieldID]; ok {
 			return vecindexmgr.GetVecIndexMgrInstance().IsDiskVecIndex(indexType)
 		}

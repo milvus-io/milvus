@@ -16,6 +16,7 @@
 
 #include "UnaryExpr.h"
 #include <optional>
+#include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/Types.h"
 #include "common/type_c.h"
@@ -209,8 +210,11 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         result = ExecRangeVisitorImplForIndex<std::string>();
                         break;
                     case proto::plan::GenericValue::ValCase::kArrayVal:
-                        result =
-                            ExecRangeVisitorImplForIndex<proto::plan::Array>();
+                        PanicInfo(DataTypeInvalid,
+                                  "unsupported data type: {}",
+                                  val_type);
+                        // result =
+                        // ExecRangeVisitorImplForIndex<proto::plan::Array>();
                         break;
                     default:
                         PanicInfo(

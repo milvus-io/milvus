@@ -14,6 +14,11 @@
 #include <memory>
 #include <limits>
 
+#include <stdexcept>
+#include <string_view>
+#include <boost/stacktrace.hpp>
+
+#include "boost/stacktrace/stacktrace.hpp"
 #include "pb/cgo_msg.pb.h"
 #include "pb/index_cgo_msg.pb.h"
 
@@ -34,6 +39,7 @@
 #include "storage/Util.h"
 #include "futures/Future.h"
 #include "futures/Executor.h"
+#include "boost/stacktrace.hpp"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CStatus
