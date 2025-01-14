@@ -20,11 +20,21 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 )
 
 type CompactionTask interface {
+	// Process performs the task's state machine
+	//
+	// Returns:
+	//   - <bool>:  whether the task state machine ends.
+	//
+	// Notes:
+	//
+	//	`end` doesn't mean the task completed, its state may be completed or failed or timeout.
 	Process() bool
+	// Clean performs clean logic for a fail/timeout task
+	Clean() bool
 	BuildCompactionRequest() (*datapb.CompactionPlan, error)
 
 	GetTriggerID() UniqueID

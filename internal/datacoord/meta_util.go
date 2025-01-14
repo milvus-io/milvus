@@ -16,7 +16,7 @@
 
 package datacoord
 
-import "github.com/milvus-io/milvus/internal/proto/datapb"
+import "github.com/milvus-io/milvus/pkg/proto/datapb"
 
 // reviseVChannelInfo will revise the datapb.VchannelInfo for upgrade compatibility from 2.0.2
 func reviseVChannelInfo(vChannel *datapb.VchannelInfo) {

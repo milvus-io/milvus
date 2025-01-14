@@ -28,10 +28,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 

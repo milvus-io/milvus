@@ -9,9 +9,9 @@ import (
 
 	grpc "google.golang.org/grpc"
 
-	indexpb "github.com/milvus-io/milvus/internal/proto/indexpb"
+	indexpb "github.com/milvus-io/milvus/pkg/proto/indexpb"
 
-	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 

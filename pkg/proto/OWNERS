@@ -18,7 +18,7 @@ filters:
     approvers:
       - maintainers
 
-  "{data_coord|index_coord|internal|proxy|query_coord|root_coord}\\.proto":
+  "{data_coord|index_coord|internal|proxy|query_coord|root_coord|streaming|messages}\\.proto":
     labels:
       - area/internal-api
     approvers:

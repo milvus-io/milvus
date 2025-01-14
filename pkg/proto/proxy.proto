@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.proxy;
 
-option go_package = "github.com/milvus-io/milvus/internal/proto/proxypb";
+option go_package = "github.com/milvus-io/milvus/pkg/proto/proxypb";
 
 import "common.proto";
 import "internal.proto";
