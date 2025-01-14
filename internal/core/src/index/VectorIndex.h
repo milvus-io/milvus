@@ -42,7 +42,7 @@ class VectorIndex : public IndexBase {
 
  public:
     void
-    BuildWithRawData(size_t n,
+    BuildWithRawDataForUT(size_t n,
                      const void* values,
                      const Config& config = {}) override {
         PanicInfo(Unsupported,

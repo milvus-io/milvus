@@ -214,7 +214,6 @@ HybridScalarIndex<std::string>::GetInternalIndex() {
         internal_index_ =
             std::make_shared<StringIndexMarisa>(file_manager_context_);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
-        // todo(SpadeA): does this need to consider single segment building?
         internal_index_ = std::make_shared<InvertedIndexTantivy<std::string>>(
             file_manager_context_);
     } else {

@@ -383,7 +383,7 @@ InvertedIndexTantivy<T>::RegexQuery(const std::string& regex_pattern) {
 
 template <typename T>
 void
-InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
+InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
                                           const void* values,
                                           const Config& config) {
     if constexpr (std::is_same_v<bool, T>) {
@@ -417,9 +417,10 @@ InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
     boost::filesystem::create_directories(path_);
     d_type_ = get_tantivy_data_type(schema_);
     std::string field = "test_inverted_index";
-    if (config.contains("inverted_index_single_segment")) {
-        inverted_index_single_segment_ = true;
-    }
+    inverted_index_single_segment_ =
+        GetValueFromConfig<int32_t>(config,
+                                    milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+            .value() == 0;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         field.c_str(), d_type_, path_.c_str(), inverted_index_single_segment_);
     if (!inverted_index_single_segment_) {

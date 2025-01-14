@@ -72,7 +72,7 @@ ScalarIndex<T>::Query(const DatasetPtr& dataset) {
 
 template <>
 void
-ScalarIndex<std::string>::BuildWithRawData(size_t n,
+ScalarIndex<std::string>::BuildWithRawDataForUT(size_t n,
                                            const void* values,
                                            const Config& config) {
     proto::schema::StringArray arr;
@@ -86,7 +86,7 @@ ScalarIndex<std::string>::BuildWithRawData(size_t n,
 
 template <>
 void
-ScalarIndex<bool>::BuildWithRawData(size_t n,
+ScalarIndex<bool>::BuildWithRawDataForUT(size_t n,
                                     const void* values,
                                     const Config& config) {
     proto::schema::BoolArray arr;
@@ -97,7 +97,7 @@ ScalarIndex<bool>::BuildWithRawData(size_t n,
 
 template <>
 void
-ScalarIndex<int8_t>::BuildWithRawData(size_t n,
+ScalarIndex<int8_t>::BuildWithRawDataForUT(size_t n,
                                       const void* values,
                                       const Config& config) {
     auto data = reinterpret_cast<int8_t*>(const_cast<void*>(values));
@@ -106,7 +106,7 @@ ScalarIndex<int8_t>::BuildWithRawData(size_t n,
 
 template <>
 void
-ScalarIndex<int16_t>::BuildWithRawData(size_t n,
+ScalarIndex<int16_t>::BuildWithRawDataForUT(size_t n,
                                        const void* values,
                                        const Config& config) {
     auto data = reinterpret_cast<int16_t*>(const_cast<void*>(values));
@@ -115,7 +115,7 @@ ScalarIndex<int16_t>::BuildWithRawData(size_t n,
 
 template <>
 void
-ScalarIndex<int32_t>::BuildWithRawData(size_t n,
+ScalarIndex<int32_t>::BuildWithRawDataForUT(size_t n,
                                        const void* values,
                                        const Config& config) {
     auto data = reinterpret_cast<int32_t*>(const_cast<void*>(values));
@@ -124,7 +124,7 @@ ScalarIndex<int32_t>::BuildWithRawData(size_t n,
 
 template <>
 void
-ScalarIndex<int64_t>::BuildWithRawData(size_t n,
+ScalarIndex<int64_t>::BuildWithRawDataForUT(size_t n,
                                        const void* values,
                                        const Config& config) {
     auto data = reinterpret_cast<int64_t*>(const_cast<void*>(values));
@@ -133,7 +133,7 @@ ScalarIndex<int64_t>::BuildWithRawData(size_t n,
 
 template <>
 void
-ScalarIndex<float>::BuildWithRawData(size_t n,
+ScalarIndex<float>::BuildWithRawDataForUT(size_t n,
                                      const void* values,
                                      const Config& config) {
     auto data = reinterpret_cast<float*>(const_cast<void*>(values));
@@ -142,7 +142,7 @@ ScalarIndex<float>::BuildWithRawData(size_t n,
 
 template <>
 void
-ScalarIndex<double>::BuildWithRawData(size_t n,
+ScalarIndex<double>::BuildWithRawDataForUT(size_t n,
                                       const void* values,
                                       const Config& config) {
     auto data = reinterpret_cast<double*>(const_cast<void*>(values));

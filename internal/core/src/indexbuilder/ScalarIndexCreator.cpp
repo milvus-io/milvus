@@ -30,9 +30,11 @@ ScalarIndexCreator::ScalarIndexCreator(
     if (config.contains("index_type")) {
         index_type_ = config.at("index_type").get<std::string>();
     }
-    if (config.contains("inverted_index_single_segment")) {
-        index_info.inverted_index_single_segment = true;
-    }
+    index_info.scalar_index_engine_version =
+        milvus::index::GetValueFromConfig<int32_t>(
+            config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+            .value();
+
     index_info.field_type = dtype_;
     index_info.index_type = index_type();
     index_ = index::IndexFactory::GetInstance().CreateIndex(
@@ -43,7 +45,7 @@ void
 ScalarIndexCreator::Build(const milvus::DatasetPtr& dataset) {
     auto size = dataset->GetRows();
     auto data = dataset->GetTensor();
-    index_->BuildWithRawData(size, data);
+    index_->BuildWithRawDataForUT(size, data);
 }
 
 void

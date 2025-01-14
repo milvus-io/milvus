@@ -39,9 +39,10 @@ IndexFactory::CreatePrimitiveScalarIndex(
     const storage::FileManagerContext& file_manager_context) {
     auto index_type = create_index_info.index_type;
     if (index_type == INVERTED_INDEX_TYPE) {
+        // scalar_index_engine_version 0 means we should built tantivy index within single segment
         return std::make_unique<InvertedIndexTantivy<T>>(
             file_manager_context,
-            create_index_info.inverted_index_single_segment);
+            create_index_info.scalar_index_engine_version == 0);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
         return std::make_unique<BitmapIndex<T>>(file_manager_context);
@@ -67,9 +68,10 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
     auto index_type = create_index_info.index_type;
 #if defined(__linux__) || defined(__APPLE__)
     if (index_type == INVERTED_INDEX_TYPE) {
+        // scalar_index_engine_version 0 means we should built tantivy index within single segment
         return std::make_unique<InvertedIndexTantivy<std::string>>(
             file_manager_context,
-            create_index_info.inverted_index_single_segment);
+            create_index_info.scalar_index_engine_version == 0);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
         return std::make_unique<BitmapIndex<std::string>>(file_manager_context);

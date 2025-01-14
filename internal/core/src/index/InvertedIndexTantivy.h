@@ -81,9 +81,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         return wrapper_->count();
     }
 
-    // BuildWithRawData should be only used in ut. Only string is supported.
+    // BuildWithRawDataForUT should be only used in ut. Only string is supported.
     void
-    BuildWithRawData(size_t n,
+    BuildWithRawDataForUT(size_t n,
                      const void* values,
                      const Config& config = {}) override;
 
