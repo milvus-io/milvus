@@ -172,9 +172,14 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
     auto index_data = index_binary.GetByName("index_data");
     data_.resize(index_size);
     auto index_num_rows = index_binary.GetByName("index_num_rows");
-    memcpy(&total_num_rows_,
-           index_num_rows->data.get(),
-           (size_t)index_num_rows->size);
+    if (index_num_rows) {
+        memcpy(&total_num_rows_,
+               index_num_rows->data.get(),
+               (size_t)index_num_rows->size);
+    } else {
+        total_num_rows_ = index_size;
+    }
+
     idx_to_offsets_.resize(total_num_rows_);
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
     memcpy(data_.data(), index_data->data.get(), (size_t)index_data->size);
