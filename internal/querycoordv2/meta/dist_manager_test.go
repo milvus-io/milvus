@@ -7,8 +7,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 )
 
@@ -81,7 +81,7 @@ func TestGetDistributionJSON(t *testing.T) {
 	manager.LeaderViewManager.Update(2, leaderView2)
 
 	// Call GetDistributionJSON
-	jsonOutput := manager.GetDistributionJSON()
+	jsonOutput := manager.GetDistributionJSON(0)
 
 	// Verify JSON output
 	var dist metricsinfo.QueryCoordDist
@@ -91,4 +91,13 @@ func TestGetDistributionJSON(t *testing.T) {
 	assert.Len(t, dist.Segments, 2)
 	assert.Len(t, dist.DMChannels, 2)
 	assert.Len(t, dist.LeaderViews, 2)
+
+	jsonOutput = manager.GetDistributionJSON(1000)
+	var dist2 metricsinfo.QueryCoordDist
+	err = json.Unmarshal([]byte(jsonOutput), &dist2)
+	assert.NoError(t, err)
+
+	assert.Len(t, dist2.Segments, 0)
+	assert.Len(t, dist2.DMChannels, 0)
+	assert.Len(t, dist2.LeaderViews, 0)
 }

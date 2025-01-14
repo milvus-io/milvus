@@ -85,7 +85,7 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
         for p in properties.items():
             if p[0] not in ["mmap.enabled"]:
                 log.debug(f"try to alter index property: {p[0]}")
-                error = {ct.err_code: 1, ct.err_msg: f"{p[0]} is not a configable index proptery"}
+                error = {ct.err_code: 1, ct.err_msg: f"{p[0]} is not a configable index property"}
                 new_value = p[1] + 1 if isinstance(p[1], numbers.Number) else "new_value"
                 self.alter_index_properties(client, collection_name, vector_field_name,
                                             properties={p[0]: new_value},

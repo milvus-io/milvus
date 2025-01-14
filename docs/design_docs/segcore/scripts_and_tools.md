@@ -14,3 +14,6 @@ The following scripts and commands may be used during segcore development.
     - if license info is added
     - if `cpplint.py` standard meets , might need to be fixed by hand
   - `make verifier` also includes functions in `make cppcheck`
+
+- under milvus/ directory
+  - use `make static-check` to check golang code format
