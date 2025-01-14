@@ -34,7 +34,7 @@ ScalarIndexCreator::ScalarIndexCreator(
     index_info.scalar_index_engine_version =
         milvus::index::GetValueFromConfig<int32_t>(
             config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
-            .value_or(0);
+            .value_or(1);
 
     index_info.field_type = dtype_;
     index_info.index_type = index_type();
