@@ -49,6 +49,10 @@ get_tantivy_data_type(proto::schema::DataType data_type) {
             return TantivyDataType::Keyword;
         }
 
+        case proto::schema::DataType::JSON: {
+            return TantivyDataType::JSON;
+        }
+
         default:
             PanicInfo(ErrorCode::NotImplemented,
                       fmt::format("not implemented data type: {}", data_type));
@@ -223,7 +227,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
         PanicInfo(ErrorCode::NotImplemented,
                   "build_index_for_json not implemented");
-    };
+    }
 
  protected:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;

@@ -356,6 +356,16 @@ pub extern "C" fn tantivy_index_add_string_by_single_segment_writer(
     unsafe { (*real).add_string_by_single_segment_writer(s).into() }
 }
 
+#[no_mangle]
+pub extern "C" fn tantivy_index_add_json(
+    ptr: *mut c_void,
+    s: *const c_char,
+    offset: i64,
+) -> RustResult {
+    let real = ptr as *mut IndexWriterWrapper;
+    let s = cstr_to_str!(s);
+    unsafe { (*real).add_json(s, offset).into() }
+}
 // --------------------------------------------- array ------------------------------------------
 
 #[no_mangle]
