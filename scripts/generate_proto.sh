@@ -24,7 +24,7 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
-PROTO_DIR=$ROOT_DIR/internal/proto/
+PROTO_DIR=$ROOT_DIR/pkg/proto
 API_PROTO_DIR=$ROOT_DIR/cmake_build/thirdparty/milvus-proto/proto
 CPP_SRC_DIR=$ROOT_DIR/internal/core
 PROTOC_BIN=$ROOT_DIR/cmake_build/bin/protoc
@@ -47,24 +47,21 @@ echo "using protoc-gen-go-grpc: $(which protoc-gen-go-grpc)"
 # official go code ship with the crate, so we need to generate it manually.
 pushd ${PROTO_DIR}
 
-mkdir -p etcdpb
-mkdir -p indexcgopb
-mkdir -p cgopb
-
-mkdir -p internalpb
-mkdir -p rootcoordpb
-
-mkdir -p segcorepb
-mkdir -p clusteringpb
-mkdir -p proxypb
-
-mkdir -p indexpb
-mkdir -p datapb
-mkdir -p querypb
-mkdir -p planpb
-mkdir -p streamingpb
-mkdir -p workerpb
-
+mkdir -p ./etcdpb
+mkdir -p ./indexcgopb
+mkdir -p ./cgopb
+mkdir -p ./internalpb
+mkdir -p ./rootcoordpb
+mkdir -p ./segcorepb
+mkdir -p ./clusteringpb
+mkdir -p ./proxypb
+mkdir -p ./indexpb
+mkdir -p ./datapb
+mkdir -p ./querypb
+mkdir -p ./planpb
+mkdir -p ./workerpb
+mkdir -p ./messagespb
+mkdir -p ./streamingpb
 mkdir -p $ROOT_DIR/cmd/tools/migration/legacy/legacypb
 
 protoc_opt="${PROTOC_BIN} --proto_path=${API_PROTO_DIR} --proto_path=."
@@ -81,7 +78,8 @@ ${protoc_opt} --go_out=paths=source_relative:./querypb --go-grpc_out=require_uni
 ${protoc_opt} --go_out=paths=source_relative:./planpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./planpb plan.proto|| { echo 'generate plan.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./segcorepb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./segcorepb segcore.proto|| { echo 'generate segcore.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./clusteringpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./clusteringpb clustering.proto|| { echo 'generate clustering.proto failed'; exit 1; }
-
+${protoc_opt} --go_out=paths=source_relative:./messagespb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./messagespb messages.proto || { echo 'generate messages.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./streamingpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./streamingpb streaming.proto || { echo 'generate streamingpb.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./workerpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./workerpb worker.proto|| { echo 'generate worker.proto failed'; exit 1; }
 
 ${protoc_opt} --proto_path=$ROOT_DIR/pkg/eventlog/ --go_out=paths=source_relative:../../pkg/eventlog/ --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:../../pkg/eventlog/ event_log.proto || { echo 'generate event_log.proto failed'; exit 1; }
@@ -97,17 +95,5 @@ ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb clustering.proto|| { echo 'generate 
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb index_cgo_msg.proto|| { echo 'generate index_cgo_msg.proto failed'; exit 1; }
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb cgo_msg.proto|| { echo 'generate cgo_msg.proto failed'; exit 1; }
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb plan.proto|| { echo 'generate plan.proto failed'; exit 1; }
-
-popd
-
-
-pushd $ROOT_DIR/pkg/streaming/proto
-
-mkdir -p messagespb
-mkdir -p streamingpb
-
-# streaming node message protobuf
-${protoc_opt} --go_out=paths=source_relative:./messagespb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./messagespb messages.proto || { echo 'generate messagespb.proto failed'; exit 1; }
-${protoc_opt} --go_out=paths=source_relative:./streamingpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./streamingpb streaming.proto || { echo 'generate streamingpb.proto failed'; exit 1; }
 
 popd

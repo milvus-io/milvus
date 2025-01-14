@@ -7,7 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/client"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"

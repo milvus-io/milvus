@@ -38,7 +38,7 @@ class ScalarIndexCreator : public IndexCreatorBase {
     void
     Load(const milvus::BinarySet&) override;
 
-    BinarySet
+    index::IndexStatsPtr
     Upload() override;
 
  private:

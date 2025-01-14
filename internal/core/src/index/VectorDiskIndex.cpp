@@ -115,7 +115,7 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
 }
 
 template <typename T>
-BinarySet
+IndexStatsPtr
 VectorDiskAnnIndex<T>::Upload(const Config& config) {
     BinarySet ret;
     auto stat = index_.Serialize(ret);
@@ -124,11 +124,8 @@ VectorDiskAnnIndex<T>::Upload(const Config& config) {
                   "failed to serialize index, " + KnowhereStatusString(stat));
     }
     auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
-    for (auto& file : remote_paths_to_size) {
-        ret.Append(file.first, nullptr, file.second);
-    }
-
-    return ret;
+    return IndexStats::NewFromSizeMap(file_manager_->GetAddedTotalFileSize(),
+                                      remote_paths_to_size);
 }
 
 template <typename T>

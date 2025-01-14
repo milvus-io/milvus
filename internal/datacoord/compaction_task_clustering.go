@@ -33,12 +33,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -716,6 +716,15 @@ func (t *clusteringCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datap
 }
 
 func (t *clusteringCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
+	// if task state is completed, cleaned, failed, timeout, then do append end time and save
+	if t.GetTaskProto().State == datapb.CompactionTaskState_completed ||
+		t.GetTaskProto().State == datapb.CompactionTaskState_cleaned ||
+		t.GetTaskProto().State == datapb.CompactionTaskState_failed ||
+		t.GetTaskProto().State == datapb.CompactionTaskState_timeout {
+		ts := time.Now().Unix()
+		opts = append(opts, setEndTime(ts))
+	}
+
 	task := t.ShadowClone(opts...)
 	err := t.saveTaskMeta(task)
 	if err != nil {

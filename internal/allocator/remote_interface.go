@@ -21,7 +21,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 )
 
 type remoteInterface interface {

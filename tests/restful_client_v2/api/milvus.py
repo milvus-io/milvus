@@ -10,6 +10,8 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt
 from requests.exceptions import ConnectionError
 import urllib.parse
 
+REQUEST_TIMEOUT = 120
+
 
 ENABLE_LOG_SAVE = False
 
@@ -101,7 +103,8 @@ class Requests():
         self.headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {self.api_key}',
-            'RequestId': self.uuid
+            'RequestId': self.uuid,
+            "Request-Timeout": REQUEST_TIMEOUT
         }
 
     @classmethod

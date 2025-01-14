@@ -22,10 +22,10 @@
 
 namespace milvus {
 
-#define THROW_FILE_WRITE_ERROR                                           \
+#define THROW_FILE_WRITE_ERROR(path)                                     \
     PanicInfo(ErrorCode::FileWriteFailed,                                \
               fmt::format("write data to file {} failed, error code {}", \
-                          file_.Path(),                                  \
+                          path,                                          \
                           strerror(errno)));
 
 class File {
@@ -145,7 +145,7 @@ class BufferedWriter {
             flush();
             ssize_t written_data_size = file_.FWrite(data, size);
             if (written_data_size != size) {
-                THROW_FILE_WRITE_ERROR
+                THROW_FILE_WRITE_ERROR(file_.Path())
             }
             return;
         }
@@ -170,7 +170,7 @@ class BufferedWriter {
         if (buffer_pos_ > 0) {
             ssize_t written_data_size = file_.FWrite(buffer_, buffer_pos_);
             if (written_data_size != buffer_pos_) {
-                THROW_FILE_WRITE_ERROR
+                THROW_FILE_WRITE_ERROR(file_.Path())
             }
             buffer_pos_ = 0;
         }

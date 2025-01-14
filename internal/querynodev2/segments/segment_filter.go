@@ -17,7 +17,7 @@
 package segments
 
 import (
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
