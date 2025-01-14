@@ -26,7 +26,7 @@ import (
 	"context"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 )
 
 type LoadFieldDataInfo struct {

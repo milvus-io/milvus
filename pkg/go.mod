@@ -12,7 +12,7 @@ require (
 	github.com/expr-lang/expr v1.15.7
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.17.7
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.19
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.20-0.20241231032247-fe5d4dd2235f
 	github.com/nats-io/nats-server/v2 v2.10.12
 	github.com/nats-io/nats.go v1.34.1
 	github.com/panjf2000/ants/v2 v2.7.2
@@ -46,7 +46,7 @@ require (
 	go.uber.org/zap v1.20.0
 	golang.org/x/crypto v0.31.0
 	golang.org/x/exp v0.0.0-20230224173230-c95f2b4c22f2
-	golang.org/x/net v0.24.0
+	golang.org/x/net v0.33.0
 	golang.org/x/sync v0.10.0
 	golang.org/x/sys v0.28.0
 	google.golang.org/grpc v1.59.0

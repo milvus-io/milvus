@@ -22,8 +22,8 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 

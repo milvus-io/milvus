@@ -209,9 +209,10 @@ PhyTermFilterExpr::ExecPkTermImpl() {
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
 
-    for (size_t i = 0; i < real_batch_size; ++i) {
-        res[i] = cached_bits_[current_data_chunk_pos_++];
-    }
+    auto current_chunk_view =
+        cached_bits_.view(current_data_chunk_pos_, real_batch_size);
+    res |= current_chunk_view;
+    current_data_chunk_pos_ += real_batch_size;
 
     if (use_cache_offsets_) {
         std::vector<VectorPtr> vecs{res_vec, cached_offsets_};
