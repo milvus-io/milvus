@@ -30,14 +30,15 @@ import (
 )
 
 type indexTaskInfo struct {
-	cancel              context.CancelFunc
-	state               commonpb.IndexState
-	fileKeys            []string
-	serializedSize      uint64
-	memSize             uint64
-	failReason          string
-	currentIndexVersion int32
-	indexStoreVersion   int64
+	cancel                    context.CancelFunc
+	state                     commonpb.IndexState
+	fileKeys                  []string
+	serializedSize            uint64
+	memSize                   uint64
+	failReason                string
+	currentIndexVersion       int32
+	indexStoreVersion         int64
+	currentScalarIndexVersion int32
 
 	// task statistics
 	statistic *indexpb.JobInfo
@@ -93,6 +94,7 @@ func (i *IndexNode) storeIndexFilesAndStatistic(
 	serializedSize uint64,
 	memSize uint64,
 	currentIndexVersion int32,
+	currentScalarIndexVersion int32,
 ) {
 	key := taskKey{ClusterID: ClusterID, TaskID: buildID}
 	i.stateLock.Lock()
@@ -102,6 +104,7 @@ func (i *IndexNode) storeIndexFilesAndStatistic(
 		info.serializedSize = serializedSize
 		info.memSize = memSize
 		info.currentIndexVersion = currentIndexVersion
+		info.currentScalarIndexVersion = currentScalarIndexVersion
 		return
 	}
 }
