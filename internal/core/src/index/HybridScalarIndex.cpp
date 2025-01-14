@@ -298,7 +298,7 @@ HybridScalarIndex<T>::SerializeIndexType() {
 }
 
 template <typename T>
-BinarySet
+IndexStatsPtr
 HybridScalarIndex<T>::Upload(const Config& config) {
     auto internal_index = GetInternalIndex();
     auto index_ret = internal_index->Upload(config);
@@ -306,9 +306,9 @@ HybridScalarIndex<T>::Upload(const Config& config) {
     auto index_type_ret = SerializeIndexType();
 
     for (auto& [key, value] : index_type_ret.binary_map_) {
-        index_ret.Append(key, value);
+        index_ret->AppendSerializedIndexFileInfo(
+            SerializedIndexFileInfo(key, value->size));
     }
-
     return index_ret;
 }
 

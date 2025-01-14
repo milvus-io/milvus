@@ -22,26 +22,24 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRbacConfig_Init(t *testing.T) {
+func TestRbacConfig_DefaultPrivileges(t *testing.T) {
 	params := ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
 	cfg := &params.RbacConfig
 	assert.Equal(t, len(cfg.GetDefaultPrivilegeGroupNames()), 9)
-	assert.True(t, cfg.IsCollectionPrivilegeGroup("CollectionReadOnly"))
-	assert.False(t, cfg.IsCollectionPrivilegeGroup("DatabaseReadOnly"))
 	assert.Equal(t, cfg.Enabled.GetAsBool(), false)
-	assert.Equal(t, cfg.ClusterReadOnlyPrivileges.GetAsStrings(), builtinPrivilegeGroups["ClusterReadOnly"])
-	assert.Equal(t, cfg.ClusterReadWritePrivileges.GetAsStrings(), builtinPrivilegeGroups["ClusterReadWrite"])
-	assert.Equal(t, cfg.ClusterAdminPrivileges.GetAsStrings(), builtinPrivilegeGroups["ClusterAdmin"])
-	assert.Equal(t, cfg.DBReadOnlyPrivileges.GetAsStrings(), builtinPrivilegeGroups["DatabaseReadOnly"])
-	assert.Equal(t, cfg.DBReadWritePrivileges.GetAsStrings(), builtinPrivilegeGroups["DatabaseReadWrite"])
-	assert.Equal(t, cfg.DBAdminPrivileges.GetAsStrings(), builtinPrivilegeGroups["DatabaseAdmin"])
-	assert.Equal(t, cfg.CollectionReadOnlyPrivileges.GetAsStrings(), builtinPrivilegeGroups["CollectionReadOnly"])
-	assert.Equal(t, cfg.CollectionReadWritePrivileges.GetAsStrings(), builtinPrivilegeGroups["CollectionReadWrite"])
-	assert.Equal(t, cfg.CollectionAdminPrivileges.GetAsStrings(), builtinPrivilegeGroups["CollectionAdmin"])
+	assert.Equal(t, cfg.ClusterReadOnlyPrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("ClusterReadOnly"))
+	assert.Equal(t, cfg.ClusterReadWritePrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("ClusterReadWrite"))
+	assert.Equal(t, cfg.ClusterAdminPrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("ClusterAdmin"))
+	assert.Equal(t, cfg.DBReadOnlyPrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("DatabaseReadOnly"))
+	assert.Equal(t, cfg.DBReadWritePrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("DatabaseReadWrite"))
+	assert.Equal(t, cfg.DBAdminPrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("DatabaseAdmin"))
+	assert.Equal(t, cfg.CollectionReadOnlyPrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("CollectionReadOnly"))
+	assert.Equal(t, cfg.CollectionReadWritePrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("CollectionReadWrite"))
+	assert.Equal(t, cfg.CollectionAdminPrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("CollectionAdmin"))
 }
 
-func TestRbacConfig_Override(t *testing.T) {
+func TestRbacConfig_OverridePrivileges(t *testing.T) {
 	params := ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
 

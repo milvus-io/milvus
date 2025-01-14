@@ -725,7 +725,7 @@ TEST(Query, ExecWithPredicateBinary) {
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
-    auto ph_group_raw = CreateBinaryPlaceholderGroupFromBlob(
+    auto ph_group_raw = CreatePlaceholderGroupFromBlob<milvus::BinaryVector>(
         num_queries, 512, vec_ptr.data() + 1024 * 512 / 8);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
