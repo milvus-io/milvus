@@ -4827,6 +4827,9 @@ type streamingConfig struct {
 	WALBalancerBackoffInitialInterval ParamItem `refreshable:"true"`
 	WALBalancerBackoffMultiplier      ParamItem `refreshable:"true"`
 
+	// broadcaster
+	WALBroadcasterConcurrencyRatio ParamItem `refreshable:"false"`
+
 	// txn
 	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
 }
@@ -4859,6 +4862,15 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 		Export:       true,
 	}
 	p.WALBalancerBackoffMultiplier.Init(base.mgr)
+
+	p.WALBroadcasterConcurrencyRatio = ParamItem{
+		Key:          "streaming.walBroadcaster.concurrencyRatio",
+		Version:      "2.5.4",
+		Doc:          `The concurrency ratio based on number of CPU for wal broadcaster, 1 by default.`,
+		DefaultValue: "1",
+		Export:       true,
+	}
+	p.WALBroadcasterConcurrencyRatio.Init(base.mgr)
 
 	// txn
 	p.TxnDefaultKeepaliveTimeout = ParamItem{
