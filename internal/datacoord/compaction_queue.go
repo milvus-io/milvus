@@ -34,30 +34,35 @@ type Item[T any] struct {
 }
 
 // A PriorityQueue implements heap.Interface and holds Items.
-type PriorityQueue[T any] []*Item[T]
+type PriorityQueue []*Item[CompactionTask]
 
-var _ heap.Interface = (*PriorityQueue[any])(nil)
+var _ heap.Interface = (*PriorityQueue)(nil)
 
-func (pq PriorityQueue[T]) Len() int { return len(pq) }
+func (pq PriorityQueue) Len() int { return len(pq) }
 
-func (pq PriorityQueue[T]) Less(i, j int) bool {
+// Use planID as priority if they have same priority
+func (pq PriorityQueue) Less(i, j int) bool {
+	if pq[i].priority == pq[j].priority {
+		return pq[i].value.GetPlanID() < pq[j].value.GetPlanID()
+	}
+
 	return pq[i].priority < pq[j].priority
 }
 
-func (pq PriorityQueue[T]) Swap(i, j int) {
+func (pq PriorityQueue) Swap(i, j int) {
 	pq[i], pq[j] = pq[j], pq[i]
 	pq[i].index = i
 	pq[j].index = j
 }
 
-func (pq *PriorityQueue[T]) Push(x any) {
+func (pq *PriorityQueue) Push(x any) {
 	n := len(*pq)
-	item := x.(*Item[T])
+	item := x.(*Item[CompactionTask])
 	item.index = n
 	*pq = append(*pq, item)
 }
 
-func (pq *PriorityQueue[T]) Pop() any {
+func (pq *PriorityQueue) Pop() any {
 	old := *pq
 	n := len(old)
 	item := old[n-1]
@@ -68,7 +73,7 @@ func (pq *PriorityQueue[T]) Pop() any {
 }
 
 // update modifies the priority and value of an Item in the queue.
-func (pq *PriorityQueue[T]) Update(item *Item[T], value T, priority int) {
+func (pq *PriorityQueue) Update(item *Item[CompactionTask], value CompactionTask, priority int) {
 	item.value = value
 	item.priority = priority
 	heap.Fix(pq, item.index)
@@ -82,7 +87,7 @@ var (
 type Prioritizer func(t CompactionTask) int
 
 type CompactionQueue struct {
-	pq          PriorityQueue[CompactionTask]
+	pq          PriorityQueue
 	lock        lock.RWMutex
 	prioritizer Prioritizer
 	capacity    int
@@ -90,7 +95,7 @@ type CompactionQueue struct {
 
 func NewCompactionQueue(capacity int, prioritizer Prioritizer) *CompactionQueue {
 	return &CompactionQueue{
-		pq:          make(PriorityQueue[CompactionTask], 0),
+		pq:          make(PriorityQueue, 0),
 		lock:        lock.RWMutex{},
 		prioritizer: prioritizer,
 		capacity:    capacity,

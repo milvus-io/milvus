@@ -68,10 +68,43 @@ func TestCompactionQueue(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int64(3), task.GetPlanID())
 	})
+	t.Run("second prioritizer planID", func(t *testing.T) {
+		cq := NewCompactionQueue(11, LevelPrioritizer)
+
+		// enqueue mixcompaction
+		err := cq.Enqueue(t1)
+		assert.NoError(t, err)
+
+		planIDs := []int64{4, 1, 2, 3, 7, 6, 9, 5, 10}
+
+		// enqueue ten L0 compactions
+		for _, planID := range planIDs {
+			l0Task := &l0CompactionTask{}
+			l0Task.SetTask(&datapb.CompactionTask{
+				PlanID: planID,
+				Type:   datapb.CompactionType_Level0DeleteCompaction,
+			})
+			err = cq.Enqueue(l0Task)
+			assert.NoError(t, err)
+		}
+
+		gotPlanIDs := []int64{}
+		for range planIDs {
+			task, err := cq.Dequeue()
+			assert.NoError(t, err)
+			assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetType())
+			gotPlanIDs = append(gotPlanIDs, task.GetPlanID())
+		}
+		assert.Equal(t, gotPlanIDs, []int64{1, 2, 3, 4, 5, 6, 7, 9, 10})
+
+		task, err := cq.Dequeue()
+		assert.Equal(t, datapb.CompactionType_MixCompaction, task.GetType())
+	})
 
 	t.Run("level prioritizer", func(t *testing.T) {
+		var err error
 		cq := NewCompactionQueue(3, LevelPrioritizer)
-		err := cq.Enqueue(t1)
+		err = cq.Enqueue(t1)
 		assert.NoError(t, err)
 		err = cq.Enqueue(t2)
 		assert.NoError(t, err)

@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/samber/lo"
 
@@ -80,6 +81,11 @@ func (v *LevelZeroSegmentsView) ForceTrigger() (CompactionView, string) {
 		return view.dmlPos.GetTimestamp() < v.earliestGrowingSegmentPos.GetTimestamp()
 	})
 
+	// Sort segments by dmlPosition
+	sort.Slice(validSegments, func(i, j int) bool {
+		return validSegments[i].dmlPos.GetTimestamp() < validSegments[j].dmlPos.GetTimestamp()
+	})
+
 	targetViews, reason := v.forceTrigger(validSegments)
 	if len(targetViews) > 0 {
 		return &LevelZeroSegmentsView{
@@ -97,6 +103,10 @@ func (v *LevelZeroSegmentsView) Trigger() (CompactionView, string) {
 	// Only choose segments with position less than the earliest growing segment position
 	validSegments := lo.Filter(v.segments, func(view *SegmentView, _ int) bool {
 		return view.dmlPos.GetTimestamp() < v.earliestGrowingSegmentPos.GetTimestamp()
+	})
+	// Sort segments by dmlPosition
+	sort.Slice(validSegments, func(i, j int) bool {
+		return validSegments[i].dmlPos.GetTimestamp() < validSegments[j].dmlPos.GetTimestamp()
 	})
 
 	targetViews, reason := v.minCountSizeTrigger(validSegments)

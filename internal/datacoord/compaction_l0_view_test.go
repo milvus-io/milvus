@@ -118,28 +118,28 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 			8 * 1024 * 1024,
 			1,
 			30000,
-			[]UniqueID{100, 101},
+			[]UniqueID{101, 100},
 		},
 		{
 			"Trigger by > TriggerDeltaCount",
 			1,
 			10,
 			30000,
-			[]UniqueID{100, 101},
+			[]UniqueID{101, 100},
 		},
 		{
 			"Trigger by > maxDeltaSize",
 			128 * 1024 * 1024,
 			1,
 			30000,
-			[]UniqueID{100},
+			[]UniqueID{101},
 		},
 		{
 			"Trigger by > maxDeltaCount",
 			1,
 			24,
 			30000,
-			[]UniqueID{100},
+			[]UniqueID{101},
 		},
 	}
 
@@ -166,7 +166,7 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 				gotSegIDs := lo.Map(levelZeroView.GetSegmentsView(), func(v *SegmentView, _ int) int64 {
 					return v.ID
 				})
-				s.ElementsMatch(gotSegIDs, test.expectedSegs)
+				s.Equal(gotSegIDs, test.expectedSegs)
 				log.Info("output view", zap.String("view", levelZeroView.String()), zap.String("trigger reason", reason))
 			}
 		})
