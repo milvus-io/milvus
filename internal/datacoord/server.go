@@ -297,6 +297,8 @@ func (s *Server) initSession() error {
 
 // Init change server state to Initializing
 func (s *Server) Init() error {
+	s.UpdateStateCode(commonpb.StateCode_Initializing)
+
 	log := log.Ctx(s.ctx)
 	var err error
 	s.registerMetricsRequest()
@@ -318,7 +320,7 @@ func (s *Server) Init() error {
 			log.Info("DataCoord startup success")
 			return nil
 		}
-		s.stateCode.Store(commonpb.StateCode_StandBy)
+		s.UpdateStateCode(commonpb.StateCode_StandBy)
 		log.Info("DataCoord enter standby mode successfully")
 		return nil
 	}
@@ -326,9 +328,14 @@ func (s *Server) Init() error {
 	return s.initDataCoord()
 }
 
+// UpdateStateCode updates the status of the coord, including healthy, unhealthy
+func (s *Server) UpdateStateCode(code commonpb.StateCode) {
+	s.stateCode.Store(code)
+	log.Info("update datacoord state", zap.String("state", code.String()))
+}
+
 func (s *Server) initDataCoord() error {
 	log := log.Ctx(s.ctx)
-	s.stateCode.Store(commonpb.StateCode_Initializing)
 	var err error
 	if err = s.initRootCoordClient(); err != nil {
 		return err
@@ -463,7 +470,7 @@ func (s *Server) startDataCoord() {
 	// })
 
 	s.afterStart()
-	s.stateCode.Store(commonpb.StateCode_Healthy)
+	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.DataCoordRole, s.session.GetServerID())
 }
 

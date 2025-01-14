@@ -447,8 +447,6 @@ func (c *Core) initInternal() error {
 	defer initSpan.End()
 	log := log.Ctx(initCtx)
 
-	c.UpdateStateCode(commonpb.StateCode_Initializing)
-
 	if err := c.initIDAllocator(initCtx); err != nil {
 		return err
 	}
@@ -525,6 +523,8 @@ func (c *Core) registerMetricsRequest() {
 
 // Init initialize routine
 func (c *Core) Init() error {
+	c.UpdateStateCode(commonpb.StateCode_Initializing)
+
 	log := log.Ctx(c.ctx)
 	var initError error
 	c.registerMetricsRequest()
