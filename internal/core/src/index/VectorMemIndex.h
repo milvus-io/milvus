@@ -78,7 +78,7 @@ class VectorMemIndex : public VectorIndex {
     std::unique_ptr<const knowhere::sparse::SparseRow<float>[]>
     GetSparseVector(const DatasetPtr dataset) const override;
 
-    BinarySet
+    IndexStatsPtr
     Upload(const Config& config = {}) override;
 
     knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>

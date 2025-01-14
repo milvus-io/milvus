@@ -35,9 +35,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -45,11 +42,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -63,8 +62,6 @@ const (
 
 	// enableMultipleVectorFields indicates whether to enable multiple vector fields.
 	enableMultipleVectorFields = true
-
-	defaultMaxVarCharLength = 1048576
 
 	defaultMaxArrayCapacity = 4096
 
@@ -364,8 +361,10 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 		if err != nil {
 			return err
 		}
+
+		defaultMaxVarCharLength := Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
 		if maxLengthPerRow > defaultMaxVarCharLength || maxLengthPerRow <= 0 {
-			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, 1048576]")
+			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, %d]", defaultMaxVarCharLength)
 		}
 		exist = true
 	}
@@ -1476,11 +1475,11 @@ func isCollectionLoaded(ctx context.Context, qc types.QueryCoordClient, collID i
 	return false, nil
 }
 
-func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64, partIDs []int64) (bool, error) {
+func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64, partID int64) (bool, error) {
 	// get all loading collections
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
 		CollectionID: collID,
-		PartitionIDs: partIDs,
+		PartitionIDs: []int64{partID},
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		// qc returns error if partition not loaded
@@ -1490,7 +1489,7 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID in
 		return false, err
 	}
 
-	return funcutil.SliceSetEqual(partIDs, resp.GetPartitionIDs()), nil
+	return true, nil
 }
 
 func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {

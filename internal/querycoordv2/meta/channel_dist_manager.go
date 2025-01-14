@@ -22,8 +22,8 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -300,15 +300,24 @@ func (m *ChannelDistManager) updateCollectionIndex() {
 	}
 }
 
-func (m *ChannelDistManager) GetChannelDist() []*metricsinfo.DmChannel {
+func (m *ChannelDistManager) GetChannelDist(collectionID int64) []*metricsinfo.DmChannel {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
-	var channels []*metricsinfo.DmChannel
-	for _, nodeChannels := range m.channels {
-		for _, channel := range nodeChannels.channels {
-			channels = append(channels, newDmChannelMetricsFrom(channel))
+	var ret []*metricsinfo.DmChannel
+	if collectionID > 0 {
+		if channels, ok := m.collectionIndex[collectionID]; ok {
+			for _, channel := range channels {
+				ret = append(ret, newDmChannelMetricsFrom(channel))
+			}
+		}
+		return ret
+	}
+
+	for _, channels := range m.collectionIndex {
+		for _, channel := range channels {
+			ret = append(ret, newDmChannelMetricsFrom(channel))
 		}
 	}
-	return channels
+	return ret
 }

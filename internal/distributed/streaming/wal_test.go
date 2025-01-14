@@ -30,19 +30,33 @@ const (
 func TestWAL(t *testing.T) {
 	coordClient := mock_client.NewMockClient(t)
 	coordClient.EXPECT().Close().Return()
+	broadcastServce := mock_client.NewMockBroadcastService(t)
+	broadcastServce.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, bmm message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+			result := make(map[string]*types.AppendResult)
+			for idx, msg := range bmm.SplitIntoMutableMessage() {
+				result[msg.VChannel()] = &types.AppendResult{
+					MessageID: walimplstest.NewTestMessageID(int64(idx)),
+					TimeTick:  uint64(time.Now().UnixMilli()),
+				}
+			}
+			return &types.BroadcastAppendResult{
+				AppendResults: result,
+			}, nil
+		})
+	coordClient.EXPECT().Broadcast().Return(broadcastServce)
 	handler := mock_handler.NewMockHandlerClient(t)
 	handler.EXPECT().Close().Return()
 
 	w := &walAccesserImpl{
-		lifetime:                       typeutil.NewLifetime(),
-		streamingCoordAssignmentClient: coordClient,
-		handlerClient:                  handler,
-		producerMutex:                  sync.Mutex{},
-		producers:                      make(map[string]*producer.ResumableProducer),
-		appendExecutionPool:            conc.NewPool[struct{}](10),
-		dispatchExecutionPool:          conc.NewPool[struct{}](10),
+		lifetime:              typeutil.NewLifetime(),
+		streamingCoordClient:  coordClient,
+		handlerClient:         handler,
+		producerMutex:         sync.Mutex{},
+		producers:             make(map[string]*producer.ResumableProducer),
+		appendExecutionPool:   conc.NewPool[struct{}](10),
+		dispatchExecutionPool: conc.NewPool[struct{}](10),
 	}
-	defer w.Close()
 
 	ctx := context.Background()
 
@@ -114,6 +128,18 @@ func TestWAL(t *testing.T) {
 		newInsertMessage(vChannel3),
 	)
 	assert.NoError(t, resp.UnwrapFirstError())
+
+	r, err := w.BroadcastAppend(ctx, newBroadcastMessage([]string{vChannel1, vChannel2, vChannel3}))
+	assert.NoError(t, err)
+	assert.Len(t, r.AppendResults, 3)
+
+	w.Close()
+
+	resp = w.AppendMessages(ctx, newInsertMessage(vChannel1))
+	assert.Error(t, resp.UnwrapFirstError())
+	r, err = w.BroadcastAppend(ctx, newBroadcastMessage([]string{vChannel1, vChannel2, vChannel3}))
+	assert.Error(t, err)
+	assert.Nil(t, r)
 }
 
 func newInsertMessage(vChannel string) message.MutableMessage {
@@ -122,6 +148,18 @@ func newInsertMessage(vChannel string) message.MutableMessage {
 		WithHeader(&message.InsertMessageHeader{}).
 		WithBody(&msgpb.InsertRequest{}).
 		BuildMutable()
+	if err != nil {
+		panic(err)
+	}
+	return msg
+}
+
+func newBroadcastMessage(vchannels []string) message.BroadcastMutableMessage {
+	msg, err := message.NewDropCollectionMessageBuilderV1().
+		WithBroadcast(vchannels).
+		WithHeader(&message.DropCollectionMessageHeader{}).
+		WithBody(&msgpb.DropCollectionRequest{}).
+		BuildBroadcast()
 	if err != nil {
 		panic(err)
 	}
