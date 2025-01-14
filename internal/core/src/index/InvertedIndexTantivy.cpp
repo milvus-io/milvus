@@ -384,8 +384,8 @@ InvertedIndexTantivy<T>::RegexQuery(const std::string& regex_pattern) {
 template <typename T>
 void
 InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
-                                          const void* values,
-                                          const Config& config) {
+                                               const void* values,
+                                               const Config& config) {
     if constexpr (std::is_same_v<bool, T>) {
         schema_.set_data_type(proto::schema::DataType::Bool);
     }

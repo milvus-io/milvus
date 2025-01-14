@@ -178,13 +178,6 @@ CreateIndex(CIndex* res_index,
         config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
             scalar_index_engine_version;
 
-        // get metric type
-        if (milvus::IsVectorDataType(field_type)) {
-            auto metric_type = milvus::index::GetValueFromConfig<std::string>(
-                config, "metric_type");
-            AssertInfo(metric_type.has_value(), "metric type is empty");
-        }
-
         // init file manager
         milvus::storage::FieldDataMeta field_meta{
             build_index_info->collectionid(),

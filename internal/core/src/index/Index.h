@@ -45,8 +45,8 @@ class IndexBase {
 
     virtual void
     BuildWithRawDataForUT(size_t n,
-                     const void* values,
-                     const Config& config = {}) = 0;
+                          const void* values,
+                          const Config& config = {}) = 0;
 
     virtual void
     BuildWithDataset(const DatasetPtr& dataset, const Config& config = {}) = 0;

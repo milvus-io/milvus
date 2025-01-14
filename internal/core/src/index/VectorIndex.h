@@ -43,8 +43,8 @@ class VectorIndex : public IndexBase {
  public:
     void
     BuildWithRawDataForUT(size_t n,
-                     const void* values,
-                     const Config& config = {}) override {
+                          const void* values,
+                          const Config& config = {}) override {
         PanicInfo(Unsupported,
                   "vector index don't support build index with raw data");
     };
