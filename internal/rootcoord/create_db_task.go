@@ -21,7 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 

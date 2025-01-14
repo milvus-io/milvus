@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.segcore;
 
-option go_package = "github.com/milvus-io/milvus/internal/proto/segcorepb";
+option go_package = "github.com/milvus-io/milvus/pkg/proto/segcorepb";
 import "schema.proto";
 import "common.proto";
 

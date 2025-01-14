@@ -26,6 +26,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -35,9 +36,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -52,6 +50,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/kv"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -315,7 +316,8 @@ func (suite *ServiceSuite) TestShowPartitions() {
 			meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
 			resp, err = server.ShowPartitions(ctx, req)
 			suite.NoError(err)
-			suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
+			err := merr.CheckRPCCall(resp, err)
+			assert.True(suite.T(), errors.Is(err, merr.ErrPartitionNotLoaded))
 			meta.GlobalFailedLoadCache.Remove(collection)
 			err = suite.meta.CollectionManager.PutCollection(colBak)
 			suite.NoError(err)
@@ -327,7 +329,8 @@ func (suite *ServiceSuite) TestShowPartitions() {
 			meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
 			resp, err = server.ShowPartitions(ctx, req)
 			suite.NoError(err)
-			suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
+			err := merr.CheckRPCCall(resp, err)
+			assert.True(suite.T(), errors.Is(err, merr.ErrPartitionNotLoaded))
 			meta.GlobalFailedLoadCache.Remove(collection)
 			err = suite.meta.CollectionManager.PutPartition(parBak)
 			suite.NoError(err)

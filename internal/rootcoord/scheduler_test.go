@@ -82,6 +82,29 @@ func newMockNormalTask() *mockNormalTask {
 	return task
 }
 
+type mockLockerKeyTask struct {
+	baseTask
+	lockerKey string
+	rw        bool
+}
+
+func (m *mockLockerKeyTask) GetLockerKey() LockerKey {
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(m.lockerKey, m.rw),
+	)
+}
+
+func newMockLockerKeyTask(lockerKey string, rw bool) *mockLockerKeyTask {
+	task := &mockLockerKeyTask{
+		baseTask:  newBaseTask(context.Background(), nil),
+		lockerKey: lockerKey,
+		rw:        rw,
+	}
+	task.SetCtx(context.Background())
+	return task
+}
+
 func Test_scheduler_Start_Stop(t *testing.T) {
 	idAlloc := newMockIDAllocator()
 	tsoAlloc := newMockTsoAllocator()
@@ -246,6 +269,87 @@ func Test_scheduler_updateDdlMinTsLoop(t *testing.T) {
 		time.Sleep(time.Millisecond * 4)
 		assert.Zero(t, s.GetMinDdlTs())
 		s.Stop()
+	})
+
+	t.Run("concurrent task schedule", func(t *testing.T) {
+		idAlloc := newMockIDAllocator()
+		tsoAlloc := newMockTsoAllocator()
+		tso := atomic.NewUint64(100)
+		idAlloc.AllocOneF = func() (UniqueID, error) {
+			return 100, nil
+		}
+		tsoAlloc.GenerateTSOF = func(count uint32) (uint64, error) {
+			got := tso.Inc()
+			return got, nil
+		}
+		ctx := context.Background()
+		s := newScheduler(ctx, idAlloc, tsoAlloc)
+		paramtable.Init()
+		paramtable.Get().Save(Params.ProxyCfg.TimeTickInterval.Key, "1")
+		s.Start()
+
+		for i := 0; i < 100; i++ {
+			if s.GetMinDdlTs() > Timestamp(100) {
+				break
+			}
+			assert.True(t, i < 100)
+			time.Sleep(time.Millisecond)
+		}
+
+		w := &sync.WaitGroup{}
+		w.Add(5)
+		// locker key rw true
+		lockerKey := "hello"
+		go func() {
+			defer w.Done()
+			n := 200
+			for i := 0; i < n; i++ {
+				task := newMockLockerKeyTask(lockerKey, true)
+				err := s.AddTask(task)
+				assert.NoError(t, err)
+			}
+		}()
+
+		// locker key rw false
+		go func() {
+			defer w.Done()
+			n := 200
+			for i := 0; i < n; i++ {
+				task := newMockLockerKeyTask(lockerKey, false)
+				err := s.AddTask(task)
+				assert.NoError(t, err)
+			}
+		}()
+
+		go func() {
+			defer w.Done()
+			n := 200
+			for i := 0; i < n; i++ {
+				task := newMockLockerKeyTask(lockerKey, false)
+				err := s.AddTask(task)
+				assert.NoError(t, err)
+			}
+		}()
+
+		go func() {
+			defer w.Done()
+			n := 200
+			for i := 0; i < n; i++ {
+				task := newMockNormalTask()
+				err := s.AddTask(task)
+				assert.NoError(t, err)
+			}
+		}()
+
+		lastMin := s.GetMinDdlTs()
+		go func() {
+			defer w.Done()
+			current := s.GetMinDdlTs()
+			assert.True(t, current >= lastMin)
+			lastMin = current
+			time.Sleep(time.Millisecond * 100)
+		}()
+		w.Wait()
 	})
 }
 

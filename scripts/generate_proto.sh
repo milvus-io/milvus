@@ -24,7 +24,7 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
-PROTO_DIR=$ROOT_DIR/internal/proto/
+PROTO_DIR=$ROOT_DIR/pkg/proto
 API_PROTO_DIR=$ROOT_DIR/cmake_build/thirdparty/milvus-proto/proto
 CPP_SRC_DIR=$ROOT_DIR/internal/core
 PROTOC_BIN=$ROOT_DIR/cmake_build/bin/protoc
@@ -47,22 +47,18 @@ echo "using protoc-gen-go-grpc: $(which protoc-gen-go-grpc)"
 # official go code ship with the crate, so we need to generate it manually.
 pushd ${PROTO_DIR}
 
-mkdir -p etcdpb
-mkdir -p indexcgopb
-mkdir -p cgopb
-
-mkdir -p internalpb
-mkdir -p rootcoordpb
-
-mkdir -p segcorepb
-mkdir -p clusteringpb
-mkdir -p proxypb
-
-mkdir -p indexpb
-mkdir -p datapb
-mkdir -p querypb
-mkdir -p planpb
-
+mkdir -p ./etcdpb
+mkdir -p ./indexcgopb
+mkdir -p ./cgopb
+mkdir -p ./internalpb
+mkdir -p ./rootcoordpb
+mkdir -p ./segcorepb
+mkdir -p ./clusteringpb
+mkdir -p ./proxypb
+mkdir -p ./indexpb
+mkdir -p ./datapb
+mkdir -p ./querypb
+mkdir -p ./planpb
 mkdir -p $ROOT_DIR/cmd/tools/migration/legacy/legacypb
 
 protoc_opt="${PROTOC_BIN} --proto_path=${API_PROTO_DIR} --proto_path=."
