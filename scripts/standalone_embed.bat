@@ -20,6 +20,7 @@ setlocal enabledelayedexpansion
 :main
 if "%1"=="" (
     echo Please use standalone_embed.bat restart^|start^|stop^|delete
+    echo Note: 'delete' will remove ALL data and containers.
     exit /b 1
 )
 
@@ -34,7 +35,8 @@ if "%1"=="restart" (
     call :delete
 ) else (
     echo Unknown command.
-    echo Please use standalone_embed.bat restart^|start^|stop^|upgrade^|delete
+    echo Please use standalone_embed.bat restart^|start^|stop^|delete
+    echo Note: 'delete' will remove ALL data and containers.
     exit /b 1
 )
 goto :eof
@@ -126,6 +128,14 @@ for /f "tokens=*" %%A in ('docker ps ^| findstr "milvus-standalone"') do (
     echo Please stop Milvus service before delete.
     exit /b 1
 )
+
+rem Check if container exists before trying to remove it
+for /f "tokens=*" %%A in ('docker ps -a ^| findstr "milvus-standalone"') do set container_exists=1
+if not defined container_exists (
+    echo Container milvus-standalone does not exist.
+    exit /b 0
+)
+
 docker rm milvus-standalone >nul
 if %errorlevel% neq 0 (
     echo Delete Milvus container failed.
@@ -135,11 +145,17 @@ echo Delete Milvus container successfully.
 goto :eof
 
 :delete
-call :delete_container
-rmdir /s /q "%cd%\volumes"
-del /q embedEtcd.yaml
-del /q user.yaml
-echo Delete successfully.
+set /p check="WARNING: This will permanently delete all Milvus data and containers. Are you sure? [y/N] > "
+if /i "%check%"=="y" (
+    call :delete_container
+    rmdir /s /q "%cd%\volumes"
+    del /q embedEtcd.yaml
+    del /q user.yaml
+    echo Delete successfully.
+) else (
+    echo Delete operation cancelled.
+    exit /b 0
+)
 goto :eof
 
 :EOF
