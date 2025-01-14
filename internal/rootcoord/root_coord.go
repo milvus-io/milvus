@@ -1344,7 +1344,7 @@ func (c *Core) ShowCollectionIDs(ctx context.Context, in *rootcoordpb.ShowCollec
 	tr := timerecord.NewTimeRecorder("ShowCollectionIDs")
 
 	ts := typeutil.MaxTimestamp
-	log := log.Ctx(ctx).With(zap.Strings("dbNames", in.GetDbNames()))
+	log := log.Ctx(ctx).With(zap.Strings("dbNames", in.GetDbNames()), zap.Bool("allowUnavailable", in.GetAllowUnavailable()))
 
 	// Currently, this interface is only called during startup, so there is no need to execute it within the scheduler.
 	var err error
@@ -1392,6 +1392,8 @@ func (c *Core) ShowCollectionIDs(ctx context.Context, in *rootcoordpb.ShowCollec
 	}
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionIDs", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowCollectionIDs").Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	log.Info("ShowCollectionIDs done", zap.Any("collectionIDs", dbCollections))
 
 	return &rootcoordpb.ShowCollectionIDsResponse{
 		Status:        merr.Success(),
