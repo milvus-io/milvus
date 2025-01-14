@@ -111,6 +111,7 @@ class BuildInvertedIndexWithSingleSegmentTest : public ::testing::Test {
             }
         }
         SealedLoadFieldData(raw_data, *seg_);
+        LoadInvertedIndex();
     }
 
     void
@@ -139,7 +140,7 @@ class BuildInvertedIndexWithSingleSegmentTest : public ::testing::Test {
     SchemaPtr schema_;
     SegmentSealedUPtr seg_;
     int64_t N_;
-    std::vector<T> index_column_data_;
+    boost::container::vector<T> index_column_data_;
 };
 
 TYPED_TEST_SUITE_P(BuildInvertedIndexWithSingleSegmentTest);
