@@ -168,7 +168,7 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 func (s *Server) getDistJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) string {
 	segments := s.meta.getSegmentsMetrics(-1)
 	var channels []*metricsinfo.DmChannel
-	for nodeID, ch := range s.channelManager.GetChannelWatchInfos() {
+	for nodeID, ch := range s.channelManager.GetChannelWatchInfos(ctx) {
 		for _, chInfo := range ch {
 			dmChannel := metrics.NewDMChannelFrom(chInfo.GetVchan())
 			dmChannel.NodeID = nodeID

@@ -23,6 +23,7 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -495,12 +496,14 @@ func (t *createCollectionTask) genCreateCollectionRequest() *msgpb.CreateCollect
 }
 
 func (t *createCollectionTask) addChannelsAndGetStartPositions(ctx context.Context, ts uint64) (map[string][]byte, error) {
+	ctx, sp := otel.Tracer("createCollectionTask").Start(ctx, "addChannelsAndGetStartPositions")
+	defer sp.End()
 	t.core.chanTimeTick.addDmlChannels(t.channels.physicalChannels...)
 	if streamingutil.IsStreamingServiceEnabled() {
 		return t.broadcastCreateCollectionMsgIntoStreamingService(ctx, ts)
 	}
 	msg := t.genCreateCollectionMsg(ctx, ts)
-	return t.core.chanTimeTick.broadcastMarkDmlChannels(t.channels.physicalChannels, msg)
+	return t.core.chanTimeTick.broadcastMarkDmlChannels(ctx, t.channels.physicalChannels, msg)
 }
 
 func (t *createCollectionTask) broadcastCreateCollectionMsgIntoStreamingService(ctx context.Context, ts uint64) (map[string][]byte, error) {

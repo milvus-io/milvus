@@ -77,8 +77,8 @@ func newBaseTask(ctx context.Context, core *Core) baseTask {
 		done:       make(chan error, 1),
 		tr:         timerecord.NewTimeRecorderWithTrace(ctx, "new task"),
 		isFinished: atomic.NewBool(false),
+		ctx:        ctx,
 	}
-	b.SetCtx(ctx)
 	return b
 }
 

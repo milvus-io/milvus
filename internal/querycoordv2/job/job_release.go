@@ -21,6 +21,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type ReleaseCollectionJob struct {
@@ -72,22 +74,24 @@ func NewReleaseCollectionJob(ctx context.Context,
 }
 
 func (job *ReleaseCollectionJob) Execute() error {
+	ctx, span := otel.Tracer(typeutil.QueryCoordRole).Start(job.ctx, "ReleaseCollectionJob-Execute")
+	defer span.End()
 	req := job.req
-	log := log.Ctx(job.ctx).With(zap.Int64("collectionID", req.GetCollectionID()))
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()))
 
-	if !job.meta.CollectionManager.Exist(job.ctx, req.GetCollectionID()) {
+	if !job.meta.CollectionManager.Exist(ctx, req.GetCollectionID()) {
 		log.Info("release collection end, the collection has not been loaded into QueryNode")
 		return nil
 	}
 
-	err := job.meta.CollectionManager.RemoveCollection(job.ctx, req.GetCollectionID())
+	err := job.meta.CollectionManager.RemoveCollection(ctx, req.GetCollectionID())
 	if err != nil {
 		msg := "failed to remove collection"
 		log.Warn(msg, zap.Error(err))
 		return errors.Wrap(err, msg)
 	}
 
-	err = job.meta.ReplicaManager.RemoveCollection(job.ctx, req.GetCollectionID())
+	err = job.meta.ReplicaManager.RemoveCollection(ctx, req.GetCollectionID())
 	if err != nil {
 		msg := "failed to remove replicas"
 		log.Warn(msg, zap.Error(err))
@@ -97,7 +101,7 @@ func (job *ReleaseCollectionJob) Execute() error {
 
 	// try best discard cache
 	// shall not affect releasing if failed
-	job.proxyManager.InvalidateCollectionMetaCache(job.ctx,
+	job.proxyManager.InvalidateCollectionMetaCache(ctx,
 		&proxypb.InvalidateCollMetaCacheRequest{
 			CollectionID: req.GetCollectionID(),
 		},

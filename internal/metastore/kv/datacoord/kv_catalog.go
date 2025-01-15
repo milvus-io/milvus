@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
@@ -431,6 +432,8 @@ func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo)
 }
 
 func (kc *Catalog) MarkChannelAdded(ctx context.Context, channel string) error {
+	ctx, sp := otel.Tracer("Catalog").Start(ctx, "MarkChannelAdded")
+	defer sp.End()
 	key := buildChannelRemovePath(channel)
 	err := kc.MetaKv.Save(ctx, key, NonRemoveFlagTomestone)
 	if err != nil {

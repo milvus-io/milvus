@@ -25,6 +25,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
@@ -305,7 +306,9 @@ func (d *dmlChannels) broadcast(chanNames []string, pack *msgstream.MsgPack) err
 	return nil
 }
 
-func (d *dmlChannels) broadcastMark(chanNames []string, pack *msgstream.MsgPack) (map[string][]byte, error) {
+func (d *dmlChannels) broadcastMark(ctx context.Context, chanNames []string, pack *msgstream.MsgPack) (map[string][]byte, error) {
+	ctx, sp := otel.Tracer("dmlChannels").Start(ctx, "addChannelsAndGetStartPositions")
+	defer sp.End()
 	result := make(map[string][]byte)
 	for _, chanName := range chanNames {
 		dms, err := d.getMsgStreamByName(chanName)
@@ -315,9 +318,9 @@ func (d *dmlChannels) broadcastMark(chanNames []string, pack *msgstream.MsgPack)
 
 		dms.mutex.RLock()
 		if dms.refcnt > 0 {
-			ids, err := dms.ms.Broadcast(d.ctx, pack)
+			ids, err := dms.ms.Broadcast(ctx, pack)
 			if err != nil {
-				log.Ctx(d.ctx).Error("BroadcastMark failed", zap.Error(err), zap.String("chanName", chanName))
+				log.Ctx(ctx).Error("BroadcastMark failed", zap.Error(err), zap.String("chanName", chanName))
 				dms.mutex.RUnlock()
 				return result, err
 			}

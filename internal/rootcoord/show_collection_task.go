@@ -18,8 +18,10 @@ package rootcoord
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -48,6 +50,13 @@ func (t *showCollectionTask) Prepare(ctx context.Context) error {
 
 // Execute task execution
 func (t *showCollectionTask) Execute(ctx context.Context) error {
+	taskName := "ShowCollectionTask"
+	ctx, span := otel.Tracer(typeutil.RootCoordRole).Start(ctx, taskName)
+	defer span.End()
+	span.AddEvent(fmt.Sprintf("taskID=%d", t.GetID()))
+	log := log.Ctx(ctx).With(zap.String("taskName", taskName), zap.Int64("taskID", t.GetID()))
+	log.Info("showCollectionTask Execute Start")
+
 	t.Rsp.Status = merr.Success()
 
 	getVisibleCollections := func() (typeutil.Set[string], error) {
@@ -60,7 +69,7 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 		curUser, err := contextutil.GetCurUserFromContext(ctx)
 		if err != nil || curUser == util.UserRoot {
 			if err != nil {
-				log.Ctx(ctx).Warn("get current user from context failed", zap.Error(err))
+				log.Warn("get current user from context failed", zap.Error(err))
 			}
 			privilegeColls.Insert(util.AnyWord)
 			return privilegeColls, nil
@@ -118,6 +127,7 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 
 	visibleCollections, err := getVisibleCollections()
 	if err != nil {
+		log.Warn("get visible collections failed", zap.Error(err))
 		t.Rsp.Status = merr.Status(err)
 		return err
 	}
@@ -132,6 +142,7 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 	colls, err := t.core.meta.ListCollections(ctx, t.Req.GetDbName(), ts, true)
 	if err != nil {
 		t.Rsp.Status = merr.Status(err)
+		log.Warn("list collections from meta failed", zap.Error(err))
 		return err
 	}
 	for _, coll := range colls {
@@ -148,6 +159,7 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 		physical, _ := tsoutil.ParseHybridTs(coll.CreateTime)
 		t.Rsp.CreatedUtcTimestamps = append(t.Rsp.CreatedUtcTimestamps, uint64(physical))
 	}
+	log.Info("showCollectionTask Execute Finish")
 	return nil
 }
 

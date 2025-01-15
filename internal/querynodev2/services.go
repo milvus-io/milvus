@@ -744,7 +744,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		zap.Int64("nq", req.GetReq().GetNq()),
 	)
 
-	log.Debug("Received SearchRequest",
+	log.Info("Received SearchRequest",
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()))
@@ -801,6 +801,8 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	if ret.GetCostAggregation() != nil {
 		ret.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
 	}
+
+	log.Info("Search Done", zap.Int64("ResponseTime", tr.ElapseSpan().Milliseconds()))
 	return ret, nil
 }
 

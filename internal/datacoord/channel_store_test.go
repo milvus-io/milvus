@@ -255,7 +255,7 @@ func (s *StateChannelStoreSuite) TestUpdateWithTxnLimit() {
 
 			// Get operations
 			ops := genChannelOperations(1, Watch, test.inOpCount)
-			err := store.Update(ops)
+			err := store.Update(context.TODO(), ops)
 			s.NoError(err)
 		})
 	}
@@ -287,7 +287,7 @@ func (s *StateChannelStoreSuite) TestUpdateMeta2000kSegs() {
 	store.addAssignment(bufferID, ch)
 	s.Require().Equal(1, store.GetNodeChannelCount(bufferID))
 
-	err := store.updateMeta(opSet)
+	err := store.updateMeta(context.TODO(), opSet)
 	s.NoError(err)
 
 	got := store.GetNodeChannelsBy(WithNodeIDs(100))
@@ -403,7 +403,7 @@ func (s *StateChannelStoreSuite) TestUpdateMeta() {
 				s.Require().Equal(1, store.GetNodeChannelCount(nodeID))
 			}
 
-			err := store.updateMeta(test.opSet)
+			err := store.updateMeta(context.TODO(), test.opSet)
 			s.NoError(err)
 
 			for nodeID, channels := range test.outAssignments {
@@ -434,7 +434,7 @@ func (s *StateChannelStoreSuite) TestUpdateState() {
 			store := NewStateChannelStore(s.mockTxn)
 
 			ch := "ch-1"
-			channel := NewStateChannel(getChannel(ch, 1))
+			channel := NewStateChannel(context.TODO(), getChannel(ch, 1))
 			channel.setState(test.inChannelState)
 			store.channelsInfo[bufferID] = &NodeChannelInfo{
 				NodeID: bufferID,
@@ -513,7 +513,7 @@ func genChannelOperations(nodeID int64, opType ChannelOpType, num int) *ChannelO
 	channels := make([]RWChannel, 0, num)
 	for i := 0; i < num; i++ {
 		name := fmt.Sprintf("ch%d", i)
-		channel := NewStateChannel(getChannel(name, 1))
+		channel := NewStateChannel(context.TODO(), getChannel(name, 1))
 		channel.Info = generateWatchInfo(name, datapb.ChannelWatchState_ToWatch)
 		channels = append(channels, channel)
 	}
