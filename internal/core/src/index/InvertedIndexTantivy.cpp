@@ -547,10 +547,15 @@ InvertedIndexTantivy<T>::build_index_for_array(
                 null_offset.push_back(i);
             }
             auto length = data->is_valid(i) ? array_column[i].length() : 0;
-            wrapper_->template add_multi_data(
-                reinterpret_cast<const T*>(array_column[i].data()),
-                length,
-                offset++);
+            if (!inverted_index_single_segment_) {
+                wrapper_->template add_multi_data(
+                    reinterpret_cast<const T*>(array_column[i].data()),
+                    length,
+                    offset++);
+            } else {
+                wrapper_->template add_multi_data_by_single_segment_writer(
+                    reinterpret_cast<const T*>(array_column[i].data()), length);
+            }
         }
     }
 }
@@ -576,7 +581,13 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
                     array_column[i].template get_data<std::string>(j));
             }
             auto length = data->is_valid(i) ? output.size() : 0;
-            wrapper_->template add_multi_data(output.data(), length, offset++);
+            if (!inverted_index_single_segment_) {
+                wrapper_->template add_multi_data(
+                    output.data(), length, offset++);
+            } else {
+                wrapper_->template add_multi_data_by_single_segment_writer(
+                    output.data(), length);
+            }
         }
     }
 }

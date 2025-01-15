@@ -4,6 +4,7 @@ use std::sync::Arc;
 use either::Either;
 use futures::executor::block_on;
 use libc::c_char;
+use log::info;
 use tantivy::schema::{
     Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, FAST, INDEXED,
 };
@@ -54,6 +55,7 @@ impl IndexWriterWrapper {
         overall_memory_budget_in_bytes: usize,
     ) -> Result<IndexWriterWrapper> {
         init_log();
+        info!("create index writer, field_name: {}, data_type: {:?}", field_name, data_type);
         let mut schema_builder = Schema::builder();
         let field = schema_builder_add_field(&mut schema_builder, &field_name, data_type);
         // We cannot build direct connection from rows in multi-segments to milvus row data. So we have this doc_id field.
@@ -76,6 +78,7 @@ impl IndexWriterWrapper {
         path: String,
     ) -> Result<IndexWriterWrapper> {
         init_log();
+        info!("create single segment index writer, field_name: {}, data_type: {:?}", field_name, data_type);
         let mut schema_builder = Schema::builder();
         let field = schema_builder_add_field(&mut schema_builder, &field_name, data_type);
         let schema = schema_builder.build();
