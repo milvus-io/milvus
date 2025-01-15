@@ -671,6 +671,7 @@ func (s *Server) Stop() error {
 // UpdateStateCode updates the status of the coord, including healthy, unhealthy
 func (s *Server) UpdateStateCode(code commonpb.StateCode) {
 	s.status.Store(int32(code))
+	log.Ctx(s.ctx).Info("update querycoord state", zap.String("state", code.String()))
 }
 
 func (s *Server) State() commonpb.StateCode {
