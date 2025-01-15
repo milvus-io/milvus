@@ -318,7 +318,7 @@ func (s *Server) Init() error {
 			log.Info("DataCoord startup success")
 			return nil
 		}
-		s.stateCode.Store(commonpb.StateCode_StandBy)
+		s.UpdateStateCode(commonpb.StateCode_StandBy)
 		log.Info("DataCoord enter standby mode successfully")
 		return nil
 	}
@@ -328,7 +328,7 @@ func (s *Server) Init() error {
 
 func (s *Server) initDataCoord() error {
 	log := log.Ctx(s.ctx)
-	s.stateCode.Store(commonpb.StateCode_Initializing)
+	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	var err error
 	if err = s.initRootCoordClient(); err != nil {
 		return err
@@ -463,7 +463,7 @@ func (s *Server) startDataCoord() {
 	// })
 
 	s.afterStart()
-	s.stateCode.Store(commonpb.StateCode_Healthy)
+	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.DataCoordRole, s.session.GetServerID())
 }
 
