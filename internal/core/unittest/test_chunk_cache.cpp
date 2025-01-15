@@ -175,10 +175,16 @@ TEST_P(ChunkCacheTest, Read) {
 
     expected_sparse_size += (N + 7) / 8;
     expected_sparse_size += sizeof(int64_t) * (N + 1);
+
+    if (mmap_enabled) {
+        const uint32_t page_size = sysconf(_SC_PAGE_SIZE);
+        auto padding_size = (expected_sparse_size / page_size +
+                             (expected_sparse_size % page_size != 0)) *
+                                page_size -
+                            expected_sparse_size;
+        expected_sparse_size += padding_size;
+    }
     auto actual_sparse_size = sparse_column->DataByteSize();
-    std::cout << "actual_sparse_size: " << actual_sparse_size
-              << ", expected_sparse_size: " << expected_sparse_size
-              << std::endl;
     Assert(actual_sparse_size == expected_sparse_size);
 
     cc->Remove(dense_file_name);
