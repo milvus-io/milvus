@@ -52,6 +52,10 @@ func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, params map[stri
 		if !CheckStrByValues(params, Metric, BinaryVectorMetrics) {
 			return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], BinaryVectorMetrics)
 		}
+	} else if typeutil.IsIntVectorType(dataType) {
+		if !CheckStrByValues(params, Metric, IntVectorMetrics) {
+			return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], IntVectorMetrics)
+		}
 	}
 
 	indexType, exist := params[common.IndexTypeKey]
