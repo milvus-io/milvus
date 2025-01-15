@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "common/type_c.h"
 #ifdef __linux__
 #include <malloc.h>
 #endif
@@ -17,29 +18,41 @@
 #include "segcore/collection_c.h"
 #include "segcore/Collection.h"
 
-CCollection
-NewCollection(const void* schema_proto_blob, const int64_t length) {
-    auto collection = std::make_unique<milvus::segcore::Collection>(
-        schema_proto_blob, length);
-    return (void*)collection.release();
+CStatus
+NewCollection(const void* schema_proto_blob,
+              const int64_t length,
+              CCollection* newCollection) {
+    try {
+        auto collection = std::make_unique<milvus::segcore::Collection>(
+            schema_proto_blob, length);
+        *newCollection = collection.release();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
 }
 
-void
+CStatus
 SetIndexMeta(CCollection collection,
              const void* proto_blob,
              const int64_t length) {
-    auto col = (milvus::segcore::Collection*)collection;
-    col->parseIndexMeta(proto_blob, length);
+    try {
+        auto col = static_cast<milvus::segcore::Collection*>(collection);
+        col->parseIndexMeta(proto_blob, length);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
 }
 
 void
 DeleteCollection(CCollection collection) {
-    auto col = (milvus::segcore::Collection*)collection;
+    auto col = static_cast<milvus::segcore::Collection*>(collection);
     delete col;
 }
 
 const char*
 GetCollectionName(CCollection collection) {
-    auto col = (milvus::segcore::Collection*)collection;
+    auto col = static_cast<milvus::segcore::Collection*>(collection);
     return strdup(col->get_collection_name().data());
 }
