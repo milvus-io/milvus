@@ -2488,4 +2488,55 @@ func TestValidateIndexParams(t *testing.T) {
 		err := ValidateIndexParams(index)
 		assert.Error(t, err)
 	})
+
+	t.Run("duplicated_index_params", func(t *testing.T) {
+		index := &model.Index{
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+			},
+		}
+		err := ValidateIndexParams(index)
+		assert.Error(t, err)
+	})
+
+	t.Run("duplicated_user_index_params", func(t *testing.T) {
+		index := &model.Index{
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+			},
+		}
+		err := ValidateIndexParams(index)
+		assert.Error(t, err)
+	})
+
+	t.Run("duplicated_user_index_params", func(t *testing.T) {
+		index := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+			},
+		}
+		err := ValidateIndexParams(index)
+		assert.Error(t, err)
+	})
 }
