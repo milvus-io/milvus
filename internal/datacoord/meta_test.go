@@ -680,7 +680,7 @@ func TestMeta_Basic(t *testing.T) {
 	})
 
 	t.Run("Test GetSegmentsChanPart", func(t *testing.T) {
-		result := meta.GetSegmentsChanPart(func(*SegmentInfo) bool { return true })
+		result := GetSegmentsChanPart(meta, collID, SegmentFilterFunc(func(segment *SegmentInfo) bool { return true }))
 		assert.Equal(t, 2, len(result))
 		for _, entry := range result {
 			assert.Equal(t, "c1", entry.channelName)
@@ -691,7 +691,7 @@ func TestMeta_Basic(t *testing.T) {
 				assert.Equal(t, 1, len(entry.segments))
 			}
 		}
-		result = meta.GetSegmentsChanPart(func(seg *SegmentInfo) bool { return seg.GetCollectionID() == 10 })
+		result = GetSegmentsChanPart(meta, 10)
 		assert.Equal(t, 0, len(result))
 	})
 
