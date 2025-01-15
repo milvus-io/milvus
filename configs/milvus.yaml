@@ -836,6 +836,7 @@ common:
     threshold:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
+    maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
   storage:
     scheme: s3
     enablev2: false
