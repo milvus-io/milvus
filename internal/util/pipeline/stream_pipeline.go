@@ -21,11 +21,7 @@ import (
 	"sync"
 	"time"
 
-<<<<<<< HEAD
-=======
 	"github.com/cockroachdb/errors"
-	"go.uber.org/atomic"
->>>>>>> 1bcf3d9ee7 (fix: Fix consume blocked due to too many consumers)
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -33,15 +29,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-<<<<<<< HEAD
-=======
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
->>>>>>> 1bcf3d9ee7 (fix: Fix consume blocked due to too many consumers)
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 

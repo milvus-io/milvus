@@ -86,7 +86,7 @@ func newDmInputNode(initCtx context.Context, dispatcherClient msgdispatcher.Clie
 			log.Warn("datanode consume failed after retried", zap.Error(err))
 			return nil, err
 		}
-	
+
 		log.Info("datanode consume successfully when register to msgDispatcher")
 	}
 
