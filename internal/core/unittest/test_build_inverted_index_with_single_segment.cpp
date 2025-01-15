@@ -173,7 +173,7 @@ TYPED_TEST_P(BuildInvertedIndexWithSingleSegmentTest,
 
         auto unary_range_expr = std::make_unique<proto::plan::UnaryRangeExpr>();
         unary_range_expr->set_allocated_column_info(column_info);
-        unary_range_expr->set_op(proto::plan::OpType::LessThan);
+        unary_range_expr->set_op(proto::plan::OpType::Equal);
         auto val = this->FieldValueAt(random_idx);
         unary_range_expr->set_allocated_value(test::GenGenericValue(val));
 
@@ -187,7 +187,7 @@ TYPED_TEST_P(BuildInvertedIndexWithSingleSegmentTest,
         BitsetType final;
         final = ExecuteQueryExpr(parsed, segpromote, this->N_, MAX_TIMESTAMP);
         auto ref = [this, random_idx](size_t offset) -> bool {
-            return this->index_column_data_[offset] <
+            return this->index_column_data_[offset] ==
                    this->index_column_data_[random_idx];
         };
         ASSERT_EQ(final.size(), this->N_);
