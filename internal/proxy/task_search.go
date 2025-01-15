@@ -521,6 +521,11 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	if searchInfo.parseError != nil {
 		return nil, nil, 0, false, searchInfo.parseError
 	}
+	if searchInfo.collectionID > 0 && searchInfo.collectionID != t.GetCollectionID() {
+		return nil, nil, 0, false, merr.WrapErrParameterInvalidMsg("collection id:%d in the request is not consistent to that in the search context,"+
+			"alias or database may have been changed: %d", searchInfo.collectionID, t.GetCollectionID())
+	}
+
 	annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
 	if searchInfo.planInfo.GetGroupByFieldId() != -1 && annField.GetDataType() == schemapb.DataType_BinaryVector {
 		return nil, nil, 0, false, errors.New("not support search_group_by operation based on binary vector column")

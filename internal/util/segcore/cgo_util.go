@@ -28,7 +28,6 @@ package segcore
 import "C"
 
 import (
-	"context"
 	"math"
 	"reflect"
 	"unsafe"
@@ -73,7 +72,7 @@ func getCProtoBlob(cProto *C.CProto) []byte {
 }
 
 // GetLocalUsedSize returns the used size of the local path
-func GetLocalUsedSize(ctx context.Context, path string) (int64, error) {
+func GetLocalUsedSize(path string) (int64, error) {
 	var availableSize int64
 	cSize := (*C.int64_t)(&availableSize)
 	cPath := C.CString(path)

@@ -443,13 +443,14 @@ func (i *IndexNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2Re
 		i.foreachIndexTaskInfo(func(ClusterID string, buildID UniqueID, info *indexTaskInfo) {
 			if ClusterID == req.GetClusterID() {
 				infos[buildID] = &indexTaskInfo{
-					state:               info.state,
-					fileKeys:            common.CloneStringList(info.fileKeys),
-					serializedSize:      info.serializedSize,
-					memSize:             info.memSize,
-					failReason:          info.failReason,
-					currentIndexVersion: info.currentIndexVersion,
-					indexStoreVersion:   info.indexStoreVersion,
+					state:                     info.state,
+					fileKeys:                  common.CloneStringList(info.fileKeys),
+					serializedSize:            info.serializedSize,
+					memSize:                   info.memSize,
+					failReason:                info.failReason,
+					currentIndexVersion:       info.currentIndexVersion,
+					indexStoreVersion:         info.indexStoreVersion,
+					currentScalarIndexVersion: info.currentScalarIndexVersion,
 				}
 			}
 		})
@@ -469,6 +470,7 @@ func (i *IndexNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2Re
 				results[i].FailReason = info.failReason
 				results[i].CurrentIndexVersion = info.currentIndexVersion
 				results[i].IndexStoreVersion = info.indexStoreVersion
+				results[i].CurrentScalarIndexVersion = info.currentScalarIndexVersion
 			}
 		}
 		log.Debug("query index jobs result success", zap.Any("results", results))

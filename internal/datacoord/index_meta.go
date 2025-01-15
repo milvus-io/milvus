@@ -804,6 +804,7 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		segIdx.IndexMemSize = taskInfo.GetMemSize()
 		segIdx.CurrentIndexVersion = taskInfo.GetCurrentIndexVersion()
 		segIdx.FinishedUTCTime = uint64(time.Now().Unix())
+		segIdx.CurrentScalarIndexVersion = taskInfo.GetCurrentScalarIndexVersion()
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 
