@@ -52,7 +52,7 @@ func (c *Collection) Available() bool {
 	return c.State == pb.CollectionState_CollectionCreated
 }
 
-func (c *Collection) ShadowClone() *Collection {
+func (c *Collection) ShallowClone() *Collection {
 	return &Collection{
 		TenantID:             c.TenantID,
 		DBID:                 c.DBID,
