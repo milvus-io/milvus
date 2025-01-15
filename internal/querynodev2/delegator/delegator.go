@@ -34,8 +34,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/optimizers"
@@ -48,6 +46,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"

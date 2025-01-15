@@ -47,10 +47,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
 	"github.com/milvus-io/milvus-storage/go/storage/options"
-	"github.com/milvus-io/milvus/internal/proto/cgopb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
@@ -60,6 +56,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/cgopb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
@@ -1609,12 +1609,6 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 	}
 
 	C.DeleteSegment(ptr)
-
-	localDiskUsage, err := GetLocalUsedSize(context.Background(), paramtable.Get().LocalStorageCfg.Path.GetValue())
-	// ignore error here, shall not block releasing
-	if err == nil {
-		metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(localDiskUsage) / 1024 / 1024) // in MB
-	}
 
 	log.Info("delete segment from memory")
 }

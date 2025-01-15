@@ -26,9 +26,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 )
 
 func Test_alterDatabaseTask_Prepare(t *testing.T) {

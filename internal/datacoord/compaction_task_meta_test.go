@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 )
 
 func TestCompactionTaskMetaSuite(t *testing.T) {

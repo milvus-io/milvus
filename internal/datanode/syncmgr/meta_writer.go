@@ -9,8 +9,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"

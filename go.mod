@@ -26,7 +26,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.17.9
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.20-0.20241231032247-fe5d4dd2235f
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.20-0.20250113093851-066d949e2686
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
 	github.com/prometheus/client_golang v1.14.0
@@ -53,7 +53,7 @@ require (
 	go.uber.org/zap v1.24.0
 	golang.org/x/crypto v0.31.0
 	golang.org/x/exp v0.0.0-20230728194245-b0cb94b80691
-	golang.org/x/net v0.26.0
+	golang.org/x/net v0.33.0
 	golang.org/x/oauth2 v0.11.0
 	golang.org/x/sync v0.10.0
 	golang.org/x/text v0.21.0

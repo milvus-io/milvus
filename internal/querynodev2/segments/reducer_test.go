@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 )
 
 type ReducerFactorySuite struct {

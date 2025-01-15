@@ -36,12 +36,12 @@ import (
 	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
 	"github.com/milvus-io/milvus-storage/go/storage/options"
 	"github.com/milvus-io/milvus-storage/go/storage/schema"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
@@ -85,7 +85,7 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	//	fmt.Sprintf("/tmp/milvus-ut/%d", rand.Int63())))
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
-	suite.loader = NewLoader(suite.manager, suite.chunkManager)
+	suite.loader = NewLoader(context.Background(), suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
 	// Data
@@ -751,7 +751,7 @@ func (suite *SegmentLoaderDetailSuite) SetupTest() {
 	ctx := context.Background()
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
-	suite.loader = NewLoader(suite.manager, suite.chunkManager)
+	suite.loader = NewLoader(context.Background(), suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
 	// Data
@@ -948,7 +948,7 @@ func (suite *SegmentLoaderV2Suite) SetupTest() {
 	//	fmt.Sprintf("/tmp/milvus-ut/%d", rand.Int63())))
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
-	suite.loader = NewLoaderV2(suite.manager, suite.chunkManager)
+	suite.loader = NewLoaderV2(ctx, suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
 	// Data

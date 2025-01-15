@@ -27,10 +27,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 

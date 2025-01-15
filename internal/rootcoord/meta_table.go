@@ -29,12 +29,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -1458,7 +1458,7 @@ func (mt *MetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvu
 	return mt.catalog.RestoreRBAC(mt.ctx, tenant, meta)
 }
 
-// check if the privielge group name is defined by users
+// check if the privilege group name is defined by users
 func (mt *MetaTable) IsCustomPrivilegeGroup(groupName string) (bool, error) {
 	privGroups, err := mt.catalog.ListPrivilegeGroups(mt.ctx)
 	if err != nil {
@@ -1574,7 +1574,7 @@ func (mt *MetaTable) OperatePrivilegeGroup(groupName string, privileges []*milvu
 			if group.GroupName == p.Name {
 				privileges = append(privileges, group.Privileges...)
 			} else {
-				return merr.WrapErrParameterInvalidMsg("there is no privilege name or privielge group name [%s] defined in system to operate", p.Name)
+				return merr.WrapErrParameterInvalidMsg("there is no privilege name or privilege group name [%s] defined in system to operate", p.Name)
 			}
 		}
 	}
