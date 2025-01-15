@@ -52,15 +52,17 @@ const (
 )
 
 var (
-	FloatVectorMetrics  = []string{metric.L2, metric.IP, metric.COSINE}                                        // const
-	BinaryVectorMetrics = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE} // const
+	FloatVectorMetrics       = []string{metric.L2, metric.IP, metric.COSINE}                                        // const
+	SparseFloatVectorMetrics = []string{metric.IP, metric.BM25}                                                     // const
+	BinaryVectorMetrics      = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE} // const
+	IntVectorMetrics         = []string{metric.L2, metric.IP, metric.COSINE}                                        // const
 )
 
 // BinIDMapMetrics is a set of all metric types supported for binary vector.
 var (
 	BinIDMapMetrics           = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE} // const
 	BinIvfMetrics             = []string{metric.HAMMING, metric.JACCARD}                                             // const
-	HnswMetrics               = []string{metric.L2, metric.IP, metric.COSINE, metric.HAMMING, metric.JACCARD}        // const
+	HnswMetrics               = []string{metric.L2, metric.IP, metric.COSINE}                                        // const
 	RaftMetrics               = []string{metric.L2, metric.IP}
 	CagraBuildAlgoTypes       = []string{CargaBuildAlgoIVFPQ, CargaBuildAlgoNNDESCENT}
 	supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1}              // const
@@ -72,4 +74,5 @@ const (
 	FloatVectorDefaultMetricType       = metric.COSINE
 	SparseFloatVectorDefaultMetricType = metric.IP
 	BinaryVectorDefaultMetricType      = metric.HAMMING
+	IntVectorDefaultMetricType         = metric.COSINE
 )

@@ -3,12 +3,17 @@ package state
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type loadStateEnum int
+
+func noop() {}
 
 // LoadState represent the state transition of segment.
 // LoadStateOnlyMeta: segment is created with meta, but not loaded.
@@ -69,32 +74,17 @@ type LoadStateLock struct {
 }
 
 // RLockIfNotReleased locks the segment if the state is not released.
-func (ls *LoadStateLock) RLockIf(pred StatePredicate) bool {
-	ls.mu.RLock()
-	if !pred(ls.state) {
-		ls.mu.RUnlock()
-		return false
-	}
-	return true
-}
-
-// RUnlock unlocks the segment.
-func (ls *LoadStateLock) RUnlock() {
-	ls.mu.RUnlock()
-}
-
-// PinIfNotReleased pin the segment into memory, avoid ReleaseAll to release it.
-func (ls *LoadStateLock) PinIfNotReleased() bool {
+func (ls *LoadStateLock) PinIf(pred StatePredicate) bool {
 	ls.mu.RLock()
 	defer ls.mu.RUnlock()
-	if ls.state == LoadStateReleased {
+	if !pred(ls.state) {
 		return false
 	}
 	ls.refCnt.Inc()
 	return true
 }
 
-// Unpin unpin the segment, then segment can be released by ReleaseAll.
+// Unpin unlocks the segment.
 func (ls *LoadStateLock) Unpin() {
 	ls.mu.RLock()
 	defer ls.mu.RUnlock()
@@ -106,6 +96,12 @@ func (ls *LoadStateLock) Unpin() {
 		// notify ReleaseAll to release segment if refcnt is zero.
 		ls.cv.Broadcast()
 	}
+}
+
+// PinIfNotReleased pin the segment if the state is not released.
+// grammar suger for PinIf(IsNotReleased).
+func (ls *LoadStateLock) PinIfNotReleased() bool {
+	return ls.PinIf(IsNotReleased)
 }
 
 // StartLoadData starts load segment data
@@ -129,76 +125,82 @@ func (ls *LoadStateLock) StartLoadData() (LoadStateLockGuard, error) {
 
 // StartReleaseData wait until the segment is releasable and starts releasing segment data.
 func (ls *LoadStateLock) StartReleaseData() (g LoadStateLockGuard) {
-	ls.cv.L.Lock()
-	defer ls.cv.L.Unlock()
-
-	ls.waitUntilCanReleaseData()
-
-	switch ls.state {
-	case LoadStateDataLoaded:
-		ls.state = LoadStateDataReleasing
-		ls.cv.Broadcast()
-		return newLoadStateLockGuard(ls, LoadStateDataLoaded, LoadStateOnlyMeta)
-	case LoadStateOnlyMeta:
-		// already transit to target state, do nothing.
-		return nil
-	case LoadStateReleased:
-		// do nothing for empty segment.
-		return nil
-	default:
-		panic(fmt.Sprintf("unreachable code: invalid state when releasing data, %s", ls.state.String()))
-	}
+	ls.waitOrPanic(ls.canReleaseData, func() {
+		switch ls.state {
+		case LoadStateDataLoaded:
+			ls.state = LoadStateDataReleasing
+			ls.cv.Broadcast()
+			g = newLoadStateLockGuard(ls, LoadStateDataLoaded, LoadStateOnlyMeta)
+		case LoadStateOnlyMeta:
+			// already transit to target state, do nothing.
+			g = nil
+		case LoadStateReleased:
+			// do nothing for empty segment.
+			g = nil
+		default:
+			panic(fmt.Sprintf("unreachable code: invalid state when releasing data, %s", ls.state.String()))
+		}
+	})
+	return g
 }
 
 // StartReleaseAll wait until the segment is releasable and starts releasing all segment.
 func (ls *LoadStateLock) StartReleaseAll() (g LoadStateLockGuard) {
-	ls.cv.L.Lock()
-	defer ls.cv.L.Unlock()
+	ls.waitOrPanic(ls.canReleaseAll, func() {
+		switch ls.state {
+		case LoadStateDataLoaded:
+			ls.state = LoadStateReleased
+			ls.cv.Broadcast()
+			g = newNopLoadStateLockGuard()
+		case LoadStateOnlyMeta:
+			ls.state = LoadStateReleased
+			ls.cv.Broadcast()
+			g = newNopLoadStateLockGuard()
+		case LoadStateReleased:
+			// already transit to target state, do nothing.
+			g = nil
+		default:
+			panic(fmt.Sprintf("unreachable code: invalid state when releasing data, %s", ls.state.String()))
+		}
+	})
 
-	ls.waitUntilCanReleaseAll()
-
-	switch ls.state {
-	case LoadStateDataLoaded:
-		ls.state = LoadStateReleased
-		ls.cv.Broadcast()
-		return newNopLoadStateLockGuard()
-	case LoadStateOnlyMeta:
-		ls.state = LoadStateReleased
-		ls.cv.Broadcast()
-		return newNopLoadStateLockGuard()
-	case LoadStateReleased:
-		// already transit to target state, do nothing.
-		return nil
-	default:
-		panic(fmt.Sprintf("unreachable code: invalid state when releasing data, %s", ls.state.String()))
-	}
+	return g
 }
 
 // blockUntilDataLoadedOrReleased blocks until the segment is loaded or released.
 func (ls *LoadStateLock) BlockUntilDataLoadedOrReleased() {
-	ls.cv.L.Lock()
-	defer ls.cv.L.Unlock()
-
-	for ls.state != LoadStateDataLoaded && ls.state != LoadStateReleased {
-		ls.cv.Wait()
-	}
+	ls.waitOrPanic(func(state loadStateEnum) bool {
+		return state == LoadStateDataLoaded || state == LoadStateReleased
+	}, noop)
 }
 
 // waitUntilCanReleaseData waits until segment is release data able.
-func (ls *LoadStateLock) waitUntilCanReleaseData() {
-	state := ls.state
-	for state != LoadStateDataLoaded && state != LoadStateOnlyMeta && state != LoadStateReleased {
-		ls.cv.Wait()
-		state = ls.state
-	}
+func (ls *LoadStateLock) canReleaseData(state loadStateEnum) bool {
+	return state == LoadStateDataLoaded || state == LoadStateOnlyMeta || state == LoadStateReleased
 }
 
 // waitUntilCanReleaseAll waits until segment is releasable.
-func (ls *LoadStateLock) waitUntilCanReleaseAll() {
-	state := ls.state
-	for (state != LoadStateDataLoaded && state != LoadStateOnlyMeta && state != LoadStateReleased) || ls.refCnt.Load() != 0 {
-		ls.cv.Wait()
-		state = ls.state
+func (ls *LoadStateLock) canReleaseAll(state loadStateEnum) bool {
+	return (state == LoadStateDataLoaded || state == LoadStateOnlyMeta || state == LoadStateReleased) && ls.refCnt.Load() == 0
+}
+
+func (ls *LoadStateLock) waitOrPanic(ready func(state loadStateEnum) bool, then func()) {
+	ch := make(chan struct{})
+	maxWaitTime := paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.GetAsDuration(time.Second)
+	go func() {
+		ls.cv.L.Lock()
+		defer ls.cv.L.Unlock()
+		defer close(ch)
+		for !ready(ls.state) {
+			ls.cv.Wait()
+		}
+		then()
+	}()
+
+	select {
+	case <-time.After(maxWaitTime):
+		panic(fmt.Sprintf("max WLock wait time(%v) excceeded", maxWaitTime))
+	case <-ch:
 	}
 }
 

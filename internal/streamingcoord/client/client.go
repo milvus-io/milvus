@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/broadcast"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
@@ -43,9 +44,14 @@ type BroadcastService interface {
 
 // Client is the interface of log service client.
 type Client interface {
+	// Broadcast access broadcast service.
+	// Broadcast service will always be available.
+	// When streaming service is enabled, the broadcast will use the streaming service.
+	// When streaming service is disabled, the broadcast will use legacy msgstream.
 	Broadcast() BroadcastService
 
 	// Assignment access assignment service.
+	// Assignment service will only be available when streaming service is enabled.
 	Assignment() AssignmentService
 
 	// Close close the client.
@@ -68,12 +74,16 @@ func NewClient(etcdCli *clientv3.Client) Client {
 			dialOptions...,
 		)
 	})
-	assignmentService := lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingCoordAssignmentServiceClient)
+	var assignmentServiceImpl *assignment.AssignmentServiceImpl
+	if streamingutil.IsStreamingServiceEnabled() {
+		assignmentService := lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingCoordAssignmentServiceClient)
+		assignmentServiceImpl = assignment.NewAssignmentService(assignmentService)
+	}
 	broadcastService := lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingCoordBroadcastServiceClient)
 	return &clientImpl{
 		conn:              conn,
 		rb:                rb,
-		assignmentService: assignment.NewAssignmentService(assignmentService),
+		assignmentService: assignmentServiceImpl,
 		broadcastService:  broadcast.NewBroadcastService(util.MustSelectWALName(), broadcastService),
 	}
 }

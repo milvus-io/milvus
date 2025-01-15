@@ -197,10 +197,14 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	}
 
 	it.req.CurrentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
+	it.req.CurrentScalarIndexVersion = getCurrentScalarIndexVersion(it.req.GetCurrentScalarIndexVersion())
 
 	log.Ctx(ctx).Info("Successfully prepare indexBuildTask", zap.Int64("buildID", it.req.GetBuildID()),
 		zap.Int64("collectionID", it.req.GetCollectionID()), zap.Int64("segmentID", it.req.GetSegmentID()),
-		zap.Int64("currentIndexVersion", it.req.GetIndexVersion()))
+		zap.Int64("taskVersion", it.req.GetIndexVersion()),
+		zap.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()),
+		zap.Int32("currentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()),
+	)
 	return nil
 }
 
@@ -282,26 +286,27 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	}
 
 	buildIndexParams := &indexcgopb.BuildIndexInfo{
-		ClusterID:             it.req.GetClusterID(),
-		BuildID:               it.req.GetBuildID(),
-		CollectionID:          it.req.GetCollectionID(),
-		PartitionID:           it.req.GetPartitionID(),
-		SegmentID:             it.req.GetSegmentID(),
-		IndexVersion:          it.req.GetIndexVersion(),
-		CurrentIndexVersion:   it.req.GetCurrentIndexVersion(),
-		NumRows:               it.req.GetNumRows(),
-		Dim:                   it.req.GetDim(),
-		IndexFilePrefix:       it.req.GetIndexFilePrefix(),
-		InsertFiles:           it.req.GetDataPaths(),
-		FieldSchema:           it.req.GetField(),
-		StorageConfig:         storageConfig,
-		IndexParams:           mapToKVPairs(it.newIndexParams),
-		TypeParams:            mapToKVPairs(it.newTypeParams),
-		StorePath:             it.req.GetStorePath(),
-		StoreVersion:          it.req.GetStoreVersion(),
-		IndexStorePath:        it.req.GetIndexStorePath(),
-		OptFields:             optFields,
-		PartitionKeyIsolation: it.req.GetPartitionKeyIsolation(),
+		ClusterID:                 it.req.GetClusterID(),
+		BuildID:                   it.req.GetBuildID(),
+		CollectionID:              it.req.GetCollectionID(),
+		PartitionID:               it.req.GetPartitionID(),
+		SegmentID:                 it.req.GetSegmentID(),
+		IndexVersion:              it.req.GetIndexVersion(),
+		CurrentIndexVersion:       it.req.GetCurrentIndexVersion(),
+		CurrentScalarIndexVersion: it.req.GetCurrentScalarIndexVersion(),
+		NumRows:                   it.req.GetNumRows(),
+		Dim:                       it.req.GetDim(),
+		IndexFilePrefix:           it.req.GetIndexFilePrefix(),
+		InsertFiles:               it.req.GetDataPaths(),
+		FieldSchema:               it.req.GetField(),
+		StorageConfig:             storageConfig,
+		IndexParams:               mapToKVPairs(it.newIndexParams),
+		TypeParams:                mapToKVPairs(it.newTypeParams),
+		StorePath:                 it.req.GetStorePath(),
+		StoreVersion:              it.req.GetStoreVersion(),
+		IndexStorePath:            it.req.GetIndexStorePath(),
+		OptFields:                 optFields,
+		PartitionKeyIsolation:     it.req.GetPartitionKeyIsolation(),
 	}
 
 	log.Info("debug create index", zap.Any("buildIndexParams", buildIndexParams))
@@ -354,7 +359,15 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		saveFileKeys = append(saveFileKeys, fileKey)
 	}
 
-	it.node.storeIndexFilesAndStatistic(it.req.GetClusterID(), it.req.GetBuildID(), saveFileKeys, serializedSize, uint64(indexStats.MemSize), it.req.GetCurrentIndexVersion())
+	it.node.storeIndexFilesAndStatistic(
+		it.req.GetClusterID(),
+		it.req.GetBuildID(),
+		saveFileKeys,
+		serializedSize,
+		uint64(indexStats.MemSize),
+		it.req.GetCurrentIndexVersion(),
+		it.req.GetCurrentScalarIndexVersion(),
+	)
 	saveIndexFileDur := it.tr.RecordSpan()
 	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
 	it.tr.Elapse("index building all done")

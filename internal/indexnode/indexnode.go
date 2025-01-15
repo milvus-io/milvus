@@ -82,6 +82,14 @@ func getCurrentIndexVersion(v int32) int32 {
 	return v
 }
 
+func getCurrentScalarIndexVersion(v int32) int32 {
+	cCurrent := common.CurrentScalarIndexEngineVersion
+	if cCurrent < v {
+		return cCurrent
+	}
+	return v
+}
+
 type taskKey struct {
 	ClusterID string
 	TaskID    UniqueID

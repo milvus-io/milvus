@@ -3,7 +3,7 @@ package broadcaster
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
@@ -16,9 +16,4 @@ type Broadcaster interface {
 	Close()
 }
 
-// AppendOperator is used to append messages, there's only two implement of this interface:
-// 1. streaming.WAL()
-// 2. old msgstream interface
-type AppendOperator interface {
-	AppendMessages(ctx context.Context, msgs ...message.MutableMessage) streaming.AppendResponses
-}
+type AppendOperator = registry.AppendOperator

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -34,6 +35,10 @@ func TestStreamingProduce(t *testing.T) {
 			PartitionIds: []int64{1, 2, 3},
 		}).
 		WithBody(&msgpb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateCollection,
+				Timestamp: 1,
+			},
 			CollectionID: 1,
 		}).
 		WithBroadcast(vChannels).
