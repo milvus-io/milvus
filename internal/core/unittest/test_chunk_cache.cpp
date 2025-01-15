@@ -172,7 +172,14 @@ TEST_P(ChunkCacheTest, Read) {
                         actual_sparse_row.data()));
         expected_sparse_size += bytes;
     }
-    Assert(sparse_column->DataByteSize() == expected_sparse_size);
+
+    expected_sparse_size += (N + 7) / 8;
+    expected_sparse_size += sizeof(int64_t) * (N + 1);
+    auto actual_sparse_size = sparse_column->DataByteSize();
+    std::cout << "actual_sparse_size: " << actual_sparse_size
+              << ", expected_sparse_size: " << expected_sparse_size
+              << std::endl;
+    Assert(actual_sparse_size == expected_sparse_size);
 
     cc->Remove(dense_file_name);
     cc->Remove(sparse_file_name);
