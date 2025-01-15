@@ -7,7 +7,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -168,10 +170,12 @@ func (ls *LoadStateLock) StartReleaseAll() (g LoadStateLockGuard) {
 }
 
 // blockUntilDataLoadedOrReleased blocks until the segment is loaded or released.
-func (ls *LoadStateLock) BlockUntilDataLoadedOrReleased() {
+func (ls *LoadStateLock) BlockUntilDataLoadedOrReleased() bool {
+	var ok bool
 	ls.waitOrPanic(func(state loadStateEnum) bool {
 		return state == LoadStateDataLoaded || state == LoadStateReleased
-	}, noop)
+	}, func() { ok = true })
+	return ok
 }
 
 // waitUntilCanReleaseData waits until segment is release data able.
@@ -199,7 +203,7 @@ func (ls *LoadStateLock) waitOrPanic(ready func(state loadStateEnum) bool, then 
 
 	select {
 	case <-time.After(maxWaitTime):
-		panic(fmt.Sprintf("max WLock wait time(%v) excceeded", maxWaitTime))
+		log.Error("load state lock wait timeout", zap.Duration("maxWaitTime", maxWaitTime))
 	case <-ch:
 	}
 }
