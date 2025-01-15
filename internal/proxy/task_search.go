@@ -342,6 +342,8 @@ func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask, plan *pl
 				if err != nil {
 					return err
 				}
+				// force set hints to disable
+				queryInfo.Hints = "disable"
 			}
 			queryInfo.MaterializedViewInvolved = true
 		} else {

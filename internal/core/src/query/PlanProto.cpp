@@ -56,7 +56,9 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         // currently, iterative filter does not support range search
         if (!search_info.search_params_.contains(RADIUS)) {
             if (query_info_proto.hints() != "") {
-                if (query_info_proto.hints() == ITERATIVE_FILTER) {
+                if (query_info_proto.hints() == "disable") {
+                    search_info.iterative_filter_execution = false;
+                } else if (query_info_proto.hints() == ITERATIVE_FILTER) {
                     search_info.iterative_filter_execution = true;
                 } else {
                     // check if hints is valid
@@ -64,9 +66,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
                               "hints: {} not supported",
                               query_info_proto.hints());
                 }
-            }
-            if (!search_info.iterative_filter_execution &&
-                search_info.search_params_.contains(HINTS)) {
+            } else if (search_info.search_params_.contains(HINTS)) {
                 if (search_info.search_params_[HINTS] == ITERATIVE_FILTER) {
                     search_info.iterative_filter_execution = true;
                 } else {
