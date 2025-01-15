@@ -36,6 +36,7 @@ const (
 	DataCoord_GetPartitionStatistics_FullMethodName      = "/milvus.proto.data.DataCoord/GetPartitionStatistics"
 	DataCoord_GetSegmentInfoChannel_FullMethodName       = "/milvus.proto.data.DataCoord/GetSegmentInfoChannel"
 	DataCoord_SaveBinlogPaths_FullMethodName             = "/milvus.proto.data.DataCoord/SaveBinlogPaths"
+	DataCoord_GetDataViewVersions_FullMethodName         = "/milvus.proto.data.DataCoord/GetDataViewVersions"
 	DataCoord_GetRecoveryInfo_FullMethodName             = "/milvus.proto.data.DataCoord/GetRecoveryInfo"
 	DataCoord_GetRecoveryInfoV2_FullMethodName           = "/milvus.proto.data.DataCoord/GetRecoveryInfoV2"
 	DataCoord_GetChannelRecoveryInfo_FullMethodName      = "/milvus.proto.data.DataCoord/GetChannelRecoveryInfo"
@@ -93,6 +94,7 @@ type DataCoordClient interface {
 	GetPartitionStatistics(ctx context.Context, in *GetPartitionStatisticsRequest, opts ...grpc.CallOption) (*GetPartitionStatisticsResponse, error)
 	GetSegmentInfoChannel(ctx context.Context, in *GetSegmentInfoChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
 	SaveBinlogPaths(ctx context.Context, in *SaveBinlogPathsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	GetDataViewVersions(ctx context.Context, in *GetDataViewVersionsRequest, opts ...grpc.CallOption) (*GetDataViewVersionsResponse, error)
 	GetRecoveryInfo(ctx context.Context, in *GetRecoveryInfoRequest, opts ...grpc.CallOption) (*GetRecoveryInfoResponse, error)
 	GetRecoveryInfoV2(ctx context.Context, in *GetRecoveryInfoRequestV2, opts ...grpc.CallOption) (*GetRecoveryInfoResponseV2, error)
 	GetChannelRecoveryInfo(ctx context.Context, in *GetChannelRecoveryInfoRequest, opts ...grpc.CallOption) (*GetChannelRecoveryInfoResponse, error)
@@ -255,6 +257,15 @@ func (c *dataCoordClient) GetSegmentInfoChannel(ctx context.Context, in *GetSegm
 func (c *dataCoordClient) SaveBinlogPaths(ctx context.Context, in *SaveBinlogPathsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, DataCoord_SaveBinlogPaths_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) GetDataViewVersions(ctx context.Context, in *GetDataViewVersionsRequest, opts ...grpc.CallOption) (*GetDataViewVersionsResponse, error) {
+	out := new(GetDataViewVersionsResponse)
+	err := c.cc.Invoke(ctx, DataCoord_GetDataViewVersions_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -604,6 +615,7 @@ type DataCoordServer interface {
 	GetPartitionStatistics(context.Context, *GetPartitionStatisticsRequest) (*GetPartitionStatisticsResponse, error)
 	GetSegmentInfoChannel(context.Context, *GetSegmentInfoChannelRequest) (*milvuspb.StringResponse, error)
 	SaveBinlogPaths(context.Context, *SaveBinlogPathsRequest) (*commonpb.Status, error)
+	GetDataViewVersions(context.Context, *GetDataViewVersionsRequest) (*GetDataViewVersionsResponse, error)
 	GetRecoveryInfo(context.Context, *GetRecoveryInfoRequest) (*GetRecoveryInfoResponse, error)
 	GetRecoveryInfoV2(context.Context, *GetRecoveryInfoRequestV2) (*GetRecoveryInfoResponseV2, error)
 	GetChannelRecoveryInfo(context.Context, *GetChannelRecoveryInfoRequest) (*GetChannelRecoveryInfoResponse, error)
@@ -688,6 +700,9 @@ func (UnimplementedDataCoordServer) GetSegmentInfoChannel(context.Context, *GetS
 }
 func (UnimplementedDataCoordServer) SaveBinlogPaths(context.Context, *SaveBinlogPathsRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SaveBinlogPaths not implemented")
+}
+func (UnimplementedDataCoordServer) GetDataViewVersions(context.Context, *GetDataViewVersionsRequest) (*GetDataViewVersionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetDataViewVersions not implemented")
 }
 func (UnimplementedDataCoordServer) GetRecoveryInfo(context.Context, *GetRecoveryInfoRequest) (*GetRecoveryInfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRecoveryInfo not implemented")
@@ -1039,6 +1054,24 @@ func _DataCoord_SaveBinlogPaths_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DataCoordServer).SaveBinlogPaths(ctx, req.(*SaveBinlogPathsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_GetDataViewVersions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetDataViewVersionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).GetDataViewVersions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_GetDataViewVersions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).GetDataViewVersions(ctx, req.(*GetDataViewVersionsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1749,6 +1782,10 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SaveBinlogPaths",
 			Handler:    _DataCoord_SaveBinlogPaths_Handler,
+		},
+		{
+			MethodName: "GetDataViewVersions",
+			Handler:    _DataCoord_GetDataViewVersions_Handler,
 		},
 		{
 			MethodName: "GetRecoveryInfo",

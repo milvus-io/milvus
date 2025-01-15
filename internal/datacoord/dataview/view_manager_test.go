@@ -23,8 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -123,11 +122,8 @@ func TestNewDataViewManager_TryUpdateDataView(t *testing.T) {
 	v4 := &DataView{
 		CollectionID: collectionID,
 		Channels: map[string]*datapb.VchannelInfo{"ch0": {
-			CollectionID: collectionID,
-			ChannelName:  "ch0",
-			SeekPosition: &msgpb.MsgPosition{
-				Timestamp: uint64(time.Now().UnixNano()),
-			},
+			CollectionID:           collectionID,
+			ChannelName:            "ch0",
 			UnflushedSegmentIds:    []int64{100, 200},
 			PartitionStatsVersions: map[int64]int64{1000: 2000},
 		}},
@@ -142,18 +138,18 @@ func TestNewDataViewManager_TryUpdateDataView(t *testing.T) {
 		return version == v4.Version
 	}, 1*time.Second, 10*time.Millisecond)
 
-	// Update due to channel cp advanced
+	// Update due to segments list changed
 	v5 := &DataView{
 		CollectionID: collectionID,
 		Channels: map[string]*datapb.VchannelInfo{"ch0": {
-			CollectionID: collectionID,
-			ChannelName:  "ch0",
-			SeekPosition: &msgpb.MsgPosition{
-				Timestamp: uint64(time.Now().Add(paramtable.Get().DataCoordCfg.CPIntervalToUpdateDataView.GetAsDuration(time.Second)).UnixNano()),
-			},
+			CollectionID:           collectionID,
+			ChannelName:            "ch0",
 			UnflushedSegmentIds:    []int64{100, 200},
 			PartitionStatsVersions: map[int64]int64{1000: 2000},
 		}},
+		Segments: map[int64]struct{}{
+			300: {},
+		},
 		Version: time.Now().UnixNano(),
 	}
 	manager.(*dataViewManager).pullFn = func(collectionID int64) (*DataView, error) {
@@ -165,22 +161,16 @@ func TestNewDataViewManager_TryUpdateDataView(t *testing.T) {
 		return version == v5.Version
 	}, 1*time.Second, 10*time.Millisecond)
 
-	// Update due to segments list changed
+	// Check force update
 	v6 := &DataView{
 		CollectionID: collectionID,
 		Channels: map[string]*datapb.VchannelInfo{"ch0": {
-			CollectionID: collectionID,
-			ChannelName:  "ch0",
-			SeekPosition: &msgpb.MsgPosition{
-				Timestamp: v5.Channels["ch0"].GetSeekPosition().GetTimestamp(),
-			},
+			CollectionID:           collectionID,
+			ChannelName:            "ch0",
 			UnflushedSegmentIds:    []int64{100, 200},
 			PartitionStatsVersions: map[int64]int64{1000: 2000},
 		}},
-		Segments: map[int64]struct{}{
-			300: {},
-		},
-		Version: time.Now().UnixNano(),
+		Version: time.Now().Add(paramtable.Get().DataCoordCfg.ForceUpdateDataViewInterval.GetAsDuration(time.Second)).UnixNano(),
 	}
 	manager.(*dataViewManager).pullFn = func(collectionID int64) (*DataView, error) {
 		return v6, nil

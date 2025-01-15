@@ -3424,8 +3424,8 @@ type dataCoordConfig struct {
 	TaskCheckInterval ParamItem `refreshable:"true"`
 
 	// data view
-	DataViewUpdateInterval     ParamItem `refreshable:"true"`
-	CPIntervalToUpdateDataView ParamItem `refreshable:"true"`
+	DataViewCheckInterval       ParamItem `refreshable:"true"`
+	ForceUpdateDataViewInterval ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -4303,25 +4303,25 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.TaskCheckInterval.Init(base.mgr)
 
-	p.DataViewUpdateInterval = ParamItem{
-		Key:          "dataCoord.dataView.updateInterval",
-		Version:      "2.5.0",
-		Doc:          "The interval (in seconds) for trying to update the data view of all collections.",
+	p.DataViewCheckInterval = ParamItem{
+		Key:          "dataCoord.dataView.checkInterval",
+		Version:      "2.5.4",
+		Doc:          "The interval (in seconds) for checking updates to the data view across all collections.",
 		DefaultValue: "10",
 		PanicIfEmpty: false,
 		Export:       false,
 	}
-	p.DataViewUpdateInterval.Init(base.mgr)
+	p.DataViewCheckInterval.Init(base.mgr)
 
-	p.CPIntervalToUpdateDataView = ParamItem{
-		Key:          "dataCoord.dataView.cpInterval",
+	p.ForceUpdateDataViewInterval = ParamItem{
+		Key:          "dataCoord.dataView.forceUpdateInterval",
 		Version:      "2.5.0",
-		Doc:          "cpInterval is a time interval in seconds. If the time interval between the new channel checkpoint and the current channel checkpoint exceeds cpInterval, it will trigger a data view update.",
+		Doc:          "The interval (in seconds) that determines the time period for forcibly refreshing the dataView.",
 		DefaultValue: "600",
 		PanicIfEmpty: false,
 		Export:       false,
 	}
-	p.CPIntervalToUpdateDataView.Init(base.mgr)
+	p.ForceUpdateDataViewInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

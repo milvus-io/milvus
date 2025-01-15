@@ -16,7 +16,9 @@
 
 package dataview
 
-import "github.com/milvus-io/milvus/internal/proto/datapb"
+import (
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+)
 
 const InitialDataViewVersion int64 = 0
 

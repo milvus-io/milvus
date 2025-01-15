@@ -22,11 +22,10 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -88,7 +87,7 @@ func (m *dataViewManager) Remove(collectionID int64) {
 }
 
 func (m *dataViewManager) Start() {
-	ticker := time.NewTicker(paramtable.Get().DataCoordCfg.DataViewUpdateInterval.GetAsDuration(time.Second))
+	ticker := time.NewTicker(paramtable.Get().DataCoordCfg.DataViewCheckInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
 	for {
 		select {
@@ -126,51 +125,53 @@ func (m *dataViewManager) TryUpdateDataView(collectionID int64) {
 		return
 	}
 
-	currentView, ok := m.currentViews.Get(collectionID)
+	curView, ok := m.currentViews.Get(collectionID)
 	if !ok {
 		// update due to data view is empty
 		m.update(newView, "init data view")
 		return
 	}
 	// no-op if the incoming version is less than the current version.
-	if newView.Version <= currentView.Version {
+	if newView.Version <= curView.Version {
 		log.Warn("stale version, skip update", zap.Int64("collectionID", collectionID),
-			zap.Int64("new", newView.Version), zap.Int64("current", currentView.Version))
+			zap.Int64("new", newView.Version), zap.Int64("current", curView.Version))
 		return
 	}
 
 	for channel, new := range newView.Channels {
-		current, ok := currentView.Channels[channel]
+		cur, ok := curView.Channels[channel]
 		if !ok {
 			// update due to channel info is empty
-			m.update(newView, "init channel info")
+			m.update(newView, "init vchannel info")
 			return
 		}
-		if !funcutil.SliceSetEqual(new.GetLevelZeroSegmentIds(), current.GetLevelZeroSegmentIds()) ||
-			!funcutil.SliceSetEqual(new.GetUnflushedSegmentIds(), current.GetUnflushedSegmentIds()) ||
-			!funcutil.SliceSetEqual(new.GetFlushedSegmentIds(), current.GetFlushedSegmentIds()) ||
-			!funcutil.SliceSetEqual(new.GetIndexedSegmentIds(), current.GetIndexedSegmentIds()) ||
-			!funcutil.SliceSetEqual(new.GetDroppedSegmentIds(), current.GetDroppedSegmentIds()) {
-			// update due to segments list changed
-			m.update(newView, "channel segments list changed")
+		// Check whether the VChannelInfo is equal.
+		// To prevent frequent updates of the dataView due to channel cp changes,
+		// here we ignore the channel cp. This is acceptable because
+		// we have the mechanism of forcibly updating the dataView as a fallback.
+		curCP, newCP := cur.GetSeekPosition(), new.GetSeekPosition()
+		cur.SeekPosition, new.SeekPosition = nil, nil
+		if !proto.Equal(cur, new) {
+			cur.SeekPosition, new.SeekPosition = curCP, newCP
+			// update due to channel info changed
+			m.update(newView, "vchannel info changed")
 			return
 		}
-		if !typeutil.MapEqual(new.GetPartitionStatsVersions(), current.GetPartitionStatsVersions()) {
-			// update due to partition stats changed
-			m.update(newView, "partition stats changed")
-			return
-		}
-		newTime := tsoutil.PhysicalTime(new.GetSeekPosition().GetTimestamp())
-		curTime := tsoutil.PhysicalTime(current.GetSeekPosition().GetTimestamp())
-		if newTime.Sub(curTime) > paramtable.Get().DataCoordCfg.CPIntervalToUpdateDataView.GetAsDuration(time.Second) {
-			// update due to channel cp advanced
-			m.update(newView, fmt.Sprintf("channel cp advanced, curTime=%v, newTime=%v", curTime, newTime))
-			return
-		}
+		cur.SeekPosition, new.SeekPosition = curCP, newCP
 	}
 
-	if !typeutil.MapEqual(newView.Segments, currentView.Segments) {
+	if !typeutil.MapEqual(newView.Segments, curView.Segments) {
 		// update due to segments list changed
 		m.update(newView, "segment list changed")
+		return
+	}
+
+	// Force update data view.
+	// DataView's Version is from Time.UnixNano(), so here we just use version as data view time.
+	curTime := time.Unix(0, curView.Version)
+	newTime := time.Unix(0, newView.Version)
+	if newTime.Sub(curTime) > paramtable.Get().DataCoordCfg.ForceUpdateDataViewInterval.GetAsDuration(time.Second) {
+		// force update
+		m.update(newView, fmt.Sprintf("force update, curTime=%v, newTime=%v", curTime, newTime))
 	}
 }
