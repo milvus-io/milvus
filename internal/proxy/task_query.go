@@ -76,10 +76,11 @@ type queryTask struct {
 }
 
 type queryParams struct {
-	limit      int64
-	offset     int64
-	reduceType reduce.IReduceType
-	isIterator bool
+	limit        int64
+	offset       int64
+	reduceType   reduce.IReduceType
+	isIterator   bool
+	collectionID int64
 }
 
 // translateToOutputFieldIDs translates output fields name to output fields id.
@@ -146,6 +147,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		reduceStopForBest bool
 		isIterator        bool
 		err               error
+		collectionID      int64
 	)
 	reduceStopForBestStr, err := funcutil.GetAttrByKeyFromRepeatedKV(ReduceStopForBestKey, queryParamsPair)
 	// if reduce_stop_for_best is provided
@@ -164,6 +166,15 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		if err != nil {
 			return nil, merr.WrapErrParameterInvalid("true or false", isIteratorStr,
 				"value for iterator field is invalid")
+		}
+	}
+
+	collectionIdStr, err := funcutil.GetAttrByKeyFromRepeatedKV(CollectionID, queryParamsPair)
+	if err == nil {
+		collectionID, err = strconv.ParseInt(collectionIdStr, 0, 64)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalid("int value for collection_id", CollectionID,
+				"value for collection id is invalid")
 		}
 	}
 
@@ -201,10 +212,11 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 	}
 
 	return &queryParams{
-		limit:      limit,
-		offset:     offset,
-		reduceType: reduceType,
-		isIterator: isIterator,
+		limit:        limit,
+		offset:       offset,
+		reduceType:   reduceType,
+		isIterator:   isIterator,
+		collectionID: collectionID,
 	}, nil
 }
 
@@ -363,6 +375,10 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	queryParams, err := parseQueryParams(t.request.GetQueryParams())
 	if err != nil {
 		return err
+	}
+	if queryParams.collectionID > 0 && queryParams.collectionID != t.GetCollectionID() {
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("Input collection id is not consistent to collectionID in the context," +
+			"alias or database may have changed"))
 	}
 	if queryParams.reduceType == reduce.IReduceInOrderForBest {
 		t.RetrieveRequest.ReduceStopForBest = true

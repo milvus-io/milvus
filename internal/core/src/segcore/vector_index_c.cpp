@@ -73,6 +73,12 @@ ValidateIndexParams(const char* index_type,
                 knowhere::Version::GetCurrentVersion().VersionNumber(),
                 json,
                 error_msg);
+        } else if (dataType == milvus::DataType::VECTOR_INT8) {
+            status = knowhere::IndexStaticFaced<knowhere::int8>::ConfigCheck(
+                index_type,
+                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                json,
+                error_msg);
         } else {
             status = knowhere::Status::invalid_args;
         }
