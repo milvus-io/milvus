@@ -26,7 +26,9 @@ func (c *clientImpl) Assignment() AssignmentService {
 
 // Close close the client.
 func (c *clientImpl) Close() {
-	c.assignmentService.Close()
+	if c.assignmentService != nil {
+		c.assignmentService.Close()
+	}
 	c.conn.Close()
 	c.rb.Close()
 }

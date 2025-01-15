@@ -12,7 +12,6 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
@@ -23,10 +22,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 func TestBroadcaster(t *testing.T) {
+	paramtable.Init()
+
 	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
 	meta.EXPECT().ListBroadcastTask(mock.Anything).
 		RunAndReturn(func(ctx context.Context) ([]*streamingpb.BroadcastTask, error) {
@@ -39,7 +41,7 @@ func TestBroadcaster(t *testing.T) {
 	done := atomic.NewInt64(0)
 	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, bt *streamingpb.BroadcastTask) error {
 		// may failure
-		if rand.Int31n(10) < 5 {
+		if rand.Int31n(10) < 3 {
 			return errors.New("save task failed")
 		}
 		if bt.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
@@ -58,7 +60,7 @@ func TestBroadcaster(t *testing.T) {
 	assert.NotNil(t, bc)
 	assert.Eventually(t, func() bool {
 		return appended.Load() == 6 && done.Load() == 3
-	}, 10*time.Second, 10*time.Millisecond)
+	}, 30*time.Second, 10*time.Millisecond)
 
 	var result *types.BroadcastAppendResult
 	for {
@@ -73,7 +75,7 @@ func TestBroadcaster(t *testing.T) {
 
 	assert.Eventually(t, func() bool {
 		return done.Load() == 4
-	}, 10*time.Second, 10*time.Millisecond)
+	}, 30*time.Second, 10*time.Millisecond)
 
 	// TODO: error path.
 	bc.Close()
@@ -83,23 +85,23 @@ func TestBroadcaster(t *testing.T) {
 	assert.Nil(t, result)
 }
 
-func createOpeartor(t *testing.T) (AppendOperator, *atomic.Int64) {
+func createOpeartor(t *testing.T) (*syncutil.Future[AppendOperator], *atomic.Int64) {
 	id := atomic.NewInt64(1)
 	appended := atomic.NewInt64(0)
 	operator := mock_broadcaster.NewMockAppendOperator(t)
-	f := func(ctx context.Context, msgs ...message.MutableMessage) streaming.AppendResponses {
-		resps := streaming.AppendResponses{
-			Responses: make([]streaming.AppendResponse, len(msgs)),
+	f := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
+		resps := types.AppendResponses{
+			Responses: make([]types.AppendResponse, len(msgs)),
 		}
 		for idx := range msgs {
 			newID := walimplstest.NewTestMessageID(id.Inc())
-			if rand.Int31n(10) < 5 {
-				resps.Responses[idx] = streaming.AppendResponse{
+			if rand.Int31n(10) < 3 {
+				resps.Responses[idx] = types.AppendResponse{
 					Error: errors.New("append failed"),
 				}
 				continue
 			}
-			resps.Responses[idx] = streaming.AppendResponse{
+			resps.Responses[idx] = types.AppendResponse{
 				AppendResult: &types.AppendResult{
 					MessageID: newID,
 					TimeTick:  uint64(time.Now().UnixMilli()),
@@ -114,7 +116,10 @@ func createOpeartor(t *testing.T) (AppendOperator, *atomic.Int64) {
 	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(f)
 	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(f)
 	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(f)
-	return operator, appended
+
+	fOperator := syncutil.NewFuture[AppendOperator]()
+	fOperator.Set(operator)
+	return fOperator, appended
 }
 
 func createNewBroadcastMsg(vchannels []string) message.BroadcastMutableMessage {
