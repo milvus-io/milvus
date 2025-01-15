@@ -382,8 +382,8 @@ func (suite *ServiceSuite) TestWatchDmChannels_BadIndexMeta() {
 	ctx := context.Background()
 
 	// data
-	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
-	deltaLogs, err := mock_segcore.SaveDeltaLog(suite.collectionID,
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	deltaLogs, err := segments.SaveDeltaLog(suite.collectionID,
 		suite.partitionIDs[0],
 		suite.flushedSegmentIDs[0],
 		suite.node.chunkManager,
@@ -723,7 +723,7 @@ func (suite *ServiceSuite) TestLoadSegments_BadIndexMeta() {
 	ctx := context.Background()
 	suite.TestWatchDmChannelsVarchar()
 	// data
-	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_VarChar, false)
+	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_VarChar, false)
 	loadMeta := &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: suite.collectionID,
