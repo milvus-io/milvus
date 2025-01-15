@@ -1238,6 +1238,7 @@ TEST(Sealed, DeleteCount) {
         auto pk = schema->AddDebugField("pk", DataType::INT64);
         schema->set_primary_field_id(pk);
         auto segment = CreateSealedSegment(schema);
+        segment->get_insert_record().seal_pks();
 
         int64_t c = 10;
         auto offset = segment->get_deleted_count();
@@ -1249,9 +1250,8 @@ TEST(Sealed, DeleteCount) {
         auto status = segment->Delete(offset, c, pks.get(), tss.data());
         ASSERT_TRUE(status.ok());
 
-        // shouldn't be filtered for empty segment.
         auto cnt = segment->get_deleted_count();
-        ASSERT_EQ(cnt, 10);
+        ASSERT_EQ(cnt, 0);
     }
     {
         auto schema = std::make_shared<Schema>();
@@ -1318,7 +1318,7 @@ TEST(Sealed, RealCount) {
 
     // delete all.
     auto del_offset3 = segment->get_deleted_count();
-    ASSERT_EQ(del_offset3, half * 2);
+    ASSERT_EQ(del_offset3, half);
     auto del_ids3 = GenPKs(pks.begin(), pks.end());
     auto del_tss3 = GenTss(c, c + half * 2);
     status = segment->Delete(del_offset3, c, del_ids3.get(), del_tss3.data());
