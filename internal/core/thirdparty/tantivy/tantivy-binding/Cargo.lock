@@ -993,6 +993,7 @@ dependencies = [
  "regex",
  "scopeguard",
  "tantivy",
+ "tempfile",
  "zstd-sys",
 ]
 
