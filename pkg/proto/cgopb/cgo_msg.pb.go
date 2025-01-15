@@ -180,6 +180,116 @@ func (x *LoadIndexInfo) GetIndexFileSize() int64 {
 	return 0
 }
 
+type IndexStats struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	MemSize              int64                      `protobuf:"varint,1,opt,name=mem_size,json=memSize,proto3" json:"mem_size,omitempty"`
+	SerializedIndexInfos []*SerializedIndexFileInfo `protobuf:"bytes,3,rep,name=serialized_index_infos,json=serializedIndexInfos,proto3" json:"serialized_index_infos,omitempty"`
+}
+
+func (x *IndexStats) Reset() {
+	*x = IndexStats{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_cgo_msg_proto_msgTypes[1]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *IndexStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IndexStats) ProtoMessage() {}
+
+func (x *IndexStats) ProtoReflect() protoreflect.Message {
+	mi := &file_cgo_msg_proto_msgTypes[1]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IndexStats.ProtoReflect.Descriptor instead.
+func (*IndexStats) Descriptor() ([]byte, []int) {
+	return file_cgo_msg_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *IndexStats) GetMemSize() int64 {
+	if x != nil {
+		return x.MemSize
+	}
+	return 0
+}
+
+func (x *IndexStats) GetSerializedIndexInfos() []*SerializedIndexFileInfo {
+	if x != nil {
+		return x.SerializedIndexInfos
+	}
+	return nil
+}
+
+type SerializedIndexFileInfo struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	FileName string `protobuf:"bytes,1,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`
+	FileSize int64  `protobuf:"varint,2,opt,name=file_size,json=fileSize,proto3" json:"file_size,omitempty"`
+}
+
+func (x *SerializedIndexFileInfo) Reset() {
+	*x = SerializedIndexFileInfo{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_cgo_msg_proto_msgTypes[2]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SerializedIndexFileInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SerializedIndexFileInfo) ProtoMessage() {}
+
+func (x *SerializedIndexFileInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_cgo_msg_proto_msgTypes[2]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SerializedIndexFileInfo.ProtoReflect.Descriptor instead.
+func (*SerializedIndexFileInfo) Descriptor() ([]byte, []int) {
+	return file_cgo_msg_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *SerializedIndexFileInfo) GetFileName() string {
+	if x != nil {
+		return x.FileName
+	}
+	return ""
+}
+
+func (x *SerializedIndexFileInfo) GetFileSize() int64 {
+	if x != nil {
+		return x.FileSize
+	}
+	return 0
+}
+
 var File_cgo_msg_proto protoreflect.FileDescriptor
 
 var file_cgo_msg_proto_rawDesc = []byte{
@@ -228,7 +338,21 @@ var file_cgo_msg_proto_rawDesc = []byte{
 	0x78, 0x50, 0x61, 0x72, 0x61, 0x6d, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x12, 0x10, 0x0a, 0x03,
 	0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x14,
 	0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x76,
-	0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x42, 0x2d, 0x5a, 0x2b, 0x67, 0x69, 0x74, 0x68,
+	0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22, 0x88, 0x01, 0x0a, 0x0a, 0x49, 0x6e, 0x64,
+	0x65, 0x78, 0x53, 0x74, 0x61, 0x74, 0x73, 0x12, 0x19, 0x0a, 0x08, 0x6d, 0x65, 0x6d, 0x5f, 0x73,
+	0x69, 0x7a, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x07, 0x6d, 0x65, 0x6d, 0x53, 0x69,
+	0x7a, 0x65, 0x12, 0x5f, 0x0a, 0x16, 0x73, 0x65, 0x72, 0x69, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
+	0x5f, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x5f, 0x69, 0x6e, 0x66, 0x6f, 0x73, 0x18, 0x03, 0x20, 0x03,
+	0x28, 0x0b, 0x32, 0x29, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2e, 0x63, 0x67, 0x6f, 0x2e, 0x53, 0x65, 0x72, 0x69, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
+	0x49, 0x6e, 0x64, 0x65, 0x78, 0x46, 0x69, 0x6c, 0x65, 0x49, 0x6e, 0x66, 0x6f, 0x52, 0x14, 0x73,
+	0x65, 0x72, 0x69, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64, 0x49, 0x6e, 0x64, 0x65, 0x78, 0x49, 0x6e,
+	0x66, 0x6f, 0x73, 0x22, 0x53, 0x0a, 0x17, 0x53, 0x65, 0x72, 0x69, 0x61, 0x6c, 0x69, 0x7a, 0x65,
+	0x64, 0x49, 0x6e, 0x64, 0x65, 0x78, 0x46, 0x69, 0x6c, 0x65, 0x49, 0x6e, 0x66, 0x6f, 0x12, 0x1b,
+	0x0a, 0x09, 0x66, 0x69, 0x6c, 0x65, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x08, 0x66, 0x69, 0x6c, 0x65, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x1b, 0x0a, 0x09, 0x66,
+	0x69, 0x6c, 0x65, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x08,
+	0x66, 0x69, 0x6c, 0x65, 0x53, 0x69, 0x7a, 0x65, 0x42, 0x2d, 0x5a, 0x2b, 0x67, 0x69, 0x74, 0x68,
 	0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f,
 	0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x70, 0x72, 0x6f, 0x74,
 	0x6f, 0x2f, 0x63, 0x67, 0x6f, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
@@ -246,20 +370,23 @@ func file_cgo_msg_proto_rawDescGZIP() []byte {
 	return file_cgo_msg_proto_rawDescData
 }
 
-var file_cgo_msg_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_cgo_msg_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_cgo_msg_proto_goTypes = []interface{}{
-	(*LoadIndexInfo)(nil),        // 0: milvus.proto.cgo.LoadIndexInfo
-	nil,                          // 1: milvus.proto.cgo.LoadIndexInfo.IndexParamsEntry
-	(*schemapb.FieldSchema)(nil), // 2: milvus.proto.schema.FieldSchema
+	(*LoadIndexInfo)(nil),           // 0: milvus.proto.cgo.LoadIndexInfo
+	(*IndexStats)(nil),              // 1: milvus.proto.cgo.IndexStats
+	(*SerializedIndexFileInfo)(nil), // 2: milvus.proto.cgo.SerializedIndexFileInfo
+	nil,                             // 3: milvus.proto.cgo.LoadIndexInfo.IndexParamsEntry
+	(*schemapb.FieldSchema)(nil),    // 4: milvus.proto.schema.FieldSchema
 }
 var file_cgo_msg_proto_depIdxs = []int32{
-	2, // 0: milvus.proto.cgo.LoadIndexInfo.field:type_name -> milvus.proto.schema.FieldSchema
-	1, // 1: milvus.proto.cgo.LoadIndexInfo.index_params:type_name -> milvus.proto.cgo.LoadIndexInfo.IndexParamsEntry
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	4, // 0: milvus.proto.cgo.LoadIndexInfo.field:type_name -> milvus.proto.schema.FieldSchema
+	3, // 1: milvus.proto.cgo.LoadIndexInfo.index_params:type_name -> milvus.proto.cgo.LoadIndexInfo.IndexParamsEntry
+	2, // 2: milvus.proto.cgo.IndexStats.serialized_index_infos:type_name -> milvus.proto.cgo.SerializedIndexFileInfo
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_cgo_msg_proto_init() }
@@ -280,6 +407,30 @@ func file_cgo_msg_proto_init() {
 				return nil
 			}
 		}
+		file_cgo_msg_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*IndexStats); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_cgo_msg_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SerializedIndexFileInfo); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -287,7 +438,7 @@ func file_cgo_msg_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_cgo_msg_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

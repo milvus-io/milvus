@@ -120,7 +120,8 @@ func (s *Server) getUnIndexTaskSegments(ctx context.Context) []*SegmentInfo {
 
 func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 	log := log.Ctx(ctx)
-	log.Info("start create index for segment loop...")
+	log.Info("start create index for segment loop...",
+		zap.Int64("TaskCheckInterval", Params.DataCoordCfg.TaskCheckInterval.GetAsInt64()))
 	defer s.serverLoopWg.Done()
 
 	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
@@ -932,7 +933,8 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 							IndexName:           s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
 							IndexParams:         indexParams,
 							IndexFilePaths:      indexFilePaths,
-							SerializedSize:      segIdx.IndexSize,
+							SerializedSize:      segIdx.IndexSerializedSize,
+							MemSize:             segIdx.IndexMemSize,
 							IndexVersion:        segIdx.IndexVersion,
 							NumRows:             segIdx.NumRows,
 							CurrentIndexVersion: segIdx.CurrentIndexVersion,

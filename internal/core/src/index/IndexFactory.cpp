@@ -451,6 +451,10 @@ IndexFactory::CreateVectorIndex(
                 return std::make_unique<VectorMemIndex<bfloat16>>(
                     index_type, metric_type, version, file_manager_context);
             }
+            case DataType::VECTOR_INT8: {
+                return std::make_unique<VectorMemIndex<int8>>(
+                    index_type, metric_type, version, file_manager_context);
+            }
             default:
                 PanicInfo(
                     DataTypeInvalid,

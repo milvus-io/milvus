@@ -1633,20 +1633,20 @@ func TestGetRecoveryInfo(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
-			SegmentID:      seg4.ID,
-			CollectionID:   0,
-			PartitionID:    0,
-			NumRows:        100,
-			IndexID:        0,
-			BuildID:        0,
-			NodeID:         0,
-			IndexVersion:   1,
-			IndexState:     commonpb.IndexState_Finished,
-			FailReason:     "",
-			IsDeleted:      false,
-			CreatedUTCTime: 0,
-			IndexFileKeys:  nil,
-			IndexSize:      0,
+			SegmentID:           seg4.ID,
+			CollectionID:        0,
+			PartitionID:         0,
+			NumRows:             100,
+			IndexID:             0,
+			BuildID:             0,
+			NodeID:              0,
+			IndexVersion:        1,
+			IndexState:          commonpb.IndexState_Finished,
+			FailReason:          "",
+			IsDeleted:           false,
+			CreatedUTCTime:      0,
+			IndexFileKeys:       nil,
+			IndexSerializedSize: 0,
 		})
 
 		req := &datapb.GetRecoveryInfoRequest{
