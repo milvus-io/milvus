@@ -31,9 +31,10 @@ import (
 
 // ResourceUsage is used to estimate the resource usage of a sealed segment.
 type ResourceUsage struct {
-	MemorySize     uint64
-	DiskSize       uint64
-	MmapFieldCount int
+	MemorySize         uint64
+	DiskSize           uint64
+	MmapFieldCount     int
+	FieldGpuMemorySize []uint64
 }
 
 // Segment is the interface of a segment implementation.

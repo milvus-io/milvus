@@ -970,8 +970,9 @@ This helps Milvus-CDC synchronize incremental data`,
 }
 
 type gpuConfig struct {
-	InitSize ParamItem `refreshable:"false"`
-	MaxSize  ParamItem `refreshable:"false"`
+	InitSize                            ParamItem `refreshable:"false"`
+	MaxSize                             ParamItem `refreshable:"false"`
+	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
 }
 
 func (t *gpuConfig) init(base *BaseTable) {
@@ -992,6 +993,16 @@ func (t *gpuConfig) init(base *BaseTable) {
 		DefaultValue: "4096",
 	}
 	t.MaxSize.Init(base.mgr)
+	t.OverloadedMemoryThresholdPercentage = ParamItem{
+		Key:          "gpu.overloadedMemoryThresholdPercentage",
+		Version:      "2.5.4",
+		Export:       true,
+		DefaultValue: "95",
+		Formatter: func(v string) string {
+			return fmt.Sprintf("%f", getAsFloat(v)/100)
+		},
+	}
+	t.OverloadedMemoryThresholdPercentage.Init(base.mgr)
 }
 
 type traceConfig struct {
