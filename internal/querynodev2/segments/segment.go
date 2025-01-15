@@ -608,6 +608,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
+	defer s.ptrLock.Unpin()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
