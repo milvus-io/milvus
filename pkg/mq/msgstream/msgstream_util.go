@@ -109,6 +109,11 @@ func PulsarHealthCheck(clusterStatus *pcommon.MQClusterStatus) {
 // KafkaHealthCheck Perform a health check by retrieving cluster metadata
 func KafkaHealthCheck(clusterStatus *pcommon.MQClusterStatus) {
 	config := kafkamqwrapper.GetBasicConfig(&paramtable.Get().KafkaCfg)
+	// Set extra config for producer
+	pConfig := (&paramtable.Get().KafkaCfg).ProducerExtraConfig.GetValue()
+	for k, v := range pConfig {
+	        config.SetKey(k, v)
+	}
 	producer, err := kafka.NewProducer(&config)
 	if err != nil {
 		clusterStatus.Reason = fmt.Sprintf("failed to create Kafka producer: %v", err)
