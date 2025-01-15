@@ -268,7 +268,12 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		return nil
 	}
 
-	collection := C.NewCollection(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)))
+	var collection C.CCollection
+	status := C.NewCollection(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), &collection)
+	if err := HandleCStatus(ctx, &status, "NewCollection"); err != nil {
+		log.Warn("create collection failed", zap.Error(err))
+		return nil
+	}
 
 	isGpuIndex := false
 	if indexMeta != nil && len(indexMeta.GetIndexMetas()) > 0 && indexMeta.GetMaxIndexRowCount() > 0 {
@@ -277,7 +282,11 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 			log.Warn("marshal index meta failed", zap.Error(err))
 			return nil
 		}
-		C.SetIndexMeta(collection, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
+		status := C.SetIndexMeta(collection, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
+		if err := HandleCStatus(ctx, &status, "SetIndexMeta"); err != nil {
+			log.Warn("set index meta failed", zap.Error(err))
+			return nil
+		}
 
 		for _, indexMeta := range indexMeta.GetIndexMetas() {
 			isGpuIndex = lo.ContainsBy(indexMeta.GetIndexParams(), func(param *commonpb.KeyValuePair) bool {
