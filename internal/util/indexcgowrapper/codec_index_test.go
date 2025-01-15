@@ -191,6 +191,15 @@ func generateBinaryVectors(numRows, dim int) []byte {
 	return ret
 }
 
+func generateInt8Vectors(numRows, dim int) []int8 {
+	total := numRows * dim
+	ret := make([]int8, 0, total)
+	for i := 0; i < total; i++ {
+		ret = append(ret, int8(rand.Intn(256)-128))
+	}
+	return ret
+}
+
 func genFieldData(dtype schemapb.DataType, numRows, dim int) storage.FieldData {
 	switch dtype {
 	case schemapb.DataType_Bool:
@@ -247,6 +256,11 @@ func genFieldData(dtype schemapb.DataType, numRows, dim int) storage.FieldData {
 	case schemapb.DataType_BFloat16Vector:
 		return &storage.BFloat16VectorFieldData{
 			Data: generateBFloat16Vectors(numRows, dim),
+			Dim:  dim,
+		}
+	case schemapb.DataType_Int8Vector:
+		return &storage.Int8VectorFieldData{
+			Data: generateInt8Vectors(numRows, dim),
 			Dim:  dim,
 		}
 	default:
@@ -369,6 +383,22 @@ func genBFloat16VecIndexCases(dtype schemapb.DataType) []indexTestCase {
 	}
 }
 
+func genInt8VecIndexCases(dtype schemapb.DataType) []indexTestCase {
+	return []indexTestCase{
+		{
+			dtype:      dtype,
+			typeParams: nil,
+			indexParams: map[string]string{
+				common.IndexTypeKey:  IndexHNSW,
+				common.MetricTypeKey: metric.L2,
+				common.DimKey:        strconv.Itoa(dim),
+				"M":                  strconv.Itoa(16),
+				"efConstruction":     strconv.Itoa(efConstruction),
+			},
+		},
+	}
+}
+
 func genTypedIndexCase(dtype schemapb.DataType) []indexTestCase {
 	switch dtype {
 	case schemapb.DataType_Bool:
@@ -397,6 +427,8 @@ func genTypedIndexCase(dtype schemapb.DataType) []indexTestCase {
 		return genFloat16VecIndexCases(dtype)
 	case schemapb.DataType_BFloat16Vector:
 		return genBFloat16VecIndexCases(dtype)
+	case schemapb.DataType_Int8Vector:
+		return genInt8VecIndexCases(dtype)
 	default:
 		return nil
 	}
@@ -417,6 +449,7 @@ func genIndexCase() []indexTestCase {
 		schemapb.DataType_FloatVector,
 		schemapb.DataType_Float16Vector,
 		schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_Int8Vector,
 	}
 	var ret []indexTestCase
 	for _, dtype := range dtypes {

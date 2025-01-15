@@ -263,6 +263,7 @@ const (
 	FloatVectorDefaultMetricType       = metric.COSINE
 	SparseFloatVectorDefaultMetricType = metric.IP
 	BinaryVectorDefaultMetricType      = metric.HAMMING
+	IntVectorDefaultMetricType         = metric.COSINE
 )
 
 func SetDefaultMetricTypeIfNotExist(dType schemapb.DataType, params map[string]string) {
@@ -272,6 +273,8 @@ func SetDefaultMetricTypeIfNotExist(dType schemapb.DataType, params map[string]s
 		setDefaultIfNotExist(params, common.MetricTypeKey, SparseFloatVectorDefaultMetricType)
 	} else if typeutil.IsBinaryVectorType(dType) {
 		setDefaultIfNotExist(params, common.MetricTypeKey, BinaryVectorDefaultMetricType)
+	} else if typeutil.IsIntVectorType(dType) {
+		setDefaultIfNotExist(params, common.MetricTypeKey, IntVectorDefaultMetricType)
 	}
 }
 

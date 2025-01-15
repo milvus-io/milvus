@@ -136,6 +136,8 @@ func (t FieldType) PbFieldType() (string, string) {
 		return "[]byte", ""
 	case FieldTypeBFloat16Vector:
 		return "[]byte", ""
+	case FieldTypeInt8Vector:
+		return "[]int8", ""
 	default:
 		return "undefined", ""
 	}
@@ -177,6 +179,8 @@ const (
 	FieldTypeBFloat16Vector FieldType = 103
 	// FieldTypeBinaryVector field type sparse vector
 	FieldTypeSparseVector FieldType = 104
+	// FieldTypeInt8Vector field type int8 vector
+	FieldTypeInt8Vector FieldType = 105
 )
 
 // Field represent field schema in milvus

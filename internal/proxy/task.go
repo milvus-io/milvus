@@ -55,6 +55,7 @@ const (
 	IgnoreGrowingKey     = "ignore_growing"
 	ReduceStopForBestKey = "reduce_stop_for_best"
 	IteratorField        = "iterator"
+	CollectionID         = "collection_id"
 	GroupByFieldKey      = "group_by_field"
 	GroupSizeKey         = "group_size"
 	StrictGroupSize      = "strict_group_size"

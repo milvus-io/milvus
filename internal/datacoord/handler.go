@@ -157,12 +157,13 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 			// Skip bulk insert segments.
 			continue
 		}
+		validSegmentInfos[s.GetID()] = s
+
 		if s.GetIsInvisible() && s.GetCreatedByCompaction() {
 			// skip invisible compaction segments
 			continue
 		}
 
-		validSegmentInfos[s.GetID()] = s
 		switch {
 		case s.GetState() == commonpb.SegmentState_Dropped:
 			droppedIDs.Insert(s.GetID())
@@ -229,41 +230,64 @@ func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
 ) (typeutil.UniqueSet, typeutil.UniqueSet) {
 	newFlushedIDs := make(typeutil.UniqueSet)
 
-	isValid := func(ids ...UniqueID) bool {
+	isConditionMet := func(condition func(seg *SegmentInfo) bool, ids ...UniqueID) bool {
 		for _, id := range ids {
-			if seg, ok := validSegmentInfos[id]; !ok || seg == nil || seg.GetIsInvisible() {
+			if seg, ok := validSegmentInfos[id]; !ok || seg == nil || !condition(seg) {
 				return false
 			}
 		}
 		return true
 	}
 
-	var compactionFromExist func(segID UniqueID) bool
-	compactionFromExist = func(segID UniqueID) bool {
-		compactionFrom := validSegmentInfos[segID].GetCompactionFrom()
-		if len(compactionFrom) == 0 || !isValid(compactionFrom...) {
+	isValid := func(ids ...UniqueID) bool {
+		return isConditionMet(func(seg *SegmentInfo) bool {
+			return true
+		}, ids...)
+	}
+
+	isVisible := func(ids ...UniqueID) bool {
+		return isConditionMet(func(seg *SegmentInfo) bool {
+			return !seg.GetIsInvisible()
+		}, ids...)
+	}
+
+	var compactionFromExistWithCache func(segID UniqueID) bool
+	compactionFromExistWithCache = func(segID UniqueID) bool {
+		var compactionFromExist func(segID UniqueID) bool
+		compactionFromExistMap := make(map[UniqueID]bool)
+
+		compactionFromExist = func(segID UniqueID) bool {
+			if exist, ok := compactionFromExistMap[segID]; ok {
+				return exist
+			}
+			compactionFrom := validSegmentInfos[segID].GetCompactionFrom()
+			if len(compactionFrom) == 0 || !isValid(compactionFrom...) {
+				compactionFromExistMap[segID] = false
+				return false
+			}
+			for _, fromID := range compactionFrom {
+				if flushedIDs.Contain(fromID) || newFlushedIDs.Contain(fromID) {
+					compactionFromExistMap[segID] = true
+					return true
+				}
+				if compactionFromExist(fromID) {
+					compactionFromExistMap[segID] = true
+					return true
+				}
+			}
+			compactionFromExistMap[segID] = false
 			return false
 		}
-		for _, fromID := range compactionFrom {
-			if flushedIDs.Contain(fromID) || newFlushedIDs.Contain(fromID) {
-				return true
-			}
-			if compactionFromExist(fromID) {
-				return true
-			}
-		}
-		return false
+		return compactionFromExist(segID)
 	}
 
 	retrieve := func() bool {
 		continueRetrieve := false
 		for id := range flushedIDs {
 			compactionFrom := validSegmentInfos[id].GetCompactionFrom()
-			if len(compactionFrom) == 0 || !isValid(compactionFrom...) {
+			if len(compactionFrom) == 0 {
 				newFlushedIDs.Insert(id)
-				continue
-			}
-			if segmentIndexed(id) && !compactionFromExist(id) {
+			} else if !compactionFromExistWithCache(id) && (segmentIndexed(id) || !isVisible(compactionFrom...)) {
 				newFlushedIDs.Insert(id)
 			} else {
 				for _, fromID := range compactionFrom {
