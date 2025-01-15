@@ -112,7 +112,7 @@ func KafkaHealthCheck(clusterStatus *pcommon.MQClusterStatus) {
 	// Set extra config for producer
 	pConfig := (&paramtable.Get().KafkaCfg).ProducerExtraConfig.GetValue()
 	for k, v := range pConfig {
-	        config.SetKey(k, v)
+		config.SetKey(k, v)
 	}
 	producer, err := kafka.NewProducer(&config)
 	if err != nil {
