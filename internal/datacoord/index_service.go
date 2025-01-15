@@ -275,6 +275,15 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 }
 
 func ValidateIndexParams(index *model.Index) error {
+	if err := CheckDuplidateKey(index.IndexParams, "indexParams"); err != nil {
+		return err
+	}
+	if err := CheckDuplidateKey(index.UserIndexParams, "userIndexParams"); err != nil {
+		return err
+	}
+	if err := CheckDuplidateKey(index.TypeParams, "typeParams"); err != nil {
+		return err
+	}
 	indexType := GetIndexType(index.IndexParams)
 	indexParams := funcutil.KeyValuePair2Map(index.IndexParams)
 	if err := indexparamcheck.ValidateMmapIndexParams(indexType, indexParams); err != nil {
@@ -283,6 +292,17 @@ func ValidateIndexParams(index *model.Index) error {
 	userIndexParams := funcutil.KeyValuePair2Map(index.UserIndexParams)
 	if err := indexparamcheck.ValidateMmapIndexParams(indexType, userIndexParams); err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid mmap user index params", err.Error())
+	}
+	return nil
+}
+
+func CheckDuplidateKey(kvs []*commonpb.KeyValuePair, tag string) error {
+	keySet := typeutil.NewSet[string]()
+	for _, kv := range kvs {
+		if keySet.Contain(kv.GetKey()) {
+			return merr.WrapErrParameterInvalidMsg("duplicate %s key in %s params", kv.GetKey(), tag)
+		}
+		keySet.Insert(kv.GetKey())
 	}
 	return nil
 }
