@@ -10,6 +10,16 @@ use crate::{
     util::{create_binding, free_binding},
 };
 
+macro_rules! convert_to_rust_slice {
+    ($arr: expr, $len: expr) => {
+        match $arr {
+            // there is a UB in slice::from_raw_parts if the pointer is null
+            x if x.is_null() => &[],
+            _ => slice::from_raw_parts($arr, $len),
+        }
+    };
+}
+
 #[no_mangle]
 pub extern "C" fn tantivy_create_index(
     field_name: *const c_char,
