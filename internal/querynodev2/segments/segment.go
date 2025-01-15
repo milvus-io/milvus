@@ -1156,19 +1156,12 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64, mmap
 			return nil, nil
 		}).Await()
 	case "async":
-<<<<<<< HEAD
 		GetWarmupPool().Submit(func() (any, error) {
-			// bad implemtation, warmup is async at another goroutine and hold the rlock.
-			// the state transition of segment in segment loader will blocked.
-			// add a waiter to avoid it.
-			s.ptrLock.BlockUntilDataLoadedOrReleased()
-=======
-		task := func() (any, error) {
 			// failed to wait for state update, return directly
 			if !s.ptrLock.BlockUntilDataLoadedOrReleased() {
 				return nil, nil
 			}
->>>>>>> 3408d2f261 (enhance: Log error instead of panicking if load lock wait timeout)
+
 			if s.PinIfNotReleased() != nil {
 				return nil, nil
 			}
