@@ -327,7 +327,7 @@ func (node *QueryNode) Init() error {
 		node.factory.Init(paramtable.Get())
 
 		localRootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
-		localUsedSize, err := segcore.GetLocalUsedSize(node.ctx, localRootPath)
+		localUsedSize, err := segcore.GetLocalUsedSize(localRootPath)
 		if err != nil {
 			log.Warn("get local used size failed", zap.Error(err))
 			initError = err
