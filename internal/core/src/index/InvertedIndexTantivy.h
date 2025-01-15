@@ -214,6 +214,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // However, the index may be built from a separate node from the query node where the index buliding node is a
     // new version while the query node is a older version. So we have this `inverted_index_single_segment_` to control the index
     // building node to build specific type of tantivy index.
-    bool inverted_index_single_segment_;
+    bool inverted_index_single_segment_{false};
 };
 }  // namespace milvus::index
