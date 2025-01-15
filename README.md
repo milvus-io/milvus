@@ -268,6 +268,7 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/CaoHaiNam"><img src="https://avatars.githubusercontent.com/u/47685795?v=4" width="30px" /></a>
 <a href="https://github.com/Chisdo"><img src="https://avatars.githubusercontent.com/u/36720318?v=4" width="30px" /></a>
 <a href="https://github.com/ChunelFeng"><img src="https://avatars.githubusercontent.com/u/37905059?v=4" width="30px" /></a>
+<a href="https://github.com/CocytusElias"><img src="https://avatars.githubusercontent.com/u/79587688?v=4" width="30px" /></a>
 <a href="https://github.com/CodeInDreams"><img src="https://avatars.githubusercontent.com/u/17664279?v=4" width="30px" /></a>
 <a href="https://github.com/CsterKuroi"><img src="https://avatars.githubusercontent.com/u/12230174?v=4" width="30px" /></a>
 <a href="https://github.com/Cupchen"><img src="https://avatars.githubusercontent.com/u/34762375?v=4" width="30px" /></a>
@@ -431,7 +432,6 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/egoebelbecker"><img src="https://avatars.githubusercontent.com/u/5241455?v=4" width="30px" /></a>
 <a href="https://github.com/ehooi"><img src="https://avatars.githubusercontent.com/u/1306183?v=4" width="30px" /></a>
 <a href="https://github.com/elfisworking"><img src="https://avatars.githubusercontent.com/u/37609214?v=4" width="30px" /></a>
-<a href="https://github.com/eliassama"><img src="https://avatars.githubusercontent.com/u/79587688?v=4" width="30px" /></a>
 <a href="https://github.com/elstic"><img src="https://avatars.githubusercontent.com/u/48523564?v=4" width="30px" /></a>
 <a href="https://github.com/eltociear"><img src="https://avatars.githubusercontent.com/u/22633385?v=4" width="30px" /></a>
 <a href="https://github.com/eolivelli"><img src="https://avatars.githubusercontent.com/u/9469110?v=4" width="30px" /></a>
