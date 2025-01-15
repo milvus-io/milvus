@@ -1,6 +1,6 @@
 package proxy
 
-import (
+/*import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/proto/internalpb"
@@ -24,4 +24,4 @@ func (r *cntReducer) Reduce(results []*internalpb.RetrieveResults) (*milvuspb.Qu
 	res.Status = merr.Success()
 	res.CollectionName = r.collectionName
 	return res, nil
-}
+}*/

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -243,12 +244,30 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	}
 
 	reducer := segments.CreateInternalReducer(req, collection.Schema())
-
 	resp, err := reducer.Reduce(ctx, results)
 	if err != nil {
 		return nil, err
 	}
+	// aggregate cost
+	requestCosts := lo.FilterMap(results, func(result *internalpb.RetrieveResults, _ int) (*internalpb.CostAggregation, bool) {
+		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
+			return result.GetCostAggregation(), true
+		}
 
+		if result.GetBase().GetSourceID() == paramtable.GetNodeID() {
+			return result.GetCostAggregation(), true
+		}
+
+		return nil, false
+	})
+	resp.CostAggregation = segmentutil.MergeRequestCost(requestCosts)
+	if resp.CostAggregation == nil {
+		resp.CostAggregation = &internalpb.CostAggregation{}
+	}
+	relatedDataSize := lo.SumBy(results, func(t *internalpb.RetrieveResults) int64 {
+		return t.GetCostAggregation().GetTotalRelatedDataSize()
+	})
+	resp.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	tr.CtxElapse(ctx, fmt.Sprintf("do query with channel done , vChannel = %s, segmentIDs = %v",
 		channel,
 		req.GetSegmentIDs(),

@@ -13,20 +13,37 @@
 
 #include <google/protobuf/text_format.h>
 
-#include <cstdint>
 #include <string>
 #include <vector>
 
-#include "common/VectorTrait.h"
 #include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "pb/plan.pb.h"
 #include "query/Utils.h"
 #include "knowhere/comp/materialized_view.h"
 #include "plan/PlanNode.h"
+#include "expr/ITypeExpr.h"
 
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
+
+std::string
+getAggregateOpName(planpb::AggregateOp op) {
+    switch (op) {
+        case planpb::sum:
+            return "sum";
+        case planpb::count:
+            return "count";
+        case planpb::avg:
+            return "avg";
+        case planpb::min:
+            return "min";
+        case planpb::max:
+            return "max";
+        default:
+            PanicInfo(OpTypeInvalid, "Unknown op type for aggregation");
+    }
+}
 
 std::unique_ptr<VectorPlanNode>
 ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
@@ -198,7 +215,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     }
 
     if (plan_node->search_info_.group_by_field_id_ != std::nullopt) {
-        plannode = std::make_shared<milvus::plan::GroupByNode>(
+        plannode = std::make_shared<milvus::plan::SearchGroupByNode>(
             milvus::plan::GetNextPlanNodeId(), sources);
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
     }
@@ -219,7 +236,6 @@ ProtoParser::RetrievePlanNodeFromProto(
     auto plan_node = [&]() -> std::unique_ptr<RetrievePlanNode> {
         auto node = std::make_unique<RetrievePlanNode>();
         if (plan_node_proto.has_predicates()) {  // version before 2023.03.30.
-            node->is_count_ = false;
             auto& predicate_proto = plan_node_proto.predicates();
             auto expr_parser = [&]() -> plan::PlanNodePtr {
                 auto expr = ParseExprs(predicate_proto);
@@ -232,7 +248,10 @@ ProtoParser::RetrievePlanNodeFromProto(
                 milvus::plan::GetNextPlanNodeId(), sources);
             node->plannodes_ = std::move(plannode);
         } else {
+            // mvccNode--->FilterBitsNode or
+            // aggNode---> projectNode --->mvccNode--->FilterBitsNode
             auto& query = plan_node_proto.query();
+            // 1. FilterBitsNode
             if (query.has_predicates()) {
                 auto& predicate_proto = query.predicates();
                 auto expr_parser = [&]() -> plan::PlanNodePtr {
@@ -244,22 +263,125 @@ ProtoParser::RetrievePlanNodeFromProto(
                 sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
             }
 
+            // 2. mvccNode
             plannode = std::make_shared<milvus::plan::MvccNode>(
                 milvus::plan::GetNextPlanNodeId(), sources);
             sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
 
-            node->is_count_ = query.is_count();
-            node->limit_ = query.limit();
-            if (node->is_count_) {
-                plannode = std::make_shared<milvus::plan::CountNode>(
-                    milvus::plan::GetNextPlanNodeId(), sources);
+            // 3. projectNode and aggNode
+            auto group_by_field_count = query.group_by_field_ids_size();
+            auto agg_functions_count = query.aggregates_size();
+            if (group_by_field_count > 0 || agg_functions_count > 0) {
+                std::vector<FieldId> project_id_list;
+                std::vector<std::string> project_name_list;
+                std::vector<milvus::DataType> project_type_list;
+                project_id_list.reserve(group_by_field_count);
+                project_name_list.reserve(group_by_field_count);
+                project_type_list.reserve(group_by_field_count);
+
+                std::vector<expr::FieldAccessTypeExprPtr> groupingKeys;
+                groupingKeys.reserve(group_by_field_count);
+                auto insert_project_field_if_not_exist =
+                    [&](FieldId& field_id,
+                        std::string& field_name,
+                        milvus::DataType field_type) {
+                        if (std::count(project_id_list.begin(),
+                                       project_id_list.end(),
+                                       field_id) == 0) {
+                            project_id_list.emplace_back(field_id);
+                            project_name_list.emplace_back(field_name);
+                            project_type_list.emplace_back(field_type);
+                        }
+                    };
+
+                for (int i = 0; i < group_by_field_count; i++) {
+                    auto input_field_id = query.group_by_field_ids(i);
+                    AssertInfo(input_field_id > 0,
+                               "input field_id to group by must be positive, "
+                               "but is:{}",
+                               input_field_id);
+                    auto field_id = FieldId(input_field_id);
+                    auto field_type = schema.GetFieldType(field_id);
+                    auto field_name = schema.GetFieldName(field_id);
+                    groupingKeys.emplace_back(
+                        std::make_shared<const expr::FieldAccessTypeExpr>(
+                            field_type, field_name, field_id));
+                    insert_project_field_if_not_exist(
+                        field_id, field_name, field_type);
+                }
+
+                std::vector<plan::AggregationNode::Aggregate> aggregates;
+                std::vector<std::string> agg_names;
+                aggregates.reserve(query.aggregates_size());
+                for (int i = 0; i < query.aggregates_size(); i++) {
+                    auto aggregate = query.aggregates(i);
+                    auto agg_name = getAggregateOpName(aggregate.op());
+                    agg_names.emplace_back(agg_name);
+                    auto input_agg_field_id = aggregate.field_id();
+                    if (input_agg_field_id == 0) {
+                        // count(*) do not need input project columns
+                        auto call = std::make_shared<const expr::CallExpr>(
+                            agg_name,
+                            std::vector<expr::TypedExprPtr>{},
+                            nullptr);
+                        aggregates.emplace_back(
+                            plan::AggregationNode::Aggregate{call});
+                        aggregates.back().resultType_ =
+                            GetAggResultType(agg_name, DataType::NONE);
+                    } else {
+                        AssertInfo(input_agg_field_id > 0,
+                                   "input field_id to aggregate must be "
+                                   "positive or zero, but is:{}",
+                                   input_agg_field_id);
+                        auto field_id = FieldId(input_agg_field_id);
+                        auto field_type = schema.GetFieldType(field_id);
+                        auto field_name = schema.GetFieldName(field_id);
+                        auto agg_input =
+                            std::make_shared<expr::FieldAccessTypeExpr>(
+                                field_type, field_name, field_id);
+                        auto call = std::make_shared<const expr::CallExpr>(
+                            agg_name,
+                            std::vector<expr::TypedExprPtr>{agg_input},
+                            nullptr);
+                        aggregates.emplace_back(
+                            plan::AggregationNode::Aggregate{call});
+                        aggregates.back().rawInputTypes_.emplace_back(
+                            field_type);
+                        aggregates.back().resultType_ =
+                            GetAggResultType(agg_name, field_type);
+                        insert_project_field_if_not_exist(
+                            field_id, field_name, field_type);
+                    }
+                }
+
+                // add projectNode
+                if (!project_id_list.empty()) {
+                    auto project_field_id_list = std::vector<FieldId>(
+                        project_id_list.begin(), project_id_list.end());
+                    plannode = std::make_shared<plan::ProjectNode>(
+                        milvus::plan::GetNextPlanNodeId(),
+                        std::move(project_field_id_list),
+                        std::move(project_name_list),
+                        std::move(project_type_list),
+                        sources);
+                }
+
+                // add agg node
                 sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+                plannode = std::make_shared<plan::AggregationNode>(
+                    milvus::plan::GetNextPlanNodeId(),
+                    milvus::plan::AggregationNode::Step::kSingle,
+                    std::move(groupingKeys),
+                    std::move(agg_names),
+                    std::move(aggregates),
+                    query.ignore_null_keys(),
+                    query.limit(),
+                    sources);
             }
             node->plannodes_ = plannode;
         }
         return node;
     }();
-
     return plan_node;
 }
 
@@ -303,7 +425,6 @@ ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
     for (auto dynamic_field : plan_node_proto.dynamic_fields()) {
         retrieve_plan->target_dynamic_fields_.push_back(dynamic_field);
     }
-
     return retrieve_plan;
 }
 
