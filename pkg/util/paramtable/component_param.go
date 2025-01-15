@@ -254,9 +254,10 @@ type commonConfig struct {
 	MetricsPort ParamItem `refreshable:"false"`
 
 	// lock related params
-	EnableLockMetrics        ParamItem `refreshable:"false"`
-	LockSlowLogInfoThreshold ParamItem `refreshable:"true"`
-	LockSlowLogWarnThreshold ParamItem `refreshable:"true"`
+	EnableLockMetrics           ParamItem `refreshable:"false"`
+	LockSlowLogInfoThreshold    ParamItem `refreshable:"true"`
+	LockSlowLogWarnThreshold    ParamItem `refreshable:"true"`
+	MaxWLockConditionalWaitTime ParamItem `refreshable:"true"`
 
 	StorageScheme             ParamItem `refreshable:"false"`
 	EnableStorageV2           ParamItem `refreshable:"false"`
@@ -752,6 +753,15 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.LockSlowLogWarnThreshold.Init(base.mgr)
+
+	p.MaxWLockConditionalWaitTime = ParamItem{
+		Key:          "common.locks.maxWLockConditionalWaitTime",
+		Version:      "2.5.4",
+		DefaultValue: "600",
+		Doc:          "maximum seconds for waiting wlock conditional",
+		Export:       true,
+	}
+	p.MaxWLockConditionalWaitTime.Init(base.mgr)
 
 	p.EnableStorageV2 = ParamItem{
 		Key:          "common.storage.enablev2",
