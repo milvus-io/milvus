@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/mocks/streaming/proto/mock_streamingpb"
+	"github.com/milvus-io/milvus/pkg/mocks/proto/mock_streamingpb"
 	"github.com/milvus-io/milvus/pkg/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"

@@ -970,8 +970,9 @@ This helps Milvus-CDC synchronize incremental data`,
 }
 
 type gpuConfig struct {
-	InitSize ParamItem `refreshable:"false"`
-	MaxSize  ParamItem `refreshable:"false"`
+	InitSize                            ParamItem `refreshable:"false"`
+	MaxSize                             ParamItem `refreshable:"false"`
+	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
 }
 
 func (t *gpuConfig) init(base *BaseTable) {
@@ -992,6 +993,16 @@ func (t *gpuConfig) init(base *BaseTable) {
 		DefaultValue: "4096",
 	}
 	t.MaxSize.Init(base.mgr)
+	t.OverloadedMemoryThresholdPercentage = ParamItem{
+		Key:          "gpu.overloadedMemoryThresholdPercentage",
+		Version:      "2.5.4",
+		Export:       true,
+		DefaultValue: "95",
+		Formatter: func(v string) string {
+			return fmt.Sprintf("%f", getAsFloat(v)/100)
+		},
+	}
+	t.OverloadedMemoryThresholdPercentage.Init(base.mgr)
 }
 
 type traceConfig struct {
@@ -2528,6 +2539,7 @@ type queryNodeConfig struct {
 	// loader
 	IoPoolSize             ParamItem `refreshable:"false"`
 	DeltaDataExpansionRate ParamItem `refreshable:"true"`
+	DiskSizeFetchInterval  ParamItem `refreshable:"false"`
 
 	// schedule task policy.
 	SchedulePolicyName                    ParamItem `refreshable:"false"`
@@ -3146,6 +3158,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "the expansion rate for deltalog physical size to actual memory usage",
 	}
 	p.DeltaDataExpansionRate.Init(base.mgr)
+
+	p.DiskSizeFetchInterval = ParamItem{
+		Key:          "querynode.diskSizeFetchInterval",
+		Version:      "2.5.0",
+		DefaultValue: "60",
+		Doc:          "The time interval in seconds for retrieving disk usage.",
+	}
+	p.DiskSizeFetchInterval.Init(base.mgr)
 
 	// schedule read task policy.
 	p.SchedulePolicyName = ParamItem{

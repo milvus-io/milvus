@@ -90,14 +90,14 @@ func (handler *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	resp := &HealthResponse{
 		State: "OK",
 	}
+
+	unhealthyComponent := make([]string, 0)
 	ctx := context.Background()
-	healthNum := 0
 	for _, in := range handler.indicators {
 		handler.unregisterLock.RLock()
 		_, unregistered := handler.unregisteredRoles[in.GetName()]
 		handler.unregisterLock.RUnlock()
 		if unregistered {
-			healthNum++
 			continue
 		}
 		code := in.Health(ctx)
@@ -105,13 +105,15 @@ func (handler *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 			Name: in.GetName(),
 			Code: code,
 		})
-		if code == commonpb.StateCode_Healthy || code == commonpb.StateCode_StandBy {
-			healthNum++
+
+		if code != commonpb.StateCode_Healthy && code != commonpb.StateCode_StandBy {
+			unhealthyComponent = append(unhealthyComponent, in.GetName())
 		}
 	}
 
-	if healthNum != handler.indicatorNum {
-		resp.State = fmt.Sprintf("Not all components are healthy, %d/%d", healthNum, handler.indicatorNum)
+	if len(unhealthyComponent) > 0 {
+		resp.State = fmt.Sprintf("Not all components are healthy, %d/%d", handler.indicatorNum-len(unhealthyComponent), handler.indicatorNum)
+		log.Info("check health failed", zap.Strings("UnhealthyComponent", unhealthyComponent))
 	}
 
 	if resp.State == "OK" {
