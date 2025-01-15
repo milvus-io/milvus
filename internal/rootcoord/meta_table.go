@@ -540,8 +540,10 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	return nil
 }
 
+// Note: The returned model.Collection is read-only. Do NOT modify it directly,
+// as it may cause unexpected behavior or inconsistencies.
 func filterUnavailable(coll *model.Collection) *model.Collection {
-	clone := coll.ShadowClone()
+	clone := coll.ShallowClone()
 	// pick available partitions.
 	clone.Partitions = make([]*model.Partition, 0, len(coll.Partitions))
 	for _, partition := range coll.Partitions {
@@ -553,6 +555,8 @@ func filterUnavailable(coll *model.Collection) *model.Collection {
 }
 
 // getLatestCollectionByIDInternal should be called with ts = typeutil.MaxTimestamp
+// Note: The returned model.Collection is read-only. Do NOT modify it directly,
+// as it may cause unexpected behavior or inconsistencies.
 func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collectionID UniqueID, allowUnavailable bool) (*model.Collection, error) {
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok || coll == nil {
@@ -568,6 +572,8 @@ func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collec
 }
 
 // getCollectionByIDInternal get collection by collection id without lock.
+// Note: The returned model.Collection is read-only. Do NOT modify it directly,
+// as it may cause unexpected behavior or inconsistencies.
 func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 	if isMaxTs(ts) {
 		return mt.getLatestCollectionByIDInternal(ctx, collectionID, allowUnavailable)
@@ -611,6 +617,8 @@ func (mt *MetaTable) GetCollectionByName(ctx context.Context, dbName string, col
 	return mt.getCollectionByNameInternal(ctx, dbName, collectionName, ts)
 }
 
+// Note: The returned model.Collection is read-only. Do NOT modify it directly,
+// as it may cause unexpected behavior or inconsistencies.
 func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error) {
 	// backward compatibility for rolling  upgrade
 	if dbName == "" {

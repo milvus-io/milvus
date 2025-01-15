@@ -492,6 +492,6 @@ func TestClone(t *testing.T) {
 
 	clone1 := collection.Clone()
 	assert.Equal(t, clone1, collection)
-	clone2 := collection.ShadowClone()
+	clone2 := collection.ShallowClone()
 	assert.Equal(t, clone2, collection)
 }
