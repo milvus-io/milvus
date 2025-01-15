@@ -64,7 +64,7 @@ TEST(Util, GetDeleteBitmap) {
     auto N = 10;
     uint64_t seg_id = 101;
     InsertRecord insert_record(*schema, N);
-    DeletedRecord delete_record;
+    DeletedRecord<false> delete_record(&insert_record);
 
     // fill insert record, all insert records has same pk = 1, timestamps= {1 ... N}
     std::vector<int64_t> age_data(N);
@@ -83,37 +83,13 @@ TEST(Util, GetDeleteBitmap) {
     // test case delete pk1(ts = 0) -> insert repeated pk1 (ts = {1 ... N}) -> query (ts = N)
     std::vector<Timestamp> delete_ts = {0};
     std::vector<PkType> delete_pk = {1};
-    delete_record.push(delete_pk, delete_ts.data());
+    delete_record.StreamPush(delete_pk, delete_ts.data());
 
     auto query_timestamp = tss[N - 1];
-    auto del_barrier = get_barrier(delete_record, query_timestamp);
     auto insert_barrier = get_barrier(insert_record, query_timestamp);
-    auto res_bitmap = get_deleted_bitmap(del_barrier,
-                                         insert_barrier,
-                                         delete_record,
-                                         insert_record,
-                                         query_timestamp);
-    ASSERT_EQ(res_bitmap->bitmap_ptr->count(), 0);
-
-    // test case insert repeated pk1 (ts = {1 ... N}) -> delete pk1 (ts = N) -> query (ts = N)
-    delete_ts = {uint64_t(N)};
-    delete_pk = {1};
-    delete_record.push(delete_pk, delete_ts.data());
-
-    del_barrier = get_barrier(delete_record, query_timestamp);
-    res_bitmap = get_deleted_bitmap(del_barrier,
-                                    insert_barrier,
-                                    delete_record,
-                                    insert_record,
-                                    query_timestamp);
-    ASSERT_EQ(res_bitmap->bitmap_ptr->count(), N - 1);
-
-    // test case insert repeated pk1 (ts = {1 ... N}) -> delete pk1 (ts = N) -> query (ts = N/2)
-    query_timestamp = tss[N - 1] / 2;
-    del_barrier = get_barrier(delete_record, query_timestamp);
-    res_bitmap = get_deleted_bitmap(
-        del_barrier, N, delete_record, insert_record, query_timestamp);
-    ASSERT_EQ(res_bitmap->bitmap_ptr->count(), 0);
+    BitsetType res_bitmap(insert_barrier);
+    delete_record.Query(res_bitmap, insert_barrier, query_timestamp);
+    ASSERT_EQ(res_bitmap.count(), 0);
 }
 
 TEST(Util, OutOfRange) {

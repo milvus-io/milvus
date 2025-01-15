@@ -110,6 +110,11 @@ class SegmentSealedImpl : public SegmentSealed {
     std::unique_ptr<DataArray>
     get_vector(FieldId field_id, const int64_t* ids, int64_t count) const;
 
+    InsertRecord<true>&
+    get_insert_record() override {
+        return insert_record_;
+    }
+
  public:
     int64_t
     num_chunk_index(FieldId field_id) const override;
@@ -161,6 +166,16 @@ class SegmentSealedImpl : public SegmentSealed {
 
     void
     ClearData();
+
+    std::vector<SegOffset>
+    search_pk(const PkType& pk, Timestamp timestamp) const override {
+        return insert_record_.search_pk(pk, timestamp);
+    }
+
+    std::vector<SegOffset>
+    search_pk(const PkType& pk, int64_t insert_barrier) const override {
+        return insert_record_.search_pk(pk, insert_barrier);
+    }
 
  protected:
     // blob and row_count
@@ -250,6 +265,7 @@ class SegmentSealedImpl : public SegmentSealed {
         // } else {
         num_rows_ = row_count;
         // }
+        deleted_record_.set_sealed_row_count(row_count);
     }
 
     void
@@ -272,11 +288,6 @@ class SegmentSealedImpl : public SegmentSealed {
     bool
     is_system_field_ready() const {
         return system_ready_count_ == 2;
-    }
-
-    const DeletedRecord&
-    get_deleted_record() const {
-        return deleted_record_;
     }
 
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
@@ -319,7 +330,7 @@ class SegmentSealedImpl : public SegmentSealed {
     InsertRecord<true> insert_record_;
 
     // deleted pks
-    mutable DeletedRecord deleted_record_;
+    mutable DeletedRecord<true> deleted_record_;
 
     LoadFieldDataInfo field_data_info_;
 
