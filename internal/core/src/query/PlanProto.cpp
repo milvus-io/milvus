@@ -56,7 +56,9 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         // currently, iterative filter does not support range search
         if (!search_info.search_params_.contains(RADIUS)) {
             if (query_info_proto.hints() != "") {
-                if (query_info_proto.hints() == ITERATIVE_FILTER) {
+                if (query_info_proto.hints() == "disable") {
+                    search_info.iterative_filter_execution = false;
+                } else if (query_info_proto.hints() == ITERATIVE_FILTER) {
                     search_info.iterative_filter_execution = true;
                 } else {
                     // check if hints is valid
@@ -64,9 +66,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
                               "hints: {} not supported",
                               query_info_proto.hints());
                 }
-            }
-            if (!search_info.iterative_filter_execution &&
-                search_info.search_params_.contains(HINTS)) {
+            } else if (search_info.search_params_.contains(HINTS)) {
                 if (search_info.search_params_[HINTS] == ITERATIVE_FILTER) {
                     search_info.iterative_filter_execution = true;
                 } else {
@@ -318,6 +318,16 @@ ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
 }
 
 expr::TypedExprPtr
+ProtoParser::ParseNullExprs(const proto::plan::NullExpr& expr_pb) {
+    auto& column_info = expr_pb.column_info();
+    auto field_id = FieldId(column_info.field_id());
+    auto data_type = schema[field_id].get_data_type();
+    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    return std::make_shared<milvus::expr::NullExpr>(
+        expr::ColumnInfo(column_info), expr_pb.op());
+}
+
+expr::TypedExprPtr
 ProtoParser::ParseBinaryRangeExprs(
     const proto::plan::BinaryRangeExpr& expr_pb) {
     auto& columnInfo = expr_pb.column_info();
@@ -521,6 +531,10 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         }
         case ppe::kValueExpr: {
             result = ParseValueExprs(expr_pb.value_expr());
+            break;
+        }
+        case ppe::kNullExpr: {
+            result = ParseNullExprs(expr_pb.null_expr());
             break;
         }
         default: {

@@ -51,6 +51,7 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 						IsPartitionKey:  field.IsPartitionKey,
 						IsClusteringKey: field.IsClusteringKey,
 						ElementType:     field.GetElementType(),
+						Nullable:        field.GetNullable(),
 					},
 				},
 			},
@@ -1177,6 +1178,46 @@ func (v *ParserVisitor) VisitEmptyArray(ctx *parser.EmptyArrayContext) interface
 			},
 		},
 		nodeDependent: true,
+	}
+}
+
+func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{} {
+	column, err := v.translateIdentifier(ctx.Identifier().GetText())
+	if err != nil {
+		return err
+	}
+
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_NullExpr{
+			NullExpr: &planpb.NullExpr{
+				ColumnInfo: toColumnInfo(column),
+				Op:         planpb.NullExpr_IsNotNull,
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
+	column, err := v.translateIdentifier(ctx.Identifier().GetText())
+	if err != nil {
+		return err
+	}
+
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_NullExpr{
+			NullExpr: &planpb.NullExpr{
+				ColumnInfo: toColumnInfo(column),
+				Op:         planpb.NullExpr_IsNull,
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
 	}
 }
 

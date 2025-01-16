@@ -350,8 +350,8 @@ func TestGrpcWrapper(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, w.Code)
 		err = json.Unmarshal(w.Body.Bytes(), returnBody)
 		assert.Nil(t, err)
-		assert.Equal(t, int32(2), returnBody.Code)
-		assert.Equal(t, "service unavailable: internal: Milvus Proxy is not ready yet. please wait", returnBody.Message)
+		assert.Equal(t, int32(65535), returnBody.Code)
+		assert.Equal(t, "rpc error: code = PermissionDenied desc = PrivilegeLoad: permission deny to test in the `default` database", returnBody.Message)
 		fmt.Println(w.Body.String())
 	})
 }
@@ -780,6 +780,187 @@ func TestDatabase(t *testing.T) {
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
 		requestBody: []byte(`{"dbName":"mock"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	for _, testcase := range postTestCases {
+		t.Run("post"+testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			fmt.Println(w.Body.String())
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+			if testcase.errCode != 0 {
+				assert.Equal(t, testcase.errMsg, returnBody.Message)
+			}
+		})
+	}
+}
+
+func TestColletcionProperties(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	postTestCases := []requestBodyTestCase{}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	path := versionalV2(CollectionCategory, AlterPropertiesAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"test", "properties":{"mmap": true}}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"mock", "properties":{"mmap": true}}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	mp.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	path = versionalV2(CollectionCategory, DropPropertiesAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"test", "deleteKeys":["mmap"]}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"mock", "deleteKeys":["mmap"]}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	for _, testcase := range postTestCases {
+		t.Run("post"+testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			fmt.Println(w.Body.String())
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+			if testcase.errCode != 0 {
+				assert.Equal(t, testcase.errMsg, returnBody.Message)
+			}
+		})
+	}
+}
+
+func TestIndexProperties(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	postTestCases := []requestBodyTestCase{}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	path := versionalV2(IndexCategory, AlterPropertiesAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"test", "indexName":"test", "properties":{"mmap": true}}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"mock", "indexName":"test", "properties":{"mmap": true}}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	mp.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	path = versionalV2(IndexCategory, DropPropertiesAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"test","indexName":"test", "deleteKeys":["test"]}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"mock","indexName":"test", "deleteKeys":["test"]}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	for _, testcase := range postTestCases {
+		t.Run("post"+testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			fmt.Println(w.Body.String())
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+			if testcase.errCode != 0 {
+				assert.Equal(t, testcase.errMsg, returnBody.Message)
+			}
+		})
+	}
+}
+
+func TestCollectionFieldProperties(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	postTestCases := []requestBodyTestCase{}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().AlterCollectionField(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().AlterCollectionField(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	path := versionalV2(CollectionFieldCategory, AlterPropertiesAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"test", "fieldName":"test", "fieldParams":{"max_length": 100}}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"mock", "fieldName":"test", "fieldParams":{"max_length": 100}}`),
 		errMsg:      "mock",
 		errCode:     1100, // ErrParameterInvalid
 	})
@@ -1482,7 +1663,7 @@ func TestMethodPost(t *testing.T) {
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().RenameCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
+	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(3)
 	mp.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().CreatePartition(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
 	mp.EXPECT().LoadPartitions(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
@@ -1531,6 +1712,9 @@ func TestMethodPost(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(CollectionCategory, LoadAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(CollectionCategory, RefreshLoadAction),
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(CollectionCategory, ReleaseAction),

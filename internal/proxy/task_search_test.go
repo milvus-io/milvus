@@ -3461,6 +3461,7 @@ func (s *MaterializedViewTestSuite) TestMvNotEnabledWithNoPartitionKey() {
 	s.NoError(err)
 	s.NotZero(len(task.queryInfos))
 	s.Equal(false, task.queryInfos[0].MaterializedViewInvolved)
+	s.Equal("", task.queryInfos[0].Hints)
 }
 
 func (s *MaterializedViewTestSuite) TestMvNotEnabledWithPartitionKey() {
@@ -3477,6 +3478,7 @@ func (s *MaterializedViewTestSuite) TestMvNotEnabledWithPartitionKey() {
 	s.NoError(err)
 	s.NotZero(len(task.queryInfos))
 	s.Equal(false, task.queryInfos[0].MaterializedViewInvolved)
+	s.Equal("", task.queryInfos[0].Hints)
 }
 
 func (s *MaterializedViewTestSuite) TestMvEnabledNoPartitionKey() {
@@ -3490,6 +3492,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledNoPartitionKey() {
 	s.NoError(err)
 	s.NotZero(len(task.queryInfos))
 	s.Equal(false, task.queryInfos[0].MaterializedViewInvolved)
+	s.Equal("", task.queryInfos[0].Hints)
 }
 
 func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnInt64() {
@@ -3506,6 +3509,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnInt64() {
 	s.NoError(err)
 	s.NotZero(len(task.queryInfos))
 	s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
+	s.Equal("disable", task.queryInfos[0].Hints)
 }
 
 func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
@@ -3522,6 +3526,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
 	s.NoError(err)
 	s.NotZero(len(task.queryInfos))
 	s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
+	s.Equal("disable", task.queryInfos[0].Hints)
 }
 
 func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolation() {
@@ -3540,6 +3545,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 		s.NoError(err)
 		s.NotZero(len(task.queryInfos))
 		s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
+		s.Equal("disable", task.queryInfos[0].Hints)
 	}
 }
 

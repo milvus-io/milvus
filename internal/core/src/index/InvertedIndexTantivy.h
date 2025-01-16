@@ -38,7 +38,8 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     InvertedIndexTantivy() : ScalarIndex<T>(INVERTED_INDEX_TYPE) {
     }
 
-    explicit InvertedIndexTantivy(const storage::FileManagerContext& ctx);
+    explicit InvertedIndexTantivy(const storage::FileManagerContext& ctx,
+                                  bool inverted_index_single_segment = false);
 
     ~InvertedIndexTantivy();
 
@@ -80,11 +81,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         return wrapper_->count();
     }
 
-    // BuildWithRawData should be only used in ut. Only string is supported.
+    // BuildWithRawDataForUT should be only used in ut. Only string is supported.
     void
-    BuildWithRawData(size_t n,
-                     const void* values,
-                     const Config& config = {}) override;
+    BuildWithRawDataForUT(size_t n,
+                          const void* values,
+                          const Config& config = {}) override;
 
     BinarySet
     Serialize(const Config& config) override;
@@ -205,5 +206,14 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // all data need to be built to align the offset
     // so need to store null_offset in inverted index additionally
     std::vector<size_t> null_offset{};
+
+    // `inverted_index_single_segment_` is used to control whether to build tantivy index with single segment.
+    //
+    // In the older version of milvus, the query node can only read tantivy index built whtin single segment
+    // where the newer version builds and reads index of multi segments by default.
+    // However, the index may be built from a separate node from the query node where the index buliding node is a
+    // new version while the query node is a older version. So we have this `inverted_index_single_segment_` to control the index
+    // building node to build specific type of tantivy index.
+    bool inverted_index_single_segment_{false};
 };
 }  // namespace milvus::index

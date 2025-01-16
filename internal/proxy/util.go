@@ -1784,7 +1784,7 @@ func isPartitionKeyMode(ctx context.Context, dbName string, colName string) (boo
 	return false, nil
 }
 
-func hasParitionKeyModeField(schema *schemapb.CollectionSchema) bool {
+func hasPartitionKeyModeField(schema *schemapb.CollectionSchema) bool {
 	for _, fieldSchema := range schema.GetFields() {
 		if fieldSchema.IsPartitionKey {
 			return true

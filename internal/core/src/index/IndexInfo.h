@@ -26,6 +26,7 @@ struct CreateIndexInfo {
     IndexVersion index_engine_version;
     std::string field_name;
     int64_t dim;
+    int32_t scalar_index_engine_version;
 };
 
 }  // namespace milvus::index
