@@ -52,21 +52,21 @@ func (r *rankParams) String() string {
 }
 
 // parseSearchInfo returns QueryInfo and offset
-func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, rankParams *rankParams) (*planpb.QueryInfo, int64, error) {
+func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, rankParams *rankParams) (*planpb.QueryInfo, int64, int64, error) {
 	var topK int64
 	isAdvanced := rankParams != nil
 	externalLimit := rankParams.GetLimit() + rankParams.GetOffset()
 	topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, searchParamsPair)
 	if err != nil {
 		if externalLimit <= 0 {
-			return nil, 0, fmt.Errorf("%s is required", TopKKey)
+			return nil, 0, 0, fmt.Errorf("%s is required", TopKKey)
 		}
 		topK = externalLimit
 	} else {
 		topKInParam, err := strconv.ParseInt(topKStr, 0, 64)
 		if err != nil {
 			if externalLimit <= 0 {
-				return nil, 0, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
+				return nil, 0, 0, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
 			}
 			topK = externalLimit
 		} else {
@@ -76,13 +76,16 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 
 	isIterator, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, searchParamsPair)
 
+	collectionIDStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(CollectionID, searchParamsPair)
+	collectionId, _ := strconv.ParseInt(collectionIDStr, 0, 64)
+
 	if err := validateLimit(topK); err != nil {
 		if isIterator == "True" {
 			// 1. if the request is from iterator, we set topK to QuotaLimit as the iterator can resolve too large topK problem
 			// 2. GetAsInt64 has cached inside, no need to worry about cpu cost for parsing here
 			topK = Params.QuotaConfig.TopKLimit.GetAsInt64()
 		} else {
-			return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", TopKKey, topK, err)
+			return nil, 0, 0, fmt.Errorf("%s [%d] is invalid, %w", TopKKey, topK, err)
 		}
 	}
 
@@ -93,12 +96,12 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		if err == nil {
 			offset, err = strconv.ParseInt(offsetStr, 0, 64)
 			if err != nil {
-				return nil, 0, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
+				return nil, 0, 0, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
 			}
 
 			if offset != 0 {
 				if err := validateLimit(offset); err != nil {
-					return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)
+					return nil, 0, 0, fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)
 				}
 			}
 		}
@@ -106,7 +109,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 
 	queryTopK := topK + offset
 	if err := validateLimit(queryTopK); err != nil {
-		return nil, 0, fmt.Errorf("%s+%s [%d] is invalid, %w", OffsetKey, TopKKey, queryTopK, err)
+		return nil, 0, 0, fmt.Errorf("%s+%s [%d] is invalid, %w", OffsetKey, TopKKey, queryTopK, err)
 	}
 
 	// 2. parse metrics type
@@ -123,11 +126,11 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 
 	roundDecimal, err := strconv.ParseInt(roundDecimalStr, 0, 64)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
+		return nil, 0, 0, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
 
 	if roundDecimal != -1 && (roundDecimal > 6 || roundDecimal < 0) {
-		return nil, 0, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
+		return nil, 0, 0, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
 
 	// 4. parse search param str
@@ -151,17 +154,17 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			}
 		}
 		if groupByFieldId == -1 {
-			return nil, 0, merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema")
+			return nil, 0, 0, merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema")
 		}
 	}
 
 	// 6. disable groupBy for iterator and range search
 	if isIterator == "True" && groupByFieldId > 0 {
-		return nil, 0, merr.WrapErrParameterInvalid("", "",
+		return nil, 0, 0, merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do groupBy when doing iteration")
 	}
 	if strings.Contains(searchParamStr, radiusKey) && groupByFieldId > 0 {
-		return nil, 0, merr.WrapErrParameterInvalid("", "",
+		return nil, 0, 0, merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do range-search when doing search-group-by")
 	}
 
@@ -171,7 +174,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		SearchParams:   searchParamStr,
 		RoundDecimal:   roundDecimal,
 		GroupByFieldId: groupByFieldId,
-	}, offset, nil
+	}, offset, collectionId, nil
 }
 
 func getOutputFieldIDs(schema *schemaInfo, outputFields []string) (outputFieldIDs []UniqueID, err error) {

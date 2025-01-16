@@ -303,6 +303,25 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		task.request.OutputFields = []string{testFloatVecField}
 		assert.NoError(t, task.PreExecute(ctx))
 	})
+	t.Run("search inconsistent collection_id", func(t *testing.T) {
+		collName := "search_inconsistent_collection" + funcutil.GenRandomStr()
+		createColl(t, collName, rc)
+
+		st := getSearchTask(t, collName)
+		st.request.SearchParams = getValidSearchParams()
+		st.request.SearchParams = append(st.request.SearchParams, &commonpb.KeyValuePair{
+			Key:   CollectionID,
+			Value: "8080",
+		})
+		st.request.DslType = commonpb.DslType_BoolExprV1
+
+		_, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
+		enqueueTs := uint64(100000)
+		st.SetTs(enqueueTs)
+		assert.Error(t, st.PreExecute(ctx))
+	})
 }
 
 func getQueryCoord() *mocks.MockQueryCoord {
@@ -1974,7 +1993,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, offset, err := parseSearchInfo(test.validParams, nil, nil)
+				info, offset, _, err := parseSearchInfo(test.validParams, nil, nil)
 				assert.NoError(t, err)
 				assert.NotNil(t, info)
 				if test.description == "offsetParam" {
@@ -1995,7 +2014,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			limit: externalLimit,
 		}
 
-		info, offset, err := parseSearchInfo(offsetParam, nil, rank)
+		info, offset, _, err := parseSearchInfo(offsetParam, nil, rank)
 		assert.NoError(t, err)
 		assert.NotNil(t, info)
 		assert.Equal(t, int64(10), info.GetTopk())
@@ -2081,7 +2100,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, offset, err := parseSearchInfo(test.invalidParams, nil, nil)
+				info, offset, _, err := parseSearchInfo(test.invalidParams, nil, nil)
 				assert.Error(t, err)
 				assert.Nil(t, info)
 				assert.Zero(t, offset)
@@ -2108,7 +2127,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, nil)
+		info, _, _, err := parseSearchInfo(normalParam, schema, nil)
 		assert.Nil(t, info)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
@@ -2127,7 +2146,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, nil)
+		info, _, _, err := parseSearchInfo(normalParam, schema, nil)
 		assert.Nil(t, info)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
@@ -2146,7 +2165,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, nil)
+		info, _, _, err := parseSearchInfo(normalParam, schema, nil)
 		assert.NotNil(t, info)
 		assert.NoError(t, err)
 		assert.Equal(t, Params.QuotaConfig.TopKLimit.GetAsInt64(), info.Topk)
