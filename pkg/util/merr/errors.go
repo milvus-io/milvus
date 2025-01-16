@@ -140,10 +140,11 @@ var (
 	ErrMetricNotFound = newMilvusError("metric not found", 1200, false)
 
 	// Message queue related
-	ErrMqTopicNotFound = newMilvusError("topic not found", 1300, false)
-	ErrMqTopicNotEmpty = newMilvusError("topic not empty", 1301, false)
-	ErrMqInternal      = newMilvusError("message queue internal error", 1302, false)
-	ErrDenyProduceMsg  = newMilvusError("deny to write the message to mq", 1303, false)
+	ErrMqTopicNotFound  = newMilvusError("topic not found", 1300, false)
+	ErrMqTopicNotEmpty  = newMilvusError("topic not empty", 1301, false)
+	ErrMqInternal       = newMilvusError("message queue internal error", 1302, false)
+	ErrDenyProduceMsg   = newMilvusError("deny to write the message to mq", 1303, false)
+	ErrTooManyConsumers = newMilvusError("consumer number limit exceeded", 1304, false)
 
 	// Privilege related
 	// this operation is denied because the user not authorized, user need to login in first

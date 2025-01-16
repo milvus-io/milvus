@@ -31,6 +31,17 @@ func TestServiceParam(t *testing.T) {
 	var SParams ServiceParam
 	bt := NewBaseTable(SkipRemote(true))
 	SParams.init(bt)
+
+	t.Run("test MQConfig", func(t *testing.T) {
+		Params := &SParams.MQCfg
+		assert.Equal(t, 1*time.Second, Params.MergeCheckInterval.GetAsDuration(time.Second))
+		assert.Equal(t, 16, Params.TargetBufSize.GetAsInt())
+		assert.Equal(t, 3*time.Second, Params.MaxTolerantLag.GetAsDuration(time.Second))
+		assert.Equal(t, 5, Params.MaxDispatcherNumPerPchannel.GetAsInt())
+		assert.Equal(t, 3*time.Second, Params.RetrySleep.GetAsDuration(time.Second))
+		assert.Equal(t, 60*time.Second, Params.RetryTimeout.GetAsDuration(time.Second))
+	})
+
 	t.Run("test etcdConfig", func(t *testing.T) {
 		Params := &SParams.EtcdCfg
 

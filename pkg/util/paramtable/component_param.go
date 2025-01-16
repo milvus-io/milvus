@@ -3320,13 +3320,12 @@ user-task-polling:
 // --- datacoord ---
 type dataCoordConfig struct {
 	// --- CHANNEL ---
-	WatchTimeoutInterval             ParamItem `refreshable:"false"`
-	LegacyVersionWithoutRPCWatch     ParamItem `refreshable:"false"`
-	ChannelBalanceSilentDuration     ParamItem `refreshable:"true"`
-	ChannelBalanceInterval           ParamItem `refreshable:"true"`
-	ChannelCheckInterval             ParamItem `refreshable:"true"`
-	ChannelOperationRPCTimeout       ParamItem `refreshable:"true"`
-	MaxConcurrentChannelTaskNumPerDN ParamItem `refreshable:"true"`
+	WatchTimeoutInterval         ParamItem `refreshable:"false"`
+	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
+	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
+	ChannelBalanceInterval       ParamItem `refreshable:"true"`
+	ChannelCheckInterval         ParamItem `refreshable:"true"`
+	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
@@ -3497,15 +3496,6 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ChannelOperationRPCTimeout.Init(base.mgr)
-
-	p.MaxConcurrentChannelTaskNumPerDN = ParamItem{
-		Key:          "dataCoord.channel.maxConcurrentChannelTaskNumPerDN",
-		Version:      "2.5",
-		DefaultValue: "32",
-		Doc:          "The maximum concurrency for each DataNode executing channel tasks (watch, release).",
-		Export:       true,
-	}
-	p.MaxConcurrentChannelTaskNumPerDN.Init(base.mgr)
 
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",
