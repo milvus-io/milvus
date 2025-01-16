@@ -158,7 +158,9 @@ func (w *walAccesserImpl) Close() {
 	}
 	w.producerMutex.Unlock()
 
-	w.handlerClient.Close()
+	if streamingutil.IsStreamingServiceEnabled() {
+		w.handlerClient.Close()
+	}
 	w.streamingCoordClient.Close()
 }
 
