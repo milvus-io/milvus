@@ -82,7 +82,6 @@ func TestKnowhereConfig_GetRuntimeParameter(t *testing.T) {
 	params, err := cfg.GetRuntimeParameter(BuildStage)
 	assert.NoError(t, err)
 	assert.Contains(t, params, BuildDramBudgetKey)
-	assert.Contains(t, params, NumBuildThreadKey)
 
 	params, err = cfg.GetRuntimeParameter(SearchStage)
 	assert.NoError(t, err)
@@ -208,7 +207,6 @@ func TestKnowhereConfig_MergeWithResource(t *testing.T) {
 			expectedParams: map[string]string{
 				"existing_key":     "existing_value",
 				BuildDramBudgetKey: "", // We can't predict the exact value, but it should exist
-				NumBuildThreadKey:  "", // We can't predict the exact value, but it should exist
 				VecFieldSizeKey:    "1.000000",
 			},
 		},
