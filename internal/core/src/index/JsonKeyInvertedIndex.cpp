@@ -25,9 +25,10 @@ JsonKeyInvertedIndex::AddInvertedRecord(const std::vector<std::string>& paths,
                                         uint32_t row_id,
                                         uint16_t offset,
                                         uint16_t length) {
-    auto key = std::string("/") + Join(paths, "/");
-    std::cout << "xxx insert inverted key" << key << "rowid" << row_id
-              << "offset" << offset << "length" << length << std::endl;
+    std::string key = "";
+    if (!paths.empty()) {
+        key = std::string("/") + Join(paths, "/");
+    }
     // LOG_DEBUG(
     //     "insert inverted key: {}, row_id: {}, offset: "
     //     "{}, length:{}",
@@ -289,7 +290,7 @@ JsonKeyInvertedIndex::AddJSONDatas(size_t n,
         if (valids != nullptr && !valids[i]) {
             continue;
         }
-        AddJson(jsonDatas[i].c_str(), offset++);
+        AddJson(jsonDatas[i].c_str(), offset);
     }
     LOG_INFO("build json key index done for AddJSONDatas");
     if (shouldTriggerCommit()) {

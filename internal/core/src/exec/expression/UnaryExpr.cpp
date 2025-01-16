@@ -799,6 +799,14 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
     return res_vec;
 }
 
+size_t
+PhyUnaryRangeFilterExpr::FindFirstDigitPosition(const std::string& str) {
+    auto it = std::find_if(
+        str.begin(), str.end(), [](char c) { return std::isdigit(c); });
+    return (it != str.end()) ? std::distance(str.begin(), it)
+                             : std::string::npos;
+}
+
 template <typename ExprValueType>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
@@ -810,6 +818,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                                ? active_count_ - current_data_chunk_pos_
                                : batch_size_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    size_t first_digit_pos = FindFirstDigitPosition(pointer);
+    std::string arrayIndex = "";
+    if (first_digit_pos != std::string::npos) {
+        arrayIndex = pointer.substr(first_digit_pos - 1);
+        pointer = pointer.substr(0, first_digit_pos - 1);
+    }
 #define UnaryRangeJSONIndexCompare(cmp)                       \
     do {                                                      \
         auto x = json.at<GetType>(offset, size);              \
@@ -821,6 +835,21 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
             return false;                                     \
         }                                                     \
         return (cmp);                                         \
+    } while (false)
+
+#define UnaryRangeJSONIndexCompareWithArrayIndex(cmp)          \
+    do {                                                       \
+        auto array1 = json.at<std::string_view>(offset, size); \
+        value_result<simdjson::dom::array> array;              \
+        array = json.array_at(offset, size);                   \
+        if (array.error()) {                                   \
+            return false;                                      \
+        }                                                      \
+        auto x = array.at_pointer(arrayIndex);                 \
+        if (x.error()) {                                       \
+            return false;                                      \
+        }                                                      \
+        return (cmp);                                          \
     } while (false)
 
 #define UnaryRangeJSONIndexCompareNotEqual(cmp)               \
@@ -849,9 +878,14 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
         auto* index = segment_->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
         Assert(sealed_seg != nullptr);
-        auto filter_func = [sealed_seg, field_id, op_type, val](uint32_t row_id,
-                                                                uint16_t offset,
-                                                                uint16_t size) {
+        auto filter_func = [sealed_seg,
+                            field_id,
+                            op_type,
+                            val,
+                            arrayIndex,
+                            pointer](uint32_t row_id,
+                                     uint16_t offset,
+                                     uint16_t size) {
             auto json_pair = sealed_seg->GetJsonData(field_id, row_id);
             if (!json_pair.second) {
                 return false;
@@ -863,29 +897,49 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         return false;
                     } else {
-                        UnaryRangeJSONIndexCompare(ExprValueType(x.value()) >
-                                                   val);
+                        if (!arrayIndex.empty()) {
+                            UnaryRangeJSONIndexCompareWithArrayIndex(
+                                ExprValueType(x.value()) > val);
+                        } else {
+                            UnaryRangeJSONIndexCompare(
+                                ExprValueType(x.value()) > val);
+                        }
                     }
                 case proto::plan::GreaterEqual:
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         return false;
                     } else {
-                        UnaryRangeJSONIndexCompare(ExprValueType(x.value()) >=
-                                                   val);
+                        if (!arrayIndex.empty()) {
+                            UnaryRangeJSONIndexCompareWithArrayIndex(
+                                ExprValueType(x.value()) >= val);
+                        } else {
+                            UnaryRangeJSONIndexCompare(
+                                ExprValueType(x.value()) >= val);
+                        }
                     }
                 case proto::plan::LessThan:
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         return false;
                     } else {
-                        UnaryRangeJSONIndexCompare(ExprValueType(x.value()) <
-                                                   val);
+                        if (!arrayIndex.empty()) {
+                            UnaryRangeJSONIndexCompareWithArrayIndex(
+                                ExprValueType(x.value()) < val);
+                        } else {
+                            UnaryRangeJSONIndexCompare(
+                                ExprValueType(x.value()) < val);
+                        }
                     }
                 case proto::plan::LessEqual:
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         return false;
                     } else {
-                        UnaryRangeJSONIndexCompare(ExprValueType(x.value()) <=
-                                                   val);
+                        if (!arrayIndex.empty()) {
+                            UnaryRangeJSONIndexCompareWithArrayIndex(
+                                ExprValueType(x.value()) <= val);
+                        } else {
+                            UnaryRangeJSONIndexCompare(
+                                ExprValueType(x.value()) <= val);
+                        }
                     }
 
                 case proto::plan::Equal:
@@ -896,8 +950,13 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                         }
                         return CompareTwoJsonArray(array.value(), val);
                     } else {
-                        UnaryRangeJSONIndexCompare(ExprValueType(x.value()) ==
-                                                   val);
+                        if (!arrayIndex.empty()) {
+                            UnaryRangeJSONIndexCompareWithArrayIndex(
+                                ExprValueType(x.value()) == val);
+                        } else {
+                            UnaryRangeJSONIndexCompare(
+                                ExprValueType(x.value()) == val);
+                        }
                     }
                 case proto::plan::NotEqual:
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {

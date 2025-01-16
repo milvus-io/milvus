@@ -1004,7 +1004,6 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
                                uint32_t row_id,
                                uint16_t offset,
                                uint16_t size) {
-            return false;
             auto json_pair = sealed_seg->GetJsonData(field_id, row_id);
             if (!json_pair.second) {
                 return false;
