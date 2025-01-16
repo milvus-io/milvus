@@ -701,6 +701,9 @@ struct fmt::formatter<milvus::OpType> : formatter<string_view> {
             case milvus::OpType::TextMatch:
                 name = "TextMatch";
                 break;
+            case milvus::OpType::PhraseMatch:
+                name = "PhraseMatch";
+                break;
         }
         return formatter<string_view>::format(name, ctx);
     }
