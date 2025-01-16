@@ -690,6 +690,12 @@ func (s *Server) GetStateCode() commonpb.StateCode {
 	return code.(commonpb.StateCode)
 }
 
+// UpdateStateCode update state code
+func (s *Server) UpdateStateCode(code commonpb.StateCode) {
+	s.stateCode.Store(code)
+	log.Ctx(s.ctx).Info("update datacoord state", zap.String("state", code.String()))
+}
+
 // GetComponentStates returns DataCoord's current state
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	code := s.GetStateCode()

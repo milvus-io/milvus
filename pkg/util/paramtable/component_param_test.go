@@ -485,6 +485,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
 
 		assert.Equal(t, true, Params.MmapChunkCache.GetAsBool())
+		assert.Equal(t, 60*time.Second, Params.DiskSizeFetchInterval.GetAsDuration(time.Second))
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
@@ -538,7 +539,6 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 4, Params.L0DeleteCompactionSlotUsage.GetAsInt())
 		params.Save("datacoord.scheduler.taskSlowThreshold", "1000")
 		assert.Equal(t, 1000*time.Second, Params.TaskSlowThreshold.GetAsDuration(time.Second))
-		assert.Equal(t, 32, Params.MaxConcurrentChannelTaskNumPerDN.GetAsInt())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {

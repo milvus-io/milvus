@@ -1,4 +1,5 @@
 import time
+import numpy as np
 import pytest
 from common import common_func as cf
 from common import common_type as ct
@@ -621,3 +622,54 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         assert len(roles) == 2
 
         super().teardown_method(method)
+
+    @pytest.mark.skip("common.security.authorizationEnabled need to be set to true")
+    def test_milvus_client_search_iterator_rbac_mul_db(self):
+        """
+        target: test search iterator(high level api) normal case about mul db by rbac
+        method: create connection, collection, insert and search iterator
+        expected: search iterator permission deny after switch to  no permission db
+        """
+        uri = f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
+        client, _ = self.init_milvus_client(uri=uri, token="root:Milvus")
+        my_db = cf.gen_unique_str(prefix)
+        self.create_database(client, my_db)
+        collection_name = cf.gen_unique_str(prefix)
+        self.using_database(client, my_db)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.using_database(client, "default")
+        # 3. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
+        # 4. insert
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        user_name = cf.gen_unique_str(user_pre)
+        role_name = cf.gen_unique_str(role_pre)
+        password = cf.gen_str_by_length()
+        self.create_user(client, user_name=user_name, password=password)
+        self.create_role(client, role_name=role_name)
+        self.grant_role(client, user_name=user_name, role_name=role_name)
+        self.grant_privilege(client, role_name, "Collection", "Search", collection_name, 'default')
+        self.grant_privilege(client, role_name, "Collection", "Insert", collection_name, my_db)
+        client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
+
+        # 5. search_iterator
+        vectors_to_search = rng.random((1, default_dim))
+        self.search_interator(client, collection_name, vectors_to_search, use_rbac_mul_db=True, another_db=my_db,
+                              check_task=CheckTasks.check_permission_deny)
+        client, _ = self.init_milvus_client(uri=uri, token="root:Milvus")
+        self.revoke_privilege(client, role_name, "Collection", "Search", collection_name, 'default')
+        self.revoke_privilege(client, role_name, "Collection", "Insert", collection_name, my_db)
+        self.revoke_role(client, user_name=user_name, role_name=role_name)
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+        self.using_database(client, 'default')
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)

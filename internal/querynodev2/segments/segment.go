@@ -1176,10 +1176,10 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64, mmap
 		}).Await()
 	case "async":
 		task := func() (any, error) {
-			// bad implemtation, warmup is async at another goroutine and hold the rlock.
-			// the state transition of segment in segment loader will blocked.
-			// add a waiter to avoid it.
-			s.ptrLock.BlockUntilDataLoadedOrReleased()
+			// failed to wait for state update, return directly
+			if !s.ptrLock.BlockUntilDataLoadedOrReleased() {
+				return nil, nil
+			}
 			if s.PinIfNotReleased() != nil {
 				return nil, nil
 			}
@@ -1294,11 +1294,6 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 
 	GetDynamicPool().Submit(func() (any, error) {
 		C.DeleteSegment(ptr)
-		localDiskUsage, err := segcore.GetLocalUsedSize(context.Background(), paramtable.Get().LocalStorageCfg.Path.GetValue())
-		// ignore error here, shall not block releasing
-		if err == nil {
-			metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(localDiskUsage) / 1024 / 1024) // in MB
-		}
 		return nil, nil
 	}).Await()
 

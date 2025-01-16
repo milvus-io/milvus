@@ -238,8 +238,12 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Success(), nil
 	}
 
-	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
 		node.composeIndexMeta(ctx, req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
+	if err != nil {
+		log.Warn("failed to ref collection", zap.Error(err))
+		return merr.Status(err), nil
+	}
 	defer func() {
 		if !merr.Ok(status) {
 			node.manager.Collection.Unref(req.GetCollectionID(), 1)
@@ -474,8 +478,12 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Success(), nil
 	}
 
-	node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
 		node.composeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
+	if err != nil {
+		log.Warn("failed to ref collection", zap.Error(err))
+		return merr.Status(err), nil
+	}
 	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
 	if req.GetLoadScope() == querypb.LoadScope_Delta {
