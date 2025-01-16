@@ -350,8 +350,8 @@ func TestGrpcWrapper(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, w.Code)
 		err = json.Unmarshal(w.Body.Bytes(), returnBody)
 		assert.Nil(t, err)
-		assert.Equal(t, int32(2), returnBody.Code)
-		assert.Equal(t, "service unavailable: internal: Milvus Proxy is not ready yet. please wait", returnBody.Message)
+		assert.Equal(t, int32(65535), returnBody.Code)
+		assert.Equal(t, "rpc error: code = PermissionDenied desc = PrivilegeLoad: permission deny to test in the `default` database", returnBody.Message)
 		fmt.Println(w.Body.String())
 	})
 }
