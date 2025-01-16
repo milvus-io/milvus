@@ -1193,6 +1193,7 @@ name = "tantivy-binding"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
+ "either",
  "env_logger",
  "futures",
  "jieba-rs",

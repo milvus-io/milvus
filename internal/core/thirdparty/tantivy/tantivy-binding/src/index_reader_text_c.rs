@@ -1,13 +1,9 @@
-use std::{ffi::CStr, ptr::null};
+use std::ffi::CStr;
 
 use libc::{c_char, c_void};
 
 use crate::{
-    array::{RustArray, RustResult},
-    cstr_to_str,
-    index_reader::IndexReaderWrapper,
-    log::init_log,
-    string_c::{c_str_to_str, create_string},
+    array::RustResult, cstr_to_str, index_reader::IndexReaderWrapper, log::init_log,
     tokenizer::create_tokenizer,
 };
 
