@@ -35,9 +35,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -45,6 +42,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
@@ -1120,31 +1120,6 @@ func ValidatePrivilege(entity string) error {
 	return validateName(entity, "Privilege")
 }
 
-func ValidateBuiltInPrivilegeGroup(entity string, dbName string, collectionName string) error {
-	if !util.IsBuiltinPrivilegeGroup(entity) {
-		return nil
-	}
-	switch {
-	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Cluster.String()):
-		if !util.IsAnyWord(dbName) || !util.IsAnyWord(collectionName) {
-			return merr.WrapErrParameterInvalidMsg("dbName and collectionName should be * for the cluster level privilege: %s", entity)
-		}
-		return nil
-	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Database.String()):
-		if collectionName != "" && collectionName != util.AnyWord {
-			return merr.WrapErrParameterInvalidMsg("collectionName should be * for the database level privilege: %s", entity)
-		}
-		return nil
-	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Collection.String()):
-		if util.IsAnyWord(dbName) && !util.IsAnyWord(collectionName) && collectionName != "" {
-			return merr.WrapErrParameterInvalidMsg("please specify database name for the collection level privilege: %s", entity)
-		}
-		return nil
-	default:
-		return nil
-	}
-}
-
 func GetCurUserFromContext(ctx context.Context) (string, error) {
 	return contextutil.GetCurUserFromContext(ctx)
 }
@@ -1809,7 +1784,7 @@ func isPartitionKeyMode(ctx context.Context, dbName string, colName string) (boo
 	return false, nil
 }
 
-func hasParitionKeyModeField(schema *schemapb.CollectionSchema) bool {
+func hasPartitionKeyModeField(schema *schemapb.CollectionSchema) bool {
 	for _, fieldSchema := range schema.GetFields() {
 		if fieldSchema.IsPartitionKey {
 			return true

@@ -8,9 +8,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -65,6 +65,7 @@ func TestGenEmptyFieldData(t *testing.T) {
 		schemapb.DataType_FloatVector,
 		schemapb.DataType_Float16Vector,
 		schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_Int8Vector,
 	}
 
 	field := &schemapb.FieldSchema{Name: "field_name", FieldID: 100}

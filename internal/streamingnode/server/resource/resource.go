@@ -8,14 +8,18 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/idalloc"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var r = &resourceImpl{} // singleton resource instance
+var r = &resourceImpl{
+	logger: log.With(log.FieldModule(typeutil.StreamingNodeRole)),
+} // singleton resource instance
 
 // optResourceInit is the option to initialize the resource.
 type optResourceInit func(r *resourceImpl)
@@ -93,6 +97,7 @@ func Resource() *resourceImpl {
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
 	flusher                   flusher.Flusher
+	logger                    *log.MLogger
 	timestampAllocator        idalloc.Allocator
 	idAllocator               idalloc.Allocator
 	etcdClient                *clientv3.Client
@@ -151,6 +156,10 @@ func (r *resourceImpl) SegmentAssignStatsManager() *stats.StatsManager {
 
 func (r *resourceImpl) TimeTickInspector() tinspector.TimeTickSyncInspector {
 	return r.timeTickInspector
+}
+
+func (r *resourceImpl) Logger() *log.MLogger {
+	return r.logger
 }
 
 // assertNotNil panics if the resource is nil.

@@ -33,12 +33,6 @@
 
 namespace milvus {
 
-#define THROW_FILE_WRITE_ERROR                                           \
-    PanicInfo(ErrorCode::FileWriteFailed,                                \
-              fmt::format("write data to file {} failed, error code {}", \
-                          file.Path(),                                   \
-                          strerror(errno)));
-
 /*
 * If string field's value all empty, need a string padding to avoid
 * mmap failing because size_ is zero which causing invalid argument
@@ -78,7 +72,7 @@ WriteFieldPadding(File& file, DataType data_type, uint64_t& total_written) {
         std::vector<char> padding(padding_size, 0);
         ssize_t written = file.Write(padding.data(), padding_size);
         if (written < padding_size) {
-            THROW_FILE_WRITE_ERROR
+            THROW_FILE_WRITE_ERROR(file.Path())
         }
         total_written += written;
     }
@@ -90,7 +84,7 @@ WriteFieldData(File& file,
                const FieldDataPtr& data,
                uint64_t& total_written,
                std::vector<uint64_t>& indices,
-               std::vector<std::vector<uint64_t>>& element_indices,
+               std::vector<std::vector<uint32_t>>& element_indices,
                FixedVector<bool>& valid_data) {
     if (IsVariableDataType(data_type)) {
         // use buffered writer to reduce fwrite/write syscall
@@ -131,8 +125,14 @@ WriteFieldData(File& file,
                     indices.push_back(total_written);
                     auto array = static_cast<const Array*>(data->RawValue(i));
                     bw.Write(array->data(), array->byte_size());
-                    element_indices.emplace_back(array->get_offsets());
                     total_written += array->byte_size();
+                    if (IsVariableDataType(array->get_element_type())) {
+                        element_indices.emplace_back(
+                            array->get_offsets_data(),
+                            array->get_offsets_data() + array->length());
+                    } else {
+                        element_indices.emplace_back();
+                    }
                 }
                 break;
             }
@@ -157,7 +157,7 @@ WriteFieldData(File& file,
         // write as: data|data|data|data|data|data......
         size_t written = file.FWrite(data->Data(), data->DataSize());
         if (written < data->DataSize()) {
-            THROW_FILE_WRITE_ERROR
+            THROW_FILE_WRITE_ERROR(file.Path())
         }
         for (auto i = 0; i < data->get_num_rows(); i++) {
             indices.emplace_back(total_written);

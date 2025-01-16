@@ -18,6 +18,8 @@ package msgdispatcher
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -27,6 +29,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -82,6 +86,7 @@ func (c *client) Register(ctx context.Context, streamConfig *StreamConfig) (<-ch
 	log := log.With(zap.String("role", c.role),
 		zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
+	start := time.Now()
 	c.managerMut.Lock(pchannel)
 	defer c.managerMut.Unlock(pchannel)
 	var manager DispatcherManager
@@ -91,6 +96,12 @@ func (c *client) Register(ctx context.Context, streamConfig *StreamConfig) (<-ch
 		c.managers.Insert(pchannel, manager)
 		go manager.Run()
 	}
+	// Check if the consumer number limit has been reached.
+	limit := paramtable.Get().MQCfg.MaxDispatcherNumPerPchannel.GetAsInt()
+	if manager.Num() >= limit {
+		return nil, merr.WrapErrTooManyConsumers(vchannel, fmt.Sprintf("limit=%d", limit))
+	}
+	// Begin to register
 	ch, err := manager.Add(ctx, streamConfig)
 	if err != nil {
 		if manager.Num() == 0 {
@@ -100,12 +111,13 @@ func (c *client) Register(ctx context.Context, streamConfig *StreamConfig) (<-ch
 		log.Error("register failed", zap.Error(err))
 		return nil, err
 	}
-	log.Info("register done")
+	log.Info("register done", zap.Duration("dur", time.Since(start)))
 	return ch, nil
 }
 
 func (c *client) Deregister(vchannel string) {
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
+	start := time.Now()
 	c.managerMut.Lock(pchannel)
 	defer c.managerMut.Unlock(pchannel)
 	if manager, ok := c.managers.Get(pchannel); ok {
@@ -114,8 +126,8 @@ func (c *client) Deregister(vchannel string) {
 			manager.Close()
 			c.managers.Remove(pchannel)
 		}
-		log.Info("deregister done", zap.String("role", c.role),
-			zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
+		log.Info("deregister done", zap.String("role", c.role), zap.Int64("nodeID", c.nodeID),
+			zap.String("vchannel", vchannel), zap.Duration("dur", time.Since(start)))
 	}
 }
 

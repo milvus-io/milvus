@@ -3037,7 +3037,7 @@ class TestCollectionSearch(TestcaseBase):
         dim = 64
         enable_dynamic_field = False
         collection_w, _vectors, _, insert_ids = \
-            self.init_collection_general(prefix, True,nb, dim=dim, is_index=False,
+            self.init_collection_general(prefix, True, nb, dim=dim, is_index=False,
                                          enable_dynamic_field=enable_dynamic_field,
                                          nullable_fields={ct.default_float_field_name: null_data_percent})[0:4]
         # 2. create index
@@ -3085,7 +3085,7 @@ class TestCollectionSearch(TestcaseBase):
                     assert set(ids).issubset(filter_ids_set)
 
                 # 4. search again with expression template
-                epxr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+                expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
                 expr_params = cf.get_expr_params_from_template(expressions[1])
                 search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
                                                     default_search_params, nb,
@@ -3103,6 +3103,25 @@ class TestCollectionSearch(TestcaseBase):
                     ids = hits.ids
                     assert set(ids).issubset(filter_ids_set)
 
+                # 5. search again with expression template and search hints
+                if expr != "":          # TODO: remove this when issue #39013 is fixed
+                    search_param = default_search_params.copy()
+                    search_param.update({"hints": "iterative_filter"})
+                    search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                                        search_param, nb,
+                                                        expr=expr, expr_params=expr_params, _async=_async,
+                                                        check_task=CheckTasks.check_search_results,
+                                                        check_items={"nq": default_nq,
+                                                                     "ids": insert_ids,
+                                                                     "limit": min(nb, len(filter_ids)),
+                                                                     "_async": _async})
+                    if _async:
+                        search_res.done()
+                        search_res = search_res.result()
+                    filter_ids_set = set(filter_ids)
+                    for hits in search_res:
+                        ids = hits.ids
+                        assert set(ids).issubset(filter_ids_set)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("bool_type", [True, False, "true", "false"])
@@ -3247,6 +3266,20 @@ class TestCollectionSearch(TestcaseBase):
                     ids = hits.ids
                     assert set(ids) == set(filter_ids)
 
+                # 7. search again with expression template and hints
+                search_params = default_search_params.copy()
+                search_params.update({"hints": "iterative_filter"})
+                search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                                    search_params, limit=nb,
+                                                    expr=expr, expr_params=expr_params,
+                                                    _async=_async)
+                if _async:
+                    search_res.done()
+                    search_res = search_res.result()
+                for hits in search_res:
+                    ids = hits.ids
+                    assert set(ids) == set(filter_ids)
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("exists", ["exists"])
     @pytest.mark.parametrize("json_field_name", ["json_field", "json_field['number']", "json_field['name']",
@@ -3366,6 +3399,76 @@ class TestCollectionSearch(TestcaseBase):
             if _async:
                 search_res.done()
                 search_res = search_res.result()
+            filter_ids_set = set(filter_ids)
+            for hits in search_res:
+                ids = hits.ids
+                assert set(ids).issubset(filter_ids_set)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_expr_json_field(self):
+        """
+        target: test delete entities using normal expression
+        method: delete using normal expression
+        expected: delete successfully
+        """
+        # init collection with nb default data
+        nb = 2000
+        dim = 64
+        collection_w, _vectors, _, insert_ids = \
+            self.init_collection_general(prefix, True, nb=nb, dim=dim, enable_dynamic_field=True)[0:4]
+
+        # filter result with expression in collection
+        search_vectors = [[random.random() for _ in range(dim)]
+                          for _ in range(default_nq)]
+        _vectors = _vectors[0]
+        for expressions in cf.gen_json_field_expressions_and_templates():
+            expr = expressions[0].replace("&&", "and").replace("||", "or")
+            filter_ids = []
+            json_field = {}
+            for i, _id in enumerate(insert_ids):
+                json_field['number'] = _vectors[i][ct.default_json_field_name]['number']
+                json_field['float'] = _vectors[i][ct.default_json_field_name]['float']
+                if not expr or eval(expr):
+                    filter_ids.append(_id)
+
+            # 3. search expressions
+            search_res, _ = collection_w.search(search_vectors[:default_nq], default_search_field,
+                                                default_search_params,
+                                                limit=nb, expr=expr,
+                                                check_task=CheckTasks.check_search_results,
+                                                check_items={"nq": default_nq,
+                                                             "ids": insert_ids,
+                                                             "limit": min(nb, len(filter_ids))})
+            filter_ids_set = set(filter_ids)
+            for hits in search_res:
+                ids = hits.ids
+                assert set(ids).issubset(filter_ids_set)
+
+            # 4. search again with expression template
+            expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+            expr_params = cf.get_expr_params_from_template(expressions[1])
+            search_res, _ = collection_w.search(search_vectors[:default_nq], default_search_field,
+                                                default_search_params,
+                                                limit=nb, expr=expr, expr_params=expr_params,
+                                                check_task=CheckTasks.check_search_results,
+                                                check_items={"nq": default_nq,
+                                                             "ids": insert_ids,
+                                                             "limit": min(nb, len(filter_ids))})
+            filter_ids_set = set(filter_ids)
+            for hits in search_res:
+                ids = hits.ids
+                assert set(ids).issubset(filter_ids_set)
+
+            # 5. search again with expression template and hint
+            search_params = default_search_params.copy()
+            search_params.update({"hints": "iterative_filter"})
+            search_res, _ = collection_w.search(search_vectors[:default_nq], default_search_field,
+                                                search_params,
+                                                limit=nb, expr=expr, expr_params=expr_params,
+                                                check_task=CheckTasks.check_search_results,
+                                                check_items={"nq": default_nq,
+                                                             "ids": insert_ids,
+                                                             "limit": min(nb, len(filter_ids))})
             filter_ids_set = set(filter_ids)
             for hits in search_res:
                 ids = hits.ids

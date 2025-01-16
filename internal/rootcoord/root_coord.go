@@ -33,20 +33,20 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -58,6 +58,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
@@ -84,7 +88,7 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 
 type Opt func(*Core)
 
-type metaKVCreator func() (kv.MetaKv, error)
+type metaKVCreator func() kv.MetaKv
 
 // Core root coordinator core
 type Core struct {
@@ -130,6 +134,8 @@ type Core struct {
 	activateFunc        func() error
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	streamingCoord *streamingcoord.Server
 }
 
 // --------------------- function --------------------------
@@ -327,17 +333,26 @@ func (c *Core) initSession() error {
 func (c *Core) initKVCreator() {
 	if c.metaKVCreator == nil {
 		if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
-			c.metaKVCreator = func() (kv.MetaKv, error) {
+			c.metaKVCreator = func() kv.MetaKv {
 				return tikv.NewTiKV(c.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue(),
-					tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
+					tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 			}
 		} else {
-			c.metaKVCreator = func() (kv.MetaKv, error) {
+			c.metaKVCreator = func() kv.MetaKv {
 				return etcdkv.NewEtcdKV(c.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
-					etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
+					etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 			}
 		}
 	}
+}
+
+func (c *Core) initStreamingCoord() {
+	c.streamingCoord = streamingcoord.NewServerBuilder().
+		WithETCD(c.etcdCli).
+		WithMetaKV(c.metaKVCreator()).
+		WithSession(c.session).
+		WithRootCoordClient(coordclient.MustGetLocalRootCoordClientFuture()).
+		Build()
 }
 
 func (c *Core) initMetaTable(initCtx context.Context) error {
@@ -348,28 +363,20 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 		switch Params.MetaStoreCfg.MetaStoreType.GetValue() {
 		case util.MetaStoreTypeEtcd:
 			log.Ctx(initCtx).Info("Using etcd as meta storage.")
-			var metaKV kv.MetaKv
 			var ss *kvmetestore.SuffixSnapshot
 			var err error
 
-			if metaKV, err = c.metaKVCreator(); err != nil {
-				return err
-			}
-
+			metaKV := c.metaKVCreator()
 			if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, Params.EtcdCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
 				return err
 			}
 			catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
 		case util.MetaStoreTypeTiKV:
 			log.Ctx(initCtx).Info("Using tikv as meta storage.")
-			var metaKV kv.MetaKv
 			var ss *kvmetestore.SuffixSnapshot
 			var err error
 
-			if metaKV, err = c.metaKVCreator(); err != nil {
-				return err
-			}
-
+			metaKV := c.metaKVCreator()
 			if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, Params.TiKVCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
 				return err
 			}
@@ -442,7 +449,6 @@ func (c *Core) initInternal() error {
 	log := log.Ctx(initCtx)
 
 	c.UpdateStateCode(commonpb.StateCode_Initializing)
-	c.initKVCreator()
 
 	if err := c.initIDAllocator(initCtx); err != nil {
 		return err
@@ -470,6 +476,10 @@ func (c *Core) initInternal() error {
 	c.garbageCollector = newBgGarbageCollector(c)
 	c.stepExecutor = newBgStepExecutor(c.ctx)
 
+	if err := c.streamingCoord.Start(c.ctx); err != nil {
+		log.Info("start streaming coord failed", zap.Error(err))
+		return err
+	}
 	if !streamingutil.IsStreamingServiceEnabled() {
 		c.proxyWatcher = proxyutil.NewProxyWatcher(
 			c.etcdCli,
@@ -523,6 +533,8 @@ func (c *Core) Init() error {
 	if err := c.initSession(); err != nil {
 		return err
 	}
+	c.initKVCreator()
+	c.initStreamingCoord()
 
 	if c.enableActiveStandBy {
 		c.activateFunc = func() error {
@@ -755,6 +767,10 @@ func (c *Core) startInternal() error {
 	sessionutil.SaveServerInfo(typeutil.RootCoordRole, c.session.ServerID)
 	log.Info("rootcoord startup successfully")
 
+	// regster the core as a appendoperator for broadcast service.
+	// TODO: should be removed at 2.6.0.
+	// Add the wal accesser to the broadcaster registry for making broadcast operation.
+	registry.Register(registry.AppendOperatorTypeMsgstream, newMsgStreamAppendOperator(c))
 	return nil
 }
 
@@ -814,6 +830,10 @@ func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
 	c.stopExecutor()
 	c.stopScheduler()
+
+	if c.streamingCoord != nil {
+		c.streamingCoord.Stop()
+	}
 	if c.proxyWatcher != nil {
 		c.proxyWatcher.Stop()
 	}
@@ -2580,6 +2600,10 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 			ctxLog.Error("", zap.Error(err))
 			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
 		}
+		if err := c.validatePrivilegeGroupParams(ctx, privName, in.Entity.DbName, in.Entity.ObjectName); err != nil {
+			ctxLog.Error("", zap.Error(err))
+			return merr.StatusWithErrorCode(err, commonpb.ErrorCode_OperatePrivilegeFailure), nil
+		}
 		// set up object type for metastore, to be compatible with v1 version
 		in.Entity.Object.Name = util.GetObjectType(privName)
 	default:
@@ -2639,6 +2663,42 @@ func (c *Core) operatePrivilegeCommonCheck(ctx context.Context, in *milvuspb.Ope
 		return errors.New("the privilege entity in the grantor entity is nil")
 	}
 	return nil
+}
+
+func (c *Core) validatePrivilegeGroupParams(ctx context.Context, entity string, dbName string, collectionName string) error {
+	allGroups, err := c.getDefaultAndCustomPrivilegeGroups(ctx)
+	if err != nil {
+		return err
+	}
+	groups := lo.SliceToMap(allGroups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
+		return group.GroupName, group.Privileges
+	})
+	privs, exists := groups[entity]
+	if !exists || len(privs) == 0 {
+		// it is a privilege, no need to check with other params
+		return nil
+	}
+	// since all privileges are same level in a group, just check the first privilege
+	level := util.GetPrivilegeLevel(privs[0].GetName())
+	switch level {
+	case milvuspb.PrivilegeLevel_Cluster.String():
+		if !util.IsAnyWord(dbName) || !util.IsAnyWord(collectionName) {
+			return merr.WrapErrParameterInvalidMsg("dbName and collectionName should be * for the cluster level privilege: %s", entity)
+		}
+		return nil
+	case milvuspb.PrivilegeLevel_Database.String():
+		if collectionName != "" && collectionName != util.AnyWord {
+			return merr.WrapErrParameterInvalidMsg("collectionName should be * for the database level privilege: %s", entity)
+		}
+		return nil
+	case milvuspb.PrivilegeLevel_Collection.String():
+		if util.IsAnyWord(dbName) && !util.IsAnyWord(collectionName) && collectionName != "" {
+			return merr.WrapErrParameterInvalidMsg("please specify database name for the collection level privilege: %s", entity)
+		}
+		return nil
+	default:
+		return errors.New("not found the privilege level")
+	}
 }
 
 func (c *Core) getMetastorePrivilegeName(ctx context.Context, privName string) (string, error) {
@@ -2742,7 +2802,7 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 		}, nil
 	}
 	// expand privilege groups and turn to policies
-	allGroups, err := c.getPrivilegeGroups(ctx)
+	allGroups, err := c.getDefaultAndCustomPrivilegeGroups(ctx)
 	if err != nil {
 		errMsg := "fail to get privilege groups"
 		ctxLog.Warn(errMsg, zap.Error(err))
@@ -3116,12 +3176,17 @@ func (c *Core) expandPrivilegeGroups(ctx context.Context, grants []*milvuspb.Gra
 	}), nil
 }
 
-// getPrivilegeGroups returns default privilege groups and user-defined privilege groups.
-func (c *Core) getPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
+// getDefaultAndCustomPrivilegeGroups returns default privilege groups and user-defined privilege groups.
+func (c *Core) getDefaultAndCustomPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
 	allGroups, err := c.meta.ListPrivilegeGroups(ctx)
 	allGroups = append(allGroups, Params.RbacConfig.GetDefaultPrivilegeGroups()...)
 	if err != nil {
 		return nil, err
 	}
 	return allGroups, nil
+}
+
+// RegisterStreamingCoordGRPCService registers the grpc service of streaming coordinator.
+func (s *Core) RegisterStreamingCoordGRPCService(server *grpc.Server) {
+	s.streamingCoord.RegisterGRPCService(server)
 }

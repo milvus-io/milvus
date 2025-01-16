@@ -12,6 +12,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "common/type_c.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,10 +20,12 @@ extern "C" {
 
 typedef void* CCollection;
 
-CCollection
-NewCollection(const void* schema_proto_blob, const int64_t length);
+CStatus
+NewCollection(const void* schema_proto_blob,
+              const int64_t length,
+              CCollection* collection);
 
-void
+CStatus
 SetIndexMeta(CCollection collection,
              const void* proto_blob,
              const int64_t length);

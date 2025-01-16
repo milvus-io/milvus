@@ -26,14 +26,14 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/kv"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -138,22 +138,28 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
 
-	// test segment's version in leader view doesn't match segment's version in dist
-	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"))
-	view = utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
+	// Verify that the segment routing table in the leader view does not point to the most recent segment replica.
+	// the leader view points to the segment on querynode-2, with version 1
+	// the distribution shows that the segment is on querynode-1, with latest version 2
+	node1, node2 := int64(1), int64(2)
+	version1, version2 := int64(1), int64(2)
+	observer.dist.SegmentDistManager.Update(node1)
+	observer.dist.SegmentDistManager.Update(node2, utils.CreateTestSegment(1, 1, 1, node2, version2, "test-insert-channel"))
+	view = utils.CreateTestLeaderView(node2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
 	view.TargetVersion = observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget)
 	view.Segments[1] = &querypb.SegmentDist{
-		NodeID:  0,
-		Version: time.Now().UnixMilli() - 1,
+		NodeID:  node1,
+		Version: version1,
 	}
-	observer.dist.LeaderViewManager.Update(2, view)
+	observer.dist.LeaderViewManager.Update(node2, view)
 
 	tasks = suite.checker.Check(context.TODO())
 	suite.Len(tasks, 1)
 	suite.Equal(tasks[0].Source(), utils.LeaderChecker)
 	suite.Len(tasks[0].Actions(), 1)
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeGrow)
-	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
+	suite.Equal(tasks[0].Actions()[0].Node(), node2)
+	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).GetLeaderID(), node2)
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
 
