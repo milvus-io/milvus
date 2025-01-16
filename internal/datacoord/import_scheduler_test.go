@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
@@ -56,7 +57,6 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	s.catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
@@ -67,7 +67,9 @@ func (s *ImportSchedulerSuite) SetupTest() {
 
 	s.cluster = NewMockCluster(s.T())
 	s.alloc = allocator.NewMockAllocator(s.T())
-	s.meta, err = newMeta(context.TODO(), s.catalog, nil)
+	broker := broker.NewMockBroker(s.T())
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	s.meta, err = newMeta(context.TODO(), s.catalog, nil, broker)
 	s.NoError(err)
 	s.meta.AddCollection(&collectionInfo{
 		ID:     s.collectionID,
