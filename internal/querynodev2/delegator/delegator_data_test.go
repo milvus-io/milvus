@@ -1518,9 +1518,10 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	s.Require().NoError(err)
 
 	schema := mock_segcore.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64, true)
-	collection := segments.NewCollection(1, schema, nil, &querypb.LoadMetaInfo{
+	collection, err := segments.NewCollection(1, schema, nil, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
+	s.NoError(err)
 
 	l0, _ := segments.NewL0Segment(collection, segments.SegmentTypeSealed, 1, &querypb.SegmentLoadInfo{
 		CollectionID:  1,
