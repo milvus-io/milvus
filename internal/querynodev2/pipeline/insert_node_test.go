@@ -62,9 +62,10 @@ func (suite *InsertNodeSuite) TestBasic() {
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
 	in := suite.buildInsertNodeMsg(schema)
 
-	collection := segments.NewCollection(suite.collectionID, schema, mock_segcore.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
+	collection, err := segments.NewCollection(suite.collectionID, schema, mock_segcore.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
+	suite.NoError(err)
 	collection.AddPartition(suite.partitionID)
 
 	// init mock
@@ -98,9 +99,10 @@ func (suite *InsertNodeSuite) TestDataTypeNotSupported() {
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
 	in := suite.buildInsertNodeMsg(schema)
 
-	collection := segments.NewCollection(suite.collectionID, schema, mock_segcore.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
+	collection, err := segments.NewCollection(suite.collectionID, schema, mock_segcore.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
+	suite.NoError(err)
 	collection.AddPartition(suite.partitionID)
 
 	// init mock

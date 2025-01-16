@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -35,6 +36,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -119,16 +123,25 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 	}
 
 	start := time.Now()
-	p.input, err = p.dispatcher.Register(ctx, &msgdispatcher.StreamConfig{
-		VChannel:        p.vChannel,
-		Pos:             position,
-		SubPos:          common.SubscriptionPositionUnknown,
-		ReplicateConfig: p.replicateConfig,
-	})
+	err = retry.Handle(ctx, func() (bool, error) {
+		p.input, err = p.dispatcher.Register(ctx, &msgdispatcher.StreamConfig{
+			VChannel:        p.vChannel,
+			Pos:             position,
+			SubPos:          common.SubscriptionPositionUnknown,
+			ReplicateConfig: p.replicateConfig,
+		})
+		if err != nil {
+			log.Warn("dispatcher register failed", zap.String("channel", position.ChannelName), zap.Error(err))
+			return errors.Is(err, merr.ErrTooManyConsumers), err
+		}
+		return false, nil
+	}, retry.Sleep(paramtable.Get().MQCfg.RetrySleep.GetAsDuration(time.Second)), // 5 seconds
+		retry.MaxSleepTime(paramtable.Get().MQCfg.RetryTimeout.GetAsDuration(time.Second))) // 5 minutes
 	if err != nil {
-		log.Error("dispatcher register failed", zap.String("channel", position.ChannelName))
+		log.Error("dispatcher register failed after retried", zap.String("channel", position.ChannelName), zap.Error(err))
 		return WrapErrRegDispather(err)
 	}
+
 	ts, _ := tsoutil.ParseTS(position.GetTimestamp())
 	log.Info("stream pipeline seeks from position with msgDispatcher",
 		zap.String("pchannel", position.ChannelName),

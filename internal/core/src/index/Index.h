@@ -45,9 +45,9 @@ class IndexBase {
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) = 0;
 
     virtual void
-    BuildWithRawData(size_t n,
-                     const void* values,
-                     const Config& config = {}) = 0;
+    BuildWithRawDataForUT(size_t n,
+                          const void* values,
+                          const Config& config = {}) = 0;
 
     virtual void
     BuildWithDataset(const DatasetPtr& dataset, const Config& config = {}) = 0;

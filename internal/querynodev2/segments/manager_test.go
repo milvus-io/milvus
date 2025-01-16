@@ -52,11 +52,13 @@ func (s *ManagerSuite) SetupTest() {
 
 	for i, id := range s.segmentIDs {
 		schema := mock_segcore.GenTestCollectionSchema("manager-suite", schemapb.DataType_Int64, true)
+		collection, err := NewCollection(s.collectionIDs[i], schema, mock_segcore.GenTestIndexMeta(s.collectionIDs[i], schema), &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+		s.Require().NoError(err)
 		segment, err := NewSegment(
 			context.Background(),
-			NewCollection(s.collectionIDs[i], schema, mock_segcore.GenTestIndexMeta(s.collectionIDs[i], schema), &querypb.LoadMetaInfo{
-				LoadType: querypb.LoadType_LoadCollection,
-			}),
+			collection,
 			s.types[i],
 			0,
 			&querypb.SegmentLoadInfo{

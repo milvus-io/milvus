@@ -151,8 +151,12 @@ TEST_F(StringIndexMarisaTest, Range) {
 TEST_F(StringIndexMarisaTest, Reverse) {
     auto index_types = GetIndexTypes<std::string>();
     for (const auto& index_type : index_types) {
-        auto index = milvus::index::IndexFactory::GetInstance()
-                         .CreatePrimitiveScalarIndex<std::string>(index_type);
+        CreateIndexInfo create_index_info{
+            .index_type = index_type,
+        };
+        auto index =
+            milvus::index::IndexFactory::GetInstance()
+                .CreatePrimitiveScalarIndex<std::string>(create_index_info);
         index->Build(nb, strs.data());
         assert_reverse<std::string>(index.get(), strs);
     }
@@ -311,7 +315,7 @@ TEST_F(StringIndexMarisaTest, BaseIndexCodec) {
     *str_arr.mutable_data() = {strings.begin(), strings.end()};
     std::vector<uint8_t> data(str_arr.ByteSizeLong(), 0);
     str_arr.SerializeToArray(data.data(), str_arr.ByteSizeLong());
-    index->BuildWithRawData(str_arr.ByteSizeLong(), data.data());
+    index->BuildWithRawDataForUT(str_arr.ByteSizeLong(), data.data());
 
     std::vector<std::string> invalid_strings = {std::to_string(nb)};
     auto copy_index = milvus::index::CreateStringIndexMarisa();

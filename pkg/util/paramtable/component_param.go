@@ -970,8 +970,9 @@ This helps Milvus-CDC synchronize incremental data`,
 }
 
 type gpuConfig struct {
-	InitSize ParamItem `refreshable:"false"`
-	MaxSize  ParamItem `refreshable:"false"`
+	InitSize                            ParamItem `refreshable:"false"`
+	MaxSize                             ParamItem `refreshable:"false"`
+	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
 }
 
 func (t *gpuConfig) init(base *BaseTable) {
@@ -992,6 +993,16 @@ func (t *gpuConfig) init(base *BaseTable) {
 		DefaultValue: "4096",
 	}
 	t.MaxSize.Init(base.mgr)
+	t.OverloadedMemoryThresholdPercentage = ParamItem{
+		Key:          "gpu.overloadedMemoryThresholdPercentage",
+		Version:      "2.5.4",
+		Export:       true,
+		DefaultValue: "95",
+		Formatter: func(v string) string {
+			return fmt.Sprintf("%f", getAsFloat(v)/100)
+		},
+	}
+	t.OverloadedMemoryThresholdPercentage.Init(base.mgr)
 }
 
 type traceConfig struct {
@@ -3310,13 +3321,12 @@ user-task-polling:
 // --- datacoord ---
 type dataCoordConfig struct {
 	// --- CHANNEL ---
-	WatchTimeoutInterval             ParamItem `refreshable:"false"`
-	LegacyVersionWithoutRPCWatch     ParamItem `refreshable:"false"`
-	ChannelBalanceSilentDuration     ParamItem `refreshable:"true"`
-	ChannelBalanceInterval           ParamItem `refreshable:"true"`
-	ChannelCheckInterval             ParamItem `refreshable:"true"`
-	ChannelOperationRPCTimeout       ParamItem `refreshable:"true"`
-	MaxConcurrentChannelTaskNumPerDN ParamItem `refreshable:"true"`
+	WatchTimeoutInterval         ParamItem `refreshable:"false"`
+	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
+	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
+	ChannelBalanceInterval       ParamItem `refreshable:"true"`
+	ChannelCheckInterval         ParamItem `refreshable:"true"`
+	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
@@ -3489,15 +3499,6 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ChannelOperationRPCTimeout.Init(base.mgr)
-
-	p.MaxConcurrentChannelTaskNumPerDN = ParamItem{
-		Key:          "dataCoord.channel.maxConcurrentChannelTaskNumPerDN",
-		Version:      "2.5",
-		DefaultValue: "32",
-		Doc:          "The maximum concurrency for each DataNode executing channel tasks (watch, release).",
-		Export:       true,
-	}
-	p.MaxConcurrentChannelTaskNumPerDN.Init(base.mgr)
 
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",
