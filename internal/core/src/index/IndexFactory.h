@@ -85,14 +85,14 @@ class IndexFactory {
     IndexBasePtr
     CreatePrimitiveScalarIndex(
         DataType data_type,
-        IndexType index_type,
+        const CreateIndexInfo& create_index_info,
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
     // For types like array, struct, union, etc
     IndexBasePtr
     CreateCompositeScalarIndex(
-        IndexType index_type,
+        const CreateIndexInfo& create_index_info,
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
@@ -115,7 +115,7 @@ class IndexFactory {
 
     template <typename T>
     ScalarIndexPtr<T>
-    CreatePrimitiveScalarIndex(const IndexType& index_type,
+    CreatePrimitiveScalarIndex(const CreateIndexInfo& create_index_info,
                                const storage::FileManagerContext& file_manager =
                                    storage::FileManagerContext());
 };

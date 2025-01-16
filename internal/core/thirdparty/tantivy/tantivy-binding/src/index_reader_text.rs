@@ -4,7 +4,7 @@ use tantivy::{
     Term,
 };
 
-use crate::error::{Result, TantivyBindingError};
+use crate::error::Result;
 use crate::{index_reader::IndexReaderWrapper, tokenizer::standard_analyzer};
 
 impl IndexReaderWrapper {
