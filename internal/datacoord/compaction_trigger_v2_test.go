@@ -75,10 +75,9 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	expectedSegID := seg1.ID
 
 	s.Require().Equal(1, len(latestL0Segments))
-	needRefresh, levelZeroView := s.triggerManager.l0Policy.getChangedLevelZeroViews(1, latestL0Segments)
-	s.True(needRefresh)
-	s.Require().Equal(1, len(levelZeroView))
-	cView, ok := levelZeroView[0].(*LevelZeroSegmentsView)
+	levelZeroViews := s.triggerManager.l0Policy.groupL0ViewsByPartChan(1, latestL0Segments)
+	s.Require().Equal(1, len(levelZeroViews))
+	cView, ok := levelZeroViews[0].(*LevelZeroSegmentsView)
 	s.True(ok)
 	s.NotNil(cView)
 	log.Info("view", zap.Any("cView", cView))
@@ -119,10 +118,9 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 
 	latestL0Segments := GetViewsByInfo(levelZeroSegments...)
 	s.Require().NotEmpty(latestL0Segments)
-	needRefresh, levelZeroView := s.triggerManager.l0Policy.getChangedLevelZeroViews(1, latestL0Segments)
-	s.Require().True(needRefresh)
-	s.Require().Equal(1, len(levelZeroView))
-	cView, ok := levelZeroView[0].(*LevelZeroSegmentsView)
+	levelZeroViews := s.triggerManager.l0Policy.groupL0ViewsByPartChan(1, latestL0Segments)
+	s.Require().Equal(1, len(levelZeroViews))
+	cView, ok := levelZeroViews[0].(*LevelZeroSegmentsView)
 	s.True(ok)
 	s.NotNil(cView)
 	log.Info("view", zap.Any("cView", cView))
@@ -131,8 +129,6 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 	s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).
 		RunAndReturn(func(task *datapb.CompactionTask) error {
 			s.EqualValues(19530, task.GetTriggerID())
-			// s.True(signal.isGlobal)
-			// s.False(signal.isForce)
 			s.EqualValues(30000, task.GetPos().GetTimestamp())
 			s.Equal(s.testLabel.CollectionID, task.GetCollectionID())
 			s.Equal(s.testLabel.PartitionID, task.GetPartitionID())
