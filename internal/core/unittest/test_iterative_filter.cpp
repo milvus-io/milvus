@@ -12,7 +12,7 @@
 #include <gtest/gtest.h>
 #include "common/Schema.h"
 #include "query/Plan.h"
-#include "segcore/SegmentSealedImpl.h"
+
 #include "segcore/reduce_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/segment_c.h"
@@ -37,19 +37,23 @@ prepareSegmentFieldData(const std::unique_ptr<SegmentSealed>& segment,
     auto field_data =
         std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(data_set.row_ids_.data(), row_count);
-    auto field_data_info =
-        FieldDataInfo{RowFieldID.get(),
-                      row_count,
-                      std::vector<milvus::FieldDataPtr>{field_data}};
+    auto arrow_data_wrapper =
+        storage::ConvertFieldDataToArrowDataWrapper(field_data);
+    auto field_data_info = FieldDataInfo{
+        RowFieldID.get(),
+        row_count,
+        std::vector<std::shared_ptr<ArrowDataWrapper>>{arrow_data_wrapper}};
     segment->LoadFieldData(RowFieldID, field_data_info);
 
     field_data =
         std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(data_set.timestamps_.data(), row_count);
-    field_data_info =
-        FieldDataInfo{TimestampFieldID.get(),
-                      row_count,
-                      std::vector<milvus::FieldDataPtr>{field_data}};
+    auto ts_arrow_data_wrapper =
+        storage::ConvertFieldDataToArrowDataWrapper(field_data);
+    field_data_info = FieldDataInfo{
+        TimestampFieldID.get(),
+        row_count,
+        std::vector<std::shared_ptr<ArrowDataWrapper>>{ts_arrow_data_wrapper}};
     segment->LoadFieldData(TimestampFieldID, field_data_info);
 }
 
@@ -102,9 +106,10 @@ TEST(IterativeFilter, SealedIndex) {
 
         auto info = FieldDataInfo(field_data.field_id(), N);
         auto field_meta = fields.at(FieldId(field_id));
-        info.channel->push(
+        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
             CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.channel->close();
+        info.arrow_reader_channel->push(arrow_data_wrapper);
+        info.arrow_reader_channel->close();
 
         segment->LoadFieldData(FieldId(field_id), info);
     }
@@ -324,9 +329,10 @@ TEST(IterativeFilter, SealedData) {
 
         auto info = FieldDataInfo(field_data.field_id(), N);
         auto field_meta = fields.at(FieldId(field_id));
-        info.channel->push(
+        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
             CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.channel->close();
+        info.arrow_reader_channel->push(arrow_data_wrapper);
+        info.arrow_reader_channel->close();
 
         segment->LoadFieldData(FieldId(field_id), info);
     }
