@@ -25,8 +25,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -41,7 +43,13 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 			log.Warn("failed to get request info", zap.Error(err))
 			return handler(ctx, req)
 		}
-
+		if rt == internalpb.RateType_DMLBulkLoad {
+			if importReq, ok := req.(*milvuspb.ImportRequest); ok {
+				if importutilv2.SkipDiskQuotaCheck(importReq.GetOptions()) {
+					return handler(ctx, req)
+				}
+			}
+		}
 		err = limiter.Check(dbID, collectionIDToPartIDs, rt, n)
 		nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
 		metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.TotalLabel).Inc()
