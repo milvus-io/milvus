@@ -353,7 +353,7 @@ TEST_F(TestChunkSegment, TestCompareExpr) {
                   data.begin() + i * test_data_count);
     }
 
-    index->BuildWithRawData(data.size(), data.data());
+    index->BuildWithRawDataForUT(data.size(), data.data());
     segcore::LoadIndexInfo load_index_info;
     load_index_info.index = std::move(index);
     load_index_info.field_id = fid.get();

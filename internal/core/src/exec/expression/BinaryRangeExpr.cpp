@@ -161,6 +161,7 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
             (input != nullptr)
                 ? ProcessChunksForValidByOffsets<T>(is_index_mode_, *input)
                 : ProcessChunksForValid<T>(is_index_mode_);
+
         auto res_vec = std::make_shared<ColumnVector>(TargetBitmap(batch_size),
                                                       std::move(valid_res));
         return res_vec;

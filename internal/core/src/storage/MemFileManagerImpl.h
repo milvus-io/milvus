@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <unordered_map>
 
 #include "storage/IndexData.h"
 #include "storage/FileManager.h"
@@ -68,6 +69,9 @@ class MemFileManagerImpl : public FileManagerImpl {
     GetAddedTotalMemSize() const {
         return added_total_mem_size_;
     }
+
+    std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>>
+    CacheOptFieldToMemory(OptFieldT& fields_map);
 
  private:
     // remote file path

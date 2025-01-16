@@ -163,4 +163,31 @@ CollectFieldDataChannel(FieldDataChannelPtr& channel);
 FieldDataPtr
 MergeFieldData(std::vector<FieldDataPtr>& data_array);
 
+template <typename T, typename = void>
+struct has_native_type : std::false_type {};
+template <typename T>
+struct has_native_type<T, std::void_t<typename T::NativeType>>
+    : std::true_type {};
+template <DataType T>
+using DataTypeNativeOrVoid =
+    typename std::conditional<has_native_type<TypeTraits<T>>::value,
+                              typename TypeTraits<T>::NativeType,
+                              void>::type;
+template <DataType T>
+using DataTypeToOffsetMap =
+    std::unordered_map<DataTypeNativeOrVoid<T>, int64_t>;
+
+std::vector<FieldDataPtr>
+FetchFieldData(ChunkManager* cm, const std::vector<std::string>& batch_files);
+
+inline void
+SortByPath(std::vector<std::string>& paths) {
+    std::sort(paths.begin(),
+              paths.end(),
+              [](const std::string& a, const std::string& b) {
+                  return std::stol(a.substr(a.find_last_of("/") + 1)) <
+                         std::stol(b.substr(b.find_last_of("/") + 1));
+              });
+}
+
 }  // namespace milvus::storage
