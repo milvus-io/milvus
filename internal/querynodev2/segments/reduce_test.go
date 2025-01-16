@@ -71,12 +71,13 @@ func (suite *ReduceSuite) SetupTest() {
 	suite.partitionID = 10
 	suite.segmentID = 1
 	schema := GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64, true)
-	suite.collection = NewCollection(suite.collectionID,
+	suite.collection, err = NewCollection(suite.collectionID,
 		schema,
 		GenTestIndexMeta(suite.collectionID, schema),
 		&querypb.LoadMetaInfo{
 			LoadType: querypb.LoadType_LoadCollection,
 		})
+	suite.Require().NoError(err)
 	suite.segment, err = NewSegment(ctx,
 		suite.collection,
 		SegmentTypeSealed,
