@@ -26,7 +26,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.17.9
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.20-0.20250113093851-066d949e2686
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.21
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
 	github.com/prometheus/client_golang v1.14.0
