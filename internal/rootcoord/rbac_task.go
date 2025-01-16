@@ -209,12 +209,14 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, in *milvu
 				})
 			})
 		}
-		if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-			OpType: opType,
-			OpKey:  funcutil.PolicyForPrivileges(expandGrants),
-		}); err != nil {
-			log.Ctx(ctx).Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
-			return nil, err
+		if len(expandGrants) > 0 {
+			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+				OpType: opType,
+				OpKey:  funcutil.PolicyForPrivileges(expandGrants),
+			}); err != nil {
+				log.Ctx(ctx).Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
+				return nil, err
+			}
 		}
 		return nil, nil
 	}))
