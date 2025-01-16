@@ -811,7 +811,8 @@ func (suite *SegmentLoaderDetailSuite) SetupTest() {
 		PartitionIDs: []int64{suite.partitionID},
 	}
 
-	collection := NewCollection(suite.collectionID, schema, indexMeta, loadMeta)
+	collection, err := NewCollection(suite.collectionID, schema, indexMeta, loadMeta)
+	suite.Require().NoError(err)
 	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(collection).Maybe()
 }
 

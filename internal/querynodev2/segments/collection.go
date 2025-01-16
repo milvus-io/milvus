@@ -41,7 +41,7 @@ type CollectionManager interface {
 	List() []int64
 	ListWithName() map[int64]string
 	Get(collectionID int64) *Collection
-	PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)
+	PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error
 	Ref(collectionID int64, count uint32) bool
 	// unref the collection,
 	// returns true if the collection ref count goes 0, or the collection not exists,
@@ -84,7 +84,7 @@ func (m *collectionManager) Get(collectionID int64) *Collection {
 	return m.collections[collectionID]
 }
 
-func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
+func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
@@ -92,14 +92,18 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 		// the schema may be changed even the collection is loaded
 		collection.schema.Store(schema)
 		collection.Ref(1)
-		return
+		return nil
 	}
 
 	log.Info("put new collection", zap.Int64("collectionID", collectionID), zap.Any("schema", schema))
-	collection := NewCollection(collectionID, schema, meta, loadMeta)
+	collection, err := NewCollection(collectionID, schema, meta, loadMeta)
+	if err != nil {
+		return err
+	}
 	collection.Ref(1)
 	m.collections[collectionID] = collection
 	m.updateMetric()
+	return nil
 }
 
 func (m *collectionManager) updateMetric() {
@@ -245,7 +249,7 @@ func (c *Collection) Unref(count uint32) uint32 {
 }
 
 // newCollection returns a new Collection
-func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMetaInfo *querypb.LoadMetaInfo) *Collection {
+func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMetaInfo *querypb.LoadMetaInfo) (*Collection, error) {
 	/*
 		CCollection
 		NewCollection(const char* schema_proto_blob);
@@ -281,7 +285,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	ccollection, err := segcore.CreateCCollection(req)
 	if err != nil {
 		log.Warn("create collection failed", zap.Error(err))
-		return nil
+		return nil, err
 	}
 	coll := &Collection{
 		ccollection:   ccollection,
@@ -300,7 +304,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	}
 	coll.schema.Store(schema)
 
-	return coll
+	return coll, nil
 }
 
 // Only for test
