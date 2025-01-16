@@ -101,6 +101,22 @@ const (
 	voyageAIAKEnvStr string = "MILVUSAI_VOYAGEAI_API_KEY"
 )
 
+// cohere
+
+const (
+	embedEnglishV30           string = "embed-english-v3.0"
+	embedMultilingualV30      string = "embed-multilingual-v3.0"
+	embedEnglishLightV30      string = "embed-english-light-v3.0"
+	embedMultilingualLightV30 string = "embed-multilingual-light-v3.0"
+	embedEnglishV20           string = "embed-english-v2.0"
+	embedEnglishLightV20      string = "embed-english-light-v2.0"
+	embedMultilingualV20      string = "embed-multilingual-v2.0"
+
+	truncateParamKey string = "truncate"
+
+	cohereAIAKEnvStr string = "MILVUSAI_COHERE_API_KEY"
+)
+
 func parseAndCheckFieldDim(dimStr string, fieldDim int64, fieldName string) (int64, error) {
 	dim, err := strconv.ParseInt(dimStr, 10, 64)
 	if err != nil {
