@@ -3362,7 +3362,6 @@ type dataCoordConfig struct {
 	CompactionGCIntervalInSeconds    ParamItem `refreshable:"true"`
 	CompactionCheckIntervalInSeconds ParamItem `refreshable:"false"` // deprecated
 	CompactionScheduleInterval       ParamItem `refreshable:"false"`
-	CompactionCheckInterval          ParamItem `refreshable:"false"`
 	MixCompactionTriggerInterval     ParamItem `refreshable:"false"`
 	L0CompactionTriggerInterval      ParamItem `refreshable:"false"`
 	GlobalCompactionInterval         ParamItem `refreshable:"false"`
@@ -3737,22 +3736,6 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "3",
 	}
 	p.CompactionCheckIntervalInSeconds.Init(base.mgr)
-
-	p.CompactionCheckInterval = ParamItem{
-		Key:          "dataCoord.compaction.checkInterval",
-		Version:      "2.4.21",
-		DefaultValue: "500",
-		Export:       true,
-		Formatter: func(value string) string {
-			ms := getAsInt64(value)
-			if ms < 100 {
-				ms = 100
-			}
-			return strconv.FormatInt(ms, 10)
-		},
-		Doc: "The time interval in milliseconds for checking compaction tasks. If the configuration setting is below 100ms, it will be ajusted upwards to 100ms",
-	}
-	p.CompactionCheckInterval.Init(base.mgr)
 
 	p.CompactionScheduleInterval = ParamItem{
 		Key:          "dataCoord.compaction.scheduleInterval",
