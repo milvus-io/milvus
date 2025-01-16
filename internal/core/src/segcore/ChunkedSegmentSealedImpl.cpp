@@ -1289,7 +1289,12 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       col_index_meta_(index_meta),
       TEST_skip_index_for_retrieve_(TEST_skip_index_for_retrieve),
       is_sorted_by_pk_(is_sorted_by_pk),
-      deleted_record_(&insert_record_, this) {
+      deleted_record_(
+          &insert_record_,
+          [this](const PkType& pk, Timestamp timestamp) {
+              return this->search_pk(pk, timestamp);
+          },
+          segment_id) {
     mmap_descriptor_ = std::shared_ptr<storage::MmapChunkDescriptor>(
         new storage::MmapChunkDescriptor({segment_id, SegmentType::Sealed}));
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
