@@ -1672,6 +1672,11 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("no binlog to import, input=%s", in.GetFiles())))
 			return resp, nil
 		}
+		if len(files) > paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
+			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("The max number of import files should not exceed %d, but got %d",
+				paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(files))))
+			return resp, nil
+		}
 		log.Info("list binlogs prefixes for import", zap.Any("binlog_prefixes", files))
 	}
 
