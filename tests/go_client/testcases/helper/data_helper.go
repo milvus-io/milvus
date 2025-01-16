@@ -290,7 +290,7 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 	case entity.FieldTypeBool:
 		boolValues := make([]bool, 0, nb)
 		for i := start; i < start+nb; i++ {
-			boolValues = append(boolValues, i/2 == 0)
+			boolValues = append(boolValues, i%2 == 0)
 		}
 		return column.NewColumnBool(fieldName, boolValues)
 

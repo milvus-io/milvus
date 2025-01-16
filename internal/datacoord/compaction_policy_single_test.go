@@ -25,7 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -128,6 +128,15 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 	segments[103] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 100, 10000, 1)
 	segmentsInfo := &SegmentsInfo{
 		segments: segments,
+		secondaryIndexes: segmentInfoIndexes{
+			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
+				collID: {
+					101: segments[101],
+					102: segments[102],
+					103: segments[103],
+				},
+			},
+		},
 	}
 
 	compactionTaskMeta := newTestCompactionTaskMeta(s.T())

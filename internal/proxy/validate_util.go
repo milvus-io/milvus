@@ -88,6 +88,10 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 			if err := v.checkSparseFloatFieldData(field, fieldSchema); err != nil {
 				return err
 			}
+		case schemapb.DataType_Int8Vector:
+			if err := v.checkInt8VectorFieldData(field, fieldSchema); err != nil {
+				return err
+			}
 		case schemapb.DataType_VarChar:
 			if err := v.checkVarCharFieldData(field, fieldSchema); err != nil {
 				return err
@@ -246,6 +250,29 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
 
+		case schemapb.DataType_Int8Vector:
+			f, err := schema.GetFieldFromName(field.GetFieldName())
+			if err != nil {
+				return err
+			}
+
+			dim, err := typeutil.GetDim(f)
+			if err != nil {
+				return err
+			}
+
+			n, err := funcutil.GetNumRowsOfInt8VectorField(field.GetVectors().GetInt8Vector(), dim)
+			if err != nil {
+				return err
+			}
+			dataDim := field.GetVectors().Dim
+			if dataDim != dim {
+				return errDimMismatch(field.GetFieldName(), dataDim, dim)
+			}
+
+			if n != numRows {
+				return errNumRowsMismatch(field.GetFieldName(), n)
+			}
 		default:
 			// error won't happen here.
 			n, err := funcutil.GetNumRowOfFieldDataWithSchema(field, schema)
@@ -607,6 +634,15 @@ func (v *validateUtil) checkSparseFloatFieldData(field *schemapb.FieldData, fiel
 		return merr.WrapErrParameterInvalid("need sparse float array", "got nil", msg)
 	}
 	return typeutil.ValidateSparseFloatRows(sparseRows...)
+}
+
+func (v *validateUtil) checkInt8VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	int8VecArray := field.GetVectors().GetInt8Vector()
+	if int8VecArray == nil {
+		msg := fmt.Sprintf("int8 vector field '%v' is illegal, nil Vector_Int8 type", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need vector_int8 array", "got nil", msg)
+	}
+	return nil
 }
 
 func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {

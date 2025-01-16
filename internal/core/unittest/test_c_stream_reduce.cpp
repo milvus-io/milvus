@@ -17,7 +17,7 @@ TEST(CApiTest, StreamReduce) {
     int N = 300;
     int topK = 100;
     int num_queries = 2;
-    auto collection = NewCollection(get_default_schema_config());
+    auto collection = NewCollection(get_default_schema_config().c_str());
 
     //1. set up segments
     CSegmentInterface segment_1;

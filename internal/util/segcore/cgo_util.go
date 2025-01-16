@@ -21,14 +21,15 @@ package segcore
 
 #include "segcore/collection_c.h"
 #include "common/type_c.h"
+#include "common/protobuf_utils_c.h"
 #include "segcore/segment_c.h"
 #include "storage/storage_c.h"
 */
 import "C"
 
 import (
-	"context"
 	"math"
+	"reflect"
 	"unsafe"
 
 	"google.golang.org/protobuf/proto"
@@ -50,6 +51,13 @@ func ConsumeCStatusIntoError(status *C.CStatus) error {
 	return merr.SegcoreError(int32(errorCode), errorMsg)
 }
 
+func UnmarshalProtoLayout(protoLayout any, msg proto.Message) error {
+	layout := unsafe.Pointer(reflect.ValueOf(protoLayout).Pointer())
+	cProtoLayout := (*C.ProtoLayout)(layout)
+	blob := (*(*[math.MaxInt32]byte)(cProtoLayout.blob))[:int(cProtoLayout.size):int(cProtoLayout.size)]
+	return proto.Unmarshal(blob, msg)
+}
+
 // unmarshalCProto unmarshal the proto from C memory
 func unmarshalCProto(cRes *C.CProto, msg proto.Message) error {
 	blob := (*(*[math.MaxInt32]byte)(cRes.proto_blob))[:int(cRes.proto_size):int(cRes.proto_size)]
@@ -64,7 +72,7 @@ func getCProtoBlob(cProto *C.CProto) []byte {
 }
 
 // GetLocalUsedSize returns the used size of the local path
-func GetLocalUsedSize(ctx context.Context, path string) (int64, error) {
+func GetLocalUsedSize(path string) (int64, error) {
 	var availableSize int64
 	cSize := (*C.int64_t)(&availableSize)
 	cPath := C.CString(path)

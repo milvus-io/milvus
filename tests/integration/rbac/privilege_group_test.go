@@ -268,7 +268,8 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 	selectResp, _ = s.validateGrants(ctx, role, commonpb.ObjectType_Global.String(), util.AnyWord, util.AnyWord)
 	s.Len(selectResp.GetEntities(), 2)
 
-	// add different object type privileges to group1 is not allowed
+	// add different privilege group level privileges to group1 is not allowed
+	s.Equal(milvuspb.PrivilegeLevel_Database.String(), util.GetPrivilegeLevel("CreateCollection"))
 	resp, _ = s.Cluster.Proxy.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
 		GroupName:  "group1",
 		Type:       milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup,

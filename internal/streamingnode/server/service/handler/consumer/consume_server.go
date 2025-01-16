@@ -6,13 +6,14 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
@@ -80,7 +81,7 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 	}); err != nil {
 		// release the scanner to avoid resource leak.
 		if err := scanner.Close(); err != nil {
-			log.Warn("close scanner failed at create consume server", zap.Error(err))
+			resource.Resource().Logger().Warn("close scanner failed at create consume server", zap.Error(err))
 		}
 		return nil, err
 	}
@@ -89,9 +90,12 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 		consumerID:    1,
 		scanner:       scanner,
 		consumeServer: consumeServer,
-		logger:        log.With(zap.String("channel", l.Channel().Name), zap.Int64("term", l.Channel().Term)), // Add trace info for all log.
-		closeCh:       make(chan struct{}),
-		metrics:       metrics,
+		logger: resource.Resource().Logger().With(
+			log.FieldComponent("consumer-server"),
+			zap.String("channel", l.Channel().Name),
+			zap.Int64("term", l.Channel().Term)), // Add trace info for all log.
+		closeCh: make(chan struct{}),
+		metrics: metrics,
 	}, nil
 }
 

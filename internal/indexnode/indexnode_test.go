@@ -30,10 +30,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -424,16 +424,17 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_Compatibility() {
 						Key: "dim", Value: "8",
 					},
 				},
-				NumRows:             s.numRows,
-				CurrentIndexVersion: 0,
-				CollectionID:        s.collID,
-				PartitionID:         s.partID,
-				SegmentID:           s.segID,
-				FieldID:             s.fieldID,
-				FieldName:           "floatVector",
-				FieldType:           schemapb.DataType_FloatVector,
-				Dim:                 8,
-				DataIds:             []int64{s.logID + 13},
+				NumRows:                   s.numRows,
+				CurrentIndexVersion:       0,
+				CurrentScalarIndexVersion: 1,
+				CollectionID:              s.collID,
+				PartitionID:               s.partID,
+				SegmentID:                 s.segID,
+				FieldID:                   s.fieldID,
+				FieldName:                 "floatVector",
+				FieldType:                 schemapb.DataType_FloatVector,
+				Dim:                       8,
+				DataIds:                   []int64{s.logID + 13},
 				Field: &schemapb.FieldSchema{
 					FieldID:  s.fieldID,
 					Name:     "floatVector",
@@ -501,6 +502,7 @@ func (s *IndexNodeSuite) Test_CreateIndexJob_ScalarIndex() {
 				Name:     "int64",
 				DataType: schemapb.DataType_Int64,
 			},
+			CurrentScalarIndexVersion: 1,
 		}
 
 		status, err := s.in.CreateJob(ctx, req)

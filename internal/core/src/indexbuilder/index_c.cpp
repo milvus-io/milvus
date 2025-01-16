@@ -166,30 +166,17 @@ CreateIndex(CIndex* res_index,
         auto field_type =
             static_cast<DataType>(build_index_info->field_schema().data_type());
 
-        milvus::index::CreateIndexInfo index_info;
-        index_info.field_type = field_type;
-
         auto storage_config =
             get_storage_config(build_index_info->storage_config());
         auto config = get_config(build_index_info);
-        // get index type
-        auto index_type = milvus::index::GetValueFromConfig<std::string>(
-            config, "index_type");
-        AssertInfo(index_type.has_value(), "index type is empty");
-        index_info.index_type = index_type.value();
 
         auto engine_version = build_index_info->current_index_version();
-        index_info.index_engine_version = engine_version;
         config[milvus::index::INDEX_ENGINE_VERSION] =
             std::to_string(engine_version);
-
-        // get metric type
-        if (milvus::IsVectorDataType(field_type)) {
-            auto metric_type = milvus::index::GetValueFromConfig<std::string>(
-                config, "metric_type");
-            AssertInfo(metric_type.has_value(), "metric type is empty");
-            index_info.metric_type = metric_type.value();
-        }
+        auto scalar_index_engine_version =
+            build_index_info->current_scalar_index_version();
+        config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
+            scalar_index_engine_version;
 
         // init file manager
         milvus::storage::FieldDataMeta field_meta{
@@ -238,7 +225,7 @@ CreateIndex(CIndex* res_index,
 }
 
 CStatus
-BuildTextIndex(CBinarySet* c_binary_set,
+BuildTextIndex(ProtoLayoutInterface result,
                const uint8_t* serialized_build_index_info,
                const uint64_t len) {
     try {
@@ -286,9 +273,9 @@ BuildTextIndex(CBinarySet* c_binary_set,
             "milvus_tokenizer",
             field_schema.get_analyzer_params().c_str());
         index->Build(config);
-        auto binary =
-            std::make_unique<knowhere::BinarySet>(index->Upload(config));
-        *c_binary_set = binary.release();
+        auto create_index_result = index->Upload(config);
+        create_index_result->SerializeAt(
+            reinterpret_cast<milvus::ProtoLayout*>(result));
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";
@@ -440,6 +427,29 @@ BuildSparseFloatVecIndex(CIndex index,
             dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
         auto ds = knowhere::GenDataSet(row_num, dim, vectors);
         ds->SetIsSparse(true);
+        cIndex->Build(ds);
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+CStatus
+BuildInt8VecIndex(CIndex index, int64_t int8_value_num, const int8_t* vectors) {
+    auto status = CStatus();
+    try {
+        AssertInfo(index,
+                   "failed to build int8 vector index, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex =
+            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
+        auto dim = cIndex->dim();
+        auto row_nums = int8_value_num / dim;
+        auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
         cIndex->Build(ds);
         status.error_code = Success;
         status.error_msg = "";
@@ -776,7 +786,7 @@ AppendIndexStorageInfo(CBuildIndexInfo c_build_index_info,
 }
 
 CStatus
-SerializeIndexAndUpLoad(CIndex index, CBinarySet* c_binary_set) {
+SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result) {
     auto status = CStatus();
     try {
         AssertInfo(
@@ -784,9 +794,9 @@ SerializeIndexAndUpLoad(CIndex index, CBinarySet* c_binary_set) {
             "failed to serialize index to binary set, passed index was null");
         auto real_index =
             reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
-        auto binary =
-            std::make_unique<knowhere::BinarySet>(real_index->Upload());
-        *c_binary_set = binary.release();
+        auto create_index_result = real_index->Upload();
+        create_index_result->SerializeAt(
+            reinterpret_cast<milvus::ProtoLayout*>(result));
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {

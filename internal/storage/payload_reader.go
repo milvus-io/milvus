@@ -89,6 +89,9 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, []bool, int, error) {
 	case schemapb.DataType_SparseFloatVector:
 		val, dim, err := r.GetSparseFloatVectorFromPayload()
 		return val, nil, dim, err
+	case schemapb.DataType_Int8Vector:
+		val, dim, err := r.GetInt8VectorFromPayload()
+		return val, nil, dim, err
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		val, validData, err := r.GetStringFromPayload()
 		return val, validData, 0, err
@@ -629,6 +632,36 @@ func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFie
 	}
 
 	return fieldData, int(fieldData.Dim), nil
+}
+
+// GetInt8VectorFromPayload returns vector, dimension, error
+func (r *PayloadReader) GetInt8VectorFromPayload() ([]int8, int, error) {
+	if r.colType != schemapb.DataType_Int8Vector {
+		return nil, -1, fmt.Errorf("failed to get int8 vector from datatype %v", r.colType.String())
+	}
+	col, err := r.reader.RowGroup(0).Column(0)
+	if err != nil {
+		return nil, -1, err
+	}
+
+	dim := col.Descriptor().TypeLength()
+
+	values := make([]parquet.FixedLenByteArray, r.numRows)
+	valuesRead, err := ReadDataFromAllRowGroups[parquet.FixedLenByteArray, *file.FixedLenByteArrayColumnChunkReader](r.reader, values, 0, r.numRows)
+	if err != nil {
+		return nil, -1, err
+	}
+
+	if valuesRead != r.numRows {
+		return nil, -1, fmt.Errorf("expect %d rows, but got valuesRead = %d", r.numRows, valuesRead)
+	}
+
+	ret := make([]int8, int64(dim)*r.numRows)
+	for i := 0; i < int(r.numRows); i++ {
+		int8Vals := arrow.Int8Traits.CastFromBytes(values[i])
+		copy(ret[i*dim:(i+1)*dim], int8Vals)
+	}
+	return ret, dim, nil
 }
 
 func (r *PayloadReader) GetPayloadLengthFromReader() (int, error) {

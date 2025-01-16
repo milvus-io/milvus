@@ -92,18 +92,14 @@ VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
 }
 
 template <typename T>
-BinarySet
+IndexStatsPtr
 VectorMemIndex<T>::Upload(const Config& config) {
     auto binary_set = Serialize(config);
     file_manager_->AddFile(binary_set);
 
     auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
-    BinarySet ret;
-    for (auto& file : remote_paths_to_size) {
-        ret.Append(file.first, nullptr, file.second);
-    }
-
-    return ret;
+    return IndexStats::NewFromSizeMap(file_manager_->GetAddedTotalMemSize(),
+                                      remote_paths_to_size);
 }
 
 template <typename T>
@@ -636,5 +632,6 @@ template class VectorMemIndex<float>;
 template class VectorMemIndex<bin1>;
 template class VectorMemIndex<float16>;
 template class VectorMemIndex<bfloat16>;
+template class VectorMemIndex<int8>;
 
 }  // namespace milvus::index

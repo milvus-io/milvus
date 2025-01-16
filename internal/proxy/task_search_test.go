@@ -37,13 +37,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
@@ -472,6 +472,30 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		st.resultBuf.Insert(&internalpb.SearchResults{})
 		st.PostExecute(context.TODO())
 		assert.Equal(t, st.result.GetSessionTs(), enqueueTs)
+	})
+
+	t.Run("search inconsistent collection_id", func(t *testing.T) {
+		collName := "search_inconsistent_collection" + funcutil.GenRandomStr()
+		createColl(t, collName, rc)
+
+		st := getSearchTask(t, collName)
+		st.request.SearchParams = getValidSearchParams()
+		st.request.SearchParams = append(st.request.SearchParams, &commonpb.KeyValuePair{
+			Key:   IteratorField,
+			Value: "True",
+		})
+		st.request.SearchParams = append(st.request.SearchParams, &commonpb.KeyValuePair{
+			Key:   CollectionID,
+			Value: "8080",
+		})
+		st.request.DslType = commonpb.DslType_BoolExprV1
+
+		_, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
+		enqueueTs := uint64(100000)
+		st.SetTs(enqueueTs)
+		assert.Error(t, st.PreExecute(ctx))
 	})
 }
 

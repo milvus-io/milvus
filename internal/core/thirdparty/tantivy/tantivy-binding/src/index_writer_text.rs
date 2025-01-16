@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use either::Either;
 use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, FAST};
 use tantivy::tokenizer::TextAnalyzer;
 use tantivy::Index;
@@ -44,8 +45,8 @@ impl IndexWriterWrapper {
 
         IndexWriterWrapper {
             field,
-            index_writer,
-            id_field,
+            index_writer: Either::Left(index_writer),
+            id_field: Some(id_field),
             index: Arc::new(index),
         }
     }

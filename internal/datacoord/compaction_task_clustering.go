@@ -25,7 +25,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -33,12 +32,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -52,7 +51,6 @@ type clusteringCompactionTask struct {
 	plan      *datapb.CompactionPlan
 	result    *datapb.CompactionPlanResult
 
-	span             trace.Span
 	allocator        allocator.Allocator
 	meta             CompactionMeta
 	sessions         session.DataNodeManager
@@ -60,7 +58,6 @@ type clusteringCompactionTask struct {
 	analyzeScheduler *taskScheduler
 
 	maxRetryTimes int32
-	slotUsage     int64
 }
 
 func (t *clusteringCompactionTask) GetTaskProto() *datapb.CompactionTask {
@@ -79,7 +76,6 @@ func newClusteringCompactionTask(t *datapb.CompactionTask, allocator allocator.A
 		handler:          handler,
 		analyzeScheduler: analyzeScheduler,
 		maxRetryTimes:    3,
-		slotUsage:        paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64(),
 	}
 	task.taskProto.Store(t)
 	return task
@@ -272,7 +268,6 @@ func (t *clusteringCompactionTask) processExecuting() error {
 	switch result.GetState() {
 	case datapb.CompactionTaskState_completed:
 		t.result = result
-		result := t.result
 		if len(result.GetSegments()) == 0 {
 			log.Warn("illegal compaction results, this should not happen")
 			return merr.WrapErrCompactionResult("compaction result is empty")
@@ -716,6 +711,15 @@ func (t *clusteringCompactionTask) ShadowClone(opts ...compactionTaskOpt) *datap
 }
 
 func (t *clusteringCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) error {
+	// if task state is completed, cleaned, failed, timeout, then do append end time and save
+	if t.GetTaskProto().State == datapb.CompactionTaskState_completed ||
+		t.GetTaskProto().State == datapb.CompactionTaskState_cleaned ||
+		t.GetTaskProto().State == datapb.CompactionTaskState_failed ||
+		t.GetTaskProto().State == datapb.CompactionTaskState_timeout {
+		ts := time.Now().Unix()
+		opts = append(opts, setEndTime(ts))
+	}
+
 	task := t.ShadowClone(opts...)
 	err := t.saveTaskMeta(task)
 	if err != nil {
@@ -757,22 +761,8 @@ func (t *clusteringCompactionTask) GetResult() *datapb.CompactionPlanResult {
 	return t.result
 }
 
-func (t *clusteringCompactionTask) GetSpan() trace.Span {
-	return t.span
-}
-
-func (t *clusteringCompactionTask) EndSpan() {
-	if t.span != nil {
-		t.span.End()
-	}
-}
-
 func (t *clusteringCompactionTask) SetResult(result *datapb.CompactionPlanResult) {
 	t.result = result
-}
-
-func (t *clusteringCompactionTask) SetSpan(span trace.Span) {
-	t.span = span
 }
 
 func (t *clusteringCompactionTask) SetPlan(plan *datapb.CompactionPlan) {
@@ -796,5 +786,5 @@ func (t *clusteringCompactionTask) NeedReAssignNodeID() bool {
 }
 
 func (t *clusteringCompactionTask) GetSlotUsage() int64 {
-	return t.slotUsage
+	return paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
 }

@@ -2534,6 +2534,26 @@ def gen_modulo_expression(expr_fields):
     return exprs
 
 
+def count_match_expr(values_l: list, rex_l: str, op: str, values_r: list, rex_r: str) -> list:
+    if len(values_l) != len(values_r):
+        raise ValueError(f"[count_match_expr] values not equal: {len(values_l)} != {len(values_r)}")
+
+    res = []
+    if op in ['and', '&&']:
+        for i in range(len(values_l)):
+            if re.search(rex_l, values_l[i]) and re.search(rex_r, values_r[i]):
+                res.append(i)
+
+    elif op in ['or', '||']:
+        for i in range(len(values_l)):
+            if re.search(rex_l, values_l[i]) or re.search(rex_r, values_r[i]):
+                res.append(i)
+
+    else:
+        raise ValueError(f"[count_match_expr] Not support op: {op}")
+    return res
+
+
 def gen_varchar_expression(expr_fields):
     exprs = []
     for field in expr_fields:
@@ -2544,6 +2564,19 @@ def gen_varchar_expression(expr_fields):
             (Expr.And(Expr.like(field, "i%").subset, Expr.LIKE(field, "%j").subset).value, field, r'^i.*j$'),
             (Expr.OR(Expr.like(field, "%h%").subset, Expr.LIKE(field, "%jo").subset).value, field, fr'(?:h.*|.*jo$)'),
             (Expr.Or(Expr.like(field, "ip%").subset, Expr.LIKE(field, "%yu%").subset).value, field, fr'(?:^ip.*|.*yu)'),
+        ])
+    return exprs
+
+
+def gen_varchar_operation(expr_fields):
+    exprs = []
+    for field in expr_fields:
+        exprs.extend([
+            (Expr.EQ(field, '"a"').value, field, r'a'),
+            (Expr.GT(field, '"a"').value, field, r'[^a]'),
+            (Expr.GE(field, '"a"').value, field, r'.*'),
+            (Expr.LT(field, '"z"').value, field, r'[^z]'),
+            (Expr.LE(field, '"z"').value, field, r'.*')
         ])
     return exprs
 

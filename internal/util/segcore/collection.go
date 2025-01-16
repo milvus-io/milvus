@@ -15,7 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
 )
 
 // CreateCCollectionRequest is a request to create a CCollection.
@@ -38,9 +38,17 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 			return nil, errors.New("marshal index meta failed")
 		}
 	}
-	ptr := C.NewCollection(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)))
+	var ptr C.CCollection
+	status := C.NewCollection(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), &ptr)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, err
+	}
 	if indexMetaBlob != nil {
-		C.SetIndexMeta(ptr, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
+		status = C.SetIndexMeta(ptr, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
+		if err := ConsumeCStatusIntoError(&status); err != nil {
+			C.DeleteCollection(ptr)
+			return nil, err
+		}
 	}
 	return &CCollection{
 		collectionID: req.CollectionID,
