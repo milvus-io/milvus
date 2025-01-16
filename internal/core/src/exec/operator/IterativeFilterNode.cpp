@@ -171,11 +171,6 @@ PhyIterativeFilterNode::GetOutput() {
                    "your code");
         int nq_index = 0;
 
-        AssertInfo(
-            nq == search_result.vector_iterators_.value().size(),
-            "nq and iterator size does not equal, nq {}, iterator size {}",
-            nq,
-            search_result.vector_iterators_.value().size());
         search_result.seg_offsets_.resize(nq * unity_topk, INVALID_SEG_OFFSET);
         search_result.distances_.resize(nq * unity_topk);
         for (auto& iterator : search_result.vector_iterators_.value()) {
