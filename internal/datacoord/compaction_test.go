@@ -450,7 +450,7 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNode() {
 
 	assigner := newSlotBasedNodeAssigner(s.cluster)
 	assigner.slots = map[int64]int64{
-		100: 8,
+		100: 9,
 		101: 16,
 	}
 
