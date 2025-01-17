@@ -138,8 +138,8 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
                 current_chunk_size =
                     segment_->chunk_size(field_id, current_chunk_id);
             }
-            auto chunk_data = chunk_info.first;
-            auto chunk_valid_data = chunk_info.second;
+            auto& chunk_data = chunk_info.first;
+            auto& chunk_valid_data = chunk_info.second;
             if (current_chunk_pos < chunk_valid_data.size() &&
                 !chunk_valid_data[current_chunk_pos]) {
                 current_chunk_pos++;
