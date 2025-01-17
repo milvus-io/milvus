@@ -2693,7 +2693,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MultipleChunkedEnable = ParamItem{
 		Key:          "queryNode.segcore.multipleChunkedEnable",
 		Version:      "2.0.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "Enable multiple chunked search",
 		Export:       true,
 	}
