@@ -33,10 +33,10 @@ func teardown() {
 	defer mc.Close(ctx)
 
 	// clear dbs
-	dbs, _ := mc.ListDatabases(ctx, clientv2.NewListDatabaseOption())
+	dbs, _ := mc.ListDatabase(ctx, clientv2.NewListDatabaseOption())
 	for _, db := range dbs {
 		if db != common.DefaultDb {
-			_ = mc.UsingDatabase(ctx, clientv2.NewUseDatabaseOption(db))
+			_ = mc.UseDatabase(ctx, clientv2.NewUseDatabaseOption(db))
 			collections, _ := mc.ListCollections(ctx, clientv2.NewListCollectionOption())
 			for _, coll := range collections {
 				_ = mc.DropCollection(ctx, clientv2.NewDropCollectionOption(coll))
