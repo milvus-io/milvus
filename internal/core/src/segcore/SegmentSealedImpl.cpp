@@ -269,8 +269,8 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     // release field column if the index contains raw data
     // only release non-primary field
     if (scalar_indexings_[field_id]->HasRawData() &&
-        get_bit(field_data_ready_bitset_, field_id)
-                schema_->get_primary_field_id() != field_id) {
+        get_bit(field_data_ready_bitset_, field_id) &&
+        (schema_->get_primary_field_id() != field_id || !is_sorted_by_pk_)) {
         fields_.erase(field_id);
         set_bit(field_data_ready_bitset_, field_id, false);
     }
