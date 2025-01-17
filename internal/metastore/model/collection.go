@@ -75,6 +75,7 @@ func (c *Collection) ShallowClone() *Collection {
 		State:                c.State,
 		EnableDynamicField:   c.EnableDynamicField,
 		Functions:            c.Functions,
+		UpdateTimestamp:      c.UpdateTimestamp,
 	}
 }
 
