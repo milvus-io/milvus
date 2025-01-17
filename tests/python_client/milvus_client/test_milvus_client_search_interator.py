@@ -75,7 +75,7 @@ class TestMilvusClientSearchInteratorInValid(TestMilvusClientV2Base):
         # 5. search_iterator
         vectors_to_search = rng.random((1, default_dim))
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, search_params=search_params,
+        self.search_iterator(client, collection_name, vectors_to_search, search_params=search_params,
                               use_mul_db=True, another_db=my_db,
                               check_task=CheckTasks.err_res,
                               check_items={})
@@ -115,7 +115,7 @@ class TestMilvusClientSearchInteratorInValid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, default_dim))
         search_params = {"params": search_params}
         error_msg = ""  # todo
-        self.search_interator(client, alias, vectors_to_search, search_params=search_params,
+        self.search_iterator(client, alias, vectors_to_search, search_params=search_params,
                               use_alias=True, another_collection=collection_name_new,
                               check_task=CheckTasks.err_res,
                               check_items={ct.err_code: 1, ct.err_msg: error_msg})
@@ -175,7 +175,7 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, search_params=search_params,
+        self.search_iterator(client, collection_name, vectors_to_search, search_params=search_params,
                               check_task=CheckTasks.check_search_iterator,
                               check_items={"enable_milvus_client_api": True,
                                            "nq": len(vectors_to_search),
@@ -218,7 +218,7 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, filter="nullable_field>=10",
+        self.search_iterator(client, collection_name, vectors_to_search, filter="nullable_field>=10",
                               search_params=search_params,
                               check_task=CheckTasks.check_search_iterator,
                               check_items={"enable_milvus_client_api": True,
@@ -260,7 +260,7 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
         search_params = {"params": search_params}
-        self.search_interator(client, new_name, vectors_to_search, search_params=search_params,
+        self.search_iterator(client, new_name, vectors_to_search, search_params=search_params,
                               check_task=CheckTasks.check_search_iterator,
                               check_items={"enable_milvus_client_api": True,
                                            "nq": len(vectors_to_search),
@@ -296,7 +296,7 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, search_params=search_params,
+        self.search_iterator(client, collection_name, vectors_to_search, search_params=search_params,
                               check_task=CheckTasks.check_search_iterator,
                               check_items={"enable_milvus_client_api": True,
                                            "nq": len(vectors_to_search),
@@ -324,7 +324,7 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         # 3. search_iterator
         vectors_to_search = rng.random((1, default_dim))
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, search_params=search_params,
+        self.search_iterator(client, collection_name, vectors_to_search, search_params=search_params,
                               check_task=CheckTasks.check_search_iterator,
                               check_items={"enable_milvus_client_api": True,
                                            "nq": len(vectors_to_search),
@@ -355,7 +355,7 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         # 3. search_iterator
         vectors_to_search = rng.random((1, default_dim))
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
+        self.search_iterator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
                               limit=default_limit, search_params=search_params,
                               output_fields=[default_primary_key_field_name],
                               check_task=CheckTasks.check_search_iterator,
@@ -389,7 +389,7 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, default_dim))
         search_params = {"params": search_params}
         search_params.update({"metric_type": metric_type})
-        self.search_interator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
+        self.search_iterator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
                               limit=default_limit, search_params=search_params,
                               output_fields=[default_primary_key_field_name],
                               check_task=CheckTasks.check_search_iterator,
@@ -426,7 +426,7 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
                 insert_ids.remove(insert_id)
         limit = default_nb - delete_num
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
+        self.search_iterator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
                               search_params=search_params, limit=default_nb,
                               check_task=CheckTasks.check_search_iterator,
                               check_items={"enable_milvus_client_api": True,
@@ -463,7 +463,7 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
                 insert_ids.remove(insert_id)
         limit = default_nb - delete_num
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
+        self.search_iterator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
                               search_params=search_params, limit=default_nb,
                               check_task=CheckTasks.check_search_iterator,
                               check_items={"enable_milvus_client_api": True,

@@ -647,7 +647,7 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
 
         # 5. search_iterator
         vectors_to_search = rng.random((1, default_dim))
-        self.search_interator(client, collection_name, vectors_to_search, use_rbac_mul_db=True, another_db=my_db,
+        self.search_iterator(client, collection_name, vectors_to_search, use_rbac_mul_db=True, another_db=my_db,
                               check_task=CheckTasks.check_permission_deny)
         client, _ = self.init_milvus_client(uri=uri, token="root:Milvus")
         self.revoke_privilege(client, role_name, "Collection", "Search", collection_name, 'default')
