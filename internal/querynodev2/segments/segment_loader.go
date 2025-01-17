@@ -620,7 +620,7 @@ type segmentLoader struct {
 	committedResource         LoadResource
 	committedResourceNotifier *syncutil.VersionedNotifier
 
-	duf *diskUsageFetcher
+	duf              *diskUsageFetcher
 	warmupDispatcher *AsyncWarmupDispatcher
 }
 
