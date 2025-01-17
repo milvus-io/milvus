@@ -1806,6 +1806,16 @@ def get_int64_field_name(schema=None):
     return None
 
 
+def get_varchar_field_name(schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype == DataType.VARCHAR:
+            return field.name
+    return None
+
+
 def get_text_field_name(schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
