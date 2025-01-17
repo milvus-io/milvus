@@ -578,7 +578,11 @@ func (c *Core) initCredentials(initCtx context.Context) error {
 		}
 		log.Ctx(initCtx).Info("RootCoord init user root")
 		err = c.meta.AddCredential(initCtx, &internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
-		return err
+		if err != nil {
+			log.Ctx(initCtx).Warn("RootCoord init user root failed", zap.Error(err))
+			return err
+		}
+		return nil
 	}
 	return nil
 }
