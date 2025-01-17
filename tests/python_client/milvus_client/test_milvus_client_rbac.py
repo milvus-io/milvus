@@ -597,9 +597,9 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         roles, _ = self.list_roles(client)
         for role in roles:
             if role not in ['admin', 'public']:
-                res, _ = self.describe_role(client, role)
-                if res['privileges']:
-                    for privilege in res['privileges']:
+                role_info, _ = self.describe_role(client, role)
+                if role_info:
+                    for privilege in role_info.get("privileges", []):
                         self.revoke_privilege(client, role, privilege["object_type"],
                                               privilege["privilege"], privilege["object_name"])
                 self.drop_role(client, role)
@@ -613,8 +613,9 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         """
         target: test search iterator(high level api) normal case about mul db by rbac
         method: create connection, collection, insert and search iterator
-        expected: search iterator permission deny after switch to  no permission db
+        expected: search iterator permission deny after switch to no permission db
         """
+        batch_size = 20
         uri = f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
         client, _ = self.init_milvus_client(uri=uri, token="root:Milvus")
         my_db = cf.gen_unique_str(prefix)
@@ -647,14 +648,10 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
 
         # 5. search_iterator
         vectors_to_search = rng.random((1, default_dim))
-        self.search_interator(client, collection_name, vectors_to_search, use_rbac_mul_db=True, another_db=my_db,
-                              check_task=CheckTasks.check_permission_deny)
+        self.search_iterator(client, collection_name, vectors_to_search, batch_size, use_rbac_mul_db=True, another_db=my_db,
+                             check_task=CheckTasks.check_permission_deny)
         client, _ = self.init_milvus_client(uri=uri, token="root:Milvus")
-        self.revoke_privilege(client, role_name, "Collection", "Search", collection_name, 'default')
         self.revoke_privilege(client, role_name, "Collection", "Insert", collection_name, my_db)
-        self.revoke_role(client, user_name=user_name, role_name=role_name)
-        self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
         self.using_database(client, 'default')
-        self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
