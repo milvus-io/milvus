@@ -42,8 +42,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -63,6 +61,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -202,7 +202,8 @@ func (s *Server) registerMetricsRequest() {
 	}
 
 	QueryDistAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-		return s.dist.GetDistributionJSON(), nil
+		collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
+		return s.dist.GetDistributionJSON(collectionID), nil
 	}
 
 	QueryTargetAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
@@ -211,11 +212,13 @@ func (s *Server) registerMetricsRequest() {
 		if v.Exists() {
 			scope = meta.TargetScope(v.Int())
 		}
-		return s.targetMgr.GetTargetJSON(ctx, scope), nil
+
+		collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
+		return s.targetMgr.GetTargetJSON(ctx, scope, collectionID), nil
 	}
 
 	QueryReplicasAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-		return s.meta.GetReplicasJSON(ctx), nil
+		return s.meta.GetReplicasJSON(ctx, s.meta), nil
 	}
 
 	QueryResourceGroupsAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
@@ -668,6 +671,7 @@ func (s *Server) Stop() error {
 // UpdateStateCode updates the status of the coord, including healthy, unhealthy
 func (s *Server) UpdateStateCode(code commonpb.StateCode) {
 	s.status.Store(int32(code))
+	log.Ctx(s.ctx).Info("update querycoord state", zap.String("state", code.String()))
 }
 
 func (s *Server) State() commonpb.StateCode {

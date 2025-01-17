@@ -38,4 +38,46 @@ RepeatedKeyValToMap(
     }
     return mapping;
 }
+
+class ProtoLayout;
+using ProtoLayoutPtr = std::unique_ptr<ProtoLayout>;
+
+// ProtoLayout is a c++ type for esaier resource management at C-side.
+// It's always keep same memory layout with ProtoLayout at C side for cgo call.
+class ProtoLayout {
+ public:
+    ProtoLayout();
+
+    ProtoLayout(const ProtoLayout&) = delete;
+
+    ProtoLayout(ProtoLayout&&) = delete;
+
+    ProtoLayout&
+    operator=(const ProtoLayout&) = delete;
+
+    ProtoLayout&
+    operator=(ProtoLayout&&) = delete;
+
+    ~ProtoLayout();
+
+    // Serialize the proto into bytes and hold it in the layout.
+    // Return false if failure.
+    template <typename T>
+    bool
+    SerializeAndHoldProto(T& proto) {
+        if (blob_ != nullptr || size_ != 0) {
+            throw std::runtime_error(
+                "ProtoLayout should always be empty "
+                "before calling SerializeAndHoldProto");
+        }
+        size_ = proto.ByteSizeLong();
+        blob_ = new uint8_t[size_];
+        return proto.SerializeToArray(blob_, size_);
+    }
+
+ private:
+    void* blob_;
+    size_t size_;
+};
+
 }  //namespace milvus

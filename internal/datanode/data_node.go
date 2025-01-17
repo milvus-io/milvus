@@ -321,12 +321,14 @@ func (node *DataNode) registerMetricsRequest() {
 
 	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return node.flowgraphManager.GetSegmentsJSON(), nil
+			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
+			return node.flowgraphManager.GetSegmentsJSON(collectionID), nil
 		})
 
 	node.metricsRequest.RegisterMetricsRequest(metricsinfo.ChannelKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return node.flowgraphManager.GetChannelsJSON(), nil
+			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
+			return node.flowgraphManager.GetChannelsJSON(collectionID), nil
 		})
 	log.Ctx(node.ctx).Info("register metrics actions finished")
 }

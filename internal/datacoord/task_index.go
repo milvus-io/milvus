@@ -25,13 +25,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -236,26 +236,27 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	}
 
 	it.req = &workerpb.CreateJobRequest{
-		ClusterID:             Params.CommonCfg.ClusterPrefix.GetValue(),
-		IndexFilePrefix:       path.Join(dependency.chunkManager.RootPath(), common.SegmentIndexPath),
-		BuildID:               it.taskID,
-		IndexVersion:          segIndex.IndexVersion + 1,
-		StorageConfig:         createStorageConfig(),
-		IndexParams:           indexParams,
-		TypeParams:            typeParams,
-		NumRows:               segIndex.NumRows,
-		CurrentIndexVersion:   dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
-		CollectionID:          segment.GetCollectionID(),
-		PartitionID:           segment.GetPartitionID(),
-		SegmentID:             segment.GetID(),
-		FieldID:               fieldID,
-		FieldName:             field.GetName(),
-		FieldType:             field.GetDataType(),
-		Dim:                   int64(dim),
-		DataIds:               binlogIDs,
-		OptionalScalarFields:  optionalFields,
-		Field:                 field,
-		PartitionKeyIsolation: partitionKeyIsolation,
+		ClusterID:                 Params.CommonCfg.ClusterPrefix.GetValue(),
+		IndexFilePrefix:           path.Join(dependency.chunkManager.RootPath(), common.SegmentIndexPath),
+		BuildID:                   it.taskID,
+		IndexVersion:              segIndex.IndexVersion + 1,
+		StorageConfig:             createStorageConfig(),
+		IndexParams:               indexParams,
+		TypeParams:                typeParams,
+		NumRows:                   segIndex.NumRows,
+		CurrentIndexVersion:       dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+		CurrentScalarIndexVersion: dependency.indexEngineVersionManager.GetCurrentScalarIndexEngineVersion(),
+		CollectionID:              segment.GetCollectionID(),
+		PartitionID:               segment.GetPartitionID(),
+		SegmentID:                 segment.GetID(),
+		FieldID:                   fieldID,
+		FieldName:                 field.GetName(),
+		FieldType:                 field.GetDataType(),
+		Dim:                       int64(dim),
+		DataIds:                   binlogIDs,
+		OptionalScalarFields:      optionalFields,
+		Field:                     field,
+		PartitionKeyIsolation:     partitionKeyIsolation,
 	}
 
 	log.Ctx(ctx).Info("index task pre check successfully", zap.Int64("taskID", it.GetTaskID()),

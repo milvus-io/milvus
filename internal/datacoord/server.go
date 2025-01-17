@@ -45,7 +45,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -54,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -311,7 +311,7 @@ func (s *Server) Init() error {
 			log.Info("DataCoord startup success")
 			return nil
 		}
-		s.stateCode.Store(commonpb.StateCode_StandBy)
+		s.UpdateStateCode(commonpb.StateCode_StandBy)
 		log.Info("DataCoord enter standby mode successfully")
 		return nil
 	}
@@ -321,7 +321,7 @@ func (s *Server) Init() error {
 
 func (s *Server) initDataCoord() error {
 	log := log.Ctx(s.ctx)
-	s.stateCode.Store(commonpb.StateCode_Initializing)
+	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	var err error
 	if err = s.initRootCoordClient(); err != nil {
 		return err
@@ -456,7 +456,7 @@ func (s *Server) startDataCoord() {
 	// })
 
 	s.afterStart()
-	s.stateCode.Store(commonpb.StateCode_Healthy)
+	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.DataCoordRole, s.session.GetServerID())
 }
 
@@ -1153,11 +1153,7 @@ func (s *Server) registerMetricsRequest() {
 
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.IndexKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			v := jsonReq.Get(metricsinfo.MetricRequestParamCollectionIDKey)
-			collectionID := int64(0)
-			if v.Exists() {
-				collectionID = v.Int()
-			}
+			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
 			return s.meta.indexMeta.GetIndexJSON(collectionID), nil
 		})
 	log.Ctx(s.ctx).Info("register metrics actions finished")

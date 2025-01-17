@@ -32,11 +32,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -193,6 +193,29 @@ func TestQueryTask_all(t *testing.T) {
 			Value: "trxxxx",
 		})
 		assert.Error(t, task.PreExecute(ctx))
+		task.request.QueryParams = task.request.QueryParams[0 : len(task.request.QueryParams)-1]
+
+		// check parse collection id
+		task.request.QueryParams = append(task.request.QueryParams, &commonpb.KeyValuePair{
+			Key:   CollectionID,
+			Value: "trxxxx",
+		})
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		task.request.QueryParams = task.request.QueryParams[0 : len(task.request.QueryParams)-1]
+
+		// check collection id consistency
+		task.request.QueryParams = append(task.request.QueryParams, &commonpb.KeyValuePair{
+			Key:   LimitKey,
+			Value: "11",
+		})
+		task.request.QueryParams = append(task.request.QueryParams, &commonpb.KeyValuePair{
+			Key:   CollectionID,
+			Value: "8080",
+		})
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		task.request.QueryParams = make([]*commonpb.KeyValuePair, 0)
 
 		result1 := &internalpb.RetrieveResults{
 			Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_RetrieveResult},

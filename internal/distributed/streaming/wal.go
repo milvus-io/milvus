@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -27,13 +28,17 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 	// Create a new streaming coord client.
 	streamingCoordClient := client.NewClient(c)
 	// Create a new streamingnode handler client.
-	handlerClient := handler.NewHandlerClient(streamingCoordClient.Assignment())
+	var handlerClient handler.HandlerClient
+	if streamingutil.IsStreamingServiceEnabled() {
+		// streaming service is enabled, create the handler client for the streaming service.
+		handlerClient = handler.NewHandlerClient(streamingCoordClient.Assignment())
+	}
 	return &walAccesserImpl{
-		lifetime:                       typeutil.NewLifetime(),
-		streamingCoordAssignmentClient: streamingCoordClient,
-		handlerClient:                  handlerClient,
-		producerMutex:                  sync.Mutex{},
-		producers:                      make(map[string]*producer.ResumableProducer),
+		lifetime:             typeutil.NewLifetime(),
+		streamingCoordClient: streamingCoordClient,
+		handlerClient:        handlerClient,
+		producerMutex:        sync.Mutex{},
+		producers:            make(map[string]*producer.ResumableProducer),
 
 		// TODO: optimize the pool size, use the streaming api but not goroutines.
 		appendExecutionPool:   conc.NewPool[struct{}](10),
@@ -46,8 +51,8 @@ type walAccesserImpl struct {
 	lifetime *typeutil.Lifetime
 
 	// All services
-	streamingCoordAssignmentClient client.Client
-	handlerClient                  handler.HandlerClient
+	streamingCoordClient client.Client
+	handlerClient        handler.HandlerClient
 
 	producerMutex         sync.Mutex
 	producers             map[string]*producer.ResumableProducer
@@ -69,6 +74,16 @@ func (w *walAccesserImpl) RawAppend(ctx context.Context, msg message.MutableMess
 
 	msg = applyOpt(msg, opts...)
 	return w.appendToWAL(ctx, msg)
+}
+
+func (w *walAccesserImpl) BroadcastAppend(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	assertValidBroadcastMessage(msg)
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrWALAccesserClosed
+	}
+	defer w.lifetime.Done()
+
+	return w.broadcastToWAL(ctx, msg)
 }
 
 // Read returns a scanner for reading records from the wal.
@@ -149,7 +164,7 @@ func (w *walAccesserImpl) Close() {
 	w.producerMutex.Unlock()
 
 	w.handlerClient.Close()
-	w.streamingCoordAssignmentClient.Close()
+	w.streamingCoordClient.Close()
 }
 
 // newErrScanner creates a scanner that returns an error.

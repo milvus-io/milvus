@@ -60,15 +60,21 @@ GenTestSchema(std::map<std::string, std::string> params = {},
     return schema;
 }
 std::shared_ptr<milvus::plan::FilterBitsNode>
-GetTextMatchExpr(SchemaPtr schema, const std::string& query) {
+GetMatchExpr(SchemaPtr schema,
+             const std::string& query,
+             proto::plan::OpType op,
+             int64_t slop = 0) {
     const auto& str_meta = schema->operator[](FieldName("str"));
     auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
                                            proto::schema::DataType::VarChar,
                                            false,
                                            false);
 
-    auto unary_range_expr = test::GenUnaryRangeExpr(OpType::TextMatch, query);
+    auto unary_range_expr = test::GenUnaryRangeExpr(op, query);
     unary_range_expr->set_allocated_column_info(column_info);
+    auto generic_for_slop = milvus::test::GenGenericValue(slop);
+    unary_range_expr->add_extra_values()->CopyFrom(*generic_for_slop);
+    delete generic_for_slop;
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
@@ -80,14 +86,22 @@ GetTextMatchExpr(SchemaPtr schema, const std::string& query) {
 };
 
 std::shared_ptr<milvus::plan::FilterBitsNode>
-GetNotTextMatchExpr(SchemaPtr schema, const std::string& query) {
+GetNotMatchExpr(SchemaPtr schema,
+                const std::string& query,
+                proto::plan::OpType op,
+                int64_t slop = 0) {
     const auto& str_meta = schema->operator[](FieldName("str"));
     proto::plan::GenericValue val;
     val.set_string_val(query);
+    std::vector<proto::plan::GenericValue> extra_values;
+    auto generic_for_slop = milvus::test::GenGenericValue(slop);
+    extra_values.push_back(*generic_for_slop);
+    delete generic_for_slop;
     auto child_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
         milvus::expr::ColumnInfo(str_meta.get_id(), DataType::VARCHAR),
-        proto::plan::OpType::TextMatch,
-        val);
+        op,
+        val,
+        extra_values);
     auto expr = std::make_shared<expr::LogicalUnaryExpr>(
         expr::LogicalUnaryExpr::OpType::LogicalNot, child_expr);
     auto parsed =
@@ -140,21 +154,50 @@ TEST(TextMatch, Index) {
     index->AddText("swimming, football", true, 2);
     index->Commit();
     index->Reload();
-    auto res = index->MatchQuery("football");
-    ASSERT_EQ(res.size(), 3);
-    ASSERT_TRUE(res[0]);
-    ASSERT_FALSE(res[1]);
-    ASSERT_TRUE(res[2]);
-    auto res1 = index->IsNull();
-    ASSERT_FALSE(res1[0]);
-    ASSERT_TRUE(res1[1]);
-    ASSERT_FALSE(res1[2]);
-    auto res2 = index->IsNotNull();
-    ASSERT_TRUE(res2[0]);
-    ASSERT_FALSE(res2[1]);
-    ASSERT_TRUE(res2[2]);
-    res = index->MatchQuery("nothing");
-    ASSERT_EQ(res.size(), 0);
+
+    {
+        auto res = index->MatchQuery("football");
+        ASSERT_EQ(res.size(), 3);
+        ASSERT_TRUE(res[0]);
+        ASSERT_FALSE(res[1]);
+        ASSERT_TRUE(res[2]);
+        auto res1 = index->IsNull();
+        ASSERT_FALSE(res1[0]);
+        ASSERT_TRUE(res1[1]);
+        ASSERT_FALSE(res1[2]);
+        auto res2 = index->IsNotNull();
+        ASSERT_TRUE(res2[0]);
+        ASSERT_FALSE(res2[1]);
+        ASSERT_TRUE(res2[2]);
+        res = index->MatchQuery("nothing");
+        ASSERT_EQ(res.size(), 0);
+    }
+
+    {
+        auto res = index->PhraseMatchQuery("football", 0);
+        ASSERT_EQ(res.size(), 3);
+        ASSERT_TRUE(res[0]);
+        ASSERT_FALSE(res[1]);
+        ASSERT_TRUE(res[2]);
+
+        auto res1 = index->PhraseMatchQuery("swimming football", 0);
+        ASSERT_EQ(res1.size(), 3);
+        ASSERT_FALSE(res1[0]);
+        ASSERT_FALSE(res1[1]);
+        ASSERT_TRUE(res1[2]);
+
+        auto res2 = index->PhraseMatchQuery("football swimming", 0);
+        ASSERT_EQ(res2.size(), 0);
+
+        auto res3 = index->PhraseMatchQuery("football swimming", 1);
+        ASSERT_EQ(res3.size(), 0);
+
+        auto res4 = index->PhraseMatchQuery("football swimming", 2);
+        ASSERT_EQ(res4.size(), 3);
+        ASSERT_FALSE(res4[0]);
+        ASSERT_FALSE(res4[1]);
+        ASSERT_TRUE(res4[2]);
+    }
 }
 
 TEST(TextMatch, GrowingNaive) {
@@ -185,44 +228,63 @@ TEST(TextMatch, GrowingNaive) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
 
     {
-        auto expr = GetTextMatchExpr(schema, "football");
+        BitsetType final;
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "football", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_TRUE(final[1]);
+            auto expr1 = GetNotMatchExpr(schema, "football", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_FALSE(final[1]);
+        }
+    }
+
+    {
+        BitsetType final;
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "swimming", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_TRUE(final[1]);
+            auto expr1 = GetNotMatchExpr(schema, "swimming", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_FALSE(final[1]);
+        }
+    }
+
+    {
+        auto expr =
+            GetMatchExpr(schema, "basketball, swimming", OpType::TextMatch);
         BitsetType final;
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);
-        auto expr1 = GetNotTextMatchExpr(schema, "football");
+        auto expr1 =
+            GetNotMatchExpr(schema, "basketball, swimming", OpType::TextMatch);
         final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_FALSE(final[1]);
-    }
 
-    {
-        auto expr = GetTextMatchExpr(schema, "swimming");
-        BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        auto expr2 =
+            GetMatchExpr(schema, "football, pingpang", OpType::PhraseMatch);
+        final = ExecuteQueryExpr(expr2, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
-        ASSERT_TRUE(final[1]);
-        auto expr1 = GetNotTextMatchExpr(schema, "swimming");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
         ASSERT_FALSE(final[1]);
-    }
-
-    {
-        auto expr = GetTextMatchExpr(schema, "basketball, swimming");
-        BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        auto expr3 =
+            GetMatchExpr(schema, "football, pingpang", OpType::PhraseMatch, 1);
+        final = ExecuteQueryExpr(expr3, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
-        ASSERT_TRUE(final[1]);
-        auto expr1 = GetNotTextMatchExpr(schema, "basketball, swimming");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
         ASSERT_FALSE(final[1]);
     }
 }
@@ -260,49 +322,70 @@ TEST(TextMatch, GrowingNaiveNullable) {
 
     std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     {
-        auto expr = GetTextMatchExpr(schema, "football");
+        BitsetType final;
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "football", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_TRUE(final[1]);
+            ASSERT_FALSE(final[2]);
+            auto expr1 = GetNotMatchExpr(schema, "football", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_FALSE(final[1]);
+            ASSERT_FALSE(final[2]);
+        }
+    }
+
+    {
+        BitsetType final;
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "swimming", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_TRUE(final[1]);
+            ASSERT_FALSE(final[2]);
+            auto expr1 = GetNotMatchExpr(schema, "swimming", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_FALSE(final[1]);
+            ASSERT_FALSE(final[2]);
+        }
+    }
+
+    {
+        auto expr =
+            GetMatchExpr(schema, "basketball, swimming", OpType::TextMatch);
         BitsetType final;
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);
         ASSERT_FALSE(final[2]);
-        auto expr1 = GetNotTextMatchExpr(schema, "football");
+        auto expr1 =
+            GetNotMatchExpr(schema, "basketball, swimming", OpType::TextMatch);
         final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_FALSE(final[1]);
         ASSERT_FALSE(final[2]);
-    }
 
-    {
-        auto expr = GetTextMatchExpr(schema, "swimming");
-        BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        auto expr2 =
+            GetMatchExpr(schema, "football, pingpang", OpType::PhraseMatch);
+        final = ExecuteQueryExpr(expr2, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
-        ASSERT_TRUE(final[1]);
-        ASSERT_FALSE(final[2]);
-        auto expr1 = GetNotTextMatchExpr(schema, "swimming");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
         ASSERT_FALSE(final[1]);
         ASSERT_FALSE(final[2]);
-    }
-
-    {
-        auto expr = GetTextMatchExpr(schema, "basketball, swimming");
-        BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        auto expr3 =
+            GetMatchExpr(schema, "football, pingpang", OpType::PhraseMatch, 1);
+        final = ExecuteQueryExpr(expr3, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
-        ASSERT_TRUE(final[1]);
-        ASSERT_FALSE(final[2]);
-        auto expr1 = GetNotTextMatchExpr(schema, "basketball, swimming");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
         ASSERT_FALSE(final[1]);
         ASSERT_FALSE(final[2]);
     }
@@ -330,44 +413,63 @@ TEST(TextMatch, SealedNaive) {
     seg->CreateTextIndex(FieldId(101));
 
     {
-        auto expr = GetTextMatchExpr(schema, "football");
+        BitsetType final;
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "football", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_TRUE(final[1]);
+            auto expr1 = GetNotMatchExpr(schema, "football", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_FALSE(final[1]);
+        }
+    }
+
+    {
+        BitsetType final;
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "swimming", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_TRUE(final[1]);
+            auto expr1 = GetNotMatchExpr(schema, "swimming", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_FALSE(final[1]);
+        }
+    }
+
+    {
+        auto expr =
+            GetMatchExpr(schema, "basketball, swimming", OpType::TextMatch);
         BitsetType final;
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);
-        auto expr1 = GetNotTextMatchExpr(schema, "football");
+        auto expr1 =
+            GetNotMatchExpr(schema, "basketball, swimming", OpType::TextMatch);
         final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_FALSE(final[1]);
-    }
 
-    {
-        auto expr = GetTextMatchExpr(schema, "swimming");
-        BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        auto expr2 =
+            GetMatchExpr(schema, "football, pingpang", OpType::PhraseMatch);
+        final = ExecuteQueryExpr(expr2, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
-        ASSERT_TRUE(final[1]);
-        auto expr1 = GetNotTextMatchExpr(schema, "swimming");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
         ASSERT_FALSE(final[1]);
-    }
-
-    {
-        auto expr = GetTextMatchExpr(schema, "basketball, swimming");
-        BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        auto expr3 =
+            GetMatchExpr(schema, "football, pingpang", OpType::PhraseMatch, 1);
+        final = ExecuteQueryExpr(expr3, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
-        ASSERT_TRUE(final[1]);
-        auto expr1 = GetNotTextMatchExpr(schema, "basketball, swimming");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
         ASSERT_FALSE(final[1]);
     }
 }
@@ -399,49 +501,70 @@ TEST(TextMatch, SealedNaiveNullable) {
     SealedLoadFieldData(raw_data, *seg);
     seg->CreateTextIndex(FieldId(101));
     {
-        auto expr = GetTextMatchExpr(schema, "football");
+        BitsetType final;
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "football", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_TRUE(final[1]);
+            ASSERT_FALSE(final[2]);
+            auto expr1 = GetNotMatchExpr(schema, "football", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_FALSE(final[1]);
+            ASSERT_FALSE(final[2]);
+        }
+    }
+
+    {
+        BitsetType final;
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "swimming", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_TRUE(final[1]);
+            ASSERT_FALSE(final[2]);
+            auto expr1 = GetNotMatchExpr(schema, "swimming", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_FALSE(final[1]);
+            ASSERT_FALSE(final[2]);
+        }
+    }
+
+    {
+        auto expr =
+            GetMatchExpr(schema, "basketball, swimming", OpType::TextMatch);
         BitsetType final;
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
         ASSERT_TRUE(final[1]);
         ASSERT_FALSE(final[2]);
-        auto expr1 = GetNotTextMatchExpr(schema, "football");
+        auto expr1 =
+            GetNotMatchExpr(schema, "basketball, swimming", OpType::TextMatch);
         final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_FALSE(final[1]);
         ASSERT_FALSE(final[2]);
-    }
 
-    {
-        auto expr = GetTextMatchExpr(schema, "swimming");
-        BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        auto expr2 =
+            GetMatchExpr(schema, "football, pingpang", OpType::PhraseMatch);
+        final = ExecuteQueryExpr(expr2, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
-        ASSERT_TRUE(final[1]);
-        ASSERT_FALSE(final[2]);
-        auto expr1 = GetNotTextMatchExpr(schema, "swimming");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
         ASSERT_FALSE(final[1]);
         ASSERT_FALSE(final[2]);
-    }
-
-    {
-        auto expr = GetTextMatchExpr(schema, "basketball, swimming");
-        BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        auto expr3 =
+            GetMatchExpr(schema, "football, pingpang", OpType::PhraseMatch, 1);
+        final = ExecuteQueryExpr(expr3, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_TRUE(final[0]);
-        ASSERT_TRUE(final[1]);
-        ASSERT_FALSE(final[2]);
-        auto expr1 = GetNotTextMatchExpr(schema, "basketball, swimming");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
         ASSERT_FALSE(final[1]);
         ASSERT_FALSE(final[2]);
     }
@@ -478,45 +601,65 @@ TEST(TextMatch, GrowingJieBa) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
 
     {
-        auto expr = GetTextMatchExpr(schema, "青铜");
         BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
-        ASSERT_FALSE(final[1]);
-        auto expr1 = GetNotTextMatchExpr(schema, "青铜");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
-        ASSERT_TRUE(final[1]);
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "青铜", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_FALSE(final[1]);
+            auto expr1 = GetNotMatchExpr(schema, "青铜", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_TRUE(final[1]);
+        }
     }
 
     {
-        auto expr = GetTextMatchExpr(schema, "黄金");
         BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
-        ASSERT_TRUE(final[1]);
-        auto expr1 = GetNotTextMatchExpr(schema, "黄金");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
-        ASSERT_FALSE(final[1]);
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "黄金", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_TRUE(final[1]);
+            auto expr1 = GetNotMatchExpr(schema, "黄金", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_FALSE(final[1]);
+        }
     }
 
     {
-        auto expr = GetTextMatchExpr(schema, "时代");
         BitsetType final;
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "时代", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_TRUE(final[1]);
+            auto expr1 = GetNotMatchExpr(schema, "时代", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_FALSE(final[1]);
+        }
+    }
+
+    {
+        BitsetType final;
+        auto expr = GetMatchExpr(schema, "黄金时代", OpType::PhraseMatch);
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
-        ASSERT_TRUE(final[1]);
-        auto expr1 = GetNotTextMatchExpr(schema, "时代");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_FALSE(final[1]);
+        auto expr1 = GetMatchExpr(schema, "黄金时代", OpType::PhraseMatch, 2);
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_TRUE(final[1]);
     }
 }
 
@@ -558,50 +701,72 @@ TEST(TextMatch, GrowingJieBaNullable) {
 
     std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     {
-        auto expr = GetTextMatchExpr(schema, "青铜");
         BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
-        ASSERT_FALSE(final[1]);
-        ASSERT_FALSE(final[2]);
-        auto expr1 = GetNotTextMatchExpr(schema, "青铜");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
-        ASSERT_TRUE(final[1]);
-        ASSERT_FALSE(final[2]);
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "青铜", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_FALSE(final[1]);
+            ASSERT_FALSE(final[2]);
+            auto expr1 = GetNotMatchExpr(schema, "青铜", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_TRUE(final[1]);
+            ASSERT_FALSE(final[2]);
+        }
     }
 
     {
-        auto expr = GetTextMatchExpr(schema, "黄金");
         BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
-        ASSERT_TRUE(final[1]);
-        ASSERT_FALSE(final[2]);
-        auto expr1 = GetNotTextMatchExpr(schema, "黄金");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
-        ASSERT_FALSE(final[1]);
-        ASSERT_FALSE(final[2]);
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "黄金", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_TRUE(final[1]);
+            ASSERT_FALSE(final[2]);
+            auto expr1 = GetNotMatchExpr(schema, "黄金", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_FALSE(final[1]);
+            ASSERT_FALSE(final[2]);
+        }
     }
 
     {
-        auto expr = GetTextMatchExpr(schema, "时代");
         BitsetType final;
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "时代", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_TRUE(final[1]);
+            ASSERT_FALSE(final[2]);
+            auto expr1 = GetNotMatchExpr(schema, "时代", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_FALSE(final[1]);
+            ASSERT_FALSE(final[2]);
+        }
+    }
+
+    {
+        BitsetType final;
+        auto expr = GetMatchExpr(schema, "黄金时代", OpType::PhraseMatch);
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
-        ASSERT_TRUE(final[1]);
-        ASSERT_FALSE(final[2]);
-        auto expr1 = GetNotTextMatchExpr(schema, "时代");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_FALSE(final[1]);
+        ASSERT_FALSE(final[2]);
+        auto expr1 = GetMatchExpr(schema, "黄金时代", OpType::PhraseMatch, 2);
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_TRUE(final[1]);
         ASSERT_FALSE(final[2]);
     }
 }
@@ -631,45 +796,65 @@ TEST(TextMatch, SealedJieBa) {
     seg->CreateTextIndex(FieldId(101));
 
     {
-        auto expr = GetTextMatchExpr(schema, "青铜");
         BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
-        ASSERT_FALSE(final[1]);
-        auto expr1 = GetNotTextMatchExpr(schema, "青铜");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
-        ASSERT_TRUE(final[1]);
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "青铜", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_FALSE(final[1]);
+            auto expr1 = GetNotMatchExpr(schema, "青铜", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_TRUE(final[1]);
+        }
     }
 
     {
-        auto expr = GetTextMatchExpr(schema, "黄金");
         BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
-        ASSERT_TRUE(final[1]);
-        auto expr1 = GetNotTextMatchExpr(schema, "黄金");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
-        ASSERT_FALSE(final[1]);
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "黄金", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_TRUE(final[1]);
+            auto expr1 = GetNotMatchExpr(schema, "黄金", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_FALSE(final[1]);
+        }
     }
 
     {
-        auto expr = GetTextMatchExpr(schema, "时代");
         BitsetType final;
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "时代", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_TRUE(final[1]);
+            auto expr1 = GetNotMatchExpr(schema, "时代", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_FALSE(final[1]);
+        }
+    }
+
+    {
+        BitsetType final;
+        auto expr = GetMatchExpr(schema, "黄金时代", OpType::PhraseMatch);
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
-        ASSERT_TRUE(final[1]);
-        auto expr1 = GetNotTextMatchExpr(schema, "时代");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_FALSE(final[1]);
+        auto expr1 = GetMatchExpr(schema, "黄金时代", OpType::PhraseMatch, 2);
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_TRUE(final[1]);
     }
 }
 
@@ -706,50 +891,72 @@ TEST(TextMatch, SealedJieBaNullable) {
     seg->CreateTextIndex(FieldId(101));
 
     {
-        auto expr = GetTextMatchExpr(schema, "青铜");
         BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
-        ASSERT_FALSE(final[1]);
-        ASSERT_FALSE(final[2]);
-        auto expr1 = GetNotTextMatchExpr(schema, "青铜");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
-        ASSERT_TRUE(final[1]);
-        ASSERT_FALSE(final[2]);
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "青铜", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_FALSE(final[1]);
+            ASSERT_FALSE(final[2]);
+            auto expr1 = GetNotMatchExpr(schema, "青铜", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_TRUE(final[1]);
+            ASSERT_FALSE(final[2]);
+        }
     }
 
     {
-        auto expr = GetTextMatchExpr(schema, "黄金");
         BitsetType final;
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
-        ASSERT_TRUE(final[1]);
-        ASSERT_FALSE(final[2]);
-        auto expr1 = GetNotTextMatchExpr(schema, "黄金");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
-        ASSERT_FALSE(final[1]);
-        ASSERT_FALSE(final[2]);
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "黄金", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_TRUE(final[1]);
+            ASSERT_FALSE(final[2]);
+            auto expr1 = GetNotMatchExpr(schema, "黄金", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_FALSE(final[1]);
+            ASSERT_FALSE(final[2]);
+        }
     }
 
     {
-        auto expr = GetTextMatchExpr(schema, "时代");
         BitsetType final;
+        for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+            auto expr = GetMatchExpr(schema, "时代", op);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_TRUE(final[0]);
+            ASSERT_TRUE(final[1]);
+            ASSERT_FALSE(final[2]);
+            auto expr1 = GetNotMatchExpr(schema, "时代", op);
+            final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N);
+            ASSERT_FALSE(final[0]);
+            ASSERT_FALSE(final[1]);
+            ASSERT_FALSE(final[2]);
+        }
+    }
+
+    {
+        BitsetType final;
+        auto expr = GetMatchExpr(schema, "黄金时代", OpType::PhraseMatch);
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_TRUE(final[0]);
-        ASSERT_TRUE(final[1]);
-        ASSERT_FALSE(final[2]);
-        auto expr1 = GetNotTextMatchExpr(schema, "时代");
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_FALSE(final[1]);
+        ASSERT_FALSE(final[2]);
+        auto expr1 = GetMatchExpr(schema, "黄金时代", OpType::PhraseMatch, 2);
+        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        ASSERT_FALSE(final[0]);
+        ASSERT_TRUE(final[1]);
         ASSERT_FALSE(final[2]);
     }
 }
@@ -802,7 +1009,7 @@ TEST(TextMatch, GrowingLoadData) {
     ASSERT_NE(segment->get_field_avg_size(FieldId(101)), 0);
 
     // Check whether the text index has been built.
-    auto expr = GetTextMatchExpr(schema, "football");
+    auto expr = GetMatchExpr(schema, "football", OpType::TextMatch);
     BitsetType final;
     final = ExecuteQueryExpr(expr, segment.get(), N, MAX_TIMESTAMP);
     ASSERT_EQ(final.size(), N);

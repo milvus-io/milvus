@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 

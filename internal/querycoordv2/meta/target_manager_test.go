@@ -31,11 +31,11 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/kv"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -425,33 +425,38 @@ func (suite *TargetManagerSuite) TestGetTarget() {
 	current := &CollectionTarget{}
 	next := &CollectionTarget{}
 
+	t1 := typeutil.NewConcurrentMap[int64, *CollectionTarget]()
+	t2 := typeutil.NewConcurrentMap[int64, *CollectionTarget]()
+	t3 := typeutil.NewConcurrentMap[int64, *CollectionTarget]()
+	t4 := typeutil.NewConcurrentMap[int64, *CollectionTarget]()
+	t1.Insert(1000, current)
+	t2.Insert(1000, next)
+	t3.Insert(1000, current)
+	t4.Insert(1000, current)
+
 	bothMgr := &TargetManager{
 		current: &target{
-			collectionTargetMap: map[int64]*CollectionTarget{
-				1000: current,
-			},
+			collectionTargetMap: t1,
 		},
 		next: &target{
-			collectionTargetMap: map[int64]*CollectionTarget{
-				1000: next,
-			},
+			collectionTargetMap: t2,
 		},
 	}
 	currentMgr := &TargetManager{
 		current: &target{
-			collectionTargetMap: map[int64]*CollectionTarget{
-				1000: current,
-			},
+			collectionTargetMap: t3,
 		},
-		next: &target{},
+		next: &target{
+			collectionTargetMap: typeutil.NewConcurrentMap[int64, *CollectionTarget](),
+		},
 	}
 	nextMgr := &TargetManager{
 		next: &target{
-			collectionTargetMap: map[int64]*CollectionTarget{
-				1000: current,
-			},
+			collectionTargetMap: t4,
 		},
-		current: &target{},
+		current: &target{
+			collectionTargetMap: typeutil.NewConcurrentMap[int64, *CollectionTarget](),
+		},
 	}
 
 	cases := []testCase{
@@ -669,7 +674,7 @@ func (suite *TargetManagerSuite) TestGetTargetJSON() {
 	suite.NoError(suite.mgr.UpdateCollectionNextTarget(ctx, collectionID))
 	suite.True(suite.mgr.UpdateCollectionCurrentTarget(ctx, collectionID))
 
-	jsonStr := suite.mgr.GetTargetJSON(ctx, CurrentTarget)
+	jsonStr := suite.mgr.GetTargetJSON(ctx, CurrentTarget, 0)
 	assert.NotEmpty(suite.T(), jsonStr)
 
 	var currentTarget []*metricsinfo.QueryCoordTarget
@@ -679,6 +684,14 @@ func (suite *TargetManagerSuite) TestGetTargetJSON() {
 	assert.Equal(suite.T(), collectionID, currentTarget[0].CollectionID)
 	assert.Len(suite.T(), currentTarget[0].DMChannels, 2)
 	assert.Len(suite.T(), currentTarget[0].Segments, 2)
+
+	jsonStr = suite.mgr.GetTargetJSON(ctx, CurrentTarget, 1)
+	assert.NotEmpty(suite.T(), jsonStr)
+
+	var currentTarget2 []*metricsinfo.QueryCoordTarget
+	err = json.Unmarshal([]byte(jsonStr), &currentTarget)
+	suite.NoError(err)
+	assert.Len(suite.T(), currentTarget2, 0)
 }
 
 func BenchmarkTargetManager(b *testing.B) {
@@ -720,7 +733,7 @@ func BenchmarkTargetManager(b *testing.B) {
 
 	collectionNum := 10000
 	for i := 0; i < collectionNum; i++ {
-		mgr.current.collectionTargetMap[int64(i)] = NewCollectionTarget(segments, channels, nil)
+		mgr.current.collectionTargetMap.Insert(int64(i), NewCollectionTarget(segments, channels, nil))
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

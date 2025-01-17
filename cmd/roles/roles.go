@@ -43,7 +43,6 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -377,10 +376,8 @@ func (mr *MilvusRoles) Run() {
 	tracer.Init()
 
 	// Initialize streaming service if enabled.
-	if streamingutil.IsStreamingServiceEnabled() {
-		streaming.Init()
-		defer streaming.Release()
-	}
+	streaming.Init()
+	defer streaming.Release()
 
 	coordclient.EnableLocalClientRole(&coordclient.LocalClientRoleConfig{
 		ServerType:       mr.ServerType,

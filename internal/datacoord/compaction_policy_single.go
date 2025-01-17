@@ -25,8 +25,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 )
 
 // singleCompactionPolicy is to compact one segment with too many delta logs
@@ -87,15 +87,14 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 		return nil, 0, err
 	}
 
-	partSegments := policy.meta.GetSegmentsChanPart(func(segment *SegmentInfo) bool {
-		return segment.CollectionID == collectionID &&
-			isSegmentHealthy(segment) &&
+	partSegments := GetSegmentsChanPart(policy.meta, collectionID, SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		return isSegmentHealthy(segment) &&
 			isFlush(segment) &&
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
 			segment.GetLevel() == datapb.SegmentLevel_L2 && // only support L2 for now
 			!segment.GetIsInvisible()
-	})
+	}))
 
 	views := make([]CompactionView, 0)
 	for _, group := range partSegments {

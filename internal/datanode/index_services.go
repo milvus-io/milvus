@@ -29,11 +29,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -130,6 +130,7 @@ func (node *DataNode) QueryJobs(ctx context.Context, req *workerpb.QueryJobsRequ
 				State:               info.State,
 				FileKeys:            common.CloneStringList(info.FileKeys),
 				SerializedSize:      info.SerializedSize,
+				MemSize:             info.MemSize,
 				FailReason:          info.FailReason,
 				CurrentIndexVersion: info.CurrentIndexVersion,
 				IndexStoreVersion:   info.IndexStoreVersion,
@@ -152,6 +153,7 @@ func (node *DataNode) QueryJobs(ctx context.Context, req *workerpb.QueryJobsRequ
 			ret.IndexInfos[i].State = info.State
 			ret.IndexInfos[i].IndexFileKeys = info.FileKeys
 			ret.IndexInfos[i].SerializedSize = info.SerializedSize
+			ret.IndexInfos[i].MemSize = info.MemSize
 			ret.IndexInfos[i].FailReason = info.FailReason
 			ret.IndexInfos[i].CurrentIndexVersion = info.CurrentIndexVersion
 			ret.IndexInfos[i].IndexStoreVersion = info.IndexStoreVersion
@@ -392,9 +394,11 @@ func (node *DataNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2
 					State:               info.State,
 					FileKeys:            common.CloneStringList(info.FileKeys),
 					SerializedSize:      info.SerializedSize,
+					MemSize:             info.MemSize,
 					FailReason:          info.FailReason,
 					CurrentIndexVersion: info.CurrentIndexVersion,
 					IndexStoreVersion:   info.IndexStoreVersion,
+					CurrentScalarIndexVersion: info.CurrentScalarIndexVersion,
 				}
 			}
 		})
@@ -410,9 +414,11 @@ func (node *DataNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2
 				results[i].State = info.State
 				results[i].IndexFileKeys = info.FileKeys
 				results[i].SerializedSize = info.SerializedSize
+				results[i].MemSize = info.MemSize
 				results[i].FailReason = info.FailReason
 				results[i].CurrentIndexVersion = info.CurrentIndexVersion
 				results[i].IndexStoreVersion = info.IndexStoreVersion
+				results[i].CurrentScalarIndexVersion = info.CurrentScalarIndexVersion
 			}
 		}
 		log.Debug("query index jobs result success", zap.Any("results", results))

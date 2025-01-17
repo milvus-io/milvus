@@ -58,6 +58,7 @@ using distance_t = float;
 using float16 = knowhere::fp16;
 using bfloat16 = knowhere::bf16;
 using bin1 = knowhere::bin1;
+using int8 = knowhere::int8;
 
 // See also: https://github.com/milvus-io/milvus-proto/blob/master/proto/schema.proto
 enum class DataType {
@@ -85,6 +86,7 @@ enum class DataType {
     VECTOR_FLOAT16 = 102,
     VECTOR_BFLOAT16 = 103,
     VECTOR_SPARSE_FLOAT = 104,
+    VECTOR_INT8 = 105,
 };
 
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
@@ -323,6 +325,11 @@ IsSparseFloatVectorDataType(DataType data_type) {
 }
 
 inline bool
+IsInt8VectorDataType(DataType data_type) {
+    return data_type == DataType::VECTOR_INT8;
+}
+
+inline bool
 IsFloatVectorDataType(DataType data_type) {
     return IsDenseFloatVectorDataType(data_type) ||
            IsSparseFloatVectorDataType(data_type);
@@ -331,7 +338,7 @@ IsFloatVectorDataType(DataType data_type) {
 inline bool
 IsVectorDataType(DataType data_type) {
     return IsBinaryVectorDataType(data_type) ||
-           IsFloatVectorDataType(data_type);
+           IsFloatVectorDataType(data_type) || IsInt8VectorDataType(data_type);
 }
 
 inline bool
@@ -418,7 +425,17 @@ IsFloatVectorMetricType(const MetricType& metric_type) {
 
 inline bool
 IsBinaryVectorMetricType(const MetricType& metric_type) {
-    return !IsFloatVectorMetricType(metric_type);
+    return metric_type == knowhere::metric::HAMMING ||
+           metric_type == knowhere::metric::JACCARD ||
+           metric_type == knowhere::metric::SUPERSTRUCTURE ||
+           metric_type == knowhere::metric::SUBSTRUCTURE;
+}
+
+inline bool
+IsIntVectorMetricType(const MetricType& metric_type) {
+    return metric_type == knowhere::metric::L2 ||
+           metric_type == knowhere::metric::IP ||
+           metric_type == knowhere::metric::COSINE;
 }
 
 // Plus 1 because we can't use greater(>) symbol
@@ -479,7 +496,7 @@ struct TypeTraits<DataType::INT32> {
 
 template <>
 struct TypeTraits<DataType::INT64> {
-    using NativeType = int32_t;
+    using NativeType = int64_t;
     static constexpr DataType TypeKind = DataType::INT64;
     static constexpr bool IsPrimitiveType = true;
     static constexpr bool IsFixedWidth = true;
@@ -683,6 +700,9 @@ struct fmt::formatter<milvus::OpType> : formatter<string_view> {
                 break;
             case milvus::OpType::TextMatch:
                 name = "TextMatch";
+                break;
+            case milvus::OpType::PhraseMatch:
+                name = "PhraseMatch";
                 break;
         }
         return formatter<string_view>::format(name, ctx);

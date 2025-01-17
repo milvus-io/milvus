@@ -27,6 +27,7 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -34,10 +35,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -288,6 +289,16 @@ func readBFloat16Vectors(blobReaders []io.Reader, dim int) []byte {
 	return ret
 }
 
+func readInt8Vectors(blobReaders []io.Reader, dim int) []int8 {
+	ret := make([]int8, 0)
+	for _, r := range blobReaders {
+		v := make([]int8, dim)
+		ReadBinary(r, &v, schemapb.DataType_Int8Vector)
+		ret = append(ret, v...)
+	}
+	return ret
+}
+
 func readBoolArray(blobReaders []io.Reader) []bool {
 	ret := make([]bool, 0)
 	for _, r := range blobReaders {
@@ -431,6 +442,19 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 		case schemapb.DataType_SparseFloatVector:
 			return nil, fmt.Errorf("Sparse Float Vector is not supported in row based data")
 
+		case schemapb.DataType_Int8Vector:
+			dim, err := GetDimFromParams(field.TypeParams)
+			if err != nil {
+				log.Error("failed to get dim", zap.Error(err))
+				return nil, err
+			}
+
+			vecs := readInt8Vectors(blobReaders, dim)
+			idata.Data[field.FieldID] = &Int8VectorFieldData{
+				Data: vecs,
+				Dim:  dim,
+			}
+
 		case schemapb.DataType_Bool:
 			idata.Data[field.FieldID] = &BoolFieldData{
 				Data: readBoolArray(blobReaders),
@@ -571,6 +595,19 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 		case schemapb.DataType_SparseFloatVector:
 			fieldData = &SparseFloatVectorFieldData{
 				SparseFloatArray: *srcFields[field.FieldID].GetVectors().GetSparseFloatVector(),
+			}
+
+		case schemapb.DataType_Int8Vector:
+			dim, err := GetDimFromParams(field.TypeParams)
+			if err != nil {
+				log.Error("failed to get dim", zap.Error(err))
+				return nil, err
+			}
+
+			srcData := srcField.GetVectors().GetInt8Vector()
+			fieldData = &Int8VectorFieldData{
+				Data: lo.Map(srcData, func(v byte, _ int) int8 { return int8(v) }),
+				Dim:  dim,
 			}
 
 		case schemapb.DataType_Bool:
@@ -888,6 +925,18 @@ func mergeSparseFloatVectorField(data *InsertData, fid FieldID, field *SparseFlo
 	fieldData.AppendAllRows(field)
 }
 
+func mergeInt8VectorField(data *InsertData, fid FieldID, field *Int8VectorFieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		fieldData := &Int8VectorFieldData{
+			Data: nil,
+			Dim:  field.Dim,
+		}
+		data.Data[fid] = fieldData
+	}
+	fieldData := data.Data[fid].(*Int8VectorFieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+}
+
 // MergeFieldData merge field into data.
 func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 	if field == nil {
@@ -924,6 +973,8 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 		mergeBFloat16VectorField(data, fid, field)
 	case *SparseFloatVectorFieldData:
 		mergeSparseFloatVectorField(data, fid, field)
+	case *Int8VectorFieldData:
+		mergeInt8VectorField(data, fid, field)
 	}
 }
 
@@ -1256,6 +1307,20 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						Data: &schemapb.VectorField_SparseFloatVector{
 							SparseFloatVector: &rawData.SparseFloatArray,
 						},
+					},
+				},
+			}
+		case *Int8VectorFieldData:
+			dataBytes := arrow.Int8Traits.CastToBytes(rawData.Data)
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Int8Vector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_Int8Vector{
+							Int8Vector: dataBytes,
+						},
+						Dim: int64(rawData.Dim),
 					},
 				},
 			}

@@ -1,13 +1,9 @@
-use std::{ffi::CStr, ptr::null};
+use std::ffi::CStr;
 
 use libc::{c_char, c_void};
 
 use crate::{
-    array::{RustArray, RustResult},
-    cstr_to_str,
-    index_reader::IndexReaderWrapper,
-    log::init_log,
-    string_c::{c_str_to_str, create_string},
+    array::RustResult, cstr_to_str, index_reader::IndexReaderWrapper, log::init_log,
     tokenizer::create_tokenizer,
 };
 
@@ -17,6 +13,19 @@ pub extern "C" fn tantivy_match_query(ptr: *mut c_void, query: *const c_char) ->
     unsafe {
         let query = cstr_to_str!(query);
         (*real).match_query(query).into()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_phrase_match_query(
+    ptr: *mut c_void,
+    query: *const c_char,
+    slop: u32,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    unsafe {
+        let query = cstr_to_str!(query);
+        (*real).phrase_match_query(query, slop).into()
     }
 }
 

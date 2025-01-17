@@ -28,14 +28,13 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -451,24 +450,13 @@ func (m *ChannelManagerImpl) AdvanceChannelState(ctx context.Context) {
 	standbys := m.store.GetNodeChannelsBy(WithAllNodes(), WithChannelStates(Standby))
 	toNotifies := m.store.GetNodeChannelsBy(WithoutBufferNode(), WithChannelStates(ToWatch, ToRelease))
 	toChecks := m.store.GetNodeChannelsBy(WithoutBufferNode(), WithChannelStates(Watching, Releasing))
-	maxNum := len(m.store.GetNodes()) * paramtable.Get().DataCoordCfg.MaxConcurrentChannelTaskNumPerDN.GetAsInt()
 	m.mu.RUnlock()
 
 	// Processing standby channels
 	updatedStandbys := false
 	updatedStandbys = m.advanceStandbys(ctx, standbys)
 	updatedToCheckes := m.advanceToChecks(ctx, toChecks)
-
-	var (
-		updatedToNotifies bool
-		executingNum      = len(toChecks)
-		toNotifyNum       = maxNum - executingNum
-	)
-
-	if toNotifyNum > 0 {
-		toNotifies = lo.Slice(toNotifies, 0, toNotifyNum)
-		updatedToNotifies = m.advanceToNotifies(ctx, toNotifies)
-	}
+	updatedToNotifies := m.advanceToNotifies(ctx, toNotifies)
 
 	if updatedStandbys || updatedToCheckes || updatedToNotifies {
 		m.lastActiveTimestamp = time.Now()

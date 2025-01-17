@@ -33,8 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -696,20 +696,20 @@ func TestServer_getSegmentsJSON(t *testing.T) {
 				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
 					1000: {
 						10: &model.SegmentIndex{
-							SegmentID:      1000,
-							CollectionID:   1,
-							PartitionID:    2,
-							NumRows:        10250,
-							IndexID:        10,
-							BuildID:        10000,
-							NodeID:         1,
-							IndexVersion:   0,
-							IndexState:     commonpb.IndexState_Finished,
-							FailReason:     "",
-							IsDeleted:      false,
-							CreatedUTCTime: 12,
-							IndexFileKeys:  nil,
-							IndexSize:      0,
+							SegmentID:           1000,
+							CollectionID:        1,
+							PartitionID:         2,
+							NumRows:             10250,
+							IndexID:             10,
+							BuildID:             10000,
+							NodeID:              1,
+							IndexVersion:        0,
+							IndexState:          commonpb.IndexState_Finished,
+							FailReason:          "",
+							IsDeleted:           false,
+							CreatedUTCTime:      12,
+							IndexFileKeys:       nil,
+							IndexSerializedSize: 0,
 						},
 					},
 				},

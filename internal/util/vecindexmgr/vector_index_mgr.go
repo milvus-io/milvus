@@ -40,6 +40,7 @@ const (
 	Float16Flag       uint64 = 1 << 2
 	BFloat16Flag      uint64 = 1 << 3
 	SparseFloat32Flag uint64 = 1 << 4
+	Int8Flag          uint64 = 1 << 5
 
 	// NOTrainFlag This flag indicates that there is no need to create any index structure
 	NOTrainFlag uint64 = 1 << 16
@@ -62,11 +63,12 @@ type VecIndexMgr interface {
 
 	GetFeature(indexType IndexType) (uint64, bool)
 
-	IsBinarySupport(indexType IndexType) bool
-	IsFlat32Support(indexType IndexType) bool
-	IsFlat16Support(indexType IndexType) bool
-	IsBFlat16Support(indexType IndexType) bool
-	IsSparseFloat32Support(indexType IndexType) bool
+	IsBinaryVectorSupport(indexType IndexType) bool
+	IsFloat32VectorSupport(indexType IndexType) bool
+	IsFloat16VectorSupport(indexType IndexType) bool
+	IsBFloat16VectorSupport(indexType IndexType) bool
+	IsSparseFloat32VectorSupport(indexType IndexType) bool
+	IsInt8VectorSupport(indexType IndexType) bool
 	IsDataTypeSupport(indexType IndexType, dataType schemapb.DataType) bool
 
 	IsFlatVecIndex(indexType IndexType) bool
@@ -124,7 +126,7 @@ func (mgr *vecIndexMgrImpl) init() {
 	log.Info("init vector indexes with features : " + featureLog.String())
 }
 
-func (mgr *vecIndexMgrImpl) IsBinarySupport(indexType IndexType) bool {
+func (mgr *vecIndexMgrImpl) IsBinaryVectorSupport(indexType IndexType) bool {
 	feature, ok := mgr.GetFeature(indexType)
 	if !ok {
 		return false
@@ -132,7 +134,7 @@ func (mgr *vecIndexMgrImpl) IsBinarySupport(indexType IndexType) bool {
 	return (feature & BinaryFlag) == BinaryFlag
 }
 
-func (mgr *vecIndexMgrImpl) IsFlat32Support(indexType IndexType) bool {
+func (mgr *vecIndexMgrImpl) IsFloat32VectorSupport(indexType IndexType) bool {
 	feature, ok := mgr.GetFeature(indexType)
 	if !ok {
 		return false
@@ -140,7 +142,7 @@ func (mgr *vecIndexMgrImpl) IsFlat32Support(indexType IndexType) bool {
 	return (feature & Float32Flag) == Float32Flag
 }
 
-func (mgr *vecIndexMgrImpl) IsFlat16Support(indexType IndexType) bool {
+func (mgr *vecIndexMgrImpl) IsFloat16VectorSupport(indexType IndexType) bool {
 	feature, ok := mgr.GetFeature(indexType)
 	if !ok {
 		return false
@@ -148,7 +150,7 @@ func (mgr *vecIndexMgrImpl) IsFlat16Support(indexType IndexType) bool {
 	return (feature & Float16Flag) == Float16Flag
 }
 
-func (mgr *vecIndexMgrImpl) IsBFlat16Support(indexType IndexType) bool {
+func (mgr *vecIndexMgrImpl) IsBFloat16VectorSupport(indexType IndexType) bool {
 	feature, ok := mgr.GetFeature(indexType)
 	if !ok {
 		return false
@@ -156,7 +158,7 @@ func (mgr *vecIndexMgrImpl) IsBFlat16Support(indexType IndexType) bool {
 	return (feature & BFloat16Flag) == BFloat16Flag
 }
 
-func (mgr *vecIndexMgrImpl) IsSparseFloat32Support(indexType IndexType) bool {
+func (mgr *vecIndexMgrImpl) IsSparseFloat32VectorSupport(indexType IndexType) bool {
 	feature, ok := mgr.GetFeature(indexType)
 	if !ok {
 		return false
@@ -164,17 +166,27 @@ func (mgr *vecIndexMgrImpl) IsSparseFloat32Support(indexType IndexType) bool {
 	return (feature & SparseFloat32Flag) == SparseFloat32Flag
 }
 
+func (mgr *vecIndexMgrImpl) IsInt8VectorSupport(indexType IndexType) bool {
+	feature, ok := mgr.GetFeature(indexType)
+	if !ok {
+		return false
+	}
+	return (feature & Int8Flag) == Int8Flag
+}
+
 func (mgr *vecIndexMgrImpl) IsDataTypeSupport(indexType IndexType, dataType schemapb.DataType) bool {
 	if dataType == schemapb.DataType_BinaryVector {
-		return mgr.IsBinarySupport(indexType)
+		return mgr.IsBinaryVectorSupport(indexType)
 	} else if dataType == schemapb.DataType_FloatVector {
-		return mgr.IsFlat32Support(indexType)
+		return mgr.IsFloat32VectorSupport(indexType)
 	} else if dataType == schemapb.DataType_BFloat16Vector {
-		return mgr.IsBFlat16Support(indexType)
+		return mgr.IsBFloat16VectorSupport(indexType)
 	} else if dataType == schemapb.DataType_Float16Vector {
-		return mgr.IsFlat16Support(indexType)
+		return mgr.IsFloat16VectorSupport(indexType)
 	} else if dataType == schemapb.DataType_SparseFloatVector {
-		return mgr.IsSparseFloat32Support(indexType)
+		return mgr.IsSparseFloat32VectorSupport(indexType)
+	} else if dataType == schemapb.DataType_Int8Vector {
+		return mgr.IsInt8VectorSupport(indexType)
 	}
 	return false
 }

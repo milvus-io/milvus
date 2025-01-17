@@ -23,10 +23,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
@@ -164,7 +164,7 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 	}
 
 	collInfo, err := dependency.handler.GetCollection(ctx, segment.GetCollectionID())
-	if err != nil {
+	if err != nil || collInfo == nil {
 		log.Warn("stats task get collection info failed", zap.Int64("collectionID",
 			segment.GetCollectionID()), zap.Error(err))
 		st.SetState(indexpb.JobState_JobStateInit, err.Error())

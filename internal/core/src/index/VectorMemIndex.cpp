@@ -92,18 +92,14 @@ VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
 }
 
 template <typename T>
-BinarySet
+IndexStatsPtr
 VectorMemIndex<T>::Upload(const Config& config) {
     auto binary_set = Serialize(config);
     file_manager_->AddFile(binary_set);
 
     auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
-    BinarySet ret;
-    for (auto& file : remote_paths_to_size) {
-        ret.Append(file.first, nullptr, file.second);
-    }
-
-    return ret;
+    return IndexStats::NewFromSizeMap(file_manager_->GetAddedTotalMemSize(),
+                                      remote_paths_to_size);
 }
 
 template <typename T>
@@ -289,6 +285,13 @@ VectorMemIndex<T>::Build(const Config& config) {
     auto field_datas =
         file_manager_->CacheRawDataToMemory(insert_files.value());
 
+    auto opt_fields = GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
+    std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> scalar_info;
+    if (opt_fields.has_value() && index_.IsAdditionalScalarSupported() &&
+        config.value("partition_key_isolation", false)) {
+        scalar_info = file_manager_->CacheOptFieldToMemory(opt_fields.value());
+    }
+
     Config build_config;
     build_config.update(config);
     build_config.erase("insert_files");
@@ -316,6 +319,9 @@ VectorMemIndex<T>::Build(const Config& config) {
         field_datas.clear();
 
         auto dataset = GenDataset(total_num_rows, dim, buf.get());
+        if (!scalar_info.empty()) {
+            dataset->Set(knowhere::meta::SCALAR_INFO, std::move(scalar_info));
+        }
         BuildWithDataset(dataset, build_config);
     } else {
         // sparse
@@ -346,6 +352,9 @@ VectorMemIndex<T>::Build(const Config& config) {
         }
         auto dataset = GenDataset(total_rows, dim, vec.data());
         dataset->SetIsSparse(true);
+        if (!scalar_info.empty()) {
+            dataset->Set(knowhere::meta::SCALAR_INFO, std::move(scalar_info));
+        }
         BuildWithDataset(dataset, build_config);
     }
 }
@@ -636,5 +645,6 @@ template class VectorMemIndex<float>;
 template class VectorMemIndex<bin1>;
 template class VectorMemIndex<float16>;
 template class VectorMemIndex<bfloat16>;
+template class VectorMemIndex<int8>;
 
 }  // namespace milvus::index

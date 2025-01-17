@@ -14,8 +14,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -77,10 +77,11 @@ func (r *rankParams) String() string {
 }
 
 type SearchInfo struct {
-	planInfo   *planpb.QueryInfo
-	offset     int64
-	parseError error
-	isIterator bool
+	planInfo     *planpb.QueryInfo
+	offset       int64
+	parseError   error
+	isIterator   bool
+	collectionID int64
 }
 
 func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupByFieldId int64, isIterator bool, offset int64, queryTopK *int64) (*planpb.SearchIteratorV2Info, error) {
@@ -183,6 +184,9 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 
 	isIteratorStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, searchParamsPair)
 	isIterator := (isIteratorStr == "True") || (isIteratorStr == "true")
+
+	collectionIDStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(CollectionID, searchParamsPair)
+	collectionId, _ := strconv.ParseInt(collectionIDStr, 0, 64)
 
 	if err := validateLimit(topK); err != nil {
 		if isIterator {
@@ -289,9 +293,10 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			Hints:                hints,
 			SearchIteratorV2Info: planSearchIteratorV2Info,
 		},
-		offset:     offset,
-		isIterator: isIterator,
-		parseError: nil,
+		offset:       offset,
+		isIterator:   isIterator,
+		parseError:   nil,
+		collectionID: collectionId,
 	}
 }
 

@@ -25,22 +25,24 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type IndexTaskInfo struct {
-	Cancel              context.CancelFunc
-	State               commonpb.IndexState
-	FileKeys            []string
-	SerializedSize      uint64
-	FailReason          string
-	CurrentIndexVersion int32
-	IndexStoreVersion   int64
+	Cancel                    context.CancelFunc
+	State                     commonpb.IndexState
+	FileKeys                  []string
+	SerializedSize            uint64
+	MemSize                   uint64
+	FailReason                string
+	CurrentIndexVersion       int32
+	IndexStoreVersion         int64
+	CurrentScalarIndexVersion int32
 
 	// task statistics
 	statistic *indexpb.JobInfo

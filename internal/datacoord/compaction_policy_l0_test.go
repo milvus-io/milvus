@@ -17,6 +17,7 @@ package datacoord
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
@@ -24,8 +25,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestL0CompactionPolicySuite(t *testing.T) {
@@ -44,14 +46,63 @@ type L0CompactionPolicySuite struct {
 	l0_policy *l0CompactionPolicy
 }
 
+func (s *L0CompactionPolicySuite) SetupTest() {
+	s.testLabel = &CompactionGroupLabel{
+		CollectionID: 1,
+		PartitionID:  10,
+		Channel:      "ch-1",
+	}
+
+	segments := genSegmentsForMeta(s.testLabel)
+	meta := &meta{segments: NewSegmentsInfo()}
+	for id, segment := range segments {
+		meta.segments.SetSegment(id, segment)
+	}
+
+	s.l0_policy = newL0CompactionPolicy(meta)
+}
+
 const MB = 1024 * 1024
 
-func (s *L0CompactionPolicySuite) TestTrigger() {
-	s.Require().Empty(s.l0_policy.view.collections)
+func (s *L0CompactionPolicySuite) TestActiveToIdle() {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L0CompactionTriggerInterval.Key, "1")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.L0CompactionTriggerInterval.Key)
+
+	s.l0_policy.OnCollectionUpdate(1)
+	s.Require().EqualValues(1, s.l0_policy.activeCollections.GetActiveCollections()[0])
+
+	<-time.After(3 * time.Second)
+
+	for range 3 {
+		gotViews, err := s.l0_policy.Trigger()
+		s.NoError(err)
+		s.NotNil(gotViews)
+		s.NotEmpty(gotViews)
+		_, ok := gotViews[TriggerTypeLevelZeroViewChange]
+		s.True(ok)
+	}
+
+	s.Empty(s.l0_policy.activeCollections.GetActiveCollections())
+	gotViews, err := s.l0_policy.Trigger()
+	s.NoError(err)
+	s.NotNil(gotViews)
+	s.NotEmpty(gotViews)
+	_, ok := gotViews[TriggerTypeLevelZeroViewIDLE]
+	s.True(ok)
+}
+
+func (s *L0CompactionPolicySuite) TestTriggerIdle() {
+	s.Require().Empty(s.l0_policy.activeCollections.GetActiveCollections())
 
 	events, err := s.l0_policy.Trigger()
 	s.NoError(err)
+	s.NotEmpty(events)
+
 	gotViews, ok := events[TriggerTypeLevelZeroViewChange]
+	s.False(ok)
+	s.Empty(gotViews)
+
+	gotViews, ok = events[TriggerTypeLevelZeroViewIDLE]
 	s.True(ok)
 	s.NotNil(gotViews)
 	s.Equal(1, len(gotViews))
@@ -63,31 +114,9 @@ func (s *L0CompactionPolicySuite) TestTrigger() {
 		s.Equal(datapb.SegmentLevel_L0, view.Level)
 	}
 	log.Info("cView", zap.String("string", cView.String()))
+}
 
-	// Test for idle trigger
-	for i := 0; i < 2; i++ {
-		events, err = s.l0_policy.Trigger()
-		s.NoError(err)
-		s.Equal(0, len(events))
-	}
-	s.EqualValues(2, s.l0_policy.emptyLoopCount.Load())
-
-	events, err = s.l0_policy.Trigger()
-	s.NoError(err)
-	s.EqualValues(0, s.l0_policy.emptyLoopCount.Load())
-	s.Equal(1, len(events))
-	gotViews, ok = events[TriggerTypeLevelZeroViewIDLE]
-	s.True(ok)
-	s.NotNil(gotViews)
-	s.Equal(1, len(gotViews))
-	cView = gotViews[0]
-	s.Equal(s.testLabel, cView.GetGroupLabel())
-	s.Equal(4, len(cView.GetSegmentsView()))
-	for _, view := range cView.GetSegmentsView() {
-		s.Equal(datapb.SegmentLevel_L0, view.Level)
-	}
-	log.Info("cView", zap.String("string", cView.String()))
-
+func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 	segArgs := []struct {
 		ID   UniqueID
 		PosT Timestamp
@@ -114,34 +143,17 @@ func (s *L0CompactionPolicySuite) TestTrigger() {
 	}
 	s.l0_policy.meta = meta
 
-	events, err = s.l0_policy.Trigger()
+	s.l0_policy.OnCollectionUpdate(s.testLabel.CollectionID)
+	events, err := s.l0_policy.Trigger()
 	s.NoError(err)
-	gotViews, ok = events[TriggerTypeLevelZeroViewChange]
-	s.True(ok)
-	s.Equal(1, len(gotViews))
-}
-
-func (s *L0CompactionPolicySuite) TestGenerateEventForLevelZeroViewChange() {
-	s.Require().Empty(s.l0_policy.view.collections)
-
-	events := s.l0_policy.generateEventForLevelZeroViewChange()
-	s.NotEmpty(events)
-	s.NotEmpty(s.l0_policy.view.collections)
-
+	s.Equal(1, len(events))
 	gotViews, ok := events[TriggerTypeLevelZeroViewChange]
 	s.True(ok)
-	s.NotNil(gotViews)
 	s.Equal(1, len(gotViews))
 
-	storedViews, ok := s.l0_policy.view.collections[s.testLabel.CollectionID]
-	s.True(ok)
-	s.NotNil(storedViews)
-	s.Equal(4, len(storedViews))
-
-	for _, view := range storedViews {
-		s.Equal(s.testLabel, view.label)
-		s.Equal(datapb.SegmentLevel_L0, view.Level)
-	}
+	gotViews, ok = events[TriggerTypeLevelZeroViewIDLE]
+	s.False(ok)
+	s.Empty(gotViews)
 }
 
 func genSegmentsForMeta(label *CompactionGroupLabel) map[int64]*SegmentInfo {
@@ -183,22 +195,6 @@ func genSegmentsForMeta(label *CompactionGroupLabel) map[int64]*SegmentInfo {
 	}
 
 	return segments
-}
-
-func (s *L0CompactionPolicySuite) SetupTest() {
-	s.testLabel = &CompactionGroupLabel{
-		CollectionID: 1,
-		PartitionID:  10,
-		Channel:      "ch-1",
-	}
-
-	segments := genSegmentsForMeta(s.testLabel)
-	meta := &meta{segments: NewSegmentsInfo()}
-	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
-	}
-
-	s.l0_policy = newL0CompactionPolicy(meta)
 }
 
 func genTestSegmentInfo(label *CompactionGroupLabel, ID UniqueID, level datapb.SegmentLevel, state commonpb.SegmentState) *SegmentInfo {
