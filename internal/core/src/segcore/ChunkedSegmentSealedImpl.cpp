@@ -169,7 +169,8 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 
     // if segment is pk sorted, user created indexes bring no performance gain but extra memory usage
     if (is_sorted_by_pk_ && field_id == schema_->get_primary_field_id()) {
-        LOG_INFO("segment pk sorted, skip user index loading for primary key field");
+        LOG_INFO(
+            "segment pk sorted, skip user index loading for primary key field");
         return;
     }
 
