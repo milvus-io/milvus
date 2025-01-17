@@ -167,6 +167,13 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     auto field_id = FieldId(info.field_id);
     auto& field_meta = schema_->operator[](field_id);
 
+    // if segment is pk sorted, user created indexes bring no performance gain but extra memory usage
+    if (is_sorted_by_pk_ && field_id == schema_->get_primary_field_id()) {
+        LOG_INFO(
+            "segment pk sorted, skip user index loading for primary key field");
+        return;
+    }
+
     auto row_count = info.index->Count();
     AssertInfo(row_count > 0, "Index count is 0");
 
