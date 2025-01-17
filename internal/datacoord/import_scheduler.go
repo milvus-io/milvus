@@ -278,8 +278,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Failed {
-		err = s.imeta.UpdateJob(context.TODO(), task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed),
-			UpdateJobReason(resp.GetReason()))
+		err = s.imeta.UpdateJob(context.TODO(), task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(resp.GetReason()))
 		if err != nil {
 			log.Warn("failed to update job state to Failed", zap.Int64("jobID", task.GetJobID()), zap.Error(err))
 		}
@@ -324,7 +323,11 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 			op2 := UpdateStatusOperator(info.GetSegmentID(), commonpb.SegmentState_Flushed)
 			err = s.meta.UpdateSegmentsInfo(context.TODO(), op1, op2)
 			if err != nil {
-				log.Warn("update import segment binlogs failed", WrapTaskLog(task, zap.Error(err))...)
+				updateErr := s.imeta.UpdateJob(context.TODO(), task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
+				if updateErr != nil {
+					log.Warn("failed to update job state to Failed", zap.Int64("jobID", task.GetJobID()), zap.Error(updateErr))
+				}
+				log.Warn("update import segment binlogs failed", WrapTaskLog(task, zap.String("err", err.Error()))...)
 				return
 			}
 		}
