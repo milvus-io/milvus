@@ -20,7 +20,7 @@ delete_timeout = 60
 
 def pytest_addoption(parser):
 
-    parser.addoption('--data_size', type='int', action='store', default=3000, help="data size for deploy test")
+    parser.addoption('--data_size', type=int, action='store', default=3000, help="data size for deploy test")
 
 
 @pytest.fixture
