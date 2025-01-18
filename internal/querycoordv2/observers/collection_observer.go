@@ -304,7 +304,9 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
 		return true
 	})
 
-	log.Info("observe all collections done", zap.Int("num", observeTaskNum), zap.Duration("dur", time.Since(observeStart)))
+	if observeTaskNum > 0 {
+		log.Info("observe all collections done", zap.Int("num", observeTaskNum), zap.Duration("dur", time.Since(observeStart)))
+	}
 
 	// trigger check logic when loading collections/partitions
 	if loading {
