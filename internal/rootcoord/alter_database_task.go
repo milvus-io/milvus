@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type alterDatabaseTask struct {
@@ -101,7 +102,7 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 			zap.Strings("newResourceGroups", newResourceGroups),
 		)
 		redoTask.AddAsyncStep(NewSimpleStep("", func(ctx context.Context) ([]nestedStep, error) {
-			colls, err := a.core.meta.ListCollections(ctx, oldDB.Name, a.ts, true)
+			colls, err := a.core.meta.ListCollections(ctx, oldDB.Name, typeutil.MaxTimestamp, true)
 			if err != nil {
 				log.Warn("failed to trigger update load config for database", zap.Int64("dbID", oldDB.ID), zap.Error(err))
 				return nil, err

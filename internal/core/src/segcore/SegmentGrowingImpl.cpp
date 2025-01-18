@@ -48,23 +48,7 @@ void
 SegmentGrowingImpl::mask_with_delete(BitsetType& bitset,
                                      int64_t ins_barrier,
                                      Timestamp timestamp) const {
-    auto del_barrier = get_barrier(get_deleted_record(), timestamp);
-    if (del_barrier == 0) {
-        return;
-    }
-    auto bitmap_holder = get_deleted_bitmap(
-        del_barrier, ins_barrier, deleted_record_, insert_record_, timestamp);
-    if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
-        return;
-    }
-    auto& delete_bitset = *bitmap_holder->bitmap_ptr;
-    AssertInfo(
-        delete_bitset.size() == bitset.size(),
-        fmt::format(
-            "Deleted bitmap size:{} not equal to filtered bitmap size:{}",
-            delete_bitset.size(),
-            bitset.size()));
-    bitset |= delete_bitset;
+    deleted_record_.Query(bitset, ins_barrier, timestamp);
 }
 
 void
@@ -391,7 +375,7 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
     }
 
     // step 2: fill delete record
-    deleted_record_.push(sort_pks, sort_timestamps.data());
+    deleted_record_.StreamPush(sort_pks, sort_timestamps.data());
     return SegcoreError::success();
 }
 
@@ -411,38 +395,8 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     ParsePksFromIDs(pks, field_meta.get_data_type(), *info.primary_keys);
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
-    std::vector<std::tuple<Timestamp, PkType>> ordering(size);
-    for (int i = 0; i < size; i++) {
-        ordering[i] = std::make_tuple(timestamps[i], pks[i]);
-    }
-
-    if (!insert_record_.empty_pks()) {
-        auto end = std::remove_if(
-            ordering.begin(),
-            ordering.end(),
-            [&](const std::tuple<Timestamp, PkType>& record) {
-                return !insert_record_.contain(std::get<1>(record));
-            });
-        size = end - ordering.begin();
-        ordering.resize(size);
-    }
-
-    // all record filtered
-    if (size == 0) {
-        return;
-    }
-
-    std::sort(ordering.begin(), ordering.end());
-    std::vector<PkType> sort_pks(size);
-    std::vector<Timestamp> sort_timestamps(size);
-
-    for (int i = 0; i < size; i++) {
-        auto [t, pk] = ordering[i];
-        sort_timestamps[i] = t;
-        sort_pks[i] = pk;
-    }
-
-    deleted_record_.push(sort_pks, sort_timestamps.data());
+    // step 2: push delete info to delete_record
+    deleted_record_.LoadPush(pks, timestamps);
 }
 
 SpanBase

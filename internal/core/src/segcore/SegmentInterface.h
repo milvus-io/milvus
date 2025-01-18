@@ -19,7 +19,6 @@
 #include <vector>
 #include <index/ScalarIndex.h>
 
-#include "DeletedRecord.h"
 #include "FieldIndexing.h"
 #include "common/Schema.h"
 #include "common/Span.h"
@@ -350,6 +349,12 @@ class SegmentInternalInterface : public SegmentInterface {
     // return whether field mmap or not
     virtual bool
     is_mmap_field(FieldId field_id) const = 0;
+
+    virtual std::vector<SegOffset>
+    search_pk(const PkType& pk, Timestamp timestamp) const = 0;
+
+    virtual std::vector<SegOffset>
+    search_pk(const PkType& pk, int64_t insert_barrier) const = 0;
 
  protected:
     // internal API: return chunk_data in span

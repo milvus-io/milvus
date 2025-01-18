@@ -25,6 +25,7 @@ package segments
 import "C"
 
 import (
+	"context"
 	"sync"
 	"unsafe"
 
@@ -50,7 +51,7 @@ type CollectionManager interface {
 	List() []int64
 	ListWithName() map[int64]string
 	Get(collectionID int64) *Collection
-	PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)
+	PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error
 	Ref(collectionID int64, count uint32) bool
 	// unref the collection,
 	// returns true if the collection ref count goes 0, or the collection not exists,
@@ -93,7 +94,7 @@ func (m *collectionManager) Get(collectionID int64) *Collection {
 	return m.collections[collectionID]
 }
 
-func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
+func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
@@ -101,13 +102,18 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 		// the schema may be changed even the collection is loaded
 		collection.schema.Store(schema)
 		collection.Ref(1)
-		return
+		return nil
 	}
 
 	log.Info("put new collection", zap.Int64("collectionID", collectionID), zap.Any("schema", schema))
-	collection := NewCollection(collectionID, schema, meta, loadMeta)
+	collection, err := NewCollection(collectionID, schema, meta, loadMeta)
+	if err != nil {
+		return err
+	}
 	collection.Ref(1)
 	m.collections[collectionID] = collection
+
+	return nil
 }
 
 func (m *collectionManager) Ref(collectionID int64, count uint32) bool {
@@ -245,7 +251,7 @@ func (c *Collection) Unref(count uint32) uint32 {
 }
 
 // newCollection returns a new Collection
-func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMetaInfo *querypb.LoadMetaInfo) *Collection {
+func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMetaInfo *querypb.LoadMetaInfo) (*Collection, error) {
 	/*
 		CCollection
 		NewCollection(const char* schema_proto_blob);
@@ -265,19 +271,28 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	schemaBlob, err := proto.Marshal(loadSchema)
 	if err != nil {
 		log.Warn("marshal schema failed", zap.Error(err))
-		return nil
+		return nil, err
 	}
 
-	collection := C.NewCollection(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)))
+	var collection C.CCollection
+	status := C.NewCollection(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), &collection)
+	if err := HandleCStatus(context.Background(), &status, "NewCollection"); err != nil {
+		log.Warn("create collection failed", zap.Error(err))
+		return nil, err
+	}
 
 	isGpuIndex := false
 	if indexMeta != nil && len(indexMeta.GetIndexMetas()) > 0 && indexMeta.GetMaxIndexRowCount() > 0 {
 		indexMetaBlob, err := proto.Marshal(indexMeta)
 		if err != nil {
 			log.Warn("marshal index meta failed", zap.Error(err))
-			return nil
+			return nil, err
 		}
-		C.SetIndexMeta(collection, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
+		status := C.SetIndexMeta(collection, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
+		if err := HandleCStatus(context.Background(), &status, "SetIndexMeta"); err != nil {
+			log.Warn("set index meta failed", zap.Error(err))
+			return nil, err
+		}
 
 		for _, indexMeta := range indexMeta.GetIndexMetas() {
 			isGpuIndex = lo.ContainsBy(indexMeta.GetIndexParams(), func(param *commonpb.KeyValuePair) bool {
@@ -306,7 +321,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	}
 	coll.schema.Store(schema)
 
-	return coll
+	return coll, nil
 }
 
 func GetMetricType(schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta) string {

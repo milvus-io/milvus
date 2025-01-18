@@ -490,10 +490,15 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 		}
 		annsFieldName = vecFields[0].Name
 	}
-	queryInfo, offset, parseErr := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams)
+	queryInfo, offset, collectionID, parseErr := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams)
 	if parseErr != nil {
 		return nil, nil, 0, parseErr
 	}
+	if collectionID > 0 && collectionID != t.GetCollectionID() {
+		return nil, nil, 0, merr.WrapErrParameterInvalidMsg("collection id:%d in the request is not consistent to that in the search context,"+
+			"alias or database may have been changed: %d", collectionID, t.GetCollectionID())
+	}
+
 	annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
 	if queryInfo.GetGroupByFieldId() != -1 && annField.GetDataType() == schemapb.DataType_BinaryVector {
 		return nil, nil, 0, errors.New("not support search_group_by operation based on binary vector column")

@@ -802,6 +802,7 @@ common:
     # like the old password verification when updating the credential
     superUsers: 
     defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
+    rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     rbac:
       overrideBuiltInPrivilegeGroups:
         enabled: false # Whether to override build-in privilege groups
@@ -836,6 +837,7 @@ common:
     threshold:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
+    maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
   storage:
     scheme: s3
     enablev2: false

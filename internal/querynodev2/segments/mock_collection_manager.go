@@ -158,8 +158,21 @@ func (_c *MockCollectionManager_ListWithName_Call) RunAndReturn(run func() map[i
 }
 
 // PutOrRef provides a mock function with given fields: collectionID, schema, meta, loadMeta
-func (_m *MockCollectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
-	_m.Called(collectionID, schema, meta, loadMeta)
+func (_m *MockCollectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
+	ret := _m.Called(collectionID, schema, meta, loadMeta)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PutOrRef")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo) error); ok {
+		r0 = rf(collectionID, schema, meta, loadMeta)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
 }
 
 // MockCollectionManager_PutOrRef_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PutOrRef'
@@ -183,12 +196,12 @@ func (_c *MockCollectionManager_PutOrRef_Call) Run(run func(collectionID int64, 
 	return _c
 }
 
-func (_c *MockCollectionManager_PutOrRef_Call) Return() *MockCollectionManager_PutOrRef_Call {
-	_c.Call.Return()
+func (_c *MockCollectionManager_PutOrRef_Call) Return(_a0 error) *MockCollectionManager_PutOrRef_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockCollectionManager_PutOrRef_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo)) *MockCollectionManager_PutOrRef_Call {
+func (_c *MockCollectionManager_PutOrRef_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, *segcorepb.CollectionIndexMeta, *querypb.LoadMetaInfo) error) *MockCollectionManager_PutOrRef_Call {
 	_c.Call.Return(run)
 	return _c
 }

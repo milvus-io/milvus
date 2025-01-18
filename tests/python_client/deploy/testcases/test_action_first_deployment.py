@@ -67,11 +67,11 @@ class TestActionFirstDeployment(TestDeployBase):
     @pytest.mark.parametrize("replica_number", [0, 1, 2])
     @pytest.mark.parametrize("is_compacted", ["is_compacted", "not_compacted"])
     @pytest.mark.parametrize("is_deleted", ["is_deleted"])
-    @pytest.mark.parametrize("is_string_indexed", ["is_string_indexed", "not_string_indexed"])
+    @pytest.mark.parametrize("is_scalar_indexed", ["is_scalar_indexed", "not_scalar_indexed"])
     @pytest.mark.parametrize("segment_status", ["only_growing", "all"])
     @pytest.mark.parametrize("index_type", ["HNSW", "BIN_IVF_FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"])
     def test_task_all(self, index_type, is_compacted,
-                      segment_status, is_string_indexed, replica_number, is_deleted, data_size):
+                      segment_status, is_scalar_indexed, replica_number, is_deleted, data_size):
         """
         before reinstall: create collection and insert data, load and search
         """
@@ -90,7 +90,7 @@ class TestActionFirstDeployment(TestDeployBase):
             pytest.skip("skip test, not enough nodes")
 
         log.info(f"collection name: {name}, replica_number: {replica_number}, is_compacted: {is_compacted},"
-                 f"is_deleted: {is_deleted}, is_string_indexed: {is_string_indexed},"
+                 f"is_deleted: {is_deleted}, is_scalar_indexed: {is_scalar_indexed},"
                  f"segment_status: {segment_status}, index_type: {index_type}")
 
         is_binary = True if "BIN" in index_type else False
@@ -119,12 +119,24 @@ class TestActionFirstDeployment(TestDeployBase):
         # create index for vector
         default_index_param = gen_index_param(index_type)
         collection_w.create_index(default_index_field, default_index_param)
-        # create index for string
-        if is_string_indexed == "is_string_indexed":
-            default_string_index_params = {}
-            default_string_index_name = "_default_string_idx"
-            collection_w.create_index(
-                default_string_field_name, default_string_index_params, index_name=default_string_index_name)
+        # create index for scalar
+        if is_scalar_indexed == "is_scalar_indexed":
+            int_field_name = cf.get_int64_field_name(schema=collection_w.schema)
+            # create stl sort index for int field
+            collection_w.create_index(int_field_name, {"index_type": "STL_SORT"})
+
+            varchar_field_name = cf.get_varchar_field_name(schema=collection_w.schema)
+            # 50% chance to create trie index for varchar field
+            if random.randint(0, 1) == 1:
+                collection_w.create_index(varchar_field_name, {"index_type": "TRIE"})
+            scalar_field_names = cf.get_scalar_field_name_list(schema=collection_w.schema)
+            indexes = [index.to_dict() for index in collection_w.indexes]
+            indexed_fields = [index['field'] for index in indexes]
+            # create inverted index for other scalar field
+            for f in scalar_field_names:
+                if f in indexed_fields:
+                    continue
+                collection_w.create_index(f, {"index_type": "INVERTED"},)
 
         # load for growing segment
         if replica_number >= 1:

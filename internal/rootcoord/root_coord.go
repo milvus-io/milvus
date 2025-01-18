@@ -539,7 +539,11 @@ func (c *Core) initCredentials() error {
 		}
 		log.Info("RootCoord init user root")
 		err = c.meta.AddCredential(&internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
-		return err
+		if err != nil {
+			log.Warn("RootCoord init user root failed", zap.Error(err))
+			return err
+		}
+		return nil
 	}
 	return nil
 }
