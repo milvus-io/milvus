@@ -44,6 +44,7 @@ class MilvusConan(ConanFile):
         "roaring/3.0.0#25a703f80eda0764a31ef939229e202d",
         "grpc/1.50.1@milvus/dev#75103960d1cac300cf425ccfccceac08",
         "rapidjson/cci.20230929#624c0094d741e6a3749d2e44d834b96c",
+        "milvus-storage/0.1.0@milvus/dev#a9f5b4429fee682a05831ea570cbb387"
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
@@ -91,9 +92,6 @@ class MilvusConan(ConanFile):
     def requirements(self):
         if self.settings.os != "Macos":
             self.requires("libunwind/1.7.2")
-            self.requires("milvus-storage/0.1.0@milvus/dev#5f9c05f603406384793894940798d333")
-        else:
-            self.requires("arrow/15.0.0#0456d916ff25d509e0724c5b219b4c45")
 
     def imports(self):
         self.copy("*.dylib", "../lib", "lib")
