@@ -92,6 +92,8 @@ class MilvusConan(ConanFile):
         if self.settings.os != "Macos":
             self.requires("libunwind/1.7.2")
             self.requires("milvus-storage/0.1.0@milvus/dev#5f9c05f603406384793894940798d333")
+        else:
+            self.requires("arrow/15.0.0#0456d916ff25d509e0724c5b219b4c45")
 
     def imports(self):
         self.copy("*.dylib", "../lib", "lib")
