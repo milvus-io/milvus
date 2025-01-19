@@ -45,3 +45,4 @@ if (LINUX)
     add_subdirectory(jemalloc)
 endif()
 
+add_subdirectory(milvus-storage)

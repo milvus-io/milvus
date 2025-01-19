@@ -16,6 +16,7 @@ include_directories(
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
     ${CONAN_INCLUDE_DIRS}
+    ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
 add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/test_utils/test_segcore.yaml")
@@ -157,6 +158,7 @@ if (LINUX)
             gtest
             milvus_core
             knowhere
+            milvus-storage
             )
     install(TARGETS index_builder_test DESTINATION unittest)
 endif()
@@ -169,6 +171,7 @@ target_link_libraries(all_tests
         gtest
         milvus_core
         knowhere
+        milvus-storage
         )
 
 install(TARGETS all_tests DESTINATION unittest)

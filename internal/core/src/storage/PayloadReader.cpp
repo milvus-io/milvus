@@ -43,7 +43,7 @@ PayloadReader::init(std::shared_ptr<arrow::io::BufferReader> input,
     // Configure general Parquet reader settings
     auto reader_properties = parquet::ReaderProperties(pool);
     reader_properties.set_buffer_size(4096 * 4);
-    reader_properties.enable_buffered_stream();
+    // reader_properties.enable_buffered_stream();
 
     // Configure Arrow-specific Parquet reader settings
     auto arrow_reader_props = parquet::ArrowReaderProperties();
