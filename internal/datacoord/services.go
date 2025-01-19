@@ -1387,6 +1387,13 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 		return merr.Status(err), nil
 	}
 
+	for _, pos := range checkpoints {
+		if pos == nil || pos.GetMsgID() == nil || pos.GetChannelName() == "" {
+			continue
+		}
+		s.segmentManager.CleanZeroSealedSegmentsOfChannel(pos.GetChannelName(), pos.GetTimestamp())
+	}
+
 	return merr.Success(), nil
 }
 
