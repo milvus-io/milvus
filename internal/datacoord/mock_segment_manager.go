@@ -145,6 +145,41 @@ func (_c *MockManager_AllocSegment_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// CleanZeroSealedSegmentsOfChannel provides a mock function with given fields: ctx, channel, cpTs
+func (_m *MockManager) CleanZeroSealedSegmentsOfChannel(ctx context.Context, channel string, cpTs uint64) {
+	_m.Called(ctx, channel, cpTs)
+}
+
+// MockManager_CleanZeroSealedSegmentsOfChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CleanZeroSealedSegmentsOfChannel'
+type MockManager_CleanZeroSealedSegmentsOfChannel_Call struct {
+	*mock.Call
+}
+
+// CleanZeroSealedSegmentsOfChannel is a helper method to define mock.On call
+//   - ctx context.Context
+//   - channel string
+//   - cpTs uint64
+func (_e *MockManager_Expecter) CleanZeroSealedSegmentsOfChannel(ctx interface{}, channel interface{}, cpTs interface{}) *MockManager_CleanZeroSealedSegmentsOfChannel_Call {
+	return &MockManager_CleanZeroSealedSegmentsOfChannel_Call{Call: _e.mock.On("CleanZeroSealedSegmentsOfChannel", ctx, channel, cpTs)}
+}
+
+func (_c *MockManager_CleanZeroSealedSegmentsOfChannel_Call) Run(run func(ctx context.Context, channel string, cpTs uint64)) *MockManager_CleanZeroSealedSegmentsOfChannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockManager_CleanZeroSealedSegmentsOfChannel_Call) Return() *MockManager_CleanZeroSealedSegmentsOfChannel_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockManager_CleanZeroSealedSegmentsOfChannel_Call) RunAndReturn(run func(context.Context, string, uint64)) *MockManager_CleanZeroSealedSegmentsOfChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropSegment provides a mock function with given fields: ctx, channel, segmentID
 func (_m *MockManager) DropSegment(ctx context.Context, channel string, segmentID int64) {
 	_m.Called(ctx, channel, segmentID)
