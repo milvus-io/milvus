@@ -120,6 +120,7 @@ const (
 	HTTPReturnMessage        = "message"
 	HTTPReturnData           = "data"
 	HTTPReturnCost           = "cost"
+	HTTPReturnRecalls        = "recalls"
 	HTTPReturnLoadState      = "loadState"
 	HTTPReturnLoadProgress   = "loadProgress"
 
