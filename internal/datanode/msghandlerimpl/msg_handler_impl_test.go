@@ -21,9 +21,10 @@ package msghandlerimpl
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+
+	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 )
 
 func TestMsgHandlerImpl(t *testing.T) {

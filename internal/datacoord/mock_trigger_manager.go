@@ -112,39 +112,6 @@ func (_c *MockTriggerManager_OnCollectionUpdate_Call) RunAndReturn(run func(int6
 	return _c
 }
 
-// OnCollectionUpdate provides a mock function with given fields: collectionID
-func (_m *MockTriggerManager) OnCollectionUpdate(collectionID int64) {
-	_m.Called(collectionID)
-}
-
-// MockTriggerManager_OnCollectionUpdate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'OnCollectionUpdate'
-type MockTriggerManager_OnCollectionUpdate_Call struct {
-	*mock.Call
-}
-
-// OnCollectionUpdate is a helper method to define mock.On call
-//   - collectionID int64
-func (_e *MockTriggerManager_Expecter) OnCollectionUpdate(collectionID interface{}) *MockTriggerManager_OnCollectionUpdate_Call {
-	return &MockTriggerManager_OnCollectionUpdate_Call{Call: _e.mock.On("OnCollectionUpdate", collectionID)}
-}
-
-func (_c *MockTriggerManager_OnCollectionUpdate_Call) Run(run func(collectionID int64)) *MockTriggerManager_OnCollectionUpdate_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
-	})
-	return _c
-}
-
-func (_c *MockTriggerManager_OnCollectionUpdate_Call) Return() *MockTriggerManager_OnCollectionUpdate_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockTriggerManager_OnCollectionUpdate_Call) RunAndReturn(run func(int64)) *MockTriggerManager_OnCollectionUpdate_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // PauseL0SegmentCompacting provides a mock function with given fields: collectionID
 func (_m *MockTriggerManager) PauseL0SegmentCompacting(collectionID int64) {
 	_m.Called(collectionID)
