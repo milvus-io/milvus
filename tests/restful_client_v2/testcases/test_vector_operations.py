@@ -1331,7 +1331,7 @@ class TestSearchVector(TestBase):
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
         # assert no dup user_id
-        user_ids = [r["user_id"]for r in rsp['data']]
+        user_ids = [r["user_id"]for r in rsp['data'][0]]
         assert len(user_ids) == len(set(user_ids))
 
     @pytest.mark.parametrize("insert_round", [1])
@@ -1412,7 +1412,10 @@ class TestSearchVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
-        assert len(rsp['data']) == 100 * nq
+        assert len(rsp['data']) == nq
+        rsp_data = rsp['data']
+        for data in rsp_data:
+            assert len(data) == 100
 
 
     @pytest.mark.parametrize("insert_round", [1, 10])
@@ -1819,7 +1822,7 @@ class TestSearchVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
-        assert len(rsp['data']) == 100
+        assert len(rsp['data'][0]) == 100
 
     @pytest.mark.parametrize("metric_type", ["IP", "L2", "COSINE"])
     def test_search_vector_with_simple_payload(self, metric_type):
@@ -1839,7 +1842,7 @@ class TestSearchVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
-        res = rsp['data']
+        res = rsp['data'][0]
         logger.info(f"res: {len(res)}")
         limit = int(payload.get("limit", 100))
         assert len(res) == limit
@@ -1879,7 +1882,7 @@ class TestSearchVector(TestBase):
             assert rsp['code'] == 65535
             return
         assert rsp['code'] == 0
-        res = rsp['data']
+        res = rsp['data'][0]
         logger.info(f"res: {len(res)}")
         limit = int(payload.get("limit", 100))
         assert len(res) == limit
@@ -1920,7 +1923,7 @@ class TestSearchVector(TestBase):
             assert rsp['code'] == 90126
             return
         assert rsp['code'] == 0
-        res = rsp['data']
+        res = rsp['data'][0]
         logger.info(f"res: {len(res)}")
         assert len(res) == limit
         for item in res:
@@ -1953,7 +1956,7 @@ class TestSearchVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
-        res = rsp['data']
+        res = rsp['data'][0]
         logger.info(f"res: {len(res)}")
         assert len(res) <= limit
         for item in res:
@@ -1994,7 +1997,7 @@ class TestSearchVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
-        res = rsp['data']
+        res = rsp['data'][0]
         logger.info(f"res: {len(res)}")
         assert len(res) <= limit
         for item in res:
@@ -2041,7 +2044,7 @@ class TestSearchVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
-        res = rsp['data']
+        res = rsp['data'][0]
         logger.info(f"res: {len(res)}")
         assert len(res) <= limit
         for item in res:
@@ -2088,7 +2091,7 @@ class TestSearchVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
-        res = rsp['data']
+        res = rsp['data'][0]
         logger.info(f"res: {len(res)}")
         assert len(res) == limit
 
@@ -2128,7 +2131,7 @@ class TestSearchVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
-        res = rsp['data']
+        res = rsp['data'][0]
         logger.info(f"res: {len(res)}")
         assert len(res) >= limit*0.8
         # add buffer to the distance of comparison
@@ -2180,7 +2183,7 @@ class TestSearchVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
-        res = rsp['data']
+        res = rsp['data'][0]
         logger.info(f"res: {len(res)}")
         if ignore_growing is True:
             assert len(res) == 0
@@ -2288,7 +2291,7 @@ class TestSearchVector(TestBase):
             logger.info(f"expr: {expr}")
             rsp = self.vector_client.vector_search({"collectionName": name, "data":vector_to_search, "filter": f"{expr}", "outputFields": ["*"]})
             assert rsp['code'] == 0, rsp
-            for d in rsp['data']:
+            for d in rsp['data'][0]:
                 assert token in d[field]
 
     @pytest.mark.parametrize("insert_round", [1])
@@ -2370,10 +2373,11 @@ class TestSearchVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
-        assert rsp['data'][0]['book_describe'] == "8888"
-        assert rsp['data'][0]['word_count'] is None
-        assert len(rsp['data']) == 100 * nq
-
+        assert rsp['data'][0][0]['book_describe'] == "8888"
+        assert rsp['data'][0][0]['word_count'] is None
+        assert len(rsp['data']) == nq
+        for data in rsp['data']:
+            assert len(data) == 100
 @pytest.mark.L0
 class TestSearchVectorNegative(TestBase):
 
@@ -2595,7 +2599,8 @@ class TestAdvancedSearchVector(TestBase):
 
         rsp = self.vector_client.vector_advanced_search(payload)
         assert rsp['code'] == 0
-        assert len(rsp['data']) == 10
+        assert len(rsp['data']) == 1
+        assert len(rsp['data'][0]) == 10
 
 
 @pytest.mark.L0
@@ -2702,7 +2707,8 @@ class TestHybridSearchVector(TestBase):
 
         rsp = self.vector_client.vector_hybrid_search(payload)
         assert rsp['code'] == 0
-        assert len(rsp['data']) == 10
+        assert len(rsp['data']) == 1
+        assert len(rsp['data'][0]) == 10
 
 
 @pytest.mark.L0
@@ -3366,7 +3372,7 @@ class TestGetVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
-        res = rsp['data']
+        res = rsp['data'][0]
         logger.info(f"res: {len(res)}")
         limit = int(payload.get("limit", 100))
         assert len(res) == limit
