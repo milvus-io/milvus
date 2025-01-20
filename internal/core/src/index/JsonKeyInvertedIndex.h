@@ -44,6 +44,9 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
+    void
+    BuildWithFieldData(const std::vector<FieldDataPtr>& datas, bool nullable);
+
     const TargetBitmap
     FilterByPath(const std::string& path,
                  int32_t row,

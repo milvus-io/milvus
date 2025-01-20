@@ -1230,16 +1230,17 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
         int64_t val;
         std::vector<std::string> nested_path;
     };
-    std::vector<Testcase> testcases{
-        {10, {"int"}},
-        {20, {"int"}},
-        {30, {"int"}},
-        {40, {"int"}},
-        {10, {"double"}},
-        {20, {"double"}},
-        {30, {"double"}},
-        {40, {"double"}},
-    };
+    std::vector<Testcase> testcases{{10, {"int"}},
+                                    {20, {"int"}},
+                                    {30, {"int"}},
+                                    {40, {"int"}},
+                                    {10, {"double"}},
+                                    {20, {"double"}},
+                                    {30, {"double"}},
+                                    {40, {"double"}},
+                                    {1, {"array", "0"}},
+                                    {2, {"array", "1"}},
+                                    {3, {"array", "2"}}};
 
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
@@ -1341,11 +1342,13 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
 
             for (int i = 0; i < N * num_iters; ++i) {
                 auto ans = final[i];
-                if (testcase.nested_path[0] == "int") {
+                if (testcase.nested_path[0] == "int" ||
+                    testcase.nested_path[0] == "array") {
                     auto val =
                         milvus::Json(simdjson::padded_string(json_col[i]))
                             .template at<int64_t>(pointer)
                             .value();
+
                     auto ref = f(val);
                     ASSERT_EQ(ans, ref);
                     if (i % 2 == 0) {
@@ -1442,16 +1445,17 @@ TEST_P(ExprTest, TestUnaryRangeJsonNullable) {
         int64_t val;
         std::vector<std::string> nested_path;
     };
-    std::vector<Testcase> testcases{
-        {10, {"int"}},
-        {20, {"int"}},
-        {30, {"int"}},
-        {40, {"int"}},
-        {10, {"double"}},
-        {20, {"double"}},
-        {30, {"double"}},
-        {40, {"double"}},
-    };
+    std::vector<Testcase> testcases{{10, {"int"}},
+                                    {20, {"int"}},
+                                    {30, {"int"}},
+                                    {40, {"int"}},
+                                    {10, {"double"}},
+                                    {20, {"double"}},
+                                    {30, {"double"}},
+                                    {40, {"double"}},
+                                    {1, {"array", "0"}},
+                                    {2, {"array", "1"}},
+                                    {3, {"array", "2"}}};
 
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);

@@ -17,7 +17,7 @@
 #include "UnaryExpr.h"
 #include <optional>
 #include "common/Json.h"
-
+#include <boost/regex.hpp>
 namespace milvus {
 namespace exec {
 
@@ -799,12 +799,17 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
     return res_vec;
 }
 
-size_t
-PhyUnaryRangeFilterExpr::FindFirstDigitPosition(const std::string& str) {
-    auto it = std::find_if(
-        str.begin(), str.end(), [](char c) { return std::isdigit(c); });
-    return (it != str.end()) ? std::distance(str.begin(), it)
-                             : std::string::npos;
+std::pair<std::string, std::string>
+PhyUnaryRangeFilterExpr::SplitAtFirstSlashDigit(std::string input) {
+    boost::regex rgx("/\\d+");
+    boost::smatch match;
+    if (boost::regex_search(input, match, rgx)) {
+        std::string firstPart = input.substr(0, match.position());
+        std::string secondPart = input.substr(match.position());
+        return {firstPart, secondPart};
+    } else {
+        return {input, ""};
+    }
 }
 
 template <typename ExprValueType>
@@ -817,13 +822,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
     auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
                                ? active_count_ - current_data_chunk_pos_
                                : batch_size_;
-    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-    size_t first_digit_pos = FindFirstDigitPosition(pointer);
-    std::string arrayIndex = "";
-    if (first_digit_pos != std::string::npos) {
-        arrayIndex = pointer.substr(first_digit_pos - 1);
-        pointer = pointer.substr(0, first_digit_pos - 1);
-    }
+    auto pointerpath = milvus::Json::pointer(expr_->column_.nested_path_);
+    auto pointerpair = SplitAtFirstSlashDigit(pointerpath);
+    std::string pointer = pointerpair.first;  
+    std::string arrayIndex = pointerpair.second;
+
 #define UnaryRangeJSONIndexCompare(cmp)                       \
     do {                                                      \
         auto x = json.at<GetType>(offset, size);              \
@@ -837,17 +840,24 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
         return (cmp);                                         \
     } while (false)
 
-#define UnaryRangeJSONIndexCompareWithArrayIndex(cmp) \
-    do {                                              \
-        auto array = json.array_at(offset, size);     \
-        if (array.error()) {                          \
-            return false;                             \
-        }                                             \
-        auto x = array.at_pointer(arrayIndex);        \
-        if (x.error()) {                              \
-            return false;                             \
-        }                                             \
-        return (cmp);                                 \
+#define UnaryRangeJSONIndexCompareWithArrayIndex(cmp)         \
+    do {                                                      \
+        auto array = json.array_at(offset, size);             \
+        if (array.error()) {                                  \
+            return false;                                     \
+        }                                                     \
+        auto value = array.at_pointer(arrayIndex);            \
+        if (value.error()) {                                  \
+            return false;                                     \
+        }                                                     \
+        auto x = value.get<GetType>();                        \
+        if (x.error()) {                                      \
+            if constexpr (std::is_same_v<GetType, int64_t>) { \
+                auto x = value.get<double>();                 \
+                return !x.error() && (cmp);                   \
+            }                                                 \
+        }                                                     \
+        return (cmp);                                         \
     } while (false)
 
 #define UnaryRangeJSONIndexCompareNotEqual(cmp)               \
@@ -862,6 +872,26 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
         }                                                     \
         return (cmp);                                         \
     } while (false)
+#define UnaryRangeJSONIndexCompareNotEqualWithArrayIndex(cmp) \
+    do {                                                      \
+        auto array = json.array_at(offset, size);             \
+        if (array.error()) {                                  \
+            return false;                                     \
+        }                                                     \
+        auto value = array.at_pointer(arrayIndex);            \
+        if (value.error()) {                                  \
+            return false;                                     \
+        }                                                     \
+        auto x = value.get<GetType>();                        \
+        if (x.error()) {                                      \
+            if constexpr (std::is_same_v<GetType, int64_t>) { \
+                auto x = value.get<double>();                 \
+                return x.error() || (cmp);                    \
+            }                                                 \
+        }                                                     \
+        return (cmp);                                         \
+    } while (false)
+
     ExprValueType val = GetValueFromProto<ExprValueType>(expr_->val_);
     auto op_type = expr_->op_type_;
     if (cached_index_chunk_id_ != 0) {
@@ -964,15 +994,26 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                         }
                         return !CompareTwoJsonArray(array.value(), val);
                     } else {
-                        UnaryRangeJSONIndexCompareNotEqual(
-                            ExprValueType(x.value()) != val);
+                        if (!arrayIndex.empty()) {
+                            UnaryRangeJSONIndexCompareNotEqualWithArrayIndex(
+                                ExprValueType(x.value()) != val);
+                        } else {
+                            UnaryRangeJSONIndexCompareNotEqual(
+                                ExprValueType(x.value()) != val);
+                        }
                     }
                 case proto::plan::PrefixMatch:
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         return false;
                     } else {
-                        UnaryRangeJSONIndexCompare(milvus::query::Match(
-                            ExprValueType(x.value()), val, op_type));
+                        if (!arrayIndex.empty()) {
+                            UnaryRangeJSONIndexCompareWithArrayIndex(
+                                milvus::query::Match(
+                                    ExprValueType(x.value()), val, op_type));
+                        } else {
+                            UnaryRangeJSONIndexCompare(milvus::query::Match(
+                                ExprValueType(x.value()), val, op_type));
+                        }
                     }
                 case proto::plan::Match:
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
@@ -981,8 +1022,13 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                         PatternMatchTranslator translator;
                         auto regex_pattern = translator(val);
                         RegexMatcher matcher(regex_pattern);
-                        UnaryRangeJSONIndexCompare(
-                            matcher(ExprValueType(x.value())));
+                        if (!arrayIndex.empty()) {
+                            UnaryRangeJSONIndexCompareWithArrayIndex(
+                                matcher(ExprValueType(x.value())));
+                        } else {
+                            UnaryRangeJSONIndexCompare(
+                                matcher(ExprValueType(x.value())));
+                        }
                     }
                 default:
                     return false;

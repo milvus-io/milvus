@@ -502,9 +502,7 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
-    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
-                               ? active_count_ - current_data_chunk_pos_
-                               : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     std::unordered_set<ValueType> term_set;

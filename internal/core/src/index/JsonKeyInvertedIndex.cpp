@@ -245,8 +245,14 @@ JsonKeyInvertedIndex::BuildWithFieldData(
     AssertInfo(schema_.data_type() == proto::schema::DataType::JSON,
                "schema data type is {}",
                schema_.data_type());
+    BuildWithFieldData(field_datas, schema_.nullable());
+}
+
+void
+JsonKeyInvertedIndex::BuildWithFieldData(
+    const std::vector<FieldDataPtr>& field_datas, bool nullable) {
     int64_t offset = 0;
-    if (schema_.nullable()) {
+    if (nullable) {
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
             for (int i = 0; i < n; i++) {

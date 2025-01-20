@@ -386,8 +386,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecTextMatch();
 
-    size_t
-    FindFirstDigitPosition(const std::string& str);
+    std::pair<std::string, std::string>
+    SplitAtFirstSlashDigit(std::string input);
 
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;

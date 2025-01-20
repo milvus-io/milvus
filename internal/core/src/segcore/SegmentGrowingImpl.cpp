@@ -312,6 +312,15 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
             index->Reload();
         }
 
+        // build json match index
+        if (field_meta.enable_jsonIndex()) {
+            auto index = GetJsonKeyIndex(field_id);
+            index->BuildWithFieldData(field_data,field_meta.is_nullable());
+            index->Commit();
+            // Reload reader so that the index can be read immediately
+            index->Reload();
+        }
+
         // update the mem size
         stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
 
@@ -946,8 +955,7 @@ SegmentGrowingImpl::CreateJSONIndex(FieldId field_id) {
     AssertInfo(IsJsonDataType(field_meta.get_data_type()),
                "cannot create json index on non-json type");
     std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
-    std::unique_ptr<index::JsonKeyInvertedIndex> index;
-    index = std::make_unique<index::JsonKeyInvertedIndex>(
+    auto index = std::make_unique<index::JsonKeyInvertedIndex>(
         JSON_INDEX_COMMIT_INTERVAL, unique_id.c_str());
 
     index->Commit();
