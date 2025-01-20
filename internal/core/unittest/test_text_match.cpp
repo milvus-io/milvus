@@ -161,9 +161,13 @@ TEST(TextMatch, GrowingNaive) {
     auto schema = GenTestSchema();
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
     std::vector<std::string> raw_str = {"football, basketball, pingpang",
-                                        "swimming, football"};
+                                        "asdddd",
+                                        "asddfff",
+                                        "swimming, football",
+                                        "wwddda",
+                                        "ddwwwdd"};
 
-    int64_t N = 2;
+    int64_t N = 6;
     uint64_t seed = 19190504;
     auto raw_data = DataGen(schema, N, seed);
     auto str_col = raw_data.raw_->mutable_fields_data()

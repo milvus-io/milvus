@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/antlr4-go/antlr/v4"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
@@ -519,6 +521,8 @@ func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) inter
 		return err
 	}
 
+	log.Info("debug_for_sample: random sample", zap.Float64("factor", sample_factor))
+
 	if expr := ctx.Expr(); expr != nil {
 		parsed_expr, ok := expr.Accept(v).(*ExprWithType)
 		if !ok {
@@ -529,10 +533,10 @@ func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) inter
 		}
 		return &ExprWithType{
 			expr: &planpb.Expr{
-				Expr: &planpb.Expr_SampleExpr{
-					SampleExpr: &planpb.SampleExpr{
+				Expr: &planpb.Expr_RandomSampleExpr{
+					RandomSampleExpr: &planpb.RandomSampleExpr{
 						SampleFactor: float32(sample_factor),
-						Expr:         parsed_expr.expr,
+						Child:        parsed_expr.expr,
 					},
 				},
 			},
@@ -542,13 +546,14 @@ func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) inter
 
 	return &ExprWithType{
 		expr: &planpb.Expr{
-			Expr: &planpb.Expr_SampleExpr{
-				SampleExpr: &planpb.SampleExpr{
+			Expr: &planpb.Expr_RandomSampleExpr{
+				RandomSampleExpr: &planpb.RandomSampleExpr{
 					SampleFactor: float32(sample_factor),
-					Expr:         nil,
+					Child:        nil,
 				},
 			},
 		},
+		dataType: schemapb.DataType_Bool,
 	}
 }
 

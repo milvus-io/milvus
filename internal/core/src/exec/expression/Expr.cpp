@@ -48,6 +48,8 @@ ExprSet::Eval(int32_t begin,
     results.resize(exprs_.size());
 
     for (size_t i = begin; i < end; ++i) {
+        LOG_INFO("debug_for_sample: starts to eval, expr {}",
+                 exprs_[i]->get_name());
         exprs_[i]->Eval(context, results[i]);
     }
 }

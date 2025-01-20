@@ -90,6 +90,7 @@ func TestExpr_Term(t *testing.T) {
 	assert.NoError(t, err)
 
 	exprStrs := []string{
+		`Int64Field % 3 == 1`,
 		`BoolField in [true, false]`,
 		`Int8Field in [1, 2]`,
 		`Int16Field in [3, 4]`,

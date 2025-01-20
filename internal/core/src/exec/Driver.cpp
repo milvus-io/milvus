@@ -27,6 +27,7 @@
 #include "exec/operator/MvccNode.h"
 #include "exec/operator/Operator.h"
 #include "exec/operator/VectorSearchNode.h"
+#include "exec/operator/RandomSampleNode.h"
 #include "exec/operator/GroupByNode.h"
 #include "exec/Task.h"
 
@@ -83,6 +84,11 @@ DriverFactory::CreateDriver(std::unique_ptr<DriverContext> ctx,
                            plannode)) {
             operators.push_back(
                 std::make_unique<PhyGroupByNode>(id, ctx.get(), groupbynode));
+        } else if (auto samplenode =
+                       std::dynamic_pointer_cast<const plan::RandomSampleNode>(
+                           plannode)) {
+            operators.push_back(std::make_unique<PhyRandomSampleNode>(
+                id, ctx.get(), samplenode));
         }
         // TODO: add more operators
     }
@@ -206,6 +212,8 @@ Driver::RunInternal(std::shared_ptr<Driver>& self,
         for (;;) {
             for (int32_t i = num_operators - 1; i >= 0; --i) {
                 auto op = operators_[i].get();
+                LOG_INFO(
+                    "debug_for_sample: exec op {}, idx {}", op->ToString(), i);
 
                 current_operator_index_ = i;
                 CALL_OPERATOR(
@@ -351,6 +359,7 @@ SplitPlan(const std::shared_ptr<const plan::PlanNode>& plannode,
                 driver_factories);
         }
     }
+    LOG_INFO("debug_for_sample: add plannode {}", plannode->ToString());
     current_plannodes->push_back(plannode);
 }
 
@@ -361,11 +370,13 @@ LocalPlanner::Plan(
     std::vector<std::unique_ptr<DriverFactory>>* driver_factories,
     const QueryConfig& config,
     uint32_t max_drivers) {
+    LOG_INFO("debug_for_sample: start split plan");
     SplitPlan(fragment.plan_node_,
               nullptr,
               nullptr,
               MakeConsumerSupplier(consumer_supplier),
               driver_factories);
+    LOG_INFO("debug_for_sample: end split plan");
 
     (*driver_factories)[0]->is_output_driver_ = true;
 
