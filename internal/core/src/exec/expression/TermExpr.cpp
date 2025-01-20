@@ -566,7 +566,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(OffsetVector* input) {
                                        std::string_view,
                                        ValueType>;
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id)) {
+    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
         return ExecJsonInVariableByKeyIndex<ValueType>();
     }
 

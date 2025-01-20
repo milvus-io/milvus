@@ -99,10 +99,6 @@ InitMmapManager(CMmapConfig c_mmap_config) {
         mmap_config.growing_enable_mmap = c_mmap_config.growing_enable_mmap;
         mmap_config.scalar_index_enable_mmap =
             c_mmap_config.scalar_index_enable_mmap;
-        mmap_config.json_index_memory_budget =
-            c_mmap_config.json_index_memory_budget;
-        mmap_config.json_index_commit_interval =
-            c_mmap_config.json_index_commit_interval;
         milvus::storage::MmapManager::GetInstance().Init(mmap_config);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

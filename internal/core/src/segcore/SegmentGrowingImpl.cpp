@@ -23,6 +23,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/Types.h"
+#include "common/Common.h"
 #include "fmt/format.h"
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
@@ -945,17 +946,10 @@ SegmentGrowingImpl::CreateJSONIndex(FieldId field_id) {
     AssertInfo(IsJsonDataType(field_meta.get_data_type()),
                "cannot create json index on non-json type");
     std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
-    auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
     std::unique_ptr<index::JsonKeyInvertedIndex> index;
-    if (!cfg.GetScalarIndexEnableMmap()) {
-        index = std::make_unique<index::JsonKeyInvertedIndex>(
-            cfg.GetJSONIndexCommitInterval(), unique_id.c_str());
-    } else {
-        index = std::make_unique<index::JsonKeyInvertedIndex>(
-            cfg.GetJSONIndexCommitInterval(),
-            unique_id.c_str(),
-            cfg.GetMmapPath());
-    }
+    index = std::make_unique<index::JsonKeyInvertedIndex>(
+        JSON_INDEX_COMMIT_INTERVAL, unique_id.c_str());
+
     index->Commit();
     index->CreateReader();
 

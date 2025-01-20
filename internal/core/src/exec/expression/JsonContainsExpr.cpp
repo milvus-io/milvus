@@ -248,7 +248,7 @@ PhyJsonContainsFilterExpr::ExecJsonContains(OffsetVector* input) {
                            ExprValueType>;
 
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id)) {
+    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
         return ExecJsonContainsByKeyIndex<ExprValueType>();
     }
 
@@ -406,7 +406,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsArray(OffsetVector* input) {
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id)) {
+    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
         return ExecJsonContainsArrayByKeyIndex();
     }
     auto real_batch_size =
@@ -654,7 +654,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(OffsetVector* input) {
                            ExprValueType>;
 
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id)) {
+    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
         return ExecJsonContainsAllByKeyIndex<ExprValueType>();
     }
     auto real_batch_size =
@@ -817,7 +817,7 @@ VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(
     OffsetVector* input) {
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id)) {
+    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
         return ExecJsonContainsAllWithDiffTypeByKeyIndex();
     }
     auto real_batch_size =
@@ -1100,7 +1100,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(OffsetVector* input) {
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id)) {
+    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
         return ExecJsonContainsAllArrayByKeyIndex();
     }
     auto real_batch_size =
@@ -1271,7 +1271,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(OffsetVector* input) {
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id)) {
+    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
         return ExecJsonContainsWithDiffTypeByKeyIndex();
     }
     auto real_batch_size =

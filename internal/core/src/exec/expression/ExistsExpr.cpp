@@ -43,7 +43,7 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 VectorPtr
 PhyExistsFilterExpr::EvalJsonExistsForDataSegment(OffsetVector* input) {
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id)) {
+    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
         return EvalJsonExistsForDataSegmentForIndex();
     }
     auto real_batch_size =

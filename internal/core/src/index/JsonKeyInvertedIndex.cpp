@@ -151,15 +151,8 @@ JsonKeyInvertedIndex::JsonKeyInvertedIndex(
         std::string field_name =
             std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
         d_type_ = TantivyDataType::Keyword;
-        auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
-            field_name.c_str(),
-            d_type_,
-            path_.c_str(),
-            inverted_index_single_segment_,
-            false,
-            1,
-            cfg.GetJSONIndexMemoryBudget());
+            field_name.c_str(), d_type_, path_.c_str(), false, false);
     }
 }
 
@@ -169,7 +162,7 @@ JsonKeyInvertedIndex::JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
       last_commit_time_(stdclock::now()) {
     d_type_ = TantivyDataType::Keyword;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        unique_id, d_type_, "", inverted_index_single_segment_, true);
+        unique_id, d_type_, "", false, true);
 }
 
 JsonKeyInvertedIndex::JsonKeyInvertedIndex(int64_t commit_interval_in_ms,

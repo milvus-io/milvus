@@ -413,6 +413,8 @@ queryNode:
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     multipleChunkedEnable: true # Enable multiple chunked search
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
+    jsonIndexMemoryBudgetInTantivy: 64 # the memory budget for the JSON index In Tantivy
+    jsonIndexCommitInterval: 200 # the commit interval for the JSON index to commit
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -438,8 +440,6 @@ queryNode:
     growingMmapEnabled: false
     fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
     maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
-    jsonIndexMemoryBudgetInTantivy: 64 # the memory budget for the JSON index In Tantivy
-    jsonIndexCommitInterval: 200 # the commit interval for the JSON index to commit
   lazyload:
     enabled: false # Enable lazyload for loading data
     waitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve

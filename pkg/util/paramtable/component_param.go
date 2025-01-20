@@ -2513,8 +2513,6 @@ type queryNodeConfig struct {
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
 	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
-	JSONIndexMemoryBudgetInTantivy      ParamItem `refreshable:"false"`
-	JSONIndexCommitInterval             ParamItem `refreshable:"false"`
 
 	LazyLoadEnabled                      ParamItem `refreshable:"false"`
 	LazyLoadWaitTimeout                  ParamItem `refreshable:"true"`
@@ -2584,6 +2582,10 @@ type queryNodeConfig struct {
 
 	// worker
 	WorkerPoolingSize ParamItem `refreshable:"false"`
+
+	// Json Key Index
+	JSONIndexMemoryBudgetInTantivy ParamItem `refreshable:"false"`
+	JSONIndexCommitInterval        ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2885,24 +2887,6 @@ However, this optimization may come at the cost of a slight decrease in query la
 		Export:       true,
 	}
 	p.MaxMmapDiskPercentageForMmapManager.Init(base.mgr)
-
-	p.JSONIndexMemoryBudgetInTantivy = ParamItem{
-		Key:          "queryNode.mmap.jsonIndexMemoryBudgetInTantivy",
-		Version:      "2.5.0",
-		DefaultValue: "64",
-		Doc:          "the memory budget for the JSON index In Tantivy",
-		Export:       true,
-	}
-	p.JSONIndexMemoryBudgetInTantivy.Init(base.mgr)
-
-	p.JSONIndexCommitInterval = ParamItem{
-		Key:          "queryNode.mmap.jsonIndexCommitInterval",
-		Version:      "2.5.0",
-		DefaultValue: "200",
-		Doc:          "the commit interval for the JSON index to commit",
-		Export:       true,
-	}
-	p.JSONIndexCommitInterval.Init(base.mgr)
 
 	p.LazyLoadEnabled = ParamItem{
 		Key:          "queryNode.lazyload.enabled",
@@ -3260,6 +3244,24 @@ user-task-polling:
 		Doc:          "expr eval batch size for getnext interface",
 	}
 	p.ExprEvalBatchSize.Init(base.mgr)
+
+	p.JSONIndexMemoryBudgetInTantivy = ParamItem{
+		Key:          "queryNode.segcore.jsonIndexMemoryBudgetInTantivy",
+		Version:      "2.5.0",
+		DefaultValue: "64",
+		Doc:          "the memory budget for the JSON index In Tantivy",
+		Export:       true,
+	}
+	p.JSONIndexMemoryBudgetInTantivy.Init(base.mgr)
+
+	p.JSONIndexCommitInterval = ParamItem{
+		Key:          "queryNode.segcore.jsonIndexCommitInterval",
+		Version:      "2.5.0",
+		DefaultValue: "200",
+		Doc:          "the commit interval for the JSON index to commit",
+		Export:       true,
+	}
+	p.JSONIndexCommitInterval.Init(base.mgr)
 
 	p.CleanExcludeSegInterval = ParamItem{
 		Key:          "queryCoord.cleanExcludeSegmentInterval",

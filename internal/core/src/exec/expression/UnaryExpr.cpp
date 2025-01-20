@@ -555,7 +555,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
                            ExprValueType>;
 
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id)) {
+    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
         return ExecRangeVisitorImplJsonForIndex<ExprValueType>();
     }
 
@@ -837,19 +837,17 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
         return (cmp);                                         \
     } while (false)
 
-#define UnaryRangeJSONIndexCompareWithArrayIndex(cmp)          \
-    do {                                                       \
-        auto array1 = json.at<std::string_view>(offset, size); \
-        value_result<simdjson::dom::array> array;              \
-        array = json.array_at(offset, size);                   \
-        if (array.error()) {                                   \
-            return false;                                      \
-        }                                                      \
-        auto x = array.at_pointer(arrayIndex);                 \
-        if (x.error()) {                                       \
-            return false;                                      \
-        }                                                      \
-        return (cmp);                                          \
+#define UnaryRangeJSONIndexCompareWithArrayIndex(cmp) \
+    do {                                              \
+        auto array = json.array_at(offset, size);     \
+        if (array.error()) {                          \
+            return false;                             \
+        }                                             \
+        auto x = array.at_pointer(arrayIndex);        \
+        if (x.error()) {                              \
+            return false;                             \
+        }                                             \
+        return (cmp);                                 \
     } while (false)
 
 #define UnaryRangeJSONIndexCompareNotEqual(cmp)               \
@@ -973,25 +971,18 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         return false;
                     } else {
-                        auto x = json.at<GetType>(offset, size);
-                        if (x.error()) {
-                            return false;
-                        }
-                        return milvus::query::Match(
-                            ExprValueType(x.value()), val, op_type);
+                        UnaryRangeJSONIndexCompare(milvus::query::Match(
+                            ExprValueType(x.value()), val, op_type));
                     }
                 case proto::plan::Match:
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         return false;
                     } else {
-                        auto x = json.at<GetType>(offset, size);
-                        if (x.error()) {
-                            return false;
-                        }
                         PatternMatchTranslator translator;
                         auto regex_pattern = translator(val);
                         RegexMatcher matcher(regex_pattern);
-                        return matcher(ExprValueType(x.value()));
+                        UnaryRangeJSONIndexCompare(
+                            matcher(ExprValueType(x.value())));
                     }
                 default:
                     return false;
