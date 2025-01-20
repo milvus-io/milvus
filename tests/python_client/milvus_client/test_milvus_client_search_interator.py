@@ -42,13 +42,14 @@ class TestMilvusClientSearchInteratorInValid(TestMilvusClientV2Base):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/39045")
+    # @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/39045")
     def test_milvus_client_search_iterator_using_mul_db(self, search_params):
         """
         target: test search iterator(high level api) case about mul db
         method: create connection, collection, insert and search iterator
         expected: search iterator error after switch to another db
         """
+        batch_size = 20
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         my_db = cf.gen_unique_str(prefix)
@@ -75,21 +76,23 @@ class TestMilvusClientSearchInteratorInValid(TestMilvusClientV2Base):
         # 5. search_iterator
         vectors_to_search = rng.random((1, default_dim))
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, search_params=search_params,
-                              use_mul_db=True, another_db=my_db,
-                              check_task=CheckTasks.err_res,
-                              check_items={})
+        error_msg = "alias or database may have been changed"
+        self.search_iterator(client, collection_name, vectors_to_search, batch_size, search_params=search_params,
+                             use_mul_db=True, another_db=my_db,
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={ct.err_code: 1, ct.err_msg: error_msg})
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/39087")
+    # @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/39087")
     def test_milvus_client_search_iterator_alias_different_col(self, search_params):
         """
         target: test search iterator(high level api) case about alias
         method: create connection, collection, insert and search iterator
         expected: search iterator error after alter alias
         """
+        batch_size = 20
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         collection_name_new = cf.gen_unique_str(prefix)
@@ -114,11 +117,11 @@ class TestMilvusClientSearchInteratorInValid(TestMilvusClientV2Base):
         # 3. search_iterator
         vectors_to_search = rng.random((1, default_dim))
         search_params = {"params": search_params}
-        error_msg = ""  # todo
-        self.search_interator(client, alias, vectors_to_search, search_params=search_params,
-                              use_alias=True, another_collection=collection_name_new,
-                              check_task=CheckTasks.err_res,
-                              check_items={ct.err_code: 1, ct.err_msg: error_msg})
+        error_msg = "alias or database may have been changed"
+        self.search_iterator(client, alias, vectors_to_search, batch_size, search_params=search_params,
+                             use_alias=True, another_collection=collection_name_new,
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={ct.err_code: 1, ct.err_msg: error_msg})
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
         self.release_collection(client, collection_name_new)
@@ -153,6 +156,7 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         method: create connection, collection, insert and search iterator
         expected: search iterator successfully
         """
+        batch_size = 20
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         self.using_database(client, "default")
@@ -175,12 +179,12 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, search_params=search_params,
-                              check_task=CheckTasks.check_search_iterator,
-                              check_items={"enable_milvus_client_api": True,
-                                           "nq": len(vectors_to_search),
-                                           "ids": insert_ids,
-                                           "limit": default_limit})
+        self.search_iterator(client, collection_name, vectors_to_search, batch_size, search_params=search_params,
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={"enable_milvus_client_api": True,
+                                          "nq": len(vectors_to_search),
+                                          "ids": insert_ids,
+                                          "limit": default_limit})
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -192,6 +196,7 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         method: create connection, collection, insert and search iterator
         expected: search iterator successfully
         """
+        batch_size = 20
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         dim = 128
@@ -218,13 +223,13 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, filter="nullable_field>=10",
-                              search_params=search_params,
-                              check_task=CheckTasks.check_search_iterator,
-                              check_items={"enable_milvus_client_api": True,
-                                           "nq": len(vectors_to_search),
-                                           "ids": insert_ids,
-                                           "limit": default_limit})
+        self.search_iterator(client, collection_name, vectors_to_search, batch_size, filter="nullable_field>=10",
+                             search_params=search_params,
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={"enable_milvus_client_api": True,
+                                          "nq": len(vectors_to_search),
+                                          "ids": insert_ids,
+                                          "limit": default_limit})
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
 
@@ -235,6 +240,7 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         method: create connection, collection, insert and search iterator
         expected: search iterator successfully
         """
+        batch_size = 20
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
@@ -260,12 +266,12 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
         search_params = {"params": search_params}
-        self.search_interator(client, new_name, vectors_to_search, search_params=search_params,
-                              check_task=CheckTasks.check_search_iterator,
-                              check_items={"enable_milvus_client_api": True,
-                                           "nq": len(vectors_to_search),
-                                           "ids": insert_ids,
-                                           "limit": default_limit})
+        self.search_iterator(client, new_name, vectors_to_search, batch_size, search_params=search_params,
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={"enable_milvus_client_api": True,
+                                          "nq": len(vectors_to_search),
+                                          "ids": insert_ids,
+                                          "limit": default_limit})
         self.release_collection(client, new_name)
         self.drop_collection(client, new_name)
 
@@ -276,6 +282,7 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         method: create connection, collection, insert and search iterator
         expected: search iterator successfully
         """
+        batch_size = 20
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
@@ -296,12 +303,12 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, search_params=search_params,
-                              check_task=CheckTasks.check_search_iterator,
-                              check_items={"enable_milvus_client_api": True,
-                                           "nq": len(vectors_to_search),
-                                           "ids": insert_ids,
-                                           "limit": default_limit})
+        self.search_iterator(client, collection_name, vectors_to_search, batch_size, search_params=search_params,
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={"enable_milvus_client_api": True,
+                                          "nq": len(vectors_to_search),
+                                          "ids": insert_ids,
+                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_search_iterator_string(self, search_params):
@@ -310,6 +317,7 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         method: create connection, collection, insert and search iterator
         expected: search iterator successfully
         """
+        batch_size = 20
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
@@ -324,11 +332,11 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         # 3. search_iterator
         vectors_to_search = rng.random((1, default_dim))
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, search_params=search_params,
-                              check_task=CheckTasks.check_search_iterator,
-                              check_items={"enable_milvus_client_api": True,
-                                           "nq": len(vectors_to_search),
-                                           "limit": default_limit})
+        self.search_iterator(client, collection_name, vectors_to_search, batch_size, search_params=search_params,
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={"enable_milvus_client_api": True,
+                                          "nq": len(vectors_to_search),
+                                          "limit": default_limit})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -355,13 +363,13 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         # 3. search_iterator
         vectors_to_search = rng.random((1, default_dim))
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
-                              limit=default_limit, search_params=search_params,
-                              output_fields=[default_primary_key_field_name],
-                              check_task=CheckTasks.check_search_iterator,
-                              check_items={"enable_milvus_client_api": True,
-                                           "nq": len(vectors_to_search),
-                                           "limit": default_limit})
+        self.search_iterator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
+                             limit=default_limit, search_params=search_params,
+                             output_fields=[default_primary_key_field_name],
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={"enable_milvus_client_api": True,
+                                          "nq": len(vectors_to_search),
+                                          "limit": default_limit})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -389,13 +397,13 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, default_dim))
         search_params = {"params": search_params}
         search_params.update({"metric_type": metric_type})
-        self.search_interator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
-                              limit=default_limit, search_params=search_params,
-                              output_fields=[default_primary_key_field_name],
-                              check_task=CheckTasks.check_search_iterator,
-                              check_items={"enable_milvus_client_api": True,
-                                           "nq": len(vectors_to_search),
-                                           "limit": default_limit})
+        self.search_iterator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
+                             limit=default_limit, search_params=search_params,
+                             output_fields=[default_primary_key_field_name],
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={"enable_milvus_client_api": True,
+                                          "nq": len(vectors_to_search),
+                                          "limit": default_limit})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -426,13 +434,13 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
                 insert_ids.remove(insert_id)
         limit = default_nb - delete_num
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
-                              search_params=search_params, limit=default_nb,
-                              check_task=CheckTasks.check_search_iterator,
-                              check_items={"enable_milvus_client_api": True,
-                                           "nq": len(vectors_to_search),
-                                           "ids": insert_ids,
-                                           "limit": limit})
+        self.search_iterator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
+                             search_params=search_params, limit=default_nb,
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={"enable_milvus_client_api": True,
+                                          "nq": len(vectors_to_search),
+                                          "ids": insert_ids,
+                                          "limit": limit})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -463,13 +471,13 @@ class TestMilvusClientSearchInteratorValid(TestMilvusClientV2Base):
                 insert_ids.remove(insert_id)
         limit = default_nb - delete_num
         search_params = {"params": search_params}
-        self.search_interator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
-                              search_params=search_params, limit=default_nb,
-                              check_task=CheckTasks.check_search_iterator,
-                              check_items={"enable_milvus_client_api": True,
-                                           "nq": len(vectors_to_search),
-                                           "ids": insert_ids,
-                                           "limit": limit})
+        self.search_iterator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
+                             search_params=search_params, limit=default_nb,
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={"enable_milvus_client_api": True,
+                                          "nq": len(vectors_to_search),
+                                          "ids": insert_ids,
+                                          "limit": limit})
         # 5. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
