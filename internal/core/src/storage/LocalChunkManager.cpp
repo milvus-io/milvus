@@ -215,7 +215,16 @@ void
 LocalChunkManager::RemoveDir(const std::string& dir) {
     boost::filesystem::path dirPath(dir);
     boost::system::error_code err;
-    boost::filesystem::remove_all(dirPath, err);
+    int retry_times = 10;
+    // workaround for concurrent tantivy reload and remove dir
+    while (retry_times > 0) {
+        boost::filesystem::remove_all(dirPath, err);
+        if (err) {
+            retry_times--;
+            continue;
+        }
+        break;
+    }
     if (err) {
         PanicInfo(FileWriteFailed,
                   fmt::format("remove local directory:{} failed, error: {}",
