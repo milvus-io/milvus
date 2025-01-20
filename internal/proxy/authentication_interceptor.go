@@ -106,6 +106,7 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 				metrics.UserRPCCounter.WithLabelValues(user).Inc()
 				userToken := fmt.Sprintf("%s%s%s", user, util.CredentialSeperator, util.PasswordHolder)
 				md[strings.ToLower(util.HeaderAuthorize)] = []string{crypto.Base64Encode(userToken)}
+				md[util.HeaderToken] = []string{rawToken}
 				ctx = metadata.NewIncomingContext(ctx, md)
 			} else {
 				// username+password authentication
