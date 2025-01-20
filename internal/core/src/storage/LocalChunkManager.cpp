@@ -15,6 +15,8 @@
 // limitations under the License.
 
 #include "LocalChunkManager.h"
+#include "boost/algorithm/string/join.hpp"
+#include "boost/filesystem/directory.hpp"
 #include "log/Log.h"
 
 #include <boost/filesystem.hpp>
@@ -215,12 +217,30 @@ void
 LocalChunkManager::RemoveDir(const std::string& dir) {
     boost::filesystem::path dirPath(dir);
     boost::system::error_code err;
-    boost::filesystem::remove_all(dirPath, err);
+    int retry_times = 10;
+    // workaround for concurrent tantivy reload and remove dir
+    while (retry_times > 0) {
+        boost::filesystem::remove_all(dirPath, err);
+        if (err) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            retry_times--;
+            continue;
+        }
+        break;
+    }
     if (err) {
+        boost::filesystem::directory_iterator it(dirPath);
+        std::vector<std::string> paths;
+        for (; it != boost::filesystem::directory_iterator(); ++it) {
+            paths.push_back(it->path().string());
+        }
+        std::string files = boost::algorithm::join(paths, ", ");
         PanicInfo(FileWriteFailed,
-                  fmt::format("remove local directory:{} failed, error: {}",
-                              dir,
-                              err.message()));
+                  fmt::format(
+                      "remove local directory:{} failed, error: {}, files: {}",
+                      dir,
+                      err.message(),
+                      files));
     }
 }
 
