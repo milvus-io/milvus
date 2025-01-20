@@ -220,6 +220,7 @@ LocalChunkManager::RemoveDir(const std::string& dir) {
     while (retry_times > 0) {
         boost::filesystem::remove_all(dirPath, err);
         if (err) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
             retry_times--;
             continue;
         }
