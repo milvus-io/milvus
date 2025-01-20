@@ -579,6 +579,7 @@ class TestMilvusClientSearchIteratorInvalid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
         self.search_iterator(client, collection_name, vectors_to_search,
+                            batch_size=5,
                             check_task=CheckTasks.err_res,
                             check_items=error)
     
@@ -612,6 +613,7 @@ class TestMilvusClientSearchIteratorInvalid(TestMilvusClientV2Base):
         error = {ct.err_code: 1,
                  ct.err_msg: f"search_iterator_v2 does not support processing multiple vectors simultaneously"}
         self.search_iterator(client, collection_name, data,
+                        batch_size=5,
                         check_task=CheckTasks.err_res,
                         check_items=error)
         self.release_collection(client, collection_name)
@@ -647,6 +649,7 @@ class TestMilvusClientSearchIteratorInvalid(TestMilvusClientV2Base):
         error = {ct.err_code: 1,
                  ct.err_msg: f"The vector data for search cannot be empty"}
         self.search_iterator(client, collection_name, data,
+                        batch_size=5,
                         check_task=CheckTasks.err_res,
                         check_items=error)
         self.release_collection(client, collection_name)
@@ -764,6 +767,7 @@ class TestMilvusClientSearchIteratorInvalid(TestMilvusClientV2Base):
         error = {ct.err_code: 1,
                  ct.err_msg: f"`limit` value {limit} is illegal"}
         self.search_iterator(client, collection_name, vectors_to_search,
+                        batch_size=5,
                         limit=limit,
                         check_task=CheckTasks.err_res,
                         check_items=error)
