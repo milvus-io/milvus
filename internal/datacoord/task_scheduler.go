@@ -73,7 +73,7 @@ func newTaskScheduler(
 	indexEngineVersionManager IndexEngineVersionManager,
 	handler Handler,
 	allocator allocator.Allocator,
-) *taskScheduler {
+) (*taskScheduler, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	ts := &taskScheduler{
@@ -93,8 +93,10 @@ func newTaskScheduler(
 		allocator:                 allocator,
 		taskStats:                 expirable.NewLRU[UniqueID, Task](64, nil, time.Minute*15),
 	}
-	ts.reloadFromMeta()
-	return ts
+	if err := ts.reloadFromMeta(); err != nil {
+		return nil, err
+	}
+	return ts, nil
 }
 
 func (s *taskScheduler) Start() {
@@ -108,7 +110,7 @@ func (s *taskScheduler) Stop() {
 	s.wg.Wait()
 }
 
-func (s *taskScheduler) reloadFromMeta() {
+func (s *taskScheduler) reloadFromMeta() error {
 	segments := s.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
 		for _, segIndex := range s.meta.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.ID) {
@@ -153,6 +155,18 @@ func (s *taskScheduler) reloadFromMeta() {
 	allStatsTasks := s.meta.statsTaskMeta.GetAllTasks()
 	for taskID, t := range allStatsTasks {
 		if t.GetState() != indexpb.JobState_JobStateFinished && t.GetState() != indexpb.JobState_JobStateFailed {
+			if t.GetState() == indexpb.JobState_JobStateInProgress || t.GetState() == indexpb.JobState_JobStateRetry {
+				exist, canDo := s.meta.CheckAndSetSegmentsCompacting(context.TODO(), []UniqueID{t.GetSegmentID()})
+				if !exist || !canDo {
+					log.Ctx(s.ctx).Warn("segment is not exist or is compacting, skip stats, but this should not have happened, try to remove the stats task",
+						zap.Int64("taskID", taskID), zap.Bool("exist", exist), zap.Bool("canDo", canDo))
+					if err := s.meta.statsTaskMeta.DropStatsTask(t.GetTaskID()); err != nil {
+						log.Ctx(s.ctx).Warn("remove stats task failed, there will become a leaked task", zap.Int64("taskID", taskID), zap.Error(err))
+						return err
+					}
+					continue
+				}
+			}
 			s.enqueue(&statsTask{
 				taskID:          taskID,
 				segmentID:       t.GetSegmentID(),
@@ -170,6 +184,7 @@ func (s *taskScheduler) reloadFromMeta() {
 			})
 		}
 	}
+	return nil
 }
 
 // notify is an unblocked notify function

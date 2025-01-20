@@ -382,7 +382,10 @@ func (s *Server) initDataCoord() error {
 	}
 	log.Info("init service discovery done")
 
-	s.initTaskScheduler(storageCli)
+	if err := s.initTaskScheduler(storageCli); err != nil {
+		log.Warn("init task scheduler failed", zap.Error(err))
+		return err
+	}
 	log.Info("init task scheduler done")
 
 	s.initJobManager()
@@ -683,10 +686,12 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
 }
 
-func (s *Server) initTaskScheduler(manager storage.ChunkManager) {
+func (s *Server) initTaskScheduler(manager storage.ChunkManager) error {
+	var err error
 	if s.taskScheduler == nil {
-		s.taskScheduler = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler, s.allocator)
+		s.taskScheduler, err = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler, s.allocator)
 	}
+	return err
 }
 
 func (s *Server) initJobManager() {
