@@ -284,7 +284,7 @@ func NewScheduler(ctx context.Context,
 		channelTasks:     NewConcurrentMap[replicaChannelIndex, Task](),
 		processQueue:     newTaskQueue(),
 		waitQueue:        newTaskQueue(),
-		taskStats:        expirable.NewLRU[UniqueID, Task](64, nil, time.Minute*15),
+		taskStats:        expirable.NewLRU[UniqueID, Task](256, nil, time.Minute*15),
 		segmentTaskDelta: NewExecutingTaskDelta(),
 		channelTaskDelta: NewExecutingTaskDelta(),
 	}
