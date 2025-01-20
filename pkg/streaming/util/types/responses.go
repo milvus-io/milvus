@@ -9,8 +9,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
+type BroadcastAckRequest struct {
+	// BroadcastID is the broadcast id of the ack request.
+	BroadcastID uint64
+	VChannel    string
+}
+
 // BroadcastAppendResult is the result of broadcast append operation.
 type BroadcastAppendResult struct {
+	BroadcastID   uint64                   // the broadcast id of the append operation.
 	AppendResults map[string]*AppendResult // make the channel name to the append result.
 }
 

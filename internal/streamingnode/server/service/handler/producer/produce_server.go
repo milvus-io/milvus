@@ -176,7 +176,7 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 	p.appendWG.Add(1)
 	p.logger.Debug("recv produce message from client", zap.Int64("requestID", req.RequestId))
 	// Update metrics.
-	msg := message.NewMutableMessage(req.GetMessage().GetPayload(), req.GetMessage().GetProperties())
+	msg := message.NewMutableMessageBeforeAppend(req.GetMessage().GetPayload(), req.GetMessage().GetProperties())
 	metricsGuard := p.metrics.StartProduce()
 	if err := p.validateMessage(msg); err != nil {
 		p.logger.Warn("produce message validation failed", zap.Int64("requestID", req.RequestId), zap.Error(err))

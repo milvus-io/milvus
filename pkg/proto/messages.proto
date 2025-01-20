@@ -243,7 +243,51 @@ enum TxnState {
     TxnRollbacked = 6;
 }
 
-// VChannels is a layout to represent the virtual channels for broadcast.
-message VChannels {
-    repeated string vchannels = 1;
+// RMQMessageLayout is the layout of message for RMQ.
+message RMQMessageLayout {
+    bytes payload                  = 1;  // message body
+    map<string, string> properties = 2;  // message properties
+}
+
+// BroadcastHeader is the common header of broadcast message.
+message BroadcastHeader {
+    uint64 broadcast_id = 1;
+    repeated string vchannels = 2;
+    repeated ResourceKey Resource_keys = 3; // the resource key of the broadcast message.
+    // Once the broadcast is sent, the resource of resource key will be hold.
+    // New broadcast message with the same resource key will be rejected.
+    // And the user can watch the resource key to known when the resource is released.
+}
+
+// ResourceDomain is the domain of resource hold.
+enum ResourceDomain {
+    ResourceDomainUnknown = 0; // should never be used.
+    ResourceDomainImportJobID = 1; // the domain of import job id.
+    ResourceDomainCollectionName = 2; // the domain of collection name.
+}
+
+// ResourceKey is the key for resource hold.
+// It's used to implement the resource acquirition mechanism for broadcast message.
+// The key should be a unique identifier of the resource for different domain.
+message ResourceKey {
+    ResourceDomain domain = 1;
+    string key = 2;
+}
+
+// BroadcastEvent is the event of broadcast message.
+message BroadcastEvent {
+    oneof event {
+        BroadcastResourceKeyAckAll resource_key_ack_all = 1;
+        BroadcastResourceKeyAckOne resource_key_ack_one = 2;
+    }
+}
+
+// The resource key is acked by all vchannels.
+message BroadcastResourceKeyAckAll {
+    messages.ResourceKey resource_key = 1;
+}
+
+// The resource key is acked by any vchannel.
+message BroadcastResourceKeyAckOne {
+    messages.ResourceKey resource_key = 1;
 }
