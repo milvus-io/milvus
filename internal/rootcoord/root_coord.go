@@ -2724,12 +2724,14 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 				})
 			})
 		}
-		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-			OpType: opType,
-			OpKey:  funcutil.PolicyForPrivileges(expandGrants),
-		}); err != nil {
-			log.Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
-			return nil, err
+		if len(expandGrants) > 0 {
+			if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+				OpType: opType,
+				OpKey:  funcutil.PolicyForPrivileges(expandGrants),
+			}); err != nil {
+				log.Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
+				return nil, err
+			}
 		}
 		return nil, nil
 	}))
