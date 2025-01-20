@@ -396,28 +396,9 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                         std::make_shared<ChunkedArrayColumn>(field_meta);
                     std::shared_ptr<milvus::ArrowDataWrapper> r;
                     while (data.arrow_reader_channel->pop(r)) {
-                        // for (auto i = 0; i < field_data->get_num_rows(); i++) {
-                        //     auto rawValue = field_data->RawValue(i);
-                        //     auto array =
-                        //         static_cast<const milvus::Array*>(rawValue);
-                        //     if (field_data->IsNullable()) {
-                        //         var_column->Append(*array,
-                        //                            field_data->is_valid(i));
-                        //     } else {
-                        //         var_column->Append(*array);
-                        //     }
-
-                        //     // we stores the offset for each array element, so there is a additional uint64_t for each array element
-                        //     field_data_size =
-                        //         array->byte_size() + sizeof(uint64_t);
-                        //     stats_.mem_size +=
-                        //         array->byte_size() + sizeof(uint64_t);
-                        // }
-
                         auto chunk = create_chunk(field_meta, 1, r->reader);
                         var_column->AddChunk(chunk);
                     }
-                    // var_column->Seal();
                     column = std::move(var_column);
                     break;
                 }

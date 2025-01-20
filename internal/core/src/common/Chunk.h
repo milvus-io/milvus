@@ -211,6 +211,7 @@ class ArrayChunk : public Chunk {
         }
         offsets_lens_ =
             reinterpret_cast<uint32_t*>(data + null_bitmap_bytes_num);
+        LOG_INFO("hc==, size of arrayChunk:{}, valid_size:{}", sizeof(*this), valid_.size());
     }
 
     ArrayView
@@ -251,6 +252,7 @@ class ArrayChunk : public Chunk {
         for(auto i = start_offset; i < end_offset; i++) {
             views.emplace_back(View(i));
         }
+        LOG_INFO("hc===Got ArrayViews from ArrayChunk, start_offset:{}, len:{}", start_offset, len);
         if (nullable_) {
             FixedVector<bool> res_valid(valid_.begin() + start_offset, valid_.begin() + end_offset);
             return {std::move(views), std::move(res_valid)};

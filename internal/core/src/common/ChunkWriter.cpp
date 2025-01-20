@@ -160,6 +160,7 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     auto is_string = IsStringDataType(element_type_);
     std::vector<Array> arrays;
     std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
+
     for (auto batch : *data) {
         auto data = batch.ValueOrDie()->column(0);
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
@@ -182,6 +183,8 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
             size += null_bitmap_n;
         }
     }
+
+    auto finish_precompute = std::chrono::system_clock::now();
 
     // offsets + lens
     size += sizeof(uint32_t) * (row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
@@ -215,6 +218,7 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     if (offsets_num > 0) {
         offsets[offsets_num - 1] = offset_start_pos;
     }
+    auto finish_offsets = std::chrono::system_clock::now();
 
     for (int i = 0; i < offsets.size(); i++) {
         if (i == offsets.size() - 1) {
@@ -224,6 +228,7 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
         target_->write(&offsets[i], sizeof(uint32_t));
         target_->write(&lens[i], sizeof(uint32_t));
     }
+    auto finish_write_offsets = std::chrono::system_clock::now();
 
     for (auto& arr : arrays) {
         if (is_string) {
@@ -232,10 +237,28 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
         }
         target_->write(arr.data(), arr.byte_size());
     }
-    auto create_chunk_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now() - start_create_chunk
-    ).count();
-    LOG_INFO("hc===create_array_chunk_duration:{} ms", create_chunk_ms);
+    auto finish_write_arrays = std::chrono::system_clock::now();
+
+    auto precompute_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            finish_precompute - start_create_chunk).count();
+    auto compute_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            finish_offsets - finish_precompute).count();
+    auto offsets_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            finish_write_offsets - finish_offsets).count();
+    auto write_array_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            finish_write_arrays - finish_write_offsets).count();
+    auto chunk_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            finish_write_arrays - start_create_chunk).count();
+    LOG_INFO("hc===precompute_ms:{} ms, "
+             "compute_ms:{}, "
+             "offsets_ms:{}, "
+             "write_array_ms:{},"
+             "chunk_duration:{}",
+             precompute_ms,
+             compute_ms,
+             offsets_ms,
+             write_array_ms,
+             chunk_duration);
 }
 
 std::shared_ptr<Chunk>
