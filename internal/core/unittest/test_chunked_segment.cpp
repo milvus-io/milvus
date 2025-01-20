@@ -344,6 +344,7 @@ TEST_P(TestChunkSegment, TestTermExpr) {
 }
 
 TEST_P(TestChunkSegment, TestCompareExpr) {
+    srand(time(NULL));
     bool pk_is_string = GetParam();
     DataType pk_data_type = pk_is_string ? DataType::VARCHAR : DataType::INT64;
     auto expr = std::make_shared<expr::CompareExpr>(
@@ -375,6 +376,11 @@ TEST_P(TestChunkSegment, TestCompareExpr) {
         milvus::proto::schema::Int64);
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
     file_manager_ctx.fieldDataMeta.field_id = fid.get();
+    milvus::storage::IndexMeta index_meta;
+    index_meta.field_id = fid.get();
+    index_meta.build_id = rand();
+    index_meta.index_version = rand();
+    file_manager_ctx.indexMeta = index_meta;
     index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::INT64;
     create_index_info.index_type = index::INVERTED_INDEX_TYPE;
