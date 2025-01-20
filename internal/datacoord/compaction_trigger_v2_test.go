@@ -100,7 +100,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 			return nil
 		}).Return(nil).Once()
 	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Maybe()
-	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewIDLE, levelZeroView)
+	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewIDLE, levelZeroViews)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
@@ -140,7 +140,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 			return nil
 		}).Return(nil).Once()
 	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(19530, nil).Maybe()
-	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewChange, levelZeroView)
+	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewChange, levelZeroViews)
 }
 
 func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {

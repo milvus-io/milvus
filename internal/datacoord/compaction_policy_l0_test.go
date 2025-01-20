@@ -72,7 +72,7 @@ func (s *L0CompactionPolicySuite) TestActiveToIdle() {
 
 	<-time.After(3 * time.Second)
 
-	for range 3 {
+	for i := 0; i < 3; i++ {
 		gotViews, err := s.l0_policy.Trigger()
 		s.NoError(err)
 		s.NotNil(gotViews)
