@@ -840,7 +840,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateBinlogsOperator(1, nil, nil, nil),
+			UpdateBinlogsOperator(1, nil, nil, nil, nil),
 		)
 		assert.NoError(t, err)
 
