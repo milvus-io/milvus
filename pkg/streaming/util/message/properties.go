@@ -10,7 +10,7 @@ const (
 	messageLastConfirmed                    = "_lc"  // message last confirmed message id.
 	messageLastConfirmedIDSameWithMessageID = "_lcs" // message last confirmed message id is the same with message id.
 	messageVChannel                         = "_vc"  // message virtual channel.
-	messageVChannels                        = "_vcs" // message virtual channels for broadcast message.
+	messageBroadcastHeader                  = "_bh"  // message broadcast header.
 	messageHeader                           = "_h"   // specialized message header.
 	messageTxnContext                       = "_tx"  // transaction context.
 )
