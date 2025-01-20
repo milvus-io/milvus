@@ -573,7 +573,7 @@ class TestMilvusClientSearchIteratorInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str("nonexistent")
         error = {ct.err_code: 100,
-                 ct.err_msg: f"collection not found[database=default]"
+                 ct.err_msg: f"can't find collection[database=default]"
                              f"[collection={collection_name}]"}
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, default_dim))
