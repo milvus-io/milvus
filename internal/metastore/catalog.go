@@ -218,7 +218,7 @@ type StreamingCoordCataLog interface {
 	// SaveBroadcastTask save the broadcast task to metastore.
 	// Make the task recoverable after restart.
 	// When broadcast task is done, it will be removed from metastore.
-	SaveBroadcastTask(ctx context.Context, task *streamingpb.BroadcastTask) error
+	SaveBroadcastTask(ctx context.Context, broadcastID uint64, task *streamingpb.BroadcastTask) error
 }
 
 // StreamingNodeCataLog is the interface for streamingnode catalog

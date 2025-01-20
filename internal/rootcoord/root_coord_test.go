@@ -31,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
@@ -1358,6 +1359,7 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 	randVal := rand.Int()
 	paramtable.Init()
 	registry.ResetRegistration()
+	coordclient.ResetRegistration()
 	Params.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
 	// Need to reset global etcd to follow new path
 	kvfactory.CloseEtcdClient()
@@ -1419,6 +1421,7 @@ func TestRootcoord_DisableActiveStandby(t *testing.T) {
 	randVal := rand.Int()
 	paramtable.Init()
 	registry.ResetRegistration()
+	coordclient.ResetRegistration()
 	Params.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
 	// Need to reset global etcd to follow new path
 	kvfactory.CloseEtcdClient()

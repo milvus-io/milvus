@@ -27,7 +27,7 @@ func (_m *MockWALAccesser) EXPECT() *MockWALAccesser_Expecter {
 }
 
 // AppendMessages provides a mock function with given fields: ctx, msgs
-func (_m *MockWALAccesser) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) streaming.AppendResponses {
+func (_m *MockWALAccesser) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
 	_va := make([]interface{}, len(msgs))
 	for _i := range msgs {
 		_va[_i] = msgs[_i]
@@ -41,11 +41,11 @@ func (_m *MockWALAccesser) AppendMessages(ctx context.Context, msgs ...message.M
 		panic("no return value specified for AppendMessages")
 	}
 
-	var r0 streaming.AppendResponses
-	if rf, ok := ret.Get(0).(func(context.Context, ...message.MutableMessage) streaming.AppendResponses); ok {
+	var r0 types.AppendResponses
+	if rf, ok := ret.Get(0).(func(context.Context, ...message.MutableMessage) types.AppendResponses); ok {
 		r0 = rf(ctx, msgs...)
 	} else {
-		r0 = ret.Get(0).(streaming.AppendResponses)
+		r0 = ret.Get(0).(types.AppendResponses)
 	}
 
 	return r0
@@ -77,18 +77,18 @@ func (_c *MockWALAccesser_AppendMessages_Call) Run(run func(ctx context.Context,
 	return _c
 }
 
-func (_c *MockWALAccesser_AppendMessages_Call) Return(_a0 streaming.AppendResponses) *MockWALAccesser_AppendMessages_Call {
+func (_c *MockWALAccesser_AppendMessages_Call) Return(_a0 types.AppendResponses) *MockWALAccesser_AppendMessages_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWALAccesser_AppendMessages_Call) RunAndReturn(run func(context.Context, ...message.MutableMessage) streaming.AppendResponses) *MockWALAccesser_AppendMessages_Call {
+func (_c *MockWALAccesser_AppendMessages_Call) RunAndReturn(run func(context.Context, ...message.MutableMessage) types.AppendResponses) *MockWALAccesser_AppendMessages_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // AppendMessagesWithOption provides a mock function with given fields: ctx, opts, msgs
-func (_m *MockWALAccesser) AppendMessagesWithOption(ctx context.Context, opts streaming.AppendOption, msgs ...message.MutableMessage) streaming.AppendResponses {
+func (_m *MockWALAccesser) AppendMessagesWithOption(ctx context.Context, opts streaming.AppendOption, msgs ...message.MutableMessage) types.AppendResponses {
 	_va := make([]interface{}, len(msgs))
 	for _i := range msgs {
 		_va[_i] = msgs[_i]
@@ -102,11 +102,11 @@ func (_m *MockWALAccesser) AppendMessagesWithOption(ctx context.Context, opts st
 		panic("no return value specified for AppendMessagesWithOption")
 	}
 
-	var r0 streaming.AppendResponses
-	if rf, ok := ret.Get(0).(func(context.Context, streaming.AppendOption, ...message.MutableMessage) streaming.AppendResponses); ok {
+	var r0 types.AppendResponses
+	if rf, ok := ret.Get(0).(func(context.Context, streaming.AppendOption, ...message.MutableMessage) types.AppendResponses); ok {
 		r0 = rf(ctx, opts, msgs...)
 	} else {
-		r0 = ret.Get(0).(streaming.AppendResponses)
+		r0 = ret.Get(0).(types.AppendResponses)
 	}
 
 	return r0
@@ -139,71 +139,59 @@ func (_c *MockWALAccesser_AppendMessagesWithOption_Call) Run(run func(ctx contex
 	return _c
 }
 
-func (_c *MockWALAccesser_AppendMessagesWithOption_Call) Return(_a0 streaming.AppendResponses) *MockWALAccesser_AppendMessagesWithOption_Call {
+func (_c *MockWALAccesser_AppendMessagesWithOption_Call) Return(_a0 types.AppendResponses) *MockWALAccesser_AppendMessagesWithOption_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWALAccesser_AppendMessagesWithOption_Call) RunAndReturn(run func(context.Context, streaming.AppendOption, ...message.MutableMessage) streaming.AppendResponses) *MockWALAccesser_AppendMessagesWithOption_Call {
+func (_c *MockWALAccesser_AppendMessagesWithOption_Call) RunAndReturn(run func(context.Context, streaming.AppendOption, ...message.MutableMessage) types.AppendResponses) *MockWALAccesser_AppendMessagesWithOption_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// BroadcastAppend provides a mock function with given fields: ctx, msg
-func (_m *MockWALAccesser) BroadcastAppend(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-	ret := _m.Called(ctx, msg)
+// Broadcast provides a mock function with given fields:
+func (_m *MockWALAccesser) Broadcast() streaming.Broadcast {
+	ret := _m.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for BroadcastAppend")
+		panic("no return value specified for Broadcast")
 	}
 
-	var r0 *types.BroadcastAppendResult
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)); ok {
-		return rf(ctx, msg)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, message.BroadcastMutableMessage) *types.BroadcastAppendResult); ok {
-		r0 = rf(ctx, msg)
+	var r0 streaming.Broadcast
+	if rf, ok := ret.Get(0).(func() streaming.Broadcast); ok {
+		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.BroadcastAppendResult)
+			r0 = ret.Get(0).(streaming.Broadcast)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, message.BroadcastMutableMessage) error); ok {
-		r1 = rf(ctx, msg)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
+	return r0
 }
 
-// MockWALAccesser_BroadcastAppend_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BroadcastAppend'
-type MockWALAccesser_BroadcastAppend_Call struct {
+// MockWALAccesser_Broadcast_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Broadcast'
+type MockWALAccesser_Broadcast_Call struct {
 	*mock.Call
 }
 
-// BroadcastAppend is a helper method to define mock.On call
-//   - ctx context.Context
-//   - msg message.BroadcastMutableMessage
-func (_e *MockWALAccesser_Expecter) BroadcastAppend(ctx interface{}, msg interface{}) *MockWALAccesser_BroadcastAppend_Call {
-	return &MockWALAccesser_BroadcastAppend_Call{Call: _e.mock.On("BroadcastAppend", ctx, msg)}
+// Broadcast is a helper method to define mock.On call
+func (_e *MockWALAccesser_Expecter) Broadcast() *MockWALAccesser_Broadcast_Call {
+	return &MockWALAccesser_Broadcast_Call{Call: _e.mock.On("Broadcast")}
 }
 
-func (_c *MockWALAccesser_BroadcastAppend_Call) Run(run func(ctx context.Context, msg message.BroadcastMutableMessage)) *MockWALAccesser_BroadcastAppend_Call {
+func (_c *MockWALAccesser_Broadcast_Call) Run(run func()) *MockWALAccesser_Broadcast_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(message.BroadcastMutableMessage))
+		run()
 	})
 	return _c
 }
 
-func (_c *MockWALAccesser_BroadcastAppend_Call) Return(_a0 *types.BroadcastAppendResult, _a1 error) *MockWALAccesser_BroadcastAppend_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockWALAccesser_Broadcast_Call) Return(_a0 streaming.Broadcast) *MockWALAccesser_Broadcast_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWALAccesser_BroadcastAppend_Call) RunAndReturn(run func(context.Context, message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)) *MockWALAccesser_BroadcastAppend_Call {
+func (_c *MockWALAccesser_Broadcast_Call) RunAndReturn(run func() streaming.Broadcast) *MockWALAccesser_Broadcast_Call {
 	_c.Call.Return(run)
 	return _c
 }

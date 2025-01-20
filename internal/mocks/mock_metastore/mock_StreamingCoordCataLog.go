@@ -139,17 +139,17 @@ func (_c *MockStreamingCoordCataLog_ListPChannel_Call) RunAndReturn(run func(con
 	return _c
 }
 
-// SaveBroadcastTask provides a mock function with given fields: ctx, task
-func (_m *MockStreamingCoordCataLog) SaveBroadcastTask(ctx context.Context, task *streamingpb.BroadcastTask) error {
-	ret := _m.Called(ctx, task)
+// SaveBroadcastTask provides a mock function with given fields: ctx, broadcastID, task
+func (_m *MockStreamingCoordCataLog) SaveBroadcastTask(ctx context.Context, broadcastID uint64, task *streamingpb.BroadcastTask) error {
+	ret := _m.Called(ctx, broadcastID, task)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SaveBroadcastTask")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.BroadcastTask) error); ok {
-		r0 = rf(ctx, task)
+	if rf, ok := ret.Get(0).(func(context.Context, uint64, *streamingpb.BroadcastTask) error); ok {
+		r0 = rf(ctx, broadcastID, task)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -164,14 +164,15 @@ type MockStreamingCoordCataLog_SaveBroadcastTask_Call struct {
 
 // SaveBroadcastTask is a helper method to define mock.On call
 //   - ctx context.Context
+//   - broadcastID uint64
 //   - task *streamingpb.BroadcastTask
-func (_e *MockStreamingCoordCataLog_Expecter) SaveBroadcastTask(ctx interface{}, task interface{}) *MockStreamingCoordCataLog_SaveBroadcastTask_Call {
-	return &MockStreamingCoordCataLog_SaveBroadcastTask_Call{Call: _e.mock.On("SaveBroadcastTask", ctx, task)}
+func (_e *MockStreamingCoordCataLog_Expecter) SaveBroadcastTask(ctx interface{}, broadcastID interface{}, task interface{}) *MockStreamingCoordCataLog_SaveBroadcastTask_Call {
+	return &MockStreamingCoordCataLog_SaveBroadcastTask_Call{Call: _e.mock.On("SaveBroadcastTask", ctx, broadcastID, task)}
 }
 
-func (_c *MockStreamingCoordCataLog_SaveBroadcastTask_Call) Run(run func(ctx context.Context, task *streamingpb.BroadcastTask)) *MockStreamingCoordCataLog_SaveBroadcastTask_Call {
+func (_c *MockStreamingCoordCataLog_SaveBroadcastTask_Call) Run(run func(ctx context.Context, broadcastID uint64, task *streamingpb.BroadcastTask)) *MockStreamingCoordCataLog_SaveBroadcastTask_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*streamingpb.BroadcastTask))
+		run(args[0].(context.Context), args[1].(uint64), args[2].(*streamingpb.BroadcastTask))
 	})
 	return _c
 }
@@ -181,7 +182,7 @@ func (_c *MockStreamingCoordCataLog_SaveBroadcastTask_Call) Return(_a0 error) *M
 	return _c
 }
 
-func (_c *MockStreamingCoordCataLog_SaveBroadcastTask_Call) RunAndReturn(run func(context.Context, *streamingpb.BroadcastTask) error) *MockStreamingCoordCataLog_SaveBroadcastTask_Call {
+func (_c *MockStreamingCoordCataLog_SaveBroadcastTask_Call) RunAndReturn(run func(context.Context, uint64, *streamingpb.BroadcastTask) error) *MockStreamingCoordCataLog_SaveBroadcastTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
