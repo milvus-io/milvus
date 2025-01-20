@@ -1853,3 +1853,64 @@ func WrapErrorToResponse(err error) *milvuspb.BoolResponse {
 		Status: merr.Status(err),
 	}
 }
+
+// after 2.5.2, all parameters of search_params can be written into one layer
+// no more parameters will be written searchParams.params
+// to ensure compatibility and milvus can still get a json format parameter
+// try to write all the parameters under searchParams into searchParams.Params
+func generateSearchParams(reqSearchParams map[string]interface{}) ([]*commonpb.KeyValuePair, error) {
+	var searchParams []*commonpb.KeyValuePair
+	var params interface{}
+	if val, ok := reqSearchParams[Params]; ok {
+		params = val
+	}
+
+	paramsMap := make(map[string]interface{})
+	if params != nil {
+		var ok bool
+		if paramsMap, ok = params.(map[string]interface{}); !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("searchParams.params must be a dict")
+		}
+	}
+
+	deepEqual := func(value1, value2 interface{}) bool {
+		// try to handle 10.0==10
+		switch v1 := value1.(type) {
+		case float64:
+			if v2, ok := value2.(int); ok {
+				return v1 == float64(v2)
+			}
+		case int:
+			if v2, ok := value2.(float64); ok {
+				return float64(v1) == v2
+			}
+		}
+		return reflect.DeepEqual(value1, value2)
+	}
+
+	for key, value := range reqSearchParams {
+		if val, ok := paramsMap[key]; ok {
+			if !deepEqual(val, value) {
+				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("ambiguous parameter: %s, in search_param: %v, in search_param.params: %v", key, value, val))
+			}
+		} else if key != Params {
+			paramsMap[key] = value
+		}
+	}
+
+	bs, _ := json.Marshal(paramsMap)
+	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: Params, Value: string(bs)})
+
+	for key, value := range reqSearchParams {
+		if key != Params {
+			// for compatibility
+			if key == "ignoreGrowing" {
+				key = common.IgnoreGrowing
+			}
+			searchParams = append(searchParams, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
+		}
+	}
+	// need to exposure ParamRoundDecimal in req?
+	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
+	return searchParams, nil
+}
