@@ -53,6 +53,7 @@ var (
 	buildID        = UniqueID(600)
 	nodeID         = UniqueID(700)
 	partitionKeyID = UniqueID(800)
+	statsTaskID    = UniqueID(900)
 )
 
 func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
@@ -1923,4 +1924,109 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		resetMetaFunc()
 	})
 	scheduler_isolation.Stop()
+}
+
+func (s *taskSchedulerSuite) Test_reload() {
+	s.Run("normal case", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		workerManager := session.NewMockWorkerManager(s.T())
+		handler := NewNMockHandler(s.T())
+		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)),
+			withStatsTaskMeta(&statsTaskMeta{
+				ctx:     context.Background(),
+				catalog: catalog,
+				tasks: map[int64]*indexpb.StatsTask{
+					statsTaskID: {
+						CollectionID:    10000,
+						PartitionID:     10001,
+						SegmentID:       1000,
+						InsertChannel:   "",
+						TaskID:          statsTaskID,
+						Version:         1,
+						NodeID:          1,
+						State:           indexpb.JobState_JobStateInProgress,
+						FailReason:      "",
+						TargetSegmentID: 2000,
+						SubJobType:      indexpb.StatsSubJob_Sort,
+						CanRecycle:      false,
+					},
+				},
+			}))
+		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil)
+		s.NotNil(scheduler)
+		s.True(mt.segments.segments[1000].isCompacting)
+		task, ok := scheduler.tasks[statsTaskID]
+		s.True(ok)
+		s.NotNil(task)
+	})
+
+	s.Run("segment is compacting", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil)
+		workerManager := session.NewMockWorkerManager(s.T())
+		handler := NewNMockHandler(s.T())
+		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)),
+			withStatsTaskMeta(&statsTaskMeta{
+				ctx:     context.Background(),
+				catalog: catalog,
+				tasks: map[int64]*indexpb.StatsTask{
+					statsTaskID: {
+						CollectionID:    10000,
+						PartitionID:     10001,
+						SegmentID:       1000,
+						InsertChannel:   "",
+						TaskID:          statsTaskID,
+						Version:         1,
+						NodeID:          1,
+						State:           indexpb.JobState_JobStateInProgress,
+						FailReason:      "",
+						TargetSegmentID: 2000,
+						SubJobType:      indexpb.StatsSubJob_Sort,
+						CanRecycle:      false,
+					},
+				},
+			}))
+		mt.segments.segments[1000].isCompacting = true
+		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil)
+		s.NotNil(scheduler)
+		s.True(mt.segments.segments[1000].isCompacting)
+		task, ok := scheduler.tasks[statsTaskID]
+		s.False(ok)
+		s.Nil(task)
+	})
+
+	s.Run("drop task failed", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		workerManager := session.NewMockWorkerManager(s.T())
+		handler := NewNMockHandler(s.T())
+		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)),
+			withStatsTaskMeta(&statsTaskMeta{
+				ctx:     context.Background(),
+				catalog: catalog,
+				tasks: map[int64]*indexpb.StatsTask{
+					statsTaskID: {
+						CollectionID:    10000,
+						PartitionID:     10001,
+						SegmentID:       1000,
+						InsertChannel:   "",
+						TaskID:          statsTaskID,
+						Version:         1,
+						NodeID:          1,
+						State:           indexpb.JobState_JobStateInProgress,
+						FailReason:      "",
+						TargetSegmentID: 2000,
+						SubJobType:      indexpb.StatsSubJob_Sort,
+						CanRecycle:      false,
+					},
+				},
+			}))
+		mt.segments.segments[1000].isCompacting = true
+		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil)
+		s.NotNil(scheduler)
+		s.True(mt.segments.segments[1000].isCompacting)
+		task, ok := scheduler.tasks[statsTaskID]
+		s.True(ok)
+		s.Equal(indexpb.JobState_JobStateFailed, task.GetState())
+	})
 }
