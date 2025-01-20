@@ -260,7 +260,9 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	}
 
 	log.Ctx(ctx).Info("index task pre check successfully", zap.Int64("taskID", it.GetTaskID()),
-		zap.Int64("segID", segment.GetID()))
+		zap.Int64("segID", segment.GetID()),
+		zap.Int32("CurrentIndexVersion", it.req.GetCurrentIndexVersion()),
+		zap.Int32("CurrentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()))
 	return true
 }
 

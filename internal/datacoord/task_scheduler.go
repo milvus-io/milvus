@@ -73,7 +73,7 @@ func newTaskScheduler(
 	indexEngineVersionManager IndexEngineVersionManager,
 	handler Handler,
 	allocator allocator.Allocator,
-) (*taskScheduler, error) {
+) *taskScheduler {
 	ctx, cancel := context.WithCancel(ctx)
 
 	ts := &taskScheduler{
@@ -93,10 +93,8 @@ func newTaskScheduler(
 		allocator:                 allocator,
 		taskStats:                 expirable.NewLRU[UniqueID, Task](64, nil, time.Minute*15),
 	}
-	if err := ts.reloadFromMeta(); err != nil {
-		return nil, err
-	}
-	return ts, nil
+	ts.reloadFromMeta()
+	return ts
 }
 
 func (s *taskScheduler) Start() {
@@ -110,7 +108,7 @@ func (s *taskScheduler) Stop() {
 	s.wg.Wait()
 }
 
-func (s *taskScheduler) reloadFromMeta() error {
+func (s *taskScheduler) reloadFromMeta() {
 	segments := s.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
 		for _, segIndex := range s.meta.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.ID) {
@@ -160,11 +158,13 @@ func (s *taskScheduler) reloadFromMeta() error {
 				if !exist || !canDo {
 					log.Ctx(s.ctx).Warn("segment is not exist or is compacting, skip stats, but this should not have happened, try to remove the stats task",
 						zap.Int64("taskID", taskID), zap.Bool("exist", exist), zap.Bool("canDo", canDo))
-					if err := s.meta.statsTaskMeta.DropStatsTask(t.GetTaskID()); err != nil {
-						log.Ctx(s.ctx).Warn("remove stats task failed, there will become a leaked task", zap.Int64("taskID", taskID), zap.Error(err))
-						return err
+					err := s.meta.statsTaskMeta.DropStatsTask(t.GetTaskID())
+					if err == nil {
+						continue
 					}
-					continue
+					log.Ctx(s.ctx).Warn("remove stats task failed, set to failed", zap.Int64("taskID", taskID), zap.Error(err))
+					t.State = indexpb.JobState_JobStateFailed
+					t.FailReason = "segment is nto exist or is compacting"
 				}
 			}
 			s.enqueue(&statsTask{
@@ -184,7 +184,6 @@ func (s *taskScheduler) reloadFromMeta() error {
 			})
 		}
 	}
-	return nil
 }
 
 // notify is an unblocked notify function
@@ -480,6 +479,7 @@ func (s *taskScheduler) processInProgress(task Task) bool {
 	if exist {
 		task.QueryResult(s.ctx, client)
 		if task.GetState() == indexpb.JobState_JobStateFinished || task.GetState() == indexpb.JobState_JobStateFailed {
+			task.ResetTask(s.meta)
 			return s.processFinished(task)
 		}
 		return true

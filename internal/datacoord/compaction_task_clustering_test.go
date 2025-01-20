@@ -85,8 +85,7 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 
 	s.mockSessionMgr = session.NewMockDataNodeManager(s.T())
 
-	scheduler, err := newTaskScheduler(ctx, s.meta, nil, cm, newIndexEngineVersionManager(), nil, nil)
-	s.NoError(err)
+	scheduler := newTaskScheduler(ctx, s.meta, nil, cm, newIndexEngineVersionManager(), nil, nil)
 	s.analyzeScheduler = scheduler
 }
 
