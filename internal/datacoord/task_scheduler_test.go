@@ -853,8 +853,7 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	cm := mocks.NewChunkManager(s.T())
 	cm.EXPECT().RootPath().Return("root")
 
-	scheduler, err := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil)
-	s.NoError(err)
+	scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil)
 	s.Equal(9, len(scheduler.tasks))
 	s.Equal(indexpb.JobState_JobStateInit, scheduler.tasks[1].GetState())
 	s.Equal(indexpb.JobState_JobStateInProgress, scheduler.tasks[2].GetState())
@@ -1001,8 +1000,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 			}))
 
 		handler := NewNMockHandler(s.T())
-		scheduler, err := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler, nil)
-		s.NoError(err)
+		scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler, nil)
 
 		mt.segments.DropSegment(1000)
 		scheduler.scheduleDuration = s.duration
@@ -1062,11 +1060,10 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 			},
 		}, nil)
 
-		scheduler, err := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler, nil)
-		s.NoError(err)
+		scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler, nil)
 
 		// remove task in meta
-		err = scheduler.meta.analyzeMeta.DropAnalyzeTask(context.TODO(), 1)
+		err := scheduler.meta.analyzeMeta.DropAnalyzeTask(context.TODO(), 1)
 		s.NoError(err)
 		err = scheduler.meta.analyzeMeta.DropAnalyzeTask(context.TODO(), 2)
 		s.NoError(err)
@@ -1344,8 +1341,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		cm.EXPECT().RootPath().Return("ut-index")
 
 		handler := NewNMockHandler(s.T())
-		scheduler, err := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil)
-		s.NoError(err)
+		scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil)
 
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("True")
 		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("False")
@@ -1619,8 +1615,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 
 	paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 	defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
-	scheduler, err := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil)
-	s.NoError(err)
+	scheduler := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil)
 
 	waitTaskDoneFunc := func(sche *taskScheduler) {
 		for {
@@ -1859,8 +1854,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	handler_isolation := NewNMockHandler(s.T())
 	handler_isolation.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(isoCollInfo, nil)
 
-	scheduler_isolation, err := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler_isolation, nil)
-	s.NoError(err)
+	scheduler_isolation := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler_isolation, nil)
 	scheduler_isolation.Start()
 
 	s.Run("Submit partitionKeyIsolation is false when MV not enabled", func() {
@@ -1958,8 +1952,7 @@ func (s *taskSchedulerSuite) Test_reload() {
 					},
 				},
 			}))
-		scheduler, err := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil)
-		s.NoError(err)
+		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil)
 		s.NotNil(scheduler)
 		s.True(mt.segments.segments[1000].isCompacting)
 		task, ok := scheduler.tasks[statsTaskID]
@@ -1994,8 +1987,7 @@ func (s *taskSchedulerSuite) Test_reload() {
 				},
 			}))
 		mt.segments.segments[1000].isCompacting = true
-		scheduler, err := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil)
-		s.NoError(err)
+		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil)
 		s.NotNil(scheduler)
 		s.True(mt.segments.segments[1000].isCompacting)
 		task, ok := scheduler.tasks[statsTaskID]
@@ -2030,8 +2022,11 @@ func (s *taskSchedulerSuite) Test_reload() {
 				},
 			}))
 		mt.segments.segments[1000].isCompacting = true
-		scheduler, err := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil)
-		s.Error(err)
-		s.Nil(scheduler)
+		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil)
+		s.NotNil(scheduler)
+		s.True(mt.segments.segments[1000].isCompacting)
+		task, ok := scheduler.tasks[statsTaskID]
+		s.True(ok)
+		s.Equal(indexpb.JobState_JobStateFailed, task.GetState())
 	})
 }
