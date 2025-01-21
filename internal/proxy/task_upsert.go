@@ -306,7 +306,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	if it.schemaTimestamp != 0 {
 		if it.schemaTimestamp != colInfo.updateTimestamp {
 			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)
-			log.Warn("collection schema mismatch", zap.String("collectionName", collectionName), zap.Error(err))
+			log.Info("collection schema mismatch", zap.String("collectionName", collectionName), zap.Error(err))
 			return err
 		}
 	}
