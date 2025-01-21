@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <boost/lexical_cast.hpp>
@@ -61,9 +62,7 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     return schema;
 }
 
-const FieldMeta FieldMeta::RowIdMeta(FieldName("RowID"),
-                                     RowFieldID,
-                                     DataType::INT64,
-                                     false);
+const FieldMeta FieldMeta::RowIdMeta(
+    FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
 
 }  // namespace milvus

@@ -424,6 +424,10 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual bool
     is_mmap_field(FieldId field_id) const = 0;
 
+    virtual std::unique_ptr<DataArray>
+    bulk_subscript_not_exist_field(const milvus::FieldMeta& field_meta,
+                                   int64_t count) const;
+
  protected:
     // todo: use an Unified struct for all type in growing/seal segment to store data and valid_data.
     // internal API: return chunk_data in span

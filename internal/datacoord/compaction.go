@@ -683,6 +683,7 @@ func (c *compactionPlanHandler) enqueueCompaction(task *datapb.CompactionTask) e
 	return nil
 }
 
+// create compact task
 // set segments compacting, one segment can only participate one compactionTask
 func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) (CompactionTask, error) {
 	var task CompactionTask
