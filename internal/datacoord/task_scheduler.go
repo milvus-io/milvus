@@ -164,7 +164,7 @@ func (s *taskScheduler) reloadFromMeta() {
 					}
 					log.Ctx(s.ctx).Warn("remove stats task failed, set to failed", zap.Int64("taskID", taskID), zap.Error(err))
 					t.State = indexpb.JobState_JobStateFailed
-					t.FailReason = "segment is nto exist or is compacting"
+					t.FailReason = "segment is not exist or is compacting"
 				}
 			}
 			s.enqueue(&statsTask{
