@@ -2,6 +2,7 @@ package testcases
 
 import (
 	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -126,6 +127,11 @@ func TestInsertAllFieldsData(t *testing.T) {
 		flushTak, _ := mc.Flush(ctx, client.NewFlushOption(schema.CollectionName))
 		err := flushTak.Await(ctx)
 		common.CheckErr(t, err, true)
+
+		// check collection stats
+		stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(schema.CollectionName))
+		common.CheckErr(t, err, true)
+		require.Equal(t, map[string]string{common.RowCount: strconv.Itoa(common.DefaultNb)}, stats)
 	}
 }
 
@@ -587,6 +593,11 @@ func TestInsertDefaultRows(t *testing.T) {
 		common.CheckErr(t, errFlush, true)
 		errFlush = flushTask.Await(ctx)
 		common.CheckErr(t, errFlush, true)
+
+		// check collection stats
+		stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(schema.CollectionName))
+		common.CheckErr(t, err, true)
+		require.Equal(t, map[string]string{common.RowCount: strconv.Itoa(common.DefaultNb)}, stats)
 	}
 }
 
