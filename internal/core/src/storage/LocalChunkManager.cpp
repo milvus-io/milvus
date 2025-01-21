@@ -20,6 +20,7 @@
 #include <boost/system/error_code.hpp>
 #include <fstream>
 #include <sstream>
+#include <thread>
 
 #include "common/EasyAssert.h"
 #include "common/Exception.h"
