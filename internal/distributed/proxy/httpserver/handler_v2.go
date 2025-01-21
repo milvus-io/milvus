@@ -2525,7 +2525,7 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 			return nil, err
 		}
 	}
-	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/ImportV2", func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/Import", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ImportV2(reqCtx, req.(*internalpb.ImportRequest))
 	})
 	if err == nil {
