@@ -179,7 +179,7 @@ func (c *compactionPlanHandler) checkAndSetSegmentStating(segmentID int64) bool 
 		}
 	}
 	c.meta.SetSegmentStating(segmentID, true)
-	return false
+	return true
 }
 
 func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64) int {
