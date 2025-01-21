@@ -65,6 +65,8 @@ type CompactionMeta interface {
 	CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []int64) (bool, bool)
 	CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
 	CleanPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
+	CheckSegmentsStating(ctx context.Context, segmentID []UniqueID) (bool, bool)
+	SetSegmentStating(segmentID UniqueID, stating bool)
 
 	SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
 	DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
@@ -1446,6 +1448,31 @@ func (m *meta) SetLastFlushTime(segmentID UniqueID, t time.Time) {
 	m.Lock()
 	defer m.Unlock()
 	m.segments.SetFlushTime(segmentID, t)
+}
+
+func (m *meta) CheckSegmentsStating(ctx context.Context, segmentIDs []UniqueID) (exist bool, hasStating bool) {
+	m.RLock()
+	defer m.RUnlock()
+	exist = true
+	for _, segmentID := range segmentIDs {
+		seg := m.segments.GetSegment(segmentID)
+		if seg != nil {
+			if seg.isStating {
+				hasStating = true
+			}
+		} else {
+			exist = false
+			break
+		}
+	}
+	return exist, hasStating
+}
+
+func (m *meta) SetSegmentStating(segmentID UniqueID, stating bool) {
+	m.Lock()
+	defer m.Unlock()
+
+	m.segments.SetIsCompacting(segmentID, stating)
 }
 
 // SetSegmentCompacting sets compaction state for segment

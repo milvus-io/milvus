@@ -705,6 +705,7 @@ func (s *Server) initCompaction() {
 	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.meta, s.allocator, s.taskScheduler, s.handler)
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler, s.meta)
 	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
+	s.taskScheduler.setCompactionHandler(s.compactionHandler)
 }
 
 func (s *Server) stopCompaction() {

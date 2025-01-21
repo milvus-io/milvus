@@ -72,6 +72,10 @@ func (h *spyCompactionHandler) enqueueCompaction(task *datapb.CompactionTask) er
 	return err
 }
 
+func (h *spyCompactionHandler) checkAndSetSegmentStating(segmentID int64) bool {
+	return false
+}
+
 // isFull return true if the task pool is full
 func (h *spyCompactionHandler) isFull() bool {
 	return false
