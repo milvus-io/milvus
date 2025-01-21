@@ -83,6 +83,9 @@ TestVecIndex() {
     } else if (std::is_same_v<TraitType, milvus::BFloat16Vector>) {
         auto xb_data = dataset.template get_col<uint8_t>(milvus::FieldId(100));
         status = BuildBFloat16VecIndex(index, NB * DIM, xb_data.data());
+    } else if (std::is_same_v<TraitType, milvus::Int8Vector>) {
+        auto xb_data = dataset.template get_col<int8_t>(milvus::FieldId(100));
+        status = BuildInt8VecIndex(index, NB * DIM, xb_data.data());
     }
     ASSERT_EQ(milvus::Success, status.error_code);
 
@@ -111,6 +114,7 @@ TEST(VecIndex, All) {
     TestVecIndex<milvus::FloatVector>();
     TestVecIndex<milvus::Float16Vector>();
     TestVecIndex<milvus::BFloat16Vector>();
+    TestVecIndex<milvus::Int8Vector>();
 }
 
 TEST(CBoolIndexTest, All) {

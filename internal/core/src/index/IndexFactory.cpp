@@ -179,6 +179,16 @@ IndexFactory::VecIndexLoadResource(
                 knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
                     index_type, index_version, config);
             break;
+        case milvus::DataType::VECTOR_INT8:
+            resource = knowhere::IndexStaticFaced<
+                knowhere::int8>::EstimateLoadResource(index_type,
+                                                      index_version,
+                                                      index_size_gb,
+                                                      config);
+            has_raw_data =
+                knowhere::IndexStaticFaced<knowhere::int8>::HasRawData(
+                    index_type, index_version, config);
+            break;
         default:
             LOG_ERROR("invalid data type to estimate index load resource: {}",
                       field_type);
@@ -425,6 +435,9 @@ IndexFactory::CreateVectorIndex(
             case DataType::VECTOR_SPARSE_FLOAT: {
                 return std::make_unique<VectorDiskAnnIndex<float>>(
                     index_type, metric_type, version, file_manager_context);
+            }
+            case DataType::VECTOR_INT8: {
+                // TODO caiyd, not support yet
             }
             default:
                 PanicInfo(
