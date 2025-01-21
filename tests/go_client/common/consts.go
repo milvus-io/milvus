@@ -33,6 +33,9 @@ const (
 	DefaultFloatArrayField        = "floatArray"
 	DefaultDoubleArrayField       = "doubleArray"
 	DefaultVarcharArrayField      = "varcharArray"
+
+	DefaultFastPk     = "id"
+	DefaultFastVector = "vector"
 )
 
 // cost for test cases
@@ -79,8 +82,10 @@ const (
 	IndexStateRetry          index.IndexState = 5
 )
 
-// part database properties
+// properties
 const (
+	CollectionTTLSeconds     = "collection.ttl.seconds"
+	MmapEnabled              = "mmap.enabled"
 	DatabaseMaxCollections   = "database.max.collections"
 	DatabaseResourceGroups   = "database.resource_groups"
 	DatabaseReplicaNumber    = "database.replica.number"

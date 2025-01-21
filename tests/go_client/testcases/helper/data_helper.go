@@ -517,6 +517,9 @@ func GenColumnsBasedSchema(schema *entity.Schema, option *GenDataOption) ([]colu
 		if field.AutoID {
 			continue
 		}
+		if option.fieldName == "" {
+			option.fieldName = field.Name
+		}
 		if slices.Contains(GetBm25FunctionsOutputFields(schema), field.Name) {
 			continue
 		}
