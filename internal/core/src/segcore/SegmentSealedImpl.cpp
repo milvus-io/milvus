@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -321,6 +322,25 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
         auto parallel_degree = static_cast<uint64_t>(
             DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
         field_data_info.channel->set_capacity(parallel_degree * 2);
+
+        int total = 0;
+        for (int num : info.entries_nums) {
+            total += num;
+        }
+        if (total != info.row_count) {
+            AssertInfo(total <= info.row_count,
+                       "binlog number should less than row_count");
+            auto lack_num = info.row_count - total;
+            auto field_meta = get_schema()[field_id];
+            auto field_data = storage::CreateFieldData(
+                static_cast<DataType>(field_meta.get_data_type()),
+                true,
+                1,
+                lack_num);
+            field_data->FillFieldData(field_meta.default_value(), lack_num);
+            field_data_info.channel->push(field_data);
+        }
+        // field_data_info.channel.push();
         auto& pool =
             ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
         pool.Submit(
@@ -1033,8 +1053,8 @@ std::tuple<
                                                               MmapChunkDescriptorPtr&
                                                                   descriptor) {
     // For mmap mode, field_meta is unused, so just construct a fake field meta.
-    auto fm =
-        FieldMeta(FieldName(""), FieldId(0), milvus::DataType::NONE, false);
+    auto fm = FieldMeta(
+        FieldName(""), FieldId(0), milvus::DataType::NONE, false, std::nullopt);
     // TODO: add Load() interface for chunk cache when support retrieve_enable, make Read() raise error if cache miss
     auto column = cc->Read(data_path, descriptor, fm, true);
     cc->Prefetch(data_path);
@@ -1612,6 +1632,10 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
     // if count == 0, return empty data array
     if (count == 0) {
         return fill_with_empty(field_id, count);
+    }
+
+    if (fields_.find(field_id) == fields_.end()) {
+        return bulk_subscript_not_exist_field(field_meta, count);
     }
 
     if (HasIndex(field_id)) {

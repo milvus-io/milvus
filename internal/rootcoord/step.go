@@ -495,6 +495,44 @@ func (b *BroadcastAlteredCollectionStep) Desc() string {
 	return fmt.Sprintf("broadcast altered collection, collectionID: %d", b.req.CollectionID)
 }
 
+type AddFieldStep struct {
+	baseStep
+	oldColl  *model.Collection
+	newField []*model.Field
+	ts       Timestamp
+}
+
+func (a *AddFieldStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	newColl := a.oldColl.Clone()
+	newColl.Fields = append(newColl.Fields, a.newField...)
+	err := a.core.meta.AlterCollection(ctx, a.oldColl, newColl, a.ts)
+	return nil, err
+}
+
+func (a *AddFieldStep) Desc() string {
+	var fieldIDs []string
+	for _, field := range a.newField {
+		fieldIDs = append(fieldIDs, field.Name)
+	}
+	return fmt.Sprintf("add field, collectionID: %d, ts: %d", a.oldColl.CollectionID, a.ts)
+}
+
+type BroadcastAddFieldStep struct {
+	baseStep
+	req  *milvuspb.AddFieldRequest
+	core *Core
+}
+
+func (b *BroadcastAddFieldStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	// broadcast add field to DataCoord service
+	err := b.core.broker.BroadcastAddedField(ctx, b.req)
+	return nil, err
+}
+
+func (b *BroadcastAddFieldStep) Desc() string {
+	return fmt.Sprintf("broadcast altered collection, collectionID: %d", b.req.CollectionID)
+}
+
 type AlterDatabaseStep struct {
 	baseStep
 	oldDB *model.Database

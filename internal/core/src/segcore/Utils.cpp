@@ -924,7 +924,7 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
         channel->close(std::current_exception());
     }
 }
-
+// load here
 void
 LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                          FieldDataChannelPtr channel) {
