@@ -30,14 +30,7 @@ pushd $CPP_SRC_DIR
 ./run_clang_format.sh .
 popd
 
-if [[ $(uname -s) == "Darwin" ]]; then
-  if ! brew --prefix --installed grep >/dev/null 2>&1; then
-        brew install grep
-  fi
-  export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"
-fi
-
-check_result=$(git status | grep -E "*\.h|*\.hpp|*\.cc|*\.cpp")
+check_result=$(git status | grep -E "\.h\|\.hpp\|\.cc\|\.cpp")
 echo "check_result: $check_result"
 if test -z "$check_result"; then
   exit 0

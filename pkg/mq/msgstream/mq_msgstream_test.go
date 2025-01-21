@@ -708,6 +708,21 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 
+	replicatePack := MsgPack{}
+	replicatePack.Msgs = append(replicatePack.Msgs, &ReplicateMsg{
+		BaseMsg: BaseMsg{
+			BeginTimestamp: 0,
+			EndTimestamp:   0,
+			HashValues:     []uint32{100},
+		},
+		ReplicateMsg: &msgpb.ReplicateMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Replicate,
+				Timestamp: 100,
+			},
+		},
+	})
+
 	msgPack2 := MsgPack{}
 	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5))
 
@@ -719,6 +734,9 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
 	err = inputStream.Produce(ctx, &msgPack1)
+	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
+
+	err = inputStream.Produce(ctx, &replicatePack)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
 	_, err = inputStream.Broadcast(ctx, &msgPack2)

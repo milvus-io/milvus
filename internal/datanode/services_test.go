@@ -39,12 +39,12 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -329,6 +329,10 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 
 func (s *DataNodeServicesSuite) TestFlushSegments() {
 	dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-FlushSegments"
+	stream, err := s.node.factory.NewTtMsgStream(context.Background())
+	s.NoError(err)
+	s.NotNil(stream)
+	stream.AsProducer(context.Background(), []string{dmChannelName})
 	schema := &schemapb.CollectionSchema{
 		Name: "test_collection",
 		Fields: []*schemapb.FieldSchema{

@@ -292,12 +292,14 @@ func (node *DataNode) registerMetricsRequest() {
 
 	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return node.flowgraphManager.GetSegmentsJSON(), nil
+			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
+			return node.flowgraphManager.GetSegmentsJSON(collectionID), nil
 		})
 
 	node.metricsRequest.RegisterMetricsRequest(metricsinfo.ChannelKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return node.flowgraphManager.GetChannelsJSON(), nil
+			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
+			return node.flowgraphManager.GetChannelsJSON(collectionID), nil
 		})
 	log.Ctx(node.ctx).Info("register metrics actions finished")
 }
@@ -400,6 +402,13 @@ func (node *DataNode) Stop() error {
 
 		if node.writeBufferManager != nil {
 			node.writeBufferManager.Stop()
+		}
+
+		if node.syncMgr != nil {
+			err := node.syncMgr.Close()
+			if err != nil {
+				log.Error("sync manager close failed", zap.Error(err))
+			}
 		}
 
 		if node.allocator != nil {

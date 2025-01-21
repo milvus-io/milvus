@@ -27,12 +27,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	adaptor2 "github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -86,8 +86,17 @@ func (c *channelLifetime) Run() error {
 	// Get recovery info from datacoord.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
-	resp, err := resource.Resource().DataCoordClient().
-		GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: c.vchannel})
+
+	pipelineParams, err := c.f.getPipelineParams(ctx)
+	if err != nil {
+		return err
+	}
+
+	dc, err := resource.Resource().DataCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return errors.Wrap(err, "At Get DataCoordClient")
+	}
+	resp, err := dc.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: c.vchannel})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return err
 	}
@@ -115,13 +124,14 @@ func (c *channelLifetime) Run() error {
 	}
 
 	// Build and add pipeline.
-	ds, err := pipeline.NewStreamingNodeDataSyncService(ctx, c.f.pipelineParams,
+	ds, err := pipeline.NewStreamingNodeDataSyncService(ctx, pipelineParams,
+		// TODO fubang add the db properties
 		&datapb.ChannelWatchInfo{Vchan: resp.GetInfo(), Schema: resp.GetSchema()}, handler.Chan(), func(t syncmgr.Task, err error) {
 			if err != nil || t == nil {
 				return
 			}
 			if tt, ok := t.(*syncmgr.SyncTask); ok {
-				insertLogs, _, _ := tt.Binlogs()
+				insertLogs, _, _, _ := tt.Binlogs()
 				resource.Resource().SegmentAssignStatsManager().UpdateOnSync(tt.SegmentID(), stats.SyncOperationMetrics{
 					BinLogCounterIncr:     1,
 					BinLogFileCounterIncr: uint64(len(insertLogs)),

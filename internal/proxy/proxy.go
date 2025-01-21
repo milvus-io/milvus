@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
@@ -34,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -303,6 +304,13 @@ func (node *Proxy) Init() error {
 	log.Debug("init meta cache done", zap.String("role", typeutil.ProxyRole))
 
 	node.enableMaterializedView = Params.CommonCfg.EnableMaterializedView.GetAsBool()
+
+	// Enable internal rand pool for UUIDv4 generation
+	// This is NOT thread-safe and should only be called before the service starts and
+	// there is no possibility that New or any other UUID V4 generation function will be called concurrently
+	// Only proxy generates UUID for now, and one Milvus process only has one proxy
+	uuid.EnableRandPool()
+	log.Debug("enable rand pool for UUIDv4 generation")
 
 	log.Info("init proxy done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
 	return nil

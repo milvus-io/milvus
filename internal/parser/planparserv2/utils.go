@@ -2,12 +2,14 @@ package planparserv2
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -729,4 +731,42 @@ func parseJSONValue(value interface{}) (*planpb.GenericValue, schemapb.DataType,
 	default:
 		return nil, schemapb.DataType_None, fmt.Errorf("%v is of unknown type: %T\n", value, v)
 	}
+}
+
+func convertHanToASCII(s string) string {
+	var builder strings.Builder
+	builder.Grow(len(s) * 6)
+	skipCur := false
+	n := len(s)
+	for i, r := range s {
+		if skipCur {
+			builder.WriteRune(r)
+			skipCur = false
+			continue
+		}
+		if r == '\\' {
+			if i+1 < n && !isEscapeCh(s[i+1]) {
+				return s
+			}
+			skipCur = true
+			builder.WriteRune(r)
+			continue
+		}
+
+		if unicode.Is(unicode.Han, r) {
+			builder.WriteString(formatUnicode(uint32(r)))
+		} else {
+			builder.WriteRune(r)
+		}
+	}
+
+	return builder.String()
+}
+
+func decodeUnicode(input string) string {
+	re := regexp.MustCompile(`\\u[0-9a-fA-F]{4}`)
+	return re.ReplaceAllStringFunc(input, func(match string) string {
+		code, _ := strconv.ParseInt(match[2:], 16, 32)
+		return string(rune(code))
+	})
 }

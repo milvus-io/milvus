@@ -89,8 +89,8 @@ func (mc *MilvusClient) Close(ctx context.Context) error {
 // -- database --
 
 // UsingDatabase list all database in milvus cluster.
-func (mc *MilvusClient) UsingDatabase(ctx context.Context, option client.UsingDatabaseOption) error {
-	err := mc.mClient.UsingDatabase(ctx, option)
+func (mc *MilvusClient) UsingDatabase(ctx context.Context, option client.UseDatabaseOption) error {
+	err := mc.mClient.UseDatabase(ctx, option)
 	return err
 }
 
@@ -260,5 +260,11 @@ func (mc *MilvusClient) Search(ctx context.Context, option client.SearchOption, 
 // Query query from collection
 func (mc *MilvusClient) Query(ctx context.Context, option client.QueryOption, callOptions ...grpc.CallOption) (client.ResultSet, error) {
 	resultSet, err := mc.mClient.Query(ctx, option, callOptions...)
+	return resultSet, err
+}
+
+// Get get from collection
+func (mc *MilvusClient) Get(ctx context.Context, option client.QueryOption, callOptions ...grpc.CallOption) (client.ResultSet, error) {
+	resultSet, err := mc.mClient.Get(ctx, option, callOptions...)
 	return resultSet, err
 }

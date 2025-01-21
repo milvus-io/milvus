@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -35,6 +36,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -45,12 +49,13 @@ type StreamPipeline interface {
 }
 
 type streamPipeline struct {
-	pipeline   *pipeline
-	input      <-chan *msgstream.MsgPack
-	scanner    streaming.Scanner
-	dispatcher msgdispatcher.Client
-	startOnce  sync.Once
-	vChannel   string
+	pipeline        *pipeline
+	input           <-chan *msgstream.MsgPack
+	scanner         streaming.Scanner
+	dispatcher      msgdispatcher.Client
+	startOnce       sync.Once
+	vChannel        string
+	replicateConfig *msgstream.ReplicateConfig
 
 	closeCh   chan struct{} // notify work to exit
 	closeWg   sync.WaitGroup
@@ -94,7 +99,7 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 	}
 
 	if streamingutil.IsStreamingServiceEnabled() {
-		startFrom := adaptor.MustGetMessageIDFromMQWrapperIDBytes("pulsar", position.GetMsgID())
+		startFrom := adaptor.MustGetMessageIDFromMQWrapperIDBytes(streaming.WAL().WALName(), position.GetMsgID())
 		log.Info(
 			"stream pipeline seeks from position with scanner",
 			zap.String("channel", position.GetChannelName()),
@@ -118,11 +123,25 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 	}
 
 	start := time.Now()
-	p.input, err = p.dispatcher.Register(ctx, p.vChannel, position, common.SubscriptionPositionUnknown)
+	err = retry.Handle(ctx, func() (bool, error) {
+		p.input, err = p.dispatcher.Register(ctx, &msgdispatcher.StreamConfig{
+			VChannel:        p.vChannel,
+			Pos:             position,
+			SubPos:          common.SubscriptionPositionUnknown,
+			ReplicateConfig: p.replicateConfig,
+		})
+		if err != nil {
+			log.Warn("dispatcher register failed", zap.String("channel", position.ChannelName), zap.Error(err))
+			return errors.Is(err, merr.ErrTooManyConsumers), err
+		}
+		return false, nil
+	}, retry.Sleep(paramtable.Get().MQCfg.RetrySleep.GetAsDuration(time.Second)), // 5 seconds
+		retry.MaxSleepTime(paramtable.Get().MQCfg.RetryTimeout.GetAsDuration(time.Second))) // 5 minutes
 	if err != nil {
-		log.Error("dispatcher register failed", zap.String("channel", position.ChannelName))
+		log.Error("dispatcher register failed after retried", zap.String("channel", position.ChannelName), zap.Error(err))
 		return WrapErrRegDispather(err)
 	}
+
 	ts, _ := tsoutil.ParseTS(position.GetTimestamp())
 	log.Info("stream pipeline seeks from position with msgDispatcher",
 		zap.String("pchannel", position.ChannelName),
@@ -160,18 +179,24 @@ func (p *streamPipeline) Close() {
 	})
 }
 
-func NewPipelineWithStream(dispatcher msgdispatcher.Client, nodeTtInterval time.Duration, enableTtChecker bool, vChannel string) StreamPipeline {
+func NewPipelineWithStream(dispatcher msgdispatcher.Client,
+	nodeTtInterval time.Duration,
+	enableTtChecker bool,
+	vChannel string,
+	replicateConfig *msgstream.ReplicateConfig,
+) StreamPipeline {
 	pipeline := &streamPipeline{
 		pipeline: &pipeline{
 			nodes:           []*nodeCtx{},
 			nodeTtInterval:  nodeTtInterval,
 			enableTtChecker: enableTtChecker,
 		},
-		dispatcher:     dispatcher,
-		vChannel:       vChannel,
-		closeCh:        make(chan struct{}),
-		closeWg:        sync.WaitGroup{},
-		lastAccessTime: atomic.NewTime(time.Now()),
+		dispatcher:      dispatcher,
+		vChannel:        vChannel,
+		replicateConfig: replicateConfig,
+		closeCh:         make(chan struct{}),
+		closeWg:         sync.WaitGroup{},
+		lastAccessTime:  atomic.NewTime(time.Now()),
 	}
 
 	return pipeline

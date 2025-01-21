@@ -22,12 +22,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -46,7 +47,7 @@ func TestGetPipelineJSON(t *testing.T) {
 
 	collectionManager := segments.NewMockCollectionManager(t)
 	segmentManager := segments.NewMockSegmentManager(t)
-	collectionManager.EXPECT().Get(mock.Anything).Return(&segments.Collection{})
+	collectionManager.EXPECT().Get(mock.Anything).Return(segments.NewTestCollection(1, querypb.LoadType_UnKnownType, &schemapb.CollectionSchema{}))
 	manager := &segments.Manager{
 		Collection: collectionManager,
 		Segment:    segmentManager,
@@ -58,7 +59,7 @@ func TestGetPipelineJSON(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 1, pipelineManager.Num())
 
-	stats := pipelineManager.GetChannelStats()
+	stats := pipelineManager.GetChannelStats(0)
 	expectedStats := []*metricsinfo.Channel{
 		{
 			Name:           ch,
@@ -70,7 +71,7 @@ func TestGetPipelineJSON(t *testing.T) {
 	}
 	assert.Equal(t, expectedStats, stats)
 
-	JSONStr := getChannelJSON(&QueryNode{pipelineManager: pipelineManager})
+	JSONStr := getChannelJSON(&QueryNode{pipelineManager: pipelineManager}, 0)
 	assert.NotEmpty(t, JSONStr)
 
 	var actualStats []*metricsinfo.Channel
@@ -85,6 +86,7 @@ func TestGetSegmentJSON(t *testing.T) {
 	segment.EXPECT().Collection().Return(int64(1001))
 	segment.EXPECT().Partition().Return(int64(2001))
 	segment.EXPECT().MemSize().Return(int64(1024))
+	segment.EXPECT().HasRawData(mock.Anything).Return(true)
 	segment.EXPECT().Indexes().Return([]*segments.IndexedFieldInfo{
 		{
 			IndexInfo: &querypb.FieldIndexInfo{
@@ -105,7 +107,7 @@ func TestGetSegmentJSON(t *testing.T) {
 	mockedSegmentManager.EXPECT().GetBy().Return([]segments.Segment{segment})
 	node.manager = &segments.Manager{Segment: mockedSegmentManager}
 
-	jsonStr := getSegmentJSON(node)
+	jsonStr := getSegmentJSON(node, 0)
 	assert.NotEmpty(t, jsonStr)
 
 	var segments []*metricsinfo.Segment

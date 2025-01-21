@@ -25,8 +25,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -105,61 +105,65 @@ func (sss *SyncSegmentsScheduler) SyncSegmentsForCollections(ctx context.Context
 					zap.String("channelName", channelName), zap.Error(err))
 				continue
 			}
-			for _, partitionID := range collInfo.Partitions {
-				if err := sss.SyncSegments(ctx, collID, partitionID, channelName, nodeID, pkField.GetFieldID()); err != nil {
-					log.Warn("sync segment with channel failed, retry next ticker",
-						zap.Int64("collectionID", collID),
-						zap.Int64("partitionID", partitionID),
-						zap.String("channel", channelName),
-						zap.Error(err))
-					continue
-				}
+			if err := sss.SyncSegments(ctx, collID, channelName, nodeID, pkField.GetFieldID()); err != nil {
+				log.Warn("sync segment with channel failed, retry next ticker",
+					zap.Int64("collectionID", collID),
+					zap.String("channel", channelName),
+					zap.Error(err))
+				continue
 			}
 		}
 	}
 }
 
-func (sss *SyncSegmentsScheduler) SyncSegments(ctx context.Context, collectionID, partitionID int64, channelName string, nodeID, pkFieldID int64) error {
-	log := log.With(zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID),
+func (sss *SyncSegmentsScheduler) SyncSegments(ctx context.Context, collectionID int64, channelName string, nodeID, pkFieldID int64) error {
+	log := log.With(zap.Int64("collectionID", collectionID),
 		zap.String("channelName", channelName), zap.Int64("nodeID", nodeID))
 	// sync all healthy segments, but only check flushed segments on datanode. Because L0 growing segments may not in datacoord's meta.
 	// upon receiving the SyncSegments request, the datanode's segment state may have already transitioned from Growing/Flushing
 	// to Flushed, so the view must include this segment.
-	segments := sss.meta.SelectSegments(ctx, WithChannel(channelName), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return info.GetPartitionID() == partitionID && info.GetLevel() != datapb.SegmentLevel_L0 && isSegmentHealthy(info)
+	channelSegments := sss.meta.SelectSegments(ctx, WithChannel(channelName), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return info.GetLevel() != datapb.SegmentLevel_L0 && isSegmentHealthy(info)
 	}))
-	req := &datapb.SyncSegmentsRequest{
-		ChannelName:  channelName,
-		PartitionId:  partitionID,
-		CollectionId: collectionID,
-		SegmentInfos: make(map[int64]*datapb.SyncSegmentInfo),
-	}
 
-	for _, seg := range segments {
-		req.SegmentInfos[seg.ID] = &datapb.SyncSegmentInfo{
-			SegmentId: seg.GetID(),
-			State:     seg.GetState(),
-			Level:     seg.GetLevel(),
-			NumOfRows: seg.GetNumOfRows(),
+	partitionSegments := lo.GroupBy(channelSegments, func(segment *SegmentInfo) int64 {
+		return segment.GetPartitionID()
+	})
+	for partitionID, segments := range partitionSegments {
+		req := &datapb.SyncSegmentsRequest{
+			ChannelName:  channelName,
+			PartitionId:  partitionID,
+			CollectionId: collectionID,
+			SegmentInfos: make(map[int64]*datapb.SyncSegmentInfo),
 		}
-		statsLogs := make([]*datapb.Binlog, 0)
-		for _, statsLog := range seg.GetStatslogs() {
-			if statsLog.GetFieldID() == pkFieldID {
-				statsLogs = append(statsLogs, statsLog.GetBinlogs()...)
+
+		for _, seg := range segments {
+			req.SegmentInfos[seg.ID] = &datapb.SyncSegmentInfo{
+				SegmentId: seg.GetID(),
+				State:     seg.GetState(),
+				Level:     seg.GetLevel(),
+				NumOfRows: seg.GetNumOfRows(),
+			}
+			statsLogs := make([]*datapb.Binlog, 0)
+			for _, statsLog := range seg.GetStatslogs() {
+				if statsLog.GetFieldID() == pkFieldID {
+					statsLogs = append(statsLogs, statsLog.GetBinlogs()...)
+				}
+			}
+			req.SegmentInfos[seg.ID].PkStatsLog = &datapb.FieldBinlog{
+				FieldID: pkFieldID,
+				Binlogs: statsLogs,
 			}
 		}
-		req.SegmentInfos[seg.ID].PkStatsLog = &datapb.FieldBinlog{
-			FieldID: pkFieldID,
-			Binlogs: statsLogs,
+
+		if err := sss.sessions.SyncSegments(ctx, nodeID, req); err != nil {
+			log.Warn("fail to sync segments with node", zap.Error(err))
+			return err
 		}
+		log.Info("sync segments success", zap.Int64("partitionID", partitionID), zap.Int64s("segments", lo.Map(segments, func(t *SegmentInfo, i int) int64 {
+			return t.GetID()
+		})))
 	}
 
-	if err := sss.sessions.SyncSegments(ctx, nodeID, req); err != nil {
-		log.Warn("fail to sync segments with node", zap.Error(err))
-		return err
-	}
-	log.Info("sync segments success", zap.Int64s("segments", lo.Map(segments, func(t *SegmentInfo, i int) int64 {
-		return t.GetID()
-	})))
 	return nil
 }

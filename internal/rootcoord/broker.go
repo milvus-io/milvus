@@ -27,10 +27,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -43,6 +43,7 @@ type watchInfo struct {
 	vChannels      []string
 	startPositions []*commonpb.KeyDataPair
 	schema         *schemapb.CollectionSchema
+	dbProperties   []*commonpb.KeyValuePair
 }
 
 // Broker communicates with other components.
@@ -165,6 +166,7 @@ func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error
 		StartPositions:  info.startPositions,
 		Schema:          info.schema,
 		CreateTimestamp: info.ts,
+		DbProperties:    info.dbProperties,
 	})
 	if err != nil {
 		return err

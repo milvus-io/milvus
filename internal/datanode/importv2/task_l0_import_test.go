@@ -29,11 +29,11 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -132,7 +132,7 @@ func (s *L0ImportSuite) TestL0PreImport() {
 
 func (s *L0ImportSuite) TestL0Import() {
 	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).
-		RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) *conc.Future[struct{}] {
+		RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 			alloc := allocator.NewMockAllocator(s.T())
 			alloc.EXPECT().Alloc(mock.Anything).Return(1, int64(s.delCnt)+1, nil)
 			task.(*syncmgr.SyncTask).WithAllocator(alloc)
@@ -147,7 +147,7 @@ func (s *L0ImportSuite) TestL0Import() {
 			future := conc.Go(func() (struct{}, error) {
 				return struct{}{}, nil
 			})
-			return future
+			return future, nil
 		})
 
 	req := &datapb.ImportRequest{

@@ -30,14 +30,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -56,9 +56,7 @@ var (
 )
 
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	log := log.Ctx(ctx).With(zap.Int64s("collections", req.GetCollectionIDs()))
-
-	log.Info("show collections request received")
+	log.Ctx(ctx).Debug("show collections request received", zap.Int64s("collections", req.GetCollectionIDs()))
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to show collections"
 		log.Warn(msg, zap.Error(err))
@@ -161,15 +159,16 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 		if percentage < 0 {
 			err := meta.GlobalFailedLoadCache.Get(req.GetCollectionID())
 			if err != nil {
-				status := merr.Status(err)
-				log.Warn("show partition failed", zap.Error(err))
+				partitionErr := merr.WrapErrPartitionNotLoaded(partitionID, err.Error())
+				status := merr.Status(partitionErr)
+				log.Warn("show partition failed", zap.Error(partitionErr))
 				return &querypb.ShowPartitionsResponse{
 					Status: status,
 				}, nil
 			}
 
 			err = merr.WrapErrPartitionNotLoaded(partitionID)
-			log.Warn("show partitions failed", zap.Error(err))
+			log.Warn("show partition failed", zap.Error(err))
 			return &querypb.ShowPartitionsResponse{
 				Status: merr.Status(err),
 			}, nil
@@ -255,7 +254,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 
 	var loadJob job.Job
 	collection := s.meta.GetCollection(ctx, req.GetCollectionID())
-	if collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded {
+	if collection != nil {
 		// if collection is loaded, check if collection is loaded with the same replica number and resource groups
 		// if replica number or resource group changes， switch to update load config
 		collectionUsedRG := s.meta.ReplicaManager.GetResourceGroupByCollection(ctx, collection.GetCollectionID()).Collect()
@@ -834,7 +833,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	log.RatedDebug(60, "get metrics request received",
 		zap.String("metricType", req.GetRequest()))
 
-	if err := merr.CheckHealthyStandby(s.State()); err != nil {
+	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to get metrics"
 		log.Warn(msg, zap.Error(err))
 		return &milvuspb.GetMetricsResponse{
@@ -1182,7 +1181,7 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 	jobs := make([]job.Job, 0, len(req.GetCollectionIDs()))
 	for _, collectionID := range req.GetCollectionIDs() {
 		collection := s.meta.GetCollection(ctx, collectionID)
-		if collection == nil || collection.GetStatus() != querypb.LoadStatus_Loaded {
+		if collection == nil {
 			err := merr.WrapErrCollectionNotLoaded(collectionID)
 			log.Warn("failed to update load config", zap.Error(err))
 			continue

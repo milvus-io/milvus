@@ -518,9 +518,12 @@ type MQConfig struct {
 	IgnoreBadPosition ParamItem `refreshable:"true"`
 
 	// msgdispatcher
-	MergeCheckInterval ParamItem `refreshable:"false"`
-	TargetBufSize      ParamItem `refreshable:"false"`
-	MaxTolerantLag     ParamItem `refreshable:"true"`
+	MergeCheckInterval          ParamItem `refreshable:"false"`
+	TargetBufSize               ParamItem `refreshable:"false"`
+	MaxTolerantLag              ParamItem `refreshable:"true"`
+	MaxDispatcherNumPerPchannel ParamItem `refreshable:"true"`
+	RetrySleep                  ParamItem `refreshable:"true"`
+	RetryTimeout                ParamItem `refreshable:"true"`
 }
 
 // Init initializes the MQConfig object with a BaseTable.
@@ -543,6 +546,33 @@ Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 		Export:       true,
 	}
 	p.MaxTolerantLag.Init(base.mgr)
+
+	p.MaxDispatcherNumPerPchannel = ParamItem{
+		Key:          "mq.dispatcher.maxDispatcherNumPerPchannel",
+		Version:      "2.4.19",
+		DefaultValue: "5",
+		Doc:          `The maximum number of dispatchers per physical channel, primarily to limit the number of consumers and prevent performance issues(e.g., during recovery when a large number of channels are watched).`,
+		Export:       true,
+	}
+	p.MaxDispatcherNumPerPchannel.Init(base.mgr)
+
+	p.RetrySleep = ParamItem{
+		Key:          "mq.dispatcher.retrySleep",
+		Version:      "2.4.19",
+		DefaultValue: "3",
+		Doc:          `register retry sleep time in seconds`,
+		Export:       true,
+	}
+	p.RetrySleep.Init(base.mgr)
+
+	p.RetryTimeout = ParamItem{
+		Key:          "mq.dispatcher.retryTimeout",
+		Version:      "2.4.19",
+		DefaultValue: "60",
+		Doc:          `register retry timeout in seconds`,
+		Export:       true,
+	}
+	p.RetryTimeout.Init(base.mgr)
 
 	p.TargetBufSize = ParamItem{
 		Key:          "mq.dispatcher.targetBufSize",

@@ -23,10 +23,10 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/config"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -173,11 +173,22 @@ func (s *SyncManagerSuite) TestSubmit() {
 		Timestamp:   100,
 	})
 
-	f := manager.SyncData(context.Background(), task)
+	f, err := manager.SyncData(context.Background(), task)
+	s.NoError(err)
 	s.NotNil(f)
 
-	_, err := f.Await()
+	_, err = f.Await()
 	s.NoError(err)
+}
+
+func (s *SyncManagerSuite) TestClose() {
+	manager := NewSyncManager(s.chunkManager)
+	err := manager.Close()
+	s.NoError(err)
+
+	f, err := manager.SyncData(context.Background(), nil)
+	s.Error(err)
+	s.Nil(f)
 }
 
 func (s *SyncManagerSuite) TestCompacted() {
@@ -202,10 +213,11 @@ func (s *SyncManagerSuite) TestCompacted() {
 		Timestamp:   100,
 	})
 
-	f := manager.SyncData(context.Background(), task)
+	f, err := manager.SyncData(context.Background(), task)
+	s.NoError(err)
 	s.NotNil(f)
 
-	_, err := f.Await()
+	_, err = f.Await()
 	s.NoError(err)
 	s.EqualValues(1001, segmentID.Load())
 }
@@ -254,7 +266,7 @@ func (s *SyncManagerSuite) TestUnexpectedError() {
 	task.EXPECT().Run(mock.Anything).Return(merr.WrapErrServiceInternal("mocked")).Once()
 	task.EXPECT().HandleError(mock.Anything)
 
-	f := manager.SyncData(context.Background(), task)
+	f, _ := manager.SyncData(context.Background(), task)
 	_, err := f.Await()
 	s.Error(err)
 }
@@ -268,7 +280,7 @@ func (s *SyncManagerSuite) TestTargetUpdateSameID() {
 	task.EXPECT().Run(mock.Anything).Return(errors.New("mock err")).Once()
 	task.EXPECT().HandleError(mock.Anything)
 
-	f := manager.SyncData(context.Background(), task)
+	f, _ := manager.SyncData(context.Background(), task)
 	_, err := f.Await()
 	s.Error(err)
 }

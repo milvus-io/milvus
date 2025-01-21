@@ -34,13 +34,13 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -70,7 +70,7 @@ func (s *OpRunnerSuite) SetupTest() {
 		Return(nil).Maybe()
 
 	dispClient := msgdispatcher.NewMockClient(s.T())
-	dispClient.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+	dispClient.EXPECT().Register(mock.Anything, mock.Anything).
 		Return(make(chan *msgstream.MsgPack), nil).Maybe()
 	dispClient.EXPECT().Deregister(mock.Anything).Maybe()
 
@@ -265,9 +265,14 @@ func (s *ChannelManagerSuite) TestSubmitSkip() {
 func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 	channel := "by-dev-rootcoord-dml-0"
 
+	stream, err := s.pipelineParams.MsgStreamFactory.NewTtMsgStream(context.Background())
+	s.NoError(err)
+	s.NotNil(stream)
+	stream.AsProducer(context.Background(), []string{channel})
+
 	// watch
 	info := GetWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
-	err := s.manager.Submit(info)
+	err = s.manager.Submit(info)
 	s.NoError(err)
 
 	// wait for result

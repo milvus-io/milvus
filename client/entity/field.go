@@ -136,6 +136,8 @@ func (t FieldType) PbFieldType() (string, string) {
 		return "[]byte", ""
 	case FieldTypeBFloat16Vector:
 		return "[]byte", ""
+	case FieldTypeInt8Vector:
+		return "[]int8", ""
 	default:
 		return "undefined", ""
 	}
@@ -177,6 +179,8 @@ const (
 	FieldTypeBFloat16Vector FieldType = 103
 	// FieldTypeBinaryVector field type sparse vector
 	FieldTypeSparseVector FieldType = 104
+	// FieldTypeInt8Vector field type int8 vector
+	FieldTypeInt8Vector FieldType = 105
 )
 
 // Field represent field schema in milvus
@@ -193,6 +197,8 @@ type Field struct {
 	IsPartitionKey  bool
 	IsClusteringKey bool
 	ElementType     FieldType
+	DefaultValue    *schemapb.ValueField
+	Nullable        bool
 }
 
 // ProtoMessage generates corresponding FieldSchema
@@ -261,7 +267,11 @@ func (f *Field) WithIsClusteringKey(isClusteringKey bool) *Field {
 	return f
 }
 
-/*
+func (f *Field) WithNullable(nullable bool) *Field {
+	f.Nullable = nullable
+	return f
+}
+
 func (f *Field) WithDefaultValueBool(defaultValue bool) *Field {
 	f.DefaultValue = &schemapb.ValueField{
 		Data: &schemapb.ValueField_BoolData{
@@ -314,7 +324,7 @@ func (f *Field) WithDefaultValueString(defaultValue string) *Field {
 		},
 	}
 	return f
-}*/
+}
 
 func (f *Field) WithTypeParams(key string, value string) *Field {
 	if f.TypeParams == nil {

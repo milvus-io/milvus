@@ -32,8 +32,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -42,6 +40,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -113,19 +113,21 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	}
 	timeOfSeal, _ := tsoutil.ParseTS(ts)
 
-	sealedSegmentIDs := make([]int64, 0)
-	if !streamingutil.IsStreamingServiceEnabled() {
-		var err error
-		if sealedSegmentIDs, err = s.segmentManager.SealAllSegments(ctx, req.GetCollectionID(), req.GetSegmentIDs()); err != nil {
-			return &datapb.FlushResponse{
-				Status: merr.Status(errors.Wrapf(err, "failed to flush collection %d",
-					req.GetCollectionID())),
-			}, nil
-		}
-	}
 	sealedSegmentsIDDict := make(map[UniqueID]bool)
-	for _, sealedSegmentID := range sealedSegmentIDs {
-		sealedSegmentsIDDict[sealedSegmentID] = true
+
+	if !streamingutil.IsStreamingServiceEnabled() {
+		for _, channel := range coll.VChannelNames {
+			sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, channel, req.GetSegmentIDs())
+			if err != nil {
+				return &datapb.FlushResponse{
+					Status: merr.Status(errors.Wrapf(err, "failed to flush collection %d",
+						req.GetCollectionID())),
+				}, nil
+			}
+			for _, sealedSegmentID := range sealedSegmentIDs {
+				sealedSegmentsIDDict[sealedSegmentID] = true
+			}
+		}
 	}
 
 	segments := s.meta.GetSegmentsOfCollection(ctx, req.GetCollectionID())
@@ -172,7 +174,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 
 	log.Info("flush response with segments",
 		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64s("sealSegments", sealedSegmentIDs),
+		zap.Int64s("sealSegments", lo.Keys(sealedSegmentsIDDict)),
 		zap.Int("flushedSegmentsCount", len(flushSegmentIDs)),
 		zap.Time("timeOfSeal", timeOfSeal),
 		zap.Uint64("flushTs", ts),
@@ -182,7 +184,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		Status:          merr.Success(),
 		DbID:            req.GetDbID(),
 		CollectionID:    req.GetCollectionID(),
-		SegmentIDs:      sealedSegmentIDs,
+		SegmentIDs:      lo.Keys(sealedSegmentsIDDict),
 		TimeOfSeal:      timeOfSeal.Unix(),
 		FlushSegmentIDs: flushSegmentIDs,
 		FlushTs:         ts,
@@ -207,7 +209,6 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			zap.Int64("partitionID", r.GetPartitionID()),
 			zap.String("channelName", r.GetChannelName()),
 			zap.Uint32("count", r.GetCount()),
-			zap.String("segment level", r.GetLevel().String()),
 		)
 
 		// Load the collection info from Root Coordinator, if it is not found in server meta.
@@ -540,10 +541,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		// Set segment state
 		if req.GetDropped() {
 			// segmentManager manages growing segments
-			s.segmentManager.DropSegment(ctx, req.GetSegmentID())
+			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
 			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
 		} else if req.GetFlushed() {
-			s.segmentManager.DropSegment(ctx, req.GetSegmentID())
+			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
 			// set segment to SegmentState_Flushing
 			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Flushing))
 		}
@@ -570,6 +571,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
 		metrics.DataCoordSizeStoredL0Segment.WithLabelValues(fmt.Sprint(req.GetCollectionID())).Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))
+
+		s.compactionTriggerManager.OnCollectionUpdate(req.GetCollectionID())
 		return merr.Success(), nil
 	}
 
@@ -685,6 +688,12 @@ func (s *Server) GetStateCode() commonpb.StateCode {
 		return commonpb.StateCode_Abnormal
 	}
 	return code.(commonpb.StateCode)
+}
+
+// UpdateStateCode update state code
+func (s *Server) UpdateStateCode(code commonpb.StateCode) {
+	s.stateCode.Store(code)
+	log.Ctx(s.ctx).Info("update datacoord state", zap.String("state", code.String()))
 }
 
 // GetComponentStates returns DataCoord's current state
@@ -951,7 +960,7 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 		return resp, nil
 	}
 
-	channel := NewRWChannel(req.GetVchannel(), collectionID, nil, collection.Schema, 0) // TODO: remove RWChannel, just use vchannel + collectionID
+	channel := NewRWChannel(req.GetVchannel(), collectionID, nil, collection.Schema, 0, nil) // TODO: remove RWChannel, just use vchannel + collectionID
 	channelInfo := s.handler.GetDataVChanPositions(channel, allPartitionID)
 	if channelInfo.SeekPosition == nil {
 		log.Warn("channel recovery start position is not found, may collection is on creating")
@@ -1037,10 +1046,16 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 		}, nil
 	}
 	var segmentIDs []UniqueID
-	if partitionID < 0 {
-		segmentIDs = s.meta.GetSegmentsIDOfCollection(ctx, collectionID)
-	} else {
-		segmentIDs = s.meta.GetSegmentsIDOfPartition(ctx, collectionID, partitionID)
+	channels := s.channelManager.GetChannelsByCollectionID(collectionID)
+	for _, channel := range channels {
+		channelSegmentsView := s.handler.GetCurrentSegmentsView(ctx, channel, partitionID)
+		if channelSegmentsView == nil {
+			continue
+		}
+		segmentIDs = append(segmentIDs, channelSegmentsView.FlushedSegmentIDs...)
+		segmentIDs = append(segmentIDs, channelSegmentsView.GrowingSegmentIDs...)
+		segmentIDs = append(segmentIDs, channelSegmentsView.L0SegmentIDs...)
+		segmentIDs = append(segmentIDs, channelSegmentsView.ImportingSegmentIDs...)
 	}
 	ret := make([]UniqueID, 0, len(segmentIDs))
 
@@ -1086,7 +1101,7 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 // it may include SystemMetrics, Topology metrics, etc.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log := log.Ctx(ctx)
-	if err := merr.CheckHealthyStandby(s.GetStateCode()); err != nil {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		msg := "failed to get metrics"
 		log.Warn(msg, zap.Error(err))
 		return &milvuspb.GetMetricsResponse{
@@ -1230,6 +1245,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Strings("channels", req.GetChannelNames()),
+		zap.Any("dbProperties", req.GetDbProperties()),
 	)
 	log.Info("receive watch channels request")
 	resp := &datapb.WatchChannelsResponse{
@@ -1242,7 +1258,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		}, nil
 	}
 	for _, channelName := range req.GetChannelNames() {
-		ch := NewRWChannel(channelName, req.GetCollectionID(), req.GetStartPositions(), req.GetSchema(), req.GetCreateTimestamp())
+		ch := NewRWChannel(channelName, req.GetCollectionID(), req.GetStartPositions(), req.GetSchema(), req.GetCreateTimestamp(), req.GetDbProperties())
 		err := s.channelManager.Watch(ctx, ch)
 		if err != nil {
 			log.Warn("fail to watch channelName", zap.Error(err))
@@ -1432,6 +1448,13 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 		return merr.Status(err), nil
 	}
 
+	for _, pos := range checkpoints {
+		if pos == nil || pos.GetMsgID() == nil || pos.GetChannelName() == "" {
+			continue
+		}
+		s.segmentManager.CleanZeroSealedSegmentsOfChannel(ctx, pos.GetChannelName(), pos.GetTimestamp())
+	}
+
 	return merr.Success(), nil
 }
 
@@ -1492,10 +1515,7 @@ func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeT
 
 	s.updateSegmentStatistics(ctx, segmentStats)
 
-	if err := s.segmentManager.ExpireAllocations(ctx, channel, ts); err != nil {
-		log.Warn("failed to expire allocations", zap.Error(err))
-		return err
-	}
+	s.segmentManager.ExpireAllocations(ctx, channel, ts)
 
 	flushableIDs, err := s.segmentManager.GetFlushableSegments(ctx, channel, ts)
 	if err != nil {
@@ -1562,6 +1582,7 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 			StartPositions: req.GetStartPositions(),
 			Properties:     properties,
 			DatabaseID:     req.GetDbID(),
+			DatabaseName:   req.GetSchema().GetDbName(),
 			VChannelNames:  req.GetVChannels(),
 		}
 		s.meta.AddCollection(collInfo)
@@ -1692,6 +1713,11 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		})
 		if len(files) == 0 {
 			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("no binlog to import, input=%s", in.GetFiles())))
+			return resp, nil
+		}
+		if len(files) > paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
+			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("The max number of import files should not exceed %d, but got %d",
+				paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(files))))
 			return resp, nil
 		}
 		log.Info("list binlogs prefixes for import", zap.Any("binlog_prefixes", files))

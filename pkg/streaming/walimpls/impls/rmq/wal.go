@@ -7,7 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/client"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"
@@ -30,7 +30,7 @@ func (w *walImpl) WALName() string {
 
 // Append appends a message to the wal.
 func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-	id, err := w.p.Send(&common.ProducerMessage{
+	id, err := w.p.SendForStreamingService(&common.ProducerMessage{
 		Payload:    msg.Payload(),
 		Properties: msg.Properties().ToRawMap(),
 	})

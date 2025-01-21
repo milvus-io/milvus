@@ -18,12 +18,14 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -35,13 +37,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
@@ -103,9 +105,124 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		assert.Equal(t, qt.resultSizeInsufficient, true)
 		assert.Equal(t, qt.isTopkReduce, false)
 	})
+
+	t.Run("test search iterator v2", func(t *testing.T) {
+		const (
+			kRows  = 10
+			kToken = "test-token"
+		)
+
+		collName := "test_collection_search_iterator_v2" + funcutil.GenRandomStr()
+		collSchema := createColl(t, collName, rc)
+
+		createIteratorSearchTask := func(t *testing.T, metricType string, rows int) *searchTask {
+			ids := make([]int64, rows)
+			for i := range ids {
+				ids[i] = int64(i)
+			}
+			resultIDs := &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: ids,
+					},
+				},
+			}
+			scores := make([]float32, rows)
+			// proxy needs to reverse the score for negatively related metrics
+			for i := range scores {
+				if metric.PositivelyRelated(metricType) {
+					scores[i] = float32(len(scores) - i)
+				} else {
+					scores[i] = -float32(i + 1)
+				}
+			}
+			resultData := &schemapb.SearchResultData{
+				Ids:        resultIDs,
+				Scores:     scores,
+				NumQueries: 1,
+			}
+
+			qt := &searchTask{
+				ctx: ctx,
+				SearchRequest: &internalpb.SearchRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:  commonpb.MsgType_Search,
+						SourceID: paramtable.GetNodeID(),
+					},
+					Nq: 1,
+				},
+				schema: newSchemaInfo(collSchema),
+				request: &milvuspb.SearchRequest{
+					CollectionName: collName,
+				},
+				queryInfos: []*planpb.QueryInfo{{
+					SearchIteratorV2Info: &planpb.SearchIteratorV2Info{
+						Token:     kToken,
+						BatchSize: 1,
+					},
+				}},
+				result: &milvuspb.SearchResults{
+					Results: resultData,
+				},
+				resultBuf:  typeutil.NewConcurrentSet[*internalpb.SearchResults](),
+				tr:         timerecord.NewTimeRecorder("search"),
+				isIterator: true,
+			}
+			bytes, err := proto.Marshal(resultData)
+			assert.NoError(t, err)
+			qt.resultBuf.Insert(&internalpb.SearchResults{
+				MetricType: metricType,
+				SlicedBlob: bytes,
+			})
+			return qt
+		}
+
+		t.Run("test search iterator v2", func(t *testing.T) {
+			metrics := []string{metric.L2, metric.IP, metric.COSINE, metric.BM25}
+			for _, metricType := range metrics {
+				qt := createIteratorSearchTask(t, metricType, kRows)
+				err = qt.PostExecute(ctx)
+				assert.NoError(t, err)
+				assert.Equal(t, kToken, qt.result.Results.SearchIteratorV2Results.Token)
+				if metric.PositivelyRelated(metricType) {
+					assert.Equal(t, float32(1), qt.result.Results.SearchIteratorV2Results.LastBound)
+				} else {
+					assert.Equal(t, float32(kRows), qt.result.Results.SearchIteratorV2Results.LastBound)
+				}
+			}
+		})
+
+		t.Run("test search iterator v2 with empty result", func(t *testing.T) {
+			metrics := []string{metric.L2, metric.IP, metric.COSINE, metric.BM25}
+			for _, metricType := range metrics {
+				qt := createIteratorSearchTask(t, metricType, 0)
+				err = qt.PostExecute(ctx)
+				assert.NoError(t, err)
+				assert.Equal(t, kToken, qt.result.Results.SearchIteratorV2Results.Token)
+				if metric.PositivelyRelated(metricType) {
+					assert.Equal(t, float32(math.MaxFloat32), qt.result.Results.SearchIteratorV2Results.LastBound)
+				} else {
+					assert.Equal(t, float32(-math.MaxFloat32), qt.result.Results.SearchIteratorV2Results.LastBound)
+				}
+			}
+		})
+
+		t.Run("test search iterator v2 with empty result and incoming last bound", func(t *testing.T) {
+			metrics := []string{metric.L2, metric.IP, metric.COSINE, metric.BM25}
+			kLastBound := float32(10)
+			for _, metricType := range metrics {
+				qt := createIteratorSearchTask(t, metricType, 0)
+				qt.queryInfos[0].SearchIteratorV2Info.LastBound = &kLastBound
+				err = qt.PostExecute(ctx)
+				assert.NoError(t, err)
+				assert.Equal(t, kToken, qt.result.Results.SearchIteratorV2Results.Token)
+				assert.Equal(t, kLastBound, qt.result.Results.SearchIteratorV2Results.LastBound)
+			}
+		})
+	})
 }
 
-func createColl(t *testing.T, name string, rc types.RootCoordClient) {
+func createColl(t *testing.T, name string, rc types.RootCoordClient) *schemapb.CollectionSchema {
 	schema := constructCollectionSchema(testInt64Field, testFloatVecField, testVecDim, name)
 	marshaledSchema, err := proto.Marshal(schema)
 	require.NoError(t, err)
@@ -126,6 +243,8 @@ func createColl(t *testing.T, name string, rc types.RootCoordClient) {
 	require.NoError(t, createColT.PreExecute(ctx))
 	require.NoError(t, createColT.Execute(ctx))
 	require.NoError(t, createColT.PostExecute(ctx))
+
+	return schema
 }
 
 func getBaseSearchParams() []*commonpb.KeyValuePair {
@@ -353,6 +472,30 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		st.resultBuf.Insert(&internalpb.SearchResults{})
 		st.PostExecute(context.TODO())
 		assert.Equal(t, st.result.GetSessionTs(), enqueueTs)
+	})
+
+	t.Run("search inconsistent collection_id", func(t *testing.T) {
+		collName := "search_inconsistent_collection" + funcutil.GenRandomStr()
+		createColl(t, collName, rc)
+
+		st := getSearchTask(t, collName)
+		st.request.SearchParams = getValidSearchParams()
+		st.request.SearchParams = append(st.request.SearchParams, &commonpb.KeyValuePair{
+			Key:   IteratorField,
+			Value: "True",
+		})
+		st.request.SearchParams = append(st.request.SearchParams, &commonpb.KeyValuePair{
+			Key:   CollectionID,
+			Value: "8080",
+		})
+		st.request.DslType = commonpb.DslType_BoolExprV1
+
+		_, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
+		enqueueTs := uint64(100000)
+		st.SetTs(enqueueTs)
+		assert.Error(t, st.PreExecute(ctx))
 	})
 }
 
@@ -2599,6 +2742,157 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			assert.True(t, strings.Contains(searchInfo.parseError.Error(), "failed to parse input group size"))
 		}
 	})
+
+	t.Run("check search iterator v2", func(t *testing.T) {
+		kBatchSize := uint32(10)
+		generateValidParamsForSearchIteratorV2 := func() []*commonpb.KeyValuePair {
+			param := getValidSearchParams()
+			return append(param,
+				&commonpb.KeyValuePair{
+					Key:   SearchIterV2Key,
+					Value: "True",
+				},
+				&commonpb.KeyValuePair{
+					Key:   IteratorField,
+					Value: "True",
+				},
+				&commonpb.KeyValuePair{
+					Key:   SearchIterBatchSizeKey,
+					Value: fmt.Sprintf("%d", kBatchSize),
+				},
+			)
+		}
+
+		t.Run("iteratorV2 normal", func(t *testing.T) {
+			param := generateValidParamsForSearchIteratorV2()
+			searchInfo := parseSearchInfo(param, nil, nil)
+			assert.NoError(t, searchInfo.parseError)
+			assert.NotNil(t, searchInfo.planInfo)
+			assert.NotEmpty(t, searchInfo.planInfo.SearchIteratorV2Info.Token)
+			assert.Equal(t, kBatchSize, searchInfo.planInfo.SearchIteratorV2Info.BatchSize)
+			assert.Len(t, searchInfo.planInfo.SearchIteratorV2Info.Token, 36)
+			assert.Equal(t, int64(kBatchSize), searchInfo.planInfo.GetTopk()) // compatibility
+		})
+
+		t.Run("iteratorV2 without isIterator", func(t *testing.T) {
+			param := generateValidParamsForSearchIteratorV2()
+			resetSearchParamsValue(param, IteratorField, "False")
+			searchInfo := parseSearchInfo(param, nil, nil)
+			assert.Error(t, searchInfo.parseError)
+			assert.ErrorContains(t, searchInfo.parseError, "both")
+		})
+
+		t.Run("iteratorV2 with groupBy", func(t *testing.T) {
+			param := generateValidParamsForSearchIteratorV2()
+			param = append(param, &commonpb.KeyValuePair{
+				Key:   GroupByFieldKey,
+				Value: "string_field",
+			})
+			fields := make([]*schemapb.FieldSchema, 0)
+			fields = append(fields, &schemapb.FieldSchema{
+				FieldID: int64(101),
+				Name:    "string_field",
+			})
+			schema := &schemapb.CollectionSchema{
+				Fields: fields,
+			}
+			searchInfo := parseSearchInfo(param, schema, nil)
+			assert.Error(t, searchInfo.parseError)
+			assert.ErrorContains(t, searchInfo.parseError, "roupBy")
+		})
+
+		t.Run("iteratorV2 with offset", func(t *testing.T) {
+			param := generateValidParamsForSearchIteratorV2()
+			param = append(param, &commonpb.KeyValuePair{
+				Key:   OffsetKey,
+				Value: "10",
+			})
+			searchInfo := parseSearchInfo(param, nil, nil)
+			assert.Error(t, searchInfo.parseError)
+			assert.ErrorContains(t, searchInfo.parseError, "offset")
+		})
+
+		t.Run("iteratorV2 invalid token", func(t *testing.T) {
+			param := generateValidParamsForSearchIteratorV2()
+			param = append(param, &commonpb.KeyValuePair{
+				Key:   SearchIterIdKey,
+				Value: "invalid_token",
+			})
+			searchInfo := parseSearchInfo(param, nil, nil)
+			assert.Error(t, searchInfo.parseError)
+			assert.ErrorContains(t, searchInfo.parseError, "invalid token format")
+		})
+
+		t.Run("iteratorV2 passed token must be same", func(t *testing.T) {
+			token, err := uuid.NewRandom()
+			assert.NoError(t, err)
+			param := generateValidParamsForSearchIteratorV2()
+			param = append(param, &commonpb.KeyValuePair{
+				Key:   SearchIterIdKey,
+				Value: token.String(),
+			})
+			searchInfo := parseSearchInfo(param, nil, nil)
+			assert.NoError(t, searchInfo.parseError)
+			assert.NotEmpty(t, searchInfo.planInfo.SearchIteratorV2Info.Token)
+			assert.Equal(t, token.String(), searchInfo.planInfo.SearchIteratorV2Info.Token)
+		})
+
+		t.Run("iteratorV2 batch size", func(t *testing.T) {
+			param := generateValidParamsForSearchIteratorV2()
+			resetSearchParamsValue(param, SearchIterBatchSizeKey, "1.123")
+			searchInfo := parseSearchInfo(param, nil, nil)
+			assert.Error(t, searchInfo.parseError)
+			assert.ErrorContains(t, searchInfo.parseError, "batch size is invalid")
+		})
+
+		t.Run("iteratorV2 batch size", func(t *testing.T) {
+			param := generateValidParamsForSearchIteratorV2()
+			resetSearchParamsValue(param, SearchIterBatchSizeKey, "")
+			searchInfo := parseSearchInfo(param, nil, nil)
+			assert.Error(t, searchInfo.parseError)
+			assert.ErrorContains(t, searchInfo.parseError, "batch size is required")
+		})
+
+		t.Run("iteratorV2 batch size negative", func(t *testing.T) {
+			param := generateValidParamsForSearchIteratorV2()
+			resetSearchParamsValue(param, SearchIterBatchSizeKey, "-1")
+			searchInfo := parseSearchInfo(param, nil, nil)
+			assert.Error(t, searchInfo.parseError)
+			assert.ErrorContains(t, searchInfo.parseError, "batch size is invalid")
+		})
+
+		t.Run("iteratorV2 batch size too large", func(t *testing.T) {
+			param := generateValidParamsForSearchIteratorV2()
+			resetSearchParamsValue(param, SearchIterBatchSizeKey, fmt.Sprintf("%d", Params.QuotaConfig.TopKLimit.GetAsInt64()+1))
+			searchInfo := parseSearchInfo(param, nil, nil)
+			assert.Error(t, searchInfo.parseError)
+			assert.ErrorContains(t, searchInfo.parseError, "batch size is invalid")
+		})
+
+		t.Run("iteratorV2 last bound", func(t *testing.T) {
+			kLastBound := float32(1.123)
+			param := generateValidParamsForSearchIteratorV2()
+			param = append(param, &commonpb.KeyValuePair{
+				Key:   SearchIterLastBoundKey,
+				Value: fmt.Sprintf("%f", kLastBound),
+			})
+			searchInfo := parseSearchInfo(param, nil, nil)
+			assert.NoError(t, searchInfo.parseError)
+			assert.NotNil(t, searchInfo.planInfo)
+			assert.Equal(t, kLastBound, *searchInfo.planInfo.SearchIteratorV2Info.LastBound)
+		})
+
+		t.Run("iteratorV2 invalid last bound", func(t *testing.T) {
+			param := generateValidParamsForSearchIteratorV2()
+			param = append(param, &commonpb.KeyValuePair{
+				Key:   SearchIterLastBoundKey,
+				Value: "xxx",
+			})
+			searchInfo := parseSearchInfo(param, nil, nil)
+			assert.Error(t, searchInfo.parseError)
+			assert.ErrorContains(t, searchInfo.parseError, "failed to parse input last bound")
+		})
+	})
 }
 
 func getSearchResultData(nq, topk int64) *schemapb.SearchResultData {
@@ -3167,6 +3461,7 @@ func (s *MaterializedViewTestSuite) TestMvNotEnabledWithNoPartitionKey() {
 	s.NoError(err)
 	s.NotZero(len(task.queryInfos))
 	s.Equal(false, task.queryInfos[0].MaterializedViewInvolved)
+	s.Equal("", task.queryInfos[0].Hints)
 }
 
 func (s *MaterializedViewTestSuite) TestMvNotEnabledWithPartitionKey() {
@@ -3183,6 +3478,7 @@ func (s *MaterializedViewTestSuite) TestMvNotEnabledWithPartitionKey() {
 	s.NoError(err)
 	s.NotZero(len(task.queryInfos))
 	s.Equal(false, task.queryInfos[0].MaterializedViewInvolved)
+	s.Equal("", task.queryInfos[0].Hints)
 }
 
 func (s *MaterializedViewTestSuite) TestMvEnabledNoPartitionKey() {
@@ -3196,6 +3492,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledNoPartitionKey() {
 	s.NoError(err)
 	s.NotZero(len(task.queryInfos))
 	s.Equal(false, task.queryInfos[0].MaterializedViewInvolved)
+	s.Equal("", task.queryInfos[0].Hints)
 }
 
 func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnInt64() {
@@ -3212,6 +3509,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnInt64() {
 	s.NoError(err)
 	s.NotZero(len(task.queryInfos))
 	s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
+	s.Equal("disable", task.queryInfos[0].Hints)
 }
 
 func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
@@ -3228,6 +3526,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
 	s.NoError(err)
 	s.NotZero(len(task.queryInfos))
 	s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
+	s.Equal("disable", task.queryInfos[0].Hints)
 }
 
 func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolation() {
@@ -3246,6 +3545,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 		s.NoError(err)
 		s.NotZero(len(task.queryInfos))
 		s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
+		s.Equal("disable", task.queryInfos[0].Hints)
 	}
 }
 

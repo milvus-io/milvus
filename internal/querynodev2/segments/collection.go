@@ -26,13 +26,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -41,7 +41,7 @@ type CollectionManager interface {
 	List() []int64
 	ListWithName() map[int64]string
 	Get(collectionID int64) *Collection
-	PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)
+	PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error
 	Ref(collectionID int64, count uint32) bool
 	// unref the collection,
 	// returns true if the collection ref count goes 0, or the collection not exists,
@@ -84,7 +84,7 @@ func (m *collectionManager) Get(collectionID int64) *Collection {
 	return m.collections[collectionID]
 }
 
-func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
+func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
@@ -92,14 +92,18 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 		// the schema may be changed even the collection is loaded
 		collection.schema.Store(schema)
 		collection.Ref(1)
-		return
+		return nil
 	}
 
 	log.Info("put new collection", zap.Int64("collectionID", collectionID), zap.Any("schema", schema))
-	collection := NewCollection(collectionID, schema, meta, loadMeta)
+	collection, err := NewCollection(collectionID, schema, meta, loadMeta)
+	if err != nil {
+		return err
+	}
 	collection.Ref(1)
 	m.collections[collectionID] = collection
 	m.updateMetric()
+	return nil
 }
 
 func (m *collectionManager) updateMetric() {
@@ -148,6 +152,7 @@ type Collection struct {
 	partitions    *typeutil.ConcurrentSet[int64]
 	loadType      querypb.LoadType
 	dbName        string
+	dbProperties  []*commonpb.KeyValuePair
 	resourceGroup string
 	// resource group of node may be changed if node transfer,
 	// but Collection in Manager will be released before assign new replica of new resource group on these node.
@@ -164,6 +169,10 @@ type Collection struct {
 // GetDBName returns the database name of collection.
 func (c *Collection) GetDBName() string {
 	return c.dbName
+}
+
+func (c *Collection) GetDBProperties() []*commonpb.KeyValuePair {
+	return c.dbProperties
 }
 
 // GetResourceGroup returns the resource group of collection.
@@ -240,7 +249,7 @@ func (c *Collection) Unref(count uint32) uint32 {
 }
 
 // newCollection returns a new Collection
-func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMetaInfo *querypb.LoadMetaInfo) *Collection {
+func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMetaInfo *querypb.LoadMetaInfo) (*Collection, error) {
 	/*
 		CCollection
 		NewCollection(const char* schema_proto_blob);
@@ -276,7 +285,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	ccollection, err := segcore.CreateCCollection(req)
 	if err != nil {
 		log.Warn("create collection failed", zap.Error(err))
-		return nil
+		return nil, err
 	}
 	coll := &Collection{
 		ccollection:   ccollection,
@@ -284,6 +293,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		partitions:    typeutil.NewConcurrentSet[int64](),
 		loadType:      loadMetaInfo.GetLoadType(),
 		dbName:        loadMetaInfo.GetDbName(),
+		dbProperties:  loadMetaInfo.GetDbProperties(),
 		resourceGroup: loadMetaInfo.GetResourceGroup(),
 		refCount:      atomic.NewUint32(0),
 		isGpuIndex:    isGpuIndex,
@@ -294,16 +304,19 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	}
 	coll.schema.Store(schema)
 
-	return coll
+	return coll, nil
 }
 
-func NewCollectionWithoutSchema(collectionID int64, loadType querypb.LoadType) *Collection {
-	return &Collection{
+// Only for test
+func NewTestCollection(collectionID int64, loadType querypb.LoadType, schema *schemapb.CollectionSchema) *Collection {
+	col := &Collection{
 		id:         collectionID,
 		partitions: typeutil.NewConcurrentSet[int64](),
 		loadType:   loadType,
 		refCount:   atomic.NewUint32(0),
 	}
+	col.schema.Store(schema)
+	return col
 }
 
 // new collection without segcore prepare

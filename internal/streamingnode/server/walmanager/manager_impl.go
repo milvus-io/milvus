@@ -3,23 +3,24 @@ package walmanager
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+var errWALManagerClosed = status.NewOnShutdownError("wal manager is closed")
 
 // OpenManager create a wal manager.
 func OpenManager() (Manager, error) {
 	walName := util.MustSelectWALName()
-	log.Info("open wal manager", zap.String("walName", walName))
+	resource.Resource().Logger().Info("open wal manager", zap.String("walName", walName))
 	opener, err := registry.MustGetBuilder(walName).Build()
 	if err != nil {
 		return nil, err
@@ -30,33 +31,35 @@ func OpenManager() (Manager, error) {
 // newManager create a wal manager.
 func newManager(opener wal.Opener) Manager {
 	return &managerImpl{
-		lifetime: lifetime.NewLifetime(managerOpenable | managerRemoveable | managerGetable),
+		lifetime: typeutil.NewGenericLifetime[managerState](managerOpenable | managerRemoveable | managerGetable),
 		wltMap:   typeutil.NewConcurrentMap[string, *walLifetime](),
 		opener:   opener,
+		logger:   resource.Resource().Logger().With(log.FieldComponent("wal-manager")),
 	}
 }
 
 // All management operation for a wal will be serialized with order of term.
 type managerImpl struct {
-	lifetime lifetime.Lifetime[managerState]
+	lifetime *typeutil.GenericLifetime[managerState]
 
 	wltMap *typeutil.ConcurrentMap[string, *walLifetime]
 	opener wal.Opener // wal allocator
+	logger *log.MLogger
 }
 
 // Open opens a wal instance for the channel on this Manager.
 func (m *managerImpl) Open(ctx context.Context, channel types.PChannelInfo) (err error) {
 	// reject operation if manager is closing.
-	if err := m.lifetime.Add(isOpenable); err != nil {
-		return status.NewOnShutdownError("wal manager is closed, %s", err.Error())
+	if !m.lifetime.AddIf(isOpenable) {
+		return errWALManagerClosed
 	}
 	defer func() {
 		m.lifetime.Done()
 		if err != nil {
-			log.Warn("open wal failed", zap.Error(err), zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
+			m.logger.Warn("open wal failed", zap.Error(err), zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
 			return
 		}
-		log.Info("open wal success", zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
+		m.logger.Info("open wal success", zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
 	}()
 
 	return m.getWALLifetime(channel.Name).Open(ctx, channel)
@@ -65,16 +68,16 @@ func (m *managerImpl) Open(ctx context.Context, channel types.PChannelInfo) (err
 // Remove removes the wal instance for the channel.
 func (m *managerImpl) Remove(ctx context.Context, channel types.PChannelInfo) (err error) {
 	// reject operation if manager is closing.
-	if err := m.lifetime.Add(isRemoveable); err != nil {
-		return status.NewOnShutdownError("wal manager is closed, %s", err.Error())
+	if !m.lifetime.AddIf(isRemoveable) {
+		return errWALManagerClosed
 	}
 	defer func() {
 		m.lifetime.Done()
 		if err != nil {
-			log.Warn("remove wal failed", zap.Error(err), zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
+			m.logger.Warn("remove wal failed", zap.Error(err), zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
 			return
 		}
-		log.Info("remove wal success", zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
+		m.logger.Info("remove wal success", zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
 	}()
 
 	return m.getWALLifetime(channel.Name).Remove(ctx, channel.Term)
@@ -84,8 +87,8 @@ func (m *managerImpl) Remove(ctx context.Context, channel types.PChannelInfo) (e
 // Return nil if the wal instance is not found.
 func (m *managerImpl) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, error) {
 	// reject operation if manager is closing.
-	if err := m.lifetime.Add(isGetable); err != nil {
-		return nil, status.NewOnShutdownError("wal manager is closed, %s", err)
+	if !m.lifetime.AddIf(isGetable) {
+		return nil, errWALManagerClosed
 	}
 	defer m.lifetime.Done()
 
@@ -104,8 +107,8 @@ func (m *managerImpl) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, erro
 // GetAllAvailableChannels returns all available channel info.
 func (m *managerImpl) GetAllAvailableChannels() ([]types.PChannelInfo, error) {
 	// reject operation if manager is closing.
-	if err := m.lifetime.Add(isGetable); err != nil {
-		return nil, status.NewOnShutdownError("wal manager is closed, %s", err)
+	if !m.lifetime.AddIf(isGetable) {
+		return nil, errWALManagerClosed
 	}
 	defer m.lifetime.Done()
 
@@ -132,7 +135,6 @@ func (m *managerImpl) Close() {
 	})
 	m.lifetime.SetState(managerStopped)
 	m.lifetime.Wait()
-	m.lifetime.Close()
 
 	// close all underlying wal instance by allocator if there's resource leak.
 	m.opener.Close()
@@ -145,7 +147,7 @@ func (m *managerImpl) getWALLifetime(channel string) *walLifetime {
 	}
 
 	// Perform a cas here.
-	newWLT := newWALLifetime(m.opener, channel)
+	newWLT := newWALLifetime(m.opener, channel, m.logger)
 	wlt, loaded := m.wltMap.GetOrInsert(channel, newWLT)
 	// if loaded, lifetime is exist, close the redundant lifetime.
 	if loaded {
@@ -163,23 +165,14 @@ const (
 	managerGetable    managerState = 0x1 << 2
 )
 
-func isGetable(state managerState) error {
-	if state&managerGetable != 0 {
-		return nil
-	}
-	return errors.New("wal manager can not do get operation")
+func isGetable(state managerState) bool {
+	return state&managerGetable != 0
 }
 
-func isRemoveable(state managerState) error {
-	if state&managerRemoveable != 0 {
-		return nil
-	}
-	return errors.New("wal manager can not do remove operation")
+func isRemoveable(state managerState) bool {
+	return state&managerRemoveable != 0
 }
 
-func isOpenable(state managerState) error {
-	if state&managerOpenable != 0 {
-		return nil
-	}
-	return errors.New("wal manager can not do open operation")
+func isOpenable(state managerState) bool {
+	return state&managerOpenable != 0
 }

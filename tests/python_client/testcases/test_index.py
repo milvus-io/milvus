@@ -1428,7 +1428,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.alter_index(ct.default_index_name, {"error_param_key": 123},
                                  check_task=CheckTasks.err_res,
                                  check_items={ct.err_code: 1100,
-                                              ct.err_msg: f"error_param_key is not configable index param"})
+                                              ct.err_msg: "error_param_key is not a configable index property:"})
         collection_w.alter_index(ct.default_index_name, ["error_param_type"],
                                  check_task=CheckTasks.err_res,
                                  check_items={ct.err_code: 1,
@@ -1436,7 +1436,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w.alter_index(ct.default_index_name, None,
                                  check_task=CheckTasks.err_res,
                                  check_items={ct.err_code: 1,
-                                              ct.err_msg: f"extra_params should not be None"})
+                                              ct.err_msg: "properties should not be None"})
         collection_w.alter_index(ct.default_index_name, 1000,
                                  check_task=CheckTasks.err_res,
                                  check_items={ct.err_code: 1,

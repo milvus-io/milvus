@@ -29,13 +29,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -98,7 +98,7 @@ type IMetaTable interface {
 	OperatePrivilege(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
 	SelectGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
 	DropGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error
-	ListPolicy(ctx context.Context, tenant string) ([]string, error)
+	ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error)
 	ListUserRole(ctx context.Context, tenant string) ([]string, error)
 	BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error)
 	RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error
@@ -195,12 +195,16 @@ func (mt *MetaTable) reload() error {
 			return err
 		}
 		for _, collection := range collections {
+			if collection.DBName == "" {
+				collection.DBName = dbName
+			}
 			mt.collID2Meta[collection.CollectionID] = collection
-			mt.generalCnt += len(collection.Partitions) * int(collection.ShardsNum)
 			if collection.Available() {
 				mt.names.insert(dbName, collection.Name, collection.CollectionID)
+				pn := collection.GetPartitionNum(true)
+				mt.generalCnt += pn * int(collection.ShardsNum)
 				collectionNum++
-				partitionNum += int64(collection.GetPartitionNum(true))
+				partitionNum += int64(pn)
 			}
 		}
 
@@ -240,8 +244,10 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 		mt.collID2Meta[collection.CollectionID] = collection
 		if collection.Available() {
 			mt.names.insert(util.DefaultDBName, collection.Name, collection.CollectionID)
+			pn := collection.GetPartitionNum(true)
+			mt.generalCnt += pn * int(collection.ShardsNum)
 			collectionNum++
-			partitionNum += int64(collection.GetPartitionNum(true))
+			partitionNum += int64(pn)
 		}
 	}
 
@@ -425,8 +431,6 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	mt.collID2Meta[coll.CollectionID] = coll.Clone()
 	mt.names.insert(db.Name, coll.Name, coll.CollectionID)
 
-	mt.generalCnt += len(coll.Partitions) * int(coll.ShardsNum)
-
 	log.Ctx(ctx).Info("add collection to meta table",
 		zap.Int64("dbID", coll.DBID),
 		zap.String("collection", coll.Name),
@@ -457,13 +461,17 @@ func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID Uni
 		return fmt.Errorf("dbID not found for collection:%d", collectionID)
 	}
 
+	pn := coll.GetPartitionNum(true)
+
 	switch state {
 	case pb.CollectionState_CollectionCreated:
+		mt.generalCnt += pn * int(coll.ShardsNum)
 		metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Inc()
-		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(coll.GetPartitionNum(true)))
-	default:
+		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(pn))
+	case pb.CollectionState_CollectionDropping:
+		mt.generalCnt -= pn * int(coll.ShardsNum)
 		metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Dec()
-		metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(coll.GetPartitionNum(true)))
+		metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(pn))
 	}
 
 	log.Ctx(ctx).Info("change collection state", zap.Int64("collection", collectionID),
@@ -531,8 +539,6 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	mt.removeAllNamesIfMatchedInternal(collectionID, allNames)
 	mt.removeCollectionByIDInternal(collectionID)
 
-	mt.generalCnt -= len(coll.Partitions) * int(coll.ShardsNum)
-
 	log.Ctx(ctx).Info("remove collection",
 		zap.Int64("dbID", coll.DBID),
 		zap.String("name", coll.Name),
@@ -543,34 +549,42 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	return nil
 }
 
+// Note: The returned model.Collection is read-only. Do NOT modify it directly,
+// as it may cause unexpected behavior or inconsistencies.
 func filterUnavailable(coll *model.Collection) *model.Collection {
-	clone := coll.Clone()
+	clone := coll.ShallowClone()
 	// pick available partitions.
-	clone.Partitions = nil
+	clone.Partitions = make([]*model.Partition, 0, len(coll.Partitions))
 	for _, partition := range coll.Partitions {
 		if partition.Available() {
-			clone.Partitions = append(clone.Partitions, partition.Clone())
+			clone.Partitions = append(clone.Partitions, partition)
 		}
 	}
 	return clone
 }
 
 // getLatestCollectionByIDInternal should be called with ts = typeutil.MaxTimestamp
+// Note: The returned model.Collection is read-only. Do NOT modify it directly,
+// as it may cause unexpected behavior or inconsistencies.
 func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collectionID UniqueID, allowUnavailable bool) (*model.Collection, error) {
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok || coll == nil {
+		log.Warn("not found collection", zap.Int64("collectionID", collectionID))
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	if allowUnavailable {
 		return coll.Clone(), nil
 	}
 	if !coll.Available() {
+		log.Warn("collection not available", zap.Int64("collectionID", collectionID), zap.Any("state", coll.State))
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	return filterUnavailable(coll), nil
 }
 
 // getCollectionByIDInternal get collection by collection id without lock.
+// Note: The returned model.Collection is read-only. Do NOT modify it directly,
+// as it may cause unexpected behavior or inconsistencies.
 func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 	if isMaxTs(ts) {
 		return mt.getLatestCollectionByIDInternal(ctx, collectionID, allowUnavailable)
@@ -644,6 +658,8 @@ func (mt *MetaTable) GetCollectionID(ctx context.Context, dbName string, collect
 	return InvalidCollectionID
 }
 
+// Note: The returned model.Collection is read-only. Do NOT modify it directly,
+// as it may cause unexpected behavior or inconsistencies.
 func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error) {
 	// backward compatibility for rolling  upgrade
 	if dbName == "" {
@@ -844,8 +860,8 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 	}
 
 	// check new collection already exists
-	newColl, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, ts)
-	if newColl != nil {
+	coll, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, ts)
+	if coll != nil {
 		log.Warn("check new collection fail")
 		return fmt.Errorf("duplicated new collection name %s:%s with other collection name or alias", newDBName, newName)
 	}
@@ -867,7 +883,7 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 		return fmt.Errorf("fail to rename db name, must drop all aliases of this collection before rename")
 	}
 
-	newColl = oldColl.Clone()
+	newColl := oldColl.Clone()
 	newColl.Name = newName
 	newColl.DBID = targetDB.ID
 	if err := mt.catalog.AlterCollection(ctx, oldColl, newColl, metastore.MODIFY, ts); err != nil {
@@ -937,8 +953,6 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 	}
 	mt.collID2Meta[partition.CollectionID].Partitions = append(mt.collID2Meta[partition.CollectionID].Partitions, partition.Clone())
 
-	mt.generalCnt += int(coll.ShardsNum) // 1 partition * shardNum
-
 	log.Ctx(ctx).Info("add partition to meta table",
 		zap.Int64("collection", partition.CollectionID), zap.String("partition", partition.PartitionName),
 		zap.Int64("partitionid", partition.PartitionID), zap.Uint64("ts", partition.PartitionCreatedTimestamp))
@@ -966,9 +980,11 @@ func (mt *MetaTable) ChangePartitionState(ctx context.Context, collectionID Uniq
 
 			switch state {
 			case pb.PartitionState_PartitionCreated:
+				mt.generalCnt += int(coll.ShardsNum) // 1 partition * shardNum
 				// support Dynamic load/release partitions
 				metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
-			default:
+			case pb.PartitionState_PartitionDropping:
+				mt.generalCnt -= int(coll.ShardsNum) // 1 partition * shardNum
 				metrics.RootCoordNumOfPartitions.WithLabelValues().Dec()
 			}
 
@@ -1003,7 +1019,6 @@ func (mt *MetaTable) RemovePartition(ctx context.Context, dbID int64, collection
 	}
 	if loc != -1 {
 		coll.Partitions = append(coll.Partitions[:loc], coll.Partitions[loc+1:]...)
-		mt.generalCnt -= int(coll.ShardsNum) // 1 partition * shardNum
 	}
 	log.Ctx(ctx).Info("remove partition", zap.Int64("collection", collectionID), zap.Int64("partition", partitionID), zap.Uint64("ts", ts))
 	return nil
@@ -1490,7 +1505,7 @@ func (mt *MetaTable) DropGrant(ctx context.Context, tenant string, role *milvusp
 	return mt.catalog.DeleteGrant(ctx, tenant, role)
 }
 
-func (mt *MetaTable) ListPolicy(ctx context.Context, tenant string) ([]string, error) {
+func (mt *MetaTable) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
 
@@ -1518,7 +1533,7 @@ func (mt *MetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvu
 	return mt.catalog.RestoreRBAC(ctx, tenant, meta)
 }
 
-// check if the privielge group name is defined by users
+// check if the privilege group name is defined by users
 func (mt *MetaTable) IsCustomPrivilegeGroup(ctx context.Context, groupName string) (bool, error) {
 	privGroups, err := mt.catalog.ListPrivilegeGroups(ctx)
 	if err != nil {
@@ -1634,7 +1649,7 @@ func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string
 			if group.GroupName == p.Name {
 				privileges = append(privileges, group.Privileges...)
 			} else {
-				return merr.WrapErrParameterInvalidMsg("there is no privilege name or privielge group name [%s] defined in system to operate", p.Name)
+				return merr.WrapErrParameterInvalidMsg("there is no privilege name or privilege group name [%s] defined in system to operate", p.Name)
 			}
 		}
 	}

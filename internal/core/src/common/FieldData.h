@@ -97,8 +97,8 @@ class FieldData<BinaryVector> : public FieldDataImpl<uint8_t, false> {
     explicit FieldData(int64_t dim,
                        DataType data_type,
                        int64_t buffered_num_rows = 0)
-        : binary_dim_(dim),
-          FieldDataImpl(dim / 8, data_type, false, buffered_num_rows) {
+        : FieldDataImpl(dim / 8, data_type, false, buffered_num_rows),
+          binary_dim_(dim) {
         Assert(dim % 8 == 0);
     }
 
@@ -138,6 +138,17 @@ class FieldData<SparseFloatVector> : public FieldDataSparseVectorImpl {
  public:
     explicit FieldData(DataType data_type, int64_t buffered_num_rows = 0)
         : FieldDataSparseVectorImpl(data_type, buffered_num_rows) {
+    }
+};
+
+template <>
+class FieldData<Int8Vector> : public FieldDataImpl<int8, false> {
+ public:
+    explicit FieldData(int64_t dim,
+                       DataType data_type,
+                       int64_t buffered_num_rows = 0)
+        : FieldDataImpl<int8, false>::FieldDataImpl(
+              dim, data_type, false, buffered_num_rows) {
     }
 };
 

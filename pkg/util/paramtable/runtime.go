@@ -20,11 +20,16 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var (
-	once       sync.Once
-	params     ComponentParam
+	once         sync.Once
+	params       ComponentParam
+	runtimeParam = runtimeConfig{
+		components: typeutil.ConcurrentSet[string]{},
+	}
 	hookParams hookConfig
 )
 
@@ -58,11 +63,11 @@ func GetHookParams() *hookConfig {
 }
 
 func SetNodeID(newID UniqueID) {
-	params.RuntimeConfig.NodeID.SetValue(newID)
+	runtimeParam.nodeID.Store(newID)
 }
 
 func GetNodeID() UniqueID {
-	return params.RuntimeConfig.NodeID.GetAsInt64()
+	return runtimeParam.nodeID.Load()
 }
 
 func GetStringNodeID() string {
@@ -70,25 +75,33 @@ func GetStringNodeID() string {
 }
 
 func SetRole(role string) {
-	params.RuntimeConfig.Role.SetValue(role)
+	runtimeParam.role.Store(role)
 }
 
 func GetRole() string {
-	return params.RuntimeConfig.Role.GetAsString()
+	return runtimeParam.role.Load()
 }
 
 func SetCreateTime(d time.Time) {
-	params.RuntimeConfig.CreateTime.SetValue(d)
+	runtimeParam.createTime.Store(d)
 }
 
 func GetCreateTime() time.Time {
-	return params.RuntimeConfig.CreateTime.GetAsTime()
+	return runtimeParam.createTime.Load()
 }
 
 func SetUpdateTime(d time.Time) {
-	params.RuntimeConfig.UpdateTime.SetValue(d)
+	runtimeParam.updateTime.Store(d)
 }
 
 func GetUpdateTime() time.Time {
-	return params.RuntimeConfig.UpdateTime.GetAsTime()
+	return runtimeParam.updateTime.Load()
+}
+
+func SetLocalComponentEnabled(component string) {
+	runtimeParam.components.Insert(component)
+}
+
+func IsLocalComponentEnabled(component string) bool {
+	return runtimeParam.components.Contain(component)
 }

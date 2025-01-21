@@ -38,6 +38,9 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     visit(SparseFloatVectorANNS& node) override;
 
     void
+    visit(Int8VectorANNS& node) override;
+
+    void
     visit(RetrievePlanNode& node) override;
 
  public:

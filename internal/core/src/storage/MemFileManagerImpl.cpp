@@ -73,6 +73,7 @@ MemFileManagerImpl::AddFile(const BinarySet& binary_set) {
         slice_sizes.emplace_back(iter->second->size);
         slice_names.emplace_back(remotePrefix + "/" + iter->first);
         batch_size += iter->second->size;
+        added_total_mem_size_ += iter->second->size;
     }
 
     if (data_slices.size() > 0) {
@@ -125,12 +126,7 @@ MemFileManagerImpl::LoadIndexToMemory(
 std::vector<FieldDataPtr>
 MemFileManagerImpl::CacheRawDataToMemory(
     std::vector<std::string> remote_files) {
-    std::sort(remote_files.begin(),
-              remote_files.end(),
-              [](const std::string& a, const std::string& b) {
-                  return std::stol(a.substr(a.find_last_of("/") + 1)) <
-                         std::stol(b.substr(b.find_last_of("/") + 1));
-              });
+    SortByPath(remote_files);
 
     auto parallel_degree =
         uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
@@ -158,6 +154,90 @@ MemFileManagerImpl::CacheRawDataToMemory(
     AssertInfo(field_datas.size() == remote_files.size(),
                "inconsistent file num and raw data num!");
     return field_datas;
+}
+
+template <DataType T>
+std::vector<std::vector<uint32_t>>
+GetOptFieldIvfDataImpl(const std::vector<FieldDataPtr>& field_datas) {
+    using FieldDataT = DataTypeNativeOrVoid<T>;
+    std::unordered_map<FieldDataT, std::vector<uint32_t>> mp;
+    uint32_t offset = 0;
+    for (const auto& field_data : field_datas) {
+        for (int64_t i = 0; i < field_data->get_num_rows(); ++i) {
+            auto val =
+                *reinterpret_cast<const FieldDataT*>(field_data->RawValue(i));
+            mp[val].push_back(offset++);
+        }
+    }
+
+    // opt field data is not used if there is only one value
+    if (mp.size() <= 1) {
+        return {};
+    }
+    std::vector<std::vector<uint32_t>> scalar_info;
+    scalar_info.reserve(mp.size());
+    for (auto& [field_id, tup] : mp) {
+        scalar_info.emplace_back(std::move(tup));
+    }
+    LOG_INFO("Get opt fields with {} categories", scalar_info.size());
+    return scalar_info;
+}
+
+std::vector<std::vector<uint32_t>>
+GetOptFieldIvfData(const DataType& dt,
+                   const std::vector<FieldDataPtr>& field_datas) {
+    switch (dt) {
+        case DataType::BOOL:
+            return GetOptFieldIvfDataImpl<DataType::BOOL>(field_datas);
+        case DataType::INT8:
+            return GetOptFieldIvfDataImpl<DataType::INT8>(field_datas);
+        case DataType::INT16:
+            return GetOptFieldIvfDataImpl<DataType::INT16>(field_datas);
+        case DataType::INT32:
+            return GetOptFieldIvfDataImpl<DataType::INT32>(field_datas);
+        case DataType::INT64:
+            return GetOptFieldIvfDataImpl<DataType::INT64>(field_datas);
+        case DataType::FLOAT:
+            return GetOptFieldIvfDataImpl<DataType::FLOAT>(field_datas);
+        case DataType::DOUBLE:
+            return GetOptFieldIvfDataImpl<DataType::DOUBLE>(field_datas);
+        case DataType::STRING:
+            return GetOptFieldIvfDataImpl<DataType::STRING>(field_datas);
+        case DataType::VARCHAR:
+            return GetOptFieldIvfDataImpl<DataType::VARCHAR>(field_datas);
+        default:
+            LOG_WARN("Unsupported data type in optional scalar field: ", dt);
+            return {};
+    }
+    return {};
+}
+
+std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>>
+MemFileManagerImpl::CacheOptFieldToMemory(OptFieldT& fields_map) {
+    const uint32_t num_of_fields = fields_map.size();
+    if (0 == num_of_fields) {
+        return {};
+    } else if (num_of_fields > 1) {
+        PanicInfo(
+            ErrorCode::NotImplemented,
+            "vector index build with multiple fields is not supported yet");
+    }
+
+    std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> res;
+    for (auto& [field_id, tup] : fields_map) {
+        const auto& field_type = std::get<1>(tup);
+        auto& field_paths = std::get<2>(tup);
+        if (0 == field_paths.size()) {
+            LOG_WARN("optional field {} has no data", field_id);
+            return {};
+        }
+
+        SortByPath(field_paths);
+        std::vector<FieldDataPtr> field_datas =
+            FetchFieldData(rcm_.get(), field_paths);
+        res[field_id] = GetOptFieldIvfData(field_type, field_datas);
+    }
+    return res;
 }
 
 std::optional<bool>

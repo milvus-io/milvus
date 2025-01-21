@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/kv/mocks"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 )
 
 func TestCatalog(t *testing.T) {
@@ -40,4 +40,15 @@ func TestCatalog(t *testing.T) {
 		},
 	})
 	assert.NoError(t, err)
+}
+
+func TestBuildDirectory(t *testing.T) {
+	assert.Equal(t, "streamingnode-meta/wal/p1/", buildWALDirectory("p1"))
+	assert.Equal(t, "streamingnode-meta/wal/p2/", buildWALDirectory("p2"))
+
+	assert.Equal(t, "streamingnode-meta/wal/p1/segment-assign/", buildSegmentAssignmentMetaPath("p1"))
+	assert.Equal(t, "streamingnode-meta/wal/p2/segment-assign/", buildSegmentAssignmentMetaPath("p2"))
+
+	assert.Equal(t, "streamingnode-meta/wal/p1/segment-assign/1", buildSegmentAssignmentMetaPathOfSegment("p1", 1))
+	assert.Equal(t, "streamingnode-meta/wal/p2/segment-assign/2", buildSegmentAssignmentMetaPathOfSegment("p2", 2))
 }

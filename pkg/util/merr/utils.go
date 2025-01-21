@@ -40,14 +40,14 @@ func Code(err error) int32 {
 	}
 
 	cause := errors.Cause(err)
-	switch cause := cause.(type) {
+	switch specificErr := cause.(type) {
 	case milvusError:
-		return cause.code()
+		return specificErr.code()
 
 	default:
-		if errors.Is(cause, context.Canceled) {
+		if errors.Is(specificErr, context.Canceled) {
 			return CanceledCode
-		} else if errors.Is(cause, context.DeadlineExceeded) {
+		} else if errors.Is(specificErr, context.DeadlineExceeded) {
 			return TimeoutCode
 		} else {
 			return errUnexpected.code()
@@ -273,18 +273,6 @@ func CheckHealthy(state commonpb.StateCode) error {
 	return nil
 }
 
-// CheckHealthyStandby checks whether the state is healthy or standby,
-// returns nil if healthy or standby
-// otherwise returns ErrServiceNotReady wrapped with current state
-// this method only used in GetMetrics
-func CheckHealthyStandby(state commonpb.StateCode) error {
-	if state != commonpb.StateCode_Healthy && state != commonpb.StateCode_StandBy {
-		return WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), state.String())
-	}
-
-	return nil
-}
-
 func IsHealthy(stateCode commonpb.StateCode) error {
 	if stateCode == commonpb.StateCode_Healthy {
 		return nil
@@ -328,6 +316,10 @@ func WrapErrAsInputErrorWhen(err error, targets ...milvusError) error {
 		}
 	}
 	return err
+}
+
+func WrapErrCollectionReplicateMode(operation string) error {
+	return wrapFields(ErrCollectionReplicateMode, value("operation", operation))
 }
 
 func GetErrorType(err error) ErrorType {
@@ -997,6 +989,14 @@ func WrapErrMqInternal(err error, msg ...string) error {
 	return err
 }
 
+func WrapErrTooManyConsumers(vchannel string, msg ...string) error {
+	err := wrapFields(ErrTooManyConsumers, value("vchannel", vchannel))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
 func WrapErrPrivilegeNotAuthenticated(fmt string, args ...any) error {
 	err := errors.Wrapf(ErrPrivilegeNotAuthenticated, fmt, args...)
 	return err
@@ -1183,6 +1183,14 @@ func WrapErrClusteringCompactionSubmitTaskFail(taskType string, err error) error
 
 func WrapErrClusteringCompactionMetaError(operation string, err error) error {
 	return wrapFieldsWithDesc(ErrClusteringCompactionMetaError, err.Error(), value("operation", operation))
+}
+
+func WrapErrCleanPartitionStatsFail(msg ...string) error {
+	err := error(ErrCleanPartitionStatsFail)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
 }
 
 func WrapErrAnalyzeTaskNotFound(id int64) error {

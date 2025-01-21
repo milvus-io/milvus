@@ -4,8 +4,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
 )
 
 type ShowExprVisitor struct{}
@@ -16,6 +16,7 @@ func extractColumnInfo(info *planpb.ColumnInfo) interface{} {
 	js["data_type"] = info.GetDataType().String()
 	js["auto_id"] = info.GetIsAutoID()
 	js["is_pk"] = info.GetIsPrimaryKey()
+	js["nullable"] = info.GetNullable()
 	return js
 }
 
@@ -64,6 +65,8 @@ func (v *ShowExprVisitor) VisitExpr(expr *planpb.Expr) interface{} {
 		js["expr"] = v.VisitValueExpr(realExpr.ValueExpr)
 	case *planpb.Expr_ColumnExpr:
 		js["expr"] = v.VisitColumnExpr(realExpr.ColumnExpr)
+	case *planpb.Expr_NullExpr:
+		js["expr"] = v.VisitNullExpr(realExpr.NullExpr)
 	default:
 		js["expr"] = ""
 	}
@@ -124,6 +127,11 @@ func (v *ShowExprVisitor) VisitUnaryRangeExpr(expr *planpb.UnaryRangeExpr) inter
 	js["op"] = expr.Op.String()
 	js["column_info"] = extractColumnInfo(expr.GetColumnInfo())
 	js["operand"] = extractGenericValue(expr.Value)
+	var extraValues []interface{}
+	for _, v := range expr.ExtraValues {
+		extraValues = append(extraValues, extractGenericValue(v))
+	}
+	js["extra_values"] = extraValues
 	return js
 }
 
@@ -169,6 +177,14 @@ func (v *ShowExprVisitor) VisitColumnExpr(expr *planpb.ColumnExpr) interface{} {
 	js := make(map[string]interface{})
 	js["expr_type"] = "column"
 	js["column_info"] = extractColumnInfo(expr.GetInfo())
+	return js
+}
+
+func (v *ShowExprVisitor) VisitNullExpr(expr *planpb.NullExpr) interface{} {
+	js := make(map[string]interface{})
+	js["expr_type"] = "null"
+	js["op"] = expr.Op.String()
+	js["column_info"] = extractColumnInfo(expr.GetColumnInfo())
 	return js
 }
 

@@ -170,10 +170,13 @@ func (gcs *GcpNativeObjectStorage) WalkWithObjects(ctx context.Context,
 			return checkObjectStorageError(prefix, err)
 		}
 		if objAttrs.Prefix != "" {
-			continue
-		}
-		if !walkFunc(&ChunkObjectInfo{FilePath: objAttrs.Name, ModifyTime: objAttrs.Updated}) {
-			return nil
+			if !walkFunc(&ChunkObjectInfo{FilePath: objAttrs.Prefix, ModifyTime: objAttrs.Updated}) {
+				return nil
+			}
+		} else if objAttrs.Name != "" {
+			if !walkFunc(&ChunkObjectInfo{FilePath: objAttrs.Name, ModifyTime: objAttrs.Updated}) {
+				return nil
+			}
 		}
 	}
 	return nil

@@ -35,11 +35,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -302,6 +302,87 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 		_ = info.createdUtcTimestamp
 	}()
 	wg.Wait()
+}
+
+func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	ctx := context.Background()
+	rootCoord := mocks.NewMockRootCoordClient(t)
+	queryCoord := mocks.NewMockQueryCoordClient(t)
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil)
+	mgr := newShardClientMgr()
+	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
+	assert.NoError(t, err)
+	t.Run("update with name", func(t *testing.T) {
+		rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			CollectionID: 1,
+			Schema: &schemapb.CollectionSchema{
+				Name: "bar",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: 1,
+						Name:    "p",
+					},
+					{
+						FieldID: 100,
+						Name:    "pk",
+					},
+				},
+			},
+			ShardsNum:            1,
+			PhysicalChannelNames: []string{"by-dev-rootcoord-dml_1"},
+			VirtualChannelNames:  []string{"by-dev-rootcoord-dml_1_1v0"},
+		}, nil).Once()
+		rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+			Status:               merr.Success(),
+			PartitionIDs:         []typeutil.UniqueID{11},
+			PartitionNames:       []string{"p1"},
+			CreatedTimestamps:    []uint64{11},
+			CreatedUtcTimestamps: []uint64{11},
+		}, nil).Once()
+		queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Once()
+		c, err := globalMetaCache.GetCollectionInfo(ctx, "foo", "bar", 1)
+		assert.NoError(t, err)
+		assert.Equal(t, c.collID, int64(1))
+		assert.Equal(t, c.schema.Name, "bar")
+	})
+
+	t.Run("update with name", func(t *testing.T) {
+		rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			CollectionID: 1,
+			Schema: &schemapb.CollectionSchema{
+				Name: "bar",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: 1,
+						Name:    "p",
+					},
+					{
+						FieldID: 100,
+						Name:    "pk",
+					},
+				},
+			},
+			ShardsNum:            1,
+			PhysicalChannelNames: []string{"by-dev-rootcoord-dml_1"},
+			VirtualChannelNames:  []string{"by-dev-rootcoord-dml_1_1v0"},
+		}, nil).Once()
+		rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+			Status:               merr.Success(),
+			PartitionIDs:         []typeutil.UniqueID{11},
+			PartitionNames:       []string{"p1"},
+			CreatedTimestamps:    []uint64{11},
+			CreatedUtcTimestamps: []uint64{11},
+		}, nil).Once()
+		queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Once()
+		c, err := globalMetaCache.GetCollectionInfo(ctx, "foo", "hoo", 0)
+		assert.NoError(t, err)
+		assert.Equal(t, c.collID, int64(1))
+		assert.Equal(t, c.schema.Name, "bar")
+	})
 }
 
 func TestMetaCache_GetCollectionName(t *testing.T) {

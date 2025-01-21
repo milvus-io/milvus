@@ -157,7 +157,7 @@ ChunkedSegmentSealedImpl::WarmupChunkCache(const FieldId field_id,
 
     auto cc = storage::MmapManager::GetInstance().GetChunkCache();
     for (const auto& data_path : field_info.insert_files) {
-        auto column = cc->Read(data_path, mmap_descriptor_, field_meta);
+        auto column = cc->Read(data_path, field_meta, mmap_enabled, true);
     }
 }
 
@@ -166,6 +166,13 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
     auto& field_meta = schema_->operator[](field_id);
+
+    // if segment is pk sorted, user created indexes bring no performance gain but extra memory usage
+    if (is_sorted_by_pk_ && field_id == schema_->get_primary_field_id()) {
+        LOG_INFO(
+            "segment pk sorted, skip user index loading for primary key field");
+        return;
+    }
 
     auto row_count = info.index->Count();
     AssertInfo(row_count > 0, "Index count is 0");
@@ -229,8 +236,10 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     set_bit(index_ready_bitset_, field_id, true);
     update_row_count(row_count);
     // release field column if the index contains raw data
+    // only release non-primary field when in pk sorted mode
     if (scalar_indexings_[field_id]->HasRawData() &&
-        get_bit(field_data_ready_bitset_, field_id)) {
+        get_bit(field_data_ready_bitset_, field_id) &&
+        (schema_->get_primary_field_id() != field_id || !is_sorted_by_pk_)) {
         fields_.erase(field_id);
         set_bit(field_data_ready_bitset_, field_id, false);
     }
@@ -896,7 +905,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         // get index params for bm25 brute force
         std::map<std::string, std::string> index_info;
         if (search_info.metric_type_ == knowhere::metric::BM25) {
-            auto index_info =
+            index_info =
                 col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
         }
 
@@ -948,7 +957,7 @@ std::tuple<
                                                               descriptor,
                                                       const FieldMeta&
                                                           field_meta) {
-    auto column = cc->Read(data_path, descriptor, field_meta);
+    auto column = cc->Read(data_path, field_meta, true);
     cc->Prefetch(data_path);
     return {data_path, std::dynamic_pointer_cast<ChunkedColumnBase>(column)};
 }
@@ -1215,7 +1224,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
                     var_column->GetChunk(i));
                 auto offset = string_chunk->binary_search_string(target);
                 for (; offset != -1 && offset < string_chunk->RowNums() &&
-                       var_column->RawAt(offset) == target;
+                       string_chunk->operator[](offset) == target;
                      ++offset) {
                     auto segment_offset = offset + num_rows_until_chunk;
                     if (condition(segment_offset)) {
@@ -1256,19 +1265,19 @@ ChunkedSegmentSealedImpl::find_first(int64_t limit,
     seg_offsets.reserve(limit);
 
     int64_t offset = 0;
-    for (; hit_num < limit && offset < num_rows_.value(); offset++) {
+    std::optional<size_t> result = bitset.find_first(false);
+    while (result.has_value() && hit_num < limit) {
+        hit_num++;
+        seg_offsets.push_back(result.value());
+        offset = result.value();
         if (offset >= size) {
             // In fact, this case won't happen on sealed segments.
             continue;
         }
-
-        if (!bitset[offset]) {
-            seg_offsets.push_back(offset);
-            hit_num++;
-        }
+        result = bitset.find_next(offset, false);
     }
 
-    return {seg_offsets, more_hit_than_limit && offset != num_rows_.value()};
+    return {seg_offsets, more_hit_than_limit && result.has_value()};
 }
 
 ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
@@ -1720,7 +1729,15 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
             ret->mutable_vectors()->set_dim(dst->dim());
             break;
         }
-
+        case DataType::VECTOR_INT8: {
+            bulk_subscript_impl(
+                field_meta.get_sizeof(),
+                column.get(),
+                seg_offsets,
+                count,
+                ret->mutable_vectors()->mutable_int8_vector()->data());
+            break;
+        }
         default: {
             PanicInfo(DataTypeInvalid,
                       fmt::format("unsupported data type {}",

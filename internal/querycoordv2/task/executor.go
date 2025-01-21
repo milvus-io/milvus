@@ -29,13 +29,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
@@ -341,18 +341,23 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 
 	collectionInfo, err := ex.broker.DescribeCollection(ctx, task.CollectionID())
 	if err != nil {
-		log.Warn("failed to get collection info")
+		log.Warn("failed to get collection info", zap.Error(err))
 		return err
 	}
 	loadFields := ex.meta.GetLoadFields(ctx, task.CollectionID())
 	partitions, err := utils.GetPartitions(ctx, ex.targetMgr, task.CollectionID())
 	if err != nil {
-		log.Warn("failed to get partitions of collection")
+		log.Warn("failed to get partitions of collection", zap.Error(err))
 		return err
 	}
 	indexInfo, err := ex.broker.ListIndexes(ctx, task.CollectionID())
 	if err != nil {
-		log.Warn("fail to get index meta of collection")
+		log.Warn("fail to get index meta of collection", zap.Error(err))
+		return err
+	}
+	dbResp, err := ex.broker.DescribeDatabase(ctx, collectionInfo.GetDbName())
+	if err != nil {
+		log.Warn("failed to get database info", zap.Error(err))
 		return err
 	}
 	loadMeta := packLoadMeta(
@@ -363,6 +368,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		loadFields,
 		partitions...,
 	)
+	loadMeta.DbProperties = dbResp.GetProperties()
 
 	dmChannel := ex.targetMgr.GetDmChannel(ctx, task.CollectionID(), action.ChannelName(), meta.NextTarget)
 	if dmChannel == nil {

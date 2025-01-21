@@ -13,6 +13,7 @@ expr:
 	| EmptyArray                                                                 # EmptyArray
 	| expr LIKE StringLiteral                                                    # Like
 	| TEXTMATCH'('Identifier',' StringLiteral')'                                 # TextMatch
+	| PHRASEMATCH'('Identifier',' StringLiteral (',' IntegerConstant)? ')'       # PhraseMatch
 	| expr POW expr											                     # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                     # Unary
 //	| '(' typeName ')' expr									                     # Cast
@@ -34,6 +35,8 @@ expr:
 	| expr BOR expr											                     # BitOr
 	| expr AND expr											                     # LogicalAnd
 	| expr OR expr											                     # LogicalOr
+	| Identifier ISNULL                                                          # IsNull
+	| Identifier ISNOTNULL                                                       # IsNotNull
 	| EXISTS expr                                                                # Exists;
 
 // typeName: ty = (BOOL | INT8 | INT16 | INT32 | INT64 | FLOAT | DOUBLE);
@@ -58,6 +61,7 @@ NE: '!=';
 LIKE: 'like' | 'LIKE';
 EXISTS: 'exists' | 'EXISTS';
 TEXTMATCH: 'text_match'|'TEXT_MATCH';
+PHRASEMATCH: 'phrase_match'|'PHRASE_MATCH';
 
 ADD: '+';
 SUB: '-';
@@ -71,11 +75,14 @@ BAND: '&';
 BOR: '|';
 BXOR: '^';
 
-AND: '&&' | 'and';
-OR: '||' | 'or';
+AND: '&&' | 'and' | 'AND';
+OR: '||' | 'or' | 'OR';
+
+ISNULL: 'is null' | 'IS NULL';
+ISNOTNULL: 'is not null' | 'IS NOT NULL';
 
 BNOT: '~';
-NOT: '!' | 'not';
+NOT: '!' | 'not' | 'NOT';
 
 IN: 'in' | 'IN';
 EmptyArray: '[' (Whitespace | Newline)* ']';

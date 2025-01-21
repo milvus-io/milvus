@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -14,7 +15,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-const vChannel = "by-dev-rootcoord-dml_4"
+var vChannels = []string{
+	"by-dev-rootcoord-dml_4",
+	"by-dev-rootcoord-dml_5",
+}
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
@@ -31,12 +35,17 @@ func TestStreamingProduce(t *testing.T) {
 			PartitionIds: []int64{1, 2, 3},
 		}).
 		WithBody(&msgpb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateCollection,
+				Timestamp: 1,
+			},
 			CollectionID: 1,
 		}).
-		WithVChannel(vChannel).
-		BuildMutable()
-	resp, err := streaming.WAL().RawAppend(context.Background(), msg)
-	fmt.Printf("%+v\t%+v\n", resp, err)
+		WithBroadcast(vChannels).
+		BuildBroadcast()
+
+	resp, err := streaming.WAL().BroadcastAppend(context.Background(), msg)
+	t.Logf("CreateCollection: %+v\t%+v\n", resp, err)
 
 	for i := 0; i < 500; i++ {
 		time.Sleep(time.Millisecond * 1)
@@ -47,17 +56,17 @@ func TestStreamingProduce(t *testing.T) {
 			WithBody(&msgpb.InsertRequest{
 				CollectionID: 1,
 			}).
-			WithVChannel(vChannel).
+			WithVChannel(vChannels[0]).
 			BuildMutable()
 		resp, err := streaming.WAL().RawAppend(context.Background(), msg)
-		fmt.Printf("%+v\t%+v\n", resp, err)
+		t.Logf("Insert: %+v\t%+v\n", resp, err)
 	}
 
 	for i := 0; i < 500; i++ {
 		time.Sleep(time.Millisecond * 1)
 		txn, err := streaming.WAL().Txn(context.Background(), streaming.TxnOption{
-			VChannel:  vChannel,
-			Keepalive: 100 * time.Millisecond,
+			VChannel:  vChannels[0],
+			Keepalive: 500 * time.Millisecond,
 		})
 		if err != nil {
 			t.Errorf("txn failed: %v", err)
@@ -71,7 +80,7 @@ func TestStreamingProduce(t *testing.T) {
 				WithBody(&msgpb.InsertRequest{
 					CollectionID: 1,
 				}).
-				WithVChannel(vChannel).
+				WithVChannel(vChannels[0]).
 				BuildMutable()
 			err := txn.Append(context.Background(), msg)
 			fmt.Printf("%+v\n", err)
@@ -80,7 +89,7 @@ func TestStreamingProduce(t *testing.T) {
 		if err != nil {
 			t.Errorf("txn failed: %v", err)
 		}
-		fmt.Printf("%+v\n", result)
+		t.Logf("txn commit: %+v\n", result)
 	}
 
 	msg, _ = message.NewDropCollectionMessageBuilderV1().
@@ -90,10 +99,10 @@ func TestStreamingProduce(t *testing.T) {
 		WithBody(&msgpb.DropCollectionRequest{
 			CollectionID: 1,
 		}).
-		WithVChannel(vChannel).
-		BuildMutable()
-	resp, err = streaming.WAL().RawAppend(context.Background(), msg)
-	fmt.Printf("%+v\t%+v\n", resp, err)
+		WithBroadcast(vChannels).
+		BuildBroadcast()
+	resp, err = streaming.WAL().BroadcastAppend(context.Background(), msg)
+	t.Logf("DropCollection: %+v\t%+v\n", resp, err)
 }
 
 func TestStreamingConsume(t *testing.T) {
@@ -102,7 +111,7 @@ func TestStreamingConsume(t *testing.T) {
 	defer streaming.Release()
 	ch := make(message.ChanMessageHandler, 10)
 	s := streaming.WAL().Read(context.Background(), streaming.ReadOption{
-		VChannel:       vChannel,
+		VChannel:       vChannels[0],
 		DeliverPolicy:  options.DeliverPolicyAll(),
 		MessageHandler: ch,
 	})
@@ -115,7 +124,7 @@ func TestStreamingConsume(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 		select {
 		case msg := <-ch:
-			fmt.Printf("msgID=%+v, msgType=%+v, tt=%d, lca=%+v, body=%s, idx=%d\n",
+			t.Logf("msgID=%+v, msgType=%+v, tt=%d, lca=%+v, body=%s, idx=%d\n",
 				msg.MessageID(),
 				msg.MessageType(),
 				msg.TimeTick(),

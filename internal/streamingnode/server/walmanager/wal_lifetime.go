@@ -13,7 +13,7 @@ import (
 )
 
 // newWALLifetime create a WALLifetime with opener.
-func newWALLifetime(opener wal.Opener, channel string) *walLifetime {
+func newWALLifetime(opener wal.Opener, channel string, logger *log.MLogger) *walLifetime {
 	ctx, cancel := context.WithCancel(context.Background())
 	l := &walLifetime{
 		ctx:       ctx,
@@ -22,7 +22,7 @@ func newWALLifetime(opener wal.Opener, channel string) *walLifetime {
 		finish:    make(chan struct{}),
 		opener:    opener,
 		statePair: newWALStatePair(),
-		logger:    log.With(zap.String("channel", channel)),
+		logger:    logger.With(zap.String("channel", channel)),
 	}
 	go l.backgroundTask()
 	return l

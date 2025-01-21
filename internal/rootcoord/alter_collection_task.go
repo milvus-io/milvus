@@ -26,11 +26,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -64,39 +66,63 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	newColl := oldColl.Clone()
+	var newProperties []*commonpb.KeyValuePair
 	if len(a.Req.Properties) > 0 {
 		if ContainsKeyPairArray(a.Req.GetProperties(), oldColl.Properties) {
 			log.Info("skip to alter collection due to no changes were detected in the properties", zap.Int64("collectionID", oldColl.CollectionID))
 			return nil
 		}
-		newColl.Properties = MergeProperties(oldColl.Properties, a.Req.GetProperties())
+		newProperties = MergeProperties(oldColl.Properties, a.Req.GetProperties())
 	} else if len(a.Req.DeleteKeys) > 0 {
-		newColl.Properties = DeleteProperties(oldColl.Properties, a.Req.GetDeleteKeys())
+		newProperties = DeleteProperties(oldColl.Properties, a.Req.GetDeleteKeys())
 	}
 
 	ts := a.GetTs()
-	redoTask := newBaseRedoTask(a.core.stepExecutor)
+	return executeAlterCollectionTaskSteps(ctx, a.core, oldColl, oldColl.Properties, newProperties, a.Req, ts)
+}
+
+func (a *alterCollectionTask) GetLockerKey() LockerKey {
+	collection := a.core.getCollectionIDStr(a.ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), a.Req.GetCollectionID())
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(a.Req.GetDbName(), false),
+		NewCollectionLockerKey(collection, true),
+	)
+}
+
+func executeAlterCollectionTaskSteps(ctx context.Context,
+	core *Core,
+	col *model.Collection,
+	oldProperties []*commonpb.KeyValuePair,
+	newProperties []*commonpb.KeyValuePair,
+	request *milvuspb.AlterCollectionRequest,
+	ts Timestamp,
+) error {
+	oldColl := col.Clone()
+	oldColl.Properties = oldProperties
+	newColl := col.Clone()
+	newColl.Properties = newProperties
+	redoTask := newBaseRedoTask(core.stepExecutor)
 	redoTask.AddSyncStep(&AlterCollectionStep{
-		baseStep: baseStep{core: a.core},
+		baseStep: baseStep{core: core},
 		oldColl:  oldColl,
 		newColl:  newColl,
 		ts:       ts,
 	})
 
-	a.Req.CollectionID = oldColl.CollectionID
+	request.CollectionID = oldColl.CollectionID
 	redoTask.AddSyncStep(&BroadcastAlteredCollectionStep{
-		baseStep: baseStep{core: a.core},
-		req:      a.Req,
-		core:     a.core,
+		baseStep: baseStep{core: core},
+		req:      request,
+		core:     core,
 	})
 
 	// properties needs to be refreshed in the cache
-	aliases := a.core.meta.ListAliasesByID(ctx, oldColl.CollectionID)
+	aliases := core.meta.ListAliasesByID(ctx, oldColl.CollectionID)
 	redoTask.AddSyncStep(&expireCacheStep{
-		baseStep:        baseStep{core: a.core},
-		dbName:          a.Req.GetDbName(),
-		collectionNames: append(aliases, a.Req.GetCollectionName()),
+		baseStep:        baseStep{core: core},
+		dbName:          request.GetDbName(),
+		collectionNames: append(aliases, request.GetCollectionName()),
 		collectionID:    oldColl.CollectionID,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollection)},
 	})
@@ -117,7 +143,7 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 			zap.Strings("newResourceGroups", newResourceGroups),
 		)
 		redoTask.AddAsyncStep(NewSimpleStep("", func(ctx context.Context) ([]nestedStep, error) {
-			resp, err := a.core.queryCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
+			resp, err := core.queryCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
 				CollectionIDs:  []int64{oldColl.CollectionID},
 				ReplicaNumber:  int32(newReplicaNumber),
 				ResourceGroups: newResourceGroups,
@@ -130,16 +156,44 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 		}))
 	}
 
-	return redoTask.Execute(ctx)
-}
+	oldReplicateEnable, _ := common.IsReplicateEnabled(oldColl.Properties)
+	replicateEnable, ok := common.IsReplicateEnabled(newColl.Properties)
+	if ok && !replicateEnable && oldReplicateEnable {
+		replicateID, _ := common.GetReplicateID(oldColl.Properties)
+		redoTask.AddAsyncStep(NewSimpleStep("send replicate end msg for collection", func(ctx context.Context) ([]nestedStep, error) {
+			msgPack := &msgstream.MsgPack{}
+			msg := &msgstream.ReplicateMsg{
+				BaseMsg: msgstream.BaseMsg{
+					Ctx:            ctx,
+					BeginTimestamp: ts,
+					EndTimestamp:   ts,
+					HashValues:     []uint32{0},
+				},
+				ReplicateMsg: &msgpb.ReplicateMsg{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_Replicate,
+						Timestamp: ts,
+						ReplicateInfo: &commonpb.ReplicateInfo{
+							IsReplicate: true,
+							ReplicateID: replicateID,
+						},
+					},
+					IsEnd:      true,
+					Database:   newColl.DBName,
+					Collection: newColl.Name,
+				},
+			}
+			msgPack.Msgs = append(msgPack.Msgs, msg)
+			log.Info("send replicate end msg",
+				zap.String("collection", newColl.Name),
+				zap.String("database", newColl.DBName),
+				zap.String("replicateID", replicateID),
+			)
+			return nil, core.chanTimeTick.broadcastDmlChannels(newColl.PhysicalChannelNames, msgPack)
+		}))
+	}
 
-func (a *alterCollectionTask) GetLockerKey() LockerKey {
-	collection := a.core.getCollectionIDStr(a.ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), a.Req.GetCollectionID())
-	return NewLockerKeyChain(
-		NewClusterLockerKey(false),
-		NewDatabaseLockerKey(a.Req.GetDbName(), false),
-		NewCollectionLockerKey(collection, true),
-	)
+	return redoTask.Execute(ctx)
 }
 
 func DeleteProperties(oldProps []*commonpb.KeyValuePair, deleteKeys []string) []*commonpb.KeyValuePair {
@@ -188,35 +242,66 @@ func (a *alterCollectionFieldTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	newColl := oldColl.Clone()
-	err = UpdateFieldProperties(newColl, a.Req.GetFieldName(), a.Req.GetProperties())
+	oldFieldProperties, err := GetFieldProperties(oldColl, a.Req.GetFieldName())
 	if err != nil {
+		log.Warn("get field properties failed during changing collection state", zap.Error(err))
 		return err
 	}
 	ts := a.GetTs()
-	redoTask := newBaseRedoTask(a.core.stepExecutor)
+	return executeAlterCollectionFieldTaskSteps(ctx, a.core, oldColl, oldFieldProperties, a.Req, ts)
+}
+
+func (a *alterCollectionFieldTask) GetLockerKey() LockerKey {
+	collection := a.core.getCollectionIDStr(a.ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), 0)
+	return NewLockerKeyChain(
+		NewClusterLockerKey(false),
+		NewDatabaseLockerKey(a.Req.GetDbName(), false),
+		NewCollectionLockerKey(collection, true),
+	)
+}
+
+func executeAlterCollectionFieldTaskSteps(ctx context.Context,
+	core *Core,
+	col *model.Collection,
+	oldFieldProperties []*commonpb.KeyValuePair,
+	request *milvuspb.AlterCollectionFieldRequest,
+	ts Timestamp,
+) error {
+	var err error
+	filedName := request.GetFieldName()
+	newFieldProperties := UpdateFieldPropertyParams(oldFieldProperties, request.GetProperties())
+	oldColl := col.Clone()
+	err = ResetFieldProperties(oldColl, filedName, oldFieldProperties)
+	if err != nil {
+		return err
+	}
+	newColl := col.Clone()
+	err = ResetFieldProperties(newColl, filedName, newFieldProperties)
+	if err != nil {
+		return err
+	}
+	redoTask := newBaseRedoTask(core.stepExecutor)
 	redoTask.AddSyncStep(&AlterCollectionStep{
-		baseStep: baseStep{core: a.core},
+		baseStep: baseStep{core: core},
 		oldColl:  oldColl,
 		newColl:  newColl,
 		ts:       ts,
 	})
 
 	redoTask.AddSyncStep(&BroadcastAlteredCollectionStep{
-		baseStep: baseStep{core: a.core},
+		baseStep: baseStep{core: core},
 		req: &milvuspb.AlterCollectionRequest{
-			Base:           a.Req.Base,
-			DbName:         a.Req.DbName,
-			CollectionName: a.Req.CollectionName,
+			Base:           request.Base,
+			DbName:         request.DbName,
+			CollectionName: request.CollectionName,
 			CollectionID:   oldColl.CollectionID,
 		},
-		core: a.core,
+		core: core,
 	})
-	collectionNames := []string{}
 	redoTask.AddSyncStep(&expireCacheStep{
-		baseStep:        baseStep{core: a.core},
-		dbName:          a.Req.GetDbName(),
-		collectionNames: append(collectionNames, a.Req.GetCollectionName()),
+		baseStep:        baseStep{core: core},
+		dbName:          request.GetDbName(),
+		collectionNames: []string{request.GetCollectionName()},
 		collectionID:    oldColl.CollectionID,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AlterCollectionField)},
 	})
@@ -224,14 +309,23 @@ func (a *alterCollectionFieldTask) Execute(ctx context.Context) error {
 	return redoTask.Execute(ctx)
 }
 
-func UpdateFieldProperties(coll *model.Collection, fieldName string, updatedProps []*commonpb.KeyValuePair) error {
+func ResetFieldProperties(coll *model.Collection, fieldName string, newProps []*commonpb.KeyValuePair) error {
 	for i, field := range coll.Fields {
 		if field.Name == fieldName {
-			coll.Fields[i].TypeParams = UpdateFieldPropertyParams(field.TypeParams, updatedProps)
+			coll.Fields[i].TypeParams = newProps
 			return nil
 		}
 	}
 	return merr.WrapErrParameterInvalidMsg("field %s does not exist in collection", fieldName)
+}
+
+func GetFieldProperties(coll *model.Collection, fieldName string) ([]*commonpb.KeyValuePair, error) {
+	for _, field := range coll.Fields {
+		if field.Name == fieldName {
+			return field.TypeParams, nil
+		}
+	}
+	return nil, merr.WrapErrParameterInvalidMsg("field %s does not exist in collection", fieldName)
 }
 
 func UpdateFieldPropertyParams(oldProps, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {

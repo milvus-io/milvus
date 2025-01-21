@@ -18,16 +18,18 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_flusher"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
+	internaltypes "github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/idalloc"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 const testVChannel = "v1"
@@ -53,8 +55,15 @@ func initResourceForTest(t *testing.T) {
 	rc := idalloc.NewMockRootCoordClient(t)
 	rc.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{}, nil)
 
+	fRootCoordClient := syncutil.NewFuture[internaltypes.RootCoordClient]()
+	fRootCoordClient.Set(rc)
+
 	dc := mocks.NewMockDataCoordClient(t)
 	dc.EXPECT().AllocSegment(mock.Anything, mock.Anything).Return(&datapb.AllocSegmentResponse{}, nil)
+
+	fDataCoordClient := syncutil.NewFuture[internaltypes.DataCoordClient]()
+	fDataCoordClient.Set(dc)
+
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -67,8 +76,8 @@ func initResourceForTest(t *testing.T) {
 
 	resource.InitForTest(
 		t,
-		resource.OptRootCoordClient(rc),
-		resource.OptDataCoordClient(dc),
+		resource.OptRootCoordClient(fRootCoordClient),
+		resource.OptDataCoordClient(fDataCoordClient),
 		resource.OptFlusher(flusher),
 		resource.OptStreamingNodeCatalog(catalog),
 	)

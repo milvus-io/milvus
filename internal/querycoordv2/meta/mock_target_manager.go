@@ -6,7 +6,7 @@ import (
 	context "context"
 
 	metastore "github.com/milvus-io/milvus/internal/metastore"
-	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
 
 	mock "github.com/stretchr/testify/mock"
 
@@ -638,17 +638,17 @@ func (_c *MockTargetManager_GetSealedSegmentsByPartition_Call) RunAndReturn(run 
 	return _c
 }
 
-// GetTargetJSON provides a mock function with given fields: ctx, scope
-func (_m *MockTargetManager) GetTargetJSON(ctx context.Context, scope int32) string {
-	ret := _m.Called(ctx, scope)
+// GetTargetJSON provides a mock function with given fields: ctx, scope, collectionID
+func (_m *MockTargetManager) GetTargetJSON(ctx context.Context, scope int32, collectionID int64) string {
+	ret := _m.Called(ctx, scope, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetTargetJSON")
 	}
 
 	var r0 string
-	if rf, ok := ret.Get(0).(func(context.Context, int32) string); ok {
-		r0 = rf(ctx, scope)
+	if rf, ok := ret.Get(0).(func(context.Context, int32, int64) string); ok {
+		r0 = rf(ctx, scope, collectionID)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
@@ -664,13 +664,14 @@ type MockTargetManager_GetTargetJSON_Call struct {
 // GetTargetJSON is a helper method to define mock.On call
 //   - ctx context.Context
 //   - scope int32
-func (_e *MockTargetManager_Expecter) GetTargetJSON(ctx interface{}, scope interface{}) *MockTargetManager_GetTargetJSON_Call {
-	return &MockTargetManager_GetTargetJSON_Call{Call: _e.mock.On("GetTargetJSON", ctx, scope)}
+//   - collectionID int64
+func (_e *MockTargetManager_Expecter) GetTargetJSON(ctx interface{}, scope interface{}, collectionID interface{}) *MockTargetManager_GetTargetJSON_Call {
+	return &MockTargetManager_GetTargetJSON_Call{Call: _e.mock.On("GetTargetJSON", ctx, scope, collectionID)}
 }
 
-func (_c *MockTargetManager_GetTargetJSON_Call) Run(run func(ctx context.Context, scope int32)) *MockTargetManager_GetTargetJSON_Call {
+func (_c *MockTargetManager_GetTargetJSON_Call) Run(run func(ctx context.Context, scope int32, collectionID int64)) *MockTargetManager_GetTargetJSON_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int32))
+		run(args[0].(context.Context), args[1].(int32), args[2].(int64))
 	})
 	return _c
 }
@@ -680,7 +681,7 @@ func (_c *MockTargetManager_GetTargetJSON_Call) Return(_a0 string) *MockTargetMa
 	return _c
 }
 
-func (_c *MockTargetManager_GetTargetJSON_Call) RunAndReturn(run func(context.Context, int32) string) *MockTargetManager_GetTargetJSON_Call {
+func (_c *MockTargetManager_GetTargetJSON_Call) RunAndReturn(run func(context.Context, int32, int64) string) *MockTargetManager_GetTargetJSON_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -729,6 +730,53 @@ func (_c *MockTargetManager_IsCurrentTargetExist_Call) Return(_a0 bool) *MockTar
 }
 
 func (_c *MockTargetManager_IsCurrentTargetExist_Call) RunAndReturn(run func(context.Context, int64, int64) bool) *MockTargetManager_IsCurrentTargetExist_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// IsCurrentTargetReady provides a mock function with given fields: ctx, collectionID
+func (_m *MockTargetManager) IsCurrentTargetReady(ctx context.Context, collectionID int64) bool {
+	ret := _m.Called(ctx, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsCurrentTargetReady")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(context.Context, int64) bool); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockTargetManager_IsCurrentTargetReady_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsCurrentTargetReady'
+type MockTargetManager_IsCurrentTargetReady_Call struct {
+	*mock.Call
+}
+
+// IsCurrentTargetReady is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *MockTargetManager_Expecter) IsCurrentTargetReady(ctx interface{}, collectionID interface{}) *MockTargetManager_IsCurrentTargetReady_Call {
+	return &MockTargetManager_IsCurrentTargetReady_Call{Call: _e.mock.On("IsCurrentTargetReady", ctx, collectionID)}
+}
+
+func (_c *MockTargetManager_IsCurrentTargetReady_Call) Run(run func(ctx context.Context, collectionID int64)) *MockTargetManager_IsCurrentTargetReady_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockTargetManager_IsCurrentTargetReady_Call) Return(_a0 bool) *MockTargetManager_IsCurrentTargetReady_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTargetManager_IsCurrentTargetReady_Call) RunAndReturn(run func(context.Context, int64) bool) *MockTargetManager_IsCurrentTargetReady_Call {
 	_c.Call.Return(run)
 	return _c
 }

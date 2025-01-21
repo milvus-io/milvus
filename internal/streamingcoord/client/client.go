@@ -11,12 +11,16 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
+	"github.com/milvus-io/milvus/internal/streamingcoord/client/broadcast"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
@@ -32,9 +36,22 @@ type AssignmentService interface {
 	types.AssignmentDiscoverWatcher
 }
 
+// BroadcastService is the interface of broadcast service.
+type BroadcastService interface {
+	// Broadcast sends a broadcast message to the streaming service.
+	Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
+}
+
 // Client is the interface of log service client.
 type Client interface {
+	// Broadcast access broadcast service.
+	// Broadcast service will always be available.
+	// When streaming service is enabled, the broadcast will use the streaming service.
+	// When streaming service is disabled, the broadcast will use legacy msgstream.
+	Broadcast() BroadcastService
+
 	// Assignment access assignment service.
+	// Assignment service will only be available when streaming service is enabled.
 	Assignment() AssignmentService
 
 	// Close close the client.
@@ -44,8 +61,8 @@ type Client interface {
 // NewClient creates a new client.
 func NewClient(etcdCli *clientv3.Client) Client {
 	// StreamingCoord is deployed on DataCoord node.
-	role := sessionutil.GetSessionPrefixByRole(typeutil.DataCoordRole)
-	rb := resolver.NewSessionBuilder(etcdCli, role)
+	role := sessionutil.GetSessionPrefixByRole(typeutil.RootCoordRole)
+	rb := resolver.NewSessionExclusiveBuilder(etcdCli, role)
 	dialTimeout := paramtable.Get().StreamingCoordGrpcClientCfg.DialTimeout.GetAsDuration(time.Millisecond)
 	dialOptions := getDialOptions(rb)
 	conn := lazygrpc.NewConn(func(ctx context.Context) (*grpc.ClientConn, error) {
@@ -53,15 +70,21 @@ func NewClient(etcdCli *clientv3.Client) Client {
 		defer cancel()
 		return grpc.DialContext(
 			ctx,
-			resolver.SessionResolverScheme+":///"+typeutil.DataCoordRole,
+			resolver.SessionResolverScheme+":///"+typeutil.RootCoordRole,
 			dialOptions...,
 		)
 	})
-	assignmentService := lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingCoordAssignmentServiceClient)
+	var assignmentServiceImpl *assignment.AssignmentServiceImpl
+	if streamingutil.IsStreamingServiceEnabled() {
+		assignmentService := lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingCoordAssignmentServiceClient)
+		assignmentServiceImpl = assignment.NewAssignmentService(assignmentService)
+	}
+	broadcastService := lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingCoordBroadcastServiceClient)
 	return &clientImpl{
 		conn:              conn,
 		rb:                rb,
-		assignmentService: assignment.NewAssignmentService(assignmentService),
+		assignmentService: assignmentServiceImpl,
+		broadcastService:  broadcast.NewBroadcastService(util.MustSelectWALName(), broadcastService),
 	}
 }
 

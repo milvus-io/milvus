@@ -412,6 +412,11 @@ struct InsertRecord {
                     this->append_data<SparseFloatVector>(field_id,
                                                          size_per_chunk);
                     continue;
+                } else if (field_meta.get_data_type() ==
+                           DataType::VECTOR_INT8) {
+                    this->append_data<Int8Vector>(
+                        field_id, field_meta.get_dim(), size_per_chunk);
+                    continue;
                 } else {
                     PanicInfo(DataTypeInvalid,
                               fmt::format("unsupported vector type",
@@ -535,7 +540,7 @@ struct InsertRecord {
             case DataType::INT64: {
                 auto column =
                     std::dynamic_pointer_cast<SingleChunkColumn>(data);
-                auto pks = reinterpret_cast<const int64_t*>(column->Data());
+                auto pks = reinterpret_cast<const int64_t*>(column->Data(0));
                 for (int i = 0; i < column->NumRows(); ++i) {
                     pk2offset_->insert(pks[i], offset++);
                 }

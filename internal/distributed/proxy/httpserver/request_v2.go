@@ -48,6 +48,13 @@ type DatabaseReqWithProperties struct {
 
 func (req *DatabaseReqWithProperties) GetDbName() string { return req.DbName }
 
+type DropDatabasePropertiesReq struct {
+	DbName       string   `json:"dbName" binding:"required"`
+	PropertyKeys []string `json:"propertyKeys"`
+}
+
+func (req *DatabaseReqWithProperties) DropDatabasPropertiesReq() string { return req.DbName }
+
 type CollectionNameReq struct {
 	DbName         string   `json:"dbName"`
 	CollectionName string   `json:"collectionName" binding:"required"`
@@ -64,6 +71,18 @@ func (req *CollectionNameReq) GetCollectionName() string {
 
 func (req *CollectionNameReq) GetPartitionNames() []string {
 	return req.PartitionNames
+}
+
+type CollectionReqWithProperties struct {
+	DbName         string                 `json:"dbName"`
+	CollectionName string                 `json:"collectionName" binding:"required"`
+	Properties     map[string]interface{} `json:"properties"`
+}
+
+func (req *CollectionReqWithProperties) GetDbName() string { return req.DbName }
+
+func (req *CollectionReqWithProperties) GetCollectionName() string {
+	return req.CollectionName
 }
 
 type OptionalCollectionNameReq struct {
@@ -87,6 +106,62 @@ type RenameCollectionReq struct {
 }
 
 func (req *RenameCollectionReq) GetDbName() string { return req.DbName }
+
+type DropCollectionPropertiesReq struct {
+	DbName         string   `json:"dbName"`
+	CollectionName string   `json:"collectionName" binding:"required"`
+	PropertyKeys   []string `json:"propertyKeys"`
+}
+
+func (req *DropCollectionPropertiesReq) GetDbName() string { return req.DbName }
+
+func (req *DropCollectionPropertiesReq) GetCollectionName() string {
+	return req.CollectionName
+}
+
+type CompactReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	IsClustering   bool   `json:"isClustering"`
+}
+
+func (req *CompactReq) GetDbName() string { return req.DbName }
+
+func (req *CompactReq) GetCollectionName() string {
+	return req.CollectionName
+}
+
+type GetCompactionStateReq struct {
+	JobID int64 `json:"jobID"`
+}
+
+type FlushReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+}
+
+func (req *FlushReq) GetDbName() string { return req.DbName }
+
+func (req *FlushReq) GetCollectionName() string {
+	return req.CollectionName
+}
+
+type CollectionFieldReqWithParams struct {
+	DbName         string                 `json:"dbName"`
+	CollectionName string                 `json:"collectionName" binding:"required"`
+	FieldName      string                 `json:"fieldName" binding:"required"`
+	FieldParams    map[string]interface{} `json:"fieldParams"`
+}
+
+func (req *CollectionFieldReqWithParams) GetDbName() string { return req.DbName }
+
+func (req *CollectionFieldReqWithParams) GetCollectionName() string {
+	return req.CollectionName
+}
+
+func (req *CollectionFieldReqWithParams) GetFieldName() string {
+	return req.FieldName
+}
 
 type PartitionReq struct {
 	// CollectionNameReq
@@ -176,14 +251,6 @@ type CollectionDataReq struct {
 
 func (req *CollectionDataReq) GetDbName() string { return req.DbName }
 
-type searchParams struct {
-	// not use metricType any more, just for compatibility
-	MetricType    string                 `json:"metricType"`
-	Params        map[string]interface{} `json:"params"`
-	IgnoreGrowing bool                   `json:"ignoreGrowing"`
-	Hints         string                 `json:"hints"`
-}
-
 type SearchReqV2 struct {
 	DbName           string                 `json:"dbName"`
 	CollectionName   string                 `json:"collectionName" binding:"required"`
@@ -197,7 +264,7 @@ type SearchReqV2 struct {
 	Limit            int32                  `json:"limit"`
 	Offset           int32                  `json:"offset"`
 	OutputFields     []string               `json:"outputFields"`
-	SearchParams     searchParams           `json:"searchParams"`
+	SearchParams     map[string]interface{} `json:"searchParams"`
 	ConsistencyLevel string                 `json:"consistencyLevel"`
 	ExprParams       map[string]interface{} `json:"exprParams"`
 	// not use Params any more, just for compatibility
@@ -219,7 +286,7 @@ type SubSearchReq struct {
 	MetricType   string                 `json:"metricType"`
 	Limit        int32                  `json:"limit"`
 	Offset       int32                  `json:"offset"`
-	SearchParams searchParams           `json:"params"`
+	SearchParams map[string]interface{} `json:"params"`
 	ExprParams   map[string]interface{} `json:"exprParams"`
 }
 
@@ -364,6 +431,40 @@ func (req *IndexReq) GetIndexName() string {
 	return req.IndexName
 }
 
+type IndexReqWithProperties struct {
+	DbName         string                 `json:"dbName"`
+	CollectionName string                 `json:"collectionName" binding:"required"`
+	IndexName      string                 `json:"indexName" binding:"required"`
+	Properties     map[string]interface{} `json:"properties"`
+}
+
+func (req *IndexReqWithProperties) GetDbName() string { return req.DbName }
+
+func (req *IndexReqWithProperties) GetCollectionName() string {
+	return req.CollectionName
+}
+
+func (req *IndexReqWithProperties) GetIndexName() string {
+	return req.IndexName
+}
+
+type DropIndexPropertiesReq struct {
+	DbName         string   `json:"dbName"`
+	CollectionName string   `json:"collectionName" binding:"required"`
+	IndexName      string   `json:"indexName" binding:"required"`
+	PropertyKeys   []string `json:"propertyKeys"`
+}
+
+func (req *DropIndexPropertiesReq) GetDbName() string { return req.DbName }
+
+func (req *DropIndexPropertiesReq) GetCollectionName() string {
+	return req.CollectionName
+}
+
+func (req *DropIndexPropertiesReq) GetIndexName() string {
+	return req.IndexName
+}
+
 type FieldSchema struct {
 	FieldName         string                 `json:"fieldName" binding:"required"`
 	DataType          string                 `json:"dataType" binding:"required"`
@@ -466,4 +567,100 @@ func wrapperReturnDefault() gin.H {
 
 func wrapperReturnDefaultWithCost(cost int) gin.H {
 	return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}, HTTPReturnCost: cost}
+}
+
+type ResourceGroupNodeFilter struct {
+	NodeLabels map[string]string `json:"node_labels" binding:"required"`
+}
+
+func (req *ResourceGroupNodeFilter) GetNodeLabels() map[string]string {
+	return req.NodeLabels
+}
+
+type ResourceGroupLimit struct {
+	NodeNum int32 `json:"node_num" binding:"required"`
+}
+
+func (req *ResourceGroupLimit) GetNodeNum() int32 {
+	return req.NodeNum
+}
+
+type ResourceGroupTransfer struct {
+	ResourceGroup string `json:"resource_group" binding:"required"`
+}
+
+func (req *ResourceGroupTransfer) GetResourceGroup() string {
+	return req.ResourceGroup
+}
+
+type ResourceGroupConfig struct {
+	Requests     *ResourceGroupLimit      `json:"requests" binding:"required"`
+	Limits       *ResourceGroupLimit      `json:"limits" binding:"required"`
+	TransferFrom []*ResourceGroupTransfer `json:"transfer_from"`
+	TransferTo   []*ResourceGroupTransfer `json:"transfer_to"`
+	NodeFilter   *ResourceGroupNodeFilter `json:"node_filter"`
+}
+
+func (req *ResourceGroupConfig) GetRequests() *ResourceGroupLimit {
+	return req.Requests
+}
+
+func (req *ResourceGroupConfig) GetLimits() *ResourceGroupLimit {
+	return req.Limits
+}
+
+func (req *ResourceGroupConfig) GetTransferFrom() []*ResourceGroupTransfer {
+	return req.TransferFrom
+}
+
+func (req *ResourceGroupConfig) GetTransferTo() []*ResourceGroupTransfer {
+	return req.TransferTo
+}
+
+func (req *ResourceGroupConfig) GetNodeFilter() *ResourceGroupNodeFilter {
+	return req.NodeFilter
+}
+
+type ResourceGroupReq struct {
+	Name   string               `json:"name" binding:"required"`
+	Config *ResourceGroupConfig `json:"config"`
+}
+
+func (req *ResourceGroupReq) GetName() string {
+	return req.Name
+}
+
+func (req *ResourceGroupReq) GetConfig() *ResourceGroupConfig {
+	return req.Config
+}
+
+type UpdateResourceGroupReq struct {
+	ResourceGroups map[string]*ResourceGroupConfig `json:"resource_groups" binding:"required"`
+}
+
+func (req *UpdateResourceGroupReq) GetResourceGroups() map[string]*ResourceGroupConfig {
+	return req.ResourceGroups
+}
+
+type TransferReplicaReq struct {
+	SourceRgName   string `json:"sourceRgName" binding:"required"`
+	TargetRgName   string `json:"targetRgName" binding:"required"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	ReplicaNum     int64  `json:"replicaNum" binding:"required"`
+}
+
+func (req *TransferReplicaReq) GetSourceRgName() string {
+	return req.SourceRgName
+}
+
+func (req *TransferReplicaReq) GetTargetRgName() string {
+	return req.TargetRgName
+}
+
+func (req *TransferReplicaReq) GetCollectionName() string {
+	return req.CollectionName
+}
+
+func (req *TransferReplicaReq) GetReplicaNum() int64 {
+	return req.ReplicaNum
 }

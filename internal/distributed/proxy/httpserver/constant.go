@@ -25,16 +25,18 @@ import (
 // v2
 const (
 	// --- category ---
-	DataBaseCategory       = "/databases/"
-	CollectionCategory     = "/collections/"
-	EntityCategory         = "/entities/"
-	PartitionCategory      = "/partitions/"
-	UserCategory           = "/users/"
-	RoleCategory           = "/roles/"
-	IndexCategory          = "/indexes/"
-	AliasCategory          = "/aliases/"
-	ImportJobCategory      = "/jobs/import/"
-	PrivilegeGroupCategory = "/privilege_groups/"
+	DataBaseCategory        = "/databases/"
+	CollectionCategory      = "/collections/"
+	EntityCategory          = "/entities/"
+	PartitionCategory       = "/partitions/"
+	UserCategory            = "/users/"
+	RoleCategory            = "/roles/"
+	IndexCategory           = "/indexes/"
+	AliasCategory           = "/aliases/"
+	ImportJobCategory       = "/jobs/import/"
+	PrivilegeGroupCategory  = "/privilege_groups/"
+	CollectionFieldCategory = "/collections/fields/"
+	ResourceGroupCategory   = "/resource_groups/"
 
 	ListAction           = "list"
 	HasAction            = "has"
@@ -45,6 +47,7 @@ const (
 	LoadStateAction      = "get_load_state"
 	RenameAction         = "rename"
 	LoadAction           = "load"
+	RefreshLoadAction    = "refresh_load"
 	ReleaseAction        = "release"
 	QueryAction          = "query"
 	GetAction            = "get"
@@ -63,9 +66,15 @@ const (
 	GrantPrivilegeActionV2          = "grant_privilege_v2"
 	RevokePrivilegeActionV2         = "revoke_privilege_v2"
 	AlterAction                     = "alter"
+	AlterPropertiesAction           = "alter_properties"
+	DropPropertiesAction            = "drop_properties"
+	CompactAction                   = "compact"
+	CompactionStateAction           = "get_compaction_state"
+	FlushAction                     = "flush"
 	GetProgressAction               = "get_progress" // deprecated, keep it for compatibility, use `/v2/vectordb/jobs/import/describe` instead
 	AddPrivilegesToGroupAction      = "add_privileges_to_group"
 	RemovePrivilegesFromGroupAction = "remove_privileges_from_group"
+	TransferReplicaAction           = "transfer_replica"
 )
 
 const (
@@ -114,6 +123,7 @@ const (
 	HTTPReturnMessage        = "message"
 	HTTPReturnData           = "data"
 	HTTPReturnCost           = "cost"
+	HTTPReturnRecalls        = "recalls"
 	HTTPReturnLoadState      = "loadState"
 	HTTPReturnLoadProgress   = "loadProgress"
 

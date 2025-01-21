@@ -28,16 +28,15 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -149,9 +148,13 @@ func getSlowQuery(node *Proxy) gin.HandlerFunc {
 
 // buildReqParams fetch all parameters from query parameter of URL, add them into a map data structure.
 // put key and value from query parameter into map, concatenate values with separator if values size is greater than 1
-func buildReqParams(c *gin.Context, metricsType string) map[string]interface{} {
+func buildReqParams(c *gin.Context, metricsType string, customParams ...*commonpb.KeyValuePair) map[string]interface{} {
 	ret := make(map[string]interface{})
 	ret[metricsinfo.MetricTypeKey] = metricsType
+
+	for _, kv := range customParams {
+		ret[kv.Key] = kv.Value
+	}
 
 	queryParams := c.Request.URL.Query()
 	for key, values := range queryParams {
@@ -164,7 +167,7 @@ func buildReqParams(c *gin.Context, metricsType string) map[string]interface{} {
 	return ret
 }
 
-func getQueryComponentMetrics(node *Proxy, metricsType string) gin.HandlerFunc {
+func getQueryComponentMetrics(node *Proxy, metricsType string, customParams ...*commonpb.KeyValuePair) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		params := buildReqParams(c, metricsType)
 		req, err := metricsinfo.ConstructGetMetricsRequest(params)
@@ -186,7 +189,7 @@ func getQueryComponentMetrics(node *Proxy, metricsType string) gin.HandlerFunc {
 	}
 }
 
-func getDataComponentMetrics(node *Proxy, metricsType string) gin.HandlerFunc {
+func getDataComponentMetrics(node *Proxy, metricsType string, customParams ...*commonpb.KeyValuePair) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		params := buildReqParams(c, metricsType)
 		req, err := metricsinfo.ConstructGetMetricsRequest(params)
@@ -340,7 +343,7 @@ func describeCollection(node *Proxy) gin.HandlerFunc {
 		collection := &metricsinfo.Collection{
 			CollectionID:         strconv.FormatInt(describeCollectionResp.CollectionID, 10),
 			CollectionName:       describeCollectionResp.CollectionName,
-			CreatedTime:          tsoutil.PhysicalTimeFormat(describeCollectionResp.CreatedUtcTimestamp),
+			CreatedTime:          typeutil.TimestampToString(describeCollectionResp.CreatedUtcTimestamp),
 			ShardsNum:            int(describeCollectionResp.ShardsNum),
 			ConsistencyLevel:     describeCollectionResp.ConsistencyLevel.String(),
 			Aliases:              describeCollectionResp.Aliases,

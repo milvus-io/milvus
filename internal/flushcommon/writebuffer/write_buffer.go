@@ -16,12 +16,12 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -322,7 +322,7 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 			}
 		}
 
-		result = append(result, wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
+		future, err := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
 			if wb.taskObserverCallback != nil {
 				wb.taskObserverCallback(syncTask, err)
 			}
@@ -342,7 +342,11 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 				}
 			}
 			return nil
-		}))
+		})
+		if err != nil {
+			log.Fatal("failed to sync data", zap.Int64("segmentID", segmentID), zap.Error(err))
+		}
+		result = append(result, future)
 	}
 	return result
 }
@@ -643,7 +647,7 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 			t.WithDrop()
 		}
 
-		f := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
+		f, err := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
 			if wb.taskObserverCallback != nil {
 				wb.taskObserverCallback(syncTask, err)
 			}
@@ -656,6 +660,9 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 			}
 			return nil
 		})
+		if err != nil {
+			log.Fatal("failed to sync segment", zap.Int64("segmentID", id), zap.Error(err))
+		}
 		futures = append(futures, f)
 	}
 

@@ -1109,6 +1109,113 @@ TEST(StringExpr, UnaryRangeNullable) {
     }
 }
 
+TEST(StringExpr, NullExpr) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("str", DataType::VARCHAR, true);
+    schema->AddDebugField("another_str", DataType::VARCHAR);
+    schema->AddDebugField(
+        "fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto pk = schema->AddDebugField("int64", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    const auto& fvec_meta = schema->operator[](FieldName("fvec"));
+    const auto& str_meta = schema->operator[](FieldName("str"));
+
+    auto gen_plan =
+        [&, fvec_meta, str_meta](
+            NullExprType op) -> std::unique_ptr<proto::plan::PlanNode> {
+        auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
+                                               proto::schema::DataType::VarChar,
+                                               false,
+                                               false,
+                                               proto::schema::DataType::None,
+                                               true);
+        auto null_expr = test::GenNullExpr(op);
+        null_expr->set_allocated_column_info(column_info);
+
+        auto expr = test::GenExpr().release();
+        expr->set_allocated_null_expr(null_expr);
+
+        proto::plan::VectorType vector_type;
+        if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT) {
+            vector_type = proto::plan::VectorType::FloatVector;
+        } else if (fvec_meta.get_data_type() == DataType::VECTOR_BINARY) {
+            vector_type = proto::plan::VectorType::BinaryVector;
+        } else if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
+            vector_type = proto::plan::VectorType::Float16Vector;
+        }
+        auto anns = GenAnns(expr, vector_type, fvec_meta.get_id().get(), "$0");
+
+        auto plan_node = std::make_unique<proto::plan::PlanNode>();
+        plan_node->set_allocated_vector_anns(anns);
+        return plan_node;
+    };
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 1000;
+    std::vector<std::string> str_col;
+    FixedVector<bool> valid_data;
+    int num_iters = 100;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+        auto new_str_col = raw_data.get_col(str_meta.get_id());
+        auto begin = FIELD_DATA(new_str_col, string).begin();
+        auto end = FIELD_DATA(new_str_col, string).end();
+        str_col.insert(str_col.end(), begin, end);
+        auto new_str_valid_col = raw_data.get_col_valid(str_meta.get_id());
+        valid_data.insert(valid_data.end(),
+                          new_str_valid_col.begin(),
+                          new_str_valid_col.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+    std::vector<NullExprType> ops{NullExprType::NullExpr_NullOp_IsNull,
+                                  NullExprType::NullExpr_NullOp_IsNotNull};
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    // is_null
+    for (const auto op : ops) {
+        auto plan_proto = gen_plan(op);
+        auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
+        BitsetType final;
+        final = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        // specify some offsets and do scalar filtering on these offsets
+        milvus::exec::OffsetVector offsets;
+        offsets.reserve(N * num_iters / 2);
+        for (auto i = 0; i < N * num_iters; ++i) {
+            if (i % 2 == 0) {
+                offsets.emplace_back(i);
+            }
+        }
+        auto col_vec = milvus::test::gen_filter_res(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0].get(),
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP,
+            &offsets);
+        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        EXPECT_EQ(view.size(), N * num_iters / 2);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+            if (op == NullExprType::NullExpr_NullOp_IsNull) {
+                ASSERT_EQ(ans, !valid_data[i]);
+            } else {
+                ASSERT_EQ(ans, valid_data[i]);
+            }
+        }
+    }
+}
+
 TEST(StringExpr, BinaryRange) {
     auto schema = GenTestSchema();
     const auto& fvec_meta = schema->operator[](FieldName("fvec"));

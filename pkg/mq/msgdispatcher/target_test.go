@@ -14,7 +14,7 @@ import (
 )
 
 func TestSendTimeout(t *testing.T) {
-	target := newTarget("test1", &msgpb.MsgPosition{})
+	target := newTarget("test1", &msgpb.MsgPosition{}, nil)
 
 	time.Sleep(paramtable.Get().MQCfg.MaxTolerantLag.GetAsDuration(time.Second))
 

@@ -84,6 +84,7 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	dropRoleMsg := DropRoleMsg{}
 	operateUserRoleMsg := OperateUserRoleMsg{}
 	operatePrivilegeMsg := OperatePrivilegeMsg{}
+	replicateMsg := ReplicateMsg{}
 
 	p := &ProtoUnmarshalDispatcher{}
 	p.TempMap = make(map[commonpb.MsgType]UnmarshalFunc)
@@ -113,6 +114,7 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_DropRole] = dropRoleMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_OperateUserRole] = operateUserRoleMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_OperatePrivilege] = operatePrivilegeMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_Replicate] = replicateMsg.Unmarshal
 
 	return p
 }

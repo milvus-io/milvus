@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -33,26 +34,33 @@ type target struct {
 	ch       chan *MsgPack
 	pos      *Pos
 
-	closeMu   sync.Mutex
-	closeOnce sync.Once
-	closed    bool
-	maxLag    time.Duration
-	timer     *time.Timer
+	closeMu         sync.Mutex
+	closeOnce       sync.Once
+	closed          bool
+	maxLag          time.Duration
+	timer           *time.Timer
+	replicateConfig *msgstream.ReplicateConfig
 
 	cancelCh lifetime.SafeChan
 }
 
-func newTarget(vchannel string, pos *Pos) *target {
+func newTarget(vchannel string, pos *Pos, replicateConfig *msgstream.ReplicateConfig) *target {
 	maxTolerantLag := paramtable.Get().MQCfg.MaxTolerantLag.GetAsDuration(time.Second)
 	t := &target{
-		vchannel: vchannel,
-		ch:       make(chan *MsgPack, paramtable.Get().MQCfg.TargetBufSize.GetAsInt()),
-		pos:      pos,
-		cancelCh: lifetime.NewSafeChan(),
-		maxLag:   maxTolerantLag,
-		timer:    time.NewTimer(maxTolerantLag),
+		vchannel:        vchannel,
+		ch:              make(chan *MsgPack, paramtable.Get().MQCfg.TargetBufSize.GetAsInt()),
+		pos:             pos,
+		cancelCh:        lifetime.NewSafeChan(),
+		maxLag:          maxTolerantLag,
+		timer:           time.NewTimer(maxTolerantLag),
+		replicateConfig: replicateConfig,
 	}
 	t.closed = false
+	if replicateConfig != nil {
+		log.Info("have replicate config",
+			zap.String("vchannel", vchannel),
+			zap.String("replicateID", replicateConfig.ReplicateID))
+	}
 	return t
 }
 

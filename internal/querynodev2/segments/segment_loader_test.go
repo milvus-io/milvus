@@ -31,12 +31,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -81,7 +81,7 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 
 	// Dependencies
 	suite.manager = NewManager()
-	suite.loader = NewLoader(suite.manager, suite.chunkManager)
+	suite.loader = NewLoader(ctx, suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
 	// Data
@@ -98,7 +98,7 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 func (suite *SegmentLoaderSuite) SetupBM25() {
 	// Dependencies
 	suite.manager = NewManager()
-	suite.loader = NewLoader(suite.manager, suite.chunkManager)
+	suite.loader = NewLoader(context.Background(), suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
 	suite.schema = mock_segcore.GenTestBM25CollectionSchema("test")
@@ -798,7 +798,7 @@ func (suite *SegmentLoaderDetailSuite) SetupTest() {
 	ctx := context.Background()
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
-	suite.loader = NewLoader(suite.manager, suite.chunkManager)
+	suite.loader = NewLoader(ctx, suite.manager, suite.chunkManager)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
 	// Data
@@ -811,7 +811,8 @@ func (suite *SegmentLoaderDetailSuite) SetupTest() {
 		PartitionIDs: []int64{suite.partitionID},
 	}
 
-	collection := NewCollection(suite.collectionID, schema, indexMeta, loadMeta)
+	collection, err := NewCollection(suite.collectionID, schema, indexMeta, loadMeta)
+	suite.Require().NoError(err)
 	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(collection).Maybe()
 }
 

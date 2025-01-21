@@ -17,9 +17,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/indexcgopb"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -51,6 +51,10 @@ func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, params map[stri
 	} else if typeutil.IsBinaryVectorType(dataType) {
 		if !CheckStrByValues(params, Metric, BinaryVectorMetrics) {
 			return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], BinaryVectorMetrics)
+		}
+	} else if typeutil.IsIntVectorType(dataType) {
+		if !CheckStrByValues(params, Metric, IntVectorMetrics) {
+			return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], IntVectorMetrics)
 		}
 	}
 

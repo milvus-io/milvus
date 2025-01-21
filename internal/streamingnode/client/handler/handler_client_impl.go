@@ -16,15 +16,15 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var errWaitNextBackoff = errors.New("wait for next backoff")
 
 type handlerClientImpl struct {
-	lifetime         lifetime.Lifetime[lifetime.State]
+	lifetime         *typeutil.Lifetime
 	service          lazygrpc.Service[streamingpb.StreamingNodeHandlerServiceClient]
 	rb               resolver.Builder
 	watcher          assignment.Watcher
@@ -35,7 +35,7 @@ type handlerClientImpl struct {
 
 // CreateProducer creates a producer.
 func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerOptions) (Producer, error) {
-	if hc.lifetime.Add(lifetime.IsWorking) != nil {
+	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, ErrClientClosed
 	}
 	defer hc.lifetime.Done()
@@ -58,7 +58,7 @@ func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerO
 
 // CreateConsumer creates a consumer.
 func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerOptions) (Consumer, error) {
-	if hc.lifetime.Add(lifetime.IsWorking) != nil {
+	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, ErrClientClosed
 	}
 	defer hc.lifetime.Done()
@@ -135,9 +135,8 @@ func (hc *handlerClientImpl) waitForNextBackoff(ctx context.Context, pchannel st
 
 // Close closes the handler client.
 func (hc *handlerClientImpl) Close() {
-	hc.lifetime.SetState(lifetime.Stopped)
+	hc.lifetime.SetState(typeutil.LifetimeStateStopped)
 	hc.lifetime.Wait()
-	hc.lifetime.Close()
 
 	hc.watcher.Close()
 	hc.service.Close()

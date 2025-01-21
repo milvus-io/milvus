@@ -8,13 +8,18 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource/idalloc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/idalloc"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var r = &resourceImpl{} // singleton resource instance
+var r = &resourceImpl{
+	logger: log.With(log.FieldModule(typeutil.StreamingNodeRole)),
+} // singleton resource instance
 
 // optResourceInit is the option to initialize the resource.
 type optResourceInit func(r *resourceImpl)
@@ -41,7 +46,7 @@ func OptChunkManager(chunkManager storage.ChunkManager) optResourceInit {
 }
 
 // OptRootCoordClient provides the root coordinator client to the resource.
-func OptRootCoordClient(rootCoordClient types.RootCoordClient) optResourceInit {
+func OptRootCoordClient(rootCoordClient *syncutil.Future[types.RootCoordClient]) optResourceInit {
 	return func(r *resourceImpl) {
 		r.rootCoordClient = rootCoordClient
 		r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
@@ -50,7 +55,7 @@ func OptRootCoordClient(rootCoordClient types.RootCoordClient) optResourceInit {
 }
 
 // OptDataCoordClient provides the data coordinator client to the resource.
-func OptDataCoordClient(dataCoordClient types.DataCoordClient) optResourceInit {
+func OptDataCoordClient(dataCoordClient *syncutil.Future[types.DataCoordClient]) optResourceInit {
 	return func(r *resourceImpl) {
 		r.dataCoordClient = dataCoordClient
 	}
@@ -92,12 +97,13 @@ func Resource() *resourceImpl {
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
 	flusher                   flusher.Flusher
+	logger                    *log.MLogger
 	timestampAllocator        idalloc.Allocator
 	idAllocator               idalloc.Allocator
 	etcdClient                *clientv3.Client
 	chunkManager              storage.ChunkManager
-	rootCoordClient           types.RootCoordClient
-	dataCoordClient           types.DataCoordClient
+	rootCoordClient           *syncutil.Future[types.RootCoordClient]
+	dataCoordClient           *syncutil.Future[types.DataCoordClient]
 	streamingNodeCatalog      metastore.StreamingNodeCataLog
 	segmentAssignStatsManager *stats.StatsManager
 	timeTickInspector         tinspector.TimeTickSyncInspector
@@ -129,12 +135,12 @@ func (r *resourceImpl) ChunkManager() storage.ChunkManager {
 }
 
 // RootCoordClient returns the root coordinator client.
-func (r *resourceImpl) RootCoordClient() types.RootCoordClient {
+func (r *resourceImpl) RootCoordClient() *syncutil.Future[types.RootCoordClient] {
 	return r.rootCoordClient
 }
 
 // DataCoordClient returns the data coordinator client.
-func (r *resourceImpl) DataCoordClient() types.DataCoordClient {
+func (r *resourceImpl) DataCoordClient() *syncutil.Future[types.DataCoordClient] {
 	return r.dataCoordClient
 }
 
@@ -150,6 +156,10 @@ func (r *resourceImpl) SegmentAssignStatsManager() *stats.StatsManager {
 
 func (r *resourceImpl) TimeTickInspector() tinspector.TimeTickSyncInspector {
 	return r.timeTickInspector
+}
+
+func (r *resourceImpl) Logger() *log.MLogger {
+	return r.logger
 }
 
 // assertNotNil panics if the resource is nil.

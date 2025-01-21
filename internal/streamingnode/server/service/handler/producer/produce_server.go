@@ -7,13 +7,13 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
@@ -45,9 +45,12 @@ func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb
 	}
 	metrics := newProducerMetrics(l.Channel())
 	return &ProduceServer{
-		wal:              l,
-		produceServer:    produceServer,
-		logger:           log.With(zap.String("channel", l.Channel().Name), zap.Int64("term", l.Channel().Term)),
+		wal:           l,
+		produceServer: produceServer,
+		logger: resource.Resource().Logger().With(
+			log.FieldComponent("producer-server"),
+			zap.String("channel", l.Channel().Name),
+			zap.Int64("term", l.Channel().Term)),
 		produceMessageCh: make(chan *streamingpb.ProduceMessageResponse),
 		appendWG:         sync.WaitGroup{},
 		metrics:          metrics,
@@ -217,20 +220,9 @@ func (p *ProduceServer) sendProduceResult(reqID int64, appendResult *wal.AppendR
 	}
 	if err != nil {
 		p.logger.Warn("append message to wal failed", zap.Int64("requestID", reqID), zap.Error(err))
-		resp.Response = &streamingpb.ProduceMessageResponse_Error{
-			Error: status.AsStreamingError(err).AsPBError(),
-		}
+		resp.Response = &streamingpb.ProduceMessageResponse_Error{Error: status.AsStreamingError(err).AsPBError()}
 	} else {
-		resp.Response = &streamingpb.ProduceMessageResponse_Result{
-			Result: &streamingpb.ProduceMessageResponseResult{
-				Id: &messagespb.MessageID{
-					Id: appendResult.MessageID.Marshal(),
-				},
-				Timetick:   appendResult.TimeTick,
-				TxnContext: appendResult.TxnCtx.IntoProto(),
-				Extra:      appendResult.Extra,
-			},
-		}
+		resp.Response = &streamingpb.ProduceMessageResponse_Result{Result: appendResult.IntoProto()}
 	}
 
 	// If server context is canceled, it means the stream has been closed.

@@ -25,8 +25,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -277,82 +277,5 @@ func TestInsertlogIterator(t *testing.T) {
 		assert.False(t, itr.HasNext())
 		_, err = itr.Next()
 		assert.Equal(t, ErrNoMoreRecord, err)
-	})
-}
-
-func TestMergeIterator(t *testing.T) {
-	t.Run("empty iterators", func(t *testing.T) {
-		iterators := make([]Iterator, 0)
-		for i := 0; i < 3; i++ {
-			iterators = append(iterators, &InsertBinlogIterator{
-				data: &InsertData{},
-			})
-		}
-		itr := NewMergeIterator(iterators)
-		assert.False(t, itr.HasNext())
-		_, err := itr.Next()
-		assert.Equal(t, ErrNoMoreRecord, err)
-	})
-
-	t.Run("empty and non-empty iterators", func(t *testing.T) {
-		blobs, err := generateTestData(3)
-		assert.NoError(t, err)
-		insertItr, err := NewInsertBinlogIterator(blobs, common.RowIDField, schemapb.DataType_Int64)
-		assert.NoError(t, err)
-		iterators := []Iterator{
-			&InsertBinlogIterator{data: &InsertData{}},
-			insertItr,
-		}
-
-		itr := NewMergeIterator(iterators)
-
-		for i := 1; i <= 3; i++ {
-			assert.True(t, itr.HasNext())
-			v, err := itr.Next()
-			assert.NoError(t, err)
-			value := v.(*Value)
-			assertTestDataInternal(t, i, value, false)
-		}
-		assert.False(t, itr.HasNext())
-		_, err = itr.Next()
-		assert.Equal(t, ErrNoMoreRecord, err)
-	})
-
-	t.Run("non-empty iterators", func(t *testing.T) {
-		blobs, err := generateTestData(3)
-		assert.NoError(t, err)
-		itr1, err := NewInsertBinlogIterator(blobs, common.RowIDField, schemapb.DataType_Int64)
-		assert.NoError(t, err)
-		itr2, err := NewInsertBinlogIterator(blobs, common.RowIDField, schemapb.DataType_Int64)
-		assert.NoError(t, err)
-		iterators := []Iterator{itr1, itr2}
-		itr := NewMergeIterator(iterators)
-
-		for i := 1; i <= 3; i++ {
-			for j := 0; j < 2; j++ {
-				assert.True(t, itr.HasNext())
-				v, err := itr.Next()
-				assert.NoError(t, err)
-				value := v.(*Value)
-				assertTestDataInternal(t, i, value, false)
-			}
-		}
-
-		assert.False(t, itr.HasNext())
-		_, err = itr.Next()
-		assert.Equal(t, ErrNoMoreRecord, err)
-	})
-
-	t.Run("test dispose", func(t *testing.T) {
-		blobs, err := generateTestData(3)
-		assert.NoError(t, err)
-		itr1, err := NewInsertBinlogIterator(blobs, common.RowIDField, schemapb.DataType_Int64)
-		assert.NoError(t, err)
-		itr := NewMergeIterator([]Iterator{itr1})
-
-		itr.Dispose()
-		assert.False(t, itr.HasNext())
-		_, err = itr.Next()
-		assert.Equal(t, ErrDisposed, err)
 	})
 }

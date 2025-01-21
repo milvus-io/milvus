@@ -26,6 +26,7 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "index/Meta.h"
+#include "index/IndexStats.h"
 
 namespace milvus::index {
 
@@ -44,9 +45,9 @@ class IndexBase {
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) = 0;
 
     virtual void
-    BuildWithRawData(size_t n,
-                     const void* values,
-                     const Config& config = {}) = 0;
+    BuildWithRawDataForUT(size_t n,
+                          const void* values,
+                          const Config& config = {}) = 0;
 
     virtual void
     BuildWithDataset(const DatasetPtr& dataset, const Config& config = {}) = 0;
@@ -57,7 +58,7 @@ class IndexBase {
     virtual int64_t
     Count() = 0;
 
-    virtual BinarySet
+    virtual IndexStatsPtr
     Upload(const Config& config = {}) = 0;
 
     virtual const bool

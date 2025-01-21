@@ -32,9 +32,9 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/kv"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -545,7 +545,26 @@ func TestGetReplicasJSON(t *testing.T) {
 	err = replicaManager.put(ctx, replica2)
 	assert.NoError(t, err)
 
-	jsonOutput := replicaManager.GetReplicasJSON(ctx)
+	meta := &Meta{
+		CollectionManager: NewCollectionManager(catalog),
+	}
+
+	err = meta.PutCollectionWithoutSave(ctx, &Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID: 100,
+			DbID:         int64(1),
+		},
+	})
+	assert.NoError(t, err)
+
+	err = meta.PutCollectionWithoutSave(ctx, &Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID: 200,
+		},
+	})
+	assert.NoError(t, err)
+
+	jsonOutput := replicaManager.GetReplicasJSON(ctx, meta)
 	var replicas []*metricsinfo.Replica
 	err = json.Unmarshal([]byte(jsonOutput), &replicas)
 	assert.NoError(t, err)
@@ -556,10 +575,12 @@ func TestGetReplicasJSON(t *testing.T) {
 			assert.Equal(t, int64(100), replica.CollectionID)
 			assert.Equal(t, "rg1", replica.ResourceGroup)
 			assert.ElementsMatch(t, []int64{1, 2, 3}, replica.RWNodes)
+			assert.Equal(t, int64(1), replica.DatabaseID)
 		} else if replica.ID == 2 {
 			assert.Equal(t, int64(200), replica.CollectionID)
 			assert.Equal(t, "rg2", replica.ResourceGroup)
 			assert.ElementsMatch(t, []int64{4, 5, 6}, replica.RWNodes)
+			assert.Equal(t, int64(0), replica.DatabaseID)
 		} else {
 			assert.Failf(t, "unexpected replica id", "unexpected replica id %d", replica.ID)
 		}

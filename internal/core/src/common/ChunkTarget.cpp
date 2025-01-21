@@ -102,6 +102,7 @@ MmapChunkTarget::get() {
     write(padding, padding_size);
 
     flush();
+    file_.FFlush();
 
     auto m = mmap(
         nullptr, size_, PROT_READ, MAP_SHARED, file_.Descriptor(), offset_);

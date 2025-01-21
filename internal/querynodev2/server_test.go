@@ -34,11 +34,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/mocks/util/searchutil/mock_optimizers"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -221,9 +221,10 @@ func (suite *QueryNodeSuite) TestStop() {
 	suite.node.manager = segments.NewManager()
 
 	schema := mock_segcore.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64, true)
-	collection := segments.NewCollection(1, schema, nil, &querypb.LoadMetaInfo{
+	collection, err := segments.NewCollection(1, schema, nil, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
+	suite.Require().NoError(err)
 	segment, err := segments.NewSegment(
 		context.Background(),
 		collection,
@@ -236,6 +237,7 @@ func (suite *QueryNodeSuite) TestStop() {
 			Level:         datapb.SegmentLevel_Legacy,
 			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", 1),
 		},
+		nil,
 	)
 	suite.NoError(err)
 	suite.node.manager.Segment.Put(context.Background(), segments.SegmentTypeSealed, segment)

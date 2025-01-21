@@ -24,8 +24,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 )
 
 type ROChannel interface {
@@ -36,6 +36,7 @@ type ROChannel interface {
 	GetSchema() *schemapb.CollectionSchema
 	GetCreateTimestamp() Timestamp
 	GetWatchInfo() *datapb.ChannelWatchInfo
+	GetDBProperties() []*commonpb.KeyValuePair
 }
 
 type RWChannel interface {
@@ -48,6 +49,7 @@ func NewRWChannel(name string,
 	startPos []*commonpb.KeyDataPair,
 	schema *schemapb.CollectionSchema,
 	createTs uint64,
+	dbProperties []*commonpb.KeyValuePair,
 ) RWChannel {
 	return &StateChannel{
 		Name:            name,
@@ -55,9 +57,11 @@ func NewRWChannel(name string,
 		StartPositions:  startPos,
 		Schema:          schema,
 		CreateTimestamp: createTs,
+		DBProperties:    dbProperties,
 	}
 }
 
+// TODO fubang same as StateChannel
 type channelMeta struct {
 	Name            string
 	CollectionID    UniqueID
@@ -109,6 +113,10 @@ func (ch *channelMeta) String() string {
 	return fmt.Sprintf("Name: %s, CollectionID: %d, StartPositions: %v", ch.Name, ch.CollectionID, ch.StartPositions)
 }
 
+func (ch *channelMeta) GetDBProperties() []*commonpb.KeyValuePair {
+	return nil
+}
+
 type ChannelState string
 
 const (
@@ -126,6 +134,7 @@ type StateChannel struct {
 	CollectionID    UniqueID
 	StartPositions  []*commonpb.KeyDataPair
 	Schema          *schemapb.CollectionSchema
+	DBProperties    []*commonpb.KeyValuePair
 	CreateTimestamp uint64
 	Info            *datapb.ChannelWatchInfo
 
@@ -143,6 +152,7 @@ func NewStateChannel(ch RWChannel) *StateChannel {
 		Schema:          ch.GetSchema(),
 		CreateTimestamp: ch.GetCreateTimestamp(),
 		Info:            ch.GetWatchInfo(),
+		DBProperties:    ch.GetDBProperties(),
 
 		assignedNode: bufferID,
 	}
@@ -156,6 +166,7 @@ func NewStateChannelByWatchInfo(nodeID int64, info *datapb.ChannelWatchInfo) *St
 		Name:         info.GetVchan().GetChannelName(),
 		CollectionID: info.GetVchan().GetCollectionID(),
 		Schema:       info.GetSchema(),
+		DBProperties: info.GetDbProperties(),
 		Info:         info,
 		assignedNode: nodeID,
 	}
@@ -180,7 +191,15 @@ func NewStateChannelByWatchInfo(nodeID int64, info *datapb.ChannelWatchInfo) *St
 	return c
 }
 
-func (c *StateChannel) TransitionOnSuccess() {
+func (c *StateChannel) TransitionOnSuccess(opID int64) {
+	if opID != c.Info.GetOpID() {
+		log.Warn("Try to transit on success but opID not match, stay original state ",
+			zap.Any("currentState", c.currentState),
+			zap.String("channel", c.Name),
+			zap.Int64("target opID", opID),
+			zap.Int64("channel opID", c.Info.GetOpID()))
+		return
+	}
 	switch c.currentState {
 	case Standby:
 		c.setState(ToWatch)
@@ -197,7 +216,15 @@ func (c *StateChannel) TransitionOnSuccess() {
 	}
 }
 
-func (c *StateChannel) TransitionOnFailure() {
+func (c *StateChannel) TransitionOnFailure(opID int64) {
+	if opID != c.Info.GetOpID() {
+		log.Warn("Try to transit on failure but opID not match, stay original state",
+			zap.Any("currentState", c.currentState),
+			zap.String("channel", c.Name),
+			zap.Int64("target opID", opID),
+			zap.Int64("channel opID", c.Info.GetOpID()))
+		return
+	}
 	switch c.currentState {
 	case Watching:
 		c.setState(Standby)
@@ -276,4 +303,8 @@ func (c *StateChannel) Assign(nodeID int64) {
 
 func (c *StateChannel) setState(state ChannelState) {
 	c.currentState = state
+}
+
+func (c *StateChannel) GetDBProperties() []*commonpb.KeyValuePair {
+	return c.DBProperties
 }

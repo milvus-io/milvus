@@ -292,6 +292,15 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		Timestamp: it.EndTs(),
 	}
 
+	replicateID, err := GetReplicateID(ctx, it.req.GetDbName(), collectionName)
+	if err != nil {
+		log.Warn("get replicate info failed", zap.String("collectionName", collectionName), zap.Error(err))
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+	}
+	if replicateID != "" {
+		return merr.WrapErrCollectionReplicateMode("upsert")
+	}
+
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.req.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("Failed to get collection schema",

@@ -17,11 +17,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
-	"github.com/milvus-io/milvus/pkg/mocks/streaming/proto/mock_streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/mocks/proto/mock_streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -30,7 +29,8 @@ func TestManager(t *testing.T) {
 	rb := mock_resolver.NewMockBuilder(t)
 	managerService := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeManagerServiceClient](t)
 	m := &managerClientImpl{
-		lifetime: lifetime.NewLifetime(lifetime.Working),
+		lifetime: typeutil.NewLifetime(),
+		stopped:  make(chan struct{}),
 		rb:       rb,
 		service:  managerService,
 	}

@@ -23,10 +23,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -72,7 +72,7 @@ func (suite *FilterNodeSuite) TestWithLoadCollection() {
 	suite.validSegmentIDs = []int64{2, 3, 4, 5, 6}
 
 	// mock
-	collection := segments.NewCollectionWithoutSchema(suite.collectionID, querypb.LoadType_LoadCollection)
+	collection := segments.NewTestCollection(suite.collectionID, querypb.LoadType_LoadCollection, nil)
 	for _, partitionID := range suite.partitionIDs {
 		collection.AddPartition(partitionID)
 	}
@@ -111,7 +111,7 @@ func (suite *FilterNodeSuite) TestWithLoadPartation() {
 	suite.validSegmentIDs = []int64{2, 3, 4, 5, 6}
 
 	// mock
-	collection := segments.NewCollectionWithoutSchema(suite.collectionID, querypb.LoadType_LoadPartition)
+	collection := segments.NewTestCollection(suite.collectionID, querypb.LoadType_LoadPartition, nil)
 	collection.AddPartition(suite.partitionIDs[0])
 
 	mockCollectionManager := segments.NewMockCollectionManager(suite.T())

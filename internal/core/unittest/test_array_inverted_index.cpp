@@ -113,7 +113,7 @@ class ArrayInvertedIndexTest : public ::testing::Test {
         auto index = std::make_unique<index::InvertedIndexTantivy<T>>();
         Config cfg;
         cfg["is_array"] = true;
-        index->BuildWithRawData(N_, vec_of_array_.data(), cfg);
+        index->BuildWithRawDataForUT(N_, vec_of_array_.data(), cfg);
         LoadIndexInfo info{
             .field_id = schema_->get_field_id(FieldName("array")).get(),
             .index = std::move(index),

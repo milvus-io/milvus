@@ -126,6 +126,13 @@ struct GeneratedData {
                     auto src_data = reinterpret_cast<const T*>(
                         target_field_data.vectors().bfloat16_vector().data());
                     std::copy_n(src_data, len, ret.data());
+                } else if (field_meta.get_data_type() ==
+                           DataType::VECTOR_INT8) {
+                    int len = raw_->num_rows() * field_meta.get_dim();
+                    ret.resize(len);
+                    auto src_data = reinterpret_cast<const T*>(
+                        target_field_data.vectors().int8_vector().data());
+                    std::copy_n(src_data, len, ret.data());
                 } else {
                     PanicInfo(Unsupported, "unsupported");
                 }
@@ -410,12 +417,20 @@ inline GeneratedData DataGen(SchemaPtr schema,
                     array.release());
                 break;
             }
-
             case DataType::VECTOR_BFLOAT16: {
                 auto dim = field_meta.get_dim();
                 vector<bfloat16> final(dim * N);
                 for (auto& x : final) {
                     x = bfloat16(distr(random) + offset);
+                }
+                insert_cols(final, N, field_meta, random_valid);
+                break;
+            }
+            case DataType::VECTOR_INT8: {
+                auto dim = field_meta.get_dim();
+                vector<int8> final(dim * N);
+                for (auto& x : final) {
+                    x = int8_t(rand() % 256 - 128);
                 }
                 insert_cols(final, N, field_meta, random_valid);
                 break;
@@ -744,26 +759,6 @@ DataGenForJsonArray(SchemaPtr schema,
 }
 
 inline auto
-CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
-    namespace ser = milvus::proto::common;
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::FloatVector);
-    std::normal_distribution<double> dis(0, 1);
-    std::default_random_engine e(seed);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<float> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(dis(e));
-        }
-        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size() * sizeof(float));
-    }
-    return raw_group;
-}
-
-inline auto
 CreatePlaceholderGroup(int64_t num_queries,
                        int dim,
                        const std::vector<float>& vecs) {
@@ -782,148 +777,57 @@ CreatePlaceholderGroup(int64_t num_queries,
     return raw_group;
 }
 
-inline auto
-CreatePlaceholderGroupFromBlob(int64_t num_queries, int dim, const float* src) {
+template <class TraitType = milvus::FloatVector>
+auto
+CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
+    if (std::is_same_v<TraitType, milvus::BinaryVector>) {
+        assert(dim % 8 == 0);
+    }
     namespace ser = milvus::proto::common;
+    GET_ELEM_TYPE_FOR_VECTOR_TRAIT
+
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::FloatVector);
+    value->set_type(TraitType::placeholder_type);
+    // TODO caiyd: need update for Int8Vector
+    std::normal_distribution<double> dis(0, 1);
+    std::default_random_engine e(seed);
+    for (int i = 0; i < num_queries; ++i) {
+        std::vector<elem_type> vec;
+        for (int d = 0; d < dim / TraitType::dim_factor; ++d) {
+            if (std::is_same_v<TraitType, milvus::BinaryVector>) {
+                vec.push_back(e());
+            } else {
+                vec.push_back(elem_type(dis(e)));
+            }
+        }
+        value->add_values(vec.data(), vec.size() * sizeof(elem_type));
+    }
+    return raw_group;
+}
+
+template <class TraitType = milvus::FloatVector>
+inline auto
+CreatePlaceholderGroupFromBlob(int64_t num_queries, int dim, const void* src) {
+    if (std::is_same_v<TraitType, milvus::BinaryVector>) {
+        assert(dim % 8 == 0);
+    }
+    namespace ser = milvus::proto::common;
+    GET_ELEM_TYPE_FOR_VECTOR_TRAIT
+
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(TraitType::placeholder_type);
     int64_t src_index = 0;
 
     for (int i = 0; i < num_queries; ++i) {
-        std::vector<float> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(src[src_index++]);
+        std::vector<elem_type> vec;
+        for (int d = 0; d < dim / TraitType::dim_factor; ++d) {
+            vec.push_back(((elem_type*)src)[src_index++]);
         }
-        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size() * sizeof(float));
-    }
-    return raw_group;
-}
-
-inline auto
-CreateBinaryPlaceholderGroup(int64_t num_queries,
-                             int64_t dim,
-                             int64_t seed = 42) {
-    assert(dim % 8 == 0);
-    namespace ser = milvus::proto::common;
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::BinaryVector);
-    std::default_random_engine e(seed);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<uint8_t> vec;
-        for (int d = 0; d < dim / 8; ++d) {
-            vec.push_back(e());
-        }
-        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size());
-    }
-    return raw_group;
-}
-
-inline auto
-CreateBinaryPlaceholderGroupFromBlob(int64_t num_queries,
-                                     int64_t dim,
-                                     const uint8_t* ptr) {
-    assert(dim % 8 == 0);
-    namespace ser = milvus::proto::common;
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::BinaryVector);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<uint8_t> vec;
-        for (int d = 0; d < dim / 8; ++d) {
-            vec.push_back(*ptr);
-            ++ptr;
-        }
-        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size());
-    }
-    return raw_group;
-}
-
-inline auto
-CreateFloat16PlaceholderGroup(int64_t num_queries,
-                              int64_t dim,
-                              int64_t seed = 42) {
-    namespace ser = milvus::proto::common;
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::Float16Vector);
-    std::normal_distribution<double> dis(0, 1);
-    std::default_random_engine e(seed);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<float16> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(float16(dis(e)));
-        }
-        value->add_values(vec.data(), vec.size() * sizeof(float16));
-    }
-    return raw_group;
-}
-
-inline auto
-CreateFloat16PlaceholderGroupFromBlob(int64_t num_queries,
-                                      int64_t dim,
-                                      const float16* ptr) {
-    namespace ser = milvus::proto::common;
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::Float16Vector);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<float16> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(*ptr);
-            ++ptr;
-        }
-        value->add_values(vec.data(), vec.size() * sizeof(float16));
-    }
-    return raw_group;
-}
-
-inline auto
-CreateBFloat16PlaceholderGroup(int64_t num_queries,
-                               int64_t dim,
-                               int64_t seed = 42) {
-    namespace ser = milvus::proto::common;
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::BFloat16Vector);
-    std::normal_distribution<double> dis(0, 1);
-    std::default_random_engine e(seed);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<bfloat16> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(bfloat16(dis(e)));
-        }
-        value->add_values(vec.data(), vec.size() * sizeof(bfloat16));
-    }
-    return raw_group;
-}
-
-inline auto
-CreateBFloat16PlaceholderGroupFromBlob(int64_t num_queries,
-                                       int64_t dim,
-                                       const bfloat16* ptr) {
-    namespace ser = milvus::proto::common;
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::BFloat16Vector);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<bfloat16> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(*ptr);
-            ++ptr;
-        }
-        value->add_values(vec.data(), vec.size() * sizeof(bfloat16));
+        value->add_values(vec.data(), vec.size() * sizeof(elem_type));
     }
     return raw_group;
 }
@@ -941,6 +845,46 @@ CreateSparseFloatPlaceholderGroup(int64_t num_queries, int64_t seed = 42) {
     for (int i = 0; i < num_queries; ++i) {
         value->add_values(sparse_vecs[i].data(),
                           sparse_vecs[i].data_byte_size());
+    }
+    return raw_group;
+}
+
+inline auto
+CreateInt8PlaceholderGroup(int64_t num_queries,
+                           int64_t dim,
+                           int64_t seed = 42) {
+    namespace ser = milvus::proto::common;
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::Int8Vector);
+    std::default_random_engine e(seed);
+    for (int i = 0; i < num_queries; ++i) {
+        std::vector<int8> vec;
+        for (int d = 0; d < dim; ++d) {
+            vec.push_back(e());
+        }
+        value->add_values(vec.data(), vec.size() * sizeof(int8));
+    }
+    return raw_group;
+}
+
+inline auto
+CreateInt8PlaceholderGroupFromBlob(int64_t num_queries,
+                                   int64_t dim,
+                                   const int8* ptr) {
+    namespace ser = milvus::proto::common;
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::Int8Vector);
+    for (int i = 0; i < num_queries; ++i) {
+        std::vector<int8> vec;
+        for (int d = 0; d < dim; ++d) {
+            vec.push_back(*ptr);
+            ++ptr;
+        }
+        value->add_values(vec.data(), vec.size() * sizeof(int8));
     }
     return raw_group;
 }
@@ -1043,6 +987,12 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 auto sparse_float_array = data->vectors().sparse_float_vector();
                 auto rows = SparseBytesToRows(sparse_float_array.contents());
                 createFieldData(rows.get(), DataType::VECTOR_SPARSE_FLOAT, 0);
+                break;
+            }
+            case DataType::VECTOR_INT8: {
+                auto raw_data = data->vectors().int8_vector().data();
+                dim = field_meta.get_dim();
+                createFieldData(raw_data, DataType::VECTOR_INT8, dim);
                 break;
             }
             default: {
@@ -1276,12 +1226,8 @@ GenVecIndexing(int64_t N,
         knowhere::Version::GetCurrentVersion().VersionNumber(),
         file_manager_context);
     indexing->BuildWithDataset(database, conf);
-    auto binary_set = indexing->Upload();
-
-    std::vector<std::string> index_files;
-    for (auto& binary : binary_set.binary_map_) {
-        index_files.emplace_back(binary.first);
-    }
+    auto create_index_result = indexing->Upload();
+    auto index_files = create_index_result->GetIndexFiles();
     conf["index_files"] = index_files;
     // we need a load stage to use index as the producation does
     // knowhere would do some data preparation in this stage

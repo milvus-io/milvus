@@ -21,6 +21,8 @@ import "strconv"
 const (
 	scannNlistKey       = `nlist`
 	scannWithRawDataKey = `with_raw_data`
+	scannNProbeKey      = `nprobe`
+	scannReorderKKey    = `reorder_k`
 )
 
 type scannIndex struct {
@@ -48,4 +50,27 @@ func NewSCANNIndex(metricType MetricType, nlist int, withRawData bool) Index {
 		nlist:       nlist,
 		withRawData: withRawData,
 	}
+}
+
+type scannAnnParam struct {
+	baseAnnParam
+	nprobe   int
+	reorderK int
+}
+
+func NewSCANNAnnParam(nprobe int, reorderK int) scannAnnParam {
+	return scannAnnParam{
+		baseAnnParam: baseAnnParam{
+			params: make(map[string]any),
+		},
+		nprobe:   nprobe,
+		reorderK: reorderK,
+	}
+}
+
+func (ap scannAnnParam) Params() map[string]any {
+	result := ap.baseAnnParam.params
+	result[scannNProbeKey] = ap.nprobe
+	result[scannReorderKKey] = ap.reorderK
+	return result
 }

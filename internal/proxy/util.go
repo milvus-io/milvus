@@ -35,9 +35,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -45,11 +42,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -63,8 +62,6 @@ const (
 
 	// enableMultipleVectorFields indicates whether to enable multiple vector fields.
 	enableMultipleVectorFields = true
-
-	defaultMaxVarCharLength = 65535
 
 	defaultMaxArrayCapacity = 4096
 
@@ -266,7 +263,7 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 		tagSize := len(partitionTag)
 		for i := 1; i < tagSize; i++ {
 			c := partitionTag[i]
-			if c != '_' && !isAlpha(c) && !isNumber(c) {
+			if c != '_' && !isAlpha(c) && !isNumber(c) && c != '-' {
 				msg := invalidMsg + "Partition name can only contain numbers, letters and underscores."
 				return errors.New(msg)
 			}
@@ -364,8 +361,10 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 		if err != nil {
 			return err
 		}
+
+		defaultMaxVarCharLength := Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
 		if maxLengthPerRow > defaultMaxVarCharLength || maxLengthPerRow <= 0 {
-			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, 65535]")
+			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, %d]", defaultMaxVarCharLength)
 		}
 		exist = true
 	}
@@ -1121,31 +1120,6 @@ func ValidatePrivilege(entity string) error {
 	return validateName(entity, "Privilege")
 }
 
-func ValidateBuiltInPrivilegeGroup(entity string, dbName string, collectionName string) error {
-	if !util.IsBuiltinPrivilegeGroup(entity) {
-		return nil
-	}
-	switch {
-	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Cluster.String()):
-		if !util.IsAnyWord(dbName) || !util.IsAnyWord(collectionName) {
-			return merr.WrapErrParameterInvalidMsg("dbName and collectionName should be * for the cluster level privilege: %s", entity)
-		}
-		return nil
-	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Database.String()):
-		if collectionName != "" && collectionName != util.AnyWord {
-			return merr.WrapErrParameterInvalidMsg("collectionName should be * for the database level privilege: %s", entity)
-		}
-		return nil
-	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Collection.String()):
-		if util.IsAnyWord(dbName) && !util.IsAnyWord(collectionName) && collectionName != "" {
-			return merr.WrapErrParameterInvalidMsg("please specify database name for the collection level privilege: %s", entity)
-		}
-		return nil
-	default:
-		return nil
-	}
-}
-
 func GetCurUserFromContext(ctx context.Context) (string, error) {
 	return contextutil.GetCurUserFromContext(ctx)
 }
@@ -1476,11 +1450,11 @@ func isCollectionLoaded(ctx context.Context, qc types.QueryCoordClient, collID i
 	return false, nil
 }
 
-func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64, partIDs []int64) (bool, error) {
+func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64, partID int64) (bool, error) {
 	// get all loading collections
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
 		CollectionID: collID,
-		PartitionIDs: partIDs,
+		PartitionIDs: []int64{partID},
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		// qc returns error if partition not loaded
@@ -1490,7 +1464,7 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID in
 		return false, err
 	}
 
-	return funcutil.SliceSetEqual(partIDs, resp.GetPartitionIDs()), nil
+	return true, nil
 }
 
 func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {
@@ -1810,7 +1784,7 @@ func isPartitionKeyMode(ctx context.Context, dbName string, colName string) (boo
 	return false, nil
 }
 
-func hasParitionKeyModeField(schema *schemapb.CollectionSchema) bool {
+func hasPartitionKeyModeField(schema *schemapb.CollectionSchema) bool {
 	for _, fieldSchema := range schema.GetFields() {
 		if fieldSchema.IsPartitionKey {
 			return true
@@ -2211,4 +2185,23 @@ func GetFailedResponse(req any, err error) any {
 		}
 	}
 	return nil
+}
+
+func GetReplicateID(ctx context.Context, database, collectionName string) (string, error) {
+	if globalMetaCache == nil {
+		return "", merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
+	}
+	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, database, collectionName, 0)
+	if err != nil {
+		return "", err
+	}
+	if colInfo.replicateID != "" {
+		return colInfo.replicateID, nil
+	}
+	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, database)
+	if err != nil {
+		return "", err
+	}
+	replicateID, _ := common.GetReplicateID(dbInfo.properties)
+	return replicateID, nil
 }

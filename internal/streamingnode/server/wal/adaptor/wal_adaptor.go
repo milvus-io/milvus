@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
@@ -16,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -36,7 +36,8 @@ func adaptImplsToWAL(
 		WAL:      syncutil.NewFuture[wal.WAL](),
 	}
 	wal := &walAdaptorImpl{
-		lifetime:    lifetime.NewLifetime(lifetime.Working),
+		lifetime:    typeutil.NewLifetime(),
+		available:   make(chan struct{}),
 		idAllocator: typeutil.NewIDAllocator(),
 		inner:       basicWAL,
 		// TODO: make the pool size configurable.
@@ -50,6 +51,10 @@ func adaptImplsToWAL(
 		cleanup:      cleanup,
 		writeMetrics: metricsutil.NewWriteMetrics(basicWAL.Channel(), basicWAL.WALName()),
 		scanMetrics:  metricsutil.NewScanMetrics(basicWAL.Channel()),
+		logger: resource.Resource().Logger().With(
+			log.FieldComponent("wal"),
+			zap.Any("channel", basicWAL.Channel()),
+		),
 	}
 	param.WAL.Set(wal)
 	return wal
@@ -57,7 +62,8 @@ func adaptImplsToWAL(
 
 // walAdaptorImpl is a wrapper of WALImpls to extend it into a WAL interface.
 type walAdaptorImpl struct {
-	lifetime               lifetime.Lifetime[lifetime.State]
+	lifetime               *typeutil.Lifetime
+	available              chan struct{}
 	idAllocator            *typeutil.IDAllocator
 	inner                  walimpls.WALImpls
 	appendExecutionPool    *conc.Pool[struct{}]
@@ -67,6 +73,7 @@ type walAdaptorImpl struct {
 	cleanup                func()
 	writeMetrics           *metricsutil.WriteMetrics
 	scanMetrics            *metricsutil.ScanMetrics
+	logger                 *log.MLogger
 }
 
 func (w *walAdaptorImpl) WALName() string {
@@ -80,7 +87,7 @@ func (w *walAdaptorImpl) Channel() types.PChannelInfo {
 
 // Append writes a record to the log.
 func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage) (*wal.AppendResult, error) {
-	if w.lifetime.Add(lifetime.IsWorking) != nil {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("wal is on shutdown")
 	}
 	defer w.lifetime.Done()
@@ -137,7 +144,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 
 // AppendAsync writes a record to the log asynchronously.
 func (w *walAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableMessage, cb func(*wal.AppendResult, error)) {
-	if w.lifetime.Add(lifetime.IsWorking) != nil {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		cb(nil, status.NewOnShutdownError("wal is on shutdown"))
 		return
 	}
@@ -154,7 +161,7 @@ func (w *walAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableMes
 
 // Read returns a scanner for reading records from the wal.
 func (w *walAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.Scanner, error) {
-	if w.lifetime.Add(lifetime.IsWorking) != nil {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("wal is on shutdown")
 	}
 	defer w.lifetime.Done()
@@ -177,17 +184,22 @@ func (w *walAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.Sca
 
 // IsAvailable returns whether the wal is available.
 func (w *walAdaptorImpl) IsAvailable() bool {
-	return !w.lifetime.IsClosed()
+	select {
+	case <-w.available:
+		return false
+	default:
+		return true
+	}
 }
 
 // Available returns a channel that will be closed when the wal is shut down.
 func (w *walAdaptorImpl) Available() <-chan struct{} {
-	return w.lifetime.CloseCh()
+	return w.available
 }
 
 // Close overrides Scanner Close function.
 func (w *walAdaptorImpl) Close() {
-	logger := log.With(zap.Any("channel", w.Channel()), zap.String("processing", "WALClose"))
+	logger := w.logger.With(zap.String("processing", "WALClose"))
 	logger.Info("wal begin to close, start graceful close...")
 	// graceful close the interceptors before wal closing.
 	w.interceptorBuildResult.GracefulCloseFunc()
@@ -195,9 +207,9 @@ func (w *walAdaptorImpl) Close() {
 	logger.Info("wal graceful close done, wait for operation to be finished...")
 
 	// begin to close the wal.
-	w.lifetime.SetState(lifetime.Stopped)
+	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	w.lifetime.Wait()
-	w.lifetime.Close()
+	close(w.available)
 
 	logger.Info("wal begin to close scanners...")
 

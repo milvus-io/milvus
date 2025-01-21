@@ -20,20 +20,21 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // ResourceUsage is used to estimate the resource usage of a sealed segment.
 type ResourceUsage struct {
-	MemorySize     uint64
-	DiskSize       uint64
-	MmapFieldCount int
+	MemorySize         uint64
+	DiskSize           uint64
+	MmapFieldCount     int
+	FieldGpuMemorySize []uint64
 }
 
 // Segment is the interface of a segment implementation.

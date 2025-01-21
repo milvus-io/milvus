@@ -12,14 +12,21 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	internaltypes "github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 func TestWALLifetime(t *testing.T) {
 	channel := "test"
 
 	rootcoord := mocks.NewMockRootCoordClient(t)
+	fRootcoord := syncutil.NewFuture[internaltypes.RootCoordClient]()
+	fRootcoord.Set(rootcoord)
 	datacoord := mocks.NewMockDataCoordClient(t)
+	fDatacoord := syncutil.NewFuture[internaltypes.DataCoordClient]()
+	fDatacoord.Set(datacoord)
 
 	flusher := mock_flusher.NewMockFlusher(t)
 	flusher.EXPECT().RegisterPChannel(mock.Anything, mock.Anything).Return(nil)
@@ -28,8 +35,8 @@ func TestWALLifetime(t *testing.T) {
 	resource.InitForTest(
 		t,
 		resource.OptFlusher(flusher),
-		resource.OptRootCoordClient(rootcoord),
-		resource.OptDataCoordClient(datacoord),
+		resource.OptRootCoordClient(fRootcoord),
+		resource.OptDataCoordClient(fDatacoord),
 	)
 
 	opener := mock_wal.NewMockOpener(t)
@@ -41,7 +48,7 @@ func TestWALLifetime(t *testing.T) {
 			return l, nil
 		})
 
-	wlt := newWALLifetime(opener, channel)
+	wlt := newWALLifetime(opener, channel, log.With())
 	assert.Nil(t, wlt.GetWAL())
 
 	// Test open.

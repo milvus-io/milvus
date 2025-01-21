@@ -81,6 +81,11 @@ const (
 	InvalidNodeID = int64(-1)
 )
 
+const (
+	MinimalScalarIndexEngineVersion = int32(0)
+	CurrentScalarIndexEngineVersion = int32(1)
+)
+
 // Endian is type alias of binary.LittleEndian.
 // Milvus uses little endian by default.
 var Endian = binary.LittleEndian
@@ -191,6 +196,8 @@ const (
 	PartitionKeyIsolationKey   = "partitionkey.isolation"
 	FieldSkipLoadKey           = "field.skipLoad"
 	IndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
+	ReplicateIDKey             = "replicate.id"
+	ReplicateEndTSKey          = "replicate.endTS"
 )
 
 const (
@@ -394,4 +401,32 @@ func ShouldFieldBeLoaded(kvs []*commonpb.KeyValuePair) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+func IsReplicateEnabled(kvs []*commonpb.KeyValuePair) (bool, bool) {
+	replicateID, ok := GetReplicateID(kvs)
+	return replicateID != "", ok
+}
+
+func GetReplicateID(kvs []*commonpb.KeyValuePair) (string, bool) {
+	for _, kv := range kvs {
+		if kv.GetKey() == ReplicateIDKey {
+			return kv.GetValue(), true
+		}
+	}
+	return "", false
+}
+
+func GetReplicateEndTS(kvs []*commonpb.KeyValuePair) (uint64, bool) {
+	for _, kv := range kvs {
+		if kv.GetKey() == ReplicateEndTSKey {
+			ts, err := strconv.ParseUint(kv.GetValue(), 10, 64)
+			if err != nil {
+				log.Warn("parse replicate end ts failed", zap.Error(err), zap.Stack("stack"))
+				return 0, false
+			}
+			return ts, true
+		}
+	}
+	return 0, false
 }

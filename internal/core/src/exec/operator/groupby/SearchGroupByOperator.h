@@ -51,10 +51,12 @@ class GrowingDataGetter : public DataGetter<T> {
     T
     Get(int64_t idx) const {
         if constexpr (std::is_same_v<std::string, T>) {
-            return T(growing_raw_data_->view_element(idx));
-        } else {
-            return growing_raw_data_->operator[](idx);
+            if (growing_raw_data_->is_mmap()) {
+                // when scalar data is mapped, it's needed to get the scalar data view and reconstruct string from the view
+                return T(growing_raw_data_->view_element(idx));
+            }
         }
+        return growing_raw_data_->operator[](idx);
     }
 };
 

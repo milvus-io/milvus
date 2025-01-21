@@ -32,11 +32,11 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -383,8 +383,11 @@ func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 	// update load percent, then recover for second time
 	for _, collectionID := range suite.collections {
 		for _, partitionID := range suite.partitions[collectionID] {
-			mgr.UpdateLoadPercent(ctx, partitionID, 10)
+			err = mgr.UpdatePartitionLoadPercent(ctx, partitionID, 10)
+			suite.NoError(err)
 		}
+		_, err = mgr.UpdateCollectionLoadPercent(ctx, collectionID)
+		suite.NoError(err)
 	}
 	suite.clearMemory()
 	err = mgr.Recover(ctx, suite.broker)
@@ -444,27 +447,32 @@ func (suite *CollectionManagerSuite) TestUpdateLoadPercentage() {
 		})
 	}
 	// test update partition load percentage
-	mgr.UpdateLoadPercent(ctx, 1, 30)
+	err := mgr.UpdatePartitionLoadPercent(ctx, 1, 30)
+	suite.NoError(err)
 	partition := mgr.GetPartition(ctx, 1)
 	suite.Equal(int32(30), partition.LoadPercentage)
 	suite.Equal(int32(30), mgr.GetPartitionLoadPercentage(ctx, partition.PartitionID))
 	suite.Equal(querypb.LoadStatus_Loading, partition.Status)
 	collection := mgr.GetCollection(ctx, 1)
-	suite.Equal(int32(15), collection.LoadPercentage)
+	suite.Equal(int32(0), collection.LoadPercentage)
 	suite.Equal(querypb.LoadStatus_Loading, collection.Status)
 	// test update partition load percentage to 100
-	mgr.UpdateLoadPercent(ctx, 1, 100)
+	err = mgr.UpdatePartitionLoadPercent(ctx, 1, 100)
+	suite.NoError(err)
 	partition = mgr.GetPartition(ctx, 1)
 	suite.Equal(int32(100), partition.LoadPercentage)
 	suite.Equal(querypb.LoadStatus_Loaded, partition.Status)
 	collection = mgr.GetCollection(ctx, 1)
-	suite.Equal(int32(50), collection.LoadPercentage)
+	suite.Equal(int32(0), collection.LoadPercentage)
 	suite.Equal(querypb.LoadStatus_Loading, collection.Status)
 	// test update collection load percentage
-	mgr.UpdateLoadPercent(ctx, 2, 100)
+	err = mgr.UpdatePartitionLoadPercent(ctx, 2, 100)
+	suite.NoError(err)
 	partition = mgr.GetPartition(ctx, 1)
 	suite.Equal(int32(100), partition.LoadPercentage)
 	suite.Equal(querypb.LoadStatus_Loaded, partition.Status)
+	_, err = mgr.UpdateCollectionLoadPercent(ctx, 1)
+	suite.NoError(err)
 	collection = mgr.GetCollection(ctx, 1)
 	suite.Equal(int32(100), collection.LoadPercentage)
 	suite.Equal(querypb.LoadStatus_Loaded, collection.Status)

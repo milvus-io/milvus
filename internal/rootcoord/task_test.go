@@ -20,7 +20,6 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -29,8 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 )
 
 func TestLockerKey(t *testing.T) {
@@ -70,16 +69,6 @@ func TestLockerKey(t *testing.T) {
 		assert.Equal(t, lockerChain.Next(), dbLock)
 		assert.Equal(t, lockerChain.Next().Next(), collectionLock)
 	}
-}
-
-func GetLockerKeyString(k LockerKey) string {
-	key := k.LockKey()
-	level := k.Level()
-	wLock := k.IsWLock()
-	if k.Next() == nil {
-		return fmt.Sprintf("%s-%d-%t", key, level, wLock)
-	}
-	return fmt.Sprintf("%s-%d-%t|%s", key, level, wLock, GetLockerKeyString(k.Next()))
 }
 
 func TestGetLockerKey(t *testing.T) {
@@ -167,9 +156,10 @@ func TestGetLockerKey(t *testing.T) {
 				DbName:         "foo",
 				CollectionName: "bar",
 			},
+			collID: 10,
 		}
 		key := tt.GetLockerKey()
-		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|bar-2-true")
+		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|10-2-true")
 	})
 	t.Run("create database task locker key", func(t *testing.T) {
 		tt := &createDatabaseTask{
@@ -270,14 +260,26 @@ func TestGetLockerKey(t *testing.T) {
 		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|111-2-true")
 	})
 	t.Run("drop collection task locker key", func(t *testing.T) {
+		metaMock := mockrootcoord.NewIMetaTable(t)
+		metaMock.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, s string, s2 string, u uint64) (*model.Collection, error) {
+				return &model.Collection{
+					Name:         "bar",
+					CollectionID: 111,
+				}, nil
+			})
+		c := &Core{
+			meta: metaMock,
+		}
 		tt := &dropCollectionTask{
+			baseTask: baseTask{core: c},
 			Req: &milvuspb.DropCollectionRequest{
 				DbName:         "foo",
 				CollectionName: "bar",
 			},
 		}
 		key := tt.GetLockerKey()
-		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|bar-2-true")
+		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|111-2-true")
 	})
 	t.Run("drop database task locker key", func(t *testing.T) {
 		tt := &dropDatabaseTask{

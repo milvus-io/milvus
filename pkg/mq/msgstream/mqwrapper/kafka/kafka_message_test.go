@@ -13,7 +13,7 @@ func TestKafkaMessage_All(t *testing.T) {
 	km := &kafkaMessage{msg: msg}
 	properties := make(map[string]string)
 	assert.Equal(t, topic, km.Topic())
-	assert.Equal(t, int64(0), km.ID().(*kafkaID).messageID)
+	assert.Equal(t, int64(0), km.ID().(*KafkaID).MessageID)
 	assert.Nil(t, km.Payload())
 	assert.Equal(t, properties, km.Properties())
 }

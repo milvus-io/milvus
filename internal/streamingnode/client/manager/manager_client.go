@@ -15,11 +15,10 @@ import (
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
-	"github.com/milvus-io/milvus/pkg/streaming/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -61,7 +60,8 @@ func NewManagerClient(etcdCli *clientv3.Client) ManagerClient {
 		)
 	})
 	return &managerClientImpl{
-		lifetime: lifetime.NewLifetime(lifetime.Working),
+		lifetime: typeutil.NewLifetime(),
+		stopped:  make(chan struct{}),
 		rb:       rb,
 		service:  lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeManagerServiceClient),
 	}

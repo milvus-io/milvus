@@ -61,7 +61,7 @@ namespace milvus::segcore {
             case DataType::INT64: {                                        \
                 auto col =                                                 \
                     std::dynamic_pointer_cast<SingleChunkColumn>(column);  \
-                auto pks = reinterpret_cast<const int64_t*>(col->Data());  \
+                auto pks = reinterpret_cast<const int64_t*>(col->Data(0)); \
                 for (int i = 1; i < col->NumRows(); ++i) {                 \
                     assert(pks[i - 1] <= pks[i] &&                         \
                            "INT64 Column is not ordered!");                \
@@ -122,7 +122,6 @@ void
 SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
-    auto& field_meta = schema_->operator[](field_id);
 
     AssertInfo(info.index_params.count("metric_type"),
                "Can't get metric_type in index_params");
@@ -205,6 +204,13 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     auto field_id = FieldId(info.field_id);
     auto& field_meta = schema_->operator[](field_id);
 
+    // if segment is pk sorted, user created indexes bring no performance gain but extra memory usage
+    if (is_sorted_by_pk_ && field_id == schema_->get_primary_field_id()) {
+        LOG_INFO(
+            "segment pk sorted, skip user index loading for primary key field");
+        return;
+    }
+
     auto row_count = info.index->Count();
     AssertInfo(row_count > 0, "Index count is 0");
 
@@ -267,8 +273,10 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     set_bit(index_ready_bitset_, field_id, true);
     update_row_count(row_count);
     // release field column if the index contains raw data
+    // only release non-primary field
     if (scalar_indexings_[field_id]->HasRawData() &&
-        get_bit(field_data_ready_bitset_, field_id)) {
+        get_bit(field_data_ready_bitset_, field_id) &&
+        (schema_->get_primary_field_id() != field_id || !is_sorted_by_pk_)) {
         fields_.erase(field_id);
         set_bit(field_data_ready_bitset_, field_id, false);
     }
@@ -432,11 +440,11 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                                 var_column->Append(*array);
                             }
 
-                            // we stores the offset for each array element, so there is a additional uint64_t for each array element
+                            // we stores the offset for each array element, so there is a additional uint32_t for each array element
                             field_data_size =
-                                array->byte_size() + sizeof(uint64_t);
+                                array->byte_size() + sizeof(uint32_t);
                             stats_.mem_size +=
-                                array->byte_size() + sizeof(uint64_t);
+                                array->byte_size() + sizeof(uint32_t);
                         }
                     }
                     var_column->Seal();
@@ -546,7 +554,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     FieldDataPtr field_data;
     uint64_t total_written = 0;
     std::vector<uint64_t> indices{};
-    std::vector<std::vector<uint64_t>> element_indices{};
+    std::vector<std::vector<uint32_t>> element_indices{};
     FixedVector<bool> valid_data{};
     while (data.channel->pop(field_data)) {
         WriteFieldData(file,
@@ -712,7 +720,6 @@ SegmentSealedImpl::get_chunk_buffer(FieldId field_id,
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
-    auto& field_meta = schema_->operator[](field_id);
     if (auto it = fields_.find(field_id); it != fields_.end()) {
         auto& field_data = it->second;
         FixedVector<bool> valid_data;
@@ -839,7 +846,7 @@ SegmentSealedImpl::search_sorted_pk(const PkType& pk,
         case DataType::INT64: {
             auto target = std::get<int64_t>(pk);
             // get int64 pks
-            auto src = reinterpret_cast<const int64_t*>(pk_column->Data());
+            auto src = reinterpret_cast<const int64_t*>(pk_column->Data(0));
             auto it =
                 std::lower_bound(src,
                                  src + pk_column->NumRows(),
@@ -945,12 +952,12 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
         // get index params for bm25 brute force
         std::map<std::string, std::string> index_info;
         if (search_info.metric_type_ == knowhere::metric::BM25) {
-            auto index_info =
+            index_info =
                 col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
         }
 
         query::SearchOnSealed(*schema_,
-                              vec_data->Data(),
+                              vec_data->Data(0),
                               search_info,
                               index_info,
                               query_data,
@@ -1069,8 +1076,8 @@ SegmentSealedImpl::get_vector(FieldId field_id,
             pool.Submit(ReadFromChunkCache, cc, data_path, mmap_descriptor_));
     }
 
-    for (int i = 0; i < futures.size(); ++i) {
-        const auto& [data_path, column] = futures[i].get();
+    for (auto& future : futures) {
+        const auto& [data_path, column] = future.get();
         path_to_column[data_path] = column;
     }
 
@@ -1091,7 +1098,7 @@ SegmentSealedImpl::get_vector(FieldId field_id,
             AssertInfo(sparse_column, "incorrect column created");
             buf[i] = static_cast<const knowhere::sparse::SparseRow<float>*>(
                 static_cast<const void*>(
-                    sparse_column->Data()))[offset_in_binlog];
+                    sparse_column->Data(0)))[offset_in_binlog];
         }
         return segcore::CreateVectorDataArrayFrom(
             buf.data(), count, field_meta);
@@ -1112,7 +1119,7 @@ SegmentSealedImpl::get_vector(FieldId field_id,
                 offset_in_binlog,
                 column->NumRows(),
                 data_path);
-            auto vector = &column->Data()[offset_in_binlog * row_bytes];
+            auto vector = &column->Data(0)[offset_in_binlog * row_bytes];
             std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
         }
         return segcore::CreateVectorDataArrayFrom(
@@ -1133,7 +1140,6 @@ SegmentSealedImpl::DropFieldData(const FieldId field_id) {
         }
         lck.unlock();
     } else {
-        auto& field_meta = schema_->operator[](field_id);
         std::unique_lock lck(mutex_);
         if (get_bit(field_data_ready_bitset_, field_id)) {
             fields_.erase(field_id);
@@ -1379,7 +1385,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
                                 const FieldMeta& field_meta,
                                 const int64_t* seg_offsets,
                                 int64_t count) const {
-    // DO NOT directly access the column by map like: `fields_.at(field_id)->Data()`,
+    // DO NOT directly access the column by map like: `fields_.at(field_id)->Data(0)`,
     // we have to clone the shared pointer,
     // to make sure it won't get released if segment released
     auto column = fields_.at(field_id);
@@ -1421,7 +1427,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
         }
 
         case DataType::BOOL: {
-            bulk_subscript_impl<bool>(column->Data(),
+            bulk_subscript_impl<bool>(column->Data(0),
                                       seg_offsets,
                                       count,
                                       ret->mutable_scalars()
@@ -1431,7 +1437,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::INT8: {
-            bulk_subscript_impl<int8_t>(column->Data(),
+            bulk_subscript_impl<int8_t>(column->Data(0),
                                         seg_offsets,
                                         count,
                                         ret->mutable_scalars()
@@ -1441,7 +1447,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::INT16: {
-            bulk_subscript_impl<int16_t>(column->Data(),
+            bulk_subscript_impl<int16_t>(column->Data(0),
                                          seg_offsets,
                                          count,
                                          ret->mutable_scalars()
@@ -1451,7 +1457,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::INT32: {
-            bulk_subscript_impl<int32_t>(column->Data(),
+            bulk_subscript_impl<int32_t>(column->Data(0),
                                          seg_offsets,
                                          count,
                                          ret->mutable_scalars()
@@ -1461,7 +1467,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::INT64: {
-            bulk_subscript_impl<int64_t>(column->Data(),
+            bulk_subscript_impl<int64_t>(column->Data(0),
                                          seg_offsets,
                                          count,
                                          ret->mutable_scalars()
@@ -1471,7 +1477,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::FLOAT: {
-            bulk_subscript_impl<float>(column->Data(),
+            bulk_subscript_impl<float>(column->Data(0),
                                        seg_offsets,
                                        count,
                                        ret->mutable_scalars()
@@ -1481,7 +1487,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         case DataType::DOUBLE: {
-            bulk_subscript_impl<double>(column->Data(),
+            bulk_subscript_impl<double>(column->Data(0),
                                         seg_offsets,
                                         count,
                                         ret->mutable_scalars()
@@ -1492,7 +1498,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
         }
         case DataType::VECTOR_FLOAT: {
             bulk_subscript_impl(field_meta.get_sizeof(),
-                                column->Data(),
+                                column->Data(0),
                                 seg_offsets,
                                 count,
                                 ret->mutable_vectors()
@@ -1504,7 +1510,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
         case DataType::VECTOR_FLOAT16: {
             bulk_subscript_impl(
                 field_meta.get_sizeof(),
-                column->Data(),
+                column->Data(0),
                 seg_offsets,
                 count,
                 ret->mutable_vectors()->mutable_float16_vector()->data());
@@ -1513,7 +1519,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
         case DataType::VECTOR_BFLOAT16: {
             bulk_subscript_impl(
                 field_meta.get_sizeof(),
-                column->Data(),
+                column->Data(0),
                 seg_offsets,
                 count,
                 ret->mutable_vectors()->mutable_bfloat16_vector()->data());
@@ -1522,7 +1528,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
         case DataType::VECTOR_BINARY: {
             bulk_subscript_impl(
                 field_meta.get_sizeof(),
-                column->Data(),
+                column->Data(0),
                 seg_offsets,
                 count,
                 ret->mutable_vectors()->mutable_binary_vector()->data());
@@ -1530,7 +1536,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
         }
         case DataType::VECTOR_SPARSE_FLOAT: {
             auto rows = static_cast<const knowhere::sparse::SparseRow<float>*>(
-                static_cast<const void*>(column->Data()));
+                static_cast<const void*>(column->Data(0)));
             auto dst = ret->mutable_vectors()->mutable_sparse_float_vector();
             SparseRowsToProto(
                 [&](size_t i) {
@@ -1543,7 +1549,15 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             ret->mutable_vectors()->set_dim(dst->dim());
             break;
         }
-
+        case DataType::VECTOR_INT8: {
+            bulk_subscript_impl(
+                field_meta.get_sizeof(),
+                column->Data(0),
+                seg_offsets,
+                count,
+                ret->mutable_vectors()->mutable_int8_vector()->data());
+            break;
+        }
         default: {
             PanicInfo(DataTypeInvalid,
                       fmt::format("unsupported data type {}",
@@ -1590,12 +1604,15 @@ SegmentSealedImpl::bulk_subscript(
     int64_t count,
     const std::vector<std::string>& dynamic_field_names) const {
     Assert(!dynamic_field_names.empty());
-    auto& field_meta = schema_->operator[](field_id);
     if (count == 0) {
         return fill_with_empty(field_id, 0);
     }
 
-    auto column = fields_.at(field_id);
+    std::shared_ptr<SingleChunkColumnBase> column;
+    {
+        std::shared_lock lck(mutex_);
+        column = fields_.at(field_id);
+    }
     auto ret = fill_with_empty(field_id, count);
     if (column->IsNullable()) {
         auto dst = ret->mutable_valid_data()->mutable_data();
@@ -1720,19 +1737,19 @@ SegmentSealedImpl::find_first(int64_t limit, const BitsetType& bitset) const {
     seg_offsets.reserve(limit);
 
     int64_t offset = 0;
-    for (; hit_num < limit && offset < num_rows_.value(); offset++) {
+    std::optional<size_t> result = bitset.find_first(false);
+    while (result.has_value() && hit_num < limit) {
+        hit_num++;
+        seg_offsets.push_back(result.value());
+        offset = result.value();
         if (offset >= size) {
             // In fact, this case won't happen on sealed segments.
             continue;
         }
-
-        if (!bitset[offset]) {
-            seg_offsets.push_back(offset);
-            hit_num++;
-        }
+        result = bitset.find_next(offset, false);
     }
 
-    return {seg_offsets, more_hit_than_limit && offset != num_rows_.value()};
+    return {seg_offsets, more_hit_than_limit && result.has_value()};
 }
 
 SegcoreError
@@ -1920,7 +1937,7 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         auto index_metric = field_binlog_config->GetMetricType();
 
         auto dataset =
-            knowhere::GenDataSet(row_count, dim, (void*)vec_data->Data());
+            knowhere::GenDataSet(row_count, dim, (void*)vec_data->Data(0));
         dataset->SetIsOwner(false);
         dataset->SetIsSparse(is_sparse);
 

@@ -274,6 +274,16 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
                 storage::GetByteSizeOfFieldDatas(field_data));
         }
 
+        // build text match index
+        if (field_meta.enable_match()) {
+            auto index = GetTextIndex(field_id);
+            index->BuildIndexFromFieldData(field_data,
+                                           field_meta.is_nullable());
+            index->Commit();
+            // Reload reader so that the index can be read immediately
+            index->Reload();
+        }
+
         // update the mem size
         stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
 
@@ -476,6 +486,14 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 result->mutable_vectors()->mutable_sparse_float_vector());
             result->mutable_vectors()->set_dim(
                 result->vectors().sparse_float_vector().dim());
+        } else if (field_meta.get_data_type() == DataType::VECTOR_INT8) {
+            bulk_subscript_impl<Int8Vector>(
+                field_id,
+                field_meta.get_sizeof(),
+                vec_ptr,
+                seg_offsets,
+                count,
+                result->mutable_vectors()->mutable_int8_vector()->data());
         } else {
             PanicInfo(DataTypeInvalid, "logical error");
         }
@@ -863,7 +881,11 @@ SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
                              int64_t offset_begin) {
     std::unique_lock lock(mutex_);
     auto iter = text_indexes_.find(field_id);
-    AssertInfo(iter != text_indexes_.end(), "text index not found");
+    if (iter == text_indexes_.end()) {
+        throw SegcoreError(
+            ErrorCode::TextIndexNotFound,
+            fmt::format("text index not found for field {}", field_id.get()));
+    }
     iter->second->AddTexts(n, texts, texts_valid_data, offset_begin);
 }
 

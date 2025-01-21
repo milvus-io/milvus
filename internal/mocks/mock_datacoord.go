@@ -8,13 +8,11 @@ import (
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
 
-	grpc "google.golang.org/grpc"
+	indexpb "github.com/milvus-io/milvus/pkg/proto/indexpb"
 
-	indexpb "github.com/milvus-io/milvus/internal/proto/indexpb"
-
-	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
@@ -2602,39 +2600,6 @@ func (_c *MockDataCoord_Register_Call) Return(_a0 error) *MockDataCoord_Register
 }
 
 func (_c *MockDataCoord_Register_Call) RunAndReturn(run func() error) *MockDataCoord_Register_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// RegisterStreamingCoordGRPCService provides a mock function with given fields: s
-func (_m *MockDataCoord) RegisterStreamingCoordGRPCService(s *grpc.Server) {
-	_m.Called(s)
-}
-
-// MockDataCoord_RegisterStreamingCoordGRPCService_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RegisterStreamingCoordGRPCService'
-type MockDataCoord_RegisterStreamingCoordGRPCService_Call struct {
-	*mock.Call
-}
-
-// RegisterStreamingCoordGRPCService is a helper method to define mock.On call
-//   - s *grpc.Server
-func (_e *MockDataCoord_Expecter) RegisterStreamingCoordGRPCService(s interface{}) *MockDataCoord_RegisterStreamingCoordGRPCService_Call {
-	return &MockDataCoord_RegisterStreamingCoordGRPCService_Call{Call: _e.mock.On("RegisterStreamingCoordGRPCService", s)}
-}
-
-func (_c *MockDataCoord_RegisterStreamingCoordGRPCService_Call) Run(run func(s *grpc.Server)) *MockDataCoord_RegisterStreamingCoordGRPCService_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*grpc.Server))
-	})
-	return _c
-}
-
-func (_c *MockDataCoord_RegisterStreamingCoordGRPCService_Call) Return() *MockDataCoord_RegisterStreamingCoordGRPCService_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockDataCoord_RegisterStreamingCoordGRPCService_Call) RunAndReturn(run func(*grpc.Server)) *MockDataCoord_RegisterStreamingCoordGRPCService_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -25,6 +25,7 @@
 #include "common/EasyAssert.h"
 #include "index/Index.h"
 #include "fmt/format.h"
+#include "index/Meta.h"
 
 namespace milvus::index {
 
@@ -64,9 +65,9 @@ class ScalarIndex : public IndexBase {
     }
 
     void
-    BuildWithRawData(size_t n,
-                     const void* values,
-                     const Config& config = {}) override;
+    BuildWithRawDataForUT(size_t n,
+                          const void* values,
+                          const Config& config = {}) override;
 
     void
     BuildWithDataset(const DatasetPtr& dataset,
@@ -136,7 +137,10 @@ class ScalarIndex : public IndexBase {
     virtual bool
     IsMmapSupported() const override {
         return index_type_ == milvus::index::BITMAP_INDEX_TYPE ||
-               index_type_ == milvus::index::HYBRID_INDEX_TYPE;
+               index_type_ == milvus::index::HYBRID_INDEX_TYPE ||
+               index_type_ == milvus::index::INVERTED_INDEX_TYPE ||
+               index_type_ == milvus::index::MARISA_TRIE ||
+               index_type_ == milvus::index::MARISA_TRIE_UPPER;
     }
 
     virtual int64_t

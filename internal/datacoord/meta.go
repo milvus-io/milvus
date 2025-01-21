@@ -36,13 +36,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -136,6 +136,12 @@ type collectionInfo struct {
 	DatabaseName   string
 	DatabaseID     int64
 	VChannelNames  []string
+}
+
+type dbInfo struct {
+	ID         int64
+	Name       string
+	Properties []*commonpb.KeyValuePair
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
@@ -244,12 +250,12 @@ func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker
 		return err
 	}
 	for _, dbName := range resp.GetDbNames() {
-		resp, err := broker.ShowCollections(ctx, dbName)
+		collectionsResp, err := broker.ShowCollections(ctx, dbName)
 		if err != nil {
 			return err
 		}
-		for _, collectionID := range resp.GetCollectionIds() {
-			resp, err := broker.DescribeCollectionInternal(ctx, collectionID)
+		for _, collectionID := range collectionsResp.GetCollectionIds() {
+			descResp, err := broker.DescribeCollectionInternal(ctx, collectionID)
 			if err != nil {
 				return err
 			}
@@ -259,14 +265,14 @@ func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker
 			}
 			collection := &collectionInfo{
 				ID:             collectionID,
-				Schema:         resp.GetSchema(),
+				Schema:         descResp.GetSchema(),
 				Partitions:     partitionIDs,
-				StartPositions: resp.GetStartPositions(),
-				Properties:     funcutil.KeyValuePair2Map(resp.GetProperties()),
-				CreatedAt:      resp.GetCreatedTimestamp(),
-				DatabaseName:   resp.GetDbName(),
-				DatabaseID:     resp.GetDbId(),
-				VChannelNames:  resp.GetVirtualChannelNames(),
+				StartPositions: descResp.GetStartPositions(),
+				Properties:     funcutil.KeyValuePair2Map(descResp.GetProperties()),
+				CreatedAt:      descResp.GetCreatedTimestamp(),
+				DatabaseName:   descResp.GetDbName(),
+				DatabaseID:     descResp.GetDbId(),
+				VChannelNames:  descResp.GetVirtualChannelNames(),
 			}
 			m.AddCollection(collection)
 		}
@@ -344,9 +350,8 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 }
 
 // GetSegmentsChanPart returns segments organized in Channel-Partition dimension with selector applied
-func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegments {
-	m.RLock()
-	defer m.RUnlock()
+// TODO: Move this function to the compaction module after reorganizing the DataCoord modules.
+func GetSegmentsChanPart(m *meta, collectionID int64, filters ...SegmentFilter) []*chanPartSegments {
 	type dim struct {
 		partitionID int64
 		channelName string
@@ -354,10 +359,9 @@ func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegm
 
 	mDimEntry := make(map[dim]*chanPartSegments)
 
-	for _, si := range m.segments.segments {
-		if !selector(si) {
-			continue
-		}
+	filters = append(filters, WithCollection(collectionID))
+	candidates := m.SelectSegments(context.Background(), filters...)
+	for _, si := range candidates {
 		d := dim{si.PartitionID, si.InsertChannel}
 		entry, ok := mDimEntry[d]
 		if !ok {
@@ -785,6 +789,12 @@ func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateO
 			return false
 		}
 
+		if segment.GetState() == status {
+			log.Ctx(context.TODO()).Info("meta update: segment stats already is target state",
+				zap.Int64("segmentID", segmentID), zap.String("status", status.String()))
+			return false
+		}
+
 		updateSegStateAndPrepareMetrics(segment, status, modPack.metricMutation)
 		if status == commonpb.SegmentState_Dropped {
 			segment.DroppedAt = uint64(time.Now().UnixNano())
@@ -909,7 +919,7 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs
 	}
 }
 
-func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
+func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
@@ -921,6 +931,7 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*dat
 		segment.Binlogs = binlogs
 		segment.Statslogs = statslogs
 		segment.Deltalogs = deltalogs
+		segment.Bm25Statslogs = bm25logs
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
 		}

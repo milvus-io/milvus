@@ -70,6 +70,7 @@ var (
 	ErrCollectionIllegalSchema                 = newMilvusError("illegal collection schema", 105, false)
 	ErrCollectionOnRecovering                  = newMilvusError("collection on recovering", 106, true)
 	ErrCollectionVectorClusteringKeyNotAllowed = newMilvusError("vector clustering key not allowed", 107, false)
+	ErrCollectionReplicateMode                 = newMilvusError("can't operate on the collection under standby mode", 108, false)
 
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false)
@@ -139,10 +140,11 @@ var (
 	ErrMetricNotFound = newMilvusError("metric not found", 1200, false)
 
 	// Message queue related
-	ErrMqTopicNotFound = newMilvusError("topic not found", 1300, false)
-	ErrMqTopicNotEmpty = newMilvusError("topic not empty", 1301, false)
-	ErrMqInternal      = newMilvusError("message queue internal error", 1302, false)
-	ErrDenyProduceMsg  = newMilvusError("deny to write the message to mq", 1303, false)
+	ErrMqTopicNotFound  = newMilvusError("topic not found", 1300, false)
+	ErrMqTopicNotEmpty  = newMilvusError("topic not empty", 1301, false)
+	ErrMqInternal       = newMilvusError("message queue internal error", 1302, false)
+	ErrDenyProduceMsg   = newMilvusError("deny to write the message to mq", 1303, false)
+	ErrTooManyConsumers = newMilvusError("consumer number limit exceeded", 1304, false)
 
 	// Privilege related
 	// this operation is denied because the user not authorized, user need to login in first
@@ -214,6 +216,7 @@ var (
 	ErrGetCompactionPlanResultFail                = newMilvusError("fail to get compaction plan", 2313, true)
 	ErrCompactionResult                           = newMilvusError("illegal compaction results", 2314, false)
 	ErrDuplicatedCompactionTask                   = newMilvusError("duplicated compaction task", 2315, false)
+	ErrCleanPartitionStatsFail                    = newMilvusError("fail to clean partition Stats", 2316, true)
 
 	ErrDataNodeSlotExhausted = newMilvusError("datanode slot exhausted", 2401, false)
 

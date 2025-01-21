@@ -3875,7 +3875,7 @@ class TestCollectionString(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         int_field = cf.gen_int64_field(is_primary=True)
         vec_field = cf.gen_float_vec_field()
-        max_length = 100000
+        max_length = 65535 + 1
         string_field = cf.gen_string_field(max_length=max_length)
         schema = cf.gen_collection_schema([int_field, string_field, vec_field])
         error = {ct.err_code: 65535, ct.err_msg: "the maximum length specified for a VarChar should be in (0, 65535]"}

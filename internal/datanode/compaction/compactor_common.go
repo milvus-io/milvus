@@ -28,34 +28,103 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const compactionBatchSize = 100
 
-func isExpiredEntity(ttl int64, now, ts typeutil.Timestamp) bool {
-	// entity expire is not enabled if duration <= 0
-	if ttl <= 0 {
-		return false
+type EntityFilter struct {
+	deletedPkTs map[interface{}]typeutil.Timestamp // pk2ts
+	ttl         int64                              // nanoseconds
+	currentTime time.Time
+
+	expiredCount int
+	deletedCount int
+}
+
+func newEntityFilter(deletedPkTs map[interface{}]typeutil.Timestamp, ttl int64, currTime time.Time) *EntityFilter {
+	if deletedPkTs == nil {
+		deletedPkTs = make(map[interface{}]typeutil.Timestamp)
+	}
+	return &EntityFilter{
+		deletedPkTs: deletedPkTs,
+		ttl:         ttl,
+		currentTime: currTime,
+	}
+}
+
+func (filter *EntityFilter) Filtered(pk any, ts typeutil.Timestamp) bool {
+	if filter.isEntityDeleted(pk, ts) {
+		filter.deletedCount++
+		return true
 	}
 
-	pts, _ := tsoutil.ParseTS(ts)
-	pnow, _ := tsoutil.ParseTS(now)
-	expireTime := pts.Add(time.Duration(ttl))
-	return expireTime.Before(pnow)
+	// Filtering expired entity
+	if filter.isEntityExpired(ts) {
+		filter.expiredCount++
+		return true
+	}
+	return false
+}
+
+func (filter *EntityFilter) GetExpiredCount() int {
+	return filter.expiredCount
+}
+
+func (filter *EntityFilter) GetDeletedCount() int {
+	return filter.deletedCount
+}
+
+func (filter *EntityFilter) GetDeltalogDeleteCount() int {
+	return len(filter.deletedPkTs)
+}
+
+func (filter *EntityFilter) GetMissingDeleteCount() int {
+	diff := filter.GetDeltalogDeleteCount() - filter.GetDeletedCount()
+	if diff <= 0 {
+		diff = 0
+	}
+	return diff
+}
+
+func (filter *EntityFilter) isEntityDeleted(pk interface{}, pkTs typeutil.Timestamp) bool {
+	if deleteTs, ok := filter.deletedPkTs[pk]; ok {
+		// insert task and delete task has the same ts when upsert
+		// here should be < instead of <=
+		// to avoid the upsert data to be deleted after compact
+		if pkTs < deleteTs {
+			return true
+		}
+	}
+	return false
+}
+
+func (filter *EntityFilter) isEntityExpired(entityTs typeutil.Timestamp) bool {
+	// entity expire is not enabled if duration <= 0
+	if filter.ttl <= 0 {
+		return false
+	}
+	entityTime, _ := tsoutil.ParseTS(entityTs)
+
+	// this dur can represents 292 million years before or after 1970, enough for milvus
+	// ttl calculation
+	dur := filter.currentTime.UnixMilli() - entityTime.UnixMilli()
+
+	// filter.ttl is nanoseconds
+	return filter.ttl/int64(time.Millisecond) <= dur
 }
 
 func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[interface{}]typeutil.Timestamp, error) {
-	pk2ts := make(map[interface{}]typeutil.Timestamp)
+	pk2Ts := make(map[interface{}]typeutil.Timestamp)
 
 	log := log.Ctx(ctx)
 	if len(paths) == 0 {
 		log.Debug("compact with no deltalogs, skip merge deltalogs")
-		return pk2ts, nil
+		return pk2Ts, nil
 	}
 
 	blobs := make([]*storage.Blob, 0)
@@ -88,17 +157,15 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[in
 		}
 
 		dl := reader.Value()
-		// If pk already exists in pk2ts, record the later one.
-		if ts, ok := pk2ts[dl.Pk.GetValue()]; ok && ts > dl.Ts {
+		if ts, ok := pk2Ts[dl.Pk.GetValue()]; ok && ts > dl.Ts {
 			continue
 		}
-		pk2ts[dl.Pk.GetValue()] = dl.Ts
+		pk2Ts[dl.Pk.GetValue()] = dl.Ts
 	}
 
-	log.Info("compact mergeDeltalogs end",
-		zap.Int("deleted pk counts", len(pk2ts)))
+	log.Info("compact mergeDeltalogs end", zap.Int("delete entries counts", len(pk2Ts)))
 
-	return pk2ts, nil
+	return pk2Ts, nil
 }
 
 func composePaths(segments []*datapb.CompactionSegmentBinlogs) (

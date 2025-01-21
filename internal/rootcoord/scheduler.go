@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type IScheduler interface {
@@ -46,6 +47,7 @@ type scheduler struct {
 	tsoAllocator tso.Allocator
 
 	taskChan chan task
+	taskHeap typeutil.Heap[task]
 
 	lock sync.Mutex
 
@@ -56,16 +58,22 @@ type scheduler struct {
 	lockMapping    map[LockLevel]*lock.KeyLock[string]
 }
 
+func GetTaskHeapOrder(t task) Timestamp {
+	return t.GetTs()
+}
+
 func newScheduler(ctx context.Context, idAllocator allocator.Interface, tsoAllocator tso.Allocator) *scheduler {
 	ctx1, cancel := context.WithCancel(ctx)
 	// TODO
 	n := 1024 * 10
+	taskArr := make([]task, 0)
 	s := &scheduler{
 		ctx:            ctx1,
 		cancel:         cancel,
 		idAllocator:    idAllocator,
 		tsoAllocator:   tsoAllocator,
 		taskChan:       make(chan task, n),
+		taskHeap:       typeutil.NewObjectArrayBasedMinimumHeap[task, Timestamp](taskArr, GetTaskHeapOrder),
 		minDdlTs:       *atomic.NewUint64(0),
 		clusterLock:    lock.NewKeyLock[string](),
 		databaseLock:   lock.NewKeyLock[string](),
@@ -93,7 +101,7 @@ func (s *scheduler) Stop() {
 }
 
 func (s *scheduler) execute(task task) {
-	defer s.setMinDdlTs(task.GetTs()) // we should update ts, whatever task succeeds or not.
+	defer s.setMinDdlTs() // we should update ts, whatever task succeeds or not.
 	task.SetInQueueDuration()
 	if err := task.Prepare(task.GetCtx()); err != nil {
 		task.NotifyDone(err)
@@ -153,6 +161,7 @@ func (s *scheduler) setTs(task task) error {
 		return err
 	}
 	task.SetTs(ts)
+	s.taskHeap.Push(task)
 	return nil
 }
 
@@ -186,8 +195,14 @@ func (s *scheduler) GetMinDdlTs() Timestamp {
 	return s.minDdlTs.Load()
 }
 
-func (s *scheduler) setMinDdlTs(ts Timestamp) {
-	s.minDdlTs.Store(ts)
+func (s *scheduler) setMinDdlTs() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	for s.taskHeap.Len() > 0 && s.taskHeap.Peek().IsFinished() {
+		t := s.taskHeap.Pop()
+		s.minDdlTs.Store(t.GetTs())
+	}
 }
 
 func (s *scheduler) executeTaskWithLock(task task, lockerKey LockerKey) error {
@@ -195,9 +210,12 @@ func (s *scheduler) executeTaskWithLock(task task, lockerKey LockerKey) error {
 		if err := s.setID(task); err != nil {
 			return err
 		}
+		s.lock.Lock()
 		if err := s.setTs(task); err != nil {
+			s.lock.Unlock()
 			return err
 		}
+		s.lock.Unlock()
 		s.execute(task)
 		return nil
 	}

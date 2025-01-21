@@ -70,12 +70,8 @@ get_tantivy_data_type(const proto::schema::FieldSchema& schema) {
 }
 
 template <typename T>
-InvertedIndexTantivy<T>::InvertedIndexTantivy(
-    const storage::FileManagerContext& ctx)
-    : ScalarIndex<T>(INVERTED_INDEX_TYPE),
-      schema_(ctx.fieldDataMeta.field_schema) {
-    mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
-    disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
+void
+InvertedIndexTantivy<T>::InitForBuildIndex() {
     auto field =
         std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
     auto prefix = disk_file_manager_->GetIndexIdentifier();
@@ -83,20 +79,38 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
     boost::filesystem::create_directories(path_);
     d_type_ = get_tantivy_data_type(schema_);
     if (tantivy_index_exist(path_.c_str())) {
-        LOG_INFO(
-            "index {} already exists, which should happen in loading progress",
-            path_);
-    } else {
-        wrapper_ = std::make_shared<TantivyIndexWrapper>(
-            field.c_str(), d_type_, path_.c_str());
+        PanicInfo(IndexBuildError,
+                  "build inverted index temp dir:{} not empty",
+                  path_);
     }
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        field.c_str(), d_type_, path_.c_str(), inverted_index_single_segment_);
+}
+
+template <typename T>
+InvertedIndexTantivy<T>::InvertedIndexTantivy(
+    const storage::FileManagerContext& ctx, bool inverted_index_single_segment)
+    : ScalarIndex<T>(INVERTED_INDEX_TYPE),
+      schema_(ctx.fieldDataMeta.field_schema),
+      inverted_index_single_segment_(inverted_index_single_segment) {
+    mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
+    disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
+    // push init wrapper to load process
+    if (ctx.for_loading_index) {
+        return;
+    }
+    InitForBuildIndex();
 }
 
 template <typename T>
 InvertedIndexTantivy<T>::~InvertedIndexTantivy() {
+    if (wrapper_) {
+        wrapper_->free();
+    }
     auto local_chunk_manager =
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto prefix = path_;
+    LOG_INFO("inverted index remove path:{}", path_);
     local_chunk_manager->RemoveDir(prefix);
 }
 
@@ -114,14 +128,16 @@ InvertedIndexTantivy<T>::Serialize(const Config& config) {
         new uint8_t[index_valid_data_length]);
     memcpy(index_valid_data.get(), null_offset.data(), index_valid_data_length);
     BinarySet res_set;
-    res_set.Append(
-        "index_null_offset", index_valid_data, index_valid_data_length);
+    if (index_valid_data_length > 0) {
+        res_set.Append(
+            "index_null_offset", index_valid_data, index_valid_data_length);
+    }
     milvus::Disassemble(res_set);
     return res_set;
 }
 
 template <typename T>
-BinarySet
+IndexStatsPtr
 InvertedIndexTantivy<T>::Upload(const Config& config) {
     finish();
 
@@ -141,20 +157,25 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
         }
     }
 
-    BinarySet ret;
-
     auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
-    for (auto& file : remote_paths_to_size) {
-        ret.Append(file.first, nullptr, file.second);
-    }
+
     auto binary_set = Serialize(config);
     mem_file_manager_->AddFile(binary_set);
     auto remote_mem_path_to_size =
         mem_file_manager_->GetRemotePathsToFileSize();
-    for (auto& file : remote_mem_path_to_size) {
-        ret.Append(file.first, nullptr, file.second);
+
+    std::vector<SerializedIndexFileInfo> index_files;
+    index_files.reserve(remote_paths_to_size.size() +
+                        remote_mem_path_to_size.size());
+    for (auto& file : remote_paths_to_size) {
+        index_files.emplace_back(file.first, file.second);
     }
-    return ret;
+    for (auto& file : remote_mem_path_to_size) {
+        index_files.emplace_back(file.first, file.second);
+    }
+    return IndexStats::New(mem_file_manager_->GetAddedTotalMemSize() +
+                               disk_file_manager_->GetAddedTotalFileSize(),
+                           std::move(index_files));
 }
 
 template <typename T>
@@ -214,6 +235,7 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
                (size_t)index_valid_data->size);
     }
     disk_file_manager_->CacheIndexToDisk(files_value);
+    path_ = prefix;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str());
 }
 
@@ -366,9 +388,9 @@ InvertedIndexTantivy<T>::RegexQuery(const std::string& regex_pattern) {
 
 template <typename T>
 void
-InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
-                                          const void* values,
-                                          const Config& config) {
+InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
+                                               const void* values,
+                                               const Config& config) {
     if constexpr (std::is_same_v<bool, T>) {
         schema_.set_data_type(proto::schema::DataType::Bool);
     }
@@ -400,16 +422,35 @@ InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
     boost::filesystem::create_directories(path_);
     d_type_ = get_tantivy_data_type(schema_);
     std::string field = "test_inverted_index";
+    inverted_index_single_segment_ =
+        GetValueFromConfig<int32_t>(config,
+                                    milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+            .value_or(1) == 0;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        field.c_str(), d_type_, path_.c_str());
-    if (config.find("is_array") != config.end()) {
-        // only used in ut.
-        auto arr = static_cast<const boost::container::vector<T>*>(values);
-        for (size_t i = 0; i < n; i++) {
-            wrapper_->template add_multi_data(arr[i].data(), arr[i].size(), i);
+        field.c_str(), d_type_, path_.c_str(), inverted_index_single_segment_);
+    if (!inverted_index_single_segment_) {
+        if (config.find("is_array") != config.end()) {
+            // only used in ut.
+            auto arr = static_cast<const boost::container::vector<T>*>(values);
+            for (size_t i = 0; i < n; i++) {
+                wrapper_->template add_multi_data(
+                    arr[i].data(), arr[i].size(), i);
+            }
+        } else {
+            wrapper_->add_data<T>(static_cast<const T*>(values), n, 0);
         }
     } else {
-        wrapper_->add_data<T>(static_cast<const T*>(values), n, 0);
+        if (config.find("is_array") != config.end()) {
+            // only used in ut.
+            auto arr = static_cast<const boost::container::vector<T>*>(values);
+            for (size_t i = 0; i < n; i++) {
+                wrapper_->template add_multi_data_by_single_segment_writer(
+                    arr[i].data(), arr[i].size());
+            }
+        } else {
+            wrapper_->add_data_by_single_segment_writer<T>(
+                static_cast<const T*>(values), n);
+        }
     }
     wrapper_->create_reader();
     finish();
@@ -437,26 +478,48 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         case proto::schema::DataType::Double:
         case proto::schema::DataType::String:
         case proto::schema::DataType::VarChar: {
-            int64_t offset = 0;
-            if (schema_.nullable()) {
-                for (const auto& data : field_datas) {
-                    auto n = data->get_num_rows();
-                    for (int i = 0; i < n; i++) {
-                        if (!data->is_valid(i)) {
-                            null_offset.push_back(i);
+            // Generally, we will not build inverted index with single segment except for building index
+            // for query node with older version(2.4). See more comments above `inverted_index_single_segment_`.
+            if (!inverted_index_single_segment_) {
+                int64_t offset = 0;
+                if (schema_.nullable()) {
+                    for (const auto& data : field_datas) {
+                        auto n = data->get_num_rows();
+                        for (int i = 0; i < n; i++) {
+                            if (!data->is_valid(i)) {
+                                null_offset.push_back(i);
+                            }
+                            wrapper_->add_multi_data<T>(
+                                static_cast<const T*>(data->RawValue(i)),
+                                data->is_valid(i),
+                                offset++);
                         }
-                        wrapper_->add_multi_data<T>(
-                            static_cast<const T*>(data->RawValue(i)),
-                            data->is_valid(i),
-                            offset++);
+                    }
+                } else {
+                    for (const auto& data : field_datas) {
+                        auto n = data->get_num_rows();
+                        wrapper_->add_data<T>(
+                            static_cast<const T*>(data->Data()), n, offset);
+                        offset += n;
                     }
                 }
             } else {
                 for (const auto& data : field_datas) {
                     auto n = data->get_num_rows();
-                    wrapper_->add_data<T>(
-                        static_cast<const T*>(data->Data()), n, offset);
-                    offset += n;
+                    if (schema_.nullable()) {
+                        for (int i = 0; i < n; i++) {
+                            if (!data->is_valid(i)) {
+                                null_offset.push_back(i);
+                            }
+                            wrapper_
+                                ->add_multi_data_by_single_segment_writer<T>(
+                                    static_cast<const T*>(data->RawValue(i)),
+                                    data->is_valid(i));
+                        }
+                        continue;
+                    }
+                    wrapper_->add_data_by_single_segment_writer<T>(
+                        static_cast<const T*>(data->Data()), n);
                 }
             }
             break;
@@ -487,10 +550,15 @@ InvertedIndexTantivy<T>::build_index_for_array(
                 null_offset.push_back(i);
             }
             auto length = data->is_valid(i) ? array_column[i].length() : 0;
-            wrapper_->template add_multi_data(
-                reinterpret_cast<const T*>(array_column[i].data()),
-                length,
-                offset++);
+            if (!inverted_index_single_segment_) {
+                wrapper_->template add_multi_data(
+                    reinterpret_cast<const T*>(array_column[i].data()),
+                    length,
+                    offset++);
+            } else {
+                wrapper_->template add_multi_data_by_single_segment_writer(
+                    reinterpret_cast<const T*>(array_column[i].data()), length);
+            }
         }
     }
 }
@@ -516,7 +584,13 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
                     array_column[i].template get_data<std::string>(j));
             }
             auto length = data->is_valid(i) ? output.size() : 0;
-            wrapper_->template add_multi_data(output.data(), length, offset++);
+            if (!inverted_index_single_segment_) {
+                wrapper_->template add_multi_data(
+                    output.data(), length, offset++);
+            } else {
+                wrapper_->template add_multi_data_by_single_segment_writer(
+                    output.data(), length);
+            }
         }
     }
 }

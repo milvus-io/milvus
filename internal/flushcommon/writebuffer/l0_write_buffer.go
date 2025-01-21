@@ -13,11 +13,11 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -165,23 +165,24 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 
 	if paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool() || streamingutil.IsStreamingServiceEnabled() {
 		// In streaming service mode, flushed segments no longer maintain a bloom filter.
-		// So, here we skip filtering delete entries by bf.
+		// So, here we skip generating BF (growing segment's BF will be regenerated during the sync phase)
+		// and also skip filtering delete entries by bf.
 		wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos)
 	} else {
 		// distribute delete msg
 		// bf write buffer check bloom filter of segment and current insert batch to decide which segment to write delete data
 		wb.dispatchDeleteMsgs(insertData, deleteMsgs, startPos, endPos)
-	}
 
-	// update pk oracle
-	for _, inData := range insertData {
-		// segment shall always exists after buffer insert
-		segments := wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(inData.segmentID))
-		for _, segment := range segments {
-			for _, fieldData := range inData.pkField {
-				err := segment.GetBloomFilterSet().UpdatePKRange(fieldData)
-				if err != nil {
-					return err
+		// update pk oracle
+		for _, inData := range insertData {
+			// segment shall always exists after buffer insert
+			segments := wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(inData.segmentID))
+			for _, segment := range segments {
+				for _, fieldData := range inData.pkField {
+					err := segment.GetBloomFilterSet().UpdatePKRange(fieldData)
+					if err != nil {
+						return err
+					}
 				}
 			}
 		}

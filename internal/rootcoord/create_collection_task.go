@@ -32,12 +32,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	ms "github.com/milvus-io/milvus/pkg/mq/msgstream"
+	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -61,6 +61,7 @@ type createCollectionTask struct {
 	channels       collectionChannels
 	dbID           UniqueID
 	partitionNames []string
+	dbProperties   []*commonpb.KeyValuePair
 }
 
 func (t *createCollectionTask) validate(ctx context.Context) error {
@@ -424,6 +425,18 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 		return err
 	}
 	t.dbID = db.ID
+	dbReplicateID, _ := common.GetReplicateID(db.Properties)
+	if dbReplicateID != "" {
+		reqProperties := make([]*commonpb.KeyValuePair, 0, len(t.Req.Properties))
+		for _, prop := range t.Req.Properties {
+			if prop.Key == common.ReplicateIDKey {
+				continue
+			}
+			reqProperties = append(reqProperties, prop)
+		}
+		t.Req.Properties = reqProperties
+	}
+	t.dbProperties = db.Properties
 
 	if err := t.validate(ctx); err != nil {
 		return err
@@ -565,6 +578,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		CollectionID:         collID,
 		DBID:                 t.dbID,
 		Name:                 t.schema.Name,
+		DBName:               t.Req.GetDbName(),
 		Description:          t.schema.Description,
 		AutoID:               t.schema.AutoID,
 		Fields:               model.UnmarshalFieldModels(t.schema.Fields),
@@ -606,65 +620,81 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 	}
 	collInfo.StartPositions = toKeyDataPairs(startPositions)
 
-	undoTask := newBaseUndoTask(t.core.stepExecutor)
-	undoTask.AddStep(&expireCacheStep{
-		baseStep:        baseStep{core: t.core},
-		dbName:          t.Req.GetDbName(),
-		collectionNames: []string{t.Req.GetCollectionName()},
-		collectionID:    collID,
-		ts:              ts,
-		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
-	}, &nullStep{})
-	undoTask.AddStep(&nullStep{}, &removeDmlChannelsStep{
-		baseStep:  baseStep{core: t.core},
-		pChannels: chanNames,
-	}) // remove dml channels if any error occurs.
-	undoTask.AddStep(&addCollectionMetaStep{
-		baseStep: baseStep{core: t.core},
-		coll:     &collInfo,
-	}, &deleteCollectionMetaStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: collID,
-		// When we undo createCollectionTask, this ts may be less than the ts when unwatch channels.
-		ts: ts,
-	})
-	// serve for this case: watching channels succeed in datacoord but failed due to network failure.
-	undoTask.AddStep(&nullStep{}, &unwatchChannelsStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: collID,
-		channels:     t.channels,
-		isSkip:       !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
-	})
-	undoTask.AddStep(&watchChannelsStep{
-		baseStep: baseStep{core: t.core},
-		info: &watchInfo{
-			ts:             ts,
-			collectionID:   collID,
-			vChannels:      t.channels.virtualChannels,
-			startPositions: toKeyDataPairs(startPositions),
-			schema: &schemapb.CollectionSchema{
-				Name:        collInfo.Name,
-				Description: collInfo.Description,
-				AutoID:      collInfo.AutoID,
-				Fields:      model.MarshalFieldModels(collInfo.Fields),
-				Functions:   model.MarshalFunctionModels(collInfo.Functions),
-			},
-		},
-	}, &nullStep{})
-	undoTask.AddStep(&changeCollectionStateStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: collID,
-		state:        pb.CollectionState_CollectionCreated,
-		ts:           ts,
-	}, &nullStep{}) // We'll remove the whole collection anyway.
-
-	return undoTask.Execute(ctx)
+	return executeCreateCollectionTaskSteps(ctx, t.core, &collInfo, t.Req.GetDbName(), t.dbProperties, ts)
 }
 
 func (t *createCollectionTask) GetLockerKey() LockerKey {
 	return NewLockerKeyChain(
 		NewClusterLockerKey(false),
 		NewDatabaseLockerKey(t.Req.GetDbName(), false),
-		NewCollectionLockerKey(t.Req.GetCollectionName(), true),
+		NewCollectionLockerKey(strconv.FormatInt(t.collID, 10), true),
 	)
+}
+
+func executeCreateCollectionTaskSteps(ctx context.Context,
+	core *Core,
+	col *model.Collection,
+	dbName string,
+	dbProperties []*commonpb.KeyValuePair,
+	ts Timestamp,
+) error {
+	undoTask := newBaseUndoTask(core.stepExecutor)
+	collID := col.CollectionID
+	undoTask.AddStep(&expireCacheStep{
+		baseStep:        baseStep{core: core},
+		dbName:          dbName,
+		collectionNames: []string{col.Name},
+		collectionID:    collID,
+		ts:              ts,
+		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
+	}, &nullStep{})
+	undoTask.AddStep(&nullStep{}, &removeDmlChannelsStep{
+		baseStep:  baseStep{core: core},
+		pChannels: col.PhysicalChannelNames,
+	}) // remove dml channels if any error occurs.
+	undoTask.AddStep(&addCollectionMetaStep{
+		baseStep: baseStep{core: core},
+		coll:     col,
+	}, &deleteCollectionMetaStep{
+		baseStep:     baseStep{core: core},
+		collectionID: collID,
+		// When we undo createCollectionTask, this ts may be less than the ts when unwatch channels.
+		ts: ts,
+	})
+	// serve for this case: watching channels succeed in datacoord but failed due to network failure.
+	undoTask.AddStep(&nullStep{}, &unwatchChannelsStep{
+		baseStep:     baseStep{core: core},
+		collectionID: collID,
+		channels: collectionChannels{
+			virtualChannels:  col.VirtualChannelNames,
+			physicalChannels: col.PhysicalChannelNames,
+		},
+		isSkip: !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
+	})
+	undoTask.AddStep(&watchChannelsStep{
+		baseStep: baseStep{core: core},
+		info: &watchInfo{
+			ts:             ts,
+			collectionID:   collID,
+			vChannels:      col.VirtualChannelNames,
+			startPositions: col.StartPositions,
+			schema: &schemapb.CollectionSchema{
+				Name:        col.Name,
+				DbName:      col.DBName,
+				Description: col.Description,
+				AutoID:      col.AutoID,
+				Fields:      model.MarshalFieldModels(col.Fields),
+				Properties:  col.Properties,
+				Functions:   model.MarshalFunctionModels(col.Functions),
+			},
+			dbProperties: dbProperties,
+		},
+	}, &nullStep{})
+	undoTask.AddStep(&changeCollectionStateStep{
+		baseStep:     baseStep{core: core},
+		collectionID: collID,
+		state:        pb.CollectionState_CollectionCreated,
+		ts:           ts,
+	}, &nullStep{}) // We'll remove the whole collection anyway.
+	return undoTask.Execute(ctx)
 }

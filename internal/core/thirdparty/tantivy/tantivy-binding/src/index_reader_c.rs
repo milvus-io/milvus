@@ -1,13 +1,9 @@
-use std::{
-    ffi::{c_char, c_void, CStr},
-    ptr::null,
-};
+use std::ffi::{c_char, c_void, CStr};
 
 use crate::{
-    array::{RustArray, RustResult},
+    array::RustResult,
     cstr_to_str,
     index_reader::IndexReaderWrapper,
-    string_c::create_string,
     util::{create_binding, free_binding},
     util_c::tantivy_index_exist,
 };

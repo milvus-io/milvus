@@ -16,6 +16,10 @@
 
 package index
 
+const (
+	diskANNSearchListKey = `search_list`
+)
+
 var _ Index = diskANNIndex{}
 
 type diskANNIndex struct {
@@ -36,4 +40,24 @@ func NewDiskANNIndex(metricType MetricType) Index {
 			indexType:  DISKANN,
 		},
 	}
+}
+
+type diskANNParam struct {
+	baseAnnParam
+	searchList int
+}
+
+func NewDiskAnnParam(searchList int) diskANNParam {
+	return diskANNParam{
+		baseAnnParam: baseAnnParam{
+			params: make(map[string]any),
+		},
+		searchList: searchList,
+	}
+}
+
+func (ap diskANNParam) Params() map[string]any {
+	result := ap.baseAnnParam.params
+	result[diskANNSearchListKey] = ap.searchList
+	return result
 }

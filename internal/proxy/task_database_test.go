@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc/metadata"
@@ -12,8 +13,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -199,6 +200,163 @@ func TestAlterDatabase(t *testing.T) {
 
 	err1 = task1.Execute(context.Background())
 	assert.Nil(t, err1)
+}
+
+func TestAlterDatabaseTaskForReplicateProperty(t *testing.T) {
+	rc := mocks.NewMockRootCoordClient(t)
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	mockCache := NewMockCache(t)
+	globalMetaCache = mockCache
+
+	t.Run("replicate id", func(t *testing.T) {
+		task := &alterDatabaseTask{
+			AlterDatabaseRequest: &milvuspb.AlterDatabaseRequest{
+				Base:   &commonpb.MsgBase{},
+				DbName: "test_alter_database",
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.MmapEnabledKey,
+						Value: "true",
+					},
+					{
+						Key:   common.ReplicateIDKey,
+						Value: "local-test",
+					},
+				},
+			},
+			rootCoord: rc,
+		}
+		err := task.PreExecute(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("fail to get database info", func(t *testing.T) {
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, errors.New("err")).Once()
+		task := &alterDatabaseTask{
+			AlterDatabaseRequest: &milvuspb.AlterDatabaseRequest{
+				Base:   &commonpb.MsgBase{},
+				DbName: "test_alter_database",
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.ReplicateEndTSKey,
+						Value: "1000",
+					},
+				},
+			},
+			rootCoord: rc,
+		}
+		err := task.PreExecute(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("not enable replicate", func(t *testing.T) {
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+			properties: []*commonpb.KeyValuePair{},
+		}, nil).Once()
+		task := &alterDatabaseTask{
+			AlterDatabaseRequest: &milvuspb.AlterDatabaseRequest{
+				Base:   &commonpb.MsgBase{},
+				DbName: "test_alter_database",
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.ReplicateEndTSKey,
+						Value: "1000",
+					},
+				},
+			},
+			rootCoord: rc,
+		}
+		err := task.PreExecute(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("fail to alloc ts", func(t *testing.T) {
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+			properties: []*commonpb.KeyValuePair{
+				{
+					Key:   common.ReplicateIDKey,
+					Value: "local-test",
+				},
+			},
+		}, nil).Once()
+		rc.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(nil, errors.New("err")).Once()
+		task := &alterDatabaseTask{
+			AlterDatabaseRequest: &milvuspb.AlterDatabaseRequest{
+				Base:   &commonpb.MsgBase{},
+				DbName: "test_alter_database",
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.ReplicateEndTSKey,
+						Value: "1000",
+					},
+				},
+			},
+			rootCoord: rc,
+		}
+		err := task.PreExecute(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("alloc wrong ts", func(t *testing.T) {
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+			properties: []*commonpb.KeyValuePair{
+				{
+					Key:   common.ReplicateIDKey,
+					Value: "local-test",
+				},
+			},
+		}, nil).Once()
+		rc.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{
+			Status:    merr.Success(),
+			Timestamp: 999,
+		}, nil).Once()
+		task := &alterDatabaseTask{
+			AlterDatabaseRequest: &milvuspb.AlterDatabaseRequest{
+				Base:   &commonpb.MsgBase{},
+				DbName: "test_alter_database",
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.ReplicateEndTSKey,
+						Value: "1000",
+					},
+				},
+			},
+			rootCoord: rc,
+		}
+		err := task.PreExecute(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("alloc wrong ts", func(t *testing.T) {
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+			properties: []*commonpb.KeyValuePair{
+				{
+					Key:   common.ReplicateIDKey,
+					Value: "local-test",
+				},
+			},
+		}, nil).Once()
+		rc.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{
+			Status:    merr.Success(),
+			Timestamp: 1001,
+		}, nil).Once()
+		task := &alterDatabaseTask{
+			AlterDatabaseRequest: &milvuspb.AlterDatabaseRequest{
+				Base:   &commonpb.MsgBase{},
+				DbName: "test_alter_database",
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.ReplicateEndTSKey,
+						Value: "1000",
+					},
+				},
+			},
+			rootCoord: rc,
+		}
+		err := task.PreExecute(context.Background())
+		assert.NoError(t, err)
+	})
 }
 
 func TestDescribeDatabaseTask(t *testing.T) {

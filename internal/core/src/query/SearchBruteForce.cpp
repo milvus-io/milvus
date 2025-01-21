@@ -35,10 +35,19 @@ CheckBruteForceSearchParam(const FieldMeta& field,
 
     AssertInfo(IsVectorDataType(data_type),
                "[BruteForceSearch] Data type isn't vector type");
-    bool is_float_vec_data_type = IsFloatVectorDataType(data_type);
-    bool is_float_metric_type = IsFloatMetricType(metric_type);
-    AssertInfo(is_float_vec_data_type == is_float_metric_type,
-               "[BruteForceSearch] Data type and metric type miss-match");
+    if (IsBinaryVectorDataType(data_type)) {
+        AssertInfo(IsBinaryVectorMetricType(metric_type),
+                   "[BruteForceSearch] Binary vector, data type and metric type miss-match");
+    } else if (IsFloatVectorDataType(data_type)) {
+        AssertInfo(IsFloatVectorMetricType(metric_type),
+                   "[BruteForceSearch] Float vector, data type and metric type miss-match");
+    } else if (IsIntVectorDataType(data_type)) {
+        AssertInfo(IsIntVectorMetricType(metric_type),
+                   "[BruteForceSearch] Int vector, data type and metric type miss-match");
+    } else {
+        AssertInfo(IsVectorDataType(data_type),
+                   "[BruteForceSearch] Unsupported vector data type");
+    }
 }
 
 knowhere::Json
@@ -94,6 +103,12 @@ PrepareBFDataSet(const dataset::SearchDataset& query_ds,
             knowhere::ConvertFromDataTypeIfNeeded<float16>(base_dataset);
         query_dataset =
             knowhere::ConvertFromDataTypeIfNeeded<float16>(query_dataset);
+    } else if (data_type == DataType::VECTOR_INT8) {
+        // TODO caiyd: if knowhere support real int8 bf, remove this
+        base_dataset =
+            knowhere::ConvertFromDataTypeIfNeeded<int8>(base_dataset);
+        query_dataset =
+            knowhere::ConvertFromDataTypeIfNeeded<int8>(query_dataset);
     }
     base_dataset->SetTensorBeginId(raw_ds.begin_id);
     return std::make_pair(query_dataset, base_dataset);
@@ -147,6 +162,10 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
             res = knowhere::BruteForce::RangeSearch<
                 knowhere::sparse::SparseRow<float>>(
                 base_dataset, query_dataset, search_cfg, bitset);
+        } else if (data_type == DataType::VECTOR_INT8) {
+            // TODO caiyd: if knowhere support real int8 bf, change it
+            res = knowhere::BruteForce::RangeSearch<float>(
+                    base_dataset, query_dataset, search_cfg, bitset);
         } else {
             PanicInfo(
                 ErrorCode::Unsupported,
@@ -211,6 +230,15 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset);
+        } else if (data_type == DataType::VECTOR_INT8) {
+            // TODO caiyd: if knowhere support real int8 bf, change it
+            stat = knowhere::BruteForce::SearchWithBuf<float>(
+                base_dataset,
+                query_dataset,
+                sub_result.mutable_seg_offsets().data(),
+                sub_result.mutable_distances().data(),
+                search_cfg,
+                bitset);
         } else {
             PanicInfo(ErrorCode::Unsupported,
                       "Unsupported dataType for chunk brute force search:{}",
@@ -226,45 +254,66 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
     return sub_result;
 }
 
-SubSearchResult
-BruteForceSearchIterators(const dataset::SearchDataset& query_ds,
-                          const dataset::RawDataset& raw_ds,
-                          const SearchInfo& search_info,
-                          const std::map<std::string, std::string>& index_info,
-                          const BitsetView& bitset,
-                          DataType data_type) {
-    auto nq = query_ds.num_queries;
-    auto [query_dataset, base_dataset] =
-        PrepareBFDataSet(query_ds, raw_ds, data_type);
-    auto search_cfg = PrepareBFSearchParams(search_info, index_info);
-
-    knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
-        iterators_val;
+knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
+DispatchBruteForceIteratorByDataType(const knowhere::DataSetPtr& base_dataset,
+                                     const knowhere::DataSetPtr& query_dataset,
+                                     const knowhere::Json& config,
+                                     const BitsetView& bitset,
+                                     const milvus::DataType& data_type) {
     switch (data_type) {
         case DataType::VECTOR_FLOAT:
-            iterators_val = knowhere::BruteForce::AnnIterator<float>(
-                base_dataset, query_dataset, search_cfg, bitset);
-            break;
+            return knowhere::BruteForce::AnnIterator<float>(
+                base_dataset, query_dataset, config, bitset);
         case DataType::VECTOR_FLOAT16:
             //todo: if knowhere support real fp16/bf16 bf, change it
-            iterators_val = knowhere::BruteForce::AnnIterator<float>(
-                base_dataset, query_dataset, search_cfg, bitset);
-            break;
+            return knowhere::BruteForce::AnnIterator<float>(
+                base_dataset, query_dataset, config, bitset);
         case DataType::VECTOR_BFLOAT16:
             //todo: if knowhere support real fp16/bf16 bf, change it
-            iterators_val = knowhere::BruteForce::AnnIterator<float>(
-                base_dataset, query_dataset, search_cfg, bitset);
-            break;
+            return knowhere::BruteForce::AnnIterator<float>(
+                base_dataset, query_dataset, config, bitset);
         case DataType::VECTOR_SPARSE_FLOAT:
-            iterators_val = knowhere::BruteForce::AnnIterator<
+            return knowhere::BruteForce::AnnIterator<
                 knowhere::sparse::SparseRow<float>>(
-                base_dataset, query_dataset, search_cfg, bitset);
-            break;
+                base_dataset, query_dataset, config, bitset);
+        case DataType::VECTOR_INT8:
+            // TODO caiyd: if knowhere support real int8 bf, change it
+            return knowhere::BruteForce::AnnIterator<float>(
+                    base_dataset, query_dataset, config, bitset);
         default:
             PanicInfo(ErrorCode::Unsupported,
                       "Unsupported dataType for chunk brute force iterator:{}",
                       data_type);
     }
+}
+
+knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
+GetBruteForceSearchIterators(
+    const dataset::SearchDataset& query_ds,
+    const dataset::RawDataset& raw_ds,
+    const SearchInfo& search_info,
+    const std::map<std::string, std::string>& index_info,
+    const BitsetView& bitset,
+    DataType data_type) {
+    auto nq = query_ds.num_queries;
+    auto [query_dataset, base_dataset] =
+        PrepareBFDataSet(query_ds, raw_ds, data_type);
+    auto search_cfg = PrepareBFSearchParams(search_info, index_info);
+    return DispatchBruteForceIteratorByDataType(
+        base_dataset, query_dataset, search_cfg, bitset, data_type);
+}
+
+SubSearchResult
+PackBruteForceSearchIteratorsIntoSubResult(
+    const dataset::SearchDataset& query_ds,
+    const dataset::RawDataset& raw_ds,
+    const SearchInfo& search_info,
+    const std::map<std::string, std::string>& index_info,
+    const BitsetView& bitset,
+    DataType data_type) {
+    auto nq = query_ds.num_queries;
+    auto iterators_val = GetBruteForceSearchIterators(
+        query_ds, raw_ds, search_info, index_info, bitset, data_type);
     if (iterators_val.has_value()) {
         AssertInfo(
             iterators_val.value().size() == nq,

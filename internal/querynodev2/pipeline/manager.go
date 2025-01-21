@@ -42,7 +42,7 @@ type Manager interface {
 	Remove(channels ...string)
 	Start(channels ...string) error
 	Close()
-	GetChannelStats() []*metricsinfo.Channel
+	GetChannelStats(collectionID int64) []*metricsinfo.Channel
 }
 
 type manager struct {
@@ -85,7 +85,7 @@ func (m *manager) Add(collectionID UniqueID, channel string) (Pipeline, error) {
 		return nil, merr.WrapErrChannelNotFound(channel, "delegator not found")
 	}
 
-	newPipeLine, err := NewPipeLine(collectionID, channel, m.dataManager, m.dispatcher, delegator)
+	newPipeLine, err := NewPipeLine(collection, channel, m.dataManager, m.dispatcher, delegator)
 	if err != nil {
 		return nil, merr.WrapErrServiceUnavailable(err.Error(), "failed to create new pipeline")
 	}
@@ -157,12 +157,15 @@ func (m *manager) Close() {
 	}
 }
 
-func (m *manager) GetChannelStats() []*metricsinfo.Channel {
+func (m *manager) GetChannelStats(collectionID int64) []*metricsinfo.Channel {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	ret := make([]*metricsinfo.Channel, 0, len(m.channel2Pipeline))
 	for ch, p := range m.channel2Pipeline {
+		if collectionID > 0 && p.GetCollectionID() != collectionID {
+			continue
+		}
 		delegator, ok := m.delegators.Get(ch)
 		if ok {
 			tt := delegator.GetTSafe()

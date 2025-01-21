@@ -37,12 +37,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -1063,7 +1063,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 			Status:       merr.Success(),
 			PartitionIDs: []int64{partID},
 		}, nil)
-		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, qc, collID, partID)
 		assert.NoError(t, err)
 		assert.True(t, loaded)
 	})
@@ -1088,7 +1088,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 			Status:       merr.Success(),
 			PartitionIDs: []int64{partID},
 		}, errors.New("error"))
-		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, qc, collID, partID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
 	})
@@ -1116,7 +1116,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 			},
 			PartitionIDs: []int64{partID},
 		}, nil)
-		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
+		loaded, err := isPartitionLoaded(ctx, qc, collID, partID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
 	})

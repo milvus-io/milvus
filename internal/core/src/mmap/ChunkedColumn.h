@@ -53,15 +53,15 @@ class ChunkedColumnBase : public ColumnBase {
  public:
     ChunkedColumnBase() = default;
     // memory mode ctor
-    ChunkedColumnBase(const FieldMeta& field_meta) {
+    explicit ChunkedColumnBase(const FieldMeta& field_meta) {
         if (field_meta.is_nullable()) {
             nullable_ = true;
         }
     }
 
-    virtual ~ChunkedColumnBase(){};
+    virtual ~ChunkedColumnBase() = default;
 
-    virtual void
+    void
     AppendBatch(const FieldDataPtr data) override {
         PanicInfo(ErrorCode::Unsupported, "AppendBatch not supported");
     }
@@ -282,14 +282,6 @@ class ChunkedSparseFloatColumn : public ChunkedColumnBase {
             std::dynamic_pointer_cast<SparseFloatVectorChunk>(chunk)->Dim());
     }
 
-    // This is used to advice mmap prefetch, we don't currently support mmap for
-    // sparse float vector thus not implemented for now.
-    size_t
-    DataByteSize() const override {
-        PanicInfo(ErrorCode::Unsupported,
-                  "ByteSize not supported for sparse float column");
-    }
-
     SpanBase
     Span(int64_t chunk_id) const override {
         PanicInfo(ErrorCode::Unsupported,
@@ -303,7 +295,6 @@ class ChunkedSparseFloatColumn : public ChunkedColumnBase {
 
  private:
     int64_t dim_ = 0;
-    std::vector<knowhere::sparse::SparseRow<float>> vec_;
 };
 
 template <typename T>

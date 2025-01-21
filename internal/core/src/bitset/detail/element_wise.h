@@ -718,10 +718,10 @@ struct ElementWiseBitsetPolicy {
 
     //
     static inline std::optional<size_t>
-    op_find(const data_type* const data,
-            const size_t start,
-            const size_t size,
-            const size_t starting_idx) {
+    op_find_1(const data_type* const data,
+              const size_t start,
+              const size_t size,
+              const size_t starting_idx) {
         if (size == 0) {
             return std::nullopt;
         }
@@ -732,8 +732,6 @@ struct ElementWiseBitsetPolicy {
 
         const auto start_shift = get_shift(start + starting_idx);
         const auto end_shift = get_shift(start + size);
-
-        size_t extra_offset = 0;
 
         // same element?
         if (start_element == end_element) {
@@ -764,7 +762,6 @@ struct ElementWiseBitsetPolicy {
             }
 
             start_element += 1;
-            extra_offset += data_bits - start_shift;
         }
 
         // process the middle
@@ -789,6 +786,91 @@ struct ElementWiseBitsetPolicy {
         }
 
         return std::nullopt;
+    }
+
+    static inline std::optional<size_t>
+    op_find_0(const data_type* const data,
+              const size_t start,
+              const size_t size,
+              const size_t starting_idx) {
+        if (size == 0) {
+            return std::nullopt;
+        }
+
+        //
+        auto start_element = get_element(start + starting_idx);
+        const auto end_element = get_element(start + size);
+
+        const auto start_shift = get_shift(start + starting_idx);
+        const auto end_shift = get_shift(start + size);
+
+        // same element?
+        if (start_element == end_element) {
+            const data_type existing_v = ~data[start_element];
+
+            const data_type existing_mask = get_shift_mask_end(start_shift) &
+                                            get_shift_mask_begin(end_shift);
+
+            const data_type value = existing_v & existing_mask;
+            if (value != 0) {
+                const auto ctz = CtzHelper<data_type>::ctz(value);
+                return size_t(ctz) + start_element * data_bits - start;
+            } else {
+                return std::nullopt;
+            }
+        }
+
+        // process the first element
+        if (start_shift != 0) {
+            const data_type existing_v = ~data[start_element];
+            const data_type existing_mask = get_shift_mask_end(start_shift);
+
+            const data_type value = existing_v & existing_mask;
+            if (value != 0) {
+                const auto ctz = CtzHelper<data_type>::ctz(value) +
+                                 start_element * data_bits - start;
+                return size_t(ctz);
+            }
+
+            start_element += 1;
+        }
+
+        // process the middle
+        for (size_t i = start_element; i < end_element; i++) {
+            const data_type value = ~data[i];
+            if (value != 0) {
+                const auto ctz = CtzHelper<data_type>::ctz(value);
+                return size_t(ctz) + i * data_bits - start;
+            }
+        }
+
+        // process the last element
+        if (end_shift != 0) {
+            const data_type existing_v = ~data[end_element];
+            const data_type existing_mask = get_shift_mask_begin(end_shift);
+
+            const data_type value = existing_v & existing_mask;
+            if (value != 0) {
+                const auto ctz = CtzHelper<data_type>::ctz(value);
+                return size_t(ctz) + end_element * data_bits - start;
+            }
+        }
+
+        return std::nullopt;
+    }
+
+    //
+    static inline std::optional<size_t>
+    op_find(const data_type* const data,
+            const size_t start,
+            const size_t size,
+            const size_t starting_idx,
+            const bool is_set) {
+        if (is_set) {
+            return op_find_1(data, start, size, starting_idx);
+        } else {
+            return op_find_0(data, start, size, starting_idx);
+        }
     }
 
     //

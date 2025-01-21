@@ -26,11 +26,12 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -48,6 +49,7 @@ type CompactionPlanHandlerSuite struct {
 	mockCm      *MockChannelManager
 	mockSessMgr *session.MockDataNodeManager
 	handler     *compactionPlanHandler
+	mockHandler *NMockHandler
 	cluster     *MockCluster
 }
 
@@ -59,17 +61,20 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockSessMgr = session.NewMockDataNodeManager(s.T())
 	s.cluster = NewMockCluster(s.T())
 	s.handler = newCompactionPlanHandler(s.cluster, s.mockSessMgr, s.mockMeta, s.mockAlloc, nil, nil)
+	s.mockHandler = NewNMockHandler(s.T())
+	s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 }
 
 func (s *CompactionPlanHandlerSuite) TestScheduleEmpty() {
 	s.SetupTest()
-	s.handler.schedule()
+
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	s.handler.schedule(assigner)
 	s.Empty(s.handler.executingTasks)
 }
 
 func (s *CompactionPlanHandlerSuite) generateInitTasksForSchedule() {
 	task1 := &mixCompactionTask{
-		plan:     &datapb.CompactionPlan{PlanID: 1, Channel: "ch-1", Type: datapb.CompactionType_MixCompaction},
 		sessions: s.mockSessMgr,
 		meta:     s.mockMeta,
 	}
@@ -82,7 +87,6 @@ func (s *CompactionPlanHandlerSuite) generateInitTasksForSchedule() {
 	})
 
 	task2 := &mixCompactionTask{
-		plan:     &datapb.CompactionPlan{PlanID: 2, Channel: "ch-1", Type: datapb.CompactionType_MixCompaction},
 		sessions: s.mockSessMgr,
 		meta:     s.mockMeta,
 	}
@@ -95,7 +99,6 @@ func (s *CompactionPlanHandlerSuite) generateInitTasksForSchedule() {
 	})
 
 	task3 := &mixCompactionTask{
-		plan:     &datapb.CompactionPlan{PlanID: 3, Channel: "ch-2", Type: datapb.CompactionType_MixCompaction},
 		sessions: s.mockSessMgr,
 		meta:     s.mockMeta,
 	}
@@ -108,7 +111,6 @@ func (s *CompactionPlanHandlerSuite) generateInitTasksForSchedule() {
 	})
 
 	task4 := &mixCompactionTask{
-		plan:     &datapb.CompactionPlan{PlanID: 4, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction},
 		sessions: s.mockSessMgr,
 		meta:     s.mockMeta,
 	}
@@ -219,12 +221,13 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 			s.SetupTest()
 			s.generateInitTasksForSchedule()
 			// submit the testing tasks
-			for i, t := range test.tasks {
-				t.SetPlan(test.plans[i])
+			for _, t := range test.tasks {
+				// t.SetPlan(test.plans[i])
 				s.handler.submitTask(t)
 			}
 
-			gotTasks := s.handler.schedule()
+			assigner := newSlotBasedNodeAssigner(s.cluster)
+			gotTasks := s.handler.schedule(assigner)
 			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
 				return t.GetTaskProto().GetPlanID()
 			}))
@@ -293,12 +296,12 @@ func (s *CompactionPlanHandlerSuite) TestScheduleWithSlotLimit() {
 			}).Maybe()
 			s.generateInitTasksForSchedule()
 			// submit the testing tasks
-			for i, t := range test.tasks {
-				t.SetPlan(test.plans[i])
+			for _, t := range test.tasks {
+				// t.SetPlan(test.plans[i])
 				s.handler.submitTask(t)
 			}
-
-			gotTasks := s.handler.schedule()
+			assigner := newSlotBasedNodeAssigner(s.cluster)
+			gotTasks := s.handler.schedule(assigner)
 			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
 				return t.GetTaskProto().GetPlanID()
 			}))
@@ -433,8 +436,8 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 			for _, t := range test.tasks {
 				s.handler.submitTask(t)
 			}
-
-			gotTasks := s.handler.schedule()
+			assigner := newSlotBasedNodeAssigner(s.cluster)
+			gotTasks := s.handler.schedule(assigner)
 			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
 				return t.GetTaskProto().GetPlanID()
 			}))
@@ -444,54 +447,37 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 
 func (s *CompactionPlanHandlerSuite) TestPickAnyNode() {
 	s.SetupTest()
-	nodeSlots := map[int64]int64{
-		100: 16,
-		101: 23,
+
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	assigner.slots = map[int64]int64{
+		100: 9,
+		101: 16,
 	}
 
 	task1 := newMixCompactionTask(&datapb.CompactionTask{
 		Type: datapb.CompactionType_MixCompaction,
-	}, nil, nil, nil)
-	task1.slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
-	node, useSlot := pickAnyNode(nodeSlots, task1)
-	s.Equal(int64(101), node)
-	nodeSlots[node] = nodeSlots[node] - useSlot
+	}, nil, s.mockMeta, nil)
+	ok := assigner.assign(task1)
+	s.Equal(true, ok)
+	s.Equal(int64(101), task1.GetTaskProto().GetNodeID())
 
 	task2 := newMixCompactionTask(&datapb.CompactionTask{
 		Type: datapb.CompactionType_MixCompaction,
-	}, nil, nil, nil)
-	task2.slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
-
-	node, useSlot = pickAnyNode(nodeSlots, task2)
-	s.Equal(int64(100), node)
-	nodeSlots[node] = nodeSlots[node] - useSlot
+	}, nil, s.mockMeta, nil)
+	ok = assigner.assign(task2)
+	s.Equal(true, ok)
+	s.Equal(int64(100), task2.GetTaskProto().GetNodeID())
 
 	task3 := newMixCompactionTask(&datapb.CompactionTask{
 		Type: datapb.CompactionType_MixCompaction,
-	}, nil, nil, nil)
-	task3.slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
+	}, nil, s.mockMeta, nil)
 
-	node, useSlot = pickAnyNode(nodeSlots, task3)
-	s.Equal(int64(101), node)
-	nodeSlots[node] = nodeSlots[node] - useSlot
+	ok = assigner.assign(task3)
+	s.Equal(true, ok)
+	s.Equal(int64(101), task3.GetTaskProto().GetNodeID())
 
-	node, useSlot = pickAnyNode(map[int64]int64{}, &mixCompactionTask{})
-	s.Equal(int64(NullNodeID), node)
-}
-
-func (s *CompactionPlanHandlerSuite) TestPickAnyNodeSlotUsageShouldNotBeZero() {
-	s.SetupTest()
-	nodeSlots := map[int64]int64{
-		100: 16,
-		101: 23,
-	}
-	task1 := newMixCompactionTask(&datapb.CompactionTask{
-		Type: datapb.CompactionType_MixCompaction,
-	}, nil, nil, nil)
-	task1.slotUsage = 0
-	nodeID, useSlot := pickAnyNode(nodeSlots, task1)
-	s.Equal(int64(NullNodeID), nodeID)
-	s.Equal(int64(0), useSlot)
+	ok = assigner.assign(&mixCompactionTask{})
+	s.Equal(false, ok)
 }
 
 func (s *CompactionPlanHandlerSuite) TestPickAnyNodeForClusteringTask() {
@@ -505,23 +491,24 @@ func (s *CompactionPlanHandlerSuite) TestPickAnyNodeForClusteringTask() {
 
 	task1 := newClusteringCompactionTask(&datapb.CompactionTask{
 		Type: datapb.CompactionType_ClusteringCompaction,
-	}, nil, nil, nil, nil, nil)
-	task1.slotUsage = paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
+	}, nil, s.mockMeta, nil, nil, nil)
 
 	task2 := newClusteringCompactionTask(&datapb.CompactionTask{
 		Type: datapb.CompactionType_ClusteringCompaction,
-	}, nil, nil, nil, nil, nil)
-	task2.slotUsage = paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
+	}, nil, s.mockMeta, nil, nil, nil)
 
 	executingTasks[1] = task1
 	executingTasks[2] = task2
 	s.handler.executingTasks = executingTasks
-	node, useSlot := pickAnyNode(nodeSlots, task1)
-	s.Equal(int64(101), node)
-	nodeSlots[node] = nodeSlots[node] - useSlot
 
-	node, useSlot = pickAnyNode(nodeSlots, task2)
-	s.Equal(int64(NullNodeID), node)
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	assigner.slots = nodeSlots
+	ok := assigner.assign(task1)
+	s.Equal(true, ok)
+	s.Equal(int64(101), task1.GetTaskProto().GetNodeID())
+
+	ok = assigner.assign(task2)
+	s.Equal(false, ok)
 }
 
 func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
@@ -534,11 +521,6 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 		Channel: ch,
 		NodeID:  1,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	t1.plan = &datapb.CompactionPlan{
-		PlanID:  19530,
-		Channel: ch,
-		Type:    datapb.CompactionType_MixCompaction,
-	}
 
 	t2 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:  19531,
@@ -546,11 +528,6 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 		Channel: ch,
 		NodeID:  1,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	t2.plan = &datapb.CompactionPlan{
-		PlanID:  19531,
-		Channel: ch,
-		Type:    datapb.CompactionType_MixCompaction,
-	}
 
 	s.handler.submitTask(t1)
 	s.handler.restoreTask(t2)
@@ -567,11 +544,6 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 		Channel:   "ch-01",
 		State:     datapb.CompactionTaskState_executing,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	t1.plan = &datapb.CompactionPlan{
-		PlanID:  1,
-		Type:    datapb.CompactionType_MixCompaction,
-		Channel: "ch-01",
-	}
 
 	t2 := newMixCompactionTask(&datapb.CompactionTask{
 		TriggerID: 1,
@@ -580,11 +552,6 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 		Channel:   "ch-01",
 		State:     datapb.CompactionTaskState_completed,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	t2.plan = &datapb.CompactionPlan{
-		PlanID:  2,
-		Type:    datapb.CompactionType_MixCompaction,
-		Channel: "ch-01",
-	}
 
 	t3 := newL0CompactionTask(&datapb.CompactionTask{
 		TriggerID: 1,
@@ -593,11 +560,6 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 		Channel:   "ch-02",
 		State:     datapb.CompactionTaskState_failed,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	t3.plan = &datapb.CompactionPlan{
-		PlanID:  3,
-		Type:    datapb.CompactionType_Level0DeleteCompaction,
-		Channel: "ch-02",
-	}
 
 	inTasks := map[int64]CompactionTask{
 		1: t1,
@@ -619,7 +581,8 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 		s.handler.submitTask(t)
 	}
 
-	s.handler.schedule()
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	s.handler.schedule(assigner)
 
 	info := s.handler.getCompactionInfo(context.TODO(), 1)
 	s.Equal(1, info.completedCnt)
@@ -641,11 +604,6 @@ func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
 		Channel:   "ch-01",
 		State:     datapb.CompactionTaskState_executing,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	t1.plan = &datapb.CompactionPlan{
-		PlanID:  1,
-		Type:    datapb.CompactionType_MixCompaction,
-		Channel: "ch-01",
-	}
 
 	s.NoError(s.handler.submitTask(t1))
 
@@ -656,11 +614,6 @@ func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
 		Channel:   "ch-01",
 		State:     datapb.CompactionTaskState_completed,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	t2.plan = &datapb.CompactionPlan{
-		PlanID:  2,
-		Type:    datapb.CompactionType_MixCompaction,
-		Channel: "ch-01",
-	}
 
 	s.Error(s.handler.submitTask(t2))
 }
@@ -717,11 +670,6 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		State:            datapb.CompactionTaskState_executing,
 		NodeID:           111,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	t1.plan = &datapb.CompactionPlan{
-		PlanID: 1, Channel: "ch-1",
-		TimeoutInSeconds: 1,
-		Type:             datapb.CompactionType_MixCompaction,
-	}
 
 	t2 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:  2,
@@ -730,11 +678,6 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		State:   datapb.CompactionTaskState_executing,
 		NodeID:  111,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	t2.plan = &datapb.CompactionPlan{
-		PlanID:  2,
-		Channel: "ch-1",
-		Type:    datapb.CompactionType_MixCompaction,
-	}
 
 	t3 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:  3,
@@ -743,11 +686,6 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		State:   datapb.CompactionTaskState_timeout,
 		NodeID:  111,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	t3.plan = &datapb.CompactionPlan{
-		PlanID:  3,
-		Channel: "ch-1",
-		Type:    datapb.CompactionType_MixCompaction,
-	}
 
 	t4 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:  4,
@@ -756,11 +694,6 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		State:   datapb.CompactionTaskState_timeout,
 		NodeID:  111,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	t4.plan = &datapb.CompactionPlan{
-		PlanID:  4,
-		Channel: "ch-1",
-		Type:    datapb.CompactionType_MixCompaction,
-	}
 
 	t6 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:  6,
@@ -769,11 +702,6 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		State:   datapb.CompactionTaskState_executing,
 		NodeID:  111,
 	}, nil, s.mockMeta, s.mockSessMgr)
-	t6.plan = &datapb.CompactionPlan{
-		PlanID:  6,
-		Channel: "ch-2",
-		Type:    datapb.CompactionType_MixCompaction,
-	}
 
 	inTasks := map[int64]CompactionTask{
 		1: t1,
@@ -800,9 +728,10 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		s.handler.submitTask(t)
 	}
 
-	s.handler.schedule()
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	s.handler.schedule(assigner)
 	// time.Sleep(2 * time.Second)
-	s.handler.checkCompaction()
+	s.handler.checkCompaction(assigner)
 
 	t := s.handler.getCompactionTask(1)
 	s.NotNil(t)
@@ -934,9 +863,191 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 	s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
 
 	s.handler.submitTask(task)
-	s.handler.schedule()
-	err := s.handler.checkCompaction()
+
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	s.handler.schedule(assigner)
+	err := s.handler.checkCompaction(assigner)
 	s.NoError(err)
+}
+
+func (s *CompactionPlanHandlerSuite) TestCleanCompaction() {
+	s.SetupTest()
+
+	tests := []struct {
+		task CompactionTask
+	}{
+		{
+			newMixCompactionTask(
+				&datapb.CompactionTask{
+					PlanID:        1,
+					TriggerID:     1,
+					Type:          datapb.CompactionType_MixCompaction,
+					State:         datapb.CompactionTaskState_failed,
+					NodeID:        1,
+					InputSegments: []UniqueID{1, 2},
+				},
+				nil, s.mockMeta, s.mockSessMgr),
+		},
+		{
+			newL0CompactionTask(&datapb.CompactionTask{
+				PlanID:        1,
+				TriggerID:     1,
+				Type:          datapb.CompactionType_Level0DeleteCompaction,
+				State:         datapb.CompactionTaskState_failed,
+				NodeID:        1,
+				InputSegments: []UniqueID{1, 2},
+			},
+				nil, s.mockMeta, s.mockSessMgr),
+		},
+	}
+	for _, test := range tests {
+		task := test.task
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Once()
+		s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+		s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+
+		s.handler.executingTasks[1] = task
+		s.Equal(1, len(s.handler.executingTasks))
+
+		assigner := newSlotBasedNodeAssigner(s.cluster)
+		err := s.handler.checkCompaction(assigner)
+		s.NoError(err)
+		s.Equal(0, len(s.handler.executingTasks))
+		s.Equal(1, len(s.handler.cleaningTasks))
+		s.handler.cleanFailedTasks()
+		s.Equal(0, len(s.handler.cleaningTasks))
+	}
+}
+
+func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompaction() {
+	s.SetupTest()
+
+	task := newClusteringCompactionTask(
+		&datapb.CompactionTask{
+			PlanID:        1,
+			TriggerID:     1,
+			CollectionID:  1001,
+			Type:          datapb.CompactionType_ClusteringCompaction,
+			State:         datapb.CompactionTaskState_failed,
+			NodeID:        1,
+			InputSegments: []UniqueID{1, 2},
+		},
+		nil, s.mockMeta, s.mockSessMgr, s.mockHandler, nil)
+	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).Return(nil)
+	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Once()
+	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(nil)
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+	s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+
+	s.handler.executingTasks[1] = task
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	s.Equal(1, len(s.handler.executingTasks))
+	s.handler.checkCompaction(assigner)
+	s.Equal(0, len(s.handler.executingTasks))
+	s.Equal(1, len(s.handler.cleaningTasks))
+	s.handler.cleanFailedTasks()
+	s.Equal(0, len(s.handler.cleaningTasks))
+}
+
+func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompactionCommitFail() {
+	s.SetupTest()
+
+	task := newClusteringCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		TriggerID:     1,
+		CollectionID:  1001,
+		Channel:       "ch-1",
+		Type:          datapb.CompactionType_ClusteringCompaction,
+		State:         datapb.CompactionTaskState_executing,
+		NodeID:        1,
+		InputSegments: []UniqueID{1, 2},
+		ClusteringKeyField: &schemapb.FieldSchema{
+			FieldID:         100,
+			Name:            Int64Field,
+			IsPrimaryKey:    true,
+			DataType:        schemapb.DataType_Int64,
+			AutoID:          true,
+			IsClusteringKey: true,
+		},
+	},
+		nil, s.mockMeta, s.mockSessMgr, s.mockHandler, nil)
+
+	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).Return(nil)
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+	s.mockSessMgr.EXPECT().GetCompactionPlanResult(UniqueID(1), int64(1)).Return(
+		&datapb.CompactionPlanResult{
+			PlanID: 1,
+			State:  datapb.CompactionTaskState_completed,
+			Segments: []*datapb.CompactionSegment{
+				{
+					PlanID:    1,
+					SegmentID: 101,
+				},
+			},
+		}, nil).Once()
+	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, errors.New("mock error"))
+	s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+	s.handler.executingTasks[1] = task
+	s.Equal(1, len(s.handler.executingTasks))
+
+	assigner := newSlotBasedNodeAssigner(s.cluster)
+	s.handler.checkCompaction(assigner)
+	s.Equal(0, len(task.GetTaskProto().GetResultSegments()))
+
+	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+	s.Equal(0, len(s.handler.executingTasks))
+	s.Equal(1, len(s.handler.cleaningTasks))
+
+	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Once()
+	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(nil)
+	s.handler.cleanFailedTasks()
+	s.Equal(0, len(s.handler.cleaningTasks))
+}
+
+// test compactionHandler should keep clean the failed task until it become cleaned
+func (s *CompactionPlanHandlerSuite) TestKeepClean() {
+	s.SetupTest()
+
+	tests := []struct {
+		task CompactionTask
+	}{
+		{
+			newClusteringCompactionTask(&datapb.CompactionTask{
+				PlanID:        1,
+				TriggerID:     1,
+				Type:          datapb.CompactionType_ClusteringCompaction,
+				State:         datapb.CompactionTaskState_failed,
+				NodeID:        1,
+				InputSegments: []UniqueID{1, 2},
+			},
+				nil, s.mockMeta, s.mockSessMgr, s.mockHandler, nil),
+		},
+	}
+	for _, test := range tests {
+		task := test.task
+		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return()
+		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+		s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+
+		s.handler.executingTasks[1] = task
+
+		assigner := newSlotBasedNodeAssigner(s.cluster)
+		s.Equal(1, len(s.handler.executingTasks))
+		s.handler.checkCompaction(assigner)
+		s.Equal(0, len(s.handler.executingTasks))
+		s.Equal(1, len(s.handler.cleaningTasks))
+		s.handler.cleanFailedTasks()
+		s.Equal(1, len(s.handler.cleaningTasks))
+		s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(nil).Once()
+		s.handler.cleanFailedTasks()
+		s.Equal(0, len(s.handler.cleaningTasks))
+	}
 }
 
 func getFieldBinlogIDs(fieldID int64, logIDs ...int64) *datapb.FieldBinlog {

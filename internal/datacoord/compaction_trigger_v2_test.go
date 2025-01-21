@@ -14,9 +14,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -76,10 +76,9 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	expectedSegID := seg1.ID
 
 	s.Require().Equal(1, len(latestL0Segments))
-	needRefresh, levelZeroView := s.triggerManager.l0Policy.getChangedLevelZeroViews(1, latestL0Segments)
-	s.True(needRefresh)
-	s.Require().Equal(1, len(levelZeroView))
-	cView, ok := levelZeroView[0].(*LevelZeroSegmentsView)
+	levelZeroViews := s.triggerManager.l0Policy.groupL0ViewsByPartChan(1, latestL0Segments)
+	s.Require().Equal(1, len(levelZeroViews))
+	cView, ok := levelZeroViews[0].(*LevelZeroSegmentsView)
 	s.True(ok)
 	s.NotNil(cView)
 	log.Info("view", zap.Any("cView", cView))
@@ -102,7 +101,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 			return nil
 		}).Return(nil).Once()
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
-	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewIDLE, levelZeroView)
+	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewIDLE, levelZeroViews)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
@@ -120,10 +119,9 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 
 	latestL0Segments := GetViewsByInfo(levelZeroSegments...)
 	s.Require().NotEmpty(latestL0Segments)
-	needRefresh, levelZeroView := s.triggerManager.l0Policy.getChangedLevelZeroViews(1, latestL0Segments)
-	s.Require().True(needRefresh)
-	s.Require().Equal(1, len(levelZeroView))
-	cView, ok := levelZeroView[0].(*LevelZeroSegmentsView)
+	levelZeroViews := s.triggerManager.l0Policy.groupL0ViewsByPartChan(1, latestL0Segments)
+	s.Require().Equal(1, len(levelZeroViews))
+	cView, ok := levelZeroViews[0].(*LevelZeroSegmentsView)
 	s.True(ok)
 	s.NotNil(cView)
 	log.Info("view", zap.Any("cView", cView))
@@ -132,8 +130,6 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 	s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).
 		RunAndReturn(func(task *datapb.CompactionTask) error {
 			s.EqualValues(19530, task.GetTriggerID())
-			// s.True(signal.isGlobal)
-			// s.False(signal.isForce)
 			s.EqualValues(30000, task.GetPos().GetTimestamp())
 			s.Equal(s.testLabel.CollectionID, task.GetCollectionID())
 			s.Equal(s.testLabel.PartitionID, task.GetPartitionID())
@@ -145,7 +141,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 			return nil
 		}).Return(nil).Once()
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
-	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewChange, levelZeroView)
+	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewChange, levelZeroViews)
 }
 
 func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {

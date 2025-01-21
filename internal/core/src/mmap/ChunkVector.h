@@ -47,6 +47,9 @@ class ChunkVectorBase {
     virtual SpanBase
     get_span(int64_t chunk_id) = 0;
 
+    virtual bool
+    is_mmap() const = 0;
+
  protected:
     std::atomic<int64_t> counter_ = 0;
 };
@@ -107,7 +110,7 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
     ChunkViewType<Type>
     view_element(int64_t chunk_id, int64_t chunk_offset) override {
         std::shared_lock<std::shared_mutex> lck(mutex_);
-        auto chunk = vec_[chunk_id];
+        auto& chunk = vec_[chunk_id];
         if constexpr (IsMmap) {
             return chunk.view(chunk_offset);
         } else if constexpr (std::is_same_v<std::string, Type>) {
@@ -116,9 +119,10 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
         } else if constexpr (std::is_same_v<Array, Type>) {
             auto& src = chunk[chunk_offset];
             return ArrayView(const_cast<char*>(src.data()),
+                             src.length(),
                              src.byte_size(),
                              src.get_element_type(),
-                             src.get_offsets_in_copy());
+                             src.get_offsets_data());
         } else {
             return chunk[chunk_offset];
         }
@@ -182,6 +186,11 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
                             get_chunk_size(chunk_id),
                             sizeof(Type));
         }
+    }
+
+    bool
+    is_mmap() const override {
+        return mmap_descriptor_ != nullptr;
     }
 
  private:
