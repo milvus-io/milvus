@@ -60,6 +60,7 @@ type compactionPlanContext interface {
 	getCompactionTasksNumBySignalID(signalID int64) int
 	getCompactionInfo(ctx context.Context, signalID int64) *compactionInfo
 	removeTasksByChannel(channel string)
+	setTaskScheduler(scheduler *taskScheduler)
 	checkAndSetSegmentStating(segmentID int64) bool
 }
 
@@ -199,23 +200,26 @@ func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64)
 }
 
 func newCompactionPlanHandler(cluster Cluster, sessions session.DataNodeManager, meta CompactionMeta,
-	allocator allocator.Allocator, analyzeScheduler *taskScheduler, handler Handler,
+	allocator allocator.Allocator, handler Handler,
 ) *compactionPlanHandler {
 	// Higher capacity will have better ordering in priority, but consumes more memory.
 	// TODO[GOOSE]: Higher capacity makes tasks waiting longer, which need to be get rid of.
 	capacity := paramtable.Get().DataCoordCfg.CompactionTaskQueueCapacity.GetAsInt()
 	return &compactionPlanHandler{
-		queueTasks:       *NewCompactionQueue(capacity, getPrioritizer()),
-		meta:             meta,
-		sessions:         sessions,
-		allocator:        allocator,
-		stopCh:           make(chan struct{}),
-		cluster:          cluster,
-		executingTasks:   make(map[int64]CompactionTask),
-		cleaningTasks:    make(map[int64]CompactionTask),
-		analyzeScheduler: analyzeScheduler,
-		handler:          handler,
+		queueTasks:     *NewCompactionQueue(capacity, getPrioritizer()),
+		meta:           meta,
+		sessions:       sessions,
+		allocator:      allocator,
+		stopCh:         make(chan struct{}),
+		cluster:        cluster,
+		executingTasks: make(map[int64]CompactionTask),
+		cleaningTasks:  make(map[int64]CompactionTask),
+		handler:        handler,
 	}
+}
+
+func (c *compactionPlanHandler) setTaskScheduler(scheduler *taskScheduler) {
+	c.analyzeScheduler = scheduler
 }
 
 func (c *compactionPlanHandler) schedule() []CompactionTask {
@@ -340,7 +344,6 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 }
 
 func (c *compactionPlanHandler) start() {
-	c.loadMeta()
 	c.stopWg.Add(3)
 	go c.loopSchedule()
 	go c.loopCheck()

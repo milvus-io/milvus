@@ -74,6 +74,7 @@ func newTaskScheduler(
 	indexEngineVersionManager IndexEngineVersionManager,
 	handler Handler,
 	allocator allocator.Allocator,
+	compactionHandler compactionPlanContext,
 ) *taskScheduler {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -93,13 +94,10 @@ func newTaskScheduler(
 		indexEngineVersionManager: indexEngineVersionManager,
 		allocator:                 allocator,
 		taskStats:                 expirable.NewLRU[UniqueID, Task](64, nil, time.Minute*15),
+		compactionHandler:         compactionHandler,
 	}
 	ts.reloadFromMeta()
 	return ts
-}
-
-func (s *taskScheduler) setCompactionHandler(compactionHandler compactionPlanContext) {
-	s.compactionHandler = compactionHandler
 }
 
 func (s *taskScheduler) Start() {
@@ -159,9 +157,31 @@ func (s *taskScheduler) reloadFromMeta() {
 	for taskID, t := range allStatsTasks {
 		if t.GetState() != indexpb.JobState_JobStateFinished && t.GetState() != indexpb.JobState_JobStateFailed {
 			if t.GetState() == indexpb.JobState_JobStateInProgress || t.GetState() == indexpb.JobState_JobStateRetry {
-				// set to failed, and wait to retry
-				t.State = indexpb.JobState_JobStateFailed
-				t.FailReason = "segment is nto exist or is compacting"
+				if t.GetState() == indexpb.JobState_JobStateInProgress || t.GetState() == indexpb.JobState_JobStateRetry {
+					exist, canDo := s.meta.CheckAndSetSegmentsCompacting(context.TODO(), []UniqueID{t.GetSegmentID()})
+					if !exist || !canDo {
+						log.Ctx(s.ctx).Warn("segment is not exist or is compacting, skip stats, but this should not have happened, try to remove the stats task",
+							zap.Int64("taskID", taskID), zap.Bool("exist", exist), zap.Bool("canDo", canDo))
+						err := s.meta.statsTaskMeta.DropStatsTask(t.GetTaskID())
+						if err == nil {
+							continue
+						}
+						log.Ctx(s.ctx).Warn("remove stats task failed, set to failed", zap.Int64("taskID", taskID), zap.Error(err))
+						t.State = indexpb.JobState_JobStateFailed
+						t.FailReason = "segment is not exist or is compacting"
+					} else {
+						if !s.compactionHandler.checkAndSetSegmentStating(t.GetSegmentID()) {
+							s.meta.SetSegmentsCompacting(context.TODO(), []UniqueID{t.GetSegmentID()}, false)
+							err := s.meta.statsTaskMeta.DropStatsTask(t.GetTaskID())
+							if err == nil {
+								continue
+							}
+							log.Ctx(s.ctx).Warn("remove stats task failed, set to failed", zap.Int64("taskID", taskID), zap.Error(err))
+							t.State = indexpb.JobState_JobStateFailed
+							t.FailReason = "segment is not exist or is l0 compacting"
+						}
+					}
+				}
 			}
 			s.enqueue(&statsTask{
 				taskID:          taskID,

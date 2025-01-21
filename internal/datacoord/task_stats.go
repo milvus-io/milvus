@@ -133,14 +133,14 @@ func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta
 	if exist, canDo := meta.CheckAndSetSegmentsCompacting(ctx, []UniqueID{st.segmentID}); !exist || !canDo {
 		log.Warn("segment is not exist or is compacting, skip stats",
 			zap.Bool("exist", exist), zap.Bool("canDo", canDo))
-		st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
+		st.SetState(indexpb.JobState_JobStateFailed, "segment is not healthy")
 		return fmt.Errorf("mark segment compacting failed, isCompacting: %v", !canDo)
 	}
 
 	if !compactionHandler.checkAndSetSegmentStating(st.segmentID) {
 		log.Warn("segment is contains by l0 compaction, skip stats", zap.Int64("taskID", st.taskID),
 			zap.Int64("segmentID", st.segmentID))
-		st.SetState(indexpb.JobState_JobStateNone, "segment is contains by l0 compaction")
+		st.SetState(indexpb.JobState_JobStateFailed, "segment is contains by l0 compaction")
 		//reset compacting
 		meta.SetSegmentsCompacting(ctx, []UniqueID{st.segmentID}, false)
 		return fmt.Errorf("segment is contains by l0 compaction")

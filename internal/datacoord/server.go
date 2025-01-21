@@ -382,14 +382,14 @@ func (s *Server) initDataCoord() error {
 	}
 	log.Info("init service discovery done")
 
+	s.initCompaction()
+	log.Info("init compaction done")
+
 	s.initTaskScheduler(storageCli)
 	log.Info("init task scheduler done")
 
 	s.initJobManager()
 	log.Info("init statsJobManager done")
-
-	s.initCompaction()
-	log.Info("init compaction done")
 
 	if err = s.initSegmentManager(); err != nil {
 		return err
@@ -685,7 +685,8 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 
 func (s *Server) initTaskScheduler(manager storage.ChunkManager) {
 	if s.taskScheduler == nil {
-		s.taskScheduler = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler, s.allocator)
+		s.taskScheduler = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler, s.allocator, s.compactionHandler)
+		s.compactionHandler.setTaskScheduler(s.taskScheduler)
 	}
 }
 
@@ -702,10 +703,11 @@ func (s *Server) initIndexNodeManager() {
 }
 
 func (s *Server) initCompaction() {
-	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.meta, s.allocator, s.taskScheduler, s.handler)
+	cph := newCompactionPlanHandler(s.cluster, s.sessionManager, s.meta, s.allocator, s.handler)
+	cph.loadMeta()
+	s.compactionHandler = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler, s.meta)
 	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
-	s.taskScheduler.setCompactionHandler(s.compactionHandler)
 }
 
 func (s *Server) stopCompaction() {

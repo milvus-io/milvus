@@ -853,7 +853,7 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	cm := mocks.NewChunkManager(s.T())
 	cm.EXPECT().RootPath().Return("root")
 
-	scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil)
+	scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil, nil)
 	s.Equal(9, len(scheduler.tasks))
 	s.Equal(indexpb.JobState_JobStateInit, scheduler.tasks[1].GetState())
 	s.Equal(indexpb.JobState_JobStateInProgress, scheduler.tasks[2].GetState())
@@ -1000,7 +1000,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 			}))
 
 		handler := NewNMockHandler(s.T())
-		scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler, nil)
+		scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler, nil, nil)
 
 		mt.segments.DropSegment(1000)
 		scheduler.scheduleDuration = s.duration
@@ -1060,7 +1060,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 			},
 		}, nil)
 
-		scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler, nil)
+		scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler, nil, nil)
 
 		// remove task in meta
 		err := scheduler.meta.analyzeMeta.DropAnalyzeTask(context.TODO(), 1)
@@ -1341,7 +1341,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		cm.EXPECT().RootPath().Return("ut-index")
 
 		handler := NewNMockHandler(s.T())
-		scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil)
+		scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil, nil)
 
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("True")
 		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("False")
@@ -1615,7 +1615,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 
 	paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 	defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
-	scheduler := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil)
+	scheduler := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil, nil)
 
 	waitTaskDoneFunc := func(sche *taskScheduler) {
 		for {
@@ -1854,7 +1854,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	handler_isolation := NewNMockHandler(s.T())
 	handler_isolation.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(isoCollInfo, nil)
 
-	scheduler_isolation := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler_isolation, nil)
+	scheduler_isolation := newTaskScheduler(ctx, &mt, workerManager, cm, newIndexEngineVersionManager(), handler_isolation, nil, nil)
 	scheduler_isolation.Start()
 
 	s.Run("Submit partitionKeyIsolation is false when MV not enabled", func() {
@@ -1952,11 +1952,87 @@ func (s *taskSchedulerSuite) Test_reload() {
 					},
 				},
 			}))
-		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil)
+		compactionHandler := NewMockCompactionPlanContext(s.T())
+		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything).Return(true).Maybe()
+		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
 		s.NotNil(scheduler)
+		s.True(mt.segments.segments[1000].isCompacting)
 		task, ok := scheduler.tasks[statsTaskID]
 		s.True(ok)
 		s.NotNil(task)
+	})
+
+	s.Run("segment is compacting", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil)
+		workerManager := session.NewMockWorkerManager(s.T())
+		handler := NewNMockHandler(s.T())
+		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)),
+			withStatsTaskMeta(&statsTaskMeta{
+				ctx:     context.Background(),
+				catalog: catalog,
+				tasks: map[int64]*indexpb.StatsTask{
+					statsTaskID: {
+						CollectionID:    10000,
+						PartitionID:     10001,
+						SegmentID:       1000,
+						InsertChannel:   "",
+						TaskID:          statsTaskID,
+						Version:         1,
+						NodeID:          1,
+						State:           indexpb.JobState_JobStateInProgress,
+						FailReason:      "",
+						TargetSegmentID: 2000,
+						SubJobType:      indexpb.StatsSubJob_Sort,
+						CanRecycle:      false,
+					},
+				},
+			}))
+		compactionHandler := NewMockCompactionPlanContext(s.T())
+		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything).Return(true).Maybe()
+		mt.segments.segments[1000].isCompacting = true
+		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
+		s.NotNil(scheduler)
+		s.True(mt.segments.segments[1000].isCompacting)
+		task, ok := scheduler.tasks[statsTaskID]
+		s.False(ok)
+		s.Nil(task)
+	})
+
+	s.Run("drop task failed", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		workerManager := session.NewMockWorkerManager(s.T())
+		handler := NewNMockHandler(s.T())
+		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)),
+			withStatsTaskMeta(&statsTaskMeta{
+				ctx:     context.Background(),
+				catalog: catalog,
+				tasks: map[int64]*indexpb.StatsTask{
+					statsTaskID: {
+						CollectionID:    10000,
+						PartitionID:     10001,
+						SegmentID:       1000,
+						InsertChannel:   "",
+						TaskID:          statsTaskID,
+						Version:         1,
+						NodeID:          1,
+						State:           indexpb.JobState_JobStateInProgress,
+						FailReason:      "",
+						TargetSegmentID: 2000,
+						SubJobType:      indexpb.StatsSubJob_Sort,
+						CanRecycle:      false,
+					},
+				},
+			}))
+		compactionHandler := NewMockCompactionPlanContext(s.T())
+		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything).Return(true).Maybe()
+		mt.segments.segments[1000].isCompacting = true
+		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
+		s.NotNil(scheduler)
+		s.True(mt.segments.segments[1000].isCompacting)
+		task, ok := scheduler.tasks[statsTaskID]
+		s.True(ok)
 		s.Equal(indexpb.JobState_JobStateFailed, task.GetState())
 	})
 }

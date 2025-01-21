@@ -58,6 +58,9 @@ func (h *spyCompactionHandler) getCompactionInfo(ctx context.Context, signalID i
 	return nil
 }
 
+func (h *spyCompactionHandler) setTaskScheduler(scheduler *taskScheduler) {
+}
+
 var _ compactionPlanContext = (*spyCompactionHandler)(nil)
 
 func (h *spyCompactionHandler) removeTasksByChannel(channel string) {}

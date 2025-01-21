@@ -287,6 +287,39 @@ func (_c *MockCompactionPlanContext_removeTasksByChannel_Call) RunAndReturn(run 
 	return _c
 }
 
+// setTaskScheduler provides a mock function with given fields: scheduler
+func (_m *MockCompactionPlanContext) setTaskScheduler(scheduler *taskScheduler) {
+	_m.Called(scheduler)
+}
+
+// MockCompactionPlanContext_setTaskScheduler_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'setTaskScheduler'
+type MockCompactionPlanContext_setTaskScheduler_Call struct {
+	*mock.Call
+}
+
+// setTaskScheduler is a helper method to define mock.On call
+//   - scheduler *taskScheduler
+func (_e *MockCompactionPlanContext_Expecter) setTaskScheduler(scheduler interface{}) *MockCompactionPlanContext_setTaskScheduler_Call {
+	return &MockCompactionPlanContext_setTaskScheduler_Call{Call: _e.mock.On("setTaskScheduler", scheduler)}
+}
+
+func (_c *MockCompactionPlanContext_setTaskScheduler_Call) Run(run func(scheduler *taskScheduler)) *MockCompactionPlanContext_setTaskScheduler_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*taskScheduler))
+	})
+	return _c
+}
+
+func (_c *MockCompactionPlanContext_setTaskScheduler_Call) Return() *MockCompactionPlanContext_setTaskScheduler_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCompactionPlanContext_setTaskScheduler_Call) RunAndReturn(run func(*taskScheduler)) *MockCompactionPlanContext_setTaskScheduler_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // start provides a mock function with given fields:
 func (_m *MockCompactionPlanContext) start() {
 	_m.Called()
