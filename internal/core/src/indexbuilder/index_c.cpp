@@ -140,11 +140,12 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
         const auto& param = info->type_params(i);
         config[param.key()] = param.value();
     }
-
+    // index insert here
     config["insert_files"] = info->insert_files();
     if (info->opt_fields().size()) {
         config["opt_fields"] = get_opt_field(info->opt_fields());
     }
+    config["lack_binlog_rows"] = info->lack_binlog_rows();
     if (info->partition_key_isolation()) {
         config["partition_key_isolation"] = info->partition_key_isolation();
     }

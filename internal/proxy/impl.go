@@ -1028,6 +1028,81 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 	return dct.result, nil
 }
 
+// DescribeCollection get the meta information of specific collection, such as schema, created timestamp and etc.
+func (node *Proxy) AddField(ctx context.Context, request *milvuspb.AddFieldRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddField")
+	defer sp.End()
+
+	dresp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: request.DbName, CollectionName: request.CollectionName})
+
+	if err := merr.CheckRPCCall(dresp, err); err != nil {
+		return merr.Status(err), nil
+	}
+	task := &addFieldTask{
+		ctx:             ctx,
+		Condition:       NewTaskCondition(ctx),
+		AddFieldRequest: request,
+		rootCoord:       node.rootCoord,
+		oldSchema:       dresp.GetSchema(),
+	}
+
+	method := "addField"
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+		metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Int("length of field", len(request.FieldSchema)))
+
+	log.Info(rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+			metrics.AbandonLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	if err := task.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", task.BeginTs()),
+			zap.Uint64("EndTs", task.EndTs()))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+			metrics.FailLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcDone(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+		metrics.SuccessLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return task.result, nil
+}
+
 // GetStatistics get the statistics, such as `num_rows`.
 // WARNING: It is an experimental API
 func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStatisticsRequest) (*milvuspb.GetStatisticsResponse, error) {

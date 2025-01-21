@@ -545,6 +545,14 @@ func (c *Client) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 	})
 }
 
+// BroadcastAddedField is the DataCoord client side code for BroadcastAddedField call.
+func (c *Client) BroadcastAddedField(ctx context.Context, req *datapb.AddFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*commonpb.Status, error) {
+		return client.BroadcastAddedField(ctx, req)
+	})
+}
+
 func (c *Client) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*milvuspb.CheckHealthResponse, error) {
 		return client.CheckHealth(ctx, req)

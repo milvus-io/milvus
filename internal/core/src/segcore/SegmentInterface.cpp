@@ -423,4 +423,97 @@ SegmentInternalInterface::GetTextIndex(FieldId field_id) const {
     return iter->second.get();
 }
 
+std::unique_ptr<DataArray>
+SegmentInternalInterface::bulk_subscript_not_exist_field(
+    const milvus::FieldMeta& field_meta, int64_t count) const {
+    auto result = CreateScalarDataArray(count, field_meta);
+    if (field_meta.default_value().has_value()) {
+        auto res = result->mutable_valid_data()->mutable_data();
+        for (int64_t i = 0; i < count; ++i) {
+            res[i] = true;
+        }
+        switch (field_meta.get_data_type()) {
+            case DataType::BOOL: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_bool_data()
+                                    ->mutable_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr[i] = field_meta.default_value()->bool_data();
+                }
+                break;
+            }
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_int_data()
+                                    ->mutable_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr[i] = field_meta.default_value()->int_data();
+                }
+                break;
+            }
+            case DataType::INT64: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_long_data()
+                                    ->mutable_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr[i] = field_meta.default_value()->long_data();
+                }
+                break;
+            }
+            case DataType::FLOAT: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_float_data()
+                                    ->mutable_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr[i] = field_meta.default_value()->float_data();
+                }
+                break;
+            }
+            case DataType::DOUBLE: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_double_data()
+                                    ->mutable_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr[i] = field_meta.default_value()->double_data();
+                }
+                break;
+            }
+            case DataType::VARCHAR: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_string_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr->at(i) = field_meta.default_value()->string_data();
+                }
+                break;
+            }
+            default: {
+                PanicInfo(DataTypeInvalid,
+                          fmt::format("unsupported default value type {}",
+                                      field_meta.get_data_type()));
+            }
+        }
+        return result;
+    };
+    for (int64_t i = 0; i < count; ++i) {
+        auto result = CreateScalarDataArray(count, field_meta);
+        auto res = result->mutable_valid_data()->mutable_data();
+        res[i] = false;
+    }
+    return result;
+}
+
 }  // namespace milvus::segcore

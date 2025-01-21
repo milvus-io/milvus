@@ -5969,6 +5969,109 @@ func (x *AlterCollectionRequest) GetVChannels() []string {
 	return nil
 }
 
+type AddFieldRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	CollectionID   int64                      `protobuf:"varint,1,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	DbID           int64                      `protobuf:"varint,2,opt,name=dbID,proto3" json:"dbID,omitempty"`
+	FieldSchema    []*schemapb.FieldSchema    `protobuf:"bytes,3,rep,name=field_schema,json=fieldSchema,proto3" json:"field_schema,omitempty"`
+	Schema         *schemapb.CollectionSchema `protobuf:"bytes,4,opt,name=schema,proto3" json:"schema,omitempty"`
+	PartitionIDs   []int64                    `protobuf:"varint,5,rep,packed,name=partitionIDs,proto3" json:"partitionIDs,omitempty"`
+	StartPositions []*commonpb.KeyDataPair    `protobuf:"bytes,6,rep,name=start_positions,json=startPositions,proto3" json:"start_positions,omitempty"`
+	Properties     []*commonpb.KeyValuePair   `protobuf:"bytes,7,rep,name=properties,proto3" json:"properties,omitempty"`
+	VChannels      []string                   `protobuf:"bytes,8,rep,name=vChannels,proto3" json:"vChannels,omitempty"`
+}
+
+func (x *AddFieldRequest) Reset() {
+	*x = AddFieldRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[72]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *AddFieldRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddFieldRequest) ProtoMessage() {}
+
+func (x *AddFieldRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[72]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddFieldRequest.ProtoReflect.Descriptor instead.
+func (*AddFieldRequest) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{72}
+}
+
+func (x *AddFieldRequest) GetCollectionID() int64 {
+	if x != nil {
+		return x.CollectionID
+	}
+	return 0
+}
+
+func (x *AddFieldRequest) GetDbID() int64 {
+	if x != nil {
+		return x.DbID
+	}
+	return 0
+}
+
+func (x *AddFieldRequest) GetFieldSchema() []*schemapb.FieldSchema {
+	if x != nil {
+		return x.FieldSchema
+	}
+	return nil
+}
+
+func (x *AddFieldRequest) GetSchema() *schemapb.CollectionSchema {
+	if x != nil {
+		return x.Schema
+	}
+	return nil
+}
+
+func (x *AddFieldRequest) GetPartitionIDs() []int64 {
+	if x != nil {
+		return x.PartitionIDs
+	}
+	return nil
+}
+
+func (x *AddFieldRequest) GetStartPositions() []*commonpb.KeyDataPair {
+	if x != nil {
+		return x.StartPositions
+	}
+	return nil
+}
+
+func (x *AddFieldRequest) GetProperties() []*commonpb.KeyValuePair {
+	if x != nil {
+		return x.Properties
+	}
+	return nil
+}
+
+func (x *AddFieldRequest) GetVChannels() []string {
+	if x != nil {
+		return x.VChannels
+	}
+	return nil
+}
+
 type GcConfirmRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -5981,7 +6084,7 @@ type GcConfirmRequest struct {
 func (x *GcConfirmRequest) Reset() {
 	*x = GcConfirmRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[72]
+		mi := &file_data_coord_proto_msgTypes[73]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -5994,7 +6097,7 @@ func (x *GcConfirmRequest) String() string {
 func (*GcConfirmRequest) ProtoMessage() {}
 
 func (x *GcConfirmRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[72]
+	mi := &file_data_coord_proto_msgTypes[73]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6007,7 +6110,7 @@ func (x *GcConfirmRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GcConfirmRequest.ProtoReflect.Descriptor instead.
 func (*GcConfirmRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{72}
+	return file_data_coord_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *GcConfirmRequest) GetCollectionId() int64 {
@@ -6036,7 +6139,7 @@ type GcConfirmResponse struct {
 func (x *GcConfirmResponse) Reset() {
 	*x = GcConfirmResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[73]
+		mi := &file_data_coord_proto_msgTypes[74]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6049,7 +6152,7 @@ func (x *GcConfirmResponse) String() string {
 func (*GcConfirmResponse) ProtoMessage() {}
 
 func (x *GcConfirmResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[73]
+	mi := &file_data_coord_proto_msgTypes[74]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6062,7 +6165,7 @@ func (x *GcConfirmResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GcConfirmResponse.ProtoReflect.Descriptor instead.
 func (*GcConfirmResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{73}
+	return file_data_coord_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *GcConfirmResponse) GetStatus() *commonpb.Status {
@@ -6091,7 +6194,7 @@ type ReportDataNodeTtMsgsRequest struct {
 func (x *ReportDataNodeTtMsgsRequest) Reset() {
 	*x = ReportDataNodeTtMsgsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[74]
+		mi := &file_data_coord_proto_msgTypes[75]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6104,7 +6207,7 @@ func (x *ReportDataNodeTtMsgsRequest) String() string {
 func (*ReportDataNodeTtMsgsRequest) ProtoMessage() {}
 
 func (x *ReportDataNodeTtMsgsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[74]
+	mi := &file_data_coord_proto_msgTypes[75]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6117,7 +6220,7 @@ func (x *ReportDataNodeTtMsgsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportDataNodeTtMsgsRequest.ProtoReflect.Descriptor instead.
 func (*ReportDataNodeTtMsgsRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{74}
+	return file_data_coord_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *ReportDataNodeTtMsgsRequest) GetBase() *commonpb.MsgBase {
@@ -6149,7 +6252,7 @@ type GetFlushStateRequest struct {
 func (x *GetFlushStateRequest) Reset() {
 	*x = GetFlushStateRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[75]
+		mi := &file_data_coord_proto_msgTypes[76]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6162,7 +6265,7 @@ func (x *GetFlushStateRequest) String() string {
 func (*GetFlushStateRequest) ProtoMessage() {}
 
 func (x *GetFlushStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[75]
+	mi := &file_data_coord_proto_msgTypes[76]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6175,7 +6278,7 @@ func (x *GetFlushStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetFlushStateRequest.ProtoReflect.Descriptor instead.
 func (*GetFlushStateRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{75}
+	return file_data_coord_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *GetFlushStateRequest) GetSegmentIDs() []int64 {
@@ -6224,7 +6327,7 @@ type ChannelOperationsRequest struct {
 func (x *ChannelOperationsRequest) Reset() {
 	*x = ChannelOperationsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[76]
+		mi := &file_data_coord_proto_msgTypes[77]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6237,7 +6340,7 @@ func (x *ChannelOperationsRequest) String() string {
 func (*ChannelOperationsRequest) ProtoMessage() {}
 
 func (x *ChannelOperationsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[76]
+	mi := &file_data_coord_proto_msgTypes[77]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6250,7 +6353,7 @@ func (x *ChannelOperationsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChannelOperationsRequest.ProtoReflect.Descriptor instead.
 func (*ChannelOperationsRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{76}
+	return file_data_coord_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *ChannelOperationsRequest) GetInfos() []*ChannelWatchInfo {
@@ -6274,7 +6377,7 @@ type ChannelOperationProgressResponse struct {
 func (x *ChannelOperationProgressResponse) Reset() {
 	*x = ChannelOperationProgressResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[77]
+		mi := &file_data_coord_proto_msgTypes[78]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6287,7 +6390,7 @@ func (x *ChannelOperationProgressResponse) String() string {
 func (*ChannelOperationProgressResponse) ProtoMessage() {}
 
 func (x *ChannelOperationProgressResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[77]
+	mi := &file_data_coord_proto_msgTypes[78]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6300,7 +6403,7 @@ func (x *ChannelOperationProgressResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChannelOperationProgressResponse.ProtoReflect.Descriptor instead.
 func (*ChannelOperationProgressResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{77}
+	return file_data_coord_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *ChannelOperationProgressResponse) GetStatus() *commonpb.Status {
@@ -6350,7 +6453,7 @@ type PreImportRequest struct {
 func (x *PreImportRequest) Reset() {
 	*x = PreImportRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[78]
+		mi := &file_data_coord_proto_msgTypes[79]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6363,7 +6466,7 @@ func (x *PreImportRequest) String() string {
 func (*PreImportRequest) ProtoMessage() {}
 
 func (x *PreImportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[78]
+	mi := &file_data_coord_proto_msgTypes[79]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6376,7 +6479,7 @@ func (x *PreImportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PreImportRequest.ProtoReflect.Descriptor instead.
 func (*PreImportRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{78}
+	return file_data_coord_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *PreImportRequest) GetClusterID() string {
@@ -6454,7 +6557,7 @@ type IDRange struct {
 func (x *IDRange) Reset() {
 	*x = IDRange{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[79]
+		mi := &file_data_coord_proto_msgTypes[80]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6467,7 +6570,7 @@ func (x *IDRange) String() string {
 func (*IDRange) ProtoMessage() {}
 
 func (x *IDRange) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[79]
+	mi := &file_data_coord_proto_msgTypes[80]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6480,7 +6583,7 @@ func (x *IDRange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IDRange.ProtoReflect.Descriptor instead.
 func (*IDRange) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{79}
+	return file_data_coord_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *IDRange) GetBegin() int64 {
@@ -6510,7 +6613,7 @@ type ImportRequestSegment struct {
 func (x *ImportRequestSegment) Reset() {
 	*x = ImportRequestSegment{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[80]
+		mi := &file_data_coord_proto_msgTypes[81]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6523,7 +6626,7 @@ func (x *ImportRequestSegment) String() string {
 func (*ImportRequestSegment) ProtoMessage() {}
 
 func (x *ImportRequestSegment) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[80]
+	mi := &file_data_coord_proto_msgTypes[81]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6536,7 +6639,7 @@ func (x *ImportRequestSegment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportRequestSegment.ProtoReflect.Descriptor instead.
 func (*ImportRequestSegment) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{80}
+	return file_data_coord_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *ImportRequestSegment) GetSegmentID() int64 {
@@ -6582,7 +6685,7 @@ type ImportRequest struct {
 func (x *ImportRequest) Reset() {
 	*x = ImportRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[81]
+		mi := &file_data_coord_proto_msgTypes[82]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6595,7 +6698,7 @@ func (x *ImportRequest) String() string {
 func (*ImportRequest) ProtoMessage() {}
 
 func (x *ImportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[81]
+	mi := &file_data_coord_proto_msgTypes[82]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6608,7 +6711,7 @@ func (x *ImportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportRequest.ProtoReflect.Descriptor instead.
 func (*ImportRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{81}
+	return file_data_coord_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *ImportRequest) GetClusterID() string {
@@ -6708,7 +6811,7 @@ type QueryPreImportRequest struct {
 func (x *QueryPreImportRequest) Reset() {
 	*x = QueryPreImportRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[82]
+		mi := &file_data_coord_proto_msgTypes[83]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6721,7 +6824,7 @@ func (x *QueryPreImportRequest) String() string {
 func (*QueryPreImportRequest) ProtoMessage() {}
 
 func (x *QueryPreImportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[82]
+	mi := &file_data_coord_proto_msgTypes[83]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6734,7 +6837,7 @@ func (x *QueryPreImportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryPreImportRequest.ProtoReflect.Descriptor instead.
 func (*QueryPreImportRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{82}
+	return file_data_coord_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *QueryPreImportRequest) GetClusterID() string {
@@ -6770,7 +6873,7 @@ type PartitionImportStats struct {
 func (x *PartitionImportStats) Reset() {
 	*x = PartitionImportStats{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[83]
+		mi := &file_data_coord_proto_msgTypes[84]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6783,7 +6886,7 @@ func (x *PartitionImportStats) String() string {
 func (*PartitionImportStats) ProtoMessage() {}
 
 func (x *PartitionImportStats) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[83]
+	mi := &file_data_coord_proto_msgTypes[84]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6796,7 +6899,7 @@ func (x *PartitionImportStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartitionImportStats.ProtoReflect.Descriptor instead.
 func (*PartitionImportStats) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{83}
+	return file_data_coord_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *PartitionImportStats) GetPartitionRows() map[int64]int64 {
@@ -6828,7 +6931,7 @@ type ImportFileStats struct {
 func (x *ImportFileStats) Reset() {
 	*x = ImportFileStats{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[84]
+		mi := &file_data_coord_proto_msgTypes[85]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6841,7 +6944,7 @@ func (x *ImportFileStats) String() string {
 func (*ImportFileStats) ProtoMessage() {}
 
 func (x *ImportFileStats) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[84]
+	mi := &file_data_coord_proto_msgTypes[85]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6854,7 +6957,7 @@ func (x *ImportFileStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportFileStats.ProtoReflect.Descriptor instead.
 func (*ImportFileStats) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{84}
+	return file_data_coord_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *ImportFileStats) GetImportFile() *internalpb.ImportFile {
@@ -6908,7 +7011,7 @@ type QueryPreImportResponse struct {
 func (x *QueryPreImportResponse) Reset() {
 	*x = QueryPreImportResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[85]
+		mi := &file_data_coord_proto_msgTypes[86]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6921,7 +7024,7 @@ func (x *QueryPreImportResponse) String() string {
 func (*QueryPreImportResponse) ProtoMessage() {}
 
 func (x *QueryPreImportResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[85]
+	mi := &file_data_coord_proto_msgTypes[86]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6934,7 +7037,7 @@ func (x *QueryPreImportResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryPreImportResponse.ProtoReflect.Descriptor instead.
 func (*QueryPreImportResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{85}
+	return file_data_coord_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *QueryPreImportResponse) GetStatus() *commonpb.Status {
@@ -6993,7 +7096,7 @@ type QueryImportRequest struct {
 func (x *QueryImportRequest) Reset() {
 	*x = QueryImportRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[86]
+		mi := &file_data_coord_proto_msgTypes[87]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7006,7 +7109,7 @@ func (x *QueryImportRequest) String() string {
 func (*QueryImportRequest) ProtoMessage() {}
 
 func (x *QueryImportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[86]
+	mi := &file_data_coord_proto_msgTypes[87]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7019,7 +7122,7 @@ func (x *QueryImportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryImportRequest.ProtoReflect.Descriptor instead.
 func (*QueryImportRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{86}
+	return file_data_coord_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *QueryImportRequest) GetClusterID() string {
@@ -7066,7 +7169,7 @@ type ImportSegmentInfo struct {
 func (x *ImportSegmentInfo) Reset() {
 	*x = ImportSegmentInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[87]
+		mi := &file_data_coord_proto_msgTypes[88]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7079,7 +7182,7 @@ func (x *ImportSegmentInfo) String() string {
 func (*ImportSegmentInfo) ProtoMessage() {}
 
 func (x *ImportSegmentInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[87]
+	mi := &file_data_coord_proto_msgTypes[88]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7092,7 +7195,7 @@ func (x *ImportSegmentInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportSegmentInfo.ProtoReflect.Descriptor instead.
 func (*ImportSegmentInfo) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{87}
+	return file_data_coord_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *ImportSegmentInfo) GetSegmentID() int64 {
@@ -7153,7 +7256,7 @@ type QueryImportResponse struct {
 func (x *QueryImportResponse) Reset() {
 	*x = QueryImportResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[88]
+		mi := &file_data_coord_proto_msgTypes[89]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7166,7 +7269,7 @@ func (x *QueryImportResponse) String() string {
 func (*QueryImportResponse) ProtoMessage() {}
 
 func (x *QueryImportResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[88]
+	mi := &file_data_coord_proto_msgTypes[89]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7179,7 +7282,7 @@ func (x *QueryImportResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryImportResponse.ProtoReflect.Descriptor instead.
 func (*QueryImportResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{88}
+	return file_data_coord_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *QueryImportResponse) GetStatus() *commonpb.Status {
@@ -7237,7 +7340,7 @@ type DropImportRequest struct {
 func (x *DropImportRequest) Reset() {
 	*x = DropImportRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[89]
+		mi := &file_data_coord_proto_msgTypes[90]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7250,7 +7353,7 @@ func (x *DropImportRequest) String() string {
 func (*DropImportRequest) ProtoMessage() {}
 
 func (x *DropImportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[89]
+	mi := &file_data_coord_proto_msgTypes[90]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7263,7 +7366,7 @@ func (x *DropImportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DropImportRequest.ProtoReflect.Descriptor instead.
 func (*DropImportRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{89}
+	return file_data_coord_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *DropImportRequest) GetClusterID() string {
@@ -7315,7 +7418,7 @@ type ImportJob struct {
 func (x *ImportJob) Reset() {
 	*x = ImportJob{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[90]
+		mi := &file_data_coord_proto_msgTypes[91]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7328,7 +7431,7 @@ func (x *ImportJob) String() string {
 func (*ImportJob) ProtoMessage() {}
 
 func (x *ImportJob) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[90]
+	mi := &file_data_coord_proto_msgTypes[91]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7341,7 +7444,7 @@ func (x *ImportJob) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportJob.ProtoReflect.Descriptor instead.
 func (*ImportJob) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{90}
+	return file_data_coord_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *ImportJob) GetJobID() int64 {
@@ -7489,7 +7592,7 @@ type PreImportTask struct {
 func (x *PreImportTask) Reset() {
 	*x = PreImportTask{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[91]
+		mi := &file_data_coord_proto_msgTypes[92]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7502,7 +7605,7 @@ func (x *PreImportTask) String() string {
 func (*PreImportTask) ProtoMessage() {}
 
 func (x *PreImportTask) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[91]
+	mi := &file_data_coord_proto_msgTypes[92]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7515,7 +7618,7 @@ func (x *PreImportTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PreImportTask.ProtoReflect.Descriptor instead.
 func (*PreImportTask) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{91}
+	return file_data_coord_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *PreImportTask) GetJobID() int64 {
@@ -7603,7 +7706,7 @@ type ImportTaskV2 struct {
 func (x *ImportTaskV2) Reset() {
 	*x = ImportTaskV2{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[92]
+		mi := &file_data_coord_proto_msgTypes[93]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7616,7 +7719,7 @@ func (x *ImportTaskV2) String() string {
 func (*ImportTaskV2) ProtoMessage() {}
 
 func (x *ImportTaskV2) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[92]
+	mi := &file_data_coord_proto_msgTypes[93]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7629,7 +7732,7 @@ func (x *ImportTaskV2) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportTaskV2.ProtoReflect.Descriptor instead.
 func (*ImportTaskV2) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{92}
+	return file_data_coord_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *ImportTaskV2) GetJobID() int64 {
@@ -7729,7 +7832,7 @@ type GcControlRequest struct {
 func (x *GcControlRequest) Reset() {
 	*x = GcControlRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[93]
+		mi := &file_data_coord_proto_msgTypes[94]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7742,7 +7845,7 @@ func (x *GcControlRequest) String() string {
 func (*GcControlRequest) ProtoMessage() {}
 
 func (x *GcControlRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[93]
+	mi := &file_data_coord_proto_msgTypes[94]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7755,7 +7858,7 @@ func (x *GcControlRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GcControlRequest.ProtoReflect.Descriptor instead.
 func (*GcControlRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{93}
+	return file_data_coord_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *GcControlRequest) GetBase() *commonpb.MsgBase {
@@ -7788,7 +7891,7 @@ type QuerySlotRequest struct {
 func (x *QuerySlotRequest) Reset() {
 	*x = QuerySlotRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[94]
+		mi := &file_data_coord_proto_msgTypes[95]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7801,7 +7904,7 @@ func (x *QuerySlotRequest) String() string {
 func (*QuerySlotRequest) ProtoMessage() {}
 
 func (x *QuerySlotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[94]
+	mi := &file_data_coord_proto_msgTypes[95]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7814,7 +7917,7 @@ func (x *QuerySlotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QuerySlotRequest.ProtoReflect.Descriptor instead.
 func (*QuerySlotRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{94}
+	return file_data_coord_proto_rawDescGZIP(), []int{95}
 }
 
 type QuerySlotResponse struct {
@@ -7829,7 +7932,7 @@ type QuerySlotResponse struct {
 func (x *QuerySlotResponse) Reset() {
 	*x = QuerySlotResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[95]
+		mi := &file_data_coord_proto_msgTypes[96]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7842,7 +7945,7 @@ func (x *QuerySlotResponse) String() string {
 func (*QuerySlotResponse) ProtoMessage() {}
 
 func (x *QuerySlotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[95]
+	mi := &file_data_coord_proto_msgTypes[96]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7855,7 +7958,7 @@ func (x *QuerySlotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QuerySlotResponse.ProtoReflect.Descriptor instead.
 func (*QuerySlotResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{95}
+	return file_data_coord_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *QuerySlotResponse) GetStatus() *commonpb.Status {
@@ -7910,7 +8013,7 @@ type CompactionTask struct {
 func (x *CompactionTask) Reset() {
 	*x = CompactionTask{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[96]
+		mi := &file_data_coord_proto_msgTypes[97]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7923,7 +8026,7 @@ func (x *CompactionTask) String() string {
 func (*CompactionTask) ProtoMessage() {}
 
 func (x *CompactionTask) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[96]
+	mi := &file_data_coord_proto_msgTypes[97]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7936,7 +8039,7 @@ func (x *CompactionTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactionTask.ProtoReflect.Descriptor instead.
 func (*CompactionTask) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{96}
+	return file_data_coord_proto_rawDescGZIP(), []int{97}
 }
 
 func (x *CompactionTask) GetPlanID() int64 {
@@ -8152,7 +8255,7 @@ type PartitionStatsInfo struct {
 func (x *PartitionStatsInfo) Reset() {
 	*x = PartitionStatsInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[97]
+		mi := &file_data_coord_proto_msgTypes[98]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -8165,7 +8268,7 @@ func (x *PartitionStatsInfo) String() string {
 func (*PartitionStatsInfo) ProtoMessage() {}
 
 func (x *PartitionStatsInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[97]
+	mi := &file_data_coord_proto_msgTypes[98]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8178,7 +8281,7 @@ func (x *PartitionStatsInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartitionStatsInfo.ProtoReflect.Descriptor instead.
 func (*PartitionStatsInfo) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{97}
+	return file_data_coord_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *PartitionStatsInfo) GetCollectionID() int64 {
@@ -8241,7 +8344,7 @@ type DropCompactionPlanRequest struct {
 func (x *DropCompactionPlanRequest) Reset() {
 	*x = DropCompactionPlanRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[98]
+		mi := &file_data_coord_proto_msgTypes[99]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -8254,7 +8357,7 @@ func (x *DropCompactionPlanRequest) String() string {
 func (*DropCompactionPlanRequest) ProtoMessage() {}
 
 func (x *DropCompactionPlanRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[98]
+	mi := &file_data_coord_proto_msgTypes[99]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8267,7 +8370,7 @@ func (x *DropCompactionPlanRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DropCompactionPlanRequest.ProtoReflect.Descriptor instead.
 func (*DropCompactionPlanRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{98}
+	return file_data_coord_proto_rawDescGZIP(), []int{99}
 }
 
 func (x *DropCompactionPlanRequest) GetPlanID() int64 {
@@ -11755,7 +11858,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[72].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GcConfirmRequest); i {
+			switch v := v.(*AddFieldRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11767,7 +11870,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[73].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GcConfirmResponse); i {
+			switch v := v.(*GcConfirmRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11779,7 +11882,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[74].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ReportDataNodeTtMsgsRequest); i {
+			switch v := v.(*GcConfirmResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11791,7 +11894,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[75].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetFlushStateRequest); i {
+			switch v := v.(*ReportDataNodeTtMsgsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11803,7 +11906,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[76].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ChannelOperationsRequest); i {
+			switch v := v.(*GetFlushStateRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11815,7 +11918,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[77].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ChannelOperationProgressResponse); i {
+			switch v := v.(*ChannelOperationsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11827,7 +11930,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[78].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PreImportRequest); i {
+			switch v := v.(*ChannelOperationProgressResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11839,7 +11942,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[79].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*IDRange); i {
+			switch v := v.(*PreImportRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11851,7 +11954,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[80].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ImportRequestSegment); i {
+			switch v := v.(*IDRange); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11863,7 +11966,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[81].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ImportRequest); i {
+			switch v := v.(*ImportRequestSegment); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11875,7 +11978,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[82].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*QueryPreImportRequest); i {
+			switch v := v.(*ImportRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11887,7 +11990,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[83].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PartitionImportStats); i {
+			switch v := v.(*QueryPreImportRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11899,7 +12002,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[84].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ImportFileStats); i {
+			switch v := v.(*PartitionImportStats); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11911,7 +12014,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[85].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*QueryPreImportResponse); i {
+			switch v := v.(*ImportFileStats); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11923,7 +12026,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[86].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*QueryImportRequest); i {
+			switch v := v.(*QueryPreImportResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11935,7 +12038,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[87].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ImportSegmentInfo); i {
+			switch v := v.(*QueryImportRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11947,7 +12050,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[88].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*QueryImportResponse); i {
+			switch v := v.(*ImportSegmentInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11959,7 +12062,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[89].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DropImportRequest); i {
+			switch v := v.(*QueryImportResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11971,7 +12074,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[90].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ImportJob); i {
+			switch v := v.(*DropImportRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11983,7 +12086,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[91].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PreImportTask); i {
+			switch v := v.(*ImportJob); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11995,7 +12098,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[92].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ImportTaskV2); i {
+			switch v := v.(*PreImportTask); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12007,7 +12110,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[93].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GcControlRequest); i {
+			switch v := v.(*ImportTaskV2); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12019,7 +12122,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[94].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*QuerySlotRequest); i {
+			switch v := v.(*GcControlRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12031,7 +12134,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[95].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*QuerySlotResponse); i {
+			switch v := v.(*QuerySlotRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12043,7 +12146,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[96].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CompactionTask); i {
+			switch v := v.(*QuerySlotResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12055,7 +12158,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[97].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PartitionStatsInfo); i {
+			switch v := v.(*CompactionTask); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12067,6 +12170,18 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[98].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*PartitionStatsInfo); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[99].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*DropCompactionPlanRequest); i {
 			case 0:
 				return &v.state

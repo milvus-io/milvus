@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -112,6 +111,8 @@ const (
 	ListDatabaseTaskName     = "ListDatabaseTaskName"
 	AlterDatabaseTaskName    = "AlterDatabaseTaskName"
 	DescribeDatabaseTaskName = "DescribeDatabaseTaskName"
+
+	AddFieldTaskName = "AddFieldTaskName"
 
 	// minFloat32 minimum float.
 	minFloat32 = -1 * float32(math.MaxFloat32)
@@ -387,42 +388,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	for _, field := range t.schema.Fields {
-		// validate field name
-		if err := validateFieldName(field.Name); err != nil {
-			return err
-		}
-		// validate dense vector field type parameters
-		isVectorType := typeutil.IsVectorType(field.DataType)
-		if isVectorType {
-			err = validateDimension(field)
-			if err != nil {
-				return err
-			}
-		}
-		// valid max length per row parameters
-		// if max_length not specified, return error
-		if field.DataType == schemapb.DataType_VarChar ||
-			field.DataType == schemapb.DataType_Text ||
-			(field.GetDataType() == schemapb.DataType_Array && field.GetElementType() == schemapb.DataType_VarChar) {
-			err = validateMaxLengthPerRow(t.schema.Name, field)
-			if err != nil {
-				return err
-			}
-		}
-		// valid max capacity for array per row parameters
-		// if max_capacity not specified, return error
-		if field.DataType == schemapb.DataType_Array {
-			if err = validateMaxCapacityPerRow(t.schema.Name, field); err != nil {
-				return err
-			}
-		}
-		// TODO should remove the index params in the field schema
-		indexParams := funcutil.KeyValuePair2Map(field.GetIndexParams())
-		if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
-			return err
-		}
-
-		if err := ctokenizer.ValidateTextSchema(field, wasBm25FunctionInputField(t.schema, field)); err != nil {
+		if err := ValidateField(field, t.schema); err != nil {
 			return err
 		}
 	}
@@ -450,6 +416,126 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 }
 
 func (t *createCollectionTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type addFieldTask struct {
+	baseTask
+	Condition
+	*milvuspb.AddFieldRequest
+	ctx       context.Context
+	rootCoord types.RootCoordClient
+	result    *commonpb.Status
+	chMgr     channelsMgr
+	chTicker  channelsTimeTicker
+
+	oldSchema *schemapb.CollectionSchema
+}
+
+func (t *addFieldTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *addFieldTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *addFieldTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *addFieldTask) Name() string {
+	return AddFieldTaskName
+}
+
+func (t *addFieldTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *addFieldTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *addFieldTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *addFieldTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *addFieldTask) OnEnqueue() error {
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	// todo:lxg add it
+	t.Base.MsgType = commonpb.MsgType_DropCollection
+	t.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+func (t *addFieldTask) PreExecute(ctx context.Context) error {
+	if t.oldSchema.EnableDynamicField {
+		return merr.WrapErrParameterInvalidMsg("can't add field in an enable dynamic field collection")
+	}
+	fieldList := typeutil.NewSet[string]()
+	for _, schema := range t.oldSchema.Fields {
+		fieldList.Insert(schema.Name)
+	}
+	clusteringFieldIdx := 0
+	for i, field := range t.FieldSchema {
+		if typeutil.IsVectorType(field.DataType) {
+			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("can't add vector field, field name = %s", field.Name))
+		}
+		if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName}, field.GetName()) {
+			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("can't addsystem field, field name = %s", field.Name))
+		}
+		if !field.Nullable {
+			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("can't add field which is not nullable, field name = %s", field.Name))
+		}
+		if !field.IsPrimaryKey {
+			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("can't add field which is pk, field name = %s", field.Name))
+		}
+		if !field.IsPartitionKey {
+			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("partition key field not support nullable, field name = %s", field.Name))
+		}
+		if field.AutoID {
+			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("only primary field can speficy AutoID with true, field name = %s", field.Name))
+		}
+		if field.GetIsClusteringKey() {
+			if typeutil.IsVectorType(field.GetDataType()) &&
+				!paramtable.Get().CommonCfg.EnableVectorClusteringKey.GetAsBool() {
+				return merr.WrapErrCollectionVectorClusteringKeyNotAllowed(t.CollectionName, fmt.Sprintf("field name = %s", field.Name))
+			}
+			if clusteringFieldIdx > -1 {
+				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
+					fmt.Sprintf("there are more than one clustering key, field name = %s, %s", t.FieldSchema[clusteringFieldIdx].Name, field.Name))
+			}
+			clusteringFieldIdx = i
+		}
+		if err := ValidateField(field, t.oldSchema); err != nil {
+			return err
+		}
+		if fieldList.Contain(field.Name) {
+			return merr.WrapErrParameterInvalidMsg(fmt.Sprint("duplicate field name: %s", field.GetName()))
+		}
+		fieldList.Insert(field.Name)
+		log.Info("pre check add field loop", zap.String("field name", field.Name), zap.String("type", field.DataType.String()), zap.Bool("is clustering", field.IsClusteringKey), zap.Any("params", field.TypeParams))
+	}
+	if len(t.oldSchema.Fields)+len(t.FieldSchema) > Params.ProxyCfg.MaxFieldNum.GetAsInt() {
+		msg := fmt.Sprintf("maximum field's number should be limited to %d, the length of new fields: %d, the length of old fields: %d", Params.ProxyCfg.MaxFieldNum.GetAsInt(), len(t.FieldSchema), len(t.oldSchema.Fields))
+		return merr.WrapErrParameterInvalidMsg(msg)
+	}
+	return nil
+}
+
+func (t *addFieldTask) Execute(ctx context.Context) error {
+	var err error
+	t.result, err = t.rootCoord.AddField(ctx, t.AddFieldRequest)
+	return merr.CheckRPCCall(t.result, err)
+}
+
+func (t *addFieldTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 

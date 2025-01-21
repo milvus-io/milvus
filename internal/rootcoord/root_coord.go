@@ -1079,6 +1079,57 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 	return merr.Success(), nil
 }
 
+// AddField add field
+func (c *Core) AddField(ctx context.Context, in *milvuspb.AddFieldRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AddField", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("AddField")
+
+	log.Ctx(ctx).Info("received request to add field",
+		zap.String("dbName", in.GetDbName()),
+		zap.String("name", in.GetCollectionName()),
+		zap.String("role", typeutil.RootCoordRole))
+
+	t := &addFieldTask{
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
+	}
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Ctx(ctx).Info("failed to enqueue request to add field",
+			zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("AddField", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Ctx(ctx).Info("failed to add field",
+			zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()),
+			zap.Uint64("ts", t.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("AddField", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AddField", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("AddField").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("AddField").Observe(float64(t.queueDur.Milliseconds()))
+
+	log.Ctx(ctx).Info("done to add field",
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("name", in.GetCollectionName()),
+		zap.Uint64("ts", t.GetTs()))
+	return merr.Success(), nil
+}
+
 // DropCollection drop collection
 func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
