@@ -170,12 +170,15 @@ func NewLoader(
 	duf := NewDiskUsageFetcher(ctx)
 	go duf.Start()
 
+	warmupDispatcher := NewWarmupDispatcher()
+	go warmupDispatcher.Run(ctx)
 	loader := &segmentLoader{
 		manager:                   manager,
 		cm:                        cm,
 		loadingSegments:           typeutil.NewConcurrentMap[int64, *loadResult](),
 		committedResourceNotifier: syncutil.NewVersionedNotifier(),
 		duf:                       duf,
+		warmupDispatcher:          warmupDispatcher,
 	}
 
 	return loader
@@ -218,7 +221,8 @@ type segmentLoader struct {
 	committedResource         LoadResource
 	committedResourceNotifier *syncutil.VersionedNotifier
 
-	duf *diskUsageFetcher
+	duf              *diskUsageFetcher
+	warmupDispatcher *AsyncWarmupDispatcher
 }
 
 var _ Loader = (*segmentLoader)(nil)
@@ -301,6 +305,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			segmentType,
 			version,
 			loadInfo,
+			loader.warmupDispatcher,
 		)
 		if err != nil {
 			log.Warn("load segment failed when create new segment",
