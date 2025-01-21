@@ -19,7 +19,6 @@ package rootcoord
 import (
 	"context"
 	"fmt"
-	"math"
 	"strconv"
 
 	"github.com/cockroachdb/errors"
@@ -148,100 +147,6 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2
 	return check(maxColNumPerDB)
 }
 
-func checkFieldSchema(schema *schemapb.CollectionSchema) error {
-	for _, fieldSchema := range schema.Fields {
-		if fieldSchema.GetNullable() && typeutil.IsVectorType(fieldSchema.GetDataType()) {
-			msg := fmt.Sprintf("vector type not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
-			return merr.WrapErrParameterInvalidMsg(msg)
-		}
-		if fieldSchema.GetNullable() && fieldSchema.IsPrimaryKey {
-			msg := fmt.Sprintf("primary field not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
-			return merr.WrapErrParameterInvalidMsg(msg)
-		}
-		if fieldSchema.GetDefaultValue() != nil {
-			if fieldSchema.IsPrimaryKey {
-				msg := fmt.Sprintf("primary field not support default_value, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
-				return merr.WrapErrParameterInvalidMsg(msg)
-			}
-			dtype := fieldSchema.GetDataType()
-			if dtype == schemapb.DataType_Array || dtype == schemapb.DataType_JSON || typeutil.IsVectorType(dtype) {
-				msg := fmt.Sprintf("type not support default_value, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
-				return merr.WrapErrParameterInvalidMsg(msg)
-			}
-			errTypeMismatch := func(fieldName, fieldType, defaultValueType string) error {
-				msg := fmt.Sprintf("type (%s) of field (%s) is not equal to the type(%s) of default_value", fieldType, fieldName, defaultValueType)
-				return merr.WrapErrParameterInvalidMsg(msg)
-			}
-			switch fieldSchema.GetDefaultValue().Data.(type) {
-			case *schemapb.ValueField_BoolData:
-				if dtype != schemapb.DataType_Bool {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Bool")
-				}
-			case *schemapb.ValueField_IntData:
-				if dtype != schemapb.DataType_Int32 && dtype != schemapb.DataType_Int16 && dtype != schemapb.DataType_Int8 {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Int")
-				}
-				defaultValue := fieldSchema.GetDefaultValue().GetIntData()
-				if dtype == schemapb.DataType_Int16 {
-					if defaultValue > math.MaxInt16 || defaultValue < math.MinInt16 {
-						return merr.WrapErrParameterInvalidRange(math.MinInt16, math.MaxInt16, defaultValue, "default value out of range")
-					}
-				}
-				if dtype == schemapb.DataType_Int8 {
-					if defaultValue > math.MaxInt8 || defaultValue < math.MinInt8 {
-						return merr.WrapErrParameterInvalidRange(math.MinInt8, math.MaxInt8, defaultValue, "default value out of range")
-					}
-				}
-			case *schemapb.ValueField_LongData:
-				if dtype != schemapb.DataType_Int64 {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Int64")
-				}
-			case *schemapb.ValueField_FloatData:
-				if dtype != schemapb.DataType_Float {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Float")
-				}
-			case *schemapb.ValueField_DoubleData:
-				if dtype != schemapb.DataType_Double {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Double")
-				}
-			case *schemapb.ValueField_StringData:
-				if dtype != schemapb.DataType_VarChar {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_VarChar")
-				}
-				maxLength, err := parameterutil.GetMaxLength(fieldSchema)
-				if err != nil {
-					return err
-				}
-				defaultValueLength := len(fieldSchema.GetDefaultValue().GetStringData())
-				if int64(defaultValueLength) > maxLength {
-					msg := fmt.Sprintf("the length (%d) of string exceeds max length (%d)", defaultValueLength, maxLength)
-					return merr.WrapErrParameterInvalid("valid length string", "string length exceeds max length", msg)
-				}
-			default:
-				panic("default value unsupport data type")
-			}
-		}
-		if err := checkDupKvPairs(fieldSchema.GetTypeParams(), "type"); err != nil {
-			return err
-		}
-		if err := checkDupKvPairs(fieldSchema.GetIndexParams(), "index"); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func checkDupKvPairs(params []*commonpb.KeyValuePair, paramType string) error {
-	set := typeutil.NewSet[string]()
-	for _, kv := range params {
-		if set.Contain(kv.GetKey()) {
-			return merr.WrapErrParameterInvalidMsg("duplicated %s param key \"%s\"", paramType, kv.GetKey())
-		}
-		set.Insert(kv.GetKey())
-	}
-	return nil
-}
 
 func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) bool {
 	for _, f := range schema.GetFields() {
@@ -252,15 +157,6 @@ func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) b
 	return false
 }
 
-func validateFieldDataType(schema *schemapb.CollectionSchema) error {
-	for _, field := range schema.GetFields() {
-		if _, ok := schemapb.DataType_name[int32(field.GetDataType())]; !ok || field.GetDataType() == schemapb.DataType_None {
-			return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", field.GetDataType()))
-		}
-	}
-	return nil
-}
-
 func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schemapb.CollectionSchema) error {
 	log.Ctx(ctx).With(zap.String("CollectionName", t.Req.CollectionName))
 	if t.Req.GetCollectionName() != schema.GetName() {
@@ -269,7 +165,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return merr.WrapErrParameterInvalid("collection name matches schema name", "don't match", msg)
 	}
 
-	if err := checkFieldSchema(schema); err != nil {
+	if err := checkFieldSchema(schema.GetFields()); err != nil {
 		return err
 	}
 
@@ -281,7 +177,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		msg := fmt.Sprintf("schema contains system field: %s, %s, %s", RowIDFieldName, TimeStampFieldName, MetaFieldName)
 		return merr.WrapErrParameterInvalid("schema don't contains system field", "contains", msg)
 	}
-	return validateFieldDataType(schema)
+	return validateFieldDataType(schema.GetFields())
 }
 
 func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.CollectionSchema) error {

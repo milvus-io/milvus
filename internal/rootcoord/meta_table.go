@@ -81,6 +81,8 @@ type IMetaTable interface {
 	RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts Timestamp) error
 	GetGeneralCount(ctx context.Context) int
 
+	AddField(ctx context.Context, oldColl *model.Collection, newField []*model.Field, ts Timestamp) error
+
 	// TODO: it'll be a big cost if we handle the time travel logic, since we should always list all aliases in catalog.
 	IsAlias(ctx context.Context, db, name string) bool
 	ListAliasesByID(ctx context.Context, collID UniqueID) []string
@@ -819,6 +821,26 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, oldColl *model.Collect
 	}
 	mt.collID2Meta[oldColl.CollectionID] = newColl
 	log.Ctx(ctx).Info("alter collection finished", zap.Int64("collectionID", oldColl.CollectionID), zap.Uint64("ts", ts))
+	return nil
+}
+
+func (mt *MetaTable) AddField(ctx context.Context, oldColl *model.Collection, newField []*model.Field, ts Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	coll, ok := mt.collID2Meta[oldColl.CollectionID]
+	if !ok {
+		return nil
+	}
+	clone := coll.Clone()
+	clone.Fields = append(clone.Fields, newField...)
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.AlterCollection(ctx1, coll, clone, metastore.MODIFY, ts); err != nil {
+		return err
+	}
+	mt.collID2Meta[oldColl.CollectionID] = clone
+	log.Ctx(ctx).Info("add field finished", zap.Int64("collectionID", oldColl.CollectionID), zap.Uint64("ts", ts))
 	return nil
 }
 

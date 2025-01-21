@@ -19,6 +19,7 @@
 #include <optional>
 #include <utility>
 #include <pb/schema.pb.h>
+#include <sys/_types/_int64_t.h>
 #include <vector>
 #include <string>
 #include "common/CDataType.h"
@@ -44,7 +45,7 @@ ScalarIndexSort<T>::ScalarIndexSort(
         AssertInfo(file_manager_ != nullptr, "create file manager failed!");
     }
 }
-
+// index here
 template <typename T>
 void
 ScalarIndexSort<T>::Build(const Config& config) {
@@ -56,6 +57,25 @@ ScalarIndexSort<T>::Build(const Config& config) {
                "insert file paths is empty when build index");
     auto field_datas =
         file_manager_->CacheRawDataToMemory(insert_files.value());
+
+    auto lack_binlog_rows =
+        GetValueFromConfig<int64_t>(config, "lack_binlog_rows");
+    if (lack_binlog_rows.has_value()) {
+        auto field_schema = file_manager_->GetFieldDataMeta().field_schema;
+        auto default_value = [&]() -> std::optional<DefaultValueType> {
+            if (!field_schema.has_default_value()) {
+                return std::nullopt;
+            }
+            return field_schema.default_value();
+        }();
+        auto field_data = storage::CreateFieldData(
+            static_cast<DataType>(field_schema.data_type()),
+            true,
+            1,
+            lack_binlog_rows.value());
+        field_data->FillFieldData(default_value, lack_binlog_rows.value());
+        field_datas.insert(field_datas.begin(), field_data);
+    }
 
     BuildWithFieldData(field_datas);
 }
