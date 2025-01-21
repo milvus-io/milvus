@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <random>
+
 #include "exec/operator/Operator.h"
 
 namespace milvus {
@@ -64,7 +66,18 @@ class PhyRandomSampleNode : public Operator {
  private:
     // Samples M elements from 0 to N - 1 where every element has equal probability to be selected.
     static FixedVector<uint32_t>
-    sample(const uint32_t N, uint32_t M);
+    HashsetSample(const uint32_t N, const uint32_t M, std::mt19937& gen);
+
+    // Samples M elements from 0 to N - 1 where every element has equal probability to be selected.
+    static FixedVector<uint32_t>
+    StandardSample(const uint32_t N, const uint32_t M, std::mt19937& gen);
+
+    // Samples M elements from 0 to N - 1 where every element has equal probability to be selected.
+    // It decides which kinds of sample method we use for sampling. It is based on some experiments.
+    // Basically, the performance of HashsetSample is highly related to N * factor while StandardSample is highly
+    // related to N.
+    static FixedVector<uint32_t>
+    Sample(const uint32_t N, const float factor);
 
     float factor_;
     int64_t active_count_;

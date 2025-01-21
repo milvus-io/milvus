@@ -16,8 +16,6 @@
 
 #include "RandomSampleNode.h"
 
-#include <random>
-
 namespace milvus {
 namespace exec {
 PhyRandomSampleNode::PhyRandomSampleNode(
@@ -42,15 +40,42 @@ PhyRandomSampleNode::AddInput(RowVectorPtr& input) {
 }
 
 FixedVector<uint32_t>
-PhyRandomSampleNode::sample(const uint32_t N, const uint32_t M) {
+PhyRandomSampleNode::HashsetSample(const uint32_t N,
+                                   const uint32_t M,
+                                   std::mt19937& gen) {
+    LOG_INFO("debug_for_sample: HashsetSample");
     FixedVector<uint32_t> sampled(N);
     std::iota(sampled.begin(), sampled.end(), 0);
-    std::random_device rd;
-    std::mt19937 gen(rd());
 
     std::shuffle(sampled.begin(), sampled.end(), gen);
     sampled.resize(M);
     return sampled;
+}
+
+FixedVector<uint32_t>
+PhyRandomSampleNode::StandardSample(const uint32_t N,
+                                    const uint32_t M,
+                                    std::mt19937& gen) {
+    LOG_INFO("debug_for_sample: StandardSample");
+    FixedVector<uint32_t> inputs(N);
+    FixedVector<uint32_t> outputs(M);
+    std::iota(inputs.begin(), inputs.end(), 0);
+
+    std::sample(inputs.begin(), inputs.end(), outputs.begin(), M, gen);
+    return outputs;
+}
+
+FixedVector<uint32_t>
+PhyRandomSampleNode::Sample(const uint32_t N, const float factor) {
+    const uint32_t M = N * factor;
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    if (factor <= 0.03 + std::numeric_limits<float>::epsilon() ||
+        N <= 10000000 &&
+            factor <= 0.05 + std::numeric_limits<float>::epsilon()) {
+        return HashsetSample(N, M, gen);
+    }
+    return StandardSample(N, M, gen);
 }
 
 RowVectorPtr
@@ -69,8 +94,17 @@ PhyRandomSampleNode::GetOutput() {
     auto col_input = std::make_shared<ColumnVector>(
         TargetBitmap(active_count_), TargetBitmap(active_count_));
     TargetBitmapView data(col_input->GetRawData(), col_input->size());
-
-    auto sampled = sample(active_count_, active_count_ * factor_);
+    // True in TargetBitmap means we don't want this row, while for readability, we set the relevant row be true
+    // if it's sampled. So we need to flip the bits at last.
+    // However, if sample rate is larger than 0.5, we use 1-factor for sampling so that in some cases, the sampling
+    // performance would be better. In that case, we don't need to flip at last.
+    bool need_flip = true;
+    float factor = factor_;
+    if (factor > 0.5) {
+        need_flip = false;
+        factor = 1.0 - factor;
+    }
+    auto sampled = Sample(active_count_, factor);
     for (auto n : sampled) {
         data[n] = true;
     }
@@ -78,9 +112,13 @@ PhyRandomSampleNode::GetOutput() {
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> dur = end - start;
-    LOG_INFO("debug_for_sample: sample duration {} seconds, sampled size {}", dur.count(), sampled.size());
+    LOG_INFO("debug_for_sample: sample duration {} seconds, sampled size {}",
+             dur.count(),
+             sampled.size());
 
-    data.flip();
+    if (need_flip) {
+        data.flip();
+    }
     return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});
 }
 
