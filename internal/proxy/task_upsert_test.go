@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
@@ -358,5 +359,31 @@ func TestUpsertTaskForReplicate(t *testing.T) {
 		}, nil).Once()
 		err := ut.PreExecute(ctx)
 		assert.Error(t, err)
+	})
+}
+
+func TestUpsertTaskForSchemaMismatch(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	mockCache := NewMockCache(t)
+	globalMetaCache = mockCache
+	ctx := context.Background()
+
+	t.Run("schema ts mismatch", func(t *testing.T) {
+		ut := upsertTask{
+			ctx: ctx,
+			req: &milvuspb.UpsertRequest{
+				CollectionName: "col-0",
+			},
+			schemaTimestamp: 99,
+		}
+		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+			updateTimestamp: 100,
+		}, nil)
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		err := ut.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
 	})
 }
