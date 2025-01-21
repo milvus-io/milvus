@@ -554,19 +554,23 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	return nil
 }
 
+// Note: The returned model.Collection is read-only. Do NOT modify it directly,
+// as it may cause unexpected behavior or inconsistencies.
 func filterUnavailable(coll *model.Collection) *model.Collection {
-	clone := coll.Clone()
+	clone := coll.ShallowClone()
 	// pick available partitions.
-	clone.Partitions = nil
+	clone.Partitions = make([]*model.Partition, 0, len(coll.Partitions))
 	for _, partition := range coll.Partitions {
 		if partition.Available() {
-			clone.Partitions = append(clone.Partitions, partition.Clone())
+			clone.Partitions = append(clone.Partitions, partition)
 		}
 	}
 	return clone
 }
 
 // getLatestCollectionByIDInternal should be called with ts = typeutil.MaxTimestamp
+// Note: The returned model.Collection is read-only. Do NOT modify it directly,
+// as it may cause unexpected behavior or inconsistencies.
 func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collectionID UniqueID, allowUnavailable bool) (*model.Collection, error) {
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok || coll == nil {
@@ -584,6 +588,8 @@ func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collec
 }
 
 // getCollectionByIDInternal get collection by collection id without lock.
+// Note: The returned model.Collection is read-only. Do NOT modify it directly,
+// as it may cause unexpected behavior or inconsistencies.
 func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 	if isMaxTs(ts) {
 		return mt.getLatestCollectionByIDInternal(ctx, collectionID, allowUnavailable)
@@ -657,6 +663,8 @@ func (mt *MetaTable) GetCollectionID(ctx context.Context, dbName string, collect
 	return InvalidCollectionID
 }
 
+// Note: The returned model.Collection is read-only. Do NOT modify it directly,
+// as it may cause unexpected behavior or inconsistencies.
 func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error) {
 	// backward compatibility for rolling  upgrade
 	if dbName == "" {
@@ -857,8 +865,8 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 	}
 
 	// check new collection already exists
-	newColl, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, ts)
-	if newColl != nil {
+	coll, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, ts)
+	if coll != nil {
 		log.Warn("check new collection fail")
 		return fmt.Errorf("duplicated new collection name %s:%s with other collection name or alias", newDBName, newName)
 	}
@@ -880,7 +888,7 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 		return fmt.Errorf("fail to rename db name, must drop all aliases of this collection before rename")
 	}
 
-	newColl = oldColl.Clone()
+	newColl := oldColl.Clone()
 	newColl.Name = newName
 	newColl.DBID = targetDB.ID
 	if err := mt.catalog.AlterCollection(ctx, oldColl, newColl, metastore.MODIFY, ts); err != nil {

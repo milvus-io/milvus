@@ -176,6 +176,9 @@ mq:
     mergeCheckInterval: 1 # the interval time(in seconds) for dispatcher to check whether to merge
     targetBufSize: 16 # the lenth of channel buffer for targe
     maxTolerantLag: 3 # Default value: "3", the timeout(in seconds) that target sends msgPack
+    maxDispatcherNumPerPchannel: 5 # The maximum number of dispatchers per physical channel, primarily to limit the number of consumers and prevent performance issues(e.g., during recovery when a large number of channels are watched).
+    retrySleep: 3 # register retry sleep time in seconds
+    retryTimeout: 60 # register retry timeout in seconds
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
@@ -520,7 +523,6 @@ dataCoord:
     balanceInterval: 360 # The interval with which the channel manager check dml channel balance status
     checkInterval: 1 # The interval in seconds with which the channel manager advances channel states
     notifyChannelOperationTimeout: 5 # Timeout notifing channel operations (in seconds).
-    maxConcurrentChannelTaskNumPerDN: 32 # The maximum concurrency for each DataNode executing channel tasks (watch, release).
   segment:
     maxSize: 1024 # The maximum size of a segment, unit: MB. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
@@ -828,6 +830,7 @@ common:
     # like the old password verification when updating the credential
     superUsers: 
     defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
+    rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     rbac:
       overrideBuiltInPrivilegeGroups:
         enabled: false # Whether to override build-in privilege groups
@@ -1101,6 +1104,7 @@ trace:
 gpu:
   initMemSize: 2048 # Gpu Memory Pool init size
   maxMemSize: 4096 # Gpu Memory Pool Max size
+  overloadedMemoryThresholdPercentage: 95
 
 # Any configuration related to the streaming node server.
 streamingNode:

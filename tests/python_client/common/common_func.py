@@ -94,6 +94,7 @@ zh_vocabularies_distribution = {
     "库": 0.01
 }
 
+
 def patch_faker_text(fake_instance, vocabularies_distribution):
     """
     Monkey patch the text() method of a Faker instance to include custom vocabulary.
@@ -138,13 +139,8 @@ def patch_faker_text(fake_instance, vocabularies_distribution):
 
         return '. '.join(sentences) + '.'
 
-
-
     # Replace the original text method with our custom one
     fake_instance.text = new_text
-
-
-
 
 
 def get_bm25_ground_truth(corpus, queries, top_k=100, language="en"):
@@ -213,6 +209,7 @@ def custom_tokenizer(language="en"):
         )
     return tokenizer
 
+
 def manual_check_text_match(df, word, col):
     id_list = []
     for i in range(len(df)):
@@ -233,6 +230,7 @@ def get_top_english_tokens(counter, n=10):
     }
     english_counter = Counter(english_tokens)
     return english_counter.most_common(n)
+
 
 def analyze_documents(texts, language="en"):
 
@@ -255,7 +253,6 @@ def analyze_documents(texts, language="en"):
 
     # Convert token ids back to words
     word_freq = Counter({id_to_word[token_id]: count for token_id, count in freq.items()})
-
 
     # if language in ["zh", "cn", "chinese"], remove the long words
     # this is a trick to make the text match test case verification simple, because the long word can be still split
@@ -539,8 +536,6 @@ def prepare_array_test_data(data_size, hit_rate=0.005, dim=128):
     log.info(f"Proportion of arrays that have the target array length: {array_length_ratio}")
     log.info(f"Proportion of arrays that have the target array access: {array_access_ratio}")
 
-
-
     train_df = pd.DataFrame(data)
 
     target_id = {
@@ -552,7 +547,6 @@ def prepare_array_test_data(data_size, hit_rate=0.005, dim=128):
         "array_access": [r["id"] for r in array_access_result]
     }
     target_id_list = [target_id[key] for key in ["contains", "contains_any", "contains_all", "equals", "array_length", "array_access"]]
-
 
     filters = [
         "array_contains(contains, 42)",
@@ -578,9 +572,12 @@ def gen_unique_str(str_value=None):
     return "test_" + prefix if str_value is None else str_value + "_" + prefix
 
 
-def gen_str_by_length(length=8, letters_only=False):
+def gen_str_by_length(length=8, letters_only=False, contain_numbers=False):
     if letters_only:
         return "".join(random.choice(string.ascii_letters) for _ in range(length))
+    if contain_numbers:
+        return "".join(random.choice(string.ascii_letters) for _ in range(length-1)) + \
+            "".join(random.choice(string.digits))
     return "".join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
 
 
@@ -1802,6 +1799,16 @@ def get_int64_field_name(schema=None):
     fields = schema.fields
     for field in fields:
         if field.dtype == DataType.INT64:
+            return field.name
+    return None
+
+
+def get_varchar_field_name(schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype == DataType.VARCHAR:
             return field.name
     return None
 

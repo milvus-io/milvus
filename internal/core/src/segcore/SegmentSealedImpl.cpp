@@ -204,6 +204,13 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     auto field_id = FieldId(info.field_id);
     auto& field_meta = schema_->operator[](field_id);
 
+    // if segment is pk sorted, user created indexes bring no performance gain but extra memory usage
+    if (is_sorted_by_pk_ && field_id == schema_->get_primary_field_id()) {
+        LOG_INFO(
+            "segment pk sorted, skip user index loading for primary key field");
+        return;
+    }
+
     auto row_count = info.index->Count();
     AssertInfo(row_count > 0, "Index count is 0");
 
@@ -266,8 +273,10 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     set_bit(index_ready_bitset_, field_id, true);
     update_row_count(row_count);
     // release field column if the index contains raw data
+    // only release non-primary field
     if (scalar_indexings_[field_id]->HasRawData() &&
-        get_bit(field_data_ready_bitset_, field_id)) {
+        get_bit(field_data_ready_bitset_, field_id) &&
+        (schema_->get_primary_field_id() != field_id || !is_sorted_by_pk_)) {
         fields_.erase(field_id);
         set_bit(field_data_ready_bitset_, field_id, false);
     }

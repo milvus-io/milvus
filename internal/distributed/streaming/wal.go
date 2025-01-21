@@ -163,7 +163,9 @@ func (w *walAccesserImpl) Close() {
 	}
 	w.producerMutex.Unlock()
 
-	w.handlerClient.Close()
+	if w.handlerClient != nil {
+		w.handlerClient.Close()
+	}
 	w.streamingCoordClient.Close()
 }
 

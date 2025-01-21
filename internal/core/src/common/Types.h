@@ -496,7 +496,7 @@ struct TypeTraits<DataType::INT32> {
 
 template <>
 struct TypeTraits<DataType::INT64> {
-    using NativeType = int32_t;
+    using NativeType = int64_t;
     static constexpr DataType TypeKind = DataType::INT64;
     static constexpr bool IsPrimitiveType = true;
     static constexpr bool IsFixedWidth = true;
@@ -700,6 +700,9 @@ struct fmt::formatter<milvus::OpType> : formatter<string_view> {
                 break;
             case milvus::OpType::TextMatch:
                 name = "TextMatch";
+                break;
+            case milvus::OpType::PhraseMatch:
+                name = "PhraseMatch";
                 break;
         }
         return formatter<string_view>::format(name, ctx);

@@ -12,18 +12,32 @@
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
 #include <tuple>
-#include "pb/index_cgo_msg.pb.h"
 
-#include "indexbuilder/index_c.h"
-#include "test_utils/indexbuilder_test_utils.h"
-#include "indexbuilder/ScalarIndexCreator.h"
+#include "common/VectorTrait.h"
 #include "common/type_c.h"
+#include "indexbuilder/ScalarIndexCreator.h"
+#include "indexbuilder/index_c.h"
+#include "pb/index_cgo_msg.pb.h"
+#include "test_utils/indexbuilder_test_utils.h"
 
 constexpr int NB = 10;
 
-TEST(FloatVecIndex, All) {
-    auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
-    auto metric_type = knowhere::metric::L2;
+template <class TraitType>
+void
+TestVecIndex() {
+    knowhere::IndexType index_type;
+    knowhere::MetricType metric_type;
+    if (std::is_same_v<TraitType, milvus::BinaryVector>) {
+        index_type = knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
+        metric_type = knowhere::metric::JACCARD;
+    } else if (std::is_same_v<TraitType, milvus::SparseFloatVector>) {
+        index_type = knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX;
+        metric_type = knowhere::metric::IP;
+    } else {
+        index_type = knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
+        metric_type = knowhere::metric::L2;
+    }
+
     indexcgo::TypeParams type_params;
     indexcgo::IndexParams index_params;
     std::tie(type_params, index_params) =
@@ -35,289 +49,68 @@ TEST(FloatVecIndex, All) {
     ok = google::protobuf::TextFormat::PrintToString(index_params,
                                                      &index_params_str);
     assert(ok);
-    auto dataset = GenDataset(NB, metric_type, false);
-    auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
+    auto dataset = GenFieldData(NB, metric_type, TraitType::data_type);
 
-    CDataType dtype = FloatVector;
+    CDataType dtype = TraitType::c_data_type;
     CIndex index;
     CStatus status;
     CBinarySet binary_set;
     CIndex copy_index;
 
-    {
-        status = CreateIndexV0(
-            dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = BuildFloatVecIndex(index, NB * DIM, xb_data.data());
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = SerializeIndexToBinarySet(index, &binary_set);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = CreateIndexV0(dtype,
-                               type_params_str.c_str(),
-                               index_params_str.c_str(),
-                               &copy_index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = LoadIndexFromBinarySet(copy_index, binary_set);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = DeleteIndex(index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = DeleteIndex(copy_index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    { DeleteBinarySet(binary_set); }
-}
+    status = CreateIndexV0(
+        dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
+    ASSERT_EQ(milvus::Success, status.error_code);
 
-TEST(SparseFloatVecIndex, All) {
-    auto index_type = knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX;
-    auto metric_type = knowhere::metric::IP;
-    indexcgo::TypeParams type_params;
-    indexcgo::IndexParams index_params;
-    std::tie(type_params, index_params) =
-        generate_params(index_type, metric_type);
-    std::string type_params_str, index_params_str;
-    bool ok = google::protobuf::TextFormat::PrintToString(type_params,
-                                                          &type_params_str);
-    assert(ok);
-    ok = google::protobuf::TextFormat::PrintToString(index_params,
-                                                     &index_params_str);
-    assert(ok);
-    auto dataset = GenDatasetWithDataType(
-        NB, metric_type, milvus::DataType::VECTOR_SPARSE_FLOAT);
-    auto xb_data = dataset.get_col<knowhere::sparse::SparseRow<float>>(
-        milvus::FieldId(100));
-    CDataType dtype = SparseFloatVector;
-    CIndex index;
-    CStatus status;
-    CBinarySet binary_set;
-    CIndex copy_index;
-
-    {
-        status = CreateIndexV0(
-            dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
+    if (std::is_same_v<TraitType, milvus::BinaryVector>) {
+        auto xb_data = dataset.template get_col<uint8_t>(milvus::FieldId(100));
+        status = BuildBinaryVecIndex(index, NB * DIM / 8, xb_data.data());
+    } else if (std::is_same_v<TraitType, milvus::SparseFloatVector>) {
+        auto xb_data =
+            dataset.template get_col<knowhere::sparse::SparseRow<float>>(
+                milvus::FieldId(100));
         status = BuildSparseFloatVecIndex(
             index,
             NB,
             kTestSparseDim,
             static_cast<const uint8_t*>(
                 static_cast<const void*>(xb_data.data())));
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = SerializeIndexToBinarySet(index, &binary_set);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = CreateIndexV0(dtype,
-                               type_params_str.c_str(),
-                               index_params_str.c_str(),
-                               &copy_index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = LoadIndexFromBinarySet(copy_index, binary_set);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = DeleteIndex(index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = DeleteIndex(copy_index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    { DeleteBinarySet(binary_set); }
-}
-
-TEST(Float16VecIndex, All) {
-    auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
-    auto metric_type = knowhere::metric::L2;
-    indexcgo::TypeParams type_params;
-    indexcgo::IndexParams index_params;
-    std::tie(type_params, index_params) =
-        generate_params(index_type, metric_type);
-    std::string type_params_str, index_params_str;
-    bool ok = google::protobuf::TextFormat::PrintToString(type_params,
-                                                          &type_params_str);
-    assert(ok);
-    ok = google::protobuf::TextFormat::PrintToString(index_params,
-                                                     &index_params_str);
-    assert(ok);
-    auto dataset = GenDatasetWithDataType(
-        NB, metric_type, milvus::DataType::VECTOR_FLOAT16);
-    auto xb_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
-
-    CDataType dtype = Float16Vector;
-    CIndex index;
-    CStatus status;
-    CBinarySet binary_set;
-    CIndex copy_index;
-
-    {
-        status = CreateIndexV0(
-            dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
+    } else if (std::is_same_v<TraitType, milvus::FloatVector>) {
+        auto xb_data = dataset.template get_col<float>(milvus::FieldId(100));
+        status = BuildFloatVecIndex(index, NB * DIM, xb_data.data());
+    } else if (std::is_same_v<TraitType, milvus::Float16Vector>) {
+        auto xb_data = dataset.template get_col<uint8_t>(milvus::FieldId(100));
         status = BuildFloat16VecIndex(index, NB * DIM, xb_data.data());
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = SerializeIndexToBinarySet(index, &binary_set);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = CreateIndexV0(dtype,
-                               type_params_str.c_str(),
-                               index_params_str.c_str(),
-                               &copy_index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = LoadIndexFromBinarySet(copy_index, binary_set);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = DeleteIndex(index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = DeleteIndex(copy_index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    { DeleteBinarySet(binary_set); }
-}
-
-TEST(BFloat16VecIndex, All) {
-    auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
-    auto metric_type = knowhere::metric::L2;
-    indexcgo::TypeParams type_params;
-    indexcgo::IndexParams index_params;
-    std::tie(type_params, index_params) =
-        generate_params(index_type, metric_type);
-    std::string type_params_str, index_params_str;
-    bool ok = google::protobuf::TextFormat::PrintToString(type_params,
-                                                          &type_params_str);
-    assert(ok);
-    ok = google::protobuf::TextFormat::PrintToString(index_params,
-                                                     &index_params_str);
-    assert(ok);
-    auto dataset = GenDatasetWithDataType(
-        NB, metric_type, milvus::DataType::VECTOR_BFLOAT16);
-    auto xb_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
-
-    CDataType dtype = BFloat16Vector;
-    CIndex index;
-    CStatus status;
-    CBinarySet binary_set;
-    CIndex copy_index;
-
-    {
-        status = CreateIndexV0(
-            dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
+    } else if (std::is_same_v<TraitType, milvus::BFloat16Vector>) {
+        auto xb_data = dataset.template get_col<uint8_t>(milvus::FieldId(100));
         status = BuildBFloat16VecIndex(index, NB * DIM, xb_data.data());
-        ASSERT_EQ(milvus::Success, status.error_code);
     }
-    {
-        status = SerializeIndexToBinarySet(index, &binary_set);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = CreateIndexV0(dtype,
-                               type_params_str.c_str(),
-                               index_params_str.c_str(),
-                               &copy_index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = LoadIndexFromBinarySet(copy_index, binary_set);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = DeleteIndex(index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = DeleteIndex(copy_index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    { DeleteBinarySet(binary_set); }
+    ASSERT_EQ(milvus::Success, status.error_code);
+
+    status = SerializeIndexToBinarySet(index, &binary_set);
+    ASSERT_EQ(milvus::Success, status.error_code);
+
+    status = CreateIndexV0(
+        dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index);
+    ASSERT_EQ(milvus::Success, status.error_code);
+
+    status = LoadIndexFromBinarySet(copy_index, binary_set);
+    ASSERT_EQ(milvus::Success, status.error_code);
+
+    status = DeleteIndex(index);
+    ASSERT_EQ(milvus::Success, status.error_code);
+
+    status = DeleteIndex(copy_index);
+    ASSERT_EQ(milvus::Success, status.error_code);
+
+    DeleteBinarySet(binary_set);
 }
 
-TEST(BinaryVecIndex, All) {
-    auto index_type = knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
-    auto metric_type = knowhere::metric::JACCARD;
-    indexcgo::TypeParams type_params;
-    indexcgo::IndexParams index_params;
-    std::tie(type_params, index_params) =
-        generate_params(index_type, metric_type);
-    std::string type_params_str, index_params_str;
-    bool ok;
-    ok = google::protobuf::TextFormat::PrintToString(type_params,
-                                                     &type_params_str);
-    assert(ok);
-    ok = google::protobuf::TextFormat::PrintToString(index_params,
-                                                     &index_params_str);
-    assert(ok);
-    auto dataset = GenDataset(NB, metric_type, true);
-    auto xb_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
-
-    CDataType dtype = BinaryVector;
-    CIndex index;
-    CStatus status;
-    CBinarySet binary_set;
-    CIndex copy_index;
-
-    {
-        status = CreateIndexV0(
-            dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = BuildBinaryVecIndex(index, NB * DIM / 8, xb_data.data());
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = SerializeIndexToBinarySet(index, &binary_set);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = CreateIndexV0(dtype,
-                               type_params_str.c_str(),
-                               index_params_str.c_str(),
-                               &copy_index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = LoadIndexFromBinarySet(copy_index, binary_set);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = DeleteIndex(index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    {
-        status = DeleteIndex(copy_index);
-        ASSERT_EQ(milvus::Success, status.error_code);
-    }
-    { DeleteBinarySet(binary_set); }
+TEST(VecIndex, All) {
+    TestVecIndex<milvus::BinaryVector>();
+    TestVecIndex<milvus::SparseFloatVector>();
+    TestVecIndex<milvus::FloatVector>();
+    TestVecIndex<milvus::Float16Vector>();
+    TestVecIndex<milvus::BFloat16Vector>();
 }
 
 TEST(CBoolIndexTest, All) {

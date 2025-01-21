@@ -239,6 +239,7 @@ type commonConfig struct {
 	AuthorizationEnabled ParamItem `refreshable:"false"`
 	SuperUsers           ParamItem `refreshable:"true"`
 	DefaultRootPassword  ParamItem `refreshable:"false"`
+	RootShouldBindRole   ParamItem `refreshable:"true"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -516,7 +517,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
 		Version:      "2.4.6",
-		DefaultValue: "false",
+		DefaultValue: "true", // 2.5.4 version becomes default true
 	}
 	p.EnableMaterializedView.Init(base.mgr)
 
@@ -668,6 +669,15 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
+
+	p.RootShouldBindRole = ParamItem{
+		Key:          "common.security.rootShouldBindRole",
+		Version:      "2.5.4",
+		Doc:          "Whether the root user should bind a role when the authorization is enabled.",
+		DefaultValue: "false",
+		Export:       true,
+	}
+	p.RootShouldBindRole.Init(base.mgr)
 
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
@@ -970,8 +980,9 @@ This helps Milvus-CDC synchronize incremental data`,
 }
 
 type gpuConfig struct {
-	InitSize ParamItem `refreshable:"false"`
-	MaxSize  ParamItem `refreshable:"false"`
+	InitSize                            ParamItem `refreshable:"false"`
+	MaxSize                             ParamItem `refreshable:"false"`
+	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
 }
 
 func (t *gpuConfig) init(base *BaseTable) {
@@ -992,6 +1003,16 @@ func (t *gpuConfig) init(base *BaseTable) {
 		DefaultValue: "4096",
 	}
 	t.MaxSize.Init(base.mgr)
+	t.OverloadedMemoryThresholdPercentage = ParamItem{
+		Key:          "gpu.overloadedMemoryThresholdPercentage",
+		Version:      "2.5.4",
+		Export:       true,
+		DefaultValue: "95",
+		Formatter: func(v string) string {
+			return fmt.Sprintf("%f", getAsFloat(v)/100)
+		},
+	}
+	t.OverloadedMemoryThresholdPercentage.Init(base.mgr)
 }
 
 type traceConfig struct {
@@ -3310,13 +3331,12 @@ user-task-polling:
 // --- datacoord ---
 type dataCoordConfig struct {
 	// --- CHANNEL ---
-	WatchTimeoutInterval             ParamItem `refreshable:"false"`
-	LegacyVersionWithoutRPCWatch     ParamItem `refreshable:"false"`
-	ChannelBalanceSilentDuration     ParamItem `refreshable:"true"`
-	ChannelBalanceInterval           ParamItem `refreshable:"true"`
-	ChannelCheckInterval             ParamItem `refreshable:"true"`
-	ChannelOperationRPCTimeout       ParamItem `refreshable:"true"`
-	MaxConcurrentChannelTaskNumPerDN ParamItem `refreshable:"true"`
+	WatchTimeoutInterval         ParamItem `refreshable:"false"`
+	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
+	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
+	ChannelBalanceInterval       ParamItem `refreshable:"true"`
+	ChannelCheckInterval         ParamItem `refreshable:"true"`
+	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
@@ -3487,15 +3507,6 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ChannelOperationRPCTimeout.Init(base.mgr)
-
-	p.MaxConcurrentChannelTaskNumPerDN = ParamItem{
-		Key:          "dataCoord.channel.maxConcurrentChannelTaskNumPerDN",
-		Version:      "2.5",
-		DefaultValue: "32",
-		Doc:          "The maximum concurrency for each DataNode executing channel tasks (watch, release).",
-		Export:       true,
-	}
-	p.MaxConcurrentChannelTaskNumPerDN.Init(base.mgr)
 
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",

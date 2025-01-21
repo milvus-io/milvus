@@ -128,13 +128,12 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
         vec_field_data_type, config, file_manager_context);
     knowhere::DataSetPtr xb_dataset;
     if (vec_field_data_type == DataType::VECTOR_BINARY) {
-        auto dataset = GenDataset(NB, metric_type, true);
+        auto dataset = GenFieldData(NB, metric_type, vec_field_data_type);
         auto bin_vecs = dataset.get_col<uint8_t>(milvus::FieldId(100));
         xb_dataset = knowhere::GenDataSet(NB, DIM, bin_vecs.data());
         ASSERT_NO_THROW(index->Build(xb_dataset));
     } else if (vec_field_data_type == DataType::VECTOR_SPARSE_FLOAT) {
-        auto dataset = GenDatasetWithDataType(
-            NB, metric_type, milvus::DataType::VECTOR_SPARSE_FLOAT);
+        auto dataset = GenFieldData(NB, metric_type, vec_field_data_type);
         auto sparse_vecs = dataset.get_col<knowhere::sparse::SparseRow<float>>(
             milvus::FieldId(100));
         xb_dataset =
@@ -143,7 +142,7 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
         ASSERT_NO_THROW(index->Build(xb_dataset));
     } else {
         // VECTOR_FLOAT
-        auto dataset = GenDataset(NB, metric_type, false);
+        auto dataset = GenFieldData(NB, metric_type);
         auto f_vecs = dataset.get_col<float>(milvus::FieldId(100));
         xb_dataset = knowhere::GenDataSet(NB, DIM, f_vecs.data());
         ASSERT_NO_THROW(index->Build(xb_dataset));
@@ -173,14 +172,13 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
     std::unique_ptr<SearchResult> result;
     if (vec_field_data_type == DataType::VECTOR_FLOAT) {
         auto nb_for_nq = NQ + query_offset;
-        auto dataset = GenDataset(nb_for_nq, metric_type, false);
+        auto dataset = GenFieldData(nb_for_nq, metric_type);
         auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
         auto xq_dataset =
             knowhere::GenDataSet(NQ, DIM, xb_data.data() + DIM * query_offset);
         result = vec_index->Query(xq_dataset, search_info, nullptr);
     } else if (vec_field_data_type == DataType::VECTOR_SPARSE_FLOAT) {
-        auto dataset = GenDatasetWithDataType(
-            NQ, metric_type, milvus::DataType::VECTOR_SPARSE_FLOAT);
+        auto dataset = GenFieldData(NQ, metric_type, vec_field_data_type);
         auto xb_data = dataset.get_col<knowhere::sparse::SparseRow<float>>(
             milvus::FieldId(100));
         auto xq_dataset =
@@ -189,7 +187,8 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
         result = vec_index->Query(xq_dataset, search_info, nullptr);
     } else {
         auto nb_for_nq = NQ + query_offset;
-        auto dataset = GenDataset(nb_for_nq, metric_type, true);
+        auto dataset =
+            GenFieldData(nb_for_nq, metric_type, DataType::VECTOR_BINARY);
         auto xb_bin_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
         // offset of binary vector is 8-aligned bit-wise representation.
         auto xq_dataset = knowhere::GenDataSet(

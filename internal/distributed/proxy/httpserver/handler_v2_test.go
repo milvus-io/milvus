@@ -350,8 +350,8 @@ func TestGrpcWrapper(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, w.Code)
 		err = json.Unmarshal(w.Body.Bytes(), returnBody)
 		assert.Nil(t, err)
-		assert.Equal(t, int32(2), returnBody.Code)
-		assert.Equal(t, "service unavailable: internal: Milvus Proxy is not ready yet. please wait", returnBody.Message)
+		assert.Equal(t, int32(65535), returnBody.Code)
+		assert.Equal(t, "rpc error: code = PermissionDenied desc = PrivilegeLoad: permission deny to test in the `default` database", returnBody.Message)
 		fmt.Println(w.Body.String())
 	})
 }
@@ -673,6 +673,126 @@ func TestCreateIndex(t *testing.T) {
 	}
 }
 
+func TestCompact(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	postTestCases := []requestBodyTestCase{}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().ManualCompaction(mock.Anything, mock.Anything).Return(&milvuspb.ManualCompactionResponse{CompactionID: 1}, nil).Once()
+	mp.EXPECT().ManualCompaction(mock.Anything, mock.Anything).Return(
+		&milvuspb.ManualCompactionResponse{
+			Status: &commonpb.Status{
+				Code:   1100,
+				Reason: "mock",
+			},
+		}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	path := versionalV2(CollectionCategory, CompactAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"test"}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"invalid_name"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	mp.EXPECT().GetCompactionState(mock.Anything, mock.Anything).Return(&milvuspb.GetCompactionStateResponse{}, nil).Once()
+	mp.EXPECT().GetCompactionState(mock.Anything, mock.Anything).Return(
+		&milvuspb.GetCompactionStateResponse{
+			Status: &commonpb.Status{
+				Code:   1100,
+				Reason: "mock",
+			},
+		}, nil).Once()
+	path = versionalV2(CollectionCategory, CompactionStateAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"test"}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"invalid_name"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	for _, testcase := range postTestCases {
+		t.Run("post"+testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			fmt.Println(w.Body.String())
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+			if testcase.errCode != 0 {
+				assert.Equal(t, testcase.errMsg, returnBody.Message)
+			}
+		})
+	}
+}
+
+func TestFlush(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	postTestCases := []requestBodyTestCase{}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().Flush(mock.Anything, mock.Anything).Return(&milvuspb.FlushResponse{}, nil).Once()
+	mp.EXPECT().Flush(mock.Anything, mock.Anything).Return(
+		&milvuspb.FlushResponse{
+			Status: &commonpb.Status{
+				Code:   1100,
+				Reason: "mock",
+			},
+		}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	path := versionalV2(CollectionCategory, FlushAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"test"}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName":"invalid_name"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	for _, testcase := range postTestCases {
+		t.Run("post"+testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			fmt.Println(w.Body.String())
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+			if testcase.errCode != 0 {
+				assert.Equal(t, testcase.errMsg, returnBody.Message)
+			}
+		})
+	}
+}
+
 func TestDatabase(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
@@ -784,6 +904,46 @@ func TestDatabase(t *testing.T) {
 		errCode:     1100, // ErrParameterInvalid
 	})
 
+	mp.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	path = versionalV2(DataBaseCategory, DropPropertiesAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"test"}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"mock"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	mp.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(
+		&commonpb.Status{
+			Code:   1100,
+			Reason: "mock",
+		}, nil).Once()
+	path = versionalV2(DataBaseCategory, AlterPropertiesAction)
+	// success
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"test"}`),
+	})
+	// mock fail
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"dbName":"mock"}`),
+		errMsg:      "mock",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
 	for _, testcase := range postTestCases {
 		t.Run("post"+testcase.path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, testcase.path, bytes.NewReader(testcase.requestBody))
@@ -841,12 +1001,12 @@ func TestColletcionProperties(t *testing.T) {
 	// success
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
-		requestBody: []byte(`{"collectionName":"test", "deleteKeys":["mmap"]}`),
+		requestBody: []byte(`{"collectionName":"test", "propertyKeys":["mmap"]}`),
 	})
 	// mock fail
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
-		requestBody: []byte(`{"collectionName":"mock", "deleteKeys":["mmap"]}`),
+		requestBody: []byte(`{"collectionName":"mock", "propertyKeys":["mmap"]}`),
 		errMsg:      "mock",
 		errCode:     1100, // ErrParameterInvalid
 	})
@@ -908,12 +1068,12 @@ func TestIndexProperties(t *testing.T) {
 	// success
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
-		requestBody: []byte(`{"collectionName":"test","indexName":"test", "deleteKeys":["test"]}`),
+		requestBody: []byte(`{"collectionName":"test","indexName":"test", "propertyKeys":["test"]}`),
 	})
 	// mock fail
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
-		requestBody: []byte(`{"collectionName":"mock","indexName":"test", "deleteKeys":["test"]}`),
+		requestBody: []byte(`{"collectionName":"mock","indexName":"test", "propertyKeys":["test"]}`),
 		errMsg:      "mock",
 		errCode:     1100, // ErrParameterInvalid
 	})
@@ -2205,7 +2365,7 @@ func TestSearchV2(t *testing.T) {
 		Schema:         collSchema,
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Times(14)
+	}, nil).Times(15)
 	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(3)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status: &commonpb.Status{
@@ -2226,12 +2386,6 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9}}`),
-	})
-	queryTestCases = append(queryTestCases, requestBodyTestCase{
-		path:        SearchAction,
-		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "searchParams": {"ignoreGrowing": "true"}}`),
-		errMsg:      "can only accept json format request, error: json: cannot unmarshal string into Go struct field searchParams.searchParams.ignoreGrowing of type bool",
-		errCode:     1801, // ErrIncorrectParameterFormat
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
@@ -2410,8 +2564,8 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "searchParams": {"params":"a"}}`),
-		errMsg:      "can only accept json format request, error: json: cannot unmarshal string into Go struct field searchParams.searchParams.params of type map[string]interface {}",
-		errCode:     1801, // ErrIncorrectParameterFormat
+		errMsg:      "searchParams.params must be a dict: invalid parameter",
+		errCode:     1100, // ErrParameterInvalid
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
