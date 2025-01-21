@@ -253,6 +253,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			}
 			ts := typeutil.Timestamp(tsArray.Value(i))
 			if entityFilter.Filtered(pk, ts) {
+
 				if sliceStart != -1 {
 					err = writeSlice(r, sliceStart, i)
 					if err != nil {

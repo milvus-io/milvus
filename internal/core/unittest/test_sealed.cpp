@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <boost/format.hpp>
+#include <optional>
 #include <gtest/gtest.h>
 
 #include "common/Types.h"
@@ -1461,7 +1462,8 @@ TEST(Sealed, GetVectorFromChunkCache) {
                                         milvus::DataType::VECTOR_FLOAT,
                                         dim,
                                         metric_type,
-                                        false);
+                                        false,
+                                        std::nullopt);
 
     auto rcm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                    .GetRemoteChunkManager();
@@ -1561,7 +1563,8 @@ TEST(Sealed, GetSparseVectorFromChunkCache) {
                                         milvus::DataType::VECTOR_SPARSE_FLOAT,
                                         dim,
                                         metric_type,
-                                        false);
+                                        false,
+                                        std::nullopt);
 
     auto data = dataset.get_col<knowhere::sparse::SparseRow<float>>(fakevec_id);
 
@@ -1669,7 +1672,8 @@ TEST(Sealed, WarmupChunkCache) {
                                         milvus::DataType::VECTOR_FLOAT,
                                         dim,
                                         metric_type,
-                                        false);
+                                        false,
+                                        std::nullopt);
 
     auto rcm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                    .GetRemoteChunkManager();
