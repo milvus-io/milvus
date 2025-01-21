@@ -62,6 +62,7 @@ type taskScheduler struct {
 	indexEngineVersionManager IndexEngineVersionManager
 	handler                   Handler
 	allocator                 allocator.Allocator
+	compactionHandler         compactionPlanContext
 
 	taskStats *expirable.LRU[UniqueID, Task]
 }
@@ -95,6 +96,10 @@ func newTaskScheduler(
 	}
 	ts.reloadFromMeta()
 	return ts
+}
+
+func (s *taskScheduler) setCompactionHandler(compactionHandler compactionPlanContext) {
+	s.compactionHandler = compactionHandler
 }
 
 func (s *taskScheduler) Start() {
@@ -389,7 +394,7 @@ func (s *taskScheduler) processInit(task Task) bool {
 	log.Ctx(s.ctx).Info("pick client success", zap.Int64("taskID", task.GetTaskID()), zap.Int64("nodeID", nodeID))
 
 	// 2. update version
-	if err := task.UpdateVersion(s.ctx, nodeID, s.meta); err != nil {
+	if err := task.UpdateVersion(s.ctx, nodeID, s.meta, s.compactionHandler); err != nil {
 		log.Ctx(s.ctx).Warn("update task version failed", zap.Int64("taskID", task.GetTaskID()), zap.Error(err))
 		return false
 	}

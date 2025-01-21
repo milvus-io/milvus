@@ -59,6 +59,7 @@ type compactionPlanContext interface {
 	getCompactionTasksNumBySignalID(signalID int64) int
 	getCompactionInfo(ctx context.Context, signalID int64) *compactionInfo
 	removeTasksByChannel(channel string)
+	checkAndSetSegmentStating(segmentID int64) bool
 }
 
 var (
@@ -230,6 +231,21 @@ func summaryCompactionState(tasks []*datapb.CompactionTask) *compactionInfo {
 	return ret
 }
 
+func (c *compactionPlanHandler) checkAndSetSegmentStating(segmentID int64) bool {
+	c.executingGuard.Lock()
+	defer c.executingGuard.Unlock()
+
+	for _, t := range c.executingTasks {
+		if t.GetTaskProto().GetType() == datapb.CompactionType_Level0DeleteCompaction {
+			if t.CheckCompactionContainsSegment(segmentID) {
+				return false
+			}
+		}
+	}
+	c.meta.SetSegmentStating(segmentID, true)
+	return false
+}
+
 func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64) int {
 	cnt := 0
 	c.queueTasks.ForEach(func(ct CompactionTask) {
@@ -364,6 +380,13 @@ func (c *compactionPlanHandler) schedule(assigner NodeAssigner) []CompactionTask
 		}
 
 		c.executingGuard.Lock()
+		// Do not move this check logic outside the lock; it needs to remain mutually exclusive with the stats task.
+		if t.GetTaskProto().GetType() == datapb.CompactionType_Level0DeleteCompaction {
+			if !t.PreparePlan() {
+				c.executingGuard.Unlock()
+				continue
+			}
+		}
 		c.executingTasks[t.GetTaskProto().GetPlanID()] = t
 		c.executingGuard.Unlock()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Dec()

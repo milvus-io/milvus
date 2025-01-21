@@ -33,7 +33,7 @@ type Task interface {
 	SetState(state indexpb.JobState, failReason string)
 	GetState() indexpb.JobState
 	GetFailReason() string
-	UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error
+	UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error
 	UpdateMetaBuildingState(meta *meta) error
 	AssignTask(ctx context.Context, client types.IndexNodeClient) bool
 	QueryResult(ctx context.Context, client types.IndexNodeClient)
