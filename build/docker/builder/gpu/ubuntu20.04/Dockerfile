@@ -87,7 +87,7 @@ RUN wget -O /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini
     chmod +x /tini
 
 RUN curl https://sh.rustup.rs -sSf | \
-    sh -s -- --default-toolchain=1.73 -y
+    sh -s -- --default-toolchain=1.83 -y
 
 ENV PATH=/root/.cargo/bin:$PATH
 

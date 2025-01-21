@@ -1021,6 +1021,19 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		return err
 	}
 
+	// // if segment is pk sorted, user created indexes bring no performance gain but extra memory usage
+	if s.IsSorted() && fieldSchema.GetIsPrimaryKey() {
+		log.Info("skip loading index for pk field in sorted segment")
+		// set field index, preventing repeated loading index task
+		s.fieldIndexes.Insert(indexInfo.GetFieldID(), &IndexedFieldInfo{
+			FieldBinlog: &datapb.FieldBinlog{
+				FieldID: indexInfo.GetFieldID(),
+			},
+			IndexInfo: indexInfo,
+			IsLoaded:  true,
+		})
+	}
+
 	return s.innerLoadIndex(ctx, fieldSchema, indexInfo, tr, fieldType)
 }
 
