@@ -14,6 +14,7 @@
 #include "common/protobuf_utils.h"
 
 #include <boost/lexical_cast.hpp>
+#include <optional>
 
 #include "Consts.h"
 
@@ -76,6 +77,13 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
 
     auto data_type = DataType(schema_proto.data_type());
 
+    auto default_value = [&]() -> std::optional<DefaultValueType> {
+        if (schema_proto.has_default_value()) {
+            return std::nullopt;
+        }
+        return schema_proto.default_value();
+    }();
+
     if (IsVectorDataType(data_type)) {
         auto type_map = RepeatedKeyValToMap(schema_proto.type_params());
         auto index_map = RepeatedKeyValToMap(schema_proto.index_params());
@@ -85,12 +93,19 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
             AssertInfo(type_map.count("dim"), "dim not found");
             dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
         }
+
         if (!index_map.count("metric_type")) {
-            return FieldMeta{
-                name, field_id, data_type, dim, std::nullopt, false};
+            return FieldMeta{name,
+                             field_id,
+                             data_type,
+                             dim,
+                             std::nullopt,
+                             false,
+                             default_value};
         }
         auto metric_type = index_map.at("metric_type");
-        return FieldMeta{name, field_id, data_type, dim, metric_type, false};
+        return FieldMeta{
+            name, field_id, data_type, dim, metric_type, false, default_value};
     }
 
     if (IsStringDataType(data_type)) {
@@ -123,7 +138,8 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          nullable,
                          enable_match,
                          enable_analyzer,
-                         type_map};
+                         type_map,
+                         default_value};
     }
 
     if (IsArrayDataType(data_type)) {
@@ -131,10 +147,11 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          field_id,
                          data_type,
                          DataType(schema_proto.element_type()),
-                         nullable};
+                         nullable,
+                         default_value};
     }
 
-    return FieldMeta{name, field_id, data_type, nullable};
+    return FieldMeta{name, field_id, data_type, nullable, default_value};
 }
 
 }  // namespace milvus
