@@ -205,6 +205,13 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// check varchar with analyzer was utf-8 format
+	err = checkVarcharFormat(it.schema, it.insertMsg)
+	if err != nil {
+		log.Warn("check varchar format failed", zap.Error(err))
+		return err
+	}
+
 	// set field ID to insert field data
 	err = fillFieldPropertiesBySchema(it.insertMsg.GetFieldsData(), schema.CollectionSchema)
 	if err != nil {

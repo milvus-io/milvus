@@ -198,6 +198,14 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 			zap.Error(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
+
+	// check varchar with analyzer was utf-8 format
+	err = checkVarcharFormat(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+	if err != nil {
+		log.Warn("check varchar format failed", zap.Error(err))
+		return err
+	}
+
 	// set field ID to insert field data
 	err = fillFieldPropertiesBySchema(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.CollectionSchema)
 	if err != nil {
