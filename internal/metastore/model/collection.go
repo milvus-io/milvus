@@ -28,6 +28,7 @@ type Collection struct {
 	Properties           []*commonpb.KeyValuePair
 	State                pb.CollectionState
 	EnableDynamicField   bool
+	UpdateTimestamp      uint64
 }
 
 func (c *Collection) Available() bool {
@@ -54,6 +55,7 @@ func (c *Collection) Clone() *Collection {
 		Properties:           common.CloneKeyValuePairs(c.Properties),
 		State:                c.State,
 		EnableDynamicField:   c.EnableDynamicField,
+		UpdateTimestamp:      c.UpdateTimestamp,
 	}
 }
 
@@ -110,6 +112,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		State:                coll.State,
 		Properties:           coll.Properties,
 		EnableDynamicField:   coll.Schema.EnableDynamicField,
+		UpdateTimestamp:      coll.UpdateTimestamp,
 	}
 }
 
@@ -171,6 +174,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		StartPositions:       coll.StartPositions,
 		State:                coll.State,
 		Properties:           coll.Properties,
+		UpdateTimestamp:      coll.UpdateTimestamp,
 	}
 
 	if c.withPartitions {
