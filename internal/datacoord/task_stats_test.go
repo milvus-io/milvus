@@ -377,7 +377,20 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 				Reason:    "mock error",
 			}, nil)
 
-			s.False(st.AssignTask(context.Background(), in))
+			mt := &meta{
+				segments: &SegmentsInfo{
+					segments: map[int64]*SegmentInfo{
+						st.segmentID: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    st.segmentID,
+								State: commonpb.SegmentState_Flushed,
+							},
+						},
+					},
+				},
+			}
+
+			s.False(st.AssignTask(context.Background(), in, mt))
 		})
 
 		s.Run("assign success", func() {
@@ -387,7 +400,20 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 				Reason:    "",
 			}, nil)
 
-			s.True(st.AssignTask(context.Background(), in))
+			mt := &meta{
+				segments: &SegmentsInfo{
+					segments: map[int64]*SegmentInfo{
+						st.segmentID: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    st.segmentID,
+								State: commonpb.SegmentState_Flushed,
+							},
+						},
+					},
+				},
+			}
+
+			s.True(st.AssignTask(context.Background(), in, mt))
 		})
 	})
 
