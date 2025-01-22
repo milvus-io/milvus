@@ -1753,7 +1753,7 @@ type BroadcastHeader struct {
 func (x *BroadcastHeader) Reset() {
 	*x = BroadcastHeader{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_messages_proto_msgTypes[29]
+		mi := &file_messages_proto_msgTypes[30]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}

@@ -81,9 +81,6 @@ type Scanner interface {
 
 // WALAccesser is the interfaces to interact with the milvus write ahead log.
 type WALAccesser interface {
-	// WALName returns the name of the wal.
-	WALName() string
-
 	// Txn returns a transaction for writing records to one vchannel.
 	// It promises the atomicity written of the messages.
 	// Once the txn is returned, the Commit or Rollback operation must be called once, otherwise resource leak on wal.
