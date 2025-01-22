@@ -21,11 +21,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
-<<<<<<< HEAD
-	"github.com/milvus-io/milvus/internal/storage"
-=======
-	"github.com/milvus-io/milvus/internal/proto/datapb"
->>>>>>> b574767843 (fix UT failures and code check breaks)
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
