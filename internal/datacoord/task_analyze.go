@@ -118,7 +118,7 @@ func (at *analyzeTask) GetFailReason() string {
 	return at.taskInfo.GetFailReason()
 }
 
-func (at *analyzeTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error {
+func (at *analyzeTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error {
 	if err := meta.analyzeMeta.UpdateVersion(at.GetTaskID(), nodeID); err != nil {
 		return err
 	}

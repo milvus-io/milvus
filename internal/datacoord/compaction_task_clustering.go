@@ -181,6 +181,14 @@ func (t *clusteringCompactionTask) Clean() bool {
 	return t.doClean() == nil
 }
 
+func (t *clusteringCompactionTask) PreparePlan() bool {
+	return true
+}
+
+func (t *clusteringCompactionTask) CheckCompactionContainsSegment(segmentID int64) bool {
+	return false
+}
+
 func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
 	beginLogID, _, err := t.allocator.AllocN(1)
 	if err != nil {

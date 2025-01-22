@@ -22,6 +22,52 @@ func (_m *MockCompactionPlanContext) EXPECT() *MockCompactionPlanContext_Expecte
 	return &MockCompactionPlanContext_Expecter{mock: &_m.Mock}
 }
 
+// checkAndSetSegmentStating provides a mock function with given fields: segmentID
+func (_m *MockCompactionPlanContext) checkAndSetSegmentStating(segmentID int64) bool {
+	ret := _m.Called(segmentID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for checkAndSetSegmentStating")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(int64) bool); ok {
+		r0 = rf(segmentID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockCompactionPlanContext_checkAndSetSegmentStating_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'checkAndSetSegmentStating'
+type MockCompactionPlanContext_checkAndSetSegmentStating_Call struct {
+	*mock.Call
+}
+
+// checkAndSetSegmentStating is a helper method to define mock.On call
+//   - segmentID int64
+func (_e *MockCompactionPlanContext_Expecter) checkAndSetSegmentStating(segmentID interface{}) *MockCompactionPlanContext_checkAndSetSegmentStating_Call {
+	return &MockCompactionPlanContext_checkAndSetSegmentStating_Call{Call: _e.mock.On("checkAndSetSegmentStating", segmentID)}
+}
+
+func (_c *MockCompactionPlanContext_checkAndSetSegmentStating_Call) Run(run func(segmentID int64)) *MockCompactionPlanContext_checkAndSetSegmentStating_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCompactionPlanContext_checkAndSetSegmentStating_Call) Return(_a0 bool) *MockCompactionPlanContext_checkAndSetSegmentStating_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionPlanContext_checkAndSetSegmentStating_Call) RunAndReturn(run func(int64) bool) *MockCompactionPlanContext_checkAndSetSegmentStating_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // enqueueCompaction provides a mock function with given fields: task
 func (_m *MockCompactionPlanContext) enqueueCompaction(task *datapb.CompactionTask) error {
 	ret := _m.Called(task)
@@ -237,6 +283,39 @@ func (_c *MockCompactionPlanContext_removeTasksByChannel_Call) Return() *MockCom
 }
 
 func (_c *MockCompactionPlanContext_removeTasksByChannel_Call) RunAndReturn(run func(string)) *MockCompactionPlanContext_removeTasksByChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// setTaskScheduler provides a mock function with given fields: scheduler
+func (_m *MockCompactionPlanContext) setTaskScheduler(scheduler *taskScheduler) {
+	_m.Called(scheduler)
+}
+
+// MockCompactionPlanContext_setTaskScheduler_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'setTaskScheduler'
+type MockCompactionPlanContext_setTaskScheduler_Call struct {
+	*mock.Call
+}
+
+// setTaskScheduler is a helper method to define mock.On call
+//   - scheduler *taskScheduler
+func (_e *MockCompactionPlanContext_Expecter) setTaskScheduler(scheduler interface{}) *MockCompactionPlanContext_setTaskScheduler_Call {
+	return &MockCompactionPlanContext_setTaskScheduler_Call{Call: _e.mock.On("setTaskScheduler", scheduler)}
+}
+
+func (_c *MockCompactionPlanContext_setTaskScheduler_Call) Run(run func(scheduler *taskScheduler)) *MockCompactionPlanContext_setTaskScheduler_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*taskScheduler))
+	})
+	return _c
+}
+
+func (_c *MockCompactionPlanContext_setTaskScheduler_Call) Return() *MockCompactionPlanContext_setTaskScheduler_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCompactionPlanContext_setTaskScheduler_Call) RunAndReturn(run func(*taskScheduler)) *MockCompactionPlanContext_setTaskScheduler_Call {
 	_c.Call.Return(run)
 	return _c
 }

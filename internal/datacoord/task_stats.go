@@ -79,6 +79,7 @@ func (st *statsTask) ResetTask(mt *meta) {
 	// reset isCompacting
 
 	mt.SetSegmentsCompacting(context.TODO(), []UniqueID{st.segmentID}, false)
+	mt.SetSegmentStating(st.segmentID, false)
 }
 
 func (st *statsTask) SetQueueTime(t time.Time) {
@@ -127,13 +128,24 @@ func (st *statsTask) GetFailReason() string {
 	return st.taskInfo.GetFailReason()
 }
 
-func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error {
+func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error {
 	// mark compacting
 	if exist, canDo := meta.CheckAndSetSegmentsCompacting(ctx, []UniqueID{st.segmentID}); !exist || !canDo {
 		log.Warn("segment is not exist or is compacting, skip stats",
 			zap.Bool("exist", exist), zap.Bool("canDo", canDo))
-		st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
+		st.SetState(indexpb.JobState_JobStateFailed, "segment is not healthy")
+		st.SetStartTime(time.Now())
 		return fmt.Errorf("mark segment compacting failed, isCompacting: %v", !canDo)
+	}
+
+	if !compactionHandler.checkAndSetSegmentStating(st.segmentID) {
+		log.Warn("segment is contains by l0 compaction, skip stats", zap.Int64("taskID", st.taskID),
+			zap.Int64("segmentID", st.segmentID))
+		st.SetState(indexpb.JobState_JobStateFailed, "segment is contains by l0 compaction")
+		//reset compacting
+		meta.SetSegmentsCompacting(ctx, []UniqueID{st.segmentID}, false)
+		st.SetStartTime(time.Now())
+		return fmt.Errorf("segment is contains by l0 compaction")
 	}
 
 	if err := meta.statsTaskMeta.UpdateVersion(st.taskID, nodeID); err != nil {

@@ -48,6 +48,9 @@ type CompactionTask interface {
 	GetSpan() trace.Span
 	SetSpan(trace.Span)
 	SaveTaskMeta() error
+
+	PreparePlan() bool
+	CheckCompactionContainsSegment(segmentID int64) bool
 }
 
 type compactionTaskOpt func(task *datapb.CompactionTask)
