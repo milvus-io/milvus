@@ -257,7 +257,7 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("https://github.com/milvus-io/pymilvus/issues/1886")
+    # @pytest.mark.skip("https://github.com/milvus-io/pymilvus/issues/1886")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_all_indexes_params[:7]))
