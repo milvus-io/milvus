@@ -267,7 +267,6 @@ struct TantivyIndexWrapper {
     inline void
     finish() {
         if (!finished_) {
-            tantivy_finish_index(writer_);
             auto res = RustResultWrapper(tantivy_finish_index(writer_));
             AssertInfo(res.result_->success,
                        "failed to finish index: {}",
