@@ -1028,13 +1028,13 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 	return dct.result, nil
 }
 
-// DescribeCollection get the meta information of specific collection, such as schema, created timestamp and etc.
-func (node *Proxy) AddField(ctx context.Context, request *milvuspb.AddFieldRequest) (*commonpb.Status, error) {
+// AddCollectionField add a field to collection
+func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
 
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddField")
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddCollectionField")
 	defer sp.End()
 
 	dresp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: request.DbName, CollectionName: request.CollectionName})
@@ -1042,15 +1042,15 @@ func (node *Proxy) AddField(ctx context.Context, request *milvuspb.AddFieldReque
 	if err := merr.CheckRPCCall(dresp, err); err != nil {
 		return merr.Status(err), nil
 	}
-	task := &addFieldTask{
-		ctx:             ctx,
-		Condition:       NewTaskCondition(ctx),
-		AddFieldRequest: request,
-		rootCoord:       node.rootCoord,
-		oldSchema:       dresp.GetSchema(),
+	task := &addCollectionFieldTask{
+		ctx:                       ctx,
+		Condition:                 NewTaskCondition(ctx),
+		AddCollectionFieldRequest: request,
+		rootCoord:                 node.rootCoord,
+		oldSchema:                 dresp.GetSchema(),
 	}
 
-	method := "addField"
+	method := "AddCollectionField"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
@@ -1058,8 +1058,7 @@ func (node *Proxy) AddField(ctx context.Context, request *milvuspb.AddFieldReque
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.Int("length of field", len(request.FieldSchema)))
+		zap.String("collection", request.CollectionName))
 
 	log.Info(rpcReceived(method))
 

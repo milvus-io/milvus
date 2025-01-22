@@ -717,38 +717,6 @@ func (m *meta) SetState(ctx context.Context, segmentID UniqueID, targetState com
 	return nil
 }
 
-// // SetState setting segment with provided ID state
-// func (m *meta) SetAddedField(ctx context.Context, collectionID UniqueID, fieldIDs []UniqueID) error {
-// 	log.Debug("meta update: setting added field",
-// 		zap.Any("fieldIDs", fieldIDs))
-// 	log := log.Ctx(context.TODO())
-// 	segmentInfos := m.GetSegmentsOfCollection(ctx, collectionID)
-
-// 	m.Lock()
-// 	defer m.Unlock()
-// 	for _, curSegInfo := range segmentInfos {
-// 		if curSegInfo == nil {
-// 			clonedSegment := curSegInfo.Clone()
-// 			if clonedSegment != nil && isSegmentHealthy(clonedSegment) {
-// 				// Update segment state and prepare segment metric update.
-// 				updateAddedField(clonedSegment, fieldIDs)
-// 				if err := m.catalog.AlterSegments(ctx, []*datapb.SegmentInfo{clonedSegment.SegmentInfo}); err != nil {
-// 					log.Warn("meta update: setting segment state - failed to alter segments",
-// 						zap.Int64("segmentID", clonedSegment.ID),
-// 						zap.Error(err))
-// 					return err
-// 				}
-// 				// Update in-memory meta.
-// 				m.segments.SetSegment(clonedSegment.ID, clonedSegment)
-// 			}
-// 			log.Info("meta update: setting segment state - complete",
-// 				zap.Int64("segmentID", clonedSegment.ID),
-// 				zap.Any("fieldIDs", fieldIDs))
-// 		}
-// 	}
-// 	return nil
-// }
-
 func (m *meta) UpdateSegment(segmentID int64, operators ...SegmentOperator) error {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
@@ -2041,16 +2009,6 @@ func updateSegStateAndPrepareMetrics(segToUpdate *SegmentInfo, targetState commo
 		segToUpdate.DroppedAt = uint64(time.Now().UnixNano())
 	}
 }
-
-// func updateAddedField(segToUpdate *SegmentInfo, fieldIDs []UniqueID) {
-// 	log.Ctx(context.TODO()).Info("updating segment added field",
-// 		zap.Int64("segmentID", segToUpdate.GetID()),
-// 		zap.Any("fieldIDs", fieldIDs),
-// 		zap.Int64("# of rows", segToUpdate.GetNumOfRows()))
-// 	for _, fieldID := range fieldIDs {
-// 		segToUpdate.LackBinlogMap[fieldID] = segToUpdate.currRows
-// 	}
-// }
 
 func (m *meta) ListCollections() []int64 {
 	return m.collections.Keys()

@@ -57,8 +57,11 @@ TEST(chunk, test_int64_field) {
     s = arrow_reader->GetRecordBatchReader(&rb_reader);
     EXPECT_TRUE(s.ok());
 
-    FieldMeta field_meta(
-        FieldName("a"), milvus::FieldId(1), DataType::INT64, false);
+    FieldMeta field_meta(FieldName("a"),
+                         milvus::FieldId(1),
+                         DataType::INT64,
+                         false,
+                         std::nullopt);
     auto chunk = create_chunk(field_meta, 1, rb_reader);
     auto span = std::dynamic_pointer_cast<FixedWidthChunk>(chunk)->Span();
     EXPECT_EQ(span.row_count(), data.size());
@@ -93,8 +96,11 @@ TEST(chunk, test_variable_field) {
     s = arrow_reader->GetRecordBatchReader(&rb_reader);
     EXPECT_TRUE(s.ok());
 
-    FieldMeta field_meta(
-        FieldName("a"), milvus::FieldId(1), DataType::STRING, false);
+    FieldMeta field_meta(FieldName("a"),
+                         milvus::FieldId(1),
+                         DataType::STRING,
+                         false,
+                         std::nullopt);
     auto chunk = create_chunk(field_meta, 1, rb_reader);
     auto views = std::dynamic_pointer_cast<StringChunk>(chunk)->StringViews(
         std::nullopt);
@@ -291,8 +297,11 @@ TEST(chunk, test_null_int64) {
     s = arrow_reader->GetRecordBatchReader(&rb_reader);
     EXPECT_TRUE(s.ok());
 
-    FieldMeta field_meta(
-        FieldName("a"), milvus::FieldId(1), DataType::INT64, true);
+    FieldMeta field_meta(FieldName("a"),
+                         milvus::FieldId(1),
+                         DataType::INT64,
+                         true,
+                         std::nullopt);
     auto chunk = create_chunk(field_meta, 1, rb_reader);
     auto fixed_chunk = std::dynamic_pointer_cast<FixedWidthChunk>(chunk);
     auto span = fixed_chunk->Span();
@@ -349,7 +358,8 @@ TEST(chunk, test_array) {
                          milvus::FieldId(1),
                          DataType::ARRAY,
                          DataType::STRING,
-                         false);
+                         false,
+                         std::nullopt);
     auto chunk = create_chunk(field_meta, 1, rb_reader);
     auto [views, valid] =
         std::dynamic_pointer_cast<ArrayChunk>(chunk)->Views(std::nullopt);
@@ -562,7 +572,8 @@ TEST(chunk, test_sparse_float) {
                          DataType::VECTOR_SPARSE_FLOAT,
                          kTestSparseDim,
                          "IP",
-                         false);
+                         false,
+                         std::nullopt);
     auto chunk = create_chunk(field_meta, kTestSparseDim, rb_reader);
     auto vec = std::dynamic_pointer_cast<SparseFloatVectorChunk>(chunk)->Vec();
     for (size_t i = 0; i < n_rows; ++i) {
@@ -624,8 +635,11 @@ TEST(chunk, multiple_chunk_mmap) {
     s = arrow_reader->GetRecordBatchReader(&rb_reader);
     EXPECT_TRUE(s.ok());
 
-    FieldMeta field_meta(
-        FieldName("a"), milvus::FieldId(1), DataType::INT64, false);
+    FieldMeta field_meta(FieldName("a"),
+                         milvus::FieldId(1),
+                         DataType::INT64,
+                         false,
+                         std::nullopt);
     int file_offset = 0;
     auto page_size = sysconf(_SC_PAGESIZE);
     auto chunk = create_chunk(field_meta, 1, file, file_offset, rb_reader);

@@ -34,18 +34,25 @@ static int64_t debug_id = START_USER_FIELDID;
 class Schema {
  public:
     FieldId
-    AddDebugField(
-        const std::string& name,
-        DataType data_type,
-        bool nullable = false,
-        std::optional<DefaultValueType> default_value = std::nullopt) {
+    AddDebugField(const std::string& name,
+                  DataType data_type,
+                  bool nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
-        this->AddField(FieldName(name),
-                       field_id,
-                       data_type,
-                       nullable,
-                       std::move(default_value));
+        this->AddField(
+            FieldName(name), field_id, data_type, nullable, std::nullopt);
+        return field_id;
+    }
+
+    FieldId
+    AddDebugFieldWithDefaultValue(const std::string& name,
+                                  DataType data_type,
+                                  DefaultValueType value,
+                                  bool nullable = true) {
+        auto field_id = FieldId(debug_id);
+        debug_id++;
+        this->AddField(
+            FieldName(name), field_id, data_type, nullable, std::move(value));
         return field_id;
     }
 

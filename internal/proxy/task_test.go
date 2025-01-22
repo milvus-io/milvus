@@ -667,6 +667,257 @@ func TestTranslateOutputFields(t *testing.T) {
 	})
 }
 
+func TestAddFieldTask(t *testing.T) {
+	rc := NewRootCoordMock()
+	ctx := context.Background()
+	prefix := "TestAddFieldTask"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+	collectionID := int64(1)
+	int64Field := "int64"
+	floatVecField := "fvec"
+	varCharField := "varChar"
+
+	rc.collName2ID[collectionName] = collectionID
+	rc.collID2Meta[collectionID] = collectionMeta{
+		name: collectionName,
+		id:   collectionID,
+		schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_Int64, AutoID: true, Name: "ID"},
+				{
+					FieldID: 101, DataType: schemapb.DataType_FloatVector, Name: "vector",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					},
+				},
+			},
+		},
+	}
+	fieldName2Type := make(map[string]schemapb.DataType)
+	fieldName2Type[int64Field] = schemapb.DataType_Int64
+	fieldName2Type[varCharField] = schemapb.DataType_VarChar
+	fieldName2Type[floatVecField] = schemapb.DataType_FloatVector
+	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, int64Field, false)
+
+	fSchema := &schemapb.FieldSchema{
+		Name:     "add",
+		DataType: schemapb.DataType_Bool,
+		Nullable: true,
+	}
+	bytes, err := proto.Marshal(fSchema)
+	assert.NoError(t, err)
+	task := &addCollectionFieldTask{
+		Condition: NewTaskCondition(ctx),
+		AddCollectionFieldRequest: &milvuspb.AddCollectionFieldRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Schema:         bytes,
+		},
+		ctx:       ctx,
+		rootCoord: rc,
+		result:    nil,
+		oldSchema: schema,
+	}
+
+	t.Run("on enqueue", func(t *testing.T) {
+		err := task.OnEnqueue()
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.MsgType_AddCollectionField, task.Type())
+	})
+
+	t.Run("ctx", func(t *testing.T) {
+		traceCtx := task.TraceCtx()
+		assert.NotNil(t, traceCtx)
+	})
+
+	t.Run("id", func(t *testing.T) {
+		id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+		task.SetID(id)
+		assert.Equal(t, id, task.ID())
+	})
+
+	t.Run("name", func(t *testing.T) {
+		assert.Equal(t, AddFieldTaskName, task.Name())
+	})
+
+	t.Run("ts", func(t *testing.T) {
+		ts := Timestamp(time.Now().UnixNano())
+		task.SetTs(ts)
+		assert.Equal(t, ts, task.BeginTs())
+		assert.Equal(t, ts, task.EndTs())
+	})
+
+	t.Run("process task", func(t *testing.T) {
+		var err error
+		// nil collection schema
+		task.oldSchema = nil
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		bytes, err := proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+
+		task.oldSchema = schema
+
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
+
+		err = task.PostExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("PreExecute", func(t *testing.T) {
+		var err error
+
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+
+		// nil schema
+		task.Schema = nil
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// not support dynamic field
+		task.oldSchema.EnableDynamicField = true
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		task.oldSchema.EnableDynamicField = false
+
+		// too many fields
+		Params.Save(Params.ProxyCfg.MaxFieldNum.Key, fmt.Sprint(task.oldSchema.Fields))
+		fSchema := &schemapb.FieldSchema{
+			Name: "add_field",
+		}
+		bytes, err := proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		Params.Reset(Params.ProxyCfg.MaxFieldNum.Key)
+
+		// invalid field type
+		fSchema = &schemapb.FieldSchema{
+			DataType: schemapb.DataType_None,
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// not support vector field
+		fSchema = &schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// not support system field
+		fSchema = &schemapb.FieldSchema{
+			Name: common.TimeStampFieldName,
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// must be nullable
+		fSchema = &schemapb.FieldSchema{
+			Nullable: false,
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// not support pk field
+		fSchema = &schemapb.FieldSchema{
+			IsPrimaryKey: true,
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// not support partition key
+		Params.Save(Params.ProxyCfg.MustUsePartitionKey.Key, "true")
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		Params.Reset(Params.ProxyCfg.MustUsePartitionKey.Key)
+
+		// not support autoID
+		fSchema = &schemapb.FieldSchema{
+			AutoID: true,
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// more ClusteringKey field
+		fSchema = &schemapb.FieldSchema{
+			IsClusteringKey: true,
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		task.oldSchema = schema
+		task.oldSchema.Fields = append(task.oldSchema.Fields, &schemapb.FieldSchema{
+			IsClusteringKey: true,
+		})
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// fieldName invalid
+		fSchema = &schemapb.FieldSchema{
+			Name: "",
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// duplicated FieldName
+		fSchema = &schemapb.FieldSchema{
+			Name: varCharField,
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+}
+
 func TestCreateCollectionTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	ctx := context.Background()

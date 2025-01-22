@@ -78,7 +78,7 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
     auto data_type = DataType(schema_proto.data_type());
 
     auto default_value = [&]() -> std::optional<DefaultValueType> {
-        if (schema_proto.has_default_value()) {
+        if (!schema_proto.has_default_value()) {
             return std::nullopt;
         }
         return schema_proto.default_value();

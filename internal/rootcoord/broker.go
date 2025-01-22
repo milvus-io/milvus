@@ -61,7 +61,6 @@ type Broker interface {
 	DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 	// notify observer to clean their meta cache
 	BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
-	BroadcastAddedField(ctx context.Context, req *milvuspb.AddFieldRequest) error
 }
 
 type ServerBroker struct {
@@ -272,56 +271,7 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milv
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(resp.Reason)
 	}
-	log.Ctx(ctx).Info("done to broadcast request to alter collection", zap.String("collectionName", req.GetCollectionName()), zap.Int64("collectionID", req.GetCollectionID()), zap.Any("props", req.GetProperties()))
-	return nil
-}
-
-func (b *ServerBroker) BroadcastAddedField(ctx context.Context, req *milvuspb.AddFieldRequest) error {
-	log.Ctx(ctx).Info("broadcasting request to add field",
-		zap.String("collectionName", req.GetCollectionName()),
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Any("fieldSchema", req.FieldSchema))
-
-	colMeta, err := b.s.meta.GetCollectionByID(ctx, req.GetDbName(), req.GetCollectionID(), typeutil.MaxTimestamp, false)
-	if err != nil {
-		return err
-	}
-
-	db, err := b.s.meta.GetDatabaseByName(ctx, req.GetDbName(), typeutil.MaxTimestamp)
-	if err != nil {
-		return err
-	}
-
-	partitionIDs := make([]int64, len(colMeta.Partitions))
-	for _, p := range colMeta.Partitions {
-		partitionIDs = append(partitionIDs, p.PartitionID)
-	}
-	dcReq := &datapb.AddFieldRequest{
-		CollectionID: req.GetCollectionID(),
-		FieldSchema:  req.GetFieldSchema(),
-		Schema: &schemapb.CollectionSchema{
-			Name:        colMeta.Name,
-			Description: colMeta.Description,
-			AutoID:      colMeta.AutoID,
-			Fields:      model.MarshalFieldModels(colMeta.Fields),
-			Functions:   model.MarshalFunctionModels(colMeta.Functions),
-		},
-		PartitionIDs:   partitionIDs,
-		StartPositions: colMeta.StartPositions,
-		Properties:     colMeta.Properties,
-		DbID:           db.ID,
-		VChannels:      colMeta.VirtualChannelNames,
-	}
-
-	resp, err := b.s.dataCoord.BroadcastAddedField(ctx, dcReq)
-	if err != nil {
-		return err
-	}
-
-	if resp.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(resp.Reason)
-	}
-	log.Ctx(ctx).Info("done to broadcast request to added field", zap.String("collectionName", req.GetCollectionName()), zap.Int64("collectionID", req.GetCollectionID()), zap.Any("fieldSchema", req.GetFieldSchema()))
+	log.Ctx(ctx).Info("done to broadcast request to alter collection", zap.String("collectionName", req.GetCollectionName()), zap.Int64("collectionID", req.GetCollectionID()), zap.Any("props", req.GetProperties()), zap.Any("field", colMeta.Fields))
 	return nil
 }
 

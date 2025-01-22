@@ -273,6 +273,10 @@ func (m *mockRootCoordClient) ShowCollectionIDs(ctx context.Context, req *rootco
 	}, nil
 }
 
+func (m *mockRootCoordClient) AddCollectionField(ctx context.Context, req *milvuspb.AddCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockRootCoordClient) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }

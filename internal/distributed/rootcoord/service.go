@@ -432,9 +432,9 @@ func (s *Server) ShowCollectionIDs(ctx context.Context, in *rootcoordpb.ShowColl
 	return s.rootCoord.ShowCollectionIDs(ctx, in)
 }
 
-// DescribeCollectionInternal gets meta info of a collection
-func (s *Server) AddField(ctx context.Context, in *milvuspb.AddFieldRequest) (*commonpb.Status, error) {
-	return s.rootCoord.AddField(ctx, in)
+// AddCollectionField adds the specified field.
+func (s *Server) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
+	return s.rootCoord.AddCollectionField(ctx, in)
 }
 
 // CreatePartition creates a partition in a collection

@@ -625,14 +625,14 @@ func (c *Client) ListPolicy(ctx context.Context, req *internalpb.ListPolicyReque
 }
 
 // CreatePartition create partition
-func (c *Client) AddField(ctx context.Context, in *milvuspb.AddFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *Client) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*commonpb.Status, error) {
-		return client.AddField(ctx, in)
+		return client.AddCollectionField(ctx, in)
 	})
 }
 

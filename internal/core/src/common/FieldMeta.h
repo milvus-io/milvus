@@ -205,7 +205,7 @@ class FieldMeta {
 
     std::optional<DefaultValueType>
     default_value() const {
-        return default_value_.value();
+        return default_value_;
     }
 
     size_t

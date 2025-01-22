@@ -495,42 +495,23 @@ func (b *BroadcastAlteredCollectionStep) Desc() string {
 	return fmt.Sprintf("broadcast altered collection, collectionID: %d", b.req.CollectionID)
 }
 
-type AddFieldStep struct {
+type AddCollectionFieldStep struct {
 	baseStep
 	oldColl  *model.Collection
-	newField []*model.Field
+	newField *model.Field
 	ts       Timestamp
 }
 
-func (a *AddFieldStep) Execute(ctx context.Context) ([]nestedStep, error) {
+func (a *AddCollectionFieldStep) Execute(ctx context.Context) ([]nestedStep, error) {
 	newColl := a.oldColl.Clone()
-	newColl.Fields = append(newColl.Fields, a.newField...)
+	newColl.Fields = append(newColl.Fields, a.newField)
 	err := a.core.meta.AlterCollection(ctx, a.oldColl, newColl, a.ts)
+	log.Ctx(ctx).Info("add field done", zap.Int64("collectionID", a.oldColl.CollectionID), zap.Any("new field", a.newField))
 	return nil, err
 }
 
-func (a *AddFieldStep) Desc() string {
-	var fieldIDs []string
-	for _, field := range a.newField {
-		fieldIDs = append(fieldIDs, field.Name)
-	}
-	return fmt.Sprintf("add field, collectionID: %d, ts: %d", a.oldColl.CollectionID, a.ts)
-}
-
-type BroadcastAddFieldStep struct {
-	baseStep
-	req  *milvuspb.AddFieldRequest
-	core *Core
-}
-
-func (b *BroadcastAddFieldStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	// broadcast add field to DataCoord service
-	err := b.core.broker.BroadcastAddedField(ctx, b.req)
-	return nil, err
-}
-
-func (b *BroadcastAddFieldStep) Desc() string {
-	return fmt.Sprintf("broadcast altered collection, collectionID: %d", b.req.CollectionID)
+func (a *AddCollectionFieldStep) Desc() string {
+	return fmt.Sprintf("add field, collectionID: %d, fieldID: %d, ts: %d", a.oldColl.CollectionID, a.newField.FieldID, a.ts)
 }
 
 type AlterDatabaseStep struct {
