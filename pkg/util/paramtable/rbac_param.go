@@ -10,103 +10,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 )
 
-var (
-	builtinPrivilegeGroups = map[string][]string{
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadOnly.String()):  collectionReadOnlyPrivilegeGroup,
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadWrite.String()): collectionReadWritePrivilegeGroup,
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionAdmin.String()):     collectionAdminPrivilegeGroup,
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupDatabaseReadOnly.String()):    databaseReadOnlyPrivilegeGroup,
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupDatabaseReadWrite.String()):   databaseReadWritePrivilegeGroup,
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupDatabaseAdmin.String()):       databaseAdminPrivilegeGroup,
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupClusterReadOnly.String()):     clusterReadOnlyPrivilegeGroup,
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupClusterReadWrite.String()):    clusterReadWritePrivilegeGroup,
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupClusterAdmin.String()):        clusterAdminPrivilegeGroup,
-	}
-
-	collectionReadOnlyPrivilegeGroup = []string{
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeQuery.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSearch.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeIndexDetail.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetFlushState.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetLoadState.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetLoadingProgress.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeHasPartition.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeShowPartitions.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeCollection.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeAlias.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetStatistics.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListAliases.String()),
-	}
-
-	collectionReadWritePrivilegeGroup = append(collectionReadOnlyPrivilegeGroup,
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeLoad.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRelease.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeInsert.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDelete.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpsert.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeImport.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeFlush.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCompaction.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeLoadBalance.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateIndex.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropIndex.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreatePartition.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropPartition.String()),
-	)
-
-	collectionAdminPrivilegeGroup = append(collectionReadWritePrivilegeGroup,
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateAlias.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropAlias.String()),
-	)
-
-	databaseReadOnlyPrivilegeGroup = []string{
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeShowCollections.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeDatabase.String()),
-	}
-
-	databaseReadWritePrivilegeGroup = append(databaseReadOnlyPrivilegeGroup,
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAlterDatabase.String()),
-	)
-
-	databaseAdminPrivilegeGroup = append(databaseReadWritePrivilegeGroup,
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateCollection.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropCollection.String()),
-	)
-
-	clusterReadOnlyPrivilegeGroup = []string{
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListDatabases.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSelectOwnership.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSelectUser.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeResourceGroup.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListResourceGroups.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListPrivilegeGroups.String()),
-	}
-
-	clusterReadWritePrivilegeGroup = append(clusterReadOnlyPrivilegeGroup,
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeFlushAll.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeTransferNode.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeTransferReplica.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateResourceGroups.String()),
-	)
-
-	clusterAdminPrivilegeGroup = append(clusterReadWritePrivilegeGroup,
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeBackupRBAC.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRestoreRBAC.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateDatabase.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropDatabase.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateOwnership.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropOwnership.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeManageOwnership.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateResourceGroup.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropResourceGroup.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRenameCollection.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreatePrivilegeGroup.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropPrivilegeGroup.String()),
-		util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeOperatePrivilegeGroup.String()),
-	)
-)
-
 type rbacConfig struct {
 	Enabled                    ParamItem `refreshable:"false"`
 	ClusterReadOnlyPrivileges  ParamItem `refreshable:"false"`
@@ -134,7 +37,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 
 	p.ClusterReadOnlyPrivileges = ParamItem{
 		Key:          "common.security.rbac.cluster.readonly.privileges",
-		DefaultValue: strings.Join(clusterReadOnlyPrivilegeGroup, ","),
+		DefaultValue: strings.Join(util.ClusterReadOnlyPrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Cluster level readonly privileges",
 		Export:       true,
@@ -143,7 +46,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 
 	p.ClusterReadWritePrivileges = ParamItem{
 		Key:          "common.security.rbac.cluster.readwrite.privileges",
-		DefaultValue: strings.Join(clusterReadWritePrivilegeGroup, ","),
+		DefaultValue: strings.Join(util.ClusterReadWritePrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Cluster level readwrite privileges",
 		Export:       true,
@@ -152,7 +55,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 
 	p.ClusterAdminPrivileges = ParamItem{
 		Key:          "common.security.rbac.cluster.admin.privileges",
-		DefaultValue: strings.Join(clusterAdminPrivilegeGroup, ","),
+		DefaultValue: strings.Join(util.ClusterAdminPrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Cluster level admin privileges",
 		Export:       true,
@@ -161,7 +64,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 
 	p.DBReadOnlyPrivileges = ParamItem{
 		Key:          "common.security.rbac.database.readonly.privileges",
-		DefaultValue: strings.Join(databaseReadOnlyPrivilegeGroup, ","),
+		DefaultValue: strings.Join(util.DatabaseReadOnlyPrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Database level readonly privileges",
 		Export:       true,
@@ -170,7 +73,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 
 	p.DBReadWritePrivileges = ParamItem{
 		Key:          "common.security.rbac.database.readwrite.privileges",
-		DefaultValue: strings.Join(databaseReadWritePrivilegeGroup, ","),
+		DefaultValue: strings.Join(util.DatabaseReadWritePrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Database level readwrite privileges",
 		Export:       true,
@@ -179,7 +82,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 
 	p.DBAdminPrivileges = ParamItem{
 		Key:          "common.security.rbac.database.admin.privileges",
-		DefaultValue: strings.Join(databaseAdminPrivilegeGroup, ","),
+		DefaultValue: strings.Join(util.DatabaseAdminPrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Database level admin privileges",
 		Export:       true,
@@ -188,7 +91,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 
 	p.CollectionReadOnlyPrivileges = ParamItem{
 		Key:          "common.security.rbac.collection.readonly.privileges",
-		DefaultValue: strings.Join(collectionReadOnlyPrivilegeGroup, ","),
+		DefaultValue: strings.Join(util.CollectionReadOnlyPrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Collection level readonly privileges",
 		Export:       true,
@@ -197,7 +100,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 
 	p.CollectionReadWritePrivileges = ParamItem{
 		Key:          "common.security.rbac.collection.readwrite.privileges",
-		DefaultValue: strings.Join(collectionReadWritePrivilegeGroup, ","),
+		DefaultValue: strings.Join(util.CollectionReadWritePrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Collection level readwrite privileges",
 		Export:       true,
@@ -206,7 +109,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 
 	p.CollectionAdminPrivileges = ParamItem{
 		Key:          "common.security.rbac.collection.admin.privileges",
-		DefaultValue: strings.Join(collectionAdminPrivilegeGroup, ","),
+		DefaultValue: strings.Join(util.CollectionAdminPrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Collection level admin privileges",
 		Export:       true,
@@ -219,15 +122,15 @@ func (p *rbacConfig) GetDefaultPrivilegeGroups() []*milvuspb.PrivilegeGroupInfo 
 		GroupName  string
 		Privileges func() []string
 	}{
-		{"ClusterReadOnly", p.ClusterReadOnlyPrivileges.GetAsStrings},
-		{"ClusterReadWrite", p.ClusterReadWritePrivileges.GetAsStrings},
-		{"ClusterAdmin", p.ClusterAdminPrivileges.GetAsStrings},
-		{"DatabaseReadOnly", p.DBReadOnlyPrivileges.GetAsStrings},
-		{"DatabaseReadWrite", p.DBReadWritePrivileges.GetAsStrings},
-		{"DatabaseAdmin", p.DBAdminPrivileges.GetAsStrings},
-		{"CollectionReadOnly", p.CollectionReadOnlyPrivileges.GetAsStrings},
-		{"CollectionReadWrite", p.CollectionReadWritePrivileges.GetAsStrings},
-		{"CollectionAdmin", p.CollectionAdminPrivileges.GetAsStrings},
+		{util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupClusterReadOnly.String()), p.ClusterReadOnlyPrivileges.GetAsStrings},
+		{util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupClusterReadWrite.String()), p.ClusterReadWritePrivileges.GetAsStrings},
+		{util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupClusterAdmin.String()), p.ClusterAdminPrivileges.GetAsStrings},
+		{util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupDatabaseReadOnly.String()), p.DBReadOnlyPrivileges.GetAsStrings},
+		{util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupDatabaseReadWrite.String()), p.DBReadWritePrivileges.GetAsStrings},
+		{util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupDatabaseAdmin.String()), p.DBAdminPrivileges.GetAsStrings},
+		{util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadOnly.String()), p.CollectionReadOnlyPrivileges.GetAsStrings},
+		{util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadWrite.String()), p.CollectionReadWritePrivileges.GetAsStrings},
+		{util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionAdmin.String()), p.CollectionAdminPrivileges.GetAsStrings},
 	}
 
 	builtinGroups := make([]*milvuspb.PrivilegeGroupInfo, 0, len(privilegeGroupConfigs))
@@ -245,21 +148,34 @@ func (p *rbacConfig) GetDefaultPrivilegeGroups() []*milvuspb.PrivilegeGroupInfo 
 
 func (p *rbacConfig) GetDefaultPrivilegeGroup(privName string) *milvuspb.PrivilegeGroupInfo {
 	for _, group := range p.GetDefaultPrivilegeGroups() {
-		if group.GroupName == privName {
+		if group.GetGroupName() == privName {
 			return group
 		}
 	}
 	return nil
 }
 
+func (p *rbacConfig) GetDefaultPrivilegeGroupPrivileges(groupName string) []string {
+	group := p.GetDefaultPrivilegeGroup(groupName)
+	if group == nil {
+		return nil
+	}
+	return lo.Map(group.GetPrivileges(), func(priv *milvuspb.PrivilegeEntity, _ int) string {
+		return priv.GetName()
+	})
+}
+
 func (p *rbacConfig) GetDefaultPrivilegeGroupNames() []string {
-	return lo.Keys(builtinPrivilegeGroups)
+	return lo.Map(p.GetDefaultPrivilegeGroups(), func(group *milvuspb.PrivilegeGroupInfo, _ int) string {
+		return group.GroupName
+	})
 }
 
 func (p *rbacConfig) IsCollectionPrivilegeGroup(privName string) bool {
-	collectionPrivilegeGroups := lo.PickBy(builtinPrivilegeGroups, func(groupName string, _ []string) bool {
-		return strings.Contains(groupName, "Collection")
-	})
-	_, exists := collectionPrivilegeGroups[privName]
-	return exists
+	for _, groupName := range p.GetDefaultPrivilegeGroupNames() {
+		if strings.Contains(groupName, milvuspb.PrivilegeLevel_Collection.String()) && groupName == privName {
+			return true
+		}
+	}
+	return false
 }

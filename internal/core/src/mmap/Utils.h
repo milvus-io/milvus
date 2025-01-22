@@ -33,12 +33,6 @@
 
 namespace milvus {
 
-#define THROW_FILE_WRITE_ERROR                                           \
-    PanicInfo(ErrorCode::FileWriteFailed,                                \
-              fmt::format("write data to file {} failed, error code {}", \
-                          file.Path(),                                   \
-                          strerror(errno)));
-
 /*
 * If string field's value all empty, need a string padding to avoid
 * mmap failing because size_ is zero which causing invalid argument
@@ -78,7 +72,7 @@ WriteFieldPadding(File& file, DataType data_type, uint64_t& total_written) {
         std::vector<char> padding(padding_size, 0);
         ssize_t written = file.Write(padding.data(), padding_size);
         if (written < padding_size) {
-            THROW_FILE_WRITE_ERROR
+            THROW_FILE_WRITE_ERROR(file.Path())
         }
         total_written += written;
     }
@@ -163,7 +157,7 @@ WriteFieldData(File& file,
         // write as: data|data|data|data|data|data......
         size_t written = file.FWrite(data->Data(), data->DataSize());
         if (written < data->DataSize()) {
-            THROW_FILE_WRITE_ERROR
+            THROW_FILE_WRITE_ERROR(file.Path())
         }
         for (auto i = 0; i < data->get_num_rows(); i++) {
             indices.emplace_back(total_written);

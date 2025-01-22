@@ -26,8 +26,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -144,7 +144,7 @@ func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*Segmen
 
 	// apply criterion
 	candidates := s.getCandidates(criterion)
-	var result []*SegmentInfo
+	result := make([]*SegmentInfo, 0, len(candidates))
 	for _, segment := range candidates {
 		if criterion.Match(segment) {
 			result = append(result, segment)

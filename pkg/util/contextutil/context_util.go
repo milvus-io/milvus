@@ -121,3 +121,15 @@ func WithDeadlineCause(parent context.Context, deadline time.Time, err error) (c
 		cancel(context.Canceled)
 	}
 }
+
+// MergeContext create a cancellation context that cancels when any of the given contexts are canceled.
+func MergeContext(ctx1 context.Context, ctx2 context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancelCause(ctx1)
+	stop := context.AfterFunc(ctx2, func() {
+		cancel(context.Cause(ctx2))
+	})
+	return ctx, func() {
+		stop()
+		cancel(context.Canceled)
+	}
+}

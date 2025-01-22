@@ -61,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -157,7 +158,9 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 
 func (node *QueryNode) initSession() error {
 	minimalIndexVersion, currentIndexVersion := getIndexEngineVersion()
-	node.session = sessionutil.NewSession(node.ctx, sessionutil.WithIndexEngineVersion(minimalIndexVersion, currentIndexVersion))
+	node.session = sessionutil.NewSession(node.ctx,
+		sessionutil.WithIndexEngineVersion(minimalIndexVersion, currentIndexVersion),
+		sessionutil.WithScalarIndexEngineVersion(common.MinimalScalarIndexEngineVersion, common.CurrentScalarIndexEngineVersion))
 	if node.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
@@ -284,12 +287,14 @@ func (node *QueryNode) registerMetricsRequest() {
 
 	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return getSegmentJSON(node), nil
+			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
+			return getSegmentJSON(node, collectionID), nil
 		})
 
 	node.metricsRequest.RegisterMetricsRequest(metricsinfo.ChannelKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return getChannelJSON(node), nil
+			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
+			return getChannelJSON(node, collectionID), nil
 		})
 	log.Ctx(node.ctx).Info("register metrics actions finished")
 }
@@ -322,7 +327,7 @@ func (node *QueryNode) Init() error {
 		node.factory.Init(paramtable.Get())
 
 		localRootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
-		localUsedSize, err := segcore.GetLocalUsedSize(node.ctx, localRootPath)
+		localUsedSize, err := segcore.GetLocalUsedSize(localRootPath)
 		if err != nil {
 			log.Warn("get local used size failed", zap.Error(err))
 			initError = err

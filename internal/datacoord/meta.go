@@ -36,13 +36,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -350,9 +350,8 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 }
 
 // GetSegmentsChanPart returns segments organized in Channel-Partition dimension with selector applied
-func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegments {
-	m.RLock()
-	defer m.RUnlock()
+// TODO: Move this function to the compaction module after reorganizing the DataCoord modules.
+func GetSegmentsChanPart(m *meta, collectionID int64, filters ...SegmentFilter) []*chanPartSegments {
 	type dim struct {
 		partitionID int64
 		channelName string
@@ -360,10 +359,9 @@ func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegm
 
 	mDimEntry := make(map[dim]*chanPartSegments)
 
-	for _, si := range m.segments.segments {
-		if !selector(si) {
-			continue
-		}
+	filters = append(filters, WithCollection(collectionID))
+	candidates := m.SelectSegments(context.Background(), filters...)
+	for _, si := range candidates {
 		d := dim{si.PartitionID, si.InsertChannel}
 		entry, ok := mDimEntry[d]
 		if !ok {
@@ -921,7 +919,7 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs
 	}
 }
 
-func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
+func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
@@ -933,6 +931,7 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*dat
 		segment.Binlogs = binlogs
 		segment.Statslogs = statslogs
 		segment.Deltalogs = deltalogs
+		segment.Bm25Statslogs = bm25logs
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
 		}

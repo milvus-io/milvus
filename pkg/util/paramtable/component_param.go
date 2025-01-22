@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -238,6 +239,7 @@ type commonConfig struct {
 	AuthorizationEnabled ParamItem `refreshable:"false"`
 	SuperUsers           ParamItem `refreshable:"true"`
 	DefaultRootPassword  ParamItem `refreshable:"false"`
+	RootShouldBindRole   ParamItem `refreshable:"true"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -253,9 +255,10 @@ type commonConfig struct {
 	MetricsPort ParamItem `refreshable:"false"`
 
 	// lock related params
-	EnableLockMetrics        ParamItem `refreshable:"false"`
-	LockSlowLogInfoThreshold ParamItem `refreshable:"true"`
-	LockSlowLogWarnThreshold ParamItem `refreshable:"true"`
+	EnableLockMetrics           ParamItem `refreshable:"false"`
+	LockSlowLogInfoThreshold    ParamItem `refreshable:"true"`
+	LockSlowLogWarnThreshold    ParamItem `refreshable:"true"`
+	MaxWLockConditionalWaitTime ParamItem `refreshable:"true"`
 
 	StorageScheme             ParamItem `refreshable:"false"`
 	EnableStorageV2           ParamItem `refreshable:"false"`
@@ -514,7 +517,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
 		Version:      "2.4.6",
-		DefaultValue: "false",
+		DefaultValue: "true", // 2.5.4 version becomes default true
 	}
 	p.EnableMaterializedView.Init(base.mgr)
 
@@ -667,6 +670,15 @@ like the old password verification when updating the credential`,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
 
+	p.RootShouldBindRole = ParamItem{
+		Key:          "common.security.rootShouldBindRole",
+		Version:      "2.5.4",
+		Doc:          "Whether the root user should bind a role when the authorization is enabled.",
+		DefaultValue: "false",
+		Export:       true,
+	}
+	p.RootShouldBindRole.Init(base.mgr)
+
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
 		Version:      "2.0.0",
@@ -751,6 +763,15 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.LockSlowLogWarnThreshold.Init(base.mgr)
+
+	p.MaxWLockConditionalWaitTime = ParamItem{
+		Key:          "common.locks.maxWLockConditionalWaitTime",
+		Version:      "2.5.4",
+		DefaultValue: "600",
+		Doc:          "maximum seconds for waiting wlock conditional",
+		Export:       true,
+	}
+	p.MaxWLockConditionalWaitTime.Init(base.mgr)
 
 	p.EnableStorageV2 = ParamItem{
 		Key:          "common.storage.enablev2",
@@ -959,8 +980,9 @@ This helps Milvus-CDC synchronize incremental data`,
 }
 
 type gpuConfig struct {
-	InitSize ParamItem `refreshable:"false"`
-	MaxSize  ParamItem `refreshable:"false"`
+	InitSize                            ParamItem `refreshable:"false"`
+	MaxSize                             ParamItem `refreshable:"false"`
+	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
 }
 
 func (t *gpuConfig) init(base *BaseTable) {
@@ -981,6 +1003,16 @@ func (t *gpuConfig) init(base *BaseTable) {
 		DefaultValue: "4096",
 	}
 	t.MaxSize.Init(base.mgr)
+	t.OverloadedMemoryThresholdPercentage = ParamItem{
+		Key:          "gpu.overloadedMemoryThresholdPercentage",
+		Version:      "2.5.4",
+		Export:       true,
+		DefaultValue: "95",
+		Formatter: func(v string) string {
+			return fmt.Sprintf("%f", getAsFloat(v)/100)
+		},
+	}
+	t.OverloadedMemoryThresholdPercentage.Init(base.mgr)
 }
 
 type traceConfig struct {
@@ -2517,6 +2549,7 @@ type queryNodeConfig struct {
 	// loader
 	IoPoolSize             ParamItem `refreshable:"false"`
 	DeltaDataExpansionRate ParamItem `refreshable:"true"`
+	DiskSizeFetchInterval  ParamItem `refreshable:"false"`
 
 	// schedule task policy.
 	SchedulePolicyName                    ParamItem `refreshable:"false"`
@@ -2542,7 +2575,10 @@ type queryNodeConfig struct {
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 	QueryStreamBatchSize                    ParamItem `refreshable:"false"`
 	QueryStreamMaxBatchSize                 ParamItem `refreshable:"false"`
-	BloomFilterApplyParallelFactor          ParamItem `refreshable:"true"`
+
+	// BF
+	SkipGrowingSegmentBF           ParamItem `refreshable:"true"`
+	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
 	// worker
 	WorkerPoolingSize ParamItem `refreshable:"false"`
@@ -3133,6 +3169,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.DeltaDataExpansionRate.Init(base.mgr)
 
+	p.DiskSizeFetchInterval = ParamItem{
+		Key:          "querynode.diskSizeFetchInterval",
+		Version:      "2.5.0",
+		DefaultValue: "60",
+		Doc:          "The time interval in seconds for retrieving disk usage.",
+	}
+	p.DiskSizeFetchInterval.Init(base.mgr)
+
 	// schedule read task policy.
 	p.SchedulePolicyName = ParamItem{
 		Key:          "queryNode.scheduler.scheduleReadPolicy.name",
@@ -3265,6 +3309,14 @@ user-task-polling:
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
 
+	p.SkipGrowingSegmentBF = ParamItem{
+		Key:          "queryNode.skipGrowingSegmentBF",
+		Version:      "2.5",
+		DefaultValue: "true",
+		Doc:          "indicates whether skipping the creation, maintenance, or checking of Bloom Filters for growing segments",
+	}
+	p.SkipGrowingSegmentBF.Init(base.mgr)
+
 	p.WorkerPoolingSize = ParamItem{
 		Key:          "queryNode.workerPooling.size",
 		Version:      "2.4.7",
@@ -3279,13 +3331,12 @@ user-task-polling:
 // --- datacoord ---
 type dataCoordConfig struct {
 	// --- CHANNEL ---
-	WatchTimeoutInterval             ParamItem `refreshable:"false"`
-	LegacyVersionWithoutRPCWatch     ParamItem `refreshable:"false"`
-	ChannelBalanceSilentDuration     ParamItem `refreshable:"true"`
-	ChannelBalanceInterval           ParamItem `refreshable:"true"`
-	ChannelCheckInterval             ParamItem `refreshable:"true"`
-	ChannelOperationRPCTimeout       ParamItem `refreshable:"true"`
-	MaxConcurrentChannelTaskNumPerDN ParamItem `refreshable:"true"`
+	WatchTimeoutInterval         ParamItem `refreshable:"false"`
+	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
+	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
+	ChannelBalanceInterval       ParamItem `refreshable:"true"`
+	ChannelCheckInterval         ParamItem `refreshable:"true"`
+	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
@@ -3457,15 +3508,6 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	}
 	p.ChannelOperationRPCTimeout.Init(base.mgr)
 
-	p.MaxConcurrentChannelTaskNumPerDN = ParamItem{
-		Key:          "dataCoord.channel.maxConcurrentChannelTaskNumPerDN",
-		Version:      "2.5",
-		DefaultValue: "32",
-		Doc:          "The maximum concurrency for each DataNode executing channel tasks (watch, release).",
-		Export:       true,
-	}
-	p.MaxConcurrentChannelTaskNumPerDN.Init(base.mgr)
-
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",
 		Version:      "2.0.0",
@@ -3629,7 +3671,8 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 	p.CompactionMaxParallelTasks = ParamItem{
 		Key:          "dataCoord.compaction.maxParallelTaskNum",
 		Version:      "2.2.12",
-		DefaultValue: "10",
+		DefaultValue: "-1",
+		Doc:          "Deprecated, see datanode.slot.slotCap",
 		Export:       true,
 	}
 	p.CompactionMaxParallelTasks.Init(base.mgr)
@@ -4826,6 +4869,9 @@ type streamingConfig struct {
 	WALBalancerBackoffInitialInterval ParamItem `refreshable:"true"`
 	WALBalancerBackoffMultiplier      ParamItem `refreshable:"true"`
 
+	// broadcaster
+	WALBroadcasterConcurrencyRatio ParamItem `refreshable:"false"`
+
 	// txn
 	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
 }
@@ -4859,6 +4905,15 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 	}
 	p.WALBalancerBackoffMultiplier.Init(base.mgr)
 
+	p.WALBroadcasterConcurrencyRatio = ParamItem{
+		Key:          "streaming.walBroadcaster.concurrencyRatio",
+		Version:      "2.5.4",
+		Doc:          `The concurrency ratio based on number of CPU for wal broadcaster, 1 by default.`,
+		DefaultValue: "1",
+		Export:       true,
+	}
+	p.WALBroadcasterConcurrencyRatio.Init(base.mgr)
+
 	// txn
 	p.TxnDefaultKeepaliveTimeout = ParamItem{
 		Key:          "streaming.txn.defaultKeepaliveTimeout",
@@ -4872,11 +4927,11 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 
 // runtimeConfig is just a private environment value table.
 type runtimeConfig struct {
-	createTime time.Time
-	updateTime time.Time
-	role       string
+	createTime atomic.Time
+	updateTime atomic.Time
+	role       atomic.String
 	nodeID     atomic.Int64
-	components map[string]struct{}
+	components typeutil.ConcurrentSet[string]
 }
 
 type integrationTestConfig struct {

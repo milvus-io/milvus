@@ -338,8 +338,7 @@ class IndexTest : public ::testing::TestWithParam<Param> {
             vec_field_data_type = milvus::DataType::VECTOR_FLOAT;
         }
 
-        auto dataset =
-            GenDatasetWithDataType(NB, metric_type, vec_field_data_type);
+        auto dataset = GenFieldData(NB, metric_type, vec_field_data_type);
         if (is_binary) {
             // binary vector
             xb_bin_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
@@ -486,17 +485,18 @@ TEST_P(IndexTest, BuildAndQuery) {
     milvus::index::IndexBasePtr new_index;
     milvus::index::VectorIndex* vec_index = nullptr;
 
-    auto binary_set = index->Upload();
+    auto create_index_result = index->Upload();
     index.reset();
 
     new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
 
-    std::vector<std::string> index_files;
-    for (auto& binary : binary_set.binary_map_) {
-        index_files.emplace_back(binary.first);
-    }
+    auto index_files = create_index_result->GetIndexFiles();
+    auto memSize = create_index_result->GetMemSize();
+    auto serializedSize = create_index_result->GetSerializedSize();
+    ASSERT_GT(memSize, 0);
+    ASSERT_GT(serializedSize, 0);
     load_conf = generate_load_conf(index_type, metric_type, 0);
     load_conf["index_files"] = index_files;
     ASSERT_NO_THROW(vec_index->Load(milvus::tracer::TraceContext{}, load_conf));
@@ -551,7 +551,7 @@ TEST_P(IndexTest, Mmap) {
     milvus::index::IndexBasePtr new_index;
     milvus::index::VectorIndex* vec_index = nullptr;
 
-    auto binary_set = index->Upload();
+    auto create_index_result = index->Upload();
     index.reset();
 
     new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
@@ -561,10 +561,11 @@ TEST_P(IndexTest, Mmap) {
     }
     vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
 
-    std::vector<std::string> index_files;
-    for (auto& binary : binary_set.binary_map_) {
-        index_files.emplace_back(binary.first);
-    }
+    auto index_files = create_index_result->GetIndexFiles();
+    auto memSize = create_index_result->GetMemSize();
+    auto serializedSize = create_index_result->GetSerializedSize();
+    ASSERT_GT(memSize, 0);
+    ASSERT_GT(serializedSize, 0);
     load_conf = generate_load_conf(index_type, metric_type, 0);
     load_conf["index_files"] = index_files;
     load_conf["mmap_filepath"] = "mmap/test_index_mmap_" + index_type;
@@ -610,24 +611,20 @@ TEST_P(IndexTest, GetVector) {
     milvus::index::IndexBasePtr new_index;
     milvus::index::VectorIndex* vec_index = nullptr;
 
-    auto binary_set = index->Upload();
+    auto create_index_result = index->Upload();
     index.reset();
-    std::vector<std::string> index_files;
-    for (auto& binary : binary_set.binary_map_) {
-        index_files.emplace_back(binary.first);
-    }
+    auto index_files = create_index_result->GetIndexFiles();
+    auto memSize = create_index_result->GetMemSize();
+    auto serializedSize = create_index_result->GetSerializedSize();
+    ASSERT_GT(memSize, 0);
+    ASSERT_GT(serializedSize, 0);
     new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     load_conf = generate_load_conf(index_type, metric_type, 0);
     load_conf["index_files"] = index_files;
 
     vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
-    if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-        vec_index->Load(binary_set, load_conf);
-        EXPECT_EQ(vec_index->Count(), NB);
-    } else {
-        vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
-    }
+    vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
     if (!is_sparse) {
         EXPECT_EQ(vec_index->GetDim(), DIM);
     }
@@ -716,12 +713,13 @@ TEST_P(IndexTest, GetVector_EmptySparseVector) {
     milvus::index::IndexBasePtr new_index;
     milvus::index::VectorIndex* vec_index = nullptr;
 
-    auto binary_set = index->Upload();
+    auto create_index_result = index->Upload();
     index.reset();
-    std::vector<std::string> index_files;
-    for (auto& binary : binary_set.binary_map_) {
-        index_files.emplace_back(binary.first);
-    }
+    auto index_files = create_index_result->GetIndexFiles();
+    auto memSize = create_index_result->GetMemSize();
+    auto serializedSize = create_index_result->GetSerializedSize();
+    ASSERT_GT(memSize, 0);
+    ASSERT_GT(serializedSize, 0);
     new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     load_conf = generate_load_conf(index_type, metric_type, 0);
@@ -730,6 +728,10 @@ TEST_P(IndexTest, GetVector_EmptySparseVector) {
     vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
     EXPECT_EQ(vec_index->Count(), NB);
+
+    if (!vec_index->HasRawData()) {
+        return;
+    }
 
     auto ids_ds = GenRandomIds(NB);
     auto sparse_rows = vec_index->GetSparseVector(ids_ds);
@@ -785,7 +787,7 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
     };
 
     // build disk ann index
-    auto dataset = GenDataset(NB, metric_type, false);
+    auto dataset = GenFieldData(NB, metric_type);
     FixedVector<float> xb_data =
         dataset.get_col<float>(milvus::FieldId(field_id));
     knowhere::DataSetPtr xb_dataset =
@@ -793,16 +795,17 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
     ASSERT_NO_THROW(index->BuildWithDataset(xb_dataset, build_conf));
 
     // serialize and load disk index, disk index can only be search after loading for now
-    auto binary_set = index->Upload();
+    auto create_index_result = index->Upload();
+    auto memSize = create_index_result->GetMemSize();
+    auto serializedSize = create_index_result->GetSerializedSize();
+    ASSERT_GT(memSize, 0);
+    ASSERT_GT(serializedSize, 0);
+    auto index_files = create_index_result->GetIndexFiles();
     index.reset();
 
     auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
-    std::vector<std::string> index_files;
-    for (auto& binary : binary_set.binary_map_) {
-        index_files.emplace_back(binary.first);
-    }
     auto load_conf = generate_load_conf(index_type, metric_type, NB);
     load_conf["index_files"] = index_files;
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
@@ -867,8 +870,8 @@ TEST(Indexing, SearchDiskAnnWithFloat16) {
     };
 
     // build disk ann index
-    auto dataset = GenDatasetWithDataType(
-        NB, metric_type, milvus::DataType::VECTOR_FLOAT16);
+    auto dataset =
+        GenFieldData(NB, metric_type, milvus::DataType::VECTOR_FLOAT16);
     FixedVector<float16> xb_data =
         dataset.get_col<float16>(milvus::FieldId(field_id));
     knowhere::DataSetPtr xb_dataset =
@@ -876,16 +879,17 @@ TEST(Indexing, SearchDiskAnnWithFloat16) {
     ASSERT_NO_THROW(index->BuildWithDataset(xb_dataset, build_conf));
 
     // serialize and load disk index, disk index can only be search after loading for now
-    auto binary_set = index->Upload();
+    auto create_index_result = index->Upload();
+    auto memSize = create_index_result->GetMemSize();
+    auto serializedSize = create_index_result->GetSerializedSize();
+    ASSERT_GT(memSize, 0);
+    ASSERT_GT(serializedSize, 0);
+    auto index_files = create_index_result->GetIndexFiles();
     index.reset();
 
     auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
-    std::vector<std::string> index_files;
-    for (auto& binary : binary_set.binary_map_) {
-        index_files.emplace_back(binary.first);
-    }
     auto load_conf = generate_load_conf<float16>(index_type, metric_type, NB);
     load_conf["index_files"] = index_files;
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
@@ -949,8 +953,8 @@ TEST(Indexing, SearchDiskAnnWithBFloat16) {
     };
 
     // build disk ann index
-    auto dataset = GenDatasetWithDataType(
-        NB, metric_type, milvus::DataType::VECTOR_BFLOAT16);
+    auto dataset =
+        GenFieldData(NB, metric_type, milvus::DataType::VECTOR_BFLOAT16);
     FixedVector<bfloat16> xb_data =
         dataset.get_col<bfloat16>(milvus::FieldId(field_id));
     knowhere::DataSetPtr xb_dataset =
@@ -958,16 +962,17 @@ TEST(Indexing, SearchDiskAnnWithBFloat16) {
     ASSERT_NO_THROW(index->BuildWithDataset(xb_dataset, build_conf));
 
     // serialize and load disk index, disk index can only be search after loading for now
-    auto binary_set = index->Upload();
+    auto create_index_result = index->Upload();
+    auto memSize = create_index_result->GetMemSize();
+    auto serializedSize = create_index_result->GetSerializedSize();
+    ASSERT_GT(memSize, 0);
+    ASSERT_GT(serializedSize, 0);
+    auto index_files = create_index_result->GetIndexFiles();
     index.reset();
 
     auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
         create_index_info, file_manager_context);
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
-    std::vector<std::string> index_files;
-    for (auto& binary : binary_set.binary_map_) {
-        index_files.emplace_back(binary.first);
-    }
     auto load_conf = generate_load_conf<bfloat16>(index_type, metric_type, NB);
     load_conf["index_files"] = index_files;
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
@@ -989,3 +994,20 @@ TEST(Indexing, SearchDiskAnnWithBFloat16) {
     EXPECT_NO_THROW(vec_index->Query(xq_dataset, search_info, nullptr, result));
 }
 #endif
+
+TEST(Indexing, IndexStats) {
+    using milvus::index::IndexStats;
+    using milvus::index::SerializedIndexFileInfo;
+    auto sized_map =
+        std::map<std::string, int64_t>{{"file1", 100}, {"file2", 200}};
+    auto result = IndexStats::NewFromSizeMap(16, sized_map);
+    result->AppendSerializedIndexFileInfo(
+        SerializedIndexFileInfo{"file3", 300});
+    auto files = result->GetIndexFiles();
+    ASSERT_EQ(files.size(), 3);
+    ASSERT_EQ(files[0], "file1");
+    ASSERT_EQ(files[1], "file2");
+    ASSERT_EQ(files[2], "file3");
+    ASSERT_EQ(result->GetMemSize(), 16);
+    ASSERT_EQ(result->GetSerializedSize(), 600);
+}

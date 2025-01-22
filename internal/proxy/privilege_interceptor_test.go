@@ -11,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -171,6 +171,40 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		assert.Panics(t, func() {
 			getPolicyModel("foo")
 		})
+	})
+}
+
+func TestRootShouldBindRole(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	rootCtx := GetContext(context.Background(), "root:Milvus")
+	t.Run("not bind role", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.RootShouldBindRole.Key, "false")
+		defer Params.Reset(Params.CommonCfg.RootShouldBindRole.Key)
+
+		InitEmptyGlobalCache()
+		_, err := PrivilegeInterceptor(rootCtx, &milvuspb.LoadCollectionRequest{
+			CollectionName: "col1",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("bind role", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.RootShouldBindRole.Key, "true")
+		defer Params.Reset(Params.CommonCfg.RootShouldBindRole.Key)
+
+		InitEmptyGlobalCache()
+		_, err := PrivilegeInterceptor(rootCtx, &milvuspb.LoadCollectionRequest{
+			CollectionName: "col1",
+		})
+		assert.Error(t, err)
+
+		AddRootUserToAdminRole()
+		_, err = PrivilegeInterceptor(rootCtx, &milvuspb.LoadCollectionRequest{
+			CollectionName: "col1",
+		})
+		assert.NoError(t, err)
 	})
 }
 

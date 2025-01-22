@@ -33,7 +33,7 @@ func (s *DeltalogIteratorSuite) TestDeltalogIteratorIntPK() {
 	}
 
 	dCodec := storage.NewDeleteCodec()
-	blob, err := dCodec.Serialize(CollectionID, 1, 1, dData)
+	blob, err := dCodec.Serialize(10000, 1, 1, dData)
 	s.Require().NoError(err)
 	value := [][]byte{blob.Value}
 

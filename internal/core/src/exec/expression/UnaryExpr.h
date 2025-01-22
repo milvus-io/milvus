@@ -330,7 +330,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     bool
     SupportOffsetInput() override {
-        if (expr_->op_type_ == proto::plan::OpType::TextMatch) {
+        if (expr_->op_type_ == proto::plan::OpType::TextMatch ||
+            expr_->op_type_ == proto::plan::OpType::PhraseMatch) {
             return false;
         }
         return true;

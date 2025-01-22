@@ -20,13 +20,15 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var (
 	once         sync.Once
 	params       ComponentParam
 	runtimeParam = runtimeConfig{
-		components: make(map[string]struct{}, 0),
+		components: typeutil.ConcurrentSet[string]{},
 	}
 	hookParams hookConfig
 )
@@ -73,34 +75,33 @@ func GetStringNodeID() string {
 }
 
 func SetRole(role string) {
-	runtimeParam.role = role
+	runtimeParam.role.Store(role)
 }
 
 func GetRole() string {
-	return runtimeParam.role
+	return runtimeParam.role.Load()
 }
 
 func SetCreateTime(d time.Time) {
-	runtimeParam.createTime = d
+	runtimeParam.createTime.Store(d)
 }
 
 func GetCreateTime() time.Time {
-	return runtimeParam.createTime
+	return runtimeParam.createTime.Load()
 }
 
 func SetUpdateTime(d time.Time) {
-	runtimeParam.updateTime = d
+	runtimeParam.updateTime.Store(d)
 }
 
 func GetUpdateTime() time.Time {
-	return runtimeParam.updateTime
+	return runtimeParam.updateTime.Load()
 }
 
 func SetLocalComponentEnabled(component string) {
-	runtimeParam.components[component] = struct{}{}
+	runtimeParam.components.Insert(component)
 }
 
 func IsLocalComponentEnabled(component string) bool {
-	_, ok := runtimeParam.components[component]
-	return ok
+	return runtimeParam.components.Contain(component)
 }

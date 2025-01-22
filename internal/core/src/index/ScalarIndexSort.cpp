@@ -151,18 +151,14 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
 }
 
 template <typename T>
-BinarySet
+IndexStatsPtr
 ScalarIndexSort<T>::Upload(const Config& config) {
     auto binary_set = Serialize(config);
     file_manager_->AddFile(binary_set);
 
     auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
-    BinarySet ret;
-    for (auto& file : remote_paths_to_size) {
-        ret.Append(file.first, nullptr, file.second);
-    }
-
-    return ret;
+    return IndexStats::NewFromSizeMap(file_manager_->GetAddedTotalMemSize(),
+                                      remote_paths_to_size);
 }
 
 template <typename T>
@@ -176,9 +172,14 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
     auto index_data = index_binary.GetByName("index_data");
     data_.resize(index_size);
     auto index_num_rows = index_binary.GetByName("index_num_rows");
-    memcpy(&total_num_rows_,
-           index_num_rows->data.get(),
-           (size_t)index_num_rows->size);
+    if (index_num_rows) {
+        memcpy(&total_num_rows_,
+               index_num_rows->data.get(),
+               (size_t)index_num_rows->size);
+    } else {
+        total_num_rows_ = index_size;
+    }
+
     idx_to_offsets_.resize(total_num_rows_);
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
     memcpy(data_.data(), index_data->data.get(), (size_t)index_data->size);

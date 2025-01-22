@@ -65,9 +65,9 @@ class ScalarIndex : public IndexBase {
     }
 
     void
-    BuildWithRawData(size_t n,
-                     const void* values,
-                     const Config& config = {}) override;
+    BuildWithRawDataForUT(size_t n,
+                          const void* values,
+                          const Config& config = {}) override;
 
     void
     BuildWithDataset(const DatasetPtr& dataset,

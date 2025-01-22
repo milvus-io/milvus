@@ -58,6 +58,7 @@ using distance_t = float;
 using float16 = knowhere::fp16;
 using bfloat16 = knowhere::bf16;
 using bin1 = knowhere::bin1;
+using int8 = knowhere::int8;
 
 // See also: https://github.com/milvus-io/milvus-proto/blob/master/proto/schema.proto
 enum class DataType {
@@ -85,6 +86,7 @@ enum class DataType {
     VECTOR_FLOAT16 = 102,
     VECTOR_BFLOAT16 = 103,
     VECTOR_SPARSE_FLOAT = 104,
+    VECTOR_INT8 = 105,
 };
 
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
@@ -123,12 +125,12 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
             AssertInfo(dim % 8 == 0, "dim={}", dim);
             return dim / 8;
         }
-        case DataType::VECTOR_FLOAT16: {
+        case DataType::VECTOR_FLOAT16:
             return sizeof(float16) * dim;
-        }
-        case DataType::VECTOR_BFLOAT16: {
+        case DataType::VECTOR_BFLOAT16:
             return sizeof(bfloat16) * dim;
-        }
+        case DataType::VECTOR_INT8:
+            return sizeof(int8) * dim;
         // Not supporting variable length types(such as VECTOR_SPARSE_FLOAT and
         // VARCHAR) here intentionally. We can't easily estimate the size of
         // them. Caller of this method must handle this case themselves and must
@@ -190,6 +192,8 @@ GetDataTypeName(DataType data_type) {
             return "vector_bfloat16";
         case DataType::VECTOR_SPARSE_FLOAT:
             return "vector_sparse_float";
+        case DataType::VECTOR_INT8:
+            return "vector_int8";
         default:
             PanicInfo(DataTypeInvalid, "Unsupported DataType({})", data_type);
     }
@@ -323,6 +327,11 @@ IsSparseFloatVectorDataType(DataType data_type) {
 }
 
 inline bool
+IsIntVectorDataType(DataType data_type) {
+    return data_type == DataType::VECTOR_INT8;
+}
+
+inline bool
 IsFloatVectorDataType(DataType data_type) {
     return IsDenseFloatVectorDataType(data_type) ||
            IsSparseFloatVectorDataType(data_type);
@@ -331,7 +340,7 @@ IsFloatVectorDataType(DataType data_type) {
 inline bool
 IsVectorDataType(DataType data_type) {
     return IsBinaryVectorDataType(data_type) ||
-           IsFloatVectorDataType(data_type);
+           IsFloatVectorDataType(data_type) || IsIntVectorDataType(data_type);
 }
 
 inline bool
@@ -418,7 +427,17 @@ IsFloatVectorMetricType(const MetricType& metric_type) {
 
 inline bool
 IsBinaryVectorMetricType(const MetricType& metric_type) {
-    return !IsFloatVectorMetricType(metric_type);
+    return metric_type == knowhere::metric::HAMMING ||
+           metric_type == knowhere::metric::JACCARD ||
+           metric_type == knowhere::metric::SUPERSTRUCTURE ||
+           metric_type == knowhere::metric::SUBSTRUCTURE;
+}
+
+inline bool
+IsIntVectorMetricType(const MetricType& metric_type) {
+    return metric_type == knowhere::metric::L2 ||
+           metric_type == knowhere::metric::IP ||
+           metric_type == knowhere::metric::COSINE;
 }
 
 // Plus 1 because we can't use greater(>) symbol
@@ -479,7 +498,7 @@ struct TypeTraits<DataType::INT32> {
 
 template <>
 struct TypeTraits<DataType::INT64> {
-    using NativeType = int32_t;
+    using NativeType = int64_t;
     static constexpr DataType TypeKind = DataType::INT64;
     static constexpr bool IsPrimitiveType = true;
     static constexpr bool IsFixedWidth = true;
@@ -625,6 +644,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
             case milvus::DataType::VECTOR_SPARSE_FLOAT:
                 name = "VECTOR_SPARSE_FLOAT";
                 break;
+            case milvus::DataType::VECTOR_INT8:
+                name = "VECTOR_INT8";
+                break;
         }
         return formatter<string_view>::format(name, ctx);
     }
@@ -683,6 +705,9 @@ struct fmt::formatter<milvus::OpType> : formatter<string_view> {
                 break;
             case milvus::OpType::TextMatch:
                 name = "TextMatch";
+                break;
+            case milvus::OpType::PhraseMatch:
+                name = "PhraseMatch";
                 break;
         }
         return formatter<string_view>::format(name, ctx);

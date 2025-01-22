@@ -2377,3 +2377,87 @@ func TestGenerateExpressionTemplate(t *testing.T) {
 		assert.Equal(t, actual, ans[i])
 	}
 }
+
+func TestGenerateSearchParams(t *testing.T) {
+	t.Run("searchParams.params must be a dict", func(t *testing.T) {
+		reqSearchParams := map[string]interface{}{"params": 0}
+		_, err := generateSearchParams(reqSearchParams)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("ambiguous parameter", func(t *testing.T) {
+		reqSearchParams := map[string]interface{}{"radius": 100, "params": map[string]interface{}{"radius": 10}}
+		_, err := generateSearchParams(reqSearchParams)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("no ambiguous parameter", func(t *testing.T) {
+		reqSearchParams := map[string]interface{}{"radius": 10, "params": map[string]interface{}{"radius": 10.0}}
+		_, err := generateSearchParams(reqSearchParams)
+		assert.Nil(t, err)
+
+		reqSearchParams = map[string]interface{}{"radius": 10.0, "params": map[string]interface{}{"radius": 10}}
+		_, err = generateSearchParams(reqSearchParams)
+		assert.Nil(t, err)
+
+		reqSearchParams = map[string]interface{}{"radius": 10, "params": map[string]interface{}{"radius": 10}}
+		searchParams, err := generateSearchParams(reqSearchParams)
+		assert.Equal(t, 3, len(searchParams))
+		assert.Nil(t, err)
+		for _, kvs := range searchParams {
+			if kvs.Key == "radius" {
+				assert.Equal(t, "10", kvs.Value)
+			}
+			if kvs.Key == "params" {
+				var paramsMap map[string]interface{}
+				err := json.Unmarshal([]byte(kvs.Value), &paramsMap)
+				assert.Nil(t, err)
+				assert.Equal(t, 1, len(paramsMap))
+				assert.Equal(t, paramsMap["radius"], float64(10))
+			}
+		}
+	})
+
+	t.Run("old format", func(t *testing.T) {
+		reqSearchParams := map[string]interface{}{"metric_type": "L2", "params": map[string]interface{}{"radius": 10}}
+		searchParams, err := generateSearchParams(reqSearchParams)
+		assert.Nil(t, err)
+		assert.Equal(t, 3, len(searchParams))
+		for _, kvs := range searchParams {
+			if kvs.Key == "metric_type" {
+				assert.Equal(t, "L2", kvs.Value)
+			}
+			if kvs.Key == "params" {
+				var paramsMap map[string]interface{}
+				err := json.Unmarshal([]byte(kvs.Value), &paramsMap)
+				assert.Nil(t, err)
+				assert.Equal(t, 2, len(paramsMap))
+				assert.Equal(t, paramsMap["radius"], float64(10))
+				assert.Equal(t, paramsMap["metric_type"], "L2")
+			}
+		}
+	})
+
+	t.Run("new format", func(t *testing.T) {
+		reqSearchParams := map[string]interface{}{"metric_type": "L2", "radius": 10}
+		searchParams, err := generateSearchParams(reqSearchParams)
+		assert.Nil(t, err)
+		assert.Equal(t, 4, len(searchParams))
+		for _, kvs := range searchParams {
+			if kvs.Key == "metric_type" {
+				assert.Equal(t, "L2", kvs.Value)
+			}
+			if kvs.Key == "radius" {
+				assert.Equal(t, "10", kvs.Value)
+			}
+			if kvs.Key == "params" {
+				var paramsMap map[string]interface{}
+				err := json.Unmarshal([]byte(kvs.Value), &paramsMap)
+				assert.Nil(t, err)
+				assert.Equal(t, 2, len(paramsMap))
+				assert.Equal(t, paramsMap["radius"], float64(10))
+				assert.Equal(t, paramsMap["metric_type"], "L2")
+			}
+		}
+	})
+}

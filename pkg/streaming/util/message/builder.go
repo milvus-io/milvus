@@ -7,16 +7,32 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/pkg/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // NewMutableMessage creates a new mutable message.
 // !!! Only used at server side for streamingnode internal service, don't use it at client side.
 func NewMutableMessage(payload []byte, properties map[string]string) MutableMessage {
-	return &messageImpl{
+	m := &messageImpl{
 		payload:    payload,
 		properties: properties,
 	}
+	// make a assertion by vchannel function.
+	m.assertNotBroadcast()
+	return m
+}
+
+// NewBroadcastMutableMessage creates a new broadcast mutable message.
+// !!! Only used at server side for streamingcoord internal service, don't use it at client side.
+func NewBroadcastMutableMessage(payload []byte, properties map[string]string) BroadcastMutableMessage {
+	m := &messageImpl{
+		payload:    payload,
+		properties: properties,
+	}
+	m.assertBroadcast()
+	return m
 }
 
 // NewImmutableMessage creates a new immutable message.
@@ -82,10 +98,10 @@ func newMutableMessageBuilder[H proto.Message, B proto.Message](v Version) *muta
 
 // mutableMesasgeBuilder is the builder for message.
 type mutableMesasgeBuilder[H proto.Message, B proto.Message] struct {
-	header     H
-	body       B
-	properties propertiesImpl
-	broadcast  bool
+	header      H
+	body        B
+	properties  propertiesImpl
+	allVChannel bool
 }
 
 // WithMessageHeader creates a new builder with determined message type.
@@ -102,16 +118,41 @@ func (b *mutableMesasgeBuilder[H, B]) WithBody(body B) *mutableMesasgeBuilder[H,
 
 // WithVChannel creates a new builder with virtual channel.
 func (b *mutableMesasgeBuilder[H, B]) WithVChannel(vchannel string) *mutableMesasgeBuilder[H, B] {
-	if b.broadcast {
-		panic("a broadcast message cannot hold vchannel")
+	if b.allVChannel {
+		panic("a all vchannel message cannot set up vchannel property")
 	}
 	b.WithProperty(messageVChannel, vchannel)
 	return b
 }
 
 // WithBroadcast creates a new builder with broadcast property.
-func (b *mutableMesasgeBuilder[H, B]) WithBroadcast() *mutableMesasgeBuilder[H, B] {
-	b.broadcast = true
+func (b *mutableMesasgeBuilder[H, B]) WithBroadcast(vchannels []string) *mutableMesasgeBuilder[H, B] {
+	if len(vchannels) < 1 {
+		panic("broadcast message must have at least one vchannel")
+	}
+	if b.allVChannel {
+		panic("a all vchannel message cannot set up vchannel property")
+	}
+	if b.properties.Exist(messageVChannel) {
+		panic("a broadcast message cannot set up vchannel property")
+	}
+	deduplicated := typeutil.NewSet(vchannels...)
+	vcs, err := EncodeProto(&messagespb.VChannels{
+		Vchannels: deduplicated.Collect(),
+	})
+	if err != nil {
+		panic("failed to encode vchannels")
+	}
+	b.properties.Set(messageVChannels, vcs)
+	return b
+}
+
+// WithAllVChannel creates a new builder with all vchannel property.
+func (b *mutableMesasgeBuilder[H, B]) WithAllVChannel() *mutableMesasgeBuilder[H, B] {
+	if b.properties.Exist(messageVChannel) || b.properties.Exist(messageVChannels) {
+		panic("a vchannel or broadcast message cannot set up all vchannel property")
+	}
+	b.allVChannel = true
 	return b
 }
 
@@ -135,15 +176,40 @@ func (b *mutableMesasgeBuilder[H, B]) WithProperties(kvs map[string]string) *mut
 // Panic if not set payload and message type.
 // should only used at client side.
 func (b *mutableMesasgeBuilder[H, B]) BuildMutable() (MutableMessage, error) {
+	if !b.allVChannel && !b.properties.Exist(messageVChannel) {
+		panic("a non broadcast message builder not ready for vchannel field")
+	}
+
+	msg, err := b.build()
+	if err != nil {
+		return nil, err
+	}
+	return msg, nil
+}
+
+// BuildBroadcast builds a broad mutable message.
+// Panic if not set payload and message type.
+// should only used at client side.
+func (b *mutableMesasgeBuilder[H, B]) BuildBroadcast() (BroadcastMutableMessage, error) {
+	if !b.properties.Exist(messageVChannels) {
+		panic("a broadcast message builder not ready for vchannel field")
+	}
+
+	msg, err := b.build()
+	if err != nil {
+		return nil, err
+	}
+	return msg, nil
+}
+
+// build builds a message.
+func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 	// payload and header must be a pointer
 	if reflect.ValueOf(b.header).IsNil() {
 		panic("message builder not ready for header field")
 	}
 	if reflect.ValueOf(b.body).IsNil() {
 		panic("message builder not ready for body field")
-	}
-	if !b.broadcast && !b.properties.Exist(messageVChannel) {
-		panic("a non broadcast message builder not ready for vchannel field")
 	}
 
 	// setup header.

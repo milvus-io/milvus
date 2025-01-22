@@ -255,7 +255,7 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
             auto index = index::CreateStringIndexSort();
             std::vector<uint8_t> buffer(arr.ByteSize());
             ASSERT_TRUE(arr.SerializeToArray(buffer.data(), arr.ByteSize()));
-            index->BuildWithRawData(arr.ByteSize(), buffer.data());
+            index->BuildWithRawDataForUT(arr.ByteSize(), buffer.data());
             LoadIndexInfo info{
                 .field_id = schema->get_field_id(FieldName("str")).get(),
                 .index = std::move(index),
@@ -264,7 +264,7 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
         }
         {
             auto index = index::CreateScalarIndexSort<int64_t>();
-            index->BuildWithRawData(N, raw_int.data());
+            index->BuildWithRawDataForUT(N, raw_int.data());
             LoadIndexInfo info{
                 .field_id =
                     schema->get_field_id(FieldName("another_int64")).get(),
@@ -278,7 +278,7 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
     LoadInvertedIndex() {
         auto index =
             std::make_unique<index::InvertedIndexTantivy<std::string>>();
-        index->BuildWithRawData(N, raw_str.data());
+        index->BuildWithRawDataForUT(N, raw_str.data());
         LoadIndexInfo info{
             .field_id = schema->get_field_id(FieldName("str")).get(),
             .index = std::move(index),
@@ -295,7 +295,7 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
         auto index = std::make_unique<MockStringIndex>();
         std::vector<uint8_t> buffer(arr.ByteSize());
         ASSERT_TRUE(arr.SerializeToArray(buffer.data(), arr.ByteSize()));
-        index->BuildWithRawData(arr.ByteSize(), buffer.data());
+        index->BuildWithRawDataForUT(arr.ByteSize(), buffer.data());
         LoadIndexInfo info{
             .field_id = schema->get_field_id(FieldName("str")).get(),
             .index = std::move(index),

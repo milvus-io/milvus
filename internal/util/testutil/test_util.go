@@ -171,6 +171,15 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent .
 					Dim:      dim,
 				},
 			}
+		case schemapb.DataType_Int8Vector:
+			dim, err := typeutil.GetDim(f)
+			if err != nil {
+				return nil, err
+			}
+			insertData.Data[f.FieldID] = &storage.Int8VectorFieldData{
+				Data: testutils.GenerateInt8Vectors(rows, int(dim)),
+				Dim:  int(dim),
+			}
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateStringArray(rows))
 		case schemapb.DataType_JSON:
@@ -419,6 +428,20 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				return string(bs)
 			}), nil)
 			columns = append(columns, builder.NewStringArray())
+		case schemapb.DataType_Int8Vector:
+			builder := array.NewListBuilder(mem, &arrow.Int8Type{})
+			dim := insertData.Data[fieldID].(*storage.Int8VectorFieldData).Dim
+			int8VecData := insertData.Data[fieldID].(*storage.Int8VectorFieldData).Data
+			rows := len(int8VecData) / dim
+			offsets := make([]int32, 0, rows)
+			valid := make([]bool, 0, rows)
+			for i := 0; i < rows; i++ {
+				offsets = append(offsets, int32(i*dim))
+				valid = append(valid, true)
+			}
+			builder.ValueBuilder().(*array.Int8Builder).AppendValues(int8VecData, nil)
+			builder.AppendValues(offsets, valid)
+			columns = append(columns, builder.NewListArray())
 		case schemapb.DataType_JSON:
 			builder := array.NewStringBuilder(mem)
 			jsonData := insertData.Data[fieldID].(*storage.JSONFieldData).Data
@@ -742,6 +765,13 @@ func CreateInsertDataForCSV(schema *schemapb.CollectionSchema, insertData *stora
 				bytes := value.GetRow(i).([]byte)
 				m := typeutil.SparseFloatBytesToMap(bytes)
 				j, err := json.Marshal(m)
+				if err != nil {
+					return nil, err
+				}
+				data = append(data, string(j))
+			case schemapb.DataType_Int8Vector:
+				vec := value.GetRow(i).([]int8)
+				j, err := json.Marshal(vec)
 				if err != nil {
 					return nil, err
 				}

@@ -69,6 +69,39 @@ func (h *heapArray[E]) Peek() interface{} {
 	return (*h)[0]
 }
 
+type objectHeapArray[O any, E constraints.Ordered] struct {
+	objects      []O
+	getOrderFunc func(O) E
+}
+
+func (h *objectHeapArray[O, E]) Len() int {
+	return len(h.objects)
+}
+
+func (h *objectHeapArray[O, E]) Less(i, j int) bool {
+	return h.getOrderFunc(h.objects[i]) < h.getOrderFunc(h.objects[j])
+}
+
+func (h *objectHeapArray[O, E]) Swap(i, j int) {
+	h.objects[i], h.objects[j] = h.objects[j], h.objects[i]
+}
+
+func (h *objectHeapArray[O, E]) Push(x interface{}) {
+	h.objects = append(h.objects, x.(O))
+}
+
+func (h *objectHeapArray[O, E]) Pop() interface{} {
+	old := h.objects
+	n := len(old)
+	x := old[n-1]
+	h.objects = old[0 : n-1]
+	return x
+}
+
+func (h *objectHeapArray[O, E]) Peek() interface{} {
+	return h.objects[0]
+}
+
 // reverseOrderedInterface is a heap base interface that reverses the order of the elements.
 type reverseOrderedInterface[E constraints.Ordered] struct {
 	HeapInterface
@@ -104,6 +137,37 @@ func NewArrayBasedMinimumHeap[E constraints.Ordered](initial []E) Heap[E] {
 	heap.Init(&ha)
 	return &heapImpl[E, *heapArray[E]]{
 		inner: &ha,
+	}
+}
+
+func NewObjectArrayBasedMaximumHeap[O any, E constraints.Ordered](initial []O, getOrderFunc func(O) E) Heap[O] {
+	if initial == nil {
+		initial = make([]O, 0)
+	}
+	ha := &objectHeapArray[O, E]{
+		objects:      initial,
+		getOrderFunc: getOrderFunc,
+	}
+	reverse := reverseOrderedInterface[E]{
+		HeapInterface: ha,
+	}
+	heap.Init(reverse)
+	return &heapImpl[O, reverseOrderedInterface[E]]{
+		inner: reverse,
+	}
+}
+
+func NewObjectArrayBasedMinimumHeap[O any, E constraints.Ordered](initial []O, getOrderFunc func(O) E) Heap[O] {
+	if initial == nil {
+		initial = make([]O, 0)
+	}
+	ha := &objectHeapArray[O, E]{
+		objects:      initial,
+		getOrderFunc: getOrderFunc,
+	}
+	heap.Init(ha)
+	return &heapImpl[O, *objectHeapArray[O, E]]{
+		inner: ha,
 	}
 }
 
