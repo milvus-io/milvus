@@ -646,6 +646,180 @@ func TestTranslateOutputFields(t *testing.T) {
 	})
 }
 
+func TestAddFieldTask(t *testing.T) {
+	rc := NewRootCoordMock()
+	ctx := context.Background()
+	prefix := "TestAddFieldTask"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+	int64Field := "int64"
+	floatVecField := "fvec"
+	varCharField := "varChar"
+
+	fieldName2Type := make(map[string]schemapb.DataType)
+	fieldName2Type[int64Field] = schemapb.DataType_Int64
+	fieldName2Type[varCharField] = schemapb.DataType_VarChar
+	fieldName2Type[floatVecField] = schemapb.DataType_FloatVector
+	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, int64Field, false)
+
+	task := &addFieldTask{
+		Condition: NewTaskCondition(ctx),
+		AddFieldRequest: &milvuspb.AddFieldRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+		},
+		ctx:       ctx,
+		rootCoord: rc,
+		result:    nil,
+		oldSchema: schema,
+	}
+
+	t.Run("on enqueue", func(t *testing.T) {
+		err := task.OnEnqueue()
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.MsgType_AddField, task.Type())
+	})
+
+	t.Run("ctx", func(t *testing.T) {
+		traceCtx := task.TraceCtx()
+		assert.NotNil(t, traceCtx)
+	})
+
+	t.Run("id", func(t *testing.T) {
+		id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+		task.SetID(id)
+		assert.Equal(t, id, task.ID())
+	})
+
+	t.Run("name", func(t *testing.T) {
+		assert.Equal(t, AddFieldTaskName, task.Name())
+	})
+
+	t.Run("ts", func(t *testing.T) {
+		ts := Timestamp(time.Now().UnixNano())
+		task.SetTs(ts)
+		assert.Equal(t, ts, task.BeginTs())
+		assert.Equal(t, ts, task.EndTs())
+	})
+
+	t.Run("process task", func(t *testing.T) {
+		var err error
+		// nil collection schema
+		task.oldSchema = nil
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		task.oldSchema = schema
+
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
+
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
+
+		err = task.PostExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("PreExecute", func(t *testing.T) {
+		var err error
+
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+
+		// not support dynamic field
+		task.oldSchema.EnableDynamicField = true
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		task.oldSchema.EnableDynamicField = false
+
+		// too many fields
+		Params.Save(Params.ProxyCfg.MaxFieldNum.Key, fmt.Sprint(task.oldSchema.Fields))
+		task.FieldSchema = &schemapb.FieldSchema{
+			Name: "add_field",
+		}
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// invalid field type
+		task.FieldSchema = &schemapb.FieldSchema{
+			DataType: schemapb.DataType_None,
+		}
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// not support vector field
+		task.FieldSchema = &schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+		}
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// not support system field
+		task.FieldSchema = &schemapb.FieldSchema{
+			Name: common.TimeStampFieldName,
+		}
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// must be nullable
+		task.FieldSchema = &schemapb.FieldSchema{
+			Nullable: false,
+		}
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// not support pk field
+		task.FieldSchema = &schemapb.FieldSchema{
+			IsPrimaryKey: true,
+		}
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// not support partition key
+		Params.Save(Params.ProxyCfg.MustUsePartitionKey.Key, "true")
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		Params.Reset(Params.ProxyCfg.MustUsePartitionKey.Key)
+
+		// not support autoID
+		task.FieldSchema = &schemapb.FieldSchema{
+			AutoID: true,
+		}
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// fieldName invalid
+		task.FieldSchema = &schemapb.FieldSchema{
+			Name: "",
+		}
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// duplicated FieldName
+		task.FieldSchema = &schemapb.FieldSchema{
+			Name: varCharField,
+		}
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+}
+
 func TestCreateCollectionTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	ctx := context.Background()

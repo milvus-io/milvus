@@ -78,8 +78,6 @@ service DataCoord {
 
   rpc BroadcastAlteredCollection(AlterCollectionRequest) returns (common.Status) {}
 
-  rpc BroadcastAddedField(AddFieldRequest) returns (common.Status) {}
-
   rpc CheckHealth(milvus.CheckHealthRequest) returns (milvus.CheckHealthResponse) {}
 
   rpc CreateIndex(index.CreateIndexRequest) returns (common.Status){}
@@ -742,7 +740,7 @@ message AlterCollectionRequest {
 message AddFieldRequest {
   int64  collectionID = 1;
   int64  dbID = 2;
-  repeated schema.FieldSchema field_schema = 3;
+  schema.FieldSchema field_schema = 3;
   schema.CollectionSchema schema = 4;
   repeated int64 partitionIDs = 5;
   repeated common.KeyDataPair start_positions = 6;

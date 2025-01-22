@@ -34,6 +34,65 @@ func (_m *MockProxy) EXPECT() *MockProxy_Expecter {
 	return &MockProxy_Expecter{mock: &_m.Mock}
 }
 
+// AddField provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) AddField(_a0 context.Context, _a1 *milvuspb.AddFieldRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddField")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddFieldRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddFieldRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AddFieldRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_AddField_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddField'
+type MockProxy_AddField_Call struct {
+	*mock.Call
+}
+
+// AddField is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AddFieldRequest
+func (_e *MockProxy_Expecter) AddField(_a0 interface{}, _a1 interface{}) *MockProxy_AddField_Call {
+	return &MockProxy_AddField_Call{Call: _e.mock.On("AddField", _a0, _a1)}
+}
+
+func (_c *MockProxy_AddField_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AddFieldRequest)) *MockProxy_AddField_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AddFieldRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_AddField_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_AddField_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_AddField_Call) RunAndReturn(run func(context.Context, *milvuspb.AddFieldRequest) (*commonpb.Status, error)) *MockProxy_AddField_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AllocTimestamp provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) AllocTimestamp(_a0 context.Context, _a1 *milvuspb.AllocTimestampRequest) (*milvuspb.AllocTimestampResponse, error) {
 	ret := _m.Called(_a0, _a1)
