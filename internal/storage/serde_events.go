@@ -169,13 +169,13 @@ func (crr *CompositeBinlogRecordReader) Close() error {
 	return nil
 }
 
-func parseBlobKey(blobKey string) (fieldID FieldID, logId UniqueID) {
-	if _, _, _, fieldID, logId, ok := metautil.ParseInsertLogPath(blobKey); ok {
-		return fieldID, logId
+func parseBlobKey(blobKey string) (colId FieldID, logId UniqueID) {
+	if _, _, _, colId, logId, ok := metautil.ParseInsertLogPath(blobKey); ok {
+		return colId, logId
 	}
-	if fieldID, err := strconv.ParseInt(blobKey, 10, 64); err == nil {
+	if colId, err := strconv.ParseInt(blobKey, 10, 64); err == nil {
 		// data_codec.go generate single field id as blob key.
-		return fieldID, 0
+		return colId, 0
 	}
 	return InvalidUniqueID, InvalidUniqueID
 }

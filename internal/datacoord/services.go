@@ -1622,48 +1622,8 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 	}
 
 	clonedColl.Properties = properties
-	s.meta.AddCollection(clonedColl)
-	return merr.Success(), nil
-}
-
-func (s *Server) BroadcastAddedField(ctx context.Context, req *datapb.AddFieldRequest) (*commonpb.Status, error) {
-	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-
-	schema := req.GetSchema()
-	var fieldIDs []int64
-	for _, field := range req.GetFieldSchema() {
-		schema.Fields = append(schema.Fields, field)
-		fieldIDs = append(fieldIDs, field.FieldID)
-	}
-	// no need to SetAddedField
-
-	properties := make(map[string]string)
-	for _, pair := range req.Properties {
-		properties[pair.GetKey()] = pair.GetValue()
-	}
-
-	// get collection info from cache
-	clonedColl := s.meta.GetClonedCollectionInfo(req.CollectionID)
-
-	// cache miss and update cache
-	if clonedColl == nil {
-		collInfo := &collectionInfo{
-			ID:             req.GetCollectionID(),
-			Schema:         schema,
-			Partitions:     req.GetPartitionIDs(),
-			StartPositions: req.GetStartPositions(),
-			Properties:     properties,
-			DatabaseID:     req.GetDbID(),
-			DatabaseName:   req.GetSchema().GetDbName(),
-			VChannelNames:  req.GetVChannels(),
-		}
-		s.meta.AddCollection(collInfo)
-		return merr.Success(), nil
-	}
-
-	clonedColl.Schema = schema
+	// add field will change the schema
+	clonedColl.Schema = req.GetSchema()
 	s.meta.AddCollection(clonedColl)
 	return merr.Success(), nil
 }

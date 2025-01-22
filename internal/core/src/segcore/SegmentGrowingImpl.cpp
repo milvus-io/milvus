@@ -13,6 +13,7 @@
 #include <cstring>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <queue>
 #include <thread>
 #include <boost/iterator/counting_iterator.hpp>
@@ -80,10 +81,26 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     // step 1: check insert data if valid
     std::unordered_map<FieldId, int64_t> field_id_to_offset;
     int64_t field_offset = 0;
+    int64_t exist_rows = stats_.mem_size / (sizeof(Timestamp) + sizeof(idx_t));
+
     for (const auto& field : insert_record_proto->fields_data()) {
         auto field_id = FieldId(field.field_id());
         AssertInfo(!field_id_to_offset.count(field_id), "duplicate field data");
         field_id_to_offset.emplace(field_id, field_offset++);
+        // may be added field, add the null if has existed data
+        if (exist_rows > 0) {
+            schema_->AddField(FieldName(field.field_name()),
+                              field_id,
+                              DataType(field.type()),
+                              true,
+                              std::nullopt);
+            auto field_meta = schema_->get_fields().at(field_id);
+            insert_record_.append_field_meta(
+                field_id, field_meta, size_per_chunk());
+            auto data = bulk_subscript_not_exist_field(field_meta, exist_rows);
+            insert_record_.get_data_base(field_id)->set_data_raw(
+                0, exist_rows, data.get(), field_meta);
+        }
     }
 
     // step 2: sort timestamp
@@ -467,8 +484,8 @@ std::unique_ptr<DataArray>
 SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                    const int64_t* seg_offsets,
                                    int64_t count) const {
-    auto vec_ptr = insert_record_.get_data_base(field_id);
     auto& field_meta = schema_->operator[](field_id);
+    auto vec_ptr = insert_record_.get_data_base(field_id);
     if (field_meta.is_vector()) {
         auto result = CreateVectorDataArray(count, field_meta);
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
@@ -532,9 +549,6 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
     AssertInfo(!field_meta.is_vector(),
                "Scalar field meta type is vector type");
 
-    if (!insert_record_.is_data_exist(field_id)) {
-        return bulk_subscript_not_exist_field(field_meta, count);
-    }
     auto result = CreateScalarDataArray(count, field_meta);
     if (field_meta.is_nullable()) {
         auto valid_data_ptr = insert_record_.get_valid_data(field_id);
