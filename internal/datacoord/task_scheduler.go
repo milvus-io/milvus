@@ -426,7 +426,7 @@ func (s *taskScheduler) processInit(task Task) bool {
 	log.Ctx(s.ctx).Info("update task version success", zap.Int64("taskID", task.GetTaskID()))
 
 	// 3. assign task to indexNode
-	success := task.AssignTask(s.ctx, client)
+	success := task.AssignTask(s.ctx, client, s.meta)
 	if !success {
 		log.Ctx(s.ctx).Warn("assign task to client failed", zap.Int64("taskID", task.GetTaskID()),
 			zap.String("new state", task.GetState().String()), zap.String("fail reason", task.GetFailReason()))
