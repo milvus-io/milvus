@@ -58,6 +58,9 @@ func (h *spyCompactionHandler) getCompactionInfo(ctx context.Context, signalID i
 	return nil
 }
 
+func (h *spyCompactionHandler) setTaskScheduler(scheduler *taskScheduler) {
+}
+
 var _ compactionPlanContext = (*spyCompactionHandler)(nil)
 
 func (h *spyCompactionHandler) removeTasksByChannel(channel string) {}
@@ -70,6 +73,10 @@ func (h *spyCompactionHandler) enqueueCompaction(task *datapb.CompactionTask) er
 	plan, err := t.BuildCompactionRequest()
 	h.spyChan <- plan
 	return err
+}
+
+func (h *spyCompactionHandler) checkAndSetSegmentStating(segmentID int64) bool {
+	return false
 }
 
 // isFull return true if the task pool is full

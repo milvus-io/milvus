@@ -59,6 +59,8 @@ type compactionPlanContext interface {
 	getCompactionTasksNumBySignalID(signalID int64) int
 	getCompactionInfo(ctx context.Context, signalID int64) *compactionInfo
 	removeTasksByChannel(channel string)
+	setTaskScheduler(scheduler *taskScheduler)
+	checkAndSetSegmentStating(segmentID int64) bool
 }
 
 var (
@@ -230,6 +232,21 @@ func summaryCompactionState(tasks []*datapb.CompactionTask) *compactionInfo {
 	return ret
 }
 
+func (c *compactionPlanHandler) checkAndSetSegmentStating(segmentID int64) bool {
+	c.executingGuard.Lock()
+	defer c.executingGuard.Unlock()
+
+	for _, t := range c.executingTasks {
+		if t.GetTaskProto().GetType() == datapb.CompactionType_Level0DeleteCompaction {
+			if t.CheckCompactionContainsSegment(segmentID) {
+				return false
+			}
+		}
+	}
+	c.meta.SetSegmentStating(segmentID, true)
+	return true
+}
+
 func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64) int {
 	cnt := 0
 	c.queueTasks.ForEach(func(ct CompactionTask) {
@@ -248,22 +265,21 @@ func (c *compactionPlanHandler) getCompactionTasksNumBySignalID(triggerID int64)
 }
 
 func newCompactionPlanHandler(cluster Cluster, sessions session.DataNodeManager, meta CompactionMeta,
-	allocator allocator.Allocator, analyzeScheduler *taskScheduler, handler Handler,
+	allocator allocator.Allocator, handler Handler,
 ) *compactionPlanHandler {
 	// Higher capacity will have better ordering in priority, but consumes more memory.
 	// TODO[GOOSE]: Higher capacity makes tasks waiting longer, which need to be get rid of.
 	capacity := paramtable.Get().DataCoordCfg.CompactionTaskQueueCapacity.GetAsInt()
 	return &compactionPlanHandler{
-		queueTasks:       *NewCompactionQueue(capacity, getPrioritizer()),
-		meta:             meta,
-		sessions:         sessions,
-		allocator:        allocator,
-		stopCh:           make(chan struct{}),
-		cluster:          cluster,
-		executingTasks:   make(map[int64]CompactionTask),
-		cleaningTasks:    make(map[int64]CompactionTask),
-		analyzeScheduler: analyzeScheduler,
-		handler:          handler,
+		queueTasks:     *NewCompactionQueue(capacity, getPrioritizer()),
+		meta:           meta,
+		sessions:       sessions,
+		allocator:      allocator,
+		stopCh:         make(chan struct{}),
+		cluster:        cluster,
+		executingTasks: make(map[int64]CompactionTask),
+		cleaningTasks:  make(map[int64]CompactionTask),
+		handler:        handler,
 	}
 }
 
@@ -275,6 +291,10 @@ func (c *compactionPlanHandler) checkSchedule() {
 	}
 	c.cleanFailedTasks()
 	c.schedule(assigner)
+}
+
+func (c *compactionPlanHandler) setTaskScheduler(scheduler *taskScheduler) {
+	c.analyzeScheduler = scheduler
 }
 
 func (c *compactionPlanHandler) schedule(assigner NodeAssigner) []CompactionTask {
@@ -364,6 +384,13 @@ func (c *compactionPlanHandler) schedule(assigner NodeAssigner) []CompactionTask
 		}
 
 		c.executingGuard.Lock()
+		// Do not move this check logic outside the lock; it needs to remain mutually exclusive with the stats task.
+		if t.GetTaskProto().GetType() == datapb.CompactionType_Level0DeleteCompaction {
+			if !t.PreparePlan() {
+				c.executingGuard.Unlock()
+				continue
+			}
+		}
 		c.executingTasks[t.GetTaskProto().GetPlanID()] = t
 		c.executingGuard.Unlock()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Dec()
@@ -373,8 +400,7 @@ func (c *compactionPlanHandler) schedule(assigner NodeAssigner) []CompactionTask
 }
 
 func (c *compactionPlanHandler) start() {
-	c.loadMeta()
-	c.stopWg.Add(2)
+	c.stopWg.Add(3)
 	go c.loopSchedule()
 	go c.loopClean()
 }
