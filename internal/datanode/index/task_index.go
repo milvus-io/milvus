@@ -316,7 +316,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 
 	log.Info("debug create index", zap.Any("buildIndexParams", buildIndexParams))
 	var err error
-	// create index here
+
 	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)
 	if err != nil {
 		if it.index != nil && it.index.CleanLocalData() != nil {

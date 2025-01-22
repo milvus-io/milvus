@@ -55,7 +55,6 @@ const (
 	DataCoord_UpdateChannelCheckpoint_FullMethodName     = "/milvus.proto.data.DataCoord/UpdateChannelCheckpoint"
 	DataCoord_MarkSegmentsDropped_FullMethodName         = "/milvus.proto.data.DataCoord/MarkSegmentsDropped"
 	DataCoord_BroadcastAlteredCollection_FullMethodName  = "/milvus.proto.data.DataCoord/BroadcastAlteredCollection"
-	DataCoord_BroadcastAddedField_FullMethodName         = "/milvus.proto.data.DataCoord/BroadcastAddedField"
 	DataCoord_CheckHealth_FullMethodName                 = "/milvus.proto.data.DataCoord/CheckHealth"
 	DataCoord_CreateIndex_FullMethodName                 = "/milvus.proto.data.DataCoord/CreateIndex"
 	DataCoord_AlterIndex_FullMethodName                  = "/milvus.proto.data.DataCoord/AlterIndex"
@@ -115,7 +114,6 @@ type DataCoordClient interface {
 	UpdateChannelCheckpoint(ctx context.Context, in *UpdateChannelCheckpointRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	MarkSegmentsDropped(ctx context.Context, in *MarkSegmentsDroppedRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	BroadcastAlteredCollection(ctx context.Context, in *AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	BroadcastAddedField(ctx context.Context, in *AddFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error)
 	CreateIndex(ctx context.Context, in *indexpb.CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	AlterIndex(ctx context.Context, in *indexpb.AlterIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -435,15 +433,6 @@ func (c *dataCoordClient) BroadcastAlteredCollection(ctx context.Context, in *Al
 	return out, nil
 }
 
-func (c *dataCoordClient) BroadcastAddedField(ctx context.Context, in *AddFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, DataCoord_BroadcastAddedField_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *dataCoordClient) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
 	out := new(milvuspb.CheckHealthResponse)
 	err := c.cc.Invoke(ctx, DataCoord_CheckHealth_FullMethodName, in, out, opts...)
@@ -637,7 +626,6 @@ type DataCoordServer interface {
 	UpdateChannelCheckpoint(context.Context, *UpdateChannelCheckpointRequest) (*commonpb.Status, error)
 	MarkSegmentsDropped(context.Context, *MarkSegmentsDroppedRequest) (*commonpb.Status, error)
 	BroadcastAlteredCollection(context.Context, *AlterCollectionRequest) (*commonpb.Status, error)
-	BroadcastAddedField(context.Context, *AddFieldRequest) (*commonpb.Status, error)
 	CheckHealth(context.Context, *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
 	CreateIndex(context.Context, *indexpb.CreateIndexRequest) (*commonpb.Status, error)
 	AlterIndex(context.Context, *indexpb.AlterIndexRequest) (*commonpb.Status, error)
@@ -759,9 +747,6 @@ func (UnimplementedDataCoordServer) MarkSegmentsDropped(context.Context, *MarkSe
 }
 func (UnimplementedDataCoordServer) BroadcastAlteredCollection(context.Context, *AlterCollectionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BroadcastAlteredCollection not implemented")
-}
-func (UnimplementedDataCoordServer) BroadcastAddedField(context.Context, *AddFieldRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method BroadcastAddedField not implemented")
 }
 func (UnimplementedDataCoordServer) CheckHealth(context.Context, *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CheckHealth not implemented")
@@ -1402,24 +1387,6 @@ func _DataCoord_BroadcastAlteredCollection_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataCoord_BroadcastAddedField_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(AddFieldRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataCoordServer).BroadcastAddedField(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataCoord_BroadcastAddedField_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataCoordServer).BroadcastAddedField(ctx, req.(*AddFieldRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _DataCoord_CheckHealth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(milvuspb.CheckHealthRequest)
 	if err := dec(in); err != nil {
@@ -1860,10 +1827,6 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BroadcastAlteredCollection",
 			Handler:    _DataCoord_BroadcastAlteredCollection_Handler,
-		},
-		{
-			MethodName: "BroadcastAddedField",
-			Handler:    _DataCoord_BroadcastAddedField_Handler,
 		},
 		{
 			MethodName: "CheckHealth",

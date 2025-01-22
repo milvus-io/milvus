@@ -1079,21 +1079,21 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 	return merr.Success(), nil
 }
 
-// AddField add field
-func (c *Core) AddField(ctx context.Context, in *milvuspb.AddFieldRequest) (*commonpb.Status, error) {
+// AddCollectionField add field
+func (c *Core) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("AddField", metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder("AddField")
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionField", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("AddCollectionField")
 
 	log.Ctx(ctx).Info("received request to add field",
 		zap.String("dbName", in.GetDbName()),
 		zap.String("name", in.GetCollectionName()),
 		zap.String("role", typeutil.RootCoordRole))
 
-	t := &addFieldTask{
+	t := &addCollectionFieldTask{
 		baseTask: newBaseTask(ctx, c),
 		Req:      in,
 	}
@@ -1104,7 +1104,7 @@ func (c *Core) AddField(ctx context.Context, in *milvuspb.AddFieldRequest) (*com
 			zap.Error(err),
 			zap.String("name", in.GetCollectionName()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("AddField", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionField", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
@@ -1115,13 +1115,13 @@ func (c *Core) AddField(ctx context.Context, in *milvuspb.AddFieldRequest) (*com
 			zap.String("name", in.GetCollectionName()),
 			zap.Uint64("ts", t.GetTs()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("AddField", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionField", metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("AddField", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("AddField").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("AddField").Observe(float64(t.queueDur.Milliseconds()))
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AddCollectionField", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("AddCollectionField").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("AddCollectionField").Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to add field",
 		zap.String("role", typeutil.RootCoordRole),

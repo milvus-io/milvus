@@ -431,7 +431,7 @@ TEST(Sealed, LoadFieldData) {
 
     auto indexing = GenVecIndexing(
         N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
-
+    //
     auto segment = CreateSealedSegment(schema);
     // std::string dsl = R"({
     //     "bool": {
@@ -916,7 +916,7 @@ TEST(Sealed, LoadScalarIndex) {
 
     LoadFieldDataInfo row_id_info;
     FieldMeta row_id_field_meta(
-        FieldName("RowID"), RowFieldID, DataType::INT64, false);
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
     auto field_data =
         std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(dataset.row_ids_.data(), N);
@@ -925,8 +925,11 @@ TEST(Sealed, LoadScalarIndex) {
     segment->LoadFieldData(RowFieldID, field_data_info);
 
     LoadFieldDataInfo ts_info;
-    FieldMeta ts_field_meta(
-        FieldName("Timestamp"), TimestampFieldID, DataType::INT64, false);
+    FieldMeta ts_field_meta(FieldName("Timestamp"),
+                            TimestampFieldID,
+                            DataType::INT64,
+                            false,
+                            std::nullopt);
     field_data =
         std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(dataset.timestamps_.data(), N);

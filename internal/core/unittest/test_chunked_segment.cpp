@@ -39,6 +39,7 @@
 #include "test_utils/DataGen.h"
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -174,8 +175,11 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
             schema->AddDebugField("string1", DataType::VARCHAR, true);
         auto str2_fid =
             schema->AddDebugField("string2", DataType::VARCHAR, true);
-        schema->AddField(
-            FieldName("ts"), TimestampFieldID, DataType::INT64, true);
+        schema->AddField(FieldName("ts"),
+                         TimestampFieldID,
+                         DataType::INT64,
+                         true,
+                         std::nullopt);
         schema->set_primary_field_id(pk_fid);
         segment = segcore::CreateSealedSegment(
             schema,
