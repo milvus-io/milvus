@@ -280,7 +280,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
         return;
     }
     null_count_ = default_value.has_value() ? 0 : element_count;
-    // ssize_t byte_count = (num_rows + 7) / 8;
+
     auto valid_data_ptr = [&] {
         ssize_t byte_count = (element_count + 7) / 8;
         std::shared_ptr<uint8_t[]> valid_data(new uint8_t[byte_count]);

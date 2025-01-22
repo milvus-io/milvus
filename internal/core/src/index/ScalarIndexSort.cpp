@@ -45,7 +45,7 @@ ScalarIndexSort<T>::ScalarIndexSort(
         AssertInfo(file_manager_ != nullptr, "create file manager failed!");
     }
 }
-// index here
+
 template <typename T>
 void
 ScalarIndexSort<T>::Build(const Config& config) {

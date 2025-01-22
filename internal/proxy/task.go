@@ -426,8 +426,6 @@ type addFieldTask struct {
 	ctx       context.Context
 	rootCoord types.RootCoordClient
 	result    *commonpb.Status
-	chMgr     channelsMgr
-	chTicker  channelsTimeTicker
 
 	oldSchema *schemapb.CollectionSchema
 }
@@ -468,64 +466,66 @@ func (t *addFieldTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
-	// todo:lxg add it
-	t.Base.MsgType = commonpb.MsgType_DropCollection
+	t.Base.MsgType = commonpb.MsgType_AddField
 	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
 func (t *addFieldTask) PreExecute(ctx context.Context) error {
+	if t.oldSchema == nil {
+		return merr.WrapErrParameterInvalidMsg("empty old schema in add field task")
+	}
 	if t.oldSchema.EnableDynamicField {
-		return merr.WrapErrParameterInvalidMsg("can't add field in an enable dynamic field collection")
+		return merr.WrapErrParameterInvalidMsg("not support to add field in an enable dynamic field collection")
+	}
+	if t.FieldSchema == nil {
+		return nil
 	}
 	fieldList := typeutil.NewSet[string]()
 	for _, schema := range t.oldSchema.Fields {
 		fieldList.Insert(schema.Name)
 	}
-	clusteringFieldIdx := 0
-	for i, field := range t.FieldSchema {
-		if typeutil.IsVectorType(field.DataType) {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("can't add vector field, field name = %s", field.Name))
-		}
-		if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName}, field.GetName()) {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("can't addsystem field, field name = %s", field.Name))
-		}
-		if !field.Nullable {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("can't add field which is not nullable, field name = %s", field.Name))
-		}
-		if !field.IsPrimaryKey {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("can't add field which is pk, field name = %s", field.Name))
-		}
-		if !field.IsPartitionKey {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("partition key field not support nullable, field name = %s", field.Name))
-		}
-		if field.AutoID {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("only primary field can speficy AutoID with true, field name = %s", field.Name))
-		}
-		if field.GetIsClusteringKey() {
-			if typeutil.IsVectorType(field.GetDataType()) &&
-				!paramtable.Get().CommonCfg.EnableVectorClusteringKey.GetAsBool() {
-				return merr.WrapErrCollectionVectorClusteringKeyNotAllowed(t.CollectionName, fmt.Sprintf("field name = %s", field.Name))
-			}
-			if clusteringFieldIdx > -1 {
-				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
-					fmt.Sprintf("there are more than one clustering key, field name = %s, %s", t.FieldSchema[clusteringFieldIdx].Name, field.Name))
-			}
-			clusteringFieldIdx = i
-		}
-		if err := ValidateField(field, t.oldSchema); err != nil {
-			return err
-		}
-		if fieldList.Contain(field.Name) {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprint("duplicate field name: %s", field.GetName()))
-		}
-		fieldList.Insert(field.Name)
-		log.Info("pre check add field loop", zap.String("field name", field.Name), zap.String("type", field.DataType.String()), zap.Bool("is clustering", field.IsClusteringKey), zap.Any("params", field.TypeParams))
-	}
-	if len(t.oldSchema.Fields)+len(t.FieldSchema) > Params.ProxyCfg.MaxFieldNum.GetAsInt() {
-		msg := fmt.Sprintf("maximum field's number should be limited to %d, the length of new fields: %d, the length of old fields: %d", Params.ProxyCfg.MaxFieldNum.GetAsInt(), len(t.FieldSchema), len(t.oldSchema.Fields))
+
+	if len(fieldList) >= Params.ProxyCfg.MaxFieldNum.GetAsInt() {
+		msg := fmt.Sprintf("The number of fields has reached the maximum value %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
 		return merr.WrapErrParameterInvalidMsg(msg)
 	}
+
+	if _, ok := schemapb.DataType_name[int32(t.FieldSchema.DataType)]; !ok || t.FieldSchema.GetDataType() == schemapb.DataType_None {
+		return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", t.FieldSchema.GetDataType()))
+	}
+
+	if typeutil.IsVectorType(t.FieldSchema.DataType) {
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add vector field, field name = %s", t.FieldSchema.Name))
+	}
+	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName}, t.FieldSchema.GetName()) {
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add system field, field name = %s", t.FieldSchema.Name))
+	}
+	if t.FieldSchema.IsPrimaryKey {
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add pk field, field name = %s", t.FieldSchema.Name))
+	}
+	if !t.FieldSchema.Nullable {
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("added field must be nullable, please check it, field name = %s", t.FieldSchema.Name))
+	}
+	if t.FieldSchema.IsPartitionKey || Params.ProxyCfg.MustUsePartitionKey.GetAsBool() {
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("partition key field not support to be nullable, MustUsePartitionKey = %t ,field name = %s", Params.ProxyCfg.MustUsePartitionKey.GetAsBool(), t.FieldSchema.Name))
+	}
+	if t.FieldSchema.AutoID {
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("only primary field can speficy AutoID with true, field name = %s", t.FieldSchema.Name))
+	}
+	if t.FieldSchema.GetIsClusteringKey() && typeutil.IsVectorType(t.FieldSchema.GetDataType()) &&
+		!paramtable.Get().CommonCfg.EnableVectorClusteringKey.GetAsBool() {
+		return merr.WrapErrCollectionVectorClusteringKeyNotAllowed(t.CollectionName, fmt.Sprintf("field name = %s", t.FieldSchema.Name))
+
+	}
+	if err := ValidateField(t.FieldSchema, t.oldSchema); err != nil {
+		return err
+	}
+	if fieldList.Contain(t.FieldSchema.Name) {
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprint("duplicate field name: %s", t.FieldSchema.GetName()))
+	}
+
+	log.Info("PreExecute addField task done", zap.Any("field schema", t.FieldSchema))
 	return nil
 }
 

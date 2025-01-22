@@ -5920,7 +5920,7 @@ type AddFieldRequest struct {
 
 	CollectionID   int64                      `protobuf:"varint,1,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
 	DbID           int64                      `protobuf:"varint,2,opt,name=dbID,proto3" json:"dbID,omitempty"`
-	FieldSchema    []*schemapb.FieldSchema    `protobuf:"bytes,3,rep,name=field_schema,json=fieldSchema,proto3" json:"field_schema,omitempty"`
+	FieldSchema    *schemapb.FieldSchema      `protobuf:"bytes,3,opt,name=field_schema,json=fieldSchema,proto3" json:"field_schema,omitempty"`
 	Schema         *schemapb.CollectionSchema `protobuf:"bytes,4,opt,name=schema,proto3" json:"schema,omitempty"`
 	PartitionIDs   []int64                    `protobuf:"varint,5,rep,packed,name=partitionIDs,proto3" json:"partitionIDs,omitempty"`
 	StartPositions []*commonpb.KeyDataPair    `protobuf:"bytes,6,rep,name=start_positions,json=startPositions,proto3" json:"start_positions,omitempty"`
@@ -5974,7 +5974,7 @@ func (x *AddFieldRequest) GetDbID() int64 {
 	return 0
 }
 
-func (x *AddFieldRequest) GetFieldSchema() []*schemapb.FieldSchema {
+func (x *AddFieldRequest) GetFieldSchema() *schemapb.FieldSchema {
 	if x != nil {
 		return x.FieldSchema
 	}

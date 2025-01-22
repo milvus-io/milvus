@@ -33,6 +33,80 @@ func (_m *MockRootCoordClient) EXPECT() *MockRootCoordClient_Expecter {
 	return &MockRootCoordClient_Expecter{mock: &_m.Mock}
 }
 
+// AddField provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) AddField(ctx context.Context, in *milvuspb.AddFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddField")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddFieldRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddFieldRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AddFieldRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_AddField_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddField'
+type MockRootCoordClient_AddField_Call struct {
+	*mock.Call
+}
+
+// AddField is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.AddFieldRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) AddField(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_AddField_Call {
+	return &MockRootCoordClient_AddField_Call{Call: _e.mock.On("AddField",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_AddField_Call) Run(run func(ctx context.Context, in *milvuspb.AddFieldRequest, opts ...grpc.CallOption)) *MockRootCoordClient_AddField_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.AddFieldRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_AddField_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_AddField_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_AddField_Call) RunAndReturn(run func(context.Context, *milvuspb.AddFieldRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_AddField_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AllocID provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
 	_va := make([]interface{}, len(opts))
