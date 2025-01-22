@@ -359,7 +359,7 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
         case DataType::VECTOR_INT8: {
             auto length = count * dim;
             auto obj = vector_array->mutable_int8_vector();
-            obj->resize(length * sizeof(int8));
+            obj->resize(length);
             break;
         }
         default: {
@@ -609,8 +609,7 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 }
                 vector_array->set_dim(dst->dim());
                 *dst->mutable_contents() = src.contents();
-            } else if (field_meta.get_data_type() ==
-                       DataType::VECTOR_INT8) {
+            } else if (field_meta.get_data_type() == DataType::VECTOR_INT8) {
                 auto data = VEC_FIELD_DATA(src_field_data, int8);
                 auto obj = vector_array->mutable_int8_vector();
                 obj->assign(data, dim * sizeof(int8));

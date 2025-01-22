@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <stdio.h>
 
 #include "common/Types.h"
 #include "knowhere/comp/index_param.h"
@@ -71,6 +72,8 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
         "bf16_vec", DataType::VECTOR_BFLOAT16, 128, metric_type);
     auto sparse_vec = schema->AddDebugField(
         "sparse_vec", DataType::VECTOR_SPARSE_FLOAT, 128, metric_type);
+    auto int8_vec = schema->AddDebugField(
+        "int8_vec", DataType::VECTOR_INT8, 128, metric_type);
     schema->set_primary_field_id(int64_field);
 
     std::map<std::string, std::string> index_params = {
@@ -136,6 +139,8 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
             segment->bulk_subscript(bf16_vec, ids_ds->GetIds(), num_inserted);
         auto sparse_vec_result =
             segment->bulk_subscript(sparse_vec, ids_ds->GetIds(), num_inserted);
+        auto int8_vec_result =
+            segment->bulk_subscript(int8_vec, ids_ds->GetIds(), num_inserted);
 
         EXPECT_EQ(bool_result->scalars().bool_data().data_size(), num_inserted);
         EXPECT_EQ(int8_result->scalars().int_data().data_size(), num_inserted);
@@ -159,6 +164,8 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
         EXPECT_EQ(
             sparse_vec_result->vectors().sparse_float_vector().contents_size(),
             num_inserted);
+        EXPECT_EQ(int8_vec_result->vectors().int8_vector().size(),
+                  num_inserted * dim);
         EXPECT_EQ(int_array_result->scalars().array_data().data_size(),
                   num_inserted);
         EXPECT_EQ(long_array_result->scalars().array_data().data_size(),
@@ -184,24 +191,33 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
                                 .data();
         auto sparse_vec_res = SparseBytesToRows(
             sparse_vec_result->vectors().sparse_float_vector().contents());
+        auto int8_vec_res = (int8*)int8_vec_result.get()
+                                ->mutable_vectors()
+                                ->int8_vector()
+                                .data();
         EXPECT_TRUE(fp32_vec_res.size() == num_inserted * dim);
         auto fp32_vec_gt = dataset.get_col<float>(fp32_vec);
         auto fp16_vec_gt = dataset.get_col<float16>(fp16_vec);
         auto bf16_vec_gt = dataset.get_col<bfloat16>(bf16_vec);
         auto sparse_vec_gt =
             dataset.get_col<knowhere::sparse::SparseRow<float>>(sparse_vec);
+        auto int8_vec_gt = dataset.get_col<int8>(int8_vec);
 
         for (size_t i = 0; i < num_inserted; ++i) {
             auto id = ids_ds->GetIds()[i];
             // check dense vector
-            for (size_t j = 0; j < 128; ++j) {
-                EXPECT_TRUE(fp32_vec_res[i * dim + j] ==
-                            fp32_vec_gt[(id % per_batch) * dim + j]);
-                EXPECT_TRUE(fp16_vec_res[i * dim + j] ==
-                            fp16_vec_gt[(id % per_batch) * dim + j]);
-                EXPECT_TRUE(bf16_vec_res[i * dim + j] ==
-                            bf16_vec_gt[(id % per_batch) * dim + j]);
-            }
+            EXPECT_TRUE(memcmp((void*)(&fp32_vec_res[i * dim]),
+                               (void*)(&fp32_vec_gt[(id % per_batch) * dim]),
+                               sizeof(float) * dim) == 0);
+            EXPECT_TRUE(memcmp((void*)(&fp16_vec_res[i * dim]),
+                               (void*)(&fp16_vec_gt[(id % per_batch) * dim]),
+                               sizeof(float16) * dim) == 0);
+            EXPECT_TRUE(memcmp((void*)(&bf16_vec_res[i * dim]),
+                               (void*)(&bf16_vec_gt[(id % per_batch) * dim]),
+                               sizeof(bfloat16) * dim) == 0);
+            EXPECT_TRUE(memcmp((void*)(&int8_vec_res[i * dim]),
+                               (void*)(&int8_vec_gt[(id % per_batch) * dim]),
+                               sizeof(int8) * dim) == 0);
             //check sparse vector
             auto actual_row = sparse_vec_res[i];
             auto expected_row = sparse_vec_gt[(id % per_batch)];

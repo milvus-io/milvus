@@ -155,6 +155,10 @@ func NewSparseFloatVectorFieldData(fieldName string, numRows int) *schemapb.Fiel
 	return testutils.NewSparseFloatVectorFieldData(fieldName, numRows)
 }
 
+func NewInt8VectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
+	return testutils.NewInt8VectorFieldData(fieldName, numRows, dim)
+}
+
 func GenerateInt64Array(numRows int, start int64) []int64 {
 	ret := make([]int64, numRows)
 	for i := 0; i < numRows; i++ {

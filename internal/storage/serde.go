@@ -459,6 +459,13 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		fixedSizeDeserializer,
 		fixedSizeSerializer,
 	}
+	m[schemapb.DataType_Int8Vector] = serdeEntry{
+		func(i int) arrow.DataType {
+			return &arrow.FixedSizeBinaryType{ByteWidth: i}
+		},
+		fixedSizeDeserializer,
+		fixedSizeSerializer,
+	}
 	m[schemapb.DataType_FloatVector] = serdeEntry{
 		func(i int) arrow.DataType {
 			return &arrow.FixedSizeBinaryType{ByteWidth: i * 4}

@@ -191,6 +191,8 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 		vectorType = planpb.VectorType_BFloat16Vector
 	case schemapb.DataType_SparseFloatVector:
 		vectorType = planpb.VectorType_SparseFloatVector
+	case schemapb.DataType_Int8Vector:
+		vectorType = planpb.VectorType_Int8Vector
 	default:
 		log.Error("Invalid dataType", zap.Any("dataType", dataType))
 		return nil, err
