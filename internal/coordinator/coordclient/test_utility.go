@@ -17,3 +17,16 @@ func ResetRegistration() {
 		rootCoordClient:  syncutil.NewFuture[types.RootCoordClient](),
 	}
 }
+
+// ResetQueryCoordRegistration resets the query coord client to initial state.
+func ResetQueryCoordRegistration() {
+	glocalClient.queryCoordClient = syncutil.NewFuture[types.QueryCoordClient]()
+}
+
+func ResetRootCoordRegistration() {
+	glocalClient.rootCoordClient = syncutil.NewFuture[types.RootCoordClient]()
+}
+
+func ResetDataCoordRegistration() {
+	glocalClient.dataCoordClient = syncutil.NewFuture[types.DataCoordClient]()
+}
