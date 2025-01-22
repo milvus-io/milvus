@@ -120,7 +120,8 @@ func (s *Server) getUnIndexTaskSegments(ctx context.Context) []*SegmentInfo {
 
 func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 	log := log.Ctx(ctx)
-	log.Info("start create index for segment loop...")
+	log.Info("start create index for segment loop...",
+		zap.Int64("TaskCheckInterval", Params.DataCoordCfg.TaskCheckInterval.GetAsInt64()))
 	defer s.serverLoopWg.Done()
 
 	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
@@ -281,6 +282,15 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 }
 
 func ValidateIndexParams(index *model.Index) error {
+	if err := CheckDuplidateKey(index.IndexParams, "indexParams"); err != nil {
+		return err
+	}
+	if err := CheckDuplidateKey(index.UserIndexParams, "userIndexParams"); err != nil {
+		return err
+	}
+	if err := CheckDuplidateKey(index.TypeParams, "typeParams"); err != nil {
+		return err
+	}
 	indexType := GetIndexType(index.IndexParams)
 	indexParams := funcutil.KeyValuePair2Map(index.IndexParams)
 	userIndexParams := funcutil.KeyValuePair2Map(index.UserIndexParams)
@@ -295,6 +305,17 @@ func ValidateIndexParams(index *model.Index) error {
 	}
 	if err := indexparamcheck.ValidateOffsetCacheIndexParams(indexType, userIndexParams); err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params", err.Error())
+	}
+	return nil
+}
+
+func CheckDuplidateKey(kvs []*commonpb.KeyValuePair, tag string) error {
+	keySet := typeutil.NewSet[string]()
+	for _, kv := range kvs {
+		if keySet.Contain(kv.GetKey()) {
+			return merr.WrapErrParameterInvalidMsg("duplicate %s key in %s params", kv.GetKey(), tag)
+		}
+		keySet.Insert(kv.GetKey())
 	}
 	return nil
 }
@@ -932,7 +953,8 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 							IndexName:           s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
 							IndexParams:         indexParams,
 							IndexFilePaths:      indexFilePaths,
-							SerializedSize:      segIdx.IndexSize,
+							SerializedSize:      segIdx.IndexSerializedSize,
+							MemSize:             segIdx.IndexMemSize,
 							IndexVersion:        segIdx.IndexVersion,
 							NumRows:             segIdx.NumRows,
 							CurrentIndexVersion: segIdx.CurrentIndexVersion,

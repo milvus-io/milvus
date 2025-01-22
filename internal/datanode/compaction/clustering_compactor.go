@@ -473,7 +473,8 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 	for _, segment := range inputSegments {
 		segmentClone := &datapb.CompactionSegmentBinlogs{
 			SegmentID: segment.SegmentID,
-			// only FieldBinlogs needed
+			// only FieldBinlogs and deltalogs needed
+			Deltalogs:    segment.Deltalogs,
 			FieldBinlogs: segment.FieldBinlogs,
 		}
 		future := t.mappingPool.Submit(func() (any, error) {

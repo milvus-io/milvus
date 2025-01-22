@@ -179,7 +179,7 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, in *milvu
 		}
 		grants := []*milvuspb.GrantEntity{in.Entity}
 
-		allGroups, err := core.getPrivilegeGroups(ctx)
+		allGroups, err := core.getDefaultAndCustomPrivilegeGroups(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -209,12 +209,14 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, in *milvu
 				})
 			})
 		}
-		if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-			OpType: opType,
-			OpKey:  funcutil.PolicyForPrivileges(expandGrants),
-		}); err != nil {
-			log.Ctx(ctx).Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
-			return nil, err
+		if len(expandGrants) > 0 {
+			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+				OpType: opType,
+				OpKey:  funcutil.PolicyForPrivileges(expandGrants),
+			}); err != nil {
+				log.Ctx(ctx).Warn("fail to refresh policy info cache", zap.Any("in", in), zap.Error(err))
+				return nil, err
+			}
 		}
 		return nil, nil
 	}))
@@ -275,12 +277,12 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 					return p.Name
 				})
 
-				// check if privileges are the same object type
-				objectTypes := lo.SliceToMap(newPrivs, func(p *milvuspb.PrivilegeEntity) (string, struct{}) {
-					return util.GetObjectType(p.Name), struct{}{}
+				// check if privileges are the same privilege level
+				privilegeLevels := lo.SliceToMap(newPrivs, func(p *milvuspb.PrivilegeEntity) (string, struct{}) {
+					return util.GetPrivilegeLevel(p.Name), struct{}{}
 				})
-				if len(objectTypes) > 1 {
-					return nil, errors.New("privileges are not the same object type")
+				if len(privilegeLevels) > 1 {
+					return nil, errors.New("privileges are not the same privilege level")
 				}
 			case milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup:
 				newPrivs, _ := lo.Difference(v, in.Privileges)

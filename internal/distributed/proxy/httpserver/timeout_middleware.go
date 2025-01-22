@@ -27,10 +27,11 @@ import (
 	"github.com/gin-gonic/gin"
 
 	mhttp "github.com/milvus-io/milvus/internal/http"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func defaultResponse(c *gin.Context) {
-	c.String(http.StatusRequestTimeout, "timeout")
+	c.JSON(http.StatusRequestTimeout, gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
 }
 
 // BufferPool represents a pool of buffers.

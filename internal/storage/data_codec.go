@@ -387,6 +387,10 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 		if err = eventWriter.AddSparseFloatVectorToPayload(singleData.(*SparseFloatVectorFieldData)); err != nil {
 			return err
 		}
+	case schemapb.DataType_Int8Vector:
+		if err = eventWriter.AddInt8VectorToPayload(singleData.(*Int8VectorFieldData).Data, singleData.(*Int8VectorFieldData).Dim); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("undefined data type %d", dataType)
 	}
@@ -674,6 +678,22 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 		vec.AppendAllRows(singleData)
 		insertData.Data[fieldID] = vec
 		return singleData.RowNum(), nil
+
+	case schemapb.DataType_Int8Vector:
+		singleData := data.([]int8)
+		if fieldData == nil {
+			fieldData = &Int8VectorFieldData{Data: make([]int8, 0, rowNum*dim)}
+		}
+		int8VectorFieldData := fieldData.(*Int8VectorFieldData)
+
+		int8VectorFieldData.Data = append(int8VectorFieldData.Data, singleData...)
+		length, err := eventReader.GetPayloadLengthFromReader()
+		if err != nil {
+			return 0, err
+		}
+		int8VectorFieldData.Dim = dim
+		insertData.Data[fieldID] = int8VectorFieldData
+		return length, nil
 
 	default:
 		return 0, fmt.Errorf("undefined data type %d", dataType)

@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -76,6 +75,72 @@ type compactionInfo struct {
 	failedCnt    int
 	timeoutCnt   int
 	mergeInfos   map[int64]*milvuspb.CompactionMergeInfo
+}
+
+type NodeAssigner interface {
+	assign(t CompactionTask) bool
+}
+
+type SlotBasedNodeAssigner struct {
+	cluster Cluster
+
+	slots map[int64]int64
+}
+
+var _ NodeAssigner = (*SlotBasedNodeAssigner)(nil)
+
+func newSlotBasedNodeAssigner(cluster Cluster) *SlotBasedNodeAssigner {
+	return &SlotBasedNodeAssigner{
+		cluster: cluster,
+	}
+}
+
+func (sna *SlotBasedNodeAssigner) assign(t CompactionTask) bool {
+	if sna.slots == nil {
+		sna.slots = sna.cluster.QuerySlots()
+	}
+
+	logger := log.With(
+		zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+		zap.String("type", t.GetTaskProto().GetType().String()),
+		zap.String("vchannel", t.GetTaskProto().GetChannel()))
+
+	nodeID, useSlot := sna.pickAnyNode(t)
+	if nodeID == NullNodeID {
+		logger.RatedWarn(10, "cannot find datanode for compaction task",
+			zap.Int64("required", t.GetSlotUsage()), zap.Any("available", sna.slots))
+		return false
+	}
+	err := t.SetNodeID(nodeID)
+	if err != nil {
+		logger.Warn("assignNodeID failed", zap.Error(err))
+		return false
+	}
+	// update the input nodeSlots
+	sna.slots[nodeID] = sna.slots[nodeID] - useSlot
+	logger.Debug("assignNodeID success", zap.Any("nodeID", nodeID))
+	return true
+}
+
+func (sna *SlotBasedNodeAssigner) pickAnyNode(task CompactionTask) (nodeID int64, useSlot int64) {
+	nodeID = NullNodeID
+	var maxSlots int64 = -1
+
+	useSlot = task.GetSlotUsage()
+	if useSlot <= 0 {
+		log.Warn("task slot should not be 0",
+			zap.Int64("planID", task.GetTaskProto().GetPlanID()),
+			zap.String("type", task.GetTaskProto().GetType().String()))
+		return NullNodeID, useSlot
+	}
+
+	for id, slots := range sna.slots {
+		if slots >= useSlot && slots > maxSlots {
+			nodeID = id
+			maxSlots = slots
+		}
+	}
+	return nodeID, useSlot
 }
 
 type compactionPlanHandler struct {
@@ -202,15 +267,21 @@ func newCompactionPlanHandler(cluster Cluster, sessions session.DataNodeManager,
 	}
 }
 
-func (c *compactionPlanHandler) schedule() []CompactionTask {
+func (c *compactionPlanHandler) checkSchedule() {
+	assigner := newSlotBasedNodeAssigner(c.cluster)
+	err := c.checkCompaction(assigner)
+	if err != nil {
+		log.Info("fail to update compaction", zap.Error(err))
+	}
+	c.cleanFailedTasks()
+	c.schedule(assigner)
+}
+
+func (c *compactionPlanHandler) schedule(assigner NodeAssigner) []CompactionTask {
 	selected := make([]CompactionTask, 0)
 	if c.queueTasks.Len() == 0 {
 		return selected
 	}
-	var (
-		parallelism = Params.DataCoordCfg.CompactionMaxParallelTasks.GetAsInt()
-		slots       map[int64]int64
-	)
 
 	l0ChannelExcludes := typeutil.NewSet[string]()
 	mixChannelExcludes := typeutil.NewSet[string]()
@@ -219,11 +290,6 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 	clusterLabelExcludes := typeutil.NewSet[string]()
 
 	c.executingGuard.RLock()
-	if len(c.executingTasks) >= parallelism {
-		c.executingGuard.RUnlock()
-		return selected
-	}
-
 	for _, t := range c.executingTasks {
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
@@ -253,8 +319,7 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 
 	// The schedule loop will stop if either:
 	// 1. no more task to schedule (the task queue is empty)
-	// 2. the parallelism of running tasks is reached
-	// 3. no avaiable slots
+	// 2. no avaiable slots
 	for {
 		t, err := c.queueTasks.Dequeue()
 		if err != nil {
@@ -291,24 +356,15 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 		}
 
 		if t.NeedReAssignNodeID() {
-			if slots == nil {
-				slots = c.cluster.QuerySlots()
-			}
-			id := assignNodeID(slots, t)
-			if id == NullNodeID {
-				log.RatedWarn(10, "not enough slots for compaction task", zap.Int64("planID", t.GetTaskProto().GetPlanID()))
+			if ok := assigner.assign(t); !ok {
 				selected = selected[:len(selected)-1]
 				excluded = append(excluded, t)
-				break // 3. no avaiable slots
+				break // 2. no avaiable slots
 			}
 		}
 
 		c.executingGuard.Lock()
 		c.executingTasks[t.GetTaskProto().GetPlanID()] = t
-		if len(c.executingTasks) >= parallelism {
-			c.executingGuard.Unlock()
-			break // 2. the parallelism of running tasks is reached
-		}
 		c.executingGuard.Unlock()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Dec()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Inc()
@@ -318,9 +374,8 @@ func (c *compactionPlanHandler) schedule() []CompactionTask {
 
 func (c *compactionPlanHandler) start() {
 	c.loadMeta()
-	c.stopWg.Add(3)
+	c.stopWg.Add(2)
 	go c.loopSchedule()
-	go c.loopCheck()
 	go c.loopClean()
 }
 
@@ -397,29 +452,7 @@ func (c *compactionPlanHandler) loopSchedule() {
 			return
 
 		case <-scheduleTicker.C:
-			c.schedule()
-		}
-	}
-}
-
-func (c *compactionPlanHandler) loopCheck() {
-	interval := Params.DataCoordCfg.CompactionCheckIntervalInSeconds.GetAsDuration(time.Second)
-	log.Info("compactionPlanHandler start loop check", zap.Any("check result interval", interval))
-	defer c.stopWg.Done()
-	checkResultTicker := time.NewTicker(interval)
-	defer checkResultTicker.Stop()
-	for {
-		select {
-		case <-c.stopCh:
-			log.Info("compactionPlanHandler quit loop check")
-			return
-
-		case <-checkResultTicker.C:
-			err := c.checkCompaction()
-			if err != nil {
-				log.Info("fail to update compaction", zap.Error(err))
-			}
-			c.cleanFailedTasks()
+			c.checkSchedule()
 		}
 	}
 }
@@ -558,8 +591,6 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 }
 
 func (c *compactionPlanHandler) submitTask(t CompactionTask) error {
-	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", t.GetTaskProto().GetType()))
-	t.SetSpan(span)
 	if err := c.queueTasks.Enqueue(t); err != nil {
 		return err
 	}
@@ -569,8 +600,6 @@ func (c *compactionPlanHandler) submitTask(t CompactionTask) error {
 
 // restoreTask used to restore Task from etcd
 func (c *compactionPlanHandler) restoreTask(t CompactionTask) {
-	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", t.GetTaskProto().GetType()))
-	t.SetSpan(span)
 	c.executingGuard.Lock()
 	c.executingTasks[t.GetTaskProto().GetPlanID()] = t
 	c.executingGuard.Unlock()
@@ -647,50 +676,20 @@ func (c *compactionPlanHandler) createCompactTask(t *datapb.CompactionTask) (Com
 	return task, nil
 }
 
-func assignNodeID(slots map[int64]int64, t CompactionTask) int64 {
-	if len(slots) == 0 {
-		return NullNodeID
-	}
-
-	log := log.Ctx(context.TODO())
-	nodeID, useSlot := pickAnyNode(slots, t)
-	if nodeID == NullNodeID {
-		log.Info("compactionHandler cannot find datanode for compaction task",
-			zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("type", t.GetTaskProto().GetType().String()), zap.String("vchannel", t.GetTaskProto().GetChannel()))
-		return NullNodeID
-	}
-	err := t.SetNodeID(nodeID)
-	if err != nil {
-		log.Info("compactionHandler assignNodeID failed",
-			zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("vchannel", t.GetTaskProto().GetChannel()), zap.Error(err))
-		return NullNodeID
-	}
-	// update the input nodeSlots
-	slots[nodeID] = slots[nodeID] - useSlot
-	log.Info("compactionHandler assignNodeID success",
-		zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.String("vchannel", t.GetTaskProto().GetChannel()), zap.Any("nodeID", nodeID))
-	return nodeID
-}
-
 // checkCompaction retrieves executing tasks and calls each task's Process() method
 // to evaluate its state and progress through the state machine.
 // Completed tasks are removed from executingTasks.
 // Tasks that fail or timeout are moved from executingTasks to cleaningTasks,
 // where task-specific clean logic is performed asynchronously.
-func (c *compactionPlanHandler) checkCompaction() error {
+func (c *compactionPlanHandler) checkCompaction(assigner NodeAssigner) error {
 	// Get executing executingTasks before GetCompactionState from DataNode to prevent false failure,
 	//  for DC might add new task while GetCompactionState.
 
 	// Assign node id if needed
-	var slots map[int64]int64
 	c.executingGuard.RLock()
 	for _, t := range c.executingTasks {
 		if t.NeedReAssignNodeID() {
-			if slots == nil {
-				slots = c.cluster.QuerySlots()
-			}
-			id := assignNodeID(slots, t)
-			if id == NullNodeID {
+			if ok := assigner.assign(t); !ok {
 				break
 			}
 			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
@@ -754,26 +753,6 @@ func (c *compactionPlanHandler) cleanFailedTasks() {
 		delete(c.cleaningTasks, t.GetTaskProto().GetPlanID())
 	}
 	c.cleaningGuard.Unlock()
-}
-
-func pickAnyNode(nodeSlots map[int64]int64, task CompactionTask) (nodeID int64, useSlot int64) {
-	nodeID = NullNodeID
-	var maxSlots int64 = -1
-
-	useSlot = task.GetSlotUsage()
-	if useSlot <= 0 {
-		log.Ctx(context.TODO()).Warn("task slot should not be 0", zap.Int64("planID", task.GetTaskProto().GetPlanID()), zap.String("type", task.GetTaskProto().GetType().String()))
-		return NullNodeID, useSlot
-	}
-
-	for id, slots := range nodeSlots {
-		if slots >= useSlot && slots > maxSlots {
-			nodeID = id
-			maxSlots = slots
-		}
-	}
-
-	return nodeID, useSlot
 }
 
 // isFull return true if the task pool is full

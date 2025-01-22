@@ -56,7 +56,9 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         // currently, iterative filter does not support range search
         if (!search_info.search_params_.contains(RADIUS)) {
             if (query_info_proto.hints() != "") {
-                if (query_info_proto.hints() == ITERATIVE_FILTER) {
+                if (query_info_proto.hints() == "disable") {
+                    search_info.iterative_filter_execution = false;
+                } else if (query_info_proto.hints() == ITERATIVE_FILTER) {
                     search_info.iterative_filter_execution = true;
                 } else {
                     // check if hints is valid
@@ -64,9 +66,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
                               "hints: {} not supported",
                               query_info_proto.hints());
                 }
-            }
-            if (!search_info.iterative_filter_execution &&
-                search_info.search_params_.contains(HINTS)) {
+            } else if (search_info.search_params_.contains(HINTS)) {
                 if (search_info.search_params_[HINTS] == ITERATIVE_FILTER) {
                     search_info.iterative_filter_execution = true;
                 } else {
@@ -123,6 +123,9 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         } else if (anns_proto.vector_type() ==
                    milvus::proto::plan::VectorType::SparseFloatVector) {
             return std::make_unique<SparseFloatVectorANNS>();
+        } else if (anns_proto.vector_type() ==
+                   milvus::proto::plan::VectorType::Int8Vector) {
+            return std::make_unique<Int8VectorANNS>();
         } else {
             return std::make_unique<FloatVectorANNS>();
         }
@@ -338,8 +341,15 @@ ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
     auto field_id = FieldId(column_info.field_id());
     auto data_type = schema[field_id].get_data_type();
     Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    std::vector<::milvus::proto::plan::GenericValue> extra_values;
+    for (auto val : expr_pb.extra_values()) {
+        extra_values.emplace_back(val);
+    }
     return std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
-        expr::ColumnInfo(column_info), expr_pb.op(), expr_pb.value());
+        expr::ColumnInfo(column_info),
+        expr_pb.op(),
+        expr_pb.value(),
+        extra_values);
 }
 
 expr::TypedExprPtr

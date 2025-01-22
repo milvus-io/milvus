@@ -30,13 +30,15 @@ import (
 )
 
 type indexTaskInfo struct {
-	cancel              context.CancelFunc
-	state               commonpb.IndexState
-	fileKeys            []string
-	serializedSize      uint64
-	failReason          string
-	currentIndexVersion int32
-	indexStoreVersion   int64
+	cancel                    context.CancelFunc
+	state                     commonpb.IndexState
+	fileKeys                  []string
+	serializedSize            uint64
+	memSize                   uint64
+	failReason                string
+	currentIndexVersion       int32
+	indexStoreVersion         int64
+	currentScalarIndexVersion int32
 
 	// task statistics
 	statistic *indexpb.JobInfo
@@ -90,7 +92,9 @@ func (i *IndexNode) storeIndexFilesAndStatistic(
 	buildID UniqueID,
 	fileKeys []string,
 	serializedSize uint64,
+	memSize uint64,
 	currentIndexVersion int32,
+	currentScalarIndexVersion int32,
 ) {
 	key := taskKey{ClusterID: ClusterID, TaskID: buildID}
 	i.stateLock.Lock()
@@ -98,27 +102,9 @@ func (i *IndexNode) storeIndexFilesAndStatistic(
 	if info, ok := i.indexTasks[key]; ok {
 		info.fileKeys = common.CloneStringList(fileKeys)
 		info.serializedSize = serializedSize
+		info.memSize = memSize
 		info.currentIndexVersion = currentIndexVersion
-		return
-	}
-}
-
-func (i *IndexNode) storeIndexFilesAndStatisticV2(
-	ClusterID string,
-	buildID UniqueID,
-	fileKeys []string,
-	serializedSize uint64,
-	currentIndexVersion int32,
-	indexStoreVersion int64,
-) {
-	key := taskKey{ClusterID: ClusterID, TaskID: buildID}
-	i.stateLock.Lock()
-	defer i.stateLock.Unlock()
-	if info, ok := i.indexTasks[key]; ok {
-		info.fileKeys = common.CloneStringList(fileKeys)
-		info.serializedSize = serializedSize
-		info.currentIndexVersion = currentIndexVersion
-		info.indexStoreVersion = indexStoreVersion
+		info.currentScalarIndexVersion = currentScalarIndexVersion
 		return
 	}
 }

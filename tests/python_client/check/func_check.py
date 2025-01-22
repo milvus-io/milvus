@@ -429,26 +429,30 @@ class ResponseChecker:
         search_iterator = search_res
         pk_list = []
         while True:
-            res = search_iterator.next()
-            if len(res) == 0:
-                log.info("search iteration finished, close")
-                search_iterator.close()
-                break
-            if check_items.get("batch_size", None):
-                assert len(res) <= check_items["batch_size"]
-            if check_items.get("radius", None):
-                for distance in res.distances():
-                    if check_items["metric_type"] == "L2":
-                        assert distance < check_items["radius"]
-                    else:
-                        assert distance > check_items["radius"]
-            if check_items.get("range_filter", None):
-                for distance in res.distances():
-                    if check_items["metric_type"] == "L2":
-                        assert distance >= check_items["range_filter"]
-                    else:
-                        assert distance <= check_items["range_filter"]
-            pk_list.extend(res.ids())
+            try:
+                res = search_iterator.next()
+                if len(res) == 0:
+                    log.info("search iteration finished, close")
+                    search_iterator.close()
+                    break
+                if check_items.get("batch_size", None):
+                    assert len(res) <= check_items["batch_size"]
+                if check_items.get("radius", None):
+                    for distance in res.distances():
+                        if check_items["metric_type"] == "L2":
+                            assert distance < check_items["radius"]
+                        else:
+                            assert distance > check_items["radius"]
+                if check_items.get("range_filter", None):
+                    for distance in res.distances():
+                        if check_items["metric_type"] == "L2":
+                            assert distance >= check_items["range_filter"]
+                        else:
+                            assert distance <= check_items["range_filter"]
+                pk_list.extend(res.ids())
+            except Exception as e:
+                assert check_items["err_msg"] in str(e)
+                return False
         assert len(pk_list) == len(set(pk_list))
         log.info("check: total %d results" % len(pk_list))
 

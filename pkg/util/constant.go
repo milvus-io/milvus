@@ -22,6 +22,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -45,6 +46,7 @@ const (
 	FieldIndexPrefix   = "field-index"
 
 	HeaderAuthorize = "authorization"
+	HeaderToken     = "token"
 	// HeaderSourceID identify requests from Milvus members and client requests
 	HeaderSourceID = "sourceId"
 	// MemberCredID id for Milvus members (data/index/query node/coord component)
@@ -291,6 +293,124 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeFlush.String(),
 	}
 )
+
+// rbac v2 uses privilege level to group privileges rather than object type
+var (
+	CollectionReadOnlyPrivileges = ConvertPrivileges([]string{
+		commonpb.ObjectPrivilege_PrivilegeQuery.String(),
+		commonpb.ObjectPrivilege_PrivilegeSearch.String(),
+		commonpb.ObjectPrivilege_PrivilegeIndexDetail.String(),
+		commonpb.ObjectPrivilege_PrivilegeGetFlushState.String(),
+		commonpb.ObjectPrivilege_PrivilegeGetLoadState.String(),
+		commonpb.ObjectPrivilege_PrivilegeGetLoadingProgress.String(),
+		commonpb.ObjectPrivilege_PrivilegeHasPartition.String(),
+		commonpb.ObjectPrivilege_PrivilegeShowPartitions.String(),
+		commonpb.ObjectPrivilege_PrivilegeDescribeCollection.String(),
+		commonpb.ObjectPrivilege_PrivilegeDescribeAlias.String(),
+		commonpb.ObjectPrivilege_PrivilegeGetStatistics.String(),
+		commonpb.ObjectPrivilege_PrivilegeListAliases.String(),
+	})
+
+	CollectionReadWritePrivileges = append(CollectionReadOnlyPrivileges,
+		ConvertPrivileges([]string{
+			commonpb.ObjectPrivilege_PrivilegeLoad.String(),
+			commonpb.ObjectPrivilege_PrivilegeRelease.String(),
+			commonpb.ObjectPrivilege_PrivilegeInsert.String(),
+			commonpb.ObjectPrivilege_PrivilegeDelete.String(),
+			commonpb.ObjectPrivilege_PrivilegeUpsert.String(),
+			commonpb.ObjectPrivilege_PrivilegeImport.String(),
+			commonpb.ObjectPrivilege_PrivilegeFlush.String(),
+			commonpb.ObjectPrivilege_PrivilegeCompaction.String(),
+			commonpb.ObjectPrivilege_PrivilegeLoadBalance.String(),
+			commonpb.ObjectPrivilege_PrivilegeCreateIndex.String(),
+			commonpb.ObjectPrivilege_PrivilegeDropIndex.String(),
+			commonpb.ObjectPrivilege_PrivilegeCreatePartition.String(),
+			commonpb.ObjectPrivilege_PrivilegeDropPartition.String(),
+		})...,
+	)
+
+	CollectionAdminPrivileges = append(CollectionReadWritePrivileges,
+		ConvertPrivileges([]string{
+			commonpb.ObjectPrivilege_PrivilegeCreateAlias.String(),
+			commonpb.ObjectPrivilege_PrivilegeDropAlias.String(),
+		})...,
+	)
+
+	DatabaseReadOnlyPrivileges = ConvertPrivileges([]string{
+		commonpb.ObjectPrivilege_PrivilegeShowCollections.String(),
+		commonpb.ObjectPrivilege_PrivilegeDescribeDatabase.String(),
+	})
+
+	DatabaseReadWritePrivileges = append(DatabaseReadOnlyPrivileges,
+		ConvertPrivileges([]string{
+			commonpb.ObjectPrivilege_PrivilegeAlterDatabase.String(),
+		})...,
+	)
+
+	DatabaseAdminPrivileges = append(DatabaseReadWritePrivileges,
+		ConvertPrivileges([]string{
+			commonpb.ObjectPrivilege_PrivilegeCreateCollection.String(),
+			commonpb.ObjectPrivilege_PrivilegeDropCollection.String(),
+		})...,
+	)
+
+	ClusterReadOnlyPrivileges = ConvertPrivileges([]string{
+		commonpb.ObjectPrivilege_PrivilegeListDatabases.String(),
+		commonpb.ObjectPrivilege_PrivilegeSelectOwnership.String(),
+		commonpb.ObjectPrivilege_PrivilegeSelectUser.String(),
+		commonpb.ObjectPrivilege_PrivilegeDescribeResourceGroup.String(),
+		commonpb.ObjectPrivilege_PrivilegeListResourceGroups.String(),
+		commonpb.ObjectPrivilege_PrivilegeListPrivilegeGroups.String(),
+	})
+
+	ClusterReadWritePrivileges = append(ClusterReadOnlyPrivileges,
+		ConvertPrivileges([]string{
+			commonpb.ObjectPrivilege_PrivilegeFlushAll.String(),
+			commonpb.ObjectPrivilege_PrivilegeTransferNode.String(),
+			commonpb.ObjectPrivilege_PrivilegeTransferReplica.String(),
+			commonpb.ObjectPrivilege_PrivilegeUpdateResourceGroups.String(),
+		})...,
+	)
+
+	ClusterAdminPrivileges = append(ClusterReadWritePrivileges,
+		ConvertPrivileges([]string{
+			commonpb.ObjectPrivilege_PrivilegeBackupRBAC.String(),
+			commonpb.ObjectPrivilege_PrivilegeRestoreRBAC.String(),
+			commonpb.ObjectPrivilege_PrivilegeCreateDatabase.String(),
+			commonpb.ObjectPrivilege_PrivilegeDropDatabase.String(),
+			commonpb.ObjectPrivilege_PrivilegeCreateOwnership.String(),
+			commonpb.ObjectPrivilege_PrivilegeDropOwnership.String(),
+			commonpb.ObjectPrivilege_PrivilegeManageOwnership.String(),
+			commonpb.ObjectPrivilege_PrivilegeCreateResourceGroup.String(),
+			commonpb.ObjectPrivilege_PrivilegeDropResourceGroup.String(),
+			commonpb.ObjectPrivilege_PrivilegeUpdateUser.String(),
+			commonpb.ObjectPrivilege_PrivilegeRenameCollection.String(),
+			commonpb.ObjectPrivilege_PrivilegeCreatePrivilegeGroup.String(),
+			commonpb.ObjectPrivilege_PrivilegeDropPrivilegeGroup.String(),
+			commonpb.ObjectPrivilege_PrivilegeOperatePrivilegeGroup.String(),
+		})...,
+	)
+)
+
+// ConvertPrivileges converts each privilege from metastore format to API format.
+func ConvertPrivileges(privileges []string) []string {
+	return lo.Map(privileges, func(name string, _ int) string {
+		return MetaStore2API(name)
+	})
+}
+
+func GetPrivilegeLevel(privilege string) string {
+	if lo.Contains(ClusterAdminPrivileges, privilege) {
+		return milvuspb.PrivilegeLevel_Cluster.String()
+	}
+	if lo.Contains(DatabaseAdminPrivileges, privilege) {
+		return milvuspb.PrivilegeLevel_Database.String()
+	}
+	if lo.Contains(CollectionAdminPrivileges, privilege) {
+		return milvuspb.PrivilegeLevel_Collection.String()
+	}
+	return ""
+}
 
 // StringSet convert array to map for conveniently check if the array contains an element
 func StringSet(strings []string) map[string]struct{} {

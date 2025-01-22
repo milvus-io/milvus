@@ -1120,31 +1120,6 @@ func ValidatePrivilege(entity string) error {
 	return validateName(entity, "Privilege")
 }
 
-func ValidateBuiltInPrivilegeGroup(entity string, dbName string, collectionName string) error {
-	if !util.IsBuiltinPrivilegeGroup(entity) {
-		return nil
-	}
-	switch {
-	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Cluster.String()):
-		if !util.IsAnyWord(dbName) || !util.IsAnyWord(collectionName) {
-			return merr.WrapErrParameterInvalidMsg("dbName and collectionName should be * for the cluster level privilege: %s", entity)
-		}
-		return nil
-	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Database.String()):
-		if collectionName != "" && collectionName != util.AnyWord {
-			return merr.WrapErrParameterInvalidMsg("collectionName should be * for the database level privilege: %s", entity)
-		}
-		return nil
-	case strings.HasPrefix(entity, milvuspb.PrivilegeLevel_Collection.String()):
-		if util.IsAnyWord(dbName) && !util.IsAnyWord(collectionName) && collectionName != "" {
-			return merr.WrapErrParameterInvalidMsg("please specify database name for the collection level privilege: %s", entity)
-		}
-		return nil
-	default:
-		return nil
-	}
-}
-
 func GetCurUserFromContext(ctx context.Context) (string, error) {
 	return contextutil.GetCurUserFromContext(ctx)
 }
@@ -1809,7 +1784,7 @@ func isPartitionKeyMode(ctx context.Context, dbName string, colName string) (boo
 	return false, nil
 }
 
-func hasParitionKeyModeField(schema *schemapb.CollectionSchema) bool {
+func hasPartitionKeyModeField(schema *schemapb.CollectionSchema) bool {
 	for _, fieldSchema := range schema.GetFields() {
 		if fieldSchema.IsPartitionKey {
 			return true

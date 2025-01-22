@@ -1,13 +1,10 @@
 use std::ffi::c_char;
-use std::ffi::c_void;
 use std::ffi::CStr;
 
 use crate::array::RustResult;
 use crate::cstr_to_str;
-use crate::error::Result;
 use crate::index_writer::IndexWriterWrapper;
 use crate::log::init_log;
-use crate::string_c::c_str_to_str;
 use crate::tokenizer::create_tokenizer;
 use crate::util::create_binding;
 

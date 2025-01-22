@@ -261,6 +261,11 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				for k, v := range Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap() {
 					indexParamsMap[k] = v
 				}
+			} else if typeutil.IsIntVectorType(cit.fieldSchema.DataType) {
+				// override int vector index params by autoindex
+				for k, v := range Params.AutoIndexConfig.IndexParams.GetAsJSONMap() {
+					indexParamsMap[k] = v
+				}
 			}
 
 			if metricTypeExist {
@@ -320,6 +325,9 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
 				// override binary vector index params by autoindex
 				config = Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap()
+			} else if typeutil.IsIntVectorType(cit.fieldSchema.DataType) {
+				// override int vector index params by autoindex
+				config = Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
 			}
 			if !exist {
 				if err := handle(0, config); err != nil {
@@ -364,16 +372,19 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "float vector index does not support metric type: "+metricType)
 			}
 		} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) {
-			if metricType != metric.IP && metricType != metric.BM25 {
+			if !funcutil.SliceContain(indexparamcheck.SparseFloatVectorMetrics, metricType) {
 				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "only IP&BM25 is the supported metric type for sparse index")
 			}
-
 			if metricType == metric.BM25 && cit.functionSchema.GetType() != schemapb.FunctionType_BM25 {
 				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "only BM25 Function output field support BM25 metric type")
 			}
 		} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
 			if !funcutil.SliceContain(indexparamcheck.BinaryVectorMetrics, metricType) {
 				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "binary vector index does not support metric type: "+metricType)
+			}
+		} else if typeutil.IsIntVectorType(cit.fieldSchema.DataType) {
+			if !funcutil.SliceContain(indexparamcheck.IntVectorMetrics, metricType) {
+				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "int vector index does not support metric type: "+metricType)
 			}
 		}
 	}
@@ -619,13 +630,13 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 	if len(t.req.GetExtraParams()) > 0 {
 		for _, param := range t.req.GetExtraParams() {
 			if !indexparams.IsConfigableIndexParam(param.GetKey()) {
-				return merr.WrapErrParameterInvalidMsg("%s is not a configable index proptery", param.GetKey())
+				return merr.WrapErrParameterInvalidMsg("%s is not a configable index property", param.GetKey())
 			}
 		}
 	} else if len(t.req.GetDeleteKeys()) > 0 {
 		for _, param := range t.req.GetDeleteKeys() {
 			if !indexparams.IsConfigableIndexParam(param) {
-				return merr.WrapErrParameterInvalidMsg("%s is not a configable index proptery", param)
+				return merr.WrapErrParameterInvalidMsg("%s is not a configable index property", param)
 			}
 		}
 	}

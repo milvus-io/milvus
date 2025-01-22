@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -27,7 +28,11 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 	// Create a new streaming coord client.
 	streamingCoordClient := client.NewClient(c)
 	// Create a new streamingnode handler client.
-	handlerClient := handler.NewHandlerClient(streamingCoordClient.Assignment())
+	var handlerClient handler.HandlerClient
+	if streamingutil.IsStreamingServiceEnabled() {
+		// streaming service is enabled, create the handler client for the streaming service.
+		handlerClient = handler.NewHandlerClient(streamingCoordClient.Assignment())
+	}
 	return &walAccesserImpl{
 		lifetime:             typeutil.NewLifetime(),
 		streamingCoordClient: streamingCoordClient,
@@ -158,7 +163,9 @@ func (w *walAccesserImpl) Close() {
 	}
 	w.producerMutex.Unlock()
 
-	w.handlerClient.Close()
+	if w.handlerClient != nil {
+		w.handlerClient.Close()
+	}
 	w.streamingCoordClient.Close()
 }
 

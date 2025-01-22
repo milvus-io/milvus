@@ -515,6 +515,41 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 	}
 }
 
+func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interface{} {
+	column, err := v.translateIdentifier(ctx.Identifier().GetText())
+	if err != nil {
+		return err
+	}
+	if !typeutil.IsStringType(column.dataType) {
+		return fmt.Errorf("phrase match operation on non-string is unsupported")
+	}
+	queryText, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	if err != nil {
+		return err
+	}
+	var slop int64
+	if ctx.IntegerConstant() != nil {
+		slop, err = strconv.ParseInt(ctx.IntegerConstant().GetText(), 10, 64)
+		if err != nil {
+			return err
+		}
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_UnaryRangeExpr{
+				UnaryRangeExpr: &planpb.UnaryRangeExpr{
+					ColumnInfo:  toColumnInfo(column),
+					Op:          planpb.OpType_PhraseMatch,
+					Value:       NewString(queryText),
+					ExtraValues: []*planpb.GenericValue{NewInt(slop)},
+				},
+			},
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
 func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) interface{} {
 	sample_factor, err := strconv.ParseFloat(ctx.FloatingConstant().GetText(), 32)
 	if err != nil {

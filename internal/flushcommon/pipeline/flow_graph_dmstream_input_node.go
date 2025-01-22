@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -33,7 +34,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -69,6 +72,13 @@ func createNewInputFromDispatcher(initCtx context.Context,
 ) (<-chan *msgstream.MsgPack, error) {
 	log := log.With(zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("vchannel", vchannel))
+
+	var (
+		input <-chan *msgstream.MsgPack
+		err   error
+		start = time.Now()
+	)
+
 	replicateID, _ := pkgcommon.GetReplicateID(schema.GetProperties())
 	if replicateID == "" {
 		log.Info("datanode consume without replicateID, try to get replicateID from dbProperties", zap.Any("dbProperties", dbProperties))
@@ -77,30 +87,52 @@ func createNewInputFromDispatcher(initCtx context.Context,
 	replicateConfig := msgstream.GetReplicateConfig(replicateID, schema.GetDbName(), schema.GetName())
 
 	if seekPos != nil && len(seekPos.MsgID) != 0 {
-		input, err := dispatcherClient.Register(initCtx, &msgdispatcher.StreamConfig{
-			VChannel:        vchannel,
-			Pos:             seekPos,
-			SubPos:          common.SubscriptionPositionUnknown,
-			ReplicateConfig: replicateConfig,
-		})
+		err := retry.Handle(initCtx, func() (bool, error) {
+			input, err = dispatcherClient.Register(initCtx, &msgdispatcher.StreamConfig{
+				VChannel:        vchannel,
+				Pos:             seekPos,
+				SubPos:          common.SubscriptionPositionUnknown,
+				ReplicateConfig: replicateConfig,
+			})
+			if err != nil {
+				log.Warn("datanode consume failed", zap.Error(err))
+				return errors.Is(err, merr.ErrTooManyConsumers), err
+			}
+			return false, nil
+		}, retry.Sleep(paramtable.Get().MQCfg.RetrySleep.GetAsDuration(time.Second)), // 5 seconds
+			retry.MaxSleepTime(paramtable.Get().MQCfg.RetryTimeout.GetAsDuration(time.Second))) // 5 minutes
 		if err != nil {
+			log.Warn("datanode consume failed after retried", zap.Error(err))
 			return nil, err
 		}
+
 		log.Info("datanode seek successfully when register to msgDispatcher",
 			zap.ByteString("msgID", seekPos.GetMsgID()),
 			zap.Time("tsTime", tsoutil.PhysicalTime(seekPos.GetTimestamp())),
-			zap.Duration("tsLag", time.Since(tsoutil.PhysicalTime(seekPos.GetTimestamp()))))
+			zap.Duration("tsLag", time.Since(tsoutil.PhysicalTime(seekPos.GetTimestamp()))),
+			zap.Duration("dur", time.Since(start)))
 		return input, err
 	}
-	input, err := dispatcherClient.Register(initCtx, &msgdispatcher.StreamConfig{
-		VChannel:        vchannel,
-		Pos:             nil,
-		SubPos:          common.SubscriptionPositionEarliest,
-		ReplicateConfig: replicateConfig,
-	})
+
+	err = retry.Handle(initCtx, func() (bool, error) {
+		input, err = dispatcherClient.Register(initCtx, &msgdispatcher.StreamConfig{
+			VChannel:        vchannel,
+			Pos:             nil,
+			SubPos:          common.SubscriptionPositionEarliest,
+			ReplicateConfig: replicateConfig,
+		})
+		if err != nil {
+			log.Warn("datanode consume failed", zap.Error(err))
+			return errors.Is(err, merr.ErrTooManyConsumers), err
+		}
+		return false, nil
+	}, retry.Sleep(paramtable.Get().MQCfg.RetrySleep.GetAsDuration(time.Second)), // 5 seconds
+		retry.MaxSleepTime(paramtable.Get().MQCfg.RetryTimeout.GetAsDuration(time.Second))) // 5 minutes
 	if err != nil {
+		log.Warn("datanode consume failed after retried", zap.Error(err))
 		return nil, err
 	}
+
 	log.Info("datanode consume successfully when register to msgDispatcher")
 	return input, err
 }

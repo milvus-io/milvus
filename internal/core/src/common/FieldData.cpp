@@ -238,6 +238,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
         case DataType::VECTOR_FLOAT:
         case DataType::VECTOR_FLOAT16:
         case DataType::VECTOR_BFLOAT16:
+        case DataType::VECTOR_INT8:
         case DataType::VECTOR_BINARY: {
             auto array_info =
                 GetDataInfoFromArray<arrow::FixedSizeBinaryArray,

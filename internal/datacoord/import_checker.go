@@ -242,6 +242,10 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 		err = c.imeta.AddTask(context.TODO(), t)
 		if err != nil {
 			log.Warn("add new import task failed", WrapTaskLog(t, zap.Error(err))...)
+			updateErr := c.imeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
+			if updateErr != nil {
+				log.Warn("failed to update job state to Failed", zap.Error(updateErr))
+			}
 			return
 		}
 		log.Info("add new import task", WrapTaskLog(t)...)

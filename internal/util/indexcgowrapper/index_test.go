@@ -92,6 +92,13 @@ func generateBFloat16VectorTestCases() []vecTestCase {
 	}
 }
 
+func generateInt8VectorTestCases() []vecTestCase {
+	return []vecTestCase{
+		{IndexHNSW, metric.L2, false, schemapb.DataType_Int8Vector},
+		{IndexHNSW, metric.IP, false, schemapb.DataType_Int8Vector},
+	}
+}
+
 func generateTestCases() []vecTestCase {
 	return append(generateFloatVectorTestCases(), generateBinaryVectorTestCases()...)
 }
@@ -218,6 +225,23 @@ func TestCIndex_BuildBinaryVecIndex(t *testing.T) {
 	}
 }
 
+func TestCIndex_BuildInt8VecIndex(t *testing.T) {
+	for _, c := range generateInt8VectorTestCases() {
+		typeParams, indexParams := generateParams(c.indexType, c.metricType)
+
+		index, err := NewCgoIndex(c.dtype, typeParams, indexParams)
+		assert.Equal(t, err, nil)
+		assert.NotEqual(t, index, nil)
+
+		vectors := generateInt8Vectors(nb, dim)
+		err = index.Build(GenInt8VecDataset(vectors))
+		assert.Equal(t, err, nil)
+
+		err = index.Delete()
+		assert.Equal(t, err, nil)
+	}
+}
+
 func TestCIndex_Codec(t *testing.T) {
 	for _, c := range generateTestCases() {
 		typeParams, indexParams := generateParams(c.indexType, c.metricType)
@@ -303,6 +327,12 @@ func TestCIndex_Error(t *testing.T) {
 	t.Run("BuildBinaryVecIndexWithoutIds error", func(t *testing.T) {
 		binaryVectors := []byte("binaryVectors")
 		err = indexPtr.Build(GenBinaryVecDataset(binaryVectors))
+		assert.Error(t, err)
+	})
+
+	t.Run("BuildInt8VecIndexWithoutIds error", func(t *testing.T) {
+		int8Vectors := []int8{11, 22, 33, 44}
+		err = indexPtr.Build(GenInt8VecDataset(int8Vectors))
 		assert.Error(t, err)
 	})
 }

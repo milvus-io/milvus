@@ -129,7 +129,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		log.Warn("GetCurUserFromContext fail", zap.Error(err))
 		return ctx, err
 	}
-	if username == util.UserRoot {
+	if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
 		return ctx, nil
 	}
 	roleNames, err := GetRole(username)

@@ -5439,10 +5439,6 @@ func (node *Proxy) validateOperatePrivilegeV2Params(req *milvuspb.OperatePrivile
 	if err := ValidatePrivilege(req.Grantor.Privilege.Name); err != nil {
 		return err
 	}
-	// validate built-in privilege group params
-	if err := ValidateBuiltInPrivilegeGroup(req.Grantor.Privilege.Name, req.DbName, req.CollectionName); err != nil {
-		return err
-	}
 	if req.Type != milvuspb.OperatePrivilegeType_Grant && req.Type != milvuspb.OperatePrivilegeType_Revoke {
 		return merr.WrapErrParameterInvalidMsg("the type in the request not grant or revoke")
 	}
@@ -5655,6 +5651,9 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 	log.Debug("RestoreRBAC", zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
+	}
+	if req.RBACMeta == nil {
+		return merr.Success(), nil
 	}
 
 	result, err := node.rootCoord.RestoreRBAC(ctx, req)

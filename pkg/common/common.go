@@ -81,6 +81,11 @@ const (
 	InvalidNodeID = int64(-1)
 )
 
+const (
+	MinimalScalarIndexEngineVersion = int32(0)
+	CurrentScalarIndexEngineVersion = int32(1)
+)
+
 // Endian is type alias of binary.LittleEndian.
 // Milvus uses little endian by default.
 var Endian = binary.LittleEndian

@@ -55,6 +55,7 @@ const (
 	IgnoreGrowingKey     = "ignore_growing"
 	ReduceStopForBestKey = "reduce_stop_for_best"
 	IteratorField        = "iterator"
+	CollectionID         = "collection_id"
 	GroupByFieldKey      = "group_by_field"
 	GroupSizeKey         = "group_size"
 	StrictGroupSize      = "strict_group_size"
@@ -370,7 +371,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	hasPartitionKey := hasParitionKeyModeField(t.schema)
+	hasPartitionKey := hasPartitionKeyModeField(t.schema)
 	if _, err := validatePartitionKeyIsolation(ctx, t.CollectionName, hasPartitionKey, t.GetProperties()...); err != nil {
 		return err
 	}
