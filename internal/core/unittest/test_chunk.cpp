@@ -95,7 +95,7 @@ TEST(chunk, test_variable_field) {
     FieldMeta field_meta(
         FieldName("a"), milvus::FieldId(1), DataType::STRING, false);
     auto chunk = create_chunk(field_meta, 1, rb_reader);
-    auto views = std::dynamic_pointer_cast<StringChunk>(chunk)->StringViews();
+    auto views = std::dynamic_pointer_cast<StringChunk>(chunk)->StringViews(std::nullopt);
     for (size_t i = 0; i < data.size(); ++i) {
         EXPECT_EQ(views.first[i], data[i]);
     }
@@ -177,9 +177,9 @@ TEST(chunk, test_array) {
                          DataType::STRING,
                          false);
     auto chunk = create_chunk(field_meta, 1, rb_reader);
-    auto span = std::dynamic_pointer_cast<ArrayChunk>(chunk)->Span();
-    EXPECT_EQ(span.row_count(), 1);
-    auto arr = *(ArrayView*)span.data();
+    auto [views, valid] = std::dynamic_pointer_cast<ArrayChunk>(chunk)->Views(std::nullopt);
+    EXPECT_EQ(views.size(), 1);
+    auto& arr = views[0];
     for (size_t i = 0; i < arr.length(); ++i) {
         auto str = arr.get_data<std::string>(i);
         EXPECT_EQ(str, field_string_data.string_data().data(i));

@@ -880,11 +880,31 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
         futures.reserve(remote_files.size());
         for (const auto& file : remote_files) {
             auto future = pool.Submit([&]() {
+                auto start_read_file = std::chrono::system_clock::now();
                 auto fileSize = rcm->Size(file);
                 auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
+                auto finish_prepare_file = std::chrono::system_clock::now();
                 rcm->Read(file, buf.get(), fileSize);
+                auto finish_read_file = std::chrono::system_clock::now();
                 auto result =
                     storage::DeserializeFileData(buf, fileSize, false);
+                auto finish_deserialize_file = std::chrono::system_clock::now();
+
+                auto prepare_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        finish_prepare_file - start_read_file).count();
+                auto read_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        finish_read_file - finish_prepare_file).count();
+                auto deserialize_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        finish_deserialize_file - finish_read_file).count();
+                LOG_INFO("hc===download file:{}, "
+                         "prepare_ms:{}, "
+                         "read_ms:{}, "
+                         "deserialize_ms:{},",
+                         file,
+                         prepare_ms,
+                         read_ms,
+                         deserialize_ms);
+
                 result->SetData(buf);
                 return result->GetReader();
             });

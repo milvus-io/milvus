@@ -28,6 +28,7 @@ namespace milvus {
 
 void
 StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
+    auto start_create_chunk = std::chrono::system_clock::now();
     auto size = 0;
     std::vector<std::string_view> strs;
     std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
@@ -46,6 +47,8 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
         }
         row_nums_ += array->length();
     }
+    auto finish_precompute = std::chrono::system_clock::now();
+
     size += sizeof(uint32_t) * (row_nums_ + 1) + MMAP_STRING_PADDING;
     if (file_) {
         target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
@@ -71,12 +74,34 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
         offset_start_pos += str.size();
     }
     offsets.push_back(offset_start_pos);
+    auto finish_offsets = std::chrono::system_clock::now();
 
     target_->write(offsets.data(), offsets.size() * sizeof(uint32_t));
-
+    auto finish_write_offsets = std::chrono::system_clock::now();
     for (auto str : strs) {
         target_->write(str.data(), str.size());
     }
+    auto finish_write_strs = std::chrono::system_clock::now();
+    auto precompute_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            finish_precompute - start_create_chunk).count();
+    auto compute_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            finish_offsets - finish_precompute).count();
+    auto write_offsets_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            finish_write_offsets - finish_offsets).count();
+    auto write_str_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            finish_write_strs - finish_write_offsets).count();
+    auto chunk_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            finish_write_strs - start_create_chunk).count();
+    LOG_INFO("hc===precompute_ms:{} ms, "
+             "compute_ms:{}, "
+             "write_offsets_ms:{}, "
+             "write_array_ms:{},"
+             "chunk_duration:{}",
+             precompute_ms,
+             compute_ms,
+             write_offsets_ms,
+             write_str_ms,
+             chunk_duration);
 }
 
 std::shared_ptr<Chunk>
