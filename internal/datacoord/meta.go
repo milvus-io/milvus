@@ -1472,7 +1472,7 @@ func (m *meta) SetSegmentStating(segmentID UniqueID, stating bool) {
 	m.Lock()
 	defer m.Unlock()
 
-	m.segments.SetIsCompacting(segmentID, stating)
+	m.segments.SetIsStating(segmentID, stating)
 }
 
 // SetSegmentCompacting sets compaction state for segment
