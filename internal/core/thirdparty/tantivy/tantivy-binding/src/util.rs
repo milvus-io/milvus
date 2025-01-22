@@ -1,7 +1,10 @@
+use serde_json as json;
 use std::ffi::c_void;
 use std::ops::Bound;
-
 use tantivy::{directory::MmapDirectory, Index};
+
+use crate::error::Result;
+use crate::error::TantivyBindingError;
 
 pub fn index_exist(path: &str) -> bool {
     let dir = MmapDirectory::open(path).unwrap();
