@@ -264,7 +264,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	return true
 }
 
-func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNodeClient) bool {
+func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNodeClient, meta *meta) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{

@@ -194,8 +194,6 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		PartitionID:     segment.GetPartitionID(),
 		InsertChannel:   segment.GetInsertChannel(),
 		SegmentID:       segment.GetID(),
-		InsertLogs:      segment.GetBinlogs(),
-		DeltaLogs:       segment.GetDeltalogs(),
 		StorageConfig:   createStorageConfig(),
 		Schema:          collInfo.Schema,
 		SubJobType:      st.subJobType,
@@ -211,7 +209,19 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 	return true
 }
 
-func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClient) bool {
+func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClient, meta *meta) bool {
+	segment := meta.GetHealthySegment(ctx, st.segmentID)
+	if segment == nil {
+		log.Ctx(ctx).Warn("segment is node healthy, skip stats")
+		// need to set retry and reset compacting
+		st.SetState(indexpb.JobState_JobStateRetry, "segment is not healthy")
+		return false
+	}
+
+	// Set InsertLogs and DeltaLogs before execution, and wait for the L0 compaction containing the segment to complete
+	st.req.InsertLogs = segment.GetBinlogs()
+	st.req.DeltaLogs = segment.GetDeltalogs()
+
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
@@ -230,6 +240,7 @@ func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClien
 	}
 
 	log.Ctx(ctx).Info("assign stats task success", zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID))
+	log.Ctx(ctx).Debug("assign stats task success, print request", zap.Any("req", st.req))
 	st.SetState(indexpb.JobState_JobStateInProgress, "")
 	return true
 }
