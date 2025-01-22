@@ -2,9 +2,9 @@ package broadcast
 
 import (
 	"context"
-	"errors"
 	"io"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"

@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
@@ -33,6 +34,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestStreamingBroadcast(t *testing.T) {
+	t.Skip("cat not running without streaming service at background")
 	streamingutil.SetStreamingServiceEnabled()
 	streaming.Init()
 	defer streaming.Release()
@@ -64,6 +66,7 @@ func TestStreamingBroadcast(t *testing.T) {
 	// repeated broadcast with same resource key should be rejected
 	resp2, err := streaming.WAL().Broadcast().Append(context.Background(), msg)
 	assert.Error(t, err)
+	assert.True(t, status.AsStreamingError(err).IsResourceAcquired())
 	assert.Nil(t, resp2)
 
 	// resource key should be block until ack.
@@ -115,7 +118,7 @@ func TestStreamingBroadcast(t *testing.T) {
 }
 
 func TestStreamingProduce(t *testing.T) {
-	t.Skip()
+	t.Skip("cat not running without streaming service at background")
 	streamingutil.SetStreamingServiceEnabled()
 	streaming.Init()
 	defer streaming.Release()
@@ -197,7 +200,7 @@ func TestStreamingProduce(t *testing.T) {
 }
 
 func TestStreamingConsume(t *testing.T) {
-	t.Skip()
+	t.Skip("cat not running without streaming service at background")
 	streaming.Init()
 	defer streaming.Release()
 	ch := make(message.ChanMessageHandler, 10)

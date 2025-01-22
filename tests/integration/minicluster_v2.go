@@ -394,6 +394,7 @@ func (cluster *MiniClusterV2) StopRootCoord() {
 
 func (cluster *MiniClusterV2) StartRootCoord() {
 	if cluster.RootCoord == nil {
+		coordclient.ResetRootCoordRegistration()
 		var err error
 		if cluster.RootCoord, err = grpcrootcoord.NewServer(cluster.ctx, cluster.factory); err != nil {
 			panic(err)
@@ -411,6 +412,7 @@ func (cluster *MiniClusterV2) StopDataCoord() {
 
 func (cluster *MiniClusterV2) StartDataCoord() {
 	if cluster.DataCoord == nil {
+		coordclient.ResetRootCoordRegistration()
 		var err error
 		if cluster.DataCoord, err = grpcdatacoord.NewServer(cluster.ctx, cluster.factory); err != nil {
 			panic(err)
@@ -428,6 +430,7 @@ func (cluster *MiniClusterV2) StopQueryCoord() {
 
 func (cluster *MiniClusterV2) StartQueryCoord() {
 	if cluster.QueryCoord == nil {
+		coordclient.ResetQueryCoordRegistration()
 		var err error
 		if cluster.QueryCoord, err = grpcquerycoord.NewServer(cluster.ctx, cluster.factory); err != nil {
 			panic(err)
@@ -490,10 +493,6 @@ func (cluster *MiniClusterV2) Stop() error {
 	cluster.StopAllDataNodes()
 	cluster.StopAllStreamingNodes()
 	cluster.StopAllQueryNodes()
-
-	if streamingutil.IsStreamingServiceEnabled() {
-		streaming.Release()
-	}
 
 	cluster.IndexNode.Stop()
 	log.Info("mini cluster indexNode stopped")

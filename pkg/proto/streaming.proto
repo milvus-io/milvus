@@ -65,7 +65,7 @@ enum BroadcastTaskState {
     BROADCAST_TASK_STATE_UNKNOWN = 0;          // should never used.
     BROADCAST_TASK_STATE_PENDING = 1;          // task is pending.
     BROADCAST_TASK_STATE_DONE = 2;             // task has been broadcasted and acknowledged, the resource lock is released, and the persisted task can be cleared.
-    BROADCAST_TASK_STATE_WAIT_ACK = 3;         // task has been broadcasted, waiting for ack, the resource lock is still held by some vchannels.
+    BROADCAST_TASK_STATE_WAIT_ACK = 3;         // task has been broadcasted, waiting for ack, the resource lock is still acquired by some vchannels.
 }
 
 // BroadcastTask is the task to broadcast the messake.
@@ -267,6 +267,7 @@ enum StreamingCode {
     STREAMING_CODE_TRANSACTION_EXPIRED    = 9;  // transaction expired
     STREAMING_CODE_INVALID_TRANSACTION_STATE = 10;  // invalid transaction state
     STREAMING_CODE_UNRECOVERABLE          = 11;  // unrecoverable error
+    STREAMING_CODE_RESOURCE_ACQUIRED      = 12; // resource is acquired by other operation
     STREAMING_CODE_UNKNOWN                   = 999;  // unknown error
 }
 

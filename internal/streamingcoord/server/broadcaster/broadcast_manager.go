@@ -9,13 +9,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
-
-var errResourceKeyHeld = errors.New("resource key is held")
 
 // newBroadcastTaskManager creates a new broadcast task manager with recovery info.
 func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) (*broadcastTaskManager, []*pendingBroadcastTask) {
@@ -140,7 +139,7 @@ func (bm *broadcastTaskManager) addBroadcastTask(msg message.BroadcastMutableMes
 	// Check if the resource key is held by other task.
 	for key := range header.ResourceKeys {
 		if _, ok := bm.resourceKeys[key]; ok {
-			return nil, errors.Wrapf(errResourceKeyHeld, "domain: %s, key: %s", key.Domain.String(), key.Key)
+			return nil, status.NewResourceAcquired(fmt.Sprintf("domain: %s, key: %s", key.Domain.String(), key.Key))
 		}
 	}
 	// setup the resource keys to make resource exclusive held.

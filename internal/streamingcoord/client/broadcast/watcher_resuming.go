@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
@@ -141,10 +141,9 @@ func (evs *pendingEvents) AddPendingEvent(ev *pendingEvent) bool {
 	if existEv, ok := evs.evs[id]; ok {
 		existEv.notifier = append(existEv.notifier, ev.notifier...)
 		return true
-	} else {
-		evs.evs[id] = ev
-		return false
 	}
+	evs.evs[id] = ev
+	return false
 }
 
 func (evs *pendingEvents) Notify(ev *message.BroadcastEvent) {

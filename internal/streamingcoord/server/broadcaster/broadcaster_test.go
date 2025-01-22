@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -118,8 +119,9 @@ func TestBroadcaster(t *testing.T) {
 	// Test broadcast with a already exist resource key.
 	for {
 		var err error
-		result, err = bc.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1", "v2", "v3"}, message.NewCollectionNameResourceKey("c7")))
-		if errors.Is(err, errResourceKeyHeld) {
+		_, err = bc.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1", "v2", "v3"}, message.NewCollectionNameResourceKey("c7")))
+		if err != nil {
+			assert.True(t, status.AsStreamingError(err).IsResourceAcquired())
 			break
 		}
 	}
