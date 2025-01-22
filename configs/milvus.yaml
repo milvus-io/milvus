@@ -572,6 +572,7 @@ dataCoord:
     maxParallelTaskNum: 10
     dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)
     gcInterval: 1800 # The time interval in seconds for compaction gc
+    scheduleInterval: 500 # The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be ajusted upwards to 100ms
     mix:
       triggerInterval: 60 # The time interval in seconds to trigger mix compaction
     levelzero:
