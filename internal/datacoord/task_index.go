@@ -160,7 +160,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	typeParams := dependency.meta.indexMeta.GetTypeParams(segIndex.CollectionID, segIndex.IndexID)
 
 	fieldID := dependency.meta.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID)
-	// 拿id
+
 	binlogIDs := getBinLogIDs(segment, fieldID)
 	totalRows := getTotalBinlogRows(segment, fieldID)
 

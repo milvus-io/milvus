@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <optional>
 #include <string>
 
 #include "storage/DataCodec.h"
@@ -791,6 +792,34 @@ TEST(storage, InsertDataJsonNullable) {
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::JSON);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
     ASSERT_EQ(new_payload->get_null_count(), 2);
+    ASSERT_EQ(*new_payload->ValidData(), *valid_data);
+    delete[] valid_data;
+}
+
+TEST(storage, InsertDataJsonFillWithNull) {
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::JSON, true);
+    int64_t size = 2;
+    uint8_t* valid_data = new uint8_t[1]{0x00};
+    field_data->FillFieldData(std::nullopt, size);
+
+    storage::InsertData insert_data(field_data);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+    auto new_insert_data = storage::DeserializeFileData(
+        serialized_data_ptr, serialized_bytes.size());
+    ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
+    ASSERT_EQ(new_insert_data->GetTimeRage(),
+              std::make_pair(Timestamp(0), Timestamp(100)));
+    auto new_payload = new_insert_data->GetFieldData();
+    ASSERT_EQ(new_payload->get_data_type(), storage::DataType::JSON);
+    ASSERT_EQ(new_payload->get_num_rows(), size);
+    ASSERT_EQ(new_payload->get_null_count(), size);
     ASSERT_EQ(*new_payload->ValidData(), *valid_data);
     delete[] valid_data;
 }
