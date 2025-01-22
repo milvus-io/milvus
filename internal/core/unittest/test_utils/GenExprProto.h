@@ -95,6 +95,29 @@ CreateRetrievePlanByExpr(std::shared_ptr<milvus::expr::ITypeExpr> expr) {
 }
 
 inline std::shared_ptr<milvus::plan::PlanNode>
+CreateRetrievePlanForRandomSample(
+    float sample_factor,
+    std::shared_ptr<milvus::expr::ITypeExpr> expr = nullptr) {
+    auto init_plannode_id = std::stoi(DEFAULT_PLANNODE_ID);
+    milvus::plan::PlanNodePtr plannode;
+    std::vector<milvus::plan::PlanNodePtr> sources;
+
+    plannode = std::make_shared<plan::RandomSampleNode>(DEFAULT_PLANNODE_ID,
+                                                        sample_factor);
+    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+
+    if (expr) {
+        plannode = std::make_shared<plan::FilterBitsNode>(
+            std::to_string(init_plannode_id++), expr, sources);
+        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+    }
+
+    plannode = std::make_shared<milvus::plan::MvccNode>(
+        std::to_string(init_plannode_id++), sources);
+    return plannode;
+}
+
+inline std::shared_ptr<milvus::plan::PlanNode>
 CreateSearchPlanByExpr(std::shared_ptr<milvus::expr::ITypeExpr> expr) {
     auto init_plannode_id = std::stoi(DEFAULT_PLANNODE_ID);
     milvus::plan::PlanNodePtr plannode;

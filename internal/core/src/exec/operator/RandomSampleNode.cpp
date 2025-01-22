@@ -28,6 +28,10 @@ PhyRandomSampleNode::PhyRandomSampleNode(
                random_sample_node->id(),
                "PhyRandomSampleNode"),
       factor_(random_sample_node->factor()) {
+    // We should intercept unexpected number of factor at proxy level, so it's impossible to trigger
+    // the panic here theoretically.
+    AssertInfo(
+        factor_ > 0.0 && factor_ < 1.0, "Unexpected sample factor {}", factor_);
     active_count_ = operator_context_->get_exec_context()
                         ->get_query_context()
                         ->get_active_count();

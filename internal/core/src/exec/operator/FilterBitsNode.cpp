@@ -92,10 +92,7 @@ PhyFilterBitsNode::GetOutput() {
             }
         }
         eval_ctx.set_offset_input(&offsets);
-        LOG_INFO(
-            "debug_for_sample: GetOutput, input size {}, need_process_rows_ {}",
-            input_->size(),
-            need_process_rows_);
+        LOG_INFO("debug_for_sample: GetOutput, input size {}", input_->size());
     }
     TargetBitmap bitset;
     TargetBitmap valid_bitset;
