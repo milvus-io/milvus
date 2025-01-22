@@ -305,9 +305,15 @@ func (t *l0CompactionTask) CheckCompactionContainsSegment(segmentID int64) bool 
 }
 
 func (t *l0CompactionTask) PreparePlan() bool {
-	sealedSegmentIDs, _ := t.selectSealedSegment()
+	sealedSegmentIDs, sealedSegBinlogs := t.selectSealedSegment()
 	exist, hasStating := t.meta.CheckSegmentsStating(context.TODO(), sealedSegmentIDs)
-	return exist && !hasStating
+	allSorted := true
+	for _, seg := range sealedSegBinlogs {
+		if !seg.GetIsSorted() {
+			allSorted = false
+		}
+	}
+	return exist && !hasStating && allSorted
 }
 
 func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
