@@ -196,7 +196,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	if err != nil {
 		return err
 	}
-	// lxg load here
+
 	req := packLoadSegmentRequest(
 		task,
 		action,
@@ -683,7 +683,6 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 	return collectionInfo, loadMeta, channel, nil
 }
 
-// lxg get load info here
 func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int64, channel *meta.DmChannel) (*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
 	log := log.Ctx(ctx)
 	segmentInfos, err := ex.broker.GetSegmentInfo(ctx, segmentID)

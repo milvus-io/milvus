@@ -18,13 +18,12 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -36,22 +35,10 @@ type addFieldTask struct {
 }
 
 func (t *addFieldTask) Prepare(ctx context.Context) error {
-	if t.Req == nil {
-		return errors.New("empty requests")
-	}
-	if t.Req.GetCollectionName() == "" {
-		return fmt.Errorf("add field failed, collection name does not exists")
-	}
-	// change type,to do lxg
-	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_CreateCollection); err != nil {
+	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_AddField); err != nil {
 		return err
 	}
-
-	if err := checkFieldSchema(t.Req.GetFieldSchema()); err != nil {
-		return err
-	}
-
-	if err := validateFieldDataType(t.Req.GetFieldSchema()); err != nil {
+	if err := checkFieldSchema([]*schemapb.FieldSchema{t.Req.GetFieldSchema()}); err != nil {
 		return err
 	}
 	return nil
@@ -67,11 +54,9 @@ func (t *addFieldTask) Execute(ctx context.Context) error {
 
 	start := len(oldColl.Fields)
 	// assign field id
-	for idx, field := range t.Req.GetFieldSchema() {
-		field.FieldID = int64(idx + StartOfUserFieldID + start)
-	}
+	t.Req.GetFieldSchema().FieldID = int64(1 + StartOfUserFieldID + start)
 
-	newField := model.UnmarshalFieldModels(t.Req.FieldSchema)
+	newField := model.UnmarshalFieldModel(t.Req.FieldSchema)
 
 	ts := t.GetTs()
 	return executeAddFieldTaskSteps(ctx, t.core, oldColl, newField, t.Req, ts)
@@ -89,7 +74,7 @@ func (t *addFieldTask) GetLockerKey() LockerKey {
 func executeAddFieldTaskSteps(ctx context.Context,
 	core *Core,
 	col *model.Collection,
-	newField []*model.Field,
+	newField *model.Field,
 	req *milvuspb.AddFieldRequest,
 	ts Timestamp,
 ) error {
@@ -103,10 +88,14 @@ func executeAddFieldTaskSteps(ctx context.Context,
 	})
 
 	req.CollectionID = oldColl.CollectionID
-	redoTask.AddSyncStep(&BroadcastAddFieldStep{
+	redoTask.AddSyncStep(&BroadcastAlteredCollectionStep{
 		baseStep: baseStep{core: core},
-		req:      req,
-		core:     core,
+		req: &milvuspb.AlterCollectionRequest{
+			DbName:         req.GetDbName(),
+			CollectionName: req.GetCollectionName(),
+			CollectionID:   req.GetCollectionID(),
+		},
+		core: core,
 	})
 
 	// field needs to be refreshed in the cache

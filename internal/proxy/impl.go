@@ -1030,7 +1030,7 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 	return dct.result, nil
 }
 
-// DescribeCollection get the meta information of specific collection, such as schema, created timestamp and etc.
+// AddField add a field to collection
 func (node *Proxy) AddField(ctx context.Context, request *milvuspb.AddFieldRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -1061,7 +1061,7 @@ func (node *Proxy) AddField(ctx context.Context, request *milvuspb.AddFieldReque
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
-		zap.Int("length of field", len(request.FieldSchema)))
+		zap.Any("added field", request.FieldSchema))
 
 	log.Info(rpcReceived(method))
 
