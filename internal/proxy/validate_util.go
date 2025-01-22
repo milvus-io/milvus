@@ -684,13 +684,5 @@ func newValidateUtil(opts ...validateOption) *validateUtil {
 }
 
 func ValidateAutoIndexMmapConfig(isVectorField bool, indexParams map[string]string) error {
-	if !Params.AutoIndexConfig.Enable.GetAsBool() {
-		return nil
-	}
-
-	_, ok := indexParams[common.MmapEnabledKey]
-	if ok && isVectorField {
-		return fmt.Errorf("mmap index is not supported to config for the collection in auto index mode")
-	}
-	return nil
+	return common.ValidateAutoIndexMmapConfig(Params.AutoIndexConfig.Enable.GetAsBool(), isVectorField, indexParams)
 }
