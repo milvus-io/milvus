@@ -439,10 +439,6 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, request *datapb
 	return s.dataCoord.BroadcastAlteredCollection(ctx, request)
 }
 
-func (s *Server) BroadcastAddedField(ctx context.Context, request *datapb.AddFieldRequest) (*commonpb.Status, error) {
-	return s.dataCoord.BroadcastAddedField(ctx, request)
-}
-
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return s.dataCoord.CheckHealth(ctx, req)
 }

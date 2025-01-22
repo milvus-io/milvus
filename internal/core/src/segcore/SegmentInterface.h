@@ -476,6 +476,8 @@ class SegmentInternalInterface : public SegmentInterface {
         PanicInfo(ErrorCode::NotImplemented, "not implemented");
     };
 
+    virtual bool
+    is_field_exist(FieldId field_id) const = 0;
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type
     virtual void
     bulk_subscript(SystemFieldType system_type,

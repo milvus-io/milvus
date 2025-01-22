@@ -18,44 +18,37 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
-type addFieldTask struct {
-	baseTask
-	Req *milvuspb.AddFieldRequest
+type addCollectionFieldTask struct {
+	Req *milvuspb.AddCollectionFieldRequest
 }
 
-func (t *addFieldTask) Prepare(ctx context.Context) error {
-	if t.Req == nil {
-		return errors.New("empty requests")
-	}
-	if t.Req.GetCollectionName() == "" {
-		return fmt.Errorf("add field failed, collection name does not exists")
-	}
-	// change type,to do lxg
-	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_CreateCollection); err != nil {
+func (t *addCollectionFieldTask) Prepare(ctx context.Context) error {
+	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_AddCollectionField); err != nil {
 		return err
 	}
-
-	if err := checkFieldSchema(t.Req.GetFieldSchema()); err != nil {
+	t.fieldSchema = &schemapb.FieldSchema{}
+	err := proto.Unmarshal(t.Req.Schema, t.fieldSchema)
+	if err != nil {
 		return err
 	}
-
-	if err := validateFieldDataType(t.Req.GetFieldSchema()); err != nil {
+	if err := checkFieldSchema([]*schemapb.FieldSchema{t.fieldSchema}); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (t *addFieldTask) Execute(ctx context.Context) error {
+func (t *addCollectionFieldTask) Execute(ctx context.Context) error {
 	oldColl, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), t.ts)
 	if err != nil {
 		log.Ctx(ctx).Warn("get collection failed during add field",
@@ -63,19 +56,17 @@ func (t *addFieldTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	start := len(oldColl.Fields)
+	start := len(oldColl.Fields) - 2
 	// assign field id
-	for idx, field := range t.Req.GetFieldSchema() {
-		field.FieldID = int64(idx + StartOfUserFieldID + start)
-	}
+	t.fieldSchema.FieldID = int64(StartOfUserFieldID + start)
 
-	newField := model.UnmarshalFieldModels(t.Req.FieldSchema)
+	newField := model.UnmarshalFieldModel(t.fieldSchema)
 
 	ts := t.GetTs()
-	return executeAddFieldTaskSteps(ctx, t.core, oldColl, newField, t.Req, ts)
+	return executeAddCollectionFieldTaskSteps(ctx, t.core, oldColl, newField, t.Req, ts)
 }
 
-func (t *addFieldTask) GetLockerKey() LockerKey {
+func (t *addCollectionFieldTask) GetLockerKey() LockerKey {
 	collection := t.core.getCollectionIDStr(t.ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), 0)
 	return NewLockerKeyChain(
 		NewClusterLockerKey(false),
@@ -84,16 +75,16 @@ func (t *addFieldTask) GetLockerKey() LockerKey {
 	)
 }
 
-func executeAddFieldTaskSteps(ctx context.Context,
+func executeAddCollectionFieldTaskSteps(ctx context.Context,
 	core *Core,
 	col *model.Collection,
-	newField []*model.Field,
-	req *milvuspb.AddFieldRequest,
+	newField *model.Field,
+	req *milvuspb.AddCollectionFieldRequest,
 	ts Timestamp,
 ) error {
 	oldColl := col.Clone()
 	redoTask := newBaseRedoTask(core.stepExecutor)
-	redoTask.AddSyncStep(&AddFieldStep{
+	redoTask.AddSyncStep(&AddCollectionFieldStep{
 		baseStep: baseStep{core: core},
 		oldColl:  oldColl,
 		newField: newField,
@@ -101,10 +92,14 @@ func executeAddFieldTaskSteps(ctx context.Context,
 	})
 
 	req.CollectionID = oldColl.CollectionID
-	redoTask.AddSyncStep(&BroadcastAddFieldStep{
+	redoTask.AddSyncStep(&BroadcastAlteredCollectionStep{
 		baseStep: baseStep{core: core},
-		req:      req,
-		core:     core,
+		req: &milvuspb.AlterCollectionRequest{
+			DbName:         req.GetDbName(),
+			CollectionName: req.GetCollectionName(),
+			CollectionID:   req.GetCollectionID(),
+		},
+		core: core,
 	})
 
 	// field needs to be refreshed in the cache
@@ -114,7 +109,7 @@ func executeAddFieldTaskSteps(ctx context.Context,
 		dbName:          req.GetDbName(),
 		collectionNames: append(aliases, req.GetCollectionName()),
 		collectionID:    oldColl.CollectionID,
-		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AddField)},
+		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AddCollectionField)},
 	})
 
 	return redoTask.Execute(ctx)

@@ -19,7 +19,6 @@
 #include <optional>
 #include <utility>
 #include <pb/schema.pb.h>
-#include <sys/_types/_int64_t.h>
 #include <vector>
 #include <string>
 #include "common/CDataType.h"
@@ -45,7 +44,7 @@ ScalarIndexSort<T>::ScalarIndexSort(
         AssertInfo(file_manager_ != nullptr, "create file manager failed!");
     }
 }
-// index here
+
 template <typename T>
 void
 ScalarIndexSort<T>::Build(const Config& config) {
