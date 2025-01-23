@@ -572,6 +572,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
 		metrics.DataCoordSizeStoredL0Segment.WithLabelValues(fmt.Sprint(req.GetCollectionID())).Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))
+
+		s.compactionTriggerManager.OnCollectionUpdate(req.GetCollectionID())
 		return merr.Success(), nil
 	}
 
@@ -687,6 +689,12 @@ func (s *Server) GetStateCode() commonpb.StateCode {
 		return commonpb.StateCode_Abnormal
 	}
 	return code.(commonpb.StateCode)
+}
+
+// UpdateStateCode update state code
+func (s *Server) UpdateStateCode(code commonpb.StateCode) {
+	s.stateCode.Store(code)
+	log.Ctx(s.ctx).Info("update datacoord state", zap.String("state", code.String()))
 }
 
 // GetComponentStates returns DataCoord's current state
@@ -1518,6 +1526,13 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 		return merr.Status(err), nil
 	}
 
+	for _, pos := range checkpoints {
+		if pos == nil || pos.GetMsgID() == nil || pos.GetChannelName() == "" {
+			continue
+		}
+		s.segmentManager.CleanZeroSealedSegmentsOfChannel(ctx, pos.GetChannelName(), pos.GetTimestamp())
+	}
+
 	return merr.Success(), nil
 }
 
@@ -1776,6 +1791,11 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		})
 		if len(files) == 0 {
 			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("no binlog to import, input=%s", in.GetFiles())))
+			return resp, nil
+		}
+		if len(files) > paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
+			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("The max number of import files should not exceed %d, but got %d",
+				paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(files))))
 			return resp, nil
 		}
 		log.Info("list binlogs prefixes for import", zap.Any("binlog_prefixes", files))

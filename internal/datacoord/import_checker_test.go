@@ -52,7 +52,6 @@ func (s *ImportCheckerSuite) SetupTest() {
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
@@ -68,10 +67,11 @@ func (s *ImportCheckerSuite) SetupTest() {
 	s.NoError(err)
 	s.imeta = imeta
 
-	meta, err := newMeta(context.TODO(), catalog, nil)
-	s.NoError(err)
-
 	broker := broker2.NewMockBroker(s.T())
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	s.NoError(err)
 
 	sjm := NewMockStatsJobManager(s.T())
 
@@ -288,13 +288,17 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(mockErr)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	s.checker.checkPreImportingJob(job)
 	importTasks := s.imeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(ImportTaskType))
 	s.Equal(0, len(importTasks))
-	s.Equal(internalpb.ImportJobState_PreImporting, s.imeta.GetJob(context.TODO(), job.GetJobID()).GetState())
+	s.Equal(internalpb.ImportJobState_Failed, s.imeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	alloc.ExpectedCalls = nil
 	alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, mockErr)
+	err := s.imeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
+	s.NoError(err)
+	s.checker.checkPreImportingJob(job)
 	importTasks = s.imeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(ImportTaskType))
 	s.Equal(0, len(importTasks))
 	s.Equal(internalpb.ImportJobState_PreImporting, s.imeta.GetJob(context.TODO(), job.GetJobID()).GetState())

@@ -1,7 +1,5 @@
 use core::{fmt, str};
 
-use serde_json as json;
-
 #[derive(Debug)]
 pub enum TantivyBindingError {
     JsonError(serde_json::Error),

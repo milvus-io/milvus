@@ -87,7 +87,7 @@ func (c *Client) DescribeDatabase(ctx context.Context, option DescribeDatabaseOp
 	return db, err
 }
 
-func (c *Client) AlterDatabaseProperies(ctx context.Context, option AlterDatabasePropertiesOption, callOptions ...grpc.CallOption) error {
+func (c *Client) AlterDatabaseProperties(ctx context.Context, option AlterDatabasePropertiesOption, callOptions ...grpc.CallOption) error {
 	req := option.Request()
 
 	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {

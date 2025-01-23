@@ -861,6 +861,7 @@ message ImportSegmentInfo {
   repeated FieldBinlog binlogs = 3;
   repeated FieldBinlog statslogs = 4;
   repeated FieldBinlog deltalogs = 5;
+  repeated FieldBinlog bm25logs = 6;
 }
 
 message QueryImportResponse {

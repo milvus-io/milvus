@@ -64,7 +64,10 @@ IndexBuilder_build(benchmark::State& state) {
         std::to_string(knowhere::Version::GetCurrentVersion().VersionNumber());
 
     auto is_binary = state.range(2);
-    auto dataset = GenDataset(NB, metric_type, is_binary);
+    auto dataset = GenFieldData(NB,
+                                metric_type,
+                                is_binary ? milvus::DataType::VECTOR_BINARY
+                                          : milvus::DataType::VECTOR_FLOAT);
     auto xb_data = dataset.get_col<float>(milvus::FieldId(START_USER_FIELDID));
     auto xb_dataset = knowhere::GenDataSet(NB, DIM, xb_data.data());
 
@@ -98,7 +101,10 @@ IndexBuilder_build_and_codec(benchmark::State& state) {
     }
 
     auto is_binary = state.range(2);
-    auto dataset = GenDataset(NB, metric_type, is_binary);
+    auto dataset = GenFieldData(NB,
+                                metric_type,
+                                is_binary ? milvus::DataType::VECTOR_BINARY
+                                          : milvus::DataType::VECTOR_FLOAT);
     auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
     auto xb_dataset = knowhere::GenDataSet(NB, DIM, xb_data.data());
 

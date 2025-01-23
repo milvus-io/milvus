@@ -459,6 +459,7 @@ type MetaStoreConfig struct {
 	SnapshotTTLSeconds         ParamItem `refreshable:"true"`
 	SnapshotReserveTimeSeconds ParamItem `refreshable:"true"`
 	PaginationSize             ParamItem `refreshable:"true"`
+	ReadConcurrency            ParamItem `refreshable:"true"`
 }
 
 func (p *MetaStoreConfig) Init(base *BaseTable) {
@@ -492,10 +493,18 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 	p.PaginationSize = ParamItem{
 		Key:          "metastore.paginationSize",
 		Version:      "2.5.1",
-		DefaultValue: "10000",
+		DefaultValue: "100000",
 		Doc:          `limits the number of results to return from metastore.`,
 	}
 	p.PaginationSize.Init(base.mgr)
+
+	p.ReadConcurrency = ParamItem{
+		Key:          "metastore.readConcurrency",
+		Version:      "2.5.1",
+		DefaultValue: "32",
+		Doc:          `read concurrency for fetching metadata from the metastore.`,
+	}
+	p.ReadConcurrency.Init(base.mgr)
 
 	// TODO: The initialization operation of metadata storage is called in the initialization phase of every node.
 	// There should be a single initialization operation for meta store, then move the metrics registration to there.
@@ -518,9 +527,12 @@ type MQConfig struct {
 	IgnoreBadPosition ParamItem `refreshable:"true"`
 
 	// msgdispatcher
-	MergeCheckInterval ParamItem `refreshable:"false"`
-	TargetBufSize      ParamItem `refreshable:"false"`
-	MaxTolerantLag     ParamItem `refreshable:"true"`
+	MergeCheckInterval          ParamItem `refreshable:"false"`
+	TargetBufSize               ParamItem `refreshable:"false"`
+	MaxTolerantLag              ParamItem `refreshable:"true"`
+	MaxDispatcherNumPerPchannel ParamItem `refreshable:"true"`
+	RetrySleep                  ParamItem `refreshable:"true"`
+	RetryTimeout                ParamItem `refreshable:"true"`
 }
 
 // Init initializes the MQConfig object with a BaseTable.
@@ -543,6 +555,33 @@ Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 		Export:       true,
 	}
 	p.MaxTolerantLag.Init(base.mgr)
+
+	p.MaxDispatcherNumPerPchannel = ParamItem{
+		Key:          "mq.dispatcher.maxDispatcherNumPerPchannel",
+		Version:      "2.4.19",
+		DefaultValue: "5",
+		Doc:          `The maximum number of dispatchers per physical channel, primarily to limit the number of consumers and prevent performance issues(e.g., during recovery when a large number of channels are watched).`,
+		Export:       true,
+	}
+	p.MaxDispatcherNumPerPchannel.Init(base.mgr)
+
+	p.RetrySleep = ParamItem{
+		Key:          "mq.dispatcher.retrySleep",
+		Version:      "2.4.19",
+		DefaultValue: "3",
+		Doc:          `register retry sleep time in seconds`,
+		Export:       true,
+	}
+	p.RetrySleep.Init(base.mgr)
+
+	p.RetryTimeout = ParamItem{
+		Key:          "mq.dispatcher.retryTimeout",
+		Version:      "2.4.19",
+		DefaultValue: "60",
+		Doc:          `register retry timeout in seconds`,
+		Export:       true,
+	}
+	p.RetryTimeout.Init(base.mgr)
 
 	p.TargetBufSize = ParamItem{
 		Key:          "mq.dispatcher.targetBufSize",

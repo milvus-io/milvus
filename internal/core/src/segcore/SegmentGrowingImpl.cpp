@@ -486,6 +486,14 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 result->mutable_vectors()->mutable_sparse_float_vector());
             result->mutable_vectors()->set_dim(
                 result->vectors().sparse_float_vector().dim());
+        } else if (field_meta.get_data_type() == DataType::VECTOR_INT8) {
+            bulk_subscript_impl<Int8Vector>(
+                field_id,
+                field_meta.get_sizeof(),
+                vec_ptr,
+                seg_offsets,
+                count,
+                result->mutable_vectors()->mutable_int8_vector()->data());
         } else {
             PanicInfo(DataTypeInvalid, "logical error");
         }

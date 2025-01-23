@@ -38,6 +38,7 @@ enum VectorType {
   Float16Vector = 2;
   BFloat16Vector = 3;
   SparseFloatVector = 4;
+  Int8Vector = 5;
 };
 
 message GenericValue {

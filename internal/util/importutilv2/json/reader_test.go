@@ -309,6 +309,8 @@ func (suite *ReaderSuite) TestVector() {
 	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 	suite.vecDataType = schemapb.DataType_SparseFloatVector
 	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	suite.vecDataType = schemapb.DataType_Int8Vector
+	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 }
 
 func TestUtil(t *testing.T) {

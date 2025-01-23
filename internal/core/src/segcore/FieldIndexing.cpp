@@ -324,6 +324,7 @@ CreateIndex(const FieldMeta& field_meta,
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT ||
             field_meta.get_data_type() == DataType::VECTOR_FLOAT16 ||
             field_meta.get_data_type() == DataType::VECTOR_BFLOAT16 ||
+            field_meta.get_data_type() == DataType::VECTOR_INT8 ||
             field_meta.get_data_type() == DataType::VECTOR_SPARSE_FLOAT) {
             return std::make_unique<VectorFieldIndexing>(field_meta,
                                                          field_index_meta,

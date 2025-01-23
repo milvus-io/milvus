@@ -2,7 +2,6 @@ package paramtable
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -22,7 +21,6 @@ const (
 
 const (
 	BuildDramBudgetKey = "build_dram_budget_gb"
-	NumBuildThreadKey  = "num_build_thread"
 	VecFieldSizeKey    = "vec_field_size_gb"
 )
 
@@ -89,7 +87,6 @@ func (p *knowhereConfig) GetRuntimeParameter(stage string) (map[string]string, e
 
 	if stage == BuildStage {
 		params[BuildDramBudgetKey] = fmt.Sprintf("%f", float32(hardware.GetFreeMemoryCount())/(1<<30))
-		params[NumBuildThreadKey] = strconv.Itoa(int(float32(hardware.GetCPUNum())))
 	}
 
 	return params, nil

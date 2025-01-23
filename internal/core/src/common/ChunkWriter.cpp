@@ -356,13 +356,14 @@ create_chunk(const FieldMeta& field_meta,
         }
         case milvus::DataType::VECTOR_FLOAT: {
             w = std::make_shared<
-                ChunkWriter<arrow::FixedSizeBinaryArray, float>>(dim, nullable);
+                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::fp32>>(
+                dim, nullable);
             break;
         }
         case milvus::DataType::VECTOR_BINARY: {
             w = std::make_shared<
-                ChunkWriter<arrow::FixedSizeBinaryArray, uint8_t>>(dim / 8,
-                                                                   nullable);
+                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::bin1>>(
+                dim / 8, nullable);
             break;
         }
         case milvus::DataType::VECTOR_FLOAT16: {
@@ -374,6 +375,12 @@ create_chunk(const FieldMeta& field_meta,
         case milvus::DataType::VECTOR_BFLOAT16: {
             w = std::make_shared<
                 ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::bf16>>(
+                dim, nullable);
+            break;
+        }
+        case milvus::DataType::VECTOR_INT8: {
+            w = std::make_shared<
+                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::int8>>(
                 dim, nullable);
             break;
         }
@@ -450,13 +457,13 @@ create_chunk(const FieldMeta& field_meta,
         }
         case milvus::DataType::VECTOR_FLOAT: {
             w = std::make_shared<
-                ChunkWriter<arrow::FixedSizeBinaryArray, float>>(
+                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::fp32>>(
                 dim, file, file_offset, nullable);
             break;
         }
         case milvus::DataType::VECTOR_BINARY: {
             w = std::make_shared<
-                ChunkWriter<arrow::FixedSizeBinaryArray, uint8_t>>(
+                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::bin1>>(
                 dim / 8, file, file_offset, nullable);
             break;
         }
@@ -469,6 +476,12 @@ create_chunk(const FieldMeta& field_meta,
         case milvus::DataType::VECTOR_BFLOAT16: {
             w = std::make_shared<
                 ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::bf16>>(
+                dim, file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::VECTOR_INT8: {
+            w = std::make_shared<
+                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::int8>>(
                 dim, file, file_offset, nullable);
             break;
         }

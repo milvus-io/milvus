@@ -68,6 +68,9 @@ const (
 	AlterAction                     = "alter"
 	AlterPropertiesAction           = "alter_properties"
 	DropPropertiesAction            = "drop_properties"
+	CompactAction                   = "compact"
+	CompactionStateAction           = "get_compaction_state"
+	FlushAction                     = "flush"
 	GetProgressAction               = "get_progress" // deprecated, keep it for compatibility, use `/v2/vectordb/jobs/import/describe` instead
 	AddPrivilegesToGroupAction      = "add_privileges_to_group"
 	RemovePrivilegesFromGroupAction = "remove_privileges_from_group"
@@ -120,6 +123,7 @@ const (
 	HTTPReturnMessage        = "message"
 	HTTPReturnData           = "data"
 	HTTPReturnCost           = "cost"
+	HTTPReturnRecalls        = "recalls"
 	HTTPReturnLoadState      = "loadState"
 	HTTPReturnLoadProgress   = "loadProgress"
 

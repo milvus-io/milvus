@@ -1,4 +1,3 @@
-use std::default;
 use std::ffi::c_void;
 use std::ptr::null;
 
@@ -132,19 +131,15 @@ pub extern "C" fn free_rust_result(result: RustResult) {
         }
         _ => {}
     }
-    unsafe {
-        if !result.error.is_null() {
-            free_rust_string(result.error as *mut c_char);
-        }
+    if !result.error.is_null() {
+        free_rust_string(result.error as *mut c_char);
     }
 }
 
 #[no_mangle]
 pub extern "C" fn free_rust_error(error: *const c_char) {
-    unsafe {
-        if !error.is_null() {
-            free_rust_string(error as *mut c_char);
-        }
+    if !error.is_null() {
+        free_rust_string(error as *mut c_char);
     }
 }
 

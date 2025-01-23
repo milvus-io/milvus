@@ -1021,6 +1021,19 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		return err
 	}
 
+	// // if segment is pk sorted, user created indexes bring no performance gain but extra memory usage
+	if s.IsSorted() && fieldSchema.GetIsPrimaryKey() {
+		log.Info("skip loading index for pk field in sorted segment")
+		// set field index, preventing repeated loading index task
+		s.fieldIndexes.Insert(indexInfo.GetFieldID(), &IndexedFieldInfo{
+			FieldBinlog: &datapb.FieldBinlog{
+				FieldID: indexInfo.GetFieldID(),
+			},
+			IndexInfo: indexInfo,
+			IsLoaded:  true,
+		})
+	}
+
 	return s.innerLoadIndex(ctx, fieldSchema, indexInfo, tr, fieldType)
 }
 
@@ -1176,10 +1189,10 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64, mmap
 		}).Await()
 	case "async":
 		task := func() (any, error) {
-			// bad implemtation, warmup is async at another goroutine and hold the rlock.
-			// the state transition of segment in segment loader will blocked.
-			// add a waiter to avoid it.
-			s.ptrLock.BlockUntilDataLoadedOrReleased()
+			// failed to wait for state update, return directly
+			if !s.ptrLock.BlockUntilDataLoadedOrReleased() {
+				return nil, nil
+			}
 			if s.PinIfNotReleased() != nil {
 				return nil, nil
 			}

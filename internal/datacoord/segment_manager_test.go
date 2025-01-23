@@ -28,14 +28,19 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -44,7 +49,7 @@ func TestManagerOptions(t *testing.T) {
 	//	ctx := context.Background()
 	paramtable.Init()
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 	segmentManager, _ := newSegmentManager(meta, mockAllocator)
 	t.Run("test with alloc helper", func(t *testing.T) {
@@ -105,7 +110,7 @@ func TestAllocSegment(t *testing.T) {
 	paramtable.Init()
 	Params.Save(Params.DataCoordCfg.AllocLatestExpireAttempt.Key, "1")
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 	segmentManager, _ := newSegmentManager(meta, mockAllocator)
 
@@ -193,17 +198,28 @@ func TestLastExpireReset(t *testing.T) {
 	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	metaKV.RemoveWithPrefix(ctx, "")
 	catalog := datacoord.NewCatalog(metaKV, "", "")
-	meta, err := newMeta(context.TODO(), catalog, nil)
+	collID, err := mockAllocator.AllocID(ctx)
+	assert.Nil(t, err)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
+		Status: merr.Success(),
+		DbCollections: []*rootcoordpb.DBCollections{
+			{
+				DbName:        "db_1",
+				CollectionIDs: []int64{collID},
+			},
+		},
+	}, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.Nil(t, err)
 	// add collection
 	channelName := "c1"
 	schema := newTestSchema()
-	collID, err := mockAllocator.AllocID(ctx)
-	assert.Nil(t, err)
 	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 	initSegment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:            1,
+			CollectionID:  collID,
 			InsertChannel: "ch1",
 			State:         commonpb.SegmentState_Growing,
 		},
@@ -245,7 +261,7 @@ func TestLastExpireReset(t *testing.T) {
 	newMetaKV := etcdkv.NewEtcdKV(newEtcdCli, rootPath)
 	defer newMetaKV.RemoveWithPrefix(ctx, "")
 	newCatalog := datacoord.NewCatalog(newMetaKV, "", "")
-	restartedMeta, err := newMeta(context.TODO(), newCatalog, nil)
+	restartedMeta, err := newMeta(context.TODO(), newCatalog, nil, broker)
 	restartedMeta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 	assert.Nil(t, err)
 	newSegmentManager, _ := newSegmentManager(restartedMeta, mockAllocator)
@@ -274,7 +290,7 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Init()
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
 	schema := newTestSchema()
@@ -332,7 +348,7 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 func TestSaveSegmentsToMeta(t *testing.T) {
 	paramtable.Init()
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
 	schema := newTestSchema()
@@ -354,7 +370,7 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 func TestSaveSegmentsToMetaWithSpecificSegments(t *testing.T) {
 	paramtable.Init()
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
 	schema := newTestSchema()
@@ -376,7 +392,7 @@ func TestSaveSegmentsToMetaWithSpecificSegments(t *testing.T) {
 func TestDropSegment(t *testing.T) {
 	paramtable.Init()
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
 	schema := newTestSchema()
@@ -399,7 +415,7 @@ func TestDropSegment(t *testing.T) {
 func TestAllocRowsLargerThanOneSegment(t *testing.T) {
 	paramtable.Init()
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
 	schema := newTestSchema()
@@ -421,7 +437,7 @@ func TestAllocRowsLargerThanOneSegment(t *testing.T) {
 func TestExpireAllocation(t *testing.T) {
 	paramtable.Init()
 	mockAllocator := newMockAllocator(t)
-	meta, err := newMemoryMeta()
+	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
 
 	schema := newTestSchema()
@@ -463,7 +479,7 @@ func TestGetFlushableSegments(t *testing.T) {
 	t.Run("get flushable segments between small interval", func(t *testing.T) {
 		paramtable.Init()
 		mockAllocator := newMockAllocator(t)
-		meta, err := newMemoryMeta()
+		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()
@@ -498,6 +514,15 @@ func TestGetFlushableSegments(t *testing.T) {
 		assert.EqualValues(t, allocations[0].SegmentID, ids[0])
 
 		meta.SetCurrentRows(allocations[0].SegmentID, 0)
+		postions := make([]*msgpb.MsgPosition, 0)
+		cpTs := allocations[0].ExpireTime + 1
+		postions = append(postions, &msgpb.MsgPosition{
+			ChannelName: "c1",
+			MsgID:       []byte{1, 2, 3},
+			Timestamp:   cpTs,
+		})
+		meta.UpdateChannelCheckpoints(context.TODO(), postions)
+		segmentManager.CleanZeroSealedSegmentsOfChannel(context.TODO(), "c1", cpTs)
 		ids, err = segmentManager.GetFlushableSegments(context.TODO(), "c1", allocations[0].ExpireTime)
 		assert.NoError(t, err)
 		assert.Empty(t, ids)
@@ -509,7 +534,7 @@ func TestTryToSealSegment(t *testing.T) {
 	t.Run("normal seal with segment policies", func(t *testing.T) {
 		paramtable.Init()
 		mockAllocator := newMockAllocator(t)
-		meta, err := newMemoryMeta()
+		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()
@@ -534,7 +559,7 @@ func TestTryToSealSegment(t *testing.T) {
 	t.Run("normal seal with channel seal policies", func(t *testing.T) {
 		paramtable.Init()
 		mockAllocator := newMockAllocator(t)
-		meta, err := newMemoryMeta()
+		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()
@@ -559,7 +584,7 @@ func TestTryToSealSegment(t *testing.T) {
 	t.Run("normal seal with both segment & channel seal policy", func(t *testing.T) {
 		paramtable.Init()
 		mockAllocator := newMockAllocator(t)
-		meta, err := newMemoryMeta()
+		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()
@@ -586,7 +611,7 @@ func TestTryToSealSegment(t *testing.T) {
 	t.Run("test sealByMaxBinlogFileNumberPolicy", func(t *testing.T) {
 		paramtable.Init()
 		mockAllocator := newMockAllocator(t)
-		meta, err := newMemoryMeta()
+		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()
@@ -670,7 +695,9 @@ func TestTryToSealSegment(t *testing.T) {
 		mockAllocator := newMockAllocator(t)
 		memoryKV := NewMetaMemoryKV()
 		catalog := datacoord.NewCatalog(memoryKV, "", "")
-		meta, err := newMeta(context.TODO(), catalog, nil)
+		broker := broker.NewMockBroker(t)
+		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+		meta, err := newMeta(context.TODO(), catalog, nil, broker)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()
@@ -699,7 +726,9 @@ func TestTryToSealSegment(t *testing.T) {
 		mockAllocator := newMockAllocator(t)
 		memoryKV := NewMetaMemoryKV()
 		catalog := datacoord.NewCatalog(memoryKV, "", "")
-		meta, err := newMeta(context.TODO(), catalog, nil)
+		broker := broker.NewMockBroker(t)
+		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+		meta, err := newMeta(context.TODO(), catalog, nil, broker)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()
@@ -871,6 +900,151 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 				}
 			}
 			s.DropSegmentsOfChannel(context.TODO(), tt.args.channel)
+			all := make([]int64, 0)
+			s.channel2Sealed.Range(func(_ string, segments typeutil.UniqueSet) bool {
+				all = append(all, segments.Collect()...)
+				return true
+			})
+			s.channel2Growing.Range(func(_ string, segments typeutil.UniqueSet) bool {
+				all = append(all, segments.Collect()...)
+				return true
+			})
+			assert.ElementsMatch(t, tt.want, all)
+		})
+	}
+}
+
+func TestSegmentManager_CleanZeroSealedSegmentsOfChannel(t *testing.T) {
+	partitionID := int64(100)
+	type fields struct {
+		meta     *meta
+		segments []UniqueID
+	}
+	type args struct {
+		channel string
+		cpTs    Timestamp
+	}
+
+	mockCatalog := mocks.NewDataCoordCatalog(t)
+	mockCatalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	seg1 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             1,
+			PartitionID:    partitionID,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Sealed,
+			NumOfRows:      1,
+			LastExpireTime: 100,
+		},
+		currRows: 1,
+	}
+	seg2 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             2,
+			PartitionID:    partitionID,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Sealed,
+			NumOfRows:      0,
+			LastExpireTime: 100,
+		},
+		currRows: 0,
+	}
+	seg3 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             3,
+			PartitionID:    partitionID,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Sealed,
+			LastExpireTime: 90,
+		},
+	}
+	seg4 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             4,
+			PartitionID:    partitionID,
+			InsertChannel:  "ch2",
+			State:          commonpb.SegmentState_Growing,
+			NumOfRows:      1,
+			LastExpireTime: 100,
+		},
+		currRows: 1,
+	}
+	newMetaFunc := func() *meta {
+		return &meta{
+			catalog: mockCatalog,
+			segments: &SegmentsInfo{
+				segments: map[int64]*SegmentInfo{
+					1: seg1,
+					2: seg2,
+					3: seg3,
+					4: seg4,
+				},
+				secondaryIndexes: segmentInfoIndexes{
+					coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
+						0: {1: seg1, 2: seg2, 3: seg3, 4: seg4},
+					},
+					channel2Segments: map[string]map[UniqueID]*SegmentInfo{
+						"ch1": {1: seg1, 2: seg2, 3: seg3},
+						"ch2": {4: seg4},
+					},
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   []UniqueID
+	}{
+		{
+			"test clean empty sealed segments with normal channel cp <= lastExpireTs",
+			fields{
+				meta:     newMetaFunc(),
+				segments: []UniqueID{1, 2, 3, 4},
+			},
+			args{
+				"ch1", 100,
+			},
+			[]UniqueID{1, 2, 4},
+		},
+		{
+			"test clean empty sealed segments with normal channel cp > lastExpireTs",
+			fields{
+				meta:     newMetaFunc(),
+				segments: []UniqueID{1, 2, 3, 4},
+			},
+			args{
+				"ch1", 101,
+			},
+			[]UniqueID{1, 4},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &SegmentManager{
+				meta:            tt.fields.meta,
+				channelLock:     lock.NewKeyLock[string](),
+				channel2Growing: typeutil.NewConcurrentMap[string, typeutil.UniqueSet](),
+				channel2Sealed:  typeutil.NewConcurrentMap[string, typeutil.UniqueSet](),
+			}
+			for _, segmentID := range tt.fields.segments {
+				segmentInfo := tt.fields.meta.GetSegment(context.TODO(), segmentID)
+				channel := tt.args.channel
+				if segmentInfo != nil {
+					channel = segmentInfo.GetInsertChannel()
+				}
+				if segmentInfo == nil || segmentInfo.GetState() == commonpb.SegmentState_Growing {
+					growing, _ := s.channel2Growing.GetOrInsert(channel, typeutil.NewUniqueSet())
+					growing.Insert(segmentID)
+				} else if segmentInfo.GetState() == commonpb.SegmentState_Sealed {
+					sealed, _ := s.channel2Sealed.GetOrInsert(channel, typeutil.NewUniqueSet())
+					sealed.Insert(segmentID)
+				}
+			}
+			s.CleanZeroSealedSegmentsOfChannel(context.TODO(), tt.args.channel, tt.args.cpTs)
 			all := make([]int64, 0)
 			s.channel2Sealed.Range(func(_ string, segments typeutil.UniqueSet) bool {
 				all = append(all, segments.Collect()...)
