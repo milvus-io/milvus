@@ -9,6 +9,7 @@ packages:
     interfaces:
       WALAccesser:
       Utility:
+      Broadcast:
   github.com/milvus-io/milvus/internal/streamingcoord/server/balancer:
     interfaces:
       Balancer:

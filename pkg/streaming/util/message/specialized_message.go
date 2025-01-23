@@ -149,7 +149,7 @@ var (
 // Return nil, nil if the message is not the target specialized message.
 // Return nil, error if the message is the target specialized message but failed to decode the specialized header.
 // Return specializedMutableMessage, nil if the message is the target specialized message and successfully decoded the specialized header.
-func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg MutableMessage) (specializedMutableMessage[H, B], error) {
+func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg BasicMessage) (specializedMutableMessage[H, B], error) {
 	underlying := msg.(*messageImpl)
 
 	var header H

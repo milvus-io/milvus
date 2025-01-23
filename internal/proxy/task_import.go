@@ -238,17 +238,23 @@ func (it *importTask) Execute(ctx context.Context) error {
 			Schema:         it.schema.CollectionSchema,
 			JobID:          jobID,
 		}).
-		WithBroadcast(it.vchannels).
+		WithBroadcast(it.vchannels, message.NewImportJobIDResourceKey(jobID)).
 		BuildBroadcast()
 	if err != nil {
 		log.Ctx(ctx).Warn("create import message failed", zap.Error(err))
 		return err
 	}
-	_, err = streaming.WAL().BroadcastAppend(ctx, msg)
+	resp, err := streaming.WAL().Broadcast().Append(ctx, msg)
 	if err != nil {
 		log.Ctx(ctx).Warn("broadcast import msg failed", zap.Error(err))
 		return err
 	}
+	log.Ctx(ctx).Debug(
+		"broadcast import msg success",
+		zap.Int64("jobID", jobID),
+		zap.Uint64("broadcastID", resp.BroadcastID),
+		zap.Any("appendResults", resp.AppendResults),
+	)
 	it.resp.JobID = strconv.FormatInt(jobID, 10)
 	return nil
 }

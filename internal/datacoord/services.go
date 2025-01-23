@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -42,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -1750,7 +1752,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		return resp, nil
 	}
 	if importCollectionInfo == nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("collection %d not found", in.GetCollectionID())))
+		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(in.GetCollectionID()))
 		return resp, nil
 	}
 
@@ -1809,6 +1811,13 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse job id failed, err=%w", err)))
 		return resp, nil
 	}
+
+	// Import is asynchronous consumed from the wal, so we need to wait for the wal to release the resource key.
+	// The job can be seen by the user after the resource key is acked once at any vchannel.
+	if err := streaming.WAL().Broadcast().BlockUntilResourceKeyAckOnce(ctx, message.NewImportJobIDResourceKey(jobID)); err != nil {
+		return nil, err
+	}
+
 	job := s.importMeta.GetJob(ctx, jobID)
 	if job == nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d", jobID)))
