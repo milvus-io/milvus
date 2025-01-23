@@ -316,7 +316,7 @@ CreateArrowBuilder(DataType data_type, int dim) {
         case DataType::VECTOR_INT8: {
             AssertInfo(dim > 0, "invalid dim value");
             return std::make_shared<arrow::FixedSizeBinaryBuilder>(
-                    arrow::fixed_size_binary(dim * sizeof(int8)));
+                arrow::fixed_size_binary(dim * sizeof(int8)));
         }
         default: {
             PanicInfo(
@@ -837,7 +837,7 @@ CreateFieldData(const DataType& type,
                 type, total_num_rows);
         case DataType::VECTOR_INT8:
             return std::make_shared<FieldData<Int8Vector>>(
-                    dim, type, total_num_rows);
+                dim, type, total_num_rows);
         default:
             PanicInfo(DataTypeInvalid,
                       "CreateFieldData not support data type " +

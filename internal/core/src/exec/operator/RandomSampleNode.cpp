@@ -47,7 +47,6 @@ FixedVector<uint32_t>
 PhyRandomSampleNode::HashsetSample(const uint32_t N,
                                    const uint32_t M,
                                    std::mt19937& gen) {
-    LOG_INFO("debug_for_sample: HashsetSample");
     FixedVector<uint32_t> sampled(N);
     std::iota(sampled.begin(), sampled.end(), 0);
 
@@ -60,7 +59,6 @@ FixedVector<uint32_t>
 PhyRandomSampleNode::StandardSample(const uint32_t N,
                                     const uint32_t M,
                                     std::mt19937& gen) {
-    LOG_INFO("debug_for_sample: StandardSample");
     FixedVector<uint32_t> inputs(N);
     FixedVector<uint32_t> outputs(M);
     std::iota(inputs.begin(), inputs.end(), 0);
@@ -93,8 +91,6 @@ PhyRandomSampleNode::GetOutput() {
         return nullptr;
     }
 
-    auto start = std::chrono::high_resolution_clock::now();
-
     auto col_input = std::make_shared<ColumnVector>(
         TargetBitmap(active_count_), TargetBitmap(active_count_));
     TargetBitmapView data(col_input->GetRawData(), col_input->size());
@@ -112,14 +108,8 @@ PhyRandomSampleNode::GetOutput() {
     for (auto n : sampled) {
         data[n] = true;
     }
+
     is_finished_ = true;
-
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> dur = end - start;
-    LOG_INFO("debug_for_sample: sample duration {} seconds, sampled size {}",
-             dur.count(),
-             sampled.size());
-
     if (need_flip) {
         data.flip();
     }

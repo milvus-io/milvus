@@ -92,17 +92,11 @@ PhyFilterBitsNode::GetOutput() {
             }
         }
         eval_ctx.set_offset_input(&offsets);
-        LOG_INFO("debug_for_sample: GetOutput, input size {}", input_->size());
     }
     TargetBitmap bitset;
     TargetBitmap valid_bitset;
     while (num_processed_rows_ < need_process_rows_) {
         exprs_->Eval(0, 1, true, eval_ctx, results_);
-        LOG_INFO(
-            "debug_for_sample: evaluate expr, num_processed_rows_ {}, "
-            "need_process_rows_ {}",
-            num_processed_rows_,
-            need_process_rows_);
 
         AssertInfo(results_.size() == 1 && results_[0] != nullptr,
                    "PhyFilterBitsNode result size should be size one and not "

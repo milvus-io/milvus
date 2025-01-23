@@ -887,7 +887,6 @@ template <typename T>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
     OffsetVector* input) {
-    LOG_INFO("debug_for_sample: ExecRangeVisitorImplForIndex");
     using Index = index::ScalarIndex<T>;
     typedef std::conditional_t<std::is_integral_v<T> &&
                                    !std::is_same_v<bool, T>,

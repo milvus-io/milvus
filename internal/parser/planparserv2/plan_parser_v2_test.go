@@ -1313,7 +1313,6 @@ func Test_ArrayExpr(t *testing.T) {
 	var err error
 
 	exprs := []string{
-		`random_sample(0.01, Int8Field < 0)`,
 		`ArrayField == [1,2,3,4]`,
 		`ArrayField[0] == 1`,
 		`ArrayField[0] > 1`,

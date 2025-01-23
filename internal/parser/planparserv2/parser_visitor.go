@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/antlr4-go/antlr/v4"
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
@@ -581,8 +579,6 @@ func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) inter
 	if sample_factor <= 0+epsilon || sample_factor >= 1-epsilon {
 		return fmt.Errorf("sample factor should be in range (0, 1) exclusive, but got %f", sample_factor)
 	}
-
-	log.Info("debug_for_sample: random sample", zap.Float64("factor", sample_factor))
 
 	if expr := ctx.Expr(); expr != nil {
 		parsed_predicate := expr.Accept(v)

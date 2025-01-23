@@ -37,13 +37,16 @@ CheckBruteForceSearchParam(const FieldMeta& field,
                "[BruteForceSearch] Data type isn't vector type");
     if (IsBinaryVectorDataType(data_type)) {
         AssertInfo(IsBinaryVectorMetricType(metric_type),
-                   "[BruteForceSearch] Binary vector, data type and metric type miss-match");
+                   "[BruteForceSearch] Binary vector, data type and metric "
+                   "type miss-match");
     } else if (IsFloatVectorDataType(data_type)) {
         AssertInfo(IsFloatVectorMetricType(metric_type),
-                   "[BruteForceSearch] Float vector, data type and metric type miss-match");
+                   "[BruteForceSearch] Float vector, data type and metric type "
+                   "miss-match");
     } else if (IsIntVectorDataType(data_type)) {
         AssertInfo(IsIntVectorMetricType(metric_type),
-                   "[BruteForceSearch] Int vector, data type and metric type miss-match");
+                   "[BruteForceSearch] Int vector, data type and metric type "
+                   "miss-match");
     } else {
         AssertInfo(IsVectorDataType(data_type),
                    "[BruteForceSearch] Unsupported vector data type");
@@ -165,7 +168,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
         } else if (data_type == DataType::VECTOR_INT8) {
             // TODO caiyd: if knowhere support real int8 bf, change it
             res = knowhere::BruteForce::RangeSearch<float>(
-                    base_dataset, query_dataset, search_cfg, bitset);
+                base_dataset, query_dataset, search_cfg, bitset);
         } else {
             PanicInfo(
                 ErrorCode::Unsupported,
@@ -279,7 +282,7 @@ DispatchBruteForceIteratorByDataType(const knowhere::DataSetPtr& base_dataset,
         case DataType::VECTOR_INT8:
             // TODO caiyd: if knowhere support real int8 bf, change it
             return knowhere::BruteForce::AnnIterator<float>(
-                    base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset);
         default:
             PanicInfo(ErrorCode::Unsupported,
                       "Unsupported dataType for chunk brute force iterator:{}",

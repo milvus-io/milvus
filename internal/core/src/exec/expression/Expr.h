@@ -427,8 +427,6 @@ class SegmentExpr : public Expr {
         TargetBitmapView res,
         TargetBitmapView valid_res,
         ValTypes... values) {
-        LOG_INFO("debug_for_sample: ProcessDataByOffsets, input size {}",
-                 input->size());
         int64_t processed_size = 0;
 
         // index reverse lookup
@@ -508,10 +506,6 @@ class SegmentExpr : public Expr {
                 auto chunk = segment_->chunk_data<T>(field_id_, 0);
                 const T* data = chunk.data();
                 const bool* valid_data = chunk.valid_data();
-                LOG_INFO(
-                    "debug_for_sample: ProcessDataByOffsets, not chunk, offset "
-                    "size {}",
-                    input->size());
                 if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
                     func.template operator()<FilterType::random>(data,
                                                                  valid_data,
@@ -727,8 +721,6 @@ class SegmentExpr : public Expr {
         TargetBitmapView res,
         TargetBitmapView valid_res,
         ValTypes... values) {
-        LOG_INFO("debug_for_sample: ProcessDataChunks, chunked {}",
-                 segment_->is_chunked());
         if (segment_->is_chunked()) {
             return ProcessDataChunksForMultipleChunk<T>(
                 func, skip_func, res, valid_res, values...);
