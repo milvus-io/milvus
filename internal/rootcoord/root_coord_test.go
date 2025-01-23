@@ -2135,6 +2135,40 @@ func TestCore_RestoreRBAC(t *testing.T) {
 	assert.False(t, merr.Ok(resp))
 }
 
+func TestCore_getMetastorePrivilegeName(t *testing.T) {
+	meta := mockrootcoord.NewIMetaTable(t)
+	c := newTestCore(withHealthyCode(), withMeta(meta))
+
+	priv, err := c.getMetastorePrivilegeName(context.Background(), util.AnyWord)
+	assert.NoError(t, err)
+	assert.Equal(t, priv, util.AnyWord)
+
+	meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, "unknown").Return(false, nil)
+	_, err = c.getMetastorePrivilegeName(context.Background(), "unknown")
+	assert.Equal(t, err.Error(), "not found the privilege name [unknown] from metastore")
+}
+
+func TestCore_expandPrivilegeGroup(t *testing.T) {
+	meta := mockrootcoord.NewIMetaTable(t)
+	c := newTestCore(withHealthyCode(), withMeta(meta))
+
+	grants := []*milvuspb.GrantEntity{
+		{
+			ObjectName: "*",
+			Object: &milvuspb.ObjectEntity{
+				Name: "Global",
+			},
+			Role:    &milvuspb.RoleEntity{Name: "role"},
+			Grantor: &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "*"}},
+		},
+	}
+	groups := map[string][]*milvuspb.PrivilegeEntity{}
+	expandGrants, err := c.expandPrivilegeGroups(context.Background(), grants, groups)
+	assert.NoError(t, err)
+	assert.Equal(t, len(expandGrants), len(grants))
+	assert.Equal(t, expandGrants[0].Grantor.Privilege.Name, grants[0].Grantor.Privilege.Name)
+}
+
 type RootCoordSuite struct {
 	suite.Suite
 }
