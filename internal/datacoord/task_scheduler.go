@@ -170,7 +170,7 @@ func (s *taskScheduler) reloadFromMeta() {
 						t.State = indexpb.JobState_JobStateFailed
 						t.FailReason = "segment is not exist or is compacting"
 					} else {
-						if !s.compactionHandler.checkAndSetSegmentStating(t.GetSegmentID()) {
+						if !s.compactionHandler.checkAndSetSegmentStating(t.GetInsertChannel(), t.GetSegmentID()) {
 							s.meta.SetSegmentsCompacting(context.TODO(), []UniqueID{t.GetSegmentID()}, false)
 							err := s.meta.statsTaskMeta.DropStatsTask(t.GetTaskID())
 							if err == nil {

@@ -61,7 +61,7 @@ type compactionPlanContext interface {
 	getCompactionInfo(ctx context.Context, signalID int64) *compactionInfo
 	removeTasksByChannel(channel string)
 	setTaskScheduler(scheduler *taskScheduler)
-	checkAndSetSegmentStating(segmentID int64) bool
+	checkAndSetSegmentStating(channel string, segmentID int64) bool
 }
 
 var (
@@ -167,13 +167,13 @@ func summaryCompactionState(tasks []*datapb.CompactionTask) *compactionInfo {
 	return ret
 }
 
-func (c *compactionPlanHandler) checkAndSetSegmentStating(segmentID int64) bool {
+func (c *compactionPlanHandler) checkAndSetSegmentStating(channel string, segmentID int64) bool {
 	c.executingGuard.Lock()
 	defer c.executingGuard.Unlock()
 
 	for _, t := range c.executingTasks {
 		if t.GetTaskProto().GetType() == datapb.CompactionType_Level0DeleteCompaction {
-			if t.CheckCompactionContainsSegment(segmentID) {
+			if t.GetTaskProto().GetChannel() == channel && t.CheckCompactionContainsSegment(segmentID) {
 				return false
 			}
 		}
