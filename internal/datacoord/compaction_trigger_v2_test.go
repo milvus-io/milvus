@@ -380,8 +380,10 @@ func TestCompactionAndImport(t *testing.T) {
 		}).Return(nil)
 	mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
 
-	triggerManager.PauseL0SegmentCompacting(100)
-	defer triggerManager.ResumeL0SegmentCompacting(100)
+	<-triggerManager.GetPauseCompactionChan(100, 10)
+	defer func() {
+		<-triggerManager.GetResumeCompactionChan(100, 10)
+	}()
 
 	triggerManager.Start()
 	defer triggerManager.Stop()

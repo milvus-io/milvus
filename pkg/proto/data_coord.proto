@@ -639,7 +639,6 @@ message CompactionPlanResult {
   repeated CompactionSegment segments = 3;
   string channel = 4;
   CompactionType type = 5;
-  // l0 import file path
 }
 
 message CompactionStateResponse {

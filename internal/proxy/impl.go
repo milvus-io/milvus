@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
@@ -55,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
@@ -6571,6 +6573,21 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		return resp, nil
 	}
 
+	// Import is asynchronous consumed from the wal, so we need to wait for the wal to release the resource key.
+	// The job can be seen by the user after the resource key is acked once at any vchannel.
+	jobID, err := strconv.ParseInt(resp.GetJobID(), 10, 64)
+	if err != nil {
+		return &internalpb.ImportResponse{
+			Status: merr.Status(merr.WrapErrServiceInternal("invalid job ID")),
+		}, nil
+	}
+	resourceKey := message.NewImportJobIDResourceKey(jobID)
+	if err := streaming.WAL().Broadcast().BlockUntilResourceKeyAckOnce(ctx, resourceKey); err != nil {
+		log.Warn("failed to wait for resource key ack", zap.Error(err))
+		return &internalpb.ImportResponse{
+			Status: merr.Status(merr.WrapErrServiceInternal("failed to wait for resource key ack")),
+		}, nil
+	}
 	metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.SuccessLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return resp, nil

@@ -278,6 +278,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			}
 		case commonpb.MsgType_Import:
 			importMsg := msg.(*msgstream.ImportMsg)
+			if importMsg.GetCollectionID() != ddn.collectionID {
+				continue
+			}
 			logger := log.With(
 				zap.String("vchannel", ddn.Name()),
 				zap.Int32("msgType", int32(msg.Type())),
