@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -1911,7 +1912,7 @@ func GetRequestLabelFromContext(ctx context.Context) bool {
 }
 
 // GetRequestInfo returns collection name and rateType of request and return tokens needed.
-func GetRequestInfo(ctx context.Context, req interface{}) (int64, map[int64][]int64, internalpb.RateType, int, error) {
+func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]int64, internalpb.RateType, int, error) {
 	switch r := req.(type) {
 	case *milvuspb.InsertRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
@@ -1989,6 +1990,7 @@ func GetRequestInfo(ctx context.Context, req interface{}) (int64, map[int64][]in
 		if req == nil {
 			return util.InvalidDBID, map[int64][]int64{}, 0, 0, fmt.Errorf("null request")
 		}
+		log.RatedWarn(60, "not supported request type for rate limiter", zap.String("type", reflect.TypeOf(req).String()))
 		return util.InvalidDBID, map[int64][]int64{}, 0, 0, nil
 	}
 }
