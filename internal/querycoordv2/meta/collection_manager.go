@@ -123,18 +123,24 @@ func NewCollectionManager(catalog metastore.QueryCoordCatalog) *CollectionManage
 // Recover recovers collections from kv store,
 // panics if failed
 func (m *CollectionManager) Recover(broker Broker) error {
+	start := time.Now()
 	collections, err := m.catalog.GetCollections()
 	if err != nil {
 		return err
 	}
-	partitions, err := m.catalog.GetPartitions()
+	log.Info("recover collections from kv store", zap.Duration("dur", time.Since(start)))
+
+	start = time.Now()
+	partitions, err := m.catalog.GetPartitions(lo.Map(collections, func(collection *querypb.CollectionLoadInfo, _ int) int64 {
+		return collection.GetCollectionID()
+	}))
 	if err != nil {
 		return err
 	}
 
 	ctx := log.WithTraceID(context.Background(), strconv.FormatInt(time.Now().UnixNano(), 10))
 	ctxLog := log.Ctx(ctx)
-	ctxLog.Info("recover collections and partitions from kv store")
+	ctxLog.Info("recover partitions from kv store", zap.Duration("dur", time.Since(start)))
 
 	for _, collection := range collections {
 		if collection.GetReplicaNumber() <= 0 {
@@ -207,11 +213,6 @@ func (m *CollectionManager) Recover(broker Broker) error {
 		}
 	}
 
-	err = m.upgradeRecover(broker)
-	if err != nil {
-		log.Warn("upgrade recover failed", zap.Error(err))
-		return err
-	}
 	return nil
 }
 
@@ -242,66 +243,6 @@ func (m *CollectionManager) upgradeLoadFields(collection *querypb.CollectionLoad
 		return err
 	}
 
-	return nil
-}
-
-// upgradeRecover recovers from old version <= 2.2.x for compatibility.
-func (m *CollectionManager) upgradeRecover(broker Broker) error {
-	// for loaded collection from 2.2, it only save a old version CollectionLoadInfo without LoadType.
-	// we should update the CollectionLoadInfo and save all PartitionLoadInfo to meta store
-	for _, collection := range m.GetAllCollections() {
-		if collection.GetLoadType() == querypb.LoadType_UnKnownType {
-			partitionIDs, err := broker.GetPartitions(context.Background(), collection.GetCollectionID())
-			if err != nil {
-				return err
-			}
-			partitions := lo.Map(partitionIDs, func(partitionID int64, _ int) *Partition {
-				return &Partition{
-					PartitionLoadInfo: &querypb.PartitionLoadInfo{
-						CollectionID:  collection.GetCollectionID(),
-						PartitionID:   partitionID,
-						ReplicaNumber: collection.GetReplicaNumber(),
-						Status:        querypb.LoadStatus_Loaded,
-						FieldIndexID:  collection.GetFieldIndexID(),
-					},
-					LoadPercentage: 100,
-				}
-			})
-			err = m.putPartition(partitions, true)
-			if err != nil {
-				return err
-			}
-
-			newInfo := collection.Clone()
-			newInfo.LoadType = querypb.LoadType_LoadCollection
-			err = m.putCollection(true, newInfo)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	// for loaded partition from 2.2, it only save load PartitionLoadInfo.
-	// we should save it's CollectionLoadInfo to meta store
-	for _, partition := range m.GetAllPartitions() {
-		// In old version, collection would NOT be stored if the partition existed.
-		if _, ok := m.collections[partition.GetCollectionID()]; !ok {
-			col := &Collection{
-				CollectionLoadInfo: &querypb.CollectionLoadInfo{
-					CollectionID:  partition.GetCollectionID(),
-					ReplicaNumber: partition.GetReplicaNumber(),
-					Status:        partition.GetStatus(),
-					FieldIndexID:  partition.GetFieldIndexID(),
-					LoadType:      querypb.LoadType_LoadPartition,
-				},
-				LoadPercentage: 100,
-			}
-			err := m.PutCollection(col)
-			if err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 

@@ -19,15 +19,18 @@ package datacoord
 import (
 	"context"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -83,9 +86,11 @@ func (mm *metaMemoryKV) CompareVersionAndSwap(key string, version int64, target 
 	panic("implement me")
 }
 
-func newMemoryMeta() (*meta, error) {
+func newMemoryMeta(t *testing.T) (*meta, error) {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-	return newMeta(context.TODO(), catalog, nil)
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	return newMeta(context.TODO(), catalog, nil, broker)
 }
 
 var _ allocator = (*MockAllocator)(nil)
@@ -480,6 +485,12 @@ func (m *mockRootCoordClient) ShowCollections(ctx context.Context, req *milvuspb
 	return &milvuspb.ShowCollectionsResponse{
 		Status:          merr.Success(),
 		CollectionNames: []string{"test"},
+	}, nil
+}
+
+func (m *mockRootCoordClient) ShowCollectionIDs(ctx context.Context, req *rootcoordpb.ShowCollectionIDsRequest, opts ...grpc.CallOption) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+	return &rootcoordpb.ShowCollectionIDsResponse{
+		Status: merr.Success(),
 	}, nil
 }
 

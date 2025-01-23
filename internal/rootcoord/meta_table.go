@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -184,6 +185,9 @@ func (mt *MetaTable) reload() error {
 		collectionNum := int64(0)
 
 		mt.names.createDbIfNotExist(dbName)
+
+		start := time.Now()
+		// TODO: async list collections to accelerate cases with multiple databases.
 		collections, err := mt.catalog.ListCollections(mt.ctx, db.ID, typeutil.MaxTimestamp)
 		if err != nil {
 			return err
@@ -204,7 +208,8 @@ func (mt *MetaTable) reload() error {
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
 		log.Info("collections recovered from db", zap.String("db_name", dbName),
 			zap.Int64("collection_num", collectionNum),
-			zap.Int64("partition_num", partitionNum))
+			zap.Int64("partition_num", partitionNum),
+			zap.Duration("dur", time.Since(start)))
 	}
 
 	// recover aliases from db namespace
