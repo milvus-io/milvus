@@ -302,7 +302,7 @@ def gen_bf16_vectors(num, dim):
     return raw_vectors, bf16_vectors
 
 
-def gen_vector(datatype="float_vector", dim=128, binary_data=False, sparse_format='dok'):
+def gen_vector(datatype="FloatVector", dim=128, binary_data=False, sparse_format='dok'):
     value = None
     if datatype == "FloatVector":
         return preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
