@@ -1748,7 +1748,9 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NoError(t, err)
 
 		wal := mock_streaming.NewMockWALAccesser(t)
-		wal.EXPECT().BroadcastAppend(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil)
+		b := mock_streaming.NewMockBroadcast(t)
+		wal.EXPECT().Broadcast().Return(b)
+		b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil)
 		streaming.SetWALForTest(wal)
 		defer streaming.RecoverWALForTest()
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{
