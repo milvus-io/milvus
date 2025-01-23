@@ -138,6 +138,12 @@ type MiniClusterV2 struct {
 
 type OptionV2 func(cluster *MiniClusterV2)
 
+func OptionSetParam(k string, v string) OptionV2 {
+	return func(cluster *MiniClusterV2) {
+		cluster.params[k] = v
+	}
+}
+
 func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, error) {
 	cluster := &MiniClusterV2{
 		ctx:  ctx,
