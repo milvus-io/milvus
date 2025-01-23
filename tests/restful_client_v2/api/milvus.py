@@ -525,7 +525,7 @@ class CollectionClient(Requests):
         url = f"{self.endpoint}/v2/vectordb/collections/drop_properties"
         payload = {
             "collectionName": collection_name,
-            "deleteKeys": delete_keys
+            "propertyKeys": delete_keys
         }
         if self.db_name is not None:
             payload["dbName"] = self.db_name
