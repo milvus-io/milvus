@@ -176,6 +176,19 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		}
 		data, err := ReadSparseFloatVectorData(c, count)
 		return data, nil, err
+	case schemapb.DataType_Int8Vector:
+		if c.field.GetNullable() {
+			return nil, nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+		}
+		arrayData, err := ReadIntegerOrFloatArrayData[int8](c, count)
+		if err != nil {
+			return nil, nil, err
+		}
+		if arrayData == nil {
+			return nil, nil, nil
+		}
+		vectors := lo.Flatten(arrayData.([][]int8))
+		return vectors, nil, nil
 	case schemapb.DataType_Array:
 		// array has not support default_value
 		if c.field.GetNullable() {
@@ -708,6 +721,8 @@ func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) er
 	case schemapb.DataType_SparseFloatVector:
 		// JSON format, skip alignment check
 		return nil
+	case schemapb.DataType_Int8Vector:
+		return checkVectorAlignWithDim(offsets, int32(dim))
 	default:
 		return fmt.Errorf("unexpected vector data type %s", dataType.String())
 	}

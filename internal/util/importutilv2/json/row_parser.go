@@ -377,6 +377,27 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 			return nil, err
 		}
 		return vec, nil
+	case schemapb.DataType_Int8Vector:
+		arr, ok := obj.([]interface{})
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		if len(arr) != r.id2Dim[fieldID] {
+			return nil, r.wrapDimError(len(arr), fieldID)
+		}
+		vec := make([]int8, len(arr))
+		for i := 0; i < len(arr); i++ {
+			value, ok := arr[i].(json.Number)
+			if !ok {
+				return nil, r.wrapTypeError(arr[i], fieldID)
+			}
+			num, err := strconv.ParseInt(value.String(), 10, 8)
+			if err != nil {
+				return nil, err
+			}
+			vec[i] = int8(num)
+		}
+		return vec, nil
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		value, ok := obj.(string)
 		if !ok {
@@ -521,7 +542,7 @@ func (r *rowParser) parseNullableEntity(fieldID int64, obj any) (any, error) {
 			return nil, err
 		}
 		return num, nil
-	case schemapb.DataType_BinaryVector, schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_SparseFloatVector:
+	case schemapb.DataType_BinaryVector, schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_SparseFloatVector, schemapb.DataType_Int8Vector:
 		return nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		if obj == nil {
