@@ -459,6 +459,7 @@ type MetaStoreConfig struct {
 	SnapshotTTLSeconds         ParamItem `refreshable:"true"`
 	SnapshotReserveTimeSeconds ParamItem `refreshable:"true"`
 	PaginationSize             ParamItem `refreshable:"true"`
+	ReadConcurrency            ParamItem `refreshable:"true"`
 }
 
 func (p *MetaStoreConfig) Init(base *BaseTable) {
@@ -492,10 +493,18 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 	p.PaginationSize = ParamItem{
 		Key:          "metastore.paginationSize",
 		Version:      "2.5.1",
-		DefaultValue: "10000",
+		DefaultValue: "100000",
 		Doc:          `limits the number of results to return from metastore.`,
 	}
 	p.PaginationSize.Init(base.mgr)
+
+	p.ReadConcurrency = ParamItem{
+		Key:          "metastore.readConcurrency",
+		Version:      "2.5.1",
+		DefaultValue: "32",
+		Doc:          `read concurrency for fetching metadata from the metastore.`,
+	}
+	p.ReadConcurrency.Init(base.mgr)
 
 	// TODO: The initialization operation of metadata storage is called in the initialization phase of every node.
 	// There should be a single initialization operation for meta store, then move the metrics registration to there.
