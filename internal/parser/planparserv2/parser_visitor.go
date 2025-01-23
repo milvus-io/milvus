@@ -550,32 +550,68 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 	}
 }
 
+func randomSampleExpr(expr *ExprWithType) bool {
+	return expr.expr.GetRandomSampleExpr() != nil
+}
+
+// When using random sampling, we are not expected to use scalar index so
+// text_match and phrase_match are not supported in random sampling.
+func operationSupportSample(expr *ExprWithType) bool {
+	unaryExpr := expr.expr.GetUnaryRangeExpr()
+	if unaryExpr == nil {
+		return true
+	}
+
+	op := unaryExpr.Op
+	if op == planpb.OpType_TextMatch || op == planpb.OpType_PhraseMatch {
+		return false
+	}
+
+	return true
+}
+
 func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) interface{} {
 	sample_factor, err := strconv.ParseFloat(ctx.FloatingConstant().GetText(), 32)
 	if err != nil {
 		return err
 	}
 
+	if sample_factor <= 0 || sample_factor >= 1 {
+		return fmt.Errorf("sample factor should be in range (0, 1) exclusive, but got %f", sample_factor)
+	}
+
 	log.Info("debug_for_sample: random sample", zap.Float64("factor", sample_factor))
 
 	if expr := ctx.Expr(); expr != nil {
-		parsed_expr, ok := expr.Accept(v).(*ExprWithType)
-		if !ok {
-			panic("unexpected type")
+		parsed_predicate := expr.Accept(v)
+
+		if err := getError(parsed_predicate); err != nil {
+			return fmt.Errorf("cannot parse expression: %s, error: %s", expr.GetText(), err)
 		}
-		if err := getError(parsed_expr); err != nil {
-			return err
+
+		predicate := getExpr(parsed_predicate)
+		if predicate == nil {
+			return fmt.Errorf("cannot parse expression: %s", expr.GetText())
 		}
+
+		if !operationSupportSample(predicate) {
+			return fmt.Errorf("The predicate is not supported in random sampling: %s", expr.GetText())
+		}
+
+		if !canBeExecuted(predicate) {
+			return fmt.Errorf("predicate in random sample is not a boolean expression: %s, data type: %s", expr.GetText(), predicate.dataType)
+		}
+
 		return &ExprWithType{
 			expr: &planpb.Expr{
 				Expr: &planpb.Expr_RandomSampleExpr{
 					RandomSampleExpr: &planpb.RandomSampleExpr{
 						SampleFactor: float32(sample_factor),
-						Child:        parsed_expr.expr,
+						Predicate:    predicate.expr,
 					},
 				},
 			},
-			dataType: parsed_expr.dataType,
+			dataType: predicate.dataType,
 		}
 	}
 
@@ -584,7 +620,7 @@ func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) inter
 			Expr: &planpb.Expr_RandomSampleExpr{
 				RandomSampleExpr: &planpb.RandomSampleExpr{
 					SampleFactor: float32(sample_factor),
-					Child:        nil,
+					Predicate:    nil,
 				},
 			},
 		},
@@ -896,6 +932,10 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 	if childExpr == nil {
 		return fmt.Errorf("failed to parse unary expressions")
 	}
+	if randomSampleExpr(childExpr) {
+		return fmt.Errorf("random sample expression cannot be used in unary expression")
+	}
+
 	if err := checkDirectComparisonBinaryField(toColumnInfo(childExpr)); err != nil {
 		return err
 	}
@@ -950,6 +990,9 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 	var rightExpr *ExprWithType
 	leftExpr = getExpr(left)
 	rightExpr = getExpr(right)
+	if randomSampleExpr(leftExpr) || randomSampleExpr(rightExpr) {
+		return fmt.Errorf("random sample expression cannot be used in logical and expression")
+	}
 
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
 		return fmt.Errorf("'or' can only be used between boolean expressions")
@@ -999,6 +1042,9 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 	var rightExpr *ExprWithType
 	leftExpr = getExpr(left)
 	rightExpr = getExpr(right)
+	if randomSampleExpr(leftExpr) || randomSampleExpr(rightExpr) {
+		return fmt.Errorf("random sample expression cannot be used in logical and expression")
+	}
 
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
 		return fmt.Errorf("'and' can only be used between boolean expressions")

@@ -252,8 +252,8 @@ ProtoParser::RetrievePlanNodeFromProto(
                         milvus::plan::GetNextPlanNodeId(),
                         sample_expr.sample_factor());
                     sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
-                    if (sample_expr.has_child()) {
-                        predicate_proto = &sample_expr.child();
+                    if (sample_expr.has_predicate()) {
+                        predicate_proto = &sample_expr.predicate();
                         has_predicate = true;
                     }
                 }

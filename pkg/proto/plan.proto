@@ -211,7 +211,7 @@ message BinaryArithOpEvalRangeExpr {
 
 message RandomSampleExpr {
   float sample_factor = 1;
-  Expr child = 2;
+  Expr predicate = 2;
 }
 
 message AlwaysTrueExpr {}
