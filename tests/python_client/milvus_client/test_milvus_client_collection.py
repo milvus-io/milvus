@@ -103,7 +103,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        error = {ct.err_code: 65535, ct.err_msg: f"invalid dimension: {dim}. "
+        error = {ct.err_code: 65535, ct.err_msg: f"invalid dimension: {dim} of field {default_vector_field_name}. "
                                                  f"float vector dimension should be in range 2 ~ 32768"}
         if dim < ct.min_dim:
             error = {ct.err_code: 65535, ct.err_msg: f"invalid dimension: {dim}. "
