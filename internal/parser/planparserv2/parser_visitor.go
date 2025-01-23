@@ -571,23 +571,23 @@ func operationSupportSample(expr *ExprWithType) bool {
 const epsilon = 1e-7
 
 func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) interface{} {
-	sample_factor, err := strconv.ParseFloat(ctx.FloatingConstant().GetText(), 32)
+	sampleFactor, err := strconv.ParseFloat(ctx.FloatingConstant().GetText(), 32)
 	if err != nil {
 		return err
 	}
 
-	if sample_factor <= 0+epsilon || sample_factor >= 1-epsilon {
-		return fmt.Errorf("sample factor should be in range (0, 1) exclusive, but got %f", sample_factor)
+	if sampleFactor <= 0+epsilon || sampleFactor >= 1-epsilon {
+		return fmt.Errorf("sample factor should be in range (0, 1) exclusive, but got %f", sampleFactor)
 	}
 
 	if expr := ctx.Expr(); expr != nil {
-		parsed_predicate := expr.Accept(v)
+		parsedPredicate := expr.Accept(v)
 
-		if err := getError(parsed_predicate); err != nil {
+		if err := getError(parsedPredicate); err != nil {
 			return fmt.Errorf("cannot parse expression: %s, error: %s", expr.GetText(), err)
 		}
 
-		predicate := getExpr(parsed_predicate)
+		predicate := getExpr(parsedPredicate)
 		if predicate == nil {
 			return fmt.Errorf("cannot parse expression: %s", expr.GetText())
 		}
@@ -604,7 +604,7 @@ func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) inter
 			expr: &planpb.Expr{
 				Expr: &planpb.Expr_RandomSampleExpr{
 					RandomSampleExpr: &planpb.RandomSampleExpr{
-						SampleFactor: float32(sample_factor),
+						SampleFactor: float32(sampleFactor),
 						Predicate:    predicate.expr,
 					},
 				},
@@ -617,7 +617,7 @@ func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) inter
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_RandomSampleExpr{
 				RandomSampleExpr: &planpb.RandomSampleExpr{
-					SampleFactor: float32(sample_factor),
+					SampleFactor: float32(sampleFactor),
 					Predicate:    nil,
 				},
 			},
