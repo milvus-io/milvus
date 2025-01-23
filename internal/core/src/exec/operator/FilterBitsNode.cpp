@@ -116,8 +116,9 @@ PhyFilterBitsNode::GetOutput() {
                 } else {
                     // currently, process by providing offsets will handle all at once, so we can reassign the `bitset` and `valid_bitset`
                     // directly.
-                    bitset = TargetBitmap{input_->size()};
-                    valid_bitset = TargetBitmap{input_->size()};
+                    bitset = TargetBitmap{static_cast<size_t>(input_->size())};
+                    valid_bitset =
+                        TargetBitmap{static_cast<size_t>(input_->size())};
                     auto col_vec_size = col_vec->size();
                     TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
                     TargetBitmapView valid_view(col_vec->GetValidRawData(),
