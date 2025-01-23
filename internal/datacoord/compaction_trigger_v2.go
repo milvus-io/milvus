@@ -148,6 +148,9 @@ func (m *CompactionTriggerManager) setL0Triggering(b bool) {
 	m.l0SigLock.Lock()
 	defer m.l0SigLock.Unlock()
 	m.l0Triggering = b
+	if b {
+		m.l0TickSig.Broadcast()
+	}
 }
 
 func (m *CompactionTriggerManager) startLoop() {
@@ -179,6 +182,7 @@ func (m *CompactionTriggerManager) startLoop() {
 			events, err := m.l0Policy.Trigger()
 			if err != nil {
 				log.Warn("Fail to trigger L0 policy", zap.Error(err))
+				m.setL0Triggering(false)
 				continue
 			}
 			ctx := context.Background()
