@@ -18,9 +18,9 @@ fake = faker.Faker()
 prefix = "par_key_isolation_"
 
 
+@pytest.mark.tags(CaseLabel.L1)
 class TestPartitionKeyIsolation(TestcaseBase):
     """ Test case of partition key isolation"""
-    @pytest.mark.tags(CaseLabel.L3)
     def test_par_key_isolation_with_valid_expr(self):
         # create
         self._connect()
@@ -123,7 +123,6 @@ class TestPartitionKeyIsolation(TestcaseBase):
             log.info(f"true res {true_res}")
             assert len(res[0]) == len(true_res)
 
-    @pytest.mark.tags(CaseLabel.L3)
     def test_par_key_isolation_with_unsupported_expr(self):
         # create
         self._connect()
@@ -229,7 +228,6 @@ class TestPartitionKeyIsolation(TestcaseBase):
             log.info(f"search with unsupported expr {false_result}, but not raise error\n")
             assert False
 
-    @pytest.mark.tags(CaseLabel.L3)
     def test_par_key_isolation_without_partition_key(self):
         # create
         self._connect()
@@ -263,7 +261,6 @@ class TestPartitionKeyIsolation(TestcaseBase):
             log.info(f"set_properties failed without partition key {e}")
             assert "partition key isolation mode is enabled but no partition key field is set" in str(e)
 
-    @pytest.mark.tags(CaseLabel.L3)
     def test_set_par_key_isolation_after_vector_indexed(self):
         # create
         self._connect()
