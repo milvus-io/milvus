@@ -594,7 +594,7 @@ func (t *alterIndexTask) SetID(uid UniqueID) {
 }
 
 func (t *alterIndexTask) Name() string {
-	return CreateIndexTaskName
+	return AlterIndexTaskName
 }
 
 func (t *alterIndexTask) Type() commonpb.MsgType {
