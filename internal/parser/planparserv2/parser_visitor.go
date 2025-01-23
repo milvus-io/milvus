@@ -570,13 +570,15 @@ func operationSupportSample(expr *ExprWithType) bool {
 	return true
 }
 
+const epsilon = 1e-7
+
 func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) interface{} {
 	sample_factor, err := strconv.ParseFloat(ctx.FloatingConstant().GetText(), 32)
 	if err != nil {
 		return err
 	}
 
-	if sample_factor <= 0 || sample_factor >= 1 {
+	if sample_factor <= 0+epsilon || sample_factor >= 1-epsilon {
 		return fmt.Errorf("sample factor should be in range (0, 1) exclusive, but got %f", sample_factor)
 	}
 
