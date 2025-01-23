@@ -197,12 +197,15 @@ func TestWaitOrPanic(t *testing.T) {
 		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key)
 
 		l := NewLoadStateLock(LoadStateDataLoaded)
+		executed := false
 
 		assert.NotPanics(t, func() {
 			l.waitOrPanic(func(state loadStateEnum) bool {
 				return state == LoadStateDataLoaded
-			}, noop)
+			}, func() { executed = true })
 		})
+
+		assert.True(t, executed)
 	})
 
 	t.Run("timeout_panic", func(t *testing.T) {
@@ -210,12 +213,14 @@ func TestWaitOrPanic(t *testing.T) {
 		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key)
 
 		l := NewLoadStateLock(LoadStateOnlyMeta)
+		executed := false
 
-		assert.Panics(t, func() {
+		assert.NotPanics(t, func() {
 			l.waitOrPanic(func(state loadStateEnum) bool {
 				return state == LoadStateDataLoaded
 			}, noop)
 		})
+		assert.False(t, executed)
 	})
 }
 

@@ -176,6 +176,9 @@ mq:
     mergeCheckInterval: 1 # the interval time(in seconds) for dispatcher to check whether to merge
     targetBufSize: 16 # the lenth of channel buffer for targe
     maxTolerantLag: 3 # Default value: "3", the timeout(in seconds) that target sends msgPack
+    maxDispatcherNumPerPchannel: 5 # The maximum number of dispatchers per physical channel, primarily to limit the number of consumers and prevent performance issues(e.g., during recovery when a large number of channels are watched).
+    retrySleep: 3 # register retry sleep time in seconds
+    retryTimeout: 60 # register retry timeout in seconds
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
@@ -520,7 +523,6 @@ dataCoord:
     balanceInterval: 360 # The interval with which the channel manager check dml channel balance status
     checkInterval: 1 # The interval in seconds with which the channel manager advances channel states
     notifyChannelOperationTimeout: 5 # Timeout notifing channel operations (in seconds).
-    maxConcurrentChannelTaskNumPerDN: 32 # The maximum concurrency for each DataNode executing channel tasks (watch, release).
   segment:
     maxSize: 1024 # The maximum size of a segment, unit: MB. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
@@ -570,6 +572,7 @@ dataCoord:
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
     dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)
     gcInterval: 1800 # The time interval in seconds for compaction gc
+    scheduleInterval: 500 # The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be ajusted upwards to 100ms
     mix:
       triggerInterval: 60 # The time interval in seconds to trigger mix compaction
     levelzero:
@@ -828,6 +831,7 @@ common:
     # like the old password verification when updating the credential
     superUsers: 
     defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
+    rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     rbac:
       overrideBuiltInPrivilegeGroups:
         enabled: false # Whether to override build-in privilege groups

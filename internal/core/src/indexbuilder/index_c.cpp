@@ -166,30 +166,17 @@ CreateIndex(CIndex* res_index,
         auto field_type =
             static_cast<DataType>(build_index_info->field_schema().data_type());
 
-        milvus::index::CreateIndexInfo index_info;
-        index_info.field_type = field_type;
-
         auto storage_config =
             get_storage_config(build_index_info->storage_config());
         auto config = get_config(build_index_info);
-        // get index type
-        auto index_type = milvus::index::GetValueFromConfig<std::string>(
-            config, "index_type");
-        AssertInfo(index_type.has_value(), "index type is empty");
-        index_info.index_type = index_type.value();
 
         auto engine_version = build_index_info->current_index_version();
-        index_info.index_engine_version = engine_version;
         config[milvus::index::INDEX_ENGINE_VERSION] =
             std::to_string(engine_version);
-
-        // get metric type
-        if (milvus::IsVectorDataType(field_type)) {
-            auto metric_type = milvus::index::GetValueFromConfig<std::string>(
-                config, "metric_type");
-            AssertInfo(metric_type.has_value(), "metric type is empty");
-            index_info.metric_type = metric_type.value();
-        }
+        auto scalar_index_engine_version =
+            build_index_info->current_scalar_index_version();
+        config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
+            scalar_index_engine_version;
 
         // init file manager
         milvus::storage::FieldDataMeta field_meta{

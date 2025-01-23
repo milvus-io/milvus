@@ -126,6 +126,13 @@ struct GeneratedData {
                     auto src_data = reinterpret_cast<const T*>(
                         target_field_data.vectors().bfloat16_vector().data());
                     std::copy_n(src_data, len, ret.data());
+                } else if (field_meta.get_data_type() ==
+                           DataType::VECTOR_INT8) {
+                    int len = raw_->num_rows() * field_meta.get_dim();
+                    ret.resize(len);
+                    auto src_data = reinterpret_cast<const T*>(
+                        target_field_data.vectors().int8_vector().data());
+                    std::copy_n(src_data, len, ret.data());
                 } else {
                     PanicInfo(Unsupported, "unsupported");
                 }
@@ -410,12 +417,20 @@ inline GeneratedData DataGen(SchemaPtr schema,
                     array.release());
                 break;
             }
-
             case DataType::VECTOR_BFLOAT16: {
                 auto dim = field_meta.get_dim();
                 vector<bfloat16> final(dim * N);
                 for (auto& x : final) {
                     x = bfloat16(distr(random) + offset);
+                }
+                insert_cols(final, N, field_meta, random_valid);
+                break;
+            }
+            case DataType::VECTOR_INT8: {
+                auto dim = field_meta.get_dim();
+                vector<int8> final(dim * N);
+                for (auto& x : final) {
+                    x = int8_t(rand() % 256 - 128);
                 }
                 insert_cols(final, N, field_meta, random_valid);
                 break;
@@ -835,6 +850,46 @@ CreateSparseFloatPlaceholderGroup(int64_t num_queries, int64_t seed = 42) {
 }
 
 inline auto
+CreateInt8PlaceholderGroup(int64_t num_queries,
+                           int64_t dim,
+                           int64_t seed = 42) {
+    namespace ser = milvus::proto::common;
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::Int8Vector);
+    std::default_random_engine e(seed);
+    for (int i = 0; i < num_queries; ++i) {
+        std::vector<int8> vec;
+        for (int d = 0; d < dim; ++d) {
+            vec.push_back(e());
+        }
+        value->add_values(vec.data(), vec.size() * sizeof(int8));
+    }
+    return raw_group;
+}
+
+inline auto
+CreateInt8PlaceholderGroupFromBlob(int64_t num_queries,
+                                   int64_t dim,
+                                   const int8* ptr) {
+    namespace ser = milvus::proto::common;
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::Int8Vector);
+    for (int i = 0; i < num_queries; ++i) {
+        std::vector<int8> vec;
+        for (int d = 0; d < dim; ++d) {
+            vec.push_back(*ptr);
+            ++ptr;
+        }
+        value->add_values(vec.data(), vec.size() * sizeof(int8));
+    }
+    return raw_group;
+}
+
+inline auto
 SearchResultToVector(const SearchResult& sr) {
     int64_t num_queries = sr.total_nq_;
     int64_t topk = sr.unity_topK_;
@@ -932,6 +987,12 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 auto sparse_float_array = data->vectors().sparse_float_vector();
                 auto rows = SparseBytesToRows(sparse_float_array.contents());
                 createFieldData(rows.get(), DataType::VECTOR_SPARSE_FLOAT, 0);
+                break;
+            }
+            case DataType::VECTOR_INT8: {
+                auto raw_data = data->vectors().int8_vector().data();
+                dim = field_meta.get_dim();
+                createFieldData(raw_data, DataType::VECTOR_INT8, dim);
                 break;
             }
             default: {

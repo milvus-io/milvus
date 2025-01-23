@@ -239,6 +239,7 @@ type commonConfig struct {
 	AuthorizationEnabled ParamItem `refreshable:"false"`
 	SuperUsers           ParamItem `refreshable:"true"`
 	DefaultRootPassword  ParamItem `refreshable:"false"`
+	RootShouldBindRole   ParamItem `refreshable:"true"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -516,7 +517,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
 		Version:      "2.4.6",
-		DefaultValue: "false",
+		DefaultValue: "true", // 2.5.4 version becomes default true
 	}
 	p.EnableMaterializedView.Init(base.mgr)
 
@@ -668,6 +669,15 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
+
+	p.RootShouldBindRole = ParamItem{
+		Key:          "common.security.rootShouldBindRole",
+		Version:      "2.5.4",
+		Doc:          "Whether the root user should bind a role when the authorization is enabled.",
+		DefaultValue: "false",
+		Export:       true,
+	}
+	p.RootShouldBindRole.Init(base.mgr)
 
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
@@ -3321,13 +3331,12 @@ user-task-polling:
 // --- datacoord ---
 type dataCoordConfig struct {
 	// --- CHANNEL ---
-	WatchTimeoutInterval             ParamItem `refreshable:"false"`
-	LegacyVersionWithoutRPCWatch     ParamItem `refreshable:"false"`
-	ChannelBalanceSilentDuration     ParamItem `refreshable:"true"`
-	ChannelBalanceInterval           ParamItem `refreshable:"true"`
-	ChannelCheckInterval             ParamItem `refreshable:"true"`
-	ChannelOperationRPCTimeout       ParamItem `refreshable:"true"`
-	MaxConcurrentChannelTaskNumPerDN ParamItem `refreshable:"true"`
+	WatchTimeoutInterval         ParamItem `refreshable:"false"`
+	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
+	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
+	ChannelBalanceInterval       ParamItem `refreshable:"true"`
+	ChannelCheckInterval         ParamItem `refreshable:"true"`
+	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
@@ -3361,7 +3370,8 @@ type dataCoordConfig struct {
 	CompactionTimeoutInSeconds       ParamItem `refreshable:"true"`
 	CompactionDropToleranceInSeconds ParamItem `refreshable:"true"`
 	CompactionGCIntervalInSeconds    ParamItem `refreshable:"true"`
-	CompactionCheckIntervalInSeconds ParamItem `refreshable:"false"`
+	CompactionCheckIntervalInSeconds ParamItem `refreshable:"false"` // deprecated
+	CompactionScheduleInterval       ParamItem `refreshable:"false"`
 	MixCompactionTriggerInterval     ParamItem `refreshable:"false"`
 	L0CompactionTriggerInterval      ParamItem `refreshable:"false"`
 	GlobalCompactionInterval         ParamItem `refreshable:"false"`
@@ -3498,15 +3508,6 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ChannelOperationRPCTimeout.Init(base.mgr)
-
-	p.MaxConcurrentChannelTaskNumPerDN = ParamItem{
-		Key:          "dataCoord.channel.maxConcurrentChannelTaskNumPerDN",
-		Version:      "2.5",
-		DefaultValue: "32",
-		Doc:          "The maximum concurrency for each DataNode executing channel tasks (watch, release).",
-		Export:       true,
-	}
-	p.MaxConcurrentChannelTaskNumPerDN.Init(base.mgr)
 
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",
@@ -3745,6 +3746,22 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "3",
 	}
 	p.CompactionCheckIntervalInSeconds.Init(base.mgr)
+
+	p.CompactionScheduleInterval = ParamItem{
+		Key:          "dataCoord.compaction.scheduleInterval",
+		Version:      "2.4.21",
+		DefaultValue: "500",
+		Export:       true,
+		Formatter: func(value string) string {
+			ms := getAsInt64(value)
+			if ms < 100 {
+				ms = 100
+			}
+			return strconv.FormatInt(ms, 10)
+		},
+		Doc: "The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be ajusted upwards to 100ms",
+	}
+	p.CompactionScheduleInterval.Init(base.mgr)
 
 	p.SingleCompactionRatioThreshold = ParamItem{
 		Key:          "dataCoord.compaction.single.ratio.threshold",

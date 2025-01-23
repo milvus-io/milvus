@@ -359,16 +359,6 @@ DiskFileManagerImpl::CacheTextLogToDisk(
     }
 }
 
-void
-SortByPath(std::vector<std::string>& paths) {
-    std::sort(paths.begin(),
-              paths.end(),
-              [](const std::string& a, const std::string& b) {
-                  return std::stol(a.substr(a.find_last_of("/") + 1)) <
-                         std::stol(b.substr(b.find_last_of("/") + 1));
-              });
-}
-
 template <typename DataType>
 std::string
 DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
@@ -480,20 +470,6 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
     return local_data_path;
 }
 
-template <typename T, typename = void>
-struct has_native_type : std::false_type {};
-template <typename T>
-struct has_native_type<T, std::void_t<typename T::NativeType>>
-    : std::true_type {};
-template <DataType T>
-using DataTypeNativeOrVoid =
-    typename std::conditional<has_native_type<TypeTraits<T>>::value,
-                              typename TypeTraits<T>::NativeType,
-                              void>::type;
-template <DataType T>
-using DataTypeToOffsetMap =
-    std::unordered_map<DataTypeNativeOrVoid<T>, int64_t>;
-
 template <DataType T>
 bool
 WriteOptFieldIvfDataImpl(
@@ -515,7 +491,7 @@ WriteOptFieldIvfDataImpl(
     }
 
     // Do not write to disk if there is only one value
-    if (mp.size() == 1) {
+    if (mp.size() <= 1) {
         return false;
     }
 
@@ -626,23 +602,10 @@ DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
                                local_chunk_manager, segment_id, vec_field_id) +
                            std::string(VEC_OPT_FIELDS);
     local_chunk_manager->CreateFile(local_data_path);
-
-    std::vector<FieldDataPtr> field_datas;
-    std::vector<std::string> batch_files;
     uint64_t write_offset = 0;
     WriteOptFieldsIvfMeta(
         local_chunk_manager, local_data_path, num_of_fields, write_offset);
 
-    auto FetchRawData = [&]() {
-        auto fds = GetObjectData(rcm_.get(), batch_files);
-        for (size_t i = 0; i < batch_files.size(); ++i) {
-            auto data = fds[i].get()->GetFieldData();
-            field_datas.emplace_back(data);
-        }
-    };
-
-    auto parallel_degree =
-        uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     std::unordered_set<int64_t> actual_field_ids;
     for (auto& [field_id, tup] : fields_map) {
         const auto& field_type = std::get<1>(tup);
@@ -652,19 +615,10 @@ DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
             return "";
         }
 
-        std::vector<FieldDataPtr>().swap(field_datas);
         SortByPath(field_paths);
+        std::vector<FieldDataPtr> field_datas =
+            FetchFieldData(rcm_.get(), field_paths);
 
-        for (auto& file : field_paths) {
-            if (batch_files.size() >= parallel_degree) {
-                FetchRawData();
-                batch_files.clear();
-            }
-            batch_files.emplace_back(file);
-        }
-        if (batch_files.size() > 0) {
-            FetchRawData();
-        }
         if (WriteOptFieldIvfData(field_type,
                                  field_id,
                                  local_chunk_manager,

@@ -412,6 +412,11 @@ struct InsertRecord {
                     this->append_data<SparseFloatVector>(field_id,
                                                          size_per_chunk);
                     continue;
+                } else if (field_meta.get_data_type() ==
+                           DataType::VECTOR_INT8) {
+                    this->append_data<Int8Vector>(
+                        field_id, field_meta.get_dim(), size_per_chunk);
+                    continue;
                 } else {
                     PanicInfo(DataTypeInvalid,
                               fmt::format("unsupported vector type",

@@ -167,6 +167,10 @@ func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.Fie
 		vectors := data.(*storage.SparseFloatVectorFieldData)
 		err = evt.AddSparseFloatVectorToPayload(vectors)
 		assert.NoError(t, err)
+	case schemapb.DataType_Int8Vector:
+		vectors := data.(*storage.Int8VectorFieldData).Data
+		err = evt.AddInt8VectorToPayload(vectors, int(dim))
+		assert.NoError(t, err)
 	default:
 		assert.True(t, false)
 		return nil
@@ -419,6 +423,8 @@ func (suite *ReaderSuite) TestVector() {
 	suite.vecDataType = schemapb.DataType_BFloat16Vector
 	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 	suite.vecDataType = schemapb.DataType_SparseFloatVector
+	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	suite.vecDataType = schemapb.DataType_Int8Vector
 	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 }
 

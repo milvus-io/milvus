@@ -51,9 +51,11 @@ int getAllGPUMemoryInfo(GPUMemoryInfo** infos) {
 }
 */
 import "C"
+
 import (
-	"github.com/cockroachdb/errors"
 	"unsafe"
+
+	"github.com/cockroachdb/errors"
 )
 
 // GPUMemoryInfo represents a single GPU's memory information.

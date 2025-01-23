@@ -338,8 +338,7 @@ class IndexTest : public ::testing::TestWithParam<Param> {
             vec_field_data_type = milvus::DataType::VECTOR_FLOAT;
         }
 
-        auto dataset =
-            GenDatasetWithDataType(NB, metric_type, vec_field_data_type);
+        auto dataset = GenFieldData(NB, metric_type, vec_field_data_type);
         if (is_binary) {
             // binary vector
             xb_bin_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
@@ -788,7 +787,7 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
     };
 
     // build disk ann index
-    auto dataset = GenDataset(NB, metric_type, false);
+    auto dataset = GenFieldData(NB, metric_type);
     FixedVector<float> xb_data =
         dataset.get_col<float>(milvus::FieldId(field_id));
     knowhere::DataSetPtr xb_dataset =
@@ -871,8 +870,8 @@ TEST(Indexing, SearchDiskAnnWithFloat16) {
     };
 
     // build disk ann index
-    auto dataset = GenDatasetWithDataType(
-        NB, metric_type, milvus::DataType::VECTOR_FLOAT16);
+    auto dataset =
+        GenFieldData(NB, metric_type, milvus::DataType::VECTOR_FLOAT16);
     FixedVector<float16> xb_data =
         dataset.get_col<float16>(milvus::FieldId(field_id));
     knowhere::DataSetPtr xb_dataset =
@@ -954,8 +953,8 @@ TEST(Indexing, SearchDiskAnnWithBFloat16) {
     };
 
     // build disk ann index
-    auto dataset = GenDatasetWithDataType(
-        NB, metric_type, milvus::DataType::VECTOR_BFLOAT16);
+    auto dataset =
+        GenFieldData(NB, metric_type, milvus::DataType::VECTOR_BFLOAT16);
     FixedVector<bfloat16> xb_data =
         dataset.get_col<bfloat16>(milvus::FieldId(field_id));
     knowhere::DataSetPtr xb_dataset =

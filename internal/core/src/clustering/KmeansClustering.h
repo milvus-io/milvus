@@ -58,20 +58,20 @@ class KmeansClustering {
         return cluster_result_;
     }
 
-    // ut
     inline std::string
     GetRemoteCentroidsObjectPrefix() const {
         auto index_meta_ = file_manager_->GetIndexMeta();
         auto field_meta_ = file_manager_->GetFieldDataMeta();
         boost::filesystem::path prefix =
             file_manager_->GetChunkManager()->GetRootPath();
-        boost::filesystem::path path =
+        boost::filesystem::path path = std::string(ANALYZE_ROOT_PATH);
+        boost::filesystem::path path1 =
             std::to_string(index_meta_.build_id) + "/" +
             std::to_string(index_meta_.index_version) + "/" +
             std::to_string(field_meta_.collection_id) + "/" +
             std::to_string(field_meta_.partition_id) + "/" +
             std::to_string(field_meta_.field_id);
-        return (prefix / path).string();
+        return (prefix / path / path1).string();
     }
 
     inline std::string
