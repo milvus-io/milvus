@@ -88,14 +88,14 @@ func (mc *MilvusClient) Close(ctx context.Context) error {
 
 // -- database --
 
-// UsingDatabase list all database in milvus cluster.
-func (mc *MilvusClient) UsingDatabase(ctx context.Context, option client.UseDatabaseOption) error {
+// UseDatabase list all database in milvus cluster.
+func (mc *MilvusClient) UseDatabase(ctx context.Context, option client.UseDatabaseOption) error {
 	err := mc.mClient.UseDatabase(ctx, option)
 	return err
 }
 
-// ListDatabases list all database in milvus cluster.
-func (mc *MilvusClient) ListDatabases(ctx context.Context, option client.ListDatabaseOption, callOptions ...grpc.CallOption) ([]string, error) {
+// ListDatabase list all database in milvus cluster.
+func (mc *MilvusClient) ListDatabase(ctx context.Context, option client.ListDatabaseOption, callOptions ...grpc.CallOption) ([]string, error) {
 	databaseNames, err := mc.mClient.ListDatabase(ctx, option, callOptions...)
 	return databaseNames, err
 }
@@ -109,6 +109,24 @@ func (mc *MilvusClient) CreateDatabase(ctx context.Context, option client.Create
 // DropDatabase drop database with the given db name.
 func (mc *MilvusClient) DropDatabase(ctx context.Context, option client.DropDatabaseOption, callOptions ...grpc.CallOption) error {
 	err := mc.mClient.DropDatabase(ctx, option, callOptions...)
+	return err
+}
+
+// DescribeDatabase describe database with the given db name.
+func (mc *MilvusClient) DescribeDatabase(ctx context.Context, option client.DescribeDatabaseOption, callOptions ...grpc.CallOption) (*entity.Database, error) {
+	database, err := mc.mClient.DescribeDatabase(ctx, option, callOptions...)
+	return database, err
+}
+
+// AlterDatabaseProperties alter database properties
+func (mc *MilvusClient) AlterDatabaseProperties(ctx context.Context, option client.AlterDatabasePropertiesOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.AlterDatabaseProperties(ctx, option, callOptions...)
+	return err
+}
+
+// DropDatabaseProperties drop database properties
+func (mc *MilvusClient) DropDatabaseProperties(ctx context.Context, option client.DropDatabasePropertiesOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.AlterDatabaseProperties(ctx, option, callOptions...)
 	return err
 }
 

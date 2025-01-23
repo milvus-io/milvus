@@ -76,3 +76,13 @@ const (
 	IndexStateFailed         index.IndexState = 4
 	IndexStateRetry          index.IndexState = 5
 )
+
+// part database properties
+const (
+	DatabaseMaxCollections   = "database.max.collections"
+	DatabaseResourceGroups   = "database.resource_groups"
+	DatabaseReplicaNumber    = "database.replica.number"
+	DatabaseForceDenyWriting = "database.force.deny.writing"
+	DatabaseForceDenyReading = "database.force.deny.reading"
+	DatabaseDiskQuotaMb      = "database.diskQuota.mb"
+)

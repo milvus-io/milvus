@@ -104,7 +104,7 @@ func GetInvalidPartitionKeyFieldType() []entity.FieldType {
 	return nonPkFieldTypes
 }
 
-// ----------------- prepare data --------------------------
+// CollectionPrepare ----------------- prepare data --------------------------
 type CollectionPrepare struct{}
 
 var (
