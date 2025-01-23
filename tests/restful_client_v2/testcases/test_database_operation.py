@@ -162,3 +162,53 @@ class TestDatabaseOperationNegative(TestBase):
         """
         rsp = self.database_client.database_drop({"dbName": "default"})
         assert rsp["code"] != 0
+
+
+@pytest.mark.L0
+class TestDatabaseProperties(TestBase):
+    """Test database properties operations"""
+
+    def test_alter_database_properties(self):
+        """
+        target: test alter database properties
+        method: create database, alter database properties
+        expected: alter database properties successfully
+        """
+        # Create database
+        client = self.database_client
+        db_name = "test_alter_props"
+        payload = {
+            "dbName": db_name
+        }
+        response = client.database_create(payload)
+        assert response["code"] == 0
+        orders = [[True, False], [False, True]]
+        values_after_drop = []
+        for order in orders:
+            for value in order:
+                # Alter database properties
+                properties = {"mmap.enabled": value}
+                response = client.alter_database_properties(db_name, properties)
+                assert response["code"] == 0
+
+                # describe database properties
+                response = client.database_describe({"dbName": db_name})
+                assert response["code"] == 0
+                for prop in response["data"]["properties"]:
+                    if prop["key"] == "mmap.enabled":
+                        assert prop["value"] == str(value).lower()
+            # Drop database properties
+            property_keys = ["mmap.enabled"]
+            response = client.drop_database_properties(db_name, property_keys)
+            assert response["code"] == 0
+            # describe database properties
+            response = client.database_describe({"dbName": db_name})
+            assert response["code"] == 0
+            value = None
+            for prop in response["data"]["properties"]:
+                if prop["key"] == "mmap.enabled":
+                    value = prop["value"]
+            values_after_drop.append(value)
+        # assert all values after drop are same
+        for value in values_after_drop:
+            assert value == values_after_drop[0]
