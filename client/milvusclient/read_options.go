@@ -523,9 +523,10 @@ func (opt *queryOption) Request() (*milvuspb.QueryRequest, error) {
 		PartitionNames: opt.partitionNames,
 		OutputFields:   opt.outputFields,
 
-		Expr:             opt.expr,
-		QueryParams:      entity.MapKvPairs(opt.queryParams),
-		ConsistencyLevel: opt.consistencyLevel.CommonConsistencyLevel(),
+		Expr:                  opt.expr,
+		QueryParams:           entity.MapKvPairs(opt.queryParams),
+		ConsistencyLevel:      opt.consistencyLevel.CommonConsistencyLevel(),
+		UseDefaultConsistency: opt.useDefaultConsistencyLevel,
 	}
 
 	req.ExprTemplateValues = make(map[string]*schemapb.TemplateValue)
