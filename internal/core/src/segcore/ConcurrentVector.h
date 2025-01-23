@@ -169,11 +169,10 @@ class ConcurrentVectorImpl : public VectorBase {
                 Float16Vector,
                 std::conditional_t<
                     std::is_same_v<Type, bfloat16>,
-                        BFloat16Vector,
-                        std::conditional_t<
-                            std::is_same_v<Type, int8>,
-                            Int8Vector,
-                            BinaryVector>>>>>;
+                    BFloat16Vector,
+                    std::conditional_t<std::is_same_v<Type, int8>,
+                                       Int8Vector,
+                                       BinaryVector>>>>>;
 
  public:
     explicit ConcurrentVectorImpl(
@@ -546,8 +545,7 @@ class ConcurrentVector<BFloat16Vector>
 };
 
 template <>
-class ConcurrentVector<Int8Vector>
-    : public ConcurrentVectorImpl<int8, false> {
+class ConcurrentVector<Int8Vector> : public ConcurrentVectorImpl<int8, false> {
  public:
     ConcurrentVector(int64_t dim,
                      int64_t size_per_chunk,
