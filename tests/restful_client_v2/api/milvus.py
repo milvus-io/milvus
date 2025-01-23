@@ -549,13 +549,11 @@ class CollectionClient(Requests):
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 
-    def alter_index_properties(self, collection_name, index_name, properties, db_name="default"):
-        """Alter index properties"""
-        url = f"{self.endpoint}/v2/vectordb/indexes/alter_properties"
+    def flush(self, collection_name, db_name="default"):
+        """Flush collection"""
+        url = f"{self.endpoint}/v2/vectordb/collections/flush"
         payload = {
-            "collectionName": collection_name,
-            "indexName": index_name,
-            "properties": properties
+            "collectionName": collection_name
         }
         if self.db_name is not None:
             payload["dbName"] = self.db_name
@@ -564,13 +562,24 @@ class CollectionClient(Requests):
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 
-    def drop_index_properties(self, collection_name, index_name, delete_keys, db_name="default"):
-        """Drop index properties"""
-        url = f"{self.endpoint}/v2/vectordb/indexes/drop_properties"
+    def compact(self, collection_name, db_name="default"):
+        """Compact collection"""
+        url = f"{self.endpoint}/v2/vectordb/collections/compact"
         payload = {
-            "collectionName": collection_name,
-            "indexName": index_name,
-            "propertyKeys": delete_keys
+            "collectionName": collection_name
+        }
+        if self.db_name is not None:
+            payload["dbName"] = self.db_name
+        if db_name != "default":
+            payload["dbName"] = db_name
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+    def get_compaction_state(self, collection_name, db_name="default"):
+        """Get compaction state"""
+        url = f"{self.endpoint}/v2/vectordb/collections/get_compaction_state"
+        payload = {
+            "collectionName": collection_name
         }
         if self.db_name is not None:
             payload["dbName"] = self.db_name
@@ -882,6 +891,36 @@ class IndexClient(Requests):
         res = response.json()
         return res
 
+    def alter_index_properties(self, collection_name, index_name, properties, db_name="default"):
+        """Alter index properties"""
+        url = f"{self.endpoint}/v2/vectordb/indexes/alter_properties"
+        payload = {
+            "collectionName": collection_name,
+            "indexName": index_name,
+            "properties": properties
+        }
+        if self.db_name is not None:
+            db_name = self.db_name
+        if db_name != "default":
+            payload["dbName"] = db_name
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+    def drop_index_properties(self, collection_name, index_name, delete_keys, db_name="default"):
+        """Drop index properties"""
+        url = f"{self.endpoint}/v2/vectordb/indexes/drop_properties"
+        payload = {
+            "collectionName": collection_name,
+            "indexName": index_name,
+            "propertyKeys": delete_keys
+        }
+        if self.db_name is not None:
+            db_name = self.db_name
+        if db_name != "default":
+            payload["dbName"] = db_name
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
 
 class AliasClient(Requests):
 
@@ -1047,10 +1086,28 @@ class DatabaseClient(Requests):
     def database_drop(self, payload):
         """Drop a database"""
         url = f"{self.endpoint}/v2/vectordb/databases/drop"
-        rsp = self.post(url, data=payload).json()
-        if rsp['code'] == 0 and payload['dbName'] in self.db_names:
-            self.db_names.remove(payload['dbName'])
-        return rsp
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+    def alter_database_properties(self, db_name, properties):
+        """Alter database properties"""
+        url = f"{self.endpoint}/v2/vectordb/databases/alter"
+        payload = {
+            "dbName": db_name,
+            "properties": properties
+        }
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
+
+    def drop_database_properties(self, db_name, property_keys):
+        """Drop database properties"""
+        url = f"{self.endpoint}/v2/vectordb/databases/drop_properties"
+        payload = {
+            "dbName": db_name,
+            "propertyKeys": property_keys
+        }
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
 
 
 class StorageClient():

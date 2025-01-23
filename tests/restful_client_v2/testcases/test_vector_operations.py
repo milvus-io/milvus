@@ -2093,7 +2093,8 @@ class TestSearchVector(TestBase):
         assert len(res) == limit
 
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "IP"])
-    def test_search_vector_with_range_search(self, metric_type):
+    @pytest.mark.parametrize("flatten", [True, False])
+    def test_search_vector_with_range_search(self, metric_type, flatten):
         """
         Search a vector with range search with different metric type
         """
@@ -2126,6 +2127,18 @@ class TestSearchVector(TestBase):
                 }
             }
         }
+        if flatten:
+            payload = {
+                "collectionName": name,
+                "data": [vector_to_search],
+                "outputFields": output_fields,
+                "limit": limit,
+                "offset": 0,
+                "searchParams": {
+                    "radius": r1,
+                    "range_filter": r2,
+                }
+            }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
         res = rsp['data']
@@ -2186,7 +2199,6 @@ class TestSearchVector(TestBase):
             assert len(res) == 0
         else:
             assert len(res) == limit
-
 
     @pytest.mark.parametrize("tokenizer", ["jieba", "standard"])
     def test_search_vector_with_text_match_filter(self, tokenizer):

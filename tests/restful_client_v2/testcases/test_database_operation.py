@@ -162,3 +162,87 @@ class TestDatabaseOperationNegative(TestBase):
         """
         rsp = self.database_client.database_drop({"dbName": "default"})
         assert rsp["code"] != 0
+
+
+@pytest.mark.L0
+class TestDatabaseProperties(TestBase):
+    """Test database properties operations"""
+
+    def test_alter_database_properties(self):
+        """
+        target: test alter database properties
+        method: create database, alter database properties
+        expected: alter database properties successfully
+        """
+        # Create database
+        client = self.database_client
+        db_name = "test_alter_props"
+        payload = {
+            "dbName": db_name
+        }
+        response = client.database_create(payload)
+        assert response["code"] == 0
+
+        # Alter database properties
+        properties = {"mmap.enabled": False}
+        response = client.alter_database_properties(db_name, properties)
+        assert response["code"] == 0
+
+        # Drop database properties
+        property_keys = ["mmap.enabled"]
+        response = client.drop_database_properties(db_name, property_keys)
+        assert response["code"] == 0
+
+        # Clean up
+        client.database_drop({"dbName": db_name})
+
+    @pytest.mark.parametrize("invalid_property", [
+        {"invalid_key": True},
+        {"mmap.enabled": "invalid_value"}
+    ])
+    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/39545")
+    def test_alter_database_properties_with_invalid_properties(self, invalid_property):
+        """
+        target: test alter database properties with invalid properties
+        method: create database, alter database properties with invalid properties
+        expected: alter database properties failed with error
+        """
+        # Create database
+        client = self.database_client
+        db_name = "test_alter_props_invalid"
+        payload = {
+            "dbName": db_name
+        }
+        response = client.database_create(payload)
+        assert response["code"] == 0
+
+        # Alter database properties with invalid property
+        response = client.alter_database_properties(db_name, invalid_property)
+        assert response["code"] == 1100
+
+        # Clean up
+        client.database_drop({"dbName": db_name})
+
+    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/39545")
+    def test_drop_database_properties_with_nonexistent_key(self):
+        """
+        target: test drop database properties with nonexistent key
+        method: create database, drop database properties with nonexistent key
+        expected: drop database properties failed with error
+        """
+        # Create database
+        client = self.database_client
+        db_name = "test_drop_props_nonexistent"
+        payload = {
+            "dbName": db_name
+        }
+        response = client.database_create(payload)
+        assert response["code"] == 0
+
+        # Drop database properties with nonexistent key
+        property_keys = ["nonexistent.key"]
+        response = client.drop_database_properties(db_name, property_keys)
+        assert response["code"] == 1100
+
+        # Clean up
+        client.database_drop({"dbName": db_name})
