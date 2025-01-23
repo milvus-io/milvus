@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -43,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -1725,16 +1723,20 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		log.Info("list binlogs prefixes for import", zap.Any("binlog_prefixes", files))
 	}
 
+	// The import task does not need to be controlled for the time being, and additional development is required later.
+	// Here is a comment, because the current importv2 communicates through messages and needs to ensure idempotence.
+	// Adding this part of the logic will cause importv2 to retry infinitely until the previous import task is completed.
+
 	// Check if the number of jobs exceeds the limit.
-	maxNum := paramtable.Get().DataCoordCfg.MaxImportJobNum.GetAsInt()
-	executingNum := s.importMeta.CountJobBy(ctx, WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
-	if executingNum >= maxNum {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(
-			fmt.Sprintf("The number of jobs has reached the limit, please try again later. " +
-				"If your request is set to only import a single file, " +
-				"please consider importing multiple files in one request for better efficiency.")))
-		return resp, nil
-	}
+	// maxNum := paramtable.Get().DataCoordCfg.MaxImportJobNum.GetAsInt()
+	// executingNum := s.importMeta.CountJobBy(ctx, WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
+	// if executingNum >= maxNum {
+	// 	resp.Status = merr.Status(merr.WrapErrImportFailed(
+	// 		fmt.Sprintf("The number of jobs has reached the limit, please try again later. " +
+	// 			"If your request is set to only import a single file, " +
+	// 			"please consider importing multiple files in one request for better efficiency.")))
+	// 	return resp, nil
+	// }
 
 	// Allocate file ids.
 	idStart, _, err := s.allocator.AllocN(int64(len(files)) + 1)
@@ -1810,12 +1812,6 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	if err != nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse job id failed, err=%w", err)))
 		return resp, nil
-	}
-
-	// Import is asynchronous consumed from the wal, so we need to wait for the wal to release the resource key.
-	// The job can be seen by the user after the resource key is acked once at any vchannel.
-	if err := streaming.WAL().Broadcast().BlockUntilResourceKeyAckOnce(ctx, message.NewImportJobIDResourceKey(jobID)); err != nil {
-		return nil, err
 	}
 
 	job := s.importMeta.GetJob(ctx, jobID)

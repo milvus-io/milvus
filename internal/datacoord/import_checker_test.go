@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -79,8 +80,10 @@ func (s *ImportCheckerSuite) SetupTest() {
 
 	sjm := NewMockStatsJobManager(s.T())
 	l0CompactionTrigger := NewMockTriggerManager(s.T())
-	l0CompactionTrigger.EXPECT().PauseL0SegmentCompacting(mock.Anything).Return().Maybe()
-	l0CompactionTrigger.EXPECT().ResumeL0SegmentCompacting(mock.Anything).Return().Maybe()
+	compactionChan := make(chan struct{}, 1)
+	close(compactionChan)
+	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
+	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 
 	checker := NewImportChecker(meta, broker, cluster, s.alloc, imeta, sjm, l0CompactionTrigger).(*importChecker)
 	s.checker = checker
@@ -528,7 +531,6 @@ func TestImportCheckerCompaction(t *testing.T) {
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
@@ -543,15 +545,15 @@ func TestImportCheckerCompaction(t *testing.T) {
 	imeta, err := NewImportMeta(context.TODO(), catalog)
 	assert.NoError(t, err)
 
-	meta, err := newMeta(context.TODO(), catalog, nil)
-	assert.NoError(t, err)
-
 	broker := broker2.NewMockBroker(t)
-
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	sjm := NewMockStatsJobManager(t)
 	l0CompactionTrigger := NewMockTriggerManager(t)
-	l0CompactionTrigger.EXPECT().PauseL0SegmentCompacting(mock.Anything).Return().Maybe()
-	l0CompactionTrigger.EXPECT().ResumeL0SegmentCompacting(mock.Anything).Return().Maybe()
+	compactionChan := make(chan struct{}, 1)
+	close(compactionChan)
+	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
+	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 
 	checker := NewImportChecker(meta, broker, cluster, alloc, imeta, sjm, l0CompactionTrigger).(*importChecker)
 

@@ -216,12 +216,12 @@ func (it *importTask) getChannels() []pChan {
 }
 
 func (it *importTask) Execute(ctx context.Context) error {
-	// TODO fubang should send mq msg
 	jobID, err := it.node.rowIDAllocator.AllocOne()
 	if err != nil {
 		log.Ctx(ctx).Warn("alloc job id failed", zap.Error(err))
 		return err
 	}
+	resourceKey := message.NewImportJobIDResourceKey(jobID)
 	msg, err := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).WithBody(
 		&msgpb.ImportMsg{
@@ -238,7 +238,7 @@ func (it *importTask) Execute(ctx context.Context) error {
 			Schema:         it.schema.CollectionSchema,
 			JobID:          jobID,
 		}).
-		WithBroadcast(it.vchannels, message.NewImportJobIDResourceKey(jobID)).
+		WithBroadcast(it.vchannels, resourceKey).
 		BuildBroadcast()
 	if err != nil {
 		log.Ctx(ctx).Warn("create import message failed", zap.Error(err))
@@ -249,13 +249,18 @@ func (it *importTask) Execute(ctx context.Context) error {
 		log.Ctx(ctx).Warn("broadcast import msg failed", zap.Error(err))
 		return err
 	}
-	log.Ctx(ctx).Debug(
+	log.Ctx(ctx).Info(
 		"broadcast import msg success",
 		zap.Int64("jobID", jobID),
 		zap.Uint64("broadcastID", resp.BroadcastID),
 		zap.Any("appendResults", resp.AppendResults),
 	)
 	it.resp.JobID = strconv.FormatInt(jobID, 10)
+	// Import is asynchronous consumed from the wal, so we need to wait for the wal to release the resource key.
+	// The job can be seen by the user after the resource key is acked once at any vchannel.
+	if err := streaming.WAL().Broadcast().BlockUntilResourceKeyAckOnce(ctx, resourceKey); err != nil {
+		return err
+	}
 	return nil
 }
 

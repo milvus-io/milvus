@@ -1614,6 +1614,12 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 }
 
 func TestProxy_ImportV2(t *testing.T) {
+	wal := mock_streaming.NewMockWALAccesser(t)
+	b := mock_streaming.NewMockBroadcast(t)
+	wal.EXPECT().Broadcast().Return(b).Maybe()
+	b.EXPECT().BlockUntilResourceKeyAckOnce(mock.Anything, mock.Anything).Return(nil).Maybe()
+	streaming.SetWALForTest(wal)
+	defer streaming.RecoverWALForTest()
 	ctx := context.Background()
 	mockErr := errors.New("mock error")
 

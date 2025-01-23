@@ -43,6 +43,7 @@ var messageTypeName = map[MessageType]string{
 	MessageTypeBeginTxn:         "BEGIN_TXN",
 	MessageTypeCommitTxn:        "COMMIT_TXN",
 	MessageTypeRollbackTxn:      "ROLLBACK_TXN",
+	MessageTypeImport:           "IMPORT",
 }
 
 // String implements fmt.Stringer interface.

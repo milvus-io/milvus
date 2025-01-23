@@ -4818,7 +4818,7 @@ type CompactionPlanResult struct {
 	State    CompactionTaskState  `protobuf:"varint,2,opt,name=state,proto3,enum=milvus.proto.data.CompactionTaskState" json:"state,omitempty"`
 	Segments []*CompactionSegment `protobuf:"bytes,3,rep,name=segments,proto3" json:"segments,omitempty"`
 	Channel  string               `protobuf:"bytes,4,opt,name=channel,proto3" json:"channel,omitempty"`
-	Type     CompactionType       `protobuf:"varint,5,opt,name=type,proto3,enum=milvus.proto.data.CompactionType" json:"type,omitempty"` // l0 import file path
+	Type     CompactionType       `protobuf:"varint,5,opt,name=type,proto3,enum=milvus.proto.data.CompactionType" json:"type,omitempty"`
 }
 
 func (x *CompactionPlanResult) Reset() {
