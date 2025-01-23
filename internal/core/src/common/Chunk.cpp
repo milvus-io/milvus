@@ -32,12 +32,15 @@ StringChunk::StringViews(std::optional<std::pair<int64_t, int64_t>> offset_len=s
 
     std::vector<std::string_view> ret;
     ret.reserve(len);
-    auto offset = start_offset;
-    for (int i = 0; i < len; i++) {
-        ret.emplace_back(data_ + offsets_[offset], offsets_[offset + 1] - offsets_[offset]);
-        offset+=1;
+    auto end_offset = start_offset + len;
+    for(auto i = start_offset; i < end_offset; i++) {
+        ret.emplace_back(data_ + offsets_[i], offsets_[i + 1] - offsets_[i]);
     }
-    return {ret, FixedVector<bool>(valid_.begin() + start_offset, valid_.begin() + start_offset + len)};
+    if (nullable_) {
+        FixedVector<bool> res_valid(valid_.begin() + start_offset, valid_.begin() + end_offset);
+        return {ret, std::move(res_valid)};
+    }
+    return {ret, {}};
 }
 
 std::pair<std::vector<std::string_view>, FixedVector<bool>>

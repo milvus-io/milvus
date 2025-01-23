@@ -32,7 +32,10 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     auto size = 0;
     std::vector<std::string_view> strs;
     std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
+    auto before_iteration = std::chrono::system_clock::now();
+    auto do_iteration_duration = 0;
     for (auto batch : *data) {
+        do_iteration_duration += std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - before_iteration).count();
         auto data = batch.ValueOrDie()->column(0);
         auto array = std::dynamic_pointer_cast<arrow::StringArray>(data);
         for (int i = 0; i < array->length(); i++) {
@@ -46,6 +49,7 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
             size += null_bitmap_n;
         }
         row_nums_ += array->length();
+        before_iteration = std::chrono::system_clock::now();
     }
     auto finish_precompute = std::chrono::system_clock::now();
 
@@ -96,12 +100,14 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
              "compute_ms:{}, "
              "write_offsets_ms:{}, "
              "write_array_ms:{},"
-             "chunk_duration:{}",
+             "chunk_duration:{}, "
+             "do_arrow_iteration_duration:{}",
              precompute_ms,
              compute_ms,
              write_offsets_ms,
              write_str_ms,
-             chunk_duration);
+             chunk_duration,
+             do_iteration_duration);
 }
 
 std::shared_ptr<Chunk>

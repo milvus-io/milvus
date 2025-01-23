@@ -215,6 +215,10 @@ class TestChunkSegment : public testing::Test {
             field_infos.push_back(field_info);
         }
 
+        std::vector<bool> validity(test_data_count, true);
+        auto numBytes = (test_data_count + 7) / 8;
+        std::vector<uint8_t> packed_validity(numBytes, 0xff);
+
         // generate data
         for (int chunk_id = 0; chunk_id < chunk_num;
              chunk_id++, start_id += test_data_count) {
@@ -223,7 +227,7 @@ class TestChunkSegment : public testing::Test {
 
             auto builder = std::make_shared<arrow::Int64Builder>();
             auto status =
-                builder->AppendValues(test_data.begin(), test_data.end());
+                builder->AppendValues(test_data.begin(), test_data.end(), validity.begin());
             ASSERT_TRUE(status.ok());
             auto res = builder->Finish();
             ASSERT_TRUE(res.ok());
@@ -231,10 +235,14 @@ class TestChunkSegment : public testing::Test {
             arrow_int64 = res.ValueOrDie();
 
             auto str_builder = std::make_shared<arrow::StringBuilder>();
+            std::vector<std::string> strs;
+            strs.reserve(test_data_count);
             for (int i = 0; i < test_data_count; i++) {
-                auto status = str_builder->Append("test" + std::to_string(i));
-                ASSERT_TRUE(status.ok());
+                strs.emplace_back("test" + std::to_string(i));
             }
+            status = str_builder->AppendValues(strs, packed_validity.data());
+            ASSERT_TRUE(status.ok());
+
             std::shared_ptr<arrow::Array> arrow_str;
             status = str_builder->Finish(&arrow_str);
             ASSERT_TRUE(status.ok());

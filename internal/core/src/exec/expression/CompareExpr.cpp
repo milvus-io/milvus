@@ -140,6 +140,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op,
                 valid_res[i] = false;
                 continue;
             }
+            LOG_INFO("hc==left_value:{}, right_value:{}", boost::get<std::string>(left_value), boost::get<std::string>(right_value));
             res[i] =
                 boost::apply_visitor(milvus::query::Relational<decltype(op)>{},
                                      left_value.value(),

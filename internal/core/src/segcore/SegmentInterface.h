@@ -155,6 +155,14 @@ class SegmentInternalInterface : public SegmentInterface {
         } else if constexpr (std::is_same_v<ViewType, ArrayView>){
             auto [array_views, valid_data] = chunk_array_view_impl(field_id, chunk_id, offset_len);
             return std::make_pair(array_views, valid_data);
+        } else if constexpr (std::is_same_v<ViewType, Json>) {
+            auto [string_views, valid_data] = chunk_string_view_impl(field_id, chunk_id, offset_len);
+            std::vector<Json> res;
+            res.reserve(string_views.size());
+            for(const auto& str_view: string_views) {
+                res.emplace_back(str_view);
+            }
+            return {std::move(res), std::move(valid_data)};
         }
     }
 
