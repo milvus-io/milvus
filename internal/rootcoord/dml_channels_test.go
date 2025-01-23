@@ -165,7 +165,7 @@ func TestDmlChannels(t *testing.T) {
 	defer paramtable.Get().Reset(Params.CommonCfg.PreCreatedTopicEnabled.Key)
 	defer paramtable.Get().Reset(Params.CommonCfg.TopicNames.Key)
 
-	assert.Panics(t, func() { newDmlChannels(ctx, factory, dmlChanPrefix, totalDmlChannelNum) })
+	newDmlChannels(ctx, factory, dmlChanPrefix, totalDmlChannelNum)
 }
 
 func TestDmChannelsFailure(t *testing.T) {

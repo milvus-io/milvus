@@ -420,9 +420,7 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 		return nil
 	}
 
-	if _, ok := topicMu.Load(topicName); !ok {
-		topicMu.Store(topicName, new(sync.Mutex))
-	}
+	topicMu.LoadOrStore(topicName, new(sync.Mutex))
 
 	// msgSizeKey -> msgSize
 	// topicIDKey -> topic creating time
@@ -550,6 +548,11 @@ func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) error {
 	if rmq.isClosed() {
 		return errors.New(RmqNotServingErrMsg)
 	}
+	ll, _ := topicMu.LoadOrStore(consumer.Topic, new(sync.Mutex))
+	mu, _ := ll.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+
 	start := time.Now()
 	if vals, ok := rmq.consumers.Load(consumer.Topic); ok {
 		for _, v := range vals.([]*Consumer) {
