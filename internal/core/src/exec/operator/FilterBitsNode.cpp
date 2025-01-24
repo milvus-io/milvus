@@ -72,6 +72,7 @@ PhyFilterBitsNode::GetOutput() {
     EvalCtx eval_ctx(operator_context_->get_exec_context(), exprs_.get());
     OffsetVector offsets{};
     if (input_ != nullptr) {
+        offsets.reserve(input_->size());
         // PhyFilterBitsNode is not the source node. Currently, only the PhyRandomSampleNode can be
         // the source node of PhyFilterBitsNode.
         AssertInfo(input_->size() == need_process_rows_,
