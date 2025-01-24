@@ -62,10 +62,12 @@ mkdir -p ./planpb
 mkdir -p ./workerpb
 mkdir -p ./messagespb
 mkdir -p ./streamingpb
+mkdir -p ./storagev2pb
 mkdir -p $ROOT_DIR/cmd/tools/migration/legacy/legacypb
 
 protoc_opt="${PROTOC_BIN} --proto_path=${API_PROTO_DIR} --proto_path=."
 
+${protoc_opt} --go_out=paths=source_relative:./storagev2pb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./storagev2pb storagev2.proto || { echo 'generate storagev2.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./etcdpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./etcdpb etcd_meta.proto || { echo 'generate etcd_meta.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./indexcgopb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./indexcgopb index_cgo_msg.proto || { echo 'generate index_cgo_msg failed '; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./cgopb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./cgopb cgo_msg.proto || { echo 'generate cgo_msg failed '; exit 1; }
