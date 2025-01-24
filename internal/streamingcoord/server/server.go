@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	_ "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/policy" // register the balancer policy
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
@@ -62,6 +63,7 @@ func (s *Server) initBasicComponent(ctx context.Context) (err error) {
 				return struct{}{}, err
 			}
 			s.balancer.Set(balancer)
+			snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
 			s.logger.Info("recover balancer done")
 			return struct{}{}, nil
 		}))

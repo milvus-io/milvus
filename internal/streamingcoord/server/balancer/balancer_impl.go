@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -30,7 +31,10 @@ func RecoverBalancer(
 	if err != nil {
 		return nil, errors.Wrap(err, "fail to recover channel manager")
 	}
+	ctx, cancel := context.WithCancelCause(context.Background())
 	b := &balancerImpl{
+		ctx:                    ctx,
+		cancel:                 cancel,
 		lifetime:               typeutil.NewLifetime(),
 		logger:                 resource.Resource().Logger().With(log.FieldComponent("balancer"), zap.String("policy", policy)),
 		channelMetaManager:     manager,
@@ -44,6 +48,8 @@ func RecoverBalancer(
 
 // balancerImpl is a implementation of Balancer.
 type balancerImpl struct {
+	ctx                    context.Context
+	cancel                 context.CancelCauseFunc
 	lifetime               *typeutil.Lifetime
 	logger                 *log.MLogger
 	channelMetaManager     *channel.ChannelManager
@@ -58,6 +64,8 @@ func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb func(vers
 		return status.NewOnShutdownError("balancer is closing")
 	}
 	defer b.lifetime.Done()
+
+	ctx, _ = contextutil.MergeContext(ctx, b.ctx)
 	return b.channelMetaManager.WatchAssignmentResult(ctx, cb)
 }
 
@@ -93,6 +101,8 @@ func (b *balancerImpl) sendRequestAndWaitFinish(ctx context.Context, newReq *req
 // Close close the balancer.
 func (b *balancerImpl) Close() {
 	b.lifetime.SetState(typeutil.LifetimeStateStopped)
+	// cancel all watch opeartion by context.
+	b.cancel(ErrBalancerClosed)
 	b.lifetime.Wait()
 
 	b.backgroundTaskNotifier.Cancel()

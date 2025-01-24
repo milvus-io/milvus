@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -108,6 +109,8 @@ func (b *RoundRobinBalancer) AssignSegment(ctx context.Context, collectionID int
 }
 
 func (b *RoundRobinBalancer) AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan {
+	nodes = filterSQNIfStreamingServiceEnabled(nodes)
+
 	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
 	if !forceAssign {
 		versionRangeFilter := semver.MustParseRange(">2.3.x")
@@ -122,22 +125,29 @@ func (b *RoundRobinBalancer) AssignChannel(ctx context.Context, collectionID int
 	if len(nodesInfo) == 0 {
 		return nil
 	}
+
+	plans := make([]ChannelAssignPlan, 0)
+	scoreDelta := make(map[int64]int)
+	if streamingutil.IsStreamingServiceEnabled() {
+		channels, plans, scoreDelta = assignChannelToWALLocatedFirstForNodeInfo(channels, nodesInfo)
+	}
+
 	sort.Slice(nodesInfo, func(i, j int) bool {
 		cnt1, cnt2 := nodesInfo[i].ChannelCnt(), nodesInfo[j].ChannelCnt()
 		id1, id2 := nodesInfo[i].ID(), nodesInfo[j].ID()
-		delta1, delta2 := b.scheduler.GetChannelTaskDelta(id1, -1), b.scheduler.GetChannelTaskDelta(id2, -1)
+		delta1, delta2 := b.scheduler.GetChannelTaskDelta(id1, -1)+scoreDelta[id1], b.scheduler.GetChannelTaskDelta(id2, -1)+scoreDelta[id2]
 		return cnt1+delta1 < cnt2+delta2
 	})
-	ret := make([]ChannelAssignPlan, 0, len(channels))
+
 	for i, c := range channels {
 		plan := ChannelAssignPlan{
 			Channel: c,
 			From:    -1,
 			To:      nodesInfo[i%len(nodesInfo)].ID(),
 		}
-		ret = append(ret, plan)
+		plans = append(plans, plan)
 	}
-	return ret
+	return plans
 }
 
 func (b *RoundRobinBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {

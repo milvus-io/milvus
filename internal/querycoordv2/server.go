@@ -859,8 +859,16 @@ func (s *Server) tryHandleNodeUp() {
 }
 
 func (s *Server) handleNodeUp(node int64) {
+	nodeInfo := s.nodeMgr.Get(node)
+	if nodeInfo == nil {
+		return
+	}
 	s.taskScheduler.AddExecutor(node)
 	s.distController.StartDistInstance(s.ctx, node)
+	if nodeInfo.IsEmbeddedQueryNodeInStreamingNode() {
+		// The querynode embedded in the streaming node can not work with streaming node.
+		return
+	}
 	// need assign to new rg and replica
 	s.meta.ResourceManager.HandleNodeUp(s.ctx, node)
 }
