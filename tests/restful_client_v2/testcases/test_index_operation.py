@@ -35,7 +35,6 @@ class TestCreateIndex(TestBase):
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "IP"])
     @pytest.mark.parametrize("index_type", ["AUTOINDEX", "IVF_SQ8", "HNSW"])
     @pytest.mark.parametrize("dim", [128])
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/36365")
     def test_index_default(self, dim, metric_type, index_type):
         """
         target: test create collection
@@ -259,7 +258,6 @@ class TestCreateIndex(TestBase):
     @pytest.mark.parametrize("index_type", ['SPARSE_INVERTED_INDEX', 'SPARSE_WAND'])
     @pytest.mark.parametrize("bm25_k1", [1.2, 1.5])
     @pytest.mark.parametrize("bm25_b", [0.7, 0.5])
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/36365")
     def test_create_index_for_full_text_search(self, nb, dim, insert_round, auto_id, is_partition_key,
                                                enable_dynamic_schema, tokenizer, index_type, bm25_k1, bm25_b):
         """
@@ -367,6 +365,7 @@ class TestCreateIndex(TestBase):
 class TestIndexProperties(TestBase):
     """Test index properties operations"""
 
+    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/38967")
     def test_alter_index_properties(self):
         """
         target: test alter index properties

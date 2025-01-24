@@ -1626,7 +1626,6 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("groupingField", ['user_id', None])
     @pytest.mark.parametrize("tokenizer", ['jieba'])
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/36751")
     def test_search_vector_for_zh_full_text_search(self, nb, dim, insert_round, auto_id,
                                                       is_partition_key, enable_dynamic_schema, groupingField, tokenizer):
         """
@@ -3028,7 +3027,6 @@ class TestQueryVector(TestBase):
         assert rsp['code'] == 0
         assert rsp['data'][0]['count(*)'] == 3000
 
-    @pytest.mark.xfail(reason="query by id is not supported")
     def test_query_vector_by_id(self):
         """
         Query a vector with a simple payload
@@ -3469,7 +3467,6 @@ class TestGetVector(TestBase):
 @pytest.mark.L0
 class TestDeleteVector(TestBase):
 
-    @pytest.mark.xfail(reason="delete by id is not supported")
     def test_delete_vector_by_id(self):
         """
         Query a vector with a simple payload
