@@ -64,7 +64,13 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     // write null bitmaps
     if (nullable_) {
         for (auto [data, size] : null_bitmaps) {
-            target_->write(data, size);
+            if (data != nullptr) {
+                target_->write(data, size);
+            } else {
+                // have to append always-true bitmap due to arrow optimize this
+                std::vector<uint8_t> null_bitmap(size, 0xff);
+                target_->write(null_bitmap.data(), size);
+            }
         }
     }
 

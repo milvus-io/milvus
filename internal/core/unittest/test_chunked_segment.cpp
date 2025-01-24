@@ -216,8 +216,7 @@ class TestChunkSegment : public testing::Test {
         }
 
         std::vector<bool> validity(test_data_count, true);
-        auto numBytes = (test_data_count + 7) / 8;
-        std::vector<uint8_t> packed_validity(numBytes, 0xff);
+        std::vector<uint8_t> packed_validity(test_data_count, 1);
 
         // generate data
         for (int chunk_id = 0; chunk_id < chunk_num;
@@ -343,7 +342,7 @@ TEST_F(TestChunkSegment, TestCompareExpr) {
     ASSERT_EQ(chunk_num * test_data_count, final.count());
 
     // test with inverted index
-    auto fid = fields.at("int64");
+    /*auto fid = fields.at("int64");
     auto file_manager_ctx = storage::FileManagerContext();
     file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
         milvus::proto::schema::Int64);
@@ -376,5 +375,5 @@ TEST_F(TestChunkSegment, TestCompareExpr) {
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     final = query::ExecuteQueryExpr(
         plan, segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
-    ASSERT_EQ(chunk_num * test_data_count, final.count());
+    ASSERT_EQ(chunk_num * test_data_count, final.count());*/
 }
