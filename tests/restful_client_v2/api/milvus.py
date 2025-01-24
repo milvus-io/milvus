@@ -12,7 +12,6 @@ import urllib.parse
 
 REQUEST_TIMEOUT = 120
 
-
 ENABLE_LOG_SAVE = False
 
 
@@ -116,7 +115,8 @@ class Requests():
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {cls.api_key}',
-            'RequestId': cls.uuid
+            'RequestId': cls.uuid,
+            "Request-Timeout": REQUEST_TIMEOUT
         }
         return headers
 
@@ -189,7 +189,8 @@ class VectorClient(Requests):
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {cls.api_key}',
             'Accept-Type-Allow-Int64': "true",
-            'RequestId': cls.uuid
+            'RequestId': cls.uuid,
+            "Request-Timeout": REQUEST_TIMEOUT
         }
         return headers
 
@@ -351,7 +352,6 @@ class CollectionClient(Requests):
             else:
                 time.sleep(1)
 
-
     @classmethod
     def update_headers(cls, headers=None):
         if headers is not None:
@@ -359,7 +359,8 @@ class CollectionClient(Requests):
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {cls.api_key}',
-            'RequestId': cls.uuid
+            'RequestId': cls.uuid,
+            "Request-Timeout": REQUEST_TIMEOUT
         }
         return headers
 
@@ -603,7 +604,8 @@ class PartitionClient(Requests):
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {cls.api_key}',
-            'RequestId': cls.uuid
+            'RequestId': cls.uuid,
+            "Request-Timeout": REQUEST_TIMEOUT
         }
         return headers
 
@@ -844,7 +846,8 @@ class IndexClient(Requests):
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {cls.api_key}',
-            'RequestId': cls.uuid
+            'RequestId': cls.uuid,
+            "Request-Timeout": REQUEST_TIMEOUT
         }
         return headers
 
@@ -857,7 +860,7 @@ class IndexClient(Requests):
         res = response.json()
         return res
 
-    def index_describe(self, collection_name=None, index_name=None, db_name="default",):
+    def index_describe(self, collection_name=None, index_name=None, db_name="default", ):
         url = f'{self.endpoint}/v2/vectordb/indexes/describe'
         if self.db_name is not None:
             db_name = self.db_name
@@ -988,7 +991,8 @@ class ImportJobClient(Requests):
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {cls.api_key}',
-            'RequestId': cls.uuid
+            'RequestId': cls.uuid,
+            "Request-Timeout": REQUEST_TIMEOUT
         }
         return headers
 
