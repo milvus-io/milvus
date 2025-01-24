@@ -97,7 +97,8 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 			return nil, 0, fmt.Errorf("param column %s has type %v but collection field definition is %v", col.Name(), col.Type(), field.DataType)
 		}
 		if field.DataType == entity.FieldTypeFloatVector || field.DataType == entity.FieldTypeBinaryVector ||
-			field.DataType == entity.FieldTypeFloat16Vector || field.DataType == entity.FieldTypeBFloat16Vector {
+			field.DataType == entity.FieldTypeFloat16Vector || field.DataType == entity.FieldTypeBFloat16Vector ||
+			field.DataType == entity.FieldTypeInt8Vector {
 			dim := 0
 			switch column := col.(type) {
 			case *column.ColumnFloatVector:
@@ -107,6 +108,8 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 			case *column.ColumnFloat16Vector:
 				dim = column.Dim()
 			case *column.ColumnBFloat16Vector:
+				dim = column.Dim()
+			case *column.ColumnInt8Vector:
 				dim = column.Dim()
 			}
 			if fmt.Sprintf("%d", dim) != field.TypeParams[entity.TypeParamDim] {
@@ -231,6 +234,11 @@ func (opt *columnBasedDataOption) WithBFloat16VectorColumn(colName string, dim i
 
 func (opt *columnBasedDataOption) WithBinaryVectorColumn(colName string, dim int, data [][]byte) *columnBasedDataOption {
 	column := column.NewColumnBinaryVector(colName, dim, data)
+	return opt.WithColumns(column)
+}
+
+func (opt *columnBasedDataOption) WithInt8VectorColumn(colName string, dim int, data [][]int8) *columnBasedDataOption {
+	column := column.NewColumnInt8Vector(colName, dim, data)
 	return opt.WithColumns(column)
 }
 

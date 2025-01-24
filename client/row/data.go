@@ -171,6 +171,14 @@ func AnyToColumns(rows []interface{}, schemas ...*entity.Schema) ([]column.Colum
 			data := make([]entity.SparseEmbedding, 0, rowsLen)
 			col := column.NewColumnSparseVectors(field.Name, data)
 			nameColumns[field.Name] = col
+		case entity.FieldTypeInt8Vector:
+			data := make([][]int8, 0, rowsLen)
+			dim, err := field.GetDim()
+			if err != nil {
+				return []column.Column{}, err
+			}
+			col := column.NewColumnInt8Vector(field.Name, int(dim), data)
+			nameColumns[field.Name] = col
 		}
 	}
 

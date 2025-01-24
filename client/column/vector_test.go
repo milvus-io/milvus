@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type VectorSuite struct {
@@ -187,6 +188,38 @@ func (s *VectorSuite) TestBasic() {
 			}
 		}
 	})
+
+	s.Run("int8_vector", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		n := 3
+		dim := rand.Intn(10) + 2
+		data := make([][]int8, 0, n)
+		for i := 0; i < n; i++ {
+			row := lo.RepeatBy(dim, func(i int) int8 {
+				return int8(rand.Intn(256) - 128)
+			})
+			data = append(data, row)
+		}
+		column := NewColumnInt8Vector(name, dim, data)
+		s.Equal(entity.FieldTypeInt8Vector, column.Type())
+		s.Equal(name, column.Name())
+		s.Equal(lo.Map(data, func(row []int8, _ int) entity.Int8Vector { return entity.Int8Vector(row) }), column.Data())
+		s.Equal(dim, column.Dim())
+
+		fd := column.FieldData()
+		s.Equal(name, fd.GetFieldName())
+		s.Equal(typeutil.Int8ArrayToBytes(lo.Flatten(data)), fd.GetVectors().GetInt8Vector())
+
+		result, err := FieldDataColumn(fd, 0, -1)
+		s.NoError(err)
+		parsed, ok := result.(*ColumnInt8Vector)
+		if s.True(ok) {
+			s.Equal(entity.FieldTypeInt8Vector, parsed.Type())
+			s.Equal(name, parsed.Name())
+			s.Equal(lo.Map(data, func(row []int8, _ int) entity.Int8Vector { return entity.Int8Vector(row) }), parsed.Data())
+			s.Equal(dim, parsed.Dim())
+		}
+	})
 }
 
 func (s *VectorSuite) TestSlice() {
@@ -275,6 +308,28 @@ func (s *VectorSuite) TestSlice() {
 		if s.True(ok) {
 			s.Equal(dim, slicedColumn.Dim())
 			s.Equal(lo.Map(data[:l], func(row []byte, _ int) entity.BFloat16Vector { return entity.BFloat16Vector(row) }), slicedColumn.Data())
+		}
+	})
+
+	s.Run("int8_vector", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		n := 100
+		dim := rand.Intn(10) + 2
+		data := make([][]int8, 0, n)
+		for i := 0; i < n; i++ {
+			row := lo.RepeatBy(dim, func(i int) int8 {
+				return int8(rand.Intn(256) - 128)
+			})
+			data = append(data, row)
+		}
+		column := NewColumnInt8Vector(name, dim, data)
+
+		l := rand.Intn(n)
+		sliced := column.Slice(0, l)
+		slicedColumn, ok := sliced.(*ColumnInt8Vector)
+		if s.True(ok) {
+			s.Equal(dim, slicedColumn.Dim())
+			s.Equal(lo.Map(data[:l], func(row []int8, _ int) entity.Int8Vector { return entity.Int8Vector(row) }), slicedColumn.Data())
 		}
 	})
 }

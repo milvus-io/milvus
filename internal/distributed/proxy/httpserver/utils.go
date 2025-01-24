@@ -397,6 +397,16 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 					} else {
 						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, "invalid vector field: "+fieldName), reallyDataArray, validDataMap
 					}
+				case schemapb.DataType_Int8Vector:
+					if dataString == "" {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray, validDataMap
+					}
+					var vectorArray []int8
+					err := json.Unmarshal([]byte(dataString), &vectorArray)
+					if err != nil {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
+					}
+					reallyData[fieldName] = vectorArray
 				case schemapb.DataType_Bool:
 					result, err := cast.ToBoolE(dataString)
 					if err != nil {
@@ -664,6 +674,20 @@ func convertBinaryVectorToArray(vector [][]byte, dim int64, dataType schemapb.Da
 	return binaryArray, nil
 }
 
+func convertInt8VectorToArray(vector [][]int8, dim int64) ([]byte, error) {
+	byteArray := make([]byte, 0)
+	for _, arr := range vector {
+		if int64(len(arr)) != dim {
+			return nil, fmt.Errorf("[]int8 size %d doesn't equal to vector dimension %d of %s",
+				len(arr), dim, schemapb.DataType_name[int32(schemapb.DataType_Int8Vector)])
+		}
+		for i := int64(0); i < dim; i++ {
+			byteArray = append(byteArray, byte(arr[i]))
+		}
+	}
+	return byteArray, nil
+}
+
 type fieldCandi struct {
 	name    string
 	v       reflect.Value
@@ -770,6 +794,10 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 		case schemapb.DataType_SparseFloatVector:
 			data = make([][]byte, 0, rowsLen)
 			nameDims[field.Name] = int64(0)
+		case schemapb.DataType_Int8Vector:
+			data = make([][]int8, 0, rowsLen)
+			dim, _ := getDim(field)
+			nameDims[field.Name] = dim
 		default:
 			return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
 		}
@@ -871,6 +899,8 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					nameDims[field.Name] = rowSparseDim
 				}
 				nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), content)
+			case schemapb.DataType_Int8Vector:
+				nameColumns[field.Name] = append(nameColumns[field.Name].([][]int8), candi.v.Interface().([]int8))
 			default:
 				return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
 			}
@@ -1074,6 +1104,20 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					},
 				},
 			}
+		case schemapb.DataType_Int8Vector:
+			dim := nameDims[name]
+			arr, err := convertInt8VectorToArray(column.([][]int8), dim)
+			if err != nil {
+				return nil, err
+			}
+			colData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Int8Vector{
+						Int8Vector: arr,
+					},
+				},
+			}
 		default:
 			return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", colData.Type, name)
 		}
@@ -1163,6 +1207,24 @@ func serializeSparseFloatVectors(vectors []gjson.Result, dataType schemapb.DataT
 	return values, nil
 }
 
+func serializeInt8Vectors(vectorStr string, dataType schemapb.DataType, dimension int64, int8ArrayToBytesFunc func([]int8) []byte) ([][]byte, error) {
+	var int8Values [][]int8
+	err := json.Unmarshal([]byte(vectorStr), &int8Values)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vectorStr, err.Error())
+	}
+	values := make([][]byte, 0, len(int8Values))
+	for _, vectorArray := range int8Values {
+		if int64(len(vectorArray)) != dimension {
+			return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vectorStr,
+				fmt.Sprintf("dimension: %d, but length of []int8: %d", dimension, len(vectorArray)))
+		}
+		vectorBytes := int8ArrayToBytesFunc(vectorArray)
+		values = append(values, vectorBytes)
+	}
+	return values, nil
+}
+
 func convertQueries2Placeholder(body string, dataType schemapb.DataType, dimension int64) (*commonpb.PlaceholderValue, error) {
 	var valueType commonpb.PlaceholderType
 	var values [][]byte
@@ -1183,6 +1245,9 @@ func convertQueries2Placeholder(body string, dataType schemapb.DataType, dimensi
 	case schemapb.DataType_SparseFloatVector:
 		valueType = commonpb.PlaceholderType_SparseFloatVector
 		values, err = serializeSparseFloatVectors(gjson.Get(body, HTTPRequestData).Array(), dataType)
+	case schemapb.DataType_Int8Vector:
+		valueType = commonpb.PlaceholderType_Int8Vector
+		values, err = serializeInt8Vectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, typeutil.Int8ArrayToBytes)
 	case schemapb.DataType_VarChar:
 		valueType = commonpb.PlaceholderType_VarChar
 		res := gjson.Get(body, HTTPRequestData).Array()
@@ -1280,6 +1345,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				rowsNum = int64(len(fieldDataList[0].GetVectors().GetBfloat16Vector())/2) / fieldDataList[0].GetVectors().GetDim()
 			case schemapb.DataType_SparseFloatVector:
 				rowsNum = int64(len(fieldDataList[0].GetVectors().GetSparseFloatVector().Contents))
+			case schemapb.DataType_Int8Vector:
+				rowsNum = int64(len(fieldDataList[0].GetVectors().GetInt8Vector())) / fieldDataList[0].GetVectors().GetDim()
 			default:
 				return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", fieldDataList[0].Type, fieldDataList[0].FieldName)
 			}
@@ -1374,6 +1441,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetVectors().GetBfloat16Vector()[i*(fieldDataList[j].GetVectors().GetDim()*2) : (i+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
 				case schemapb.DataType_SparseFloatVector:
 					row[fieldDataList[j].FieldName] = typeutil.SparseFloatBytesToMap(fieldDataList[j].GetVectors().GetSparseFloatVector().Contents[i])
+				case schemapb.DataType_Int8Vector:
+					row[fieldDataList[j].FieldName] = fieldDataList[j].GetVectors().GetInt8Vector()[i*fieldDataList[j].GetVectors().GetDim() : (i+1)*fieldDataList[j].GetVectors().GetDim()]
 				case schemapb.DataType_Array:
 					if len(fieldDataList[j].ValidData) != 0 && !fieldDataList[j].ValidData[i] {
 						row[fieldDataList[j].FieldName] = nil
