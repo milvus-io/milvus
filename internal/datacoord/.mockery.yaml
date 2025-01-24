@@ -1,0 +1,42 @@
+quiet: False
+with-expecter: True
+inpackage: True
+filename: "mock_{{.InterfaceNameSnake}}.go"
+mockname: "Mock{{.InterfaceName}}"
+outpkg: "{{.PackageName}}"
+dir: "{{.InterfaceDir}}"
+packages:
+  github.com/milvus-io/milvus/internal/datacoord:
+    interfaces:
+      compactionPlanContext:
+        config:
+          mockname: MockCompactionPlanContext
+      Handler:
+        config:
+          mockname: NMockHandler
+      RWChannelStore:
+        config:
+          filename: mock_channel_store.go
+      IndexEngineVersionManager:
+        config:
+          mockname: MockVersionManager
+      Manager:
+        config:
+          filename: mock_segment_manager.go
+      TriggerManager:
+      Cluster:
+      CompactionMeta:
+      ChannelManager:
+      SubCluster:
+      StatsJobManager:
+  github.com/milvus-io/milvus/internal/datacoord/allocator:
+    interfaces:
+      Allocator:
+  github.com/milvus-io/milvus/internal/datacoord/broker:
+    interfaces:
+      Broker:
+  github.com/milvus-io/milvus/internal/datacoord/session:
+    interfaces:
+      DataNodeManager:
+      WorkerManager:
+      
