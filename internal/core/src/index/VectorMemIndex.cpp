@@ -287,8 +287,10 @@ VectorMemIndex<T>::Build(const Config& config) {
 
     auto opt_fields = GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
     std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> scalar_info;
-    if (opt_fields.has_value() && index_.IsAdditionalScalarSupported() &&
-        config.value("partition_key_isolation", false)) {
+    bool is_partition_key_isolation =
+        GetValueFromConfig<bool>(config, "partition_key_isolation");
+    if (opt_fields.has_value() &&
+        index_.IsAdditionalScalarSupported(is_partition_key_isolation)) {
         scalar_info = file_manager_->CacheOptFieldToMemory(opt_fields.value());
     }
 
