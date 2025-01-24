@@ -13,6 +13,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "common/type_c.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,13 +26,25 @@ void
 SegcoreSetChunkRows(const int64_t);
 
 void
-SegcoreSetEnableTempSegmentIndex(const bool);
+SegcoreSetEnableInterminSegmentIndex(const bool);
 
 void
 SegcoreSetNlist(const int64_t);
 
 void
 SegcoreSetNprobe(const int64_t);
+
+CStatus
+SegcoreSetDenseVectorInterminIndexType(const char*);
+
+void
+SegcoreSetSubDim(const int64_t);
+
+void
+SegcoreSetRefineRatio(const float);
+
+void
+SegcoreInterminDenseIndexType(const char*);
 
 // return value must be freed by the caller
 char*

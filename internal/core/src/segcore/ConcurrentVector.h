@@ -541,4 +541,17 @@ class ConcurrentVector<BFloat16Vector>
     }
 };
 
+static bool
+ConcurrentDenseVectorCheck(const VectorBase* vec_base, DataType data_type) {
+    if (data_type == DataType::VECTOR_FLOAT) {
+        return dynamic_cast<const ConcurrentVector<FloatVector>*>(vec_base);
+    } else if (data_type == DataType::VECTOR_FLOAT16) {
+        return dynamic_cast<const ConcurrentVector<Float16Vector>*>(vec_base);
+    } else if (data_type == DataType::VECTOR_BFLOAT16) {
+        return dynamic_cast<const ConcurrentVector<BFloat16Vector>*>(vec_base);
+    } else {
+        return false;
+    }
+}
+
 }  // namespace milvus::segcore
