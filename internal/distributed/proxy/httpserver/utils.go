@@ -1458,7 +1458,12 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 		return nil, err
 	}
 
-	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, req)
+	request, ok := req.(proto.Message)
+	if !ok {
+		return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
+	}
+
+	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, request)
 	if err != nil {
 		return nil, err
 	}
