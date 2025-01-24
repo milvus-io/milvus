@@ -290,7 +290,8 @@ VectorMemIndex<T>::Build(const Config& config) {
     bool is_partition_key_isolation =
         GetValueFromConfig<bool>(config, "partition_key_isolation");
     if (opt_fields.has_value() &&
-        index_.IsAdditionalScalarSupported(is_partition_key_isolation)) {
+        index_.IsAdditionalScalarSupported(
+            is_partition_key_isolation.value_or(false))) {
         scalar_info = file_manager_->CacheOptFieldToMemory(opt_fields.value());
     }
 
