@@ -39,10 +39,12 @@ import (
 
 var _ RecordReader = (*CompositeBinlogRecordReader)(nil)
 
-type CompositeBinlogRecordReader struct {
-	blobs [][]*Blob
+// ChunkedBlobsReader returns a chunk composed of blobs, or io.EOF if no more data
+type ChunkedBlobsReader func() ([]*Blob, error)
 
-	blobPos int
+type CompositeBinlogRecordReader struct {
+	BlobsReader ChunkedBlobsReader
+
 	rrs     []array.RecordReader
 	closers []func()
 	fields  []FieldID
@@ -58,13 +60,24 @@ func (crr *CompositeBinlogRecordReader) iterateNextBatch() error {
 			}
 		}
 	}
-	crr.blobPos++
-	if crr.blobPos >= len(crr.blobs[0]) {
-		return io.EOF
+
+	blobs, err := crr.BlobsReader()
+	if err != nil {
+		return err
 	}
 
-	for i, b := range crr.blobs {
-		reader, err := NewBinlogReader(b[crr.blobPos].Value)
+	if crr.rrs == nil {
+		crr.rrs = make([]array.RecordReader, len(blobs))
+		crr.closers = make([]func(), len(blobs))
+		crr.fields = make([]FieldID, len(blobs))
+		crr.r = compositeRecord{
+			recs:   make(map[FieldID]arrow.Record, len(crr.rrs)),
+			schema: make(map[FieldID]schemapb.DataType, len(crr.rrs)),
+		}
+	}
+
+	for i, b := range blobs {
+		reader, err := NewBinlogReader(b.Value)
 		if err != nil {
 			return err
 		}
@@ -92,17 +105,6 @@ func (crr *CompositeBinlogRecordReader) iterateNextBatch() error {
 
 func (crr *CompositeBinlogRecordReader) Next() error {
 	if crr.rrs == nil {
-		if crr.blobs == nil || len(crr.blobs) == 0 {
-			return io.EOF
-		}
-		crr.rrs = make([]array.RecordReader, len(crr.blobs))
-		crr.closers = make([]func(), len(crr.blobs))
-		crr.blobPos = -1
-		crr.fields = make([]FieldID, len(crr.rrs))
-		crr.r = compositeRecord{
-			recs:   make(map[FieldID]arrow.Record, len(crr.rrs)),
-			schema: make(map[FieldID]schemapb.DataType, len(crr.rrs)),
-		}
 		if err := crr.iterateNextBatch(); err != nil {
 			return err
 		}
@@ -138,12 +140,13 @@ func (crr *CompositeBinlogRecordReader) Record() Record {
 	return &crr.r
 }
 
-func (crr *CompositeBinlogRecordReader) Close() {
+func (crr *CompositeBinlogRecordReader) Close() error {
 	for _, close := range crr.closers {
 		if close != nil {
 			close()
 		}
 	}
+	return nil
 }
 
 func parseBlobKey(blobKey string) (colId FieldID, logId UniqueID) {
@@ -177,8 +180,19 @@ func NewCompositeBinlogRecordReader(blobs []*Blob) (*CompositeBinlogRecordReader
 		})
 		sortedBlobs = append(sortedBlobs, blobsForField)
 	}
+	chunkPos := 0
 	return &CompositeBinlogRecordReader{
-		blobs: sortedBlobs,
+		BlobsReader: func() ([]*Blob, error) {
+			if chunkPos >= len(sortedBlobs[0]) {
+				return nil, io.EOF
+			}
+			blobs := make([]*Blob, len(sortedBlobs))
+			for fieldPos := range blobs {
+				blobs[fieldPos] = sortedBlobs[fieldPos][chunkPos]
+			}
+			chunkPos++
+			return blobs, nil
+		},
 	}, nil
 }
 
@@ -623,10 +637,11 @@ func (crr *simpleArrowRecordReader) Record() Record {
 	return &crr.r
 }
 
-func (crr *simpleArrowRecordReader) Close() {
+func (crr *simpleArrowRecordReader) Close() error {
 	if crr.closer != nil {
 		crr.closer()
 	}
+	return nil
 }
 
 func newSimpleArrowRecordReader(blobs []*Blob) (*simpleArrowRecordReader, error) {

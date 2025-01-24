@@ -30,6 +30,25 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 )
 
+type MockRecordWriter struct {
+	writefn func(Record) error
+	closefn func() error
+}
+
+var _ RecordWriter = (*MockRecordWriter)(nil)
+
+func (w *MockRecordWriter) Write(record Record) error {
+	return w.writefn(record)
+}
+
+func (w *MockRecordWriter) Close() error {
+	return w.closefn()
+}
+
+func (w *MockRecordWriter) GetWrittenUncompressed() uint64 {
+	return 0
+}
+
 func TestSerDe(t *testing.T) {
 	type args struct {
 		dt schemapb.DataType

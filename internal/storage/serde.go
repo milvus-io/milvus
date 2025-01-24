@@ -41,19 +41,20 @@ type Record interface {
 	Column(i FieldID) arrow.Array
 	Len() int
 	Release()
+	Retain()
 	Slice(start, end int) Record
 }
 
 type RecordReader interface {
 	Next() error
 	Record() Record
-	Close()
+	Close() error
 }
 
 type RecordWriter interface {
 	Write(r Record) error
 	GetWrittenUncompressed() uint64
-	Close()
+	Close() error
 }
 
 type (
@@ -83,6 +84,12 @@ func (r *compositeRecord) Len() int {
 func (r *compositeRecord) Release() {
 	for _, rec := range r.recs {
 		rec.Release()
+	}
+}
+
+func (r *compositeRecord) Retain() {
+	for _, rec := range r.recs {
+		rec.Retain()
 	}
 }
 
@@ -543,28 +550,20 @@ func (deser *DeserializeReader[T]) Next() error {
 	return nil
 }
 
-func (deser *DeserializeReader[T]) NextRecord() (Record, error) {
-	if len(deser.values) != 0 {
-		return nil, errors.New("deserialize result is not empty")
-	}
-
-	if err := deser.rr.Next(); err != nil {
-		return nil, err
-	}
-	return deser.rr.Record(), nil
-}
-
 func (deser *DeserializeReader[T]) Value() T {
 	return deser.values[deser.pos]
 }
 
-func (deser *DeserializeReader[T]) Close() {
+func (deser *DeserializeReader[T]) Close() error {
 	if deser.rec != nil {
 		deser.rec.Release()
 	}
 	if deser.rr != nil {
-		deser.rr.Close()
+		if err := deser.rr.Close(); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func NewDeserializeReader[T any](rr RecordReader, deserializer Deserializer[T]) *DeserializeReader[T] {
@@ -605,6 +604,10 @@ func (r *selectiveRecord) Len() int {
 
 func (r *selectiveRecord) Release() {
 	// do nothing.
+}
+
+func (r *selectiveRecord) Retain() {
+	// do nothing
 }
 
 func (r *selectiveRecord) Slice(start, end int) Record {
@@ -703,14 +706,17 @@ func (crw *CompositeRecordWriter) Write(r Record) error {
 	return nil
 }
 
-func (crw *CompositeRecordWriter) Close() {
+func (crw *CompositeRecordWriter) Close() error {
 	if crw != nil {
 		for _, w := range crw.writers {
 			if w != nil {
-				w.Close()
+				if err := w.Close(); err != nil {
+					return err
+				}
 			}
 		}
 	}
+	return nil
 }
 
 func NewCompositeRecordWriter(writers map[FieldID]RecordWriter) *CompositeRecordWriter {
@@ -753,8 +759,8 @@ func (sfw *singleFieldRecordWriter) GetWrittenUncompressed() uint64 {
 	return sfw.writtenUncompressed
 }
 
-func (sfw *singleFieldRecordWriter) Close() {
-	sfw.fw.Close()
+func (sfw *singleFieldRecordWriter) Close() error {
+	return sfw.fw.Close()
 }
 
 func newSingleFieldRecordWriter(fieldId FieldID, field arrow.Field, writer io.Writer, opts ...RecordWriterOptions) (*singleFieldRecordWriter, error) {
@@ -804,8 +810,8 @@ func (mfw *multiFieldRecordWriter) GetWrittenUncompressed() uint64 {
 	return mfw.writtenUncompressed
 }
 
-func (mfw *multiFieldRecordWriter) Close() {
-	mfw.fw.Close()
+func (mfw *multiFieldRecordWriter) Close() error {
+	return mfw.fw.Close()
 }
 
 func newMultiFieldRecordWriter(fieldIds []FieldID, fields []arrow.Field, writer io.Writer) (*multiFieldRecordWriter, error) {
@@ -929,6 +935,10 @@ func (sr *simpleArrowRecord) Len() int {
 
 func (sr *simpleArrowRecord) Release() {
 	sr.r.Release()
+}
+
+func (sr *simpleArrowRecord) Retain() {
+	sr.r.Retain()
 }
 
 func (sr *simpleArrowRecord) ArrowSchema() *arrow.Schema {

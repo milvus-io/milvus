@@ -130,10 +130,13 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			InsertLogs:      lo.Values(fBinlogs),
 			Schema:          s.schema,
 			NumRows:         1,
+			StartLogID:      0,
+			EndLogID:        5,
+			BinlogMaxSize:   64 * 1024 * 1024,
 		}, node, s.mockBinlogIO)
 		err = task.PreExecute(ctx)
 		s.Require().NoError(err)
-		binlog, err := task.sortSegment(ctx)
+		binlog, err := task.sort(ctx)
 		s.Require().NoError(err)
 		s.Equal(5, len(binlog))
 
@@ -174,10 +177,13 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			InsertLogs:      lo.Values(fBinlogs),
 			Schema:          s.schema,
 			NumRows:         1,
+			StartLogID:      0,
+			EndLogID:        5,
+			BinlogMaxSize:   64 * 1024 * 1024,
 		}, node, s.mockBinlogIO)
 		err = task.PreExecute(ctx)
 		s.Require().NoError(err)
-		_, err = task.sortSegment(ctx)
+		_, err = task.sort(ctx)
 		s.Error(err)
 	})
 }
