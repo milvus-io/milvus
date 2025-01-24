@@ -770,12 +770,14 @@ func TestCreateVectorWithoutDim(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 	collName := common.GenRandomString(prefix, 6)
 
+	vecFieldName := "vec"
+
 	schema := entity.NewSchema().WithField(
 		entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).WithField(
-		entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector),
+		entity.NewField().WithName(vecFieldName).WithDataType(entity.FieldTypeFloatVector),
 	).WithName(collName)
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-	common.CheckErr(t, err, false, "dimension is not defined in field type params, check type param `dim` for vector field")
+	common.CheckErr(t, err, false, fmt.Sprintf("dimension is not defined in field type params of field %s, check type param `dim` for vector field", vecFieldName))
 }
 
 // specify dim for sparse vector -> error
@@ -836,7 +838,7 @@ func TestCreateVarcharArrayInvalidLength(t *testing.T) {
 	for _, invalidLength := range []int64{-1, 0, common.MaxLength + 1} {
 		arrayVarcharField.WithMaxLength(invalidLength)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-		common.CheckErr(t, err, false, "the maximum length specified for a VarChar should be in (0, 65535]")
+		common.CheckErr(t, err, false, fmt.Sprintf("the maximum length specified for a VarChar field(%s) should be in (0, 65535], but got %d instead: invalid parameter", arrayVarcharField.Name, invalidLength))
 	}
 }
 
@@ -858,7 +860,7 @@ func TestCreateVarcharInvalidLength(t *testing.T) {
 	for _, invalidLength := range []int64{-1, 0, common.MaxLength + 1} {
 		varcharField.WithMaxLength(invalidLength)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-		common.CheckErr(t, err, false, "the maximum length specified for a VarChar should be in (0, 65535]")
+		common.CheckErr(t, err, false, fmt.Sprintf("the maximum length specified for a VarChar field(%s) should be in (0, 65535], but got %d instead", varcharField.Name, invalidLength))
 	}
 }
 

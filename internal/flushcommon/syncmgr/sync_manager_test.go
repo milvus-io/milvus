@@ -2,13 +2,11 @@ package syncmgr
 
 import (
 	"context"
-	"math/rand"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -23,13 +21,11 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 type SyncManagerSuite struct {
@@ -95,59 +91,15 @@ func (s *SyncManagerSuite) SetupTest() {
 	s.metacache = metacache.NewMockMetaCache(s.T())
 }
 
-func (s *SyncManagerSuite) getEmptyInsertBuffer() *storage.InsertData {
-	buf, err := storage.NewInsertData(s.schema)
-	s.Require().NoError(err)
-
-	return buf
-}
-
-func (s *SyncManagerSuite) getInsertBuffer() *storage.InsertData {
-	buf := s.getEmptyInsertBuffer()
-
-	// generate data
-	for i := 0; i < 10; i++ {
-		data := make(map[storage.FieldID]any)
-		data[common.RowIDField] = int64(i + 1)
-		data[common.TimeStampField] = int64(i + 1)
-		data[100] = int64(i + 1)
-		vector := lo.RepeatBy(128, func(_ int) float32 {
-			return rand.Float32()
-		})
-		data[101] = vector
-		err := buf.Append(data)
-		s.Require().NoError(err)
-	}
-	return buf
-}
-
-func (s *SyncManagerSuite) getDeleteBuffer() *storage.DeleteData {
-	buf := &storage.DeleteData{}
-	for i := 0; i < 10; i++ {
-		pk := storage.NewInt64PrimaryKey(int64(i + 1))
-		ts := tsoutil.ComposeTSByTime(time.Now(), 0)
-		buf.Append(pk, ts)
-	}
-	return buf
-}
-
-func (s *SyncManagerSuite) getDeleteBufferZeroTs() *storage.DeleteData {
-	buf := &storage.DeleteData{}
-	for i := 0; i < 10; i++ {
-		pk := storage.NewInt64PrimaryKey(int64(i + 1))
-		buf.Append(pk, 0)
-	}
-	return buf
-}
-
 func (s *SyncManagerSuite) getSuiteSyncTask() *SyncTask {
-	task := NewSyncTask().WithCollectionID(s.collectionID).
-		WithPartitionID(s.partitionID).
-		WithSegmentID(s.segmentID).
-		WithChannelName(s.channelName).
-		WithSchema(s.schema).
-		WithChunkManager(s.chunkManager).
+	task := NewSyncTask().
+		WithSyncPack(new(SyncPack).
+			WithCollectionID(s.collectionID).
+			WithPartitionID(s.partitionID).
+			WithSegmentID(s.segmentID).
+			WithChannelName(s.channelName)).
 		WithAllocator(s.allocator).
+		WithChunkManager(s.chunkManager).
 		WithMetaCache(s.metacache).
 		WithAllocator(s.allocator)
 
@@ -166,12 +118,6 @@ func (s *SyncManagerSuite) TestSubmit() {
 	manager := NewSyncManager(s.chunkManager)
 	task := s.getSuiteSyncTask()
 	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-	task.WithTimeRange(50, 100)
-	task.WithCheckpoint(&msgpb.MsgPosition{
-		ChannelName: s.channelName,
-		MsgID:       []byte{1, 2, 3, 4},
-		Timestamp:   100,
-	})
 
 	f, err := manager.SyncData(context.Background(), task)
 	s.NoError(err)
@@ -206,12 +152,6 @@ func (s *SyncManagerSuite) TestCompacted() {
 	manager := NewSyncManager(s.chunkManager)
 	task := s.getSuiteSyncTask()
 	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-	task.WithTimeRange(50, 100)
-	task.WithCheckpoint(&msgpb.MsgPosition{
-		ChannelName: s.channelName,
-		MsgID:       []byte{1, 2, 3, 4},
-		Timestamp:   100,
-	})
 
 	f, err := manager.SyncData(context.Background(), task)
 	s.NoError(err)
@@ -295,7 +235,6 @@ func (s *SyncManagerSuite) TestSyncManager_TaskStatsJSON() {
 		collectionID: 1,
 		partitionID:  1,
 		channelName:  "channel1",
-		schema:       &schemapb.CollectionSchema{},
 		checkpoint:   &msgpb.MsgPosition{},
 		tsFrom:       1000,
 		tsTo:         2000,
@@ -306,7 +245,6 @@ func (s *SyncManagerSuite) TestSyncManager_TaskStatsJSON() {
 		collectionID: 2,
 		partitionID:  2,
 		channelName:  "channel2",
-		schema:       &schemapb.CollectionSchema{},
 		checkpoint:   &msgpb.MsgPosition{},
 		tsFrom:       3000,
 		tsTo:         4000,

@@ -304,6 +304,7 @@ class CheckTasks:
     check_value_equal = "check_value_equal"
     check_rg_property = "check_resource_group_property"
     check_describe_collection_property = "check_describe_collection_property"
+    check_describe_database_property = "check_describe_database_property"
     check_insert_result = "check_insert_result"
     check_collection_fields_properties = "check_collection_fields_properties"
 

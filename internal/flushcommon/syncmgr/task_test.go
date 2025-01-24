@@ -102,10 +102,12 @@ func (s *SyncTaskSuite) SetupTest() {
 
 	s.chunkManager = mocks.NewChunkManager(s.T())
 	s.chunkManager.EXPECT().RootPath().Return("files").Maybe()
-	s.chunkManager.EXPECT().MultiWrite(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.chunkManager.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	s.broker = broker.NewMockBroker(s.T())
 	s.metacache = metacache.NewMockMetaCache(s.T())
+	s.metacache.EXPECT().Collection().Return(s.collectionID).Maybe()
+	s.metacache.EXPECT().Schema().Return(s.schema).Maybe()
 }
 
 func (s *SyncTaskSuite) getEmptyInsertBuffer() *storage.InsertData {
@@ -144,26 +146,16 @@ func (s *SyncTaskSuite) getDeleteBuffer() *storage.DeleteData {
 	return buf
 }
 
-func (s *SyncTaskSuite) getDeleteBufferZeroTs() *storage.DeleteData {
-	buf := &storage.DeleteData{}
-	for i := 0; i < 10; i++ {
-		pk := storage.NewInt64PrimaryKey(int64(i + 1))
-		buf.Append(pk, 0)
-	}
-	return buf
-}
-
-func (s *SyncTaskSuite) getSuiteSyncTask() *SyncTask {
-	task := NewSyncTask().WithCollectionID(s.collectionID).
-		WithPartitionID(s.partitionID).
-		WithSegmentID(s.segmentID).
-		WithChannelName(s.channelName).
-		WithSchema(s.schema).
-		WithChunkManager(s.chunkManager).
+func (s *SyncTaskSuite) getSuiteSyncTask(pack *SyncPack) *SyncTask {
+	task := NewSyncTask().
+		WithSyncPack(pack.
+			WithCollectionID(s.collectionID).
+			WithPartitionID(s.partitionID).
+			WithSegmentID(s.segmentID).
+			WithChannelName(s.channelName)).
 		WithAllocator(s.allocator).
+		WithChunkManager(s.chunkManager).
 		WithMetaCache(s.metacache)
-	task.binlogMemsize = map[int64]int64{0: 1, 1: 1, 100: 100}
-
 	return task
 }
 
@@ -192,79 +184,64 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	seg.GetBloomFilterSet().Roll()
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
-	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(seg)
+	}).Return()
 
 	s.Run("without_data", func() {
-		task := s.getSuiteSyncTask()
+		task := s.getSuiteSyncTask(new(SyncPack).WithCheckpoint(
+			&msgpb.MsgPosition{
+				ChannelName: s.channelName,
+				MsgID:       []byte{1, 2, 3, 4},
+				Timestamp:   100,
+			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-		task.WithTimeRange(50, 100)
-		task.WithCheckpoint(&msgpb.MsgPosition{
-			ChannelName: s.channelName,
-			MsgID:       []byte{1, 2, 3, 4},
-			Timestamp:   100,
-		})
 
 		err := task.Run(ctx)
 		s.NoError(err)
 	})
 
 	s.Run("with_insert_delete_cp", func() {
-		task := s.getSuiteSyncTask()
-		task.WithTimeRange(50, 100)
+		task := s.getSuiteSyncTask(
+			new(SyncPack).
+				WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).
+				WithCheckpoint(&msgpb.MsgPosition{
+					ChannelName: s.channelName,
+					MsgID:       []byte{1, 2, 3, 4},
+					Timestamp:   100,
+				}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-		task.WithCheckpoint(&msgpb.MsgPosition{
-			ChannelName: s.channelName,
-			MsgID:       []byte{1, 2, 3, 4},
-			Timestamp:   100,
-		})
-		task.binlogBlobs[100] = &storage.Blob{
-			Key:   "100",
-			Value: []byte("test_data"),
-		}
 
 		err := task.Run(ctx)
 		s.NoError(err)
 	})
 
-	s.Run("with_statslog", func() {
-		task := s.getSuiteSyncTask()
-		task.WithTimeRange(50, 100)
+	s.Run("with_flush", func() {
+		task := s.getSuiteSyncTask(
+			new(SyncPack).
+				WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).
+				WithFlush().
+				WithCheckpoint(&msgpb.MsgPosition{
+					ChannelName: s.channelName,
+					MsgID:       []byte{1, 2, 3, 4},
+					Timestamp:   100,
+				}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-		task.WithCheckpoint(&msgpb.MsgPosition{
-			ChannelName: s.channelName,
-			MsgID:       []byte{1, 2, 3, 4},
-			Timestamp:   100,
-		})
-		task.WithFlush()
-		task.batchStatsBlob = &storage.Blob{
-			Key:   "100",
-			Value: []byte("test_data"),
-		}
-		task.mergedStatsBlob = &storage.Blob{
-			Key:   "1",
-			Value: []byte("test_data"),
-		}
-
 		err := task.Run(ctx)
 		s.NoError(err)
 	})
 
-	s.Run("with_delta_data", func() {
+	s.Run("with_drop", func() {
 		s.metacache.EXPECT().RemoveSegments(mock.Anything, mock.Anything).Return(nil).Once()
-		task := s.getSuiteSyncTask()
-		task.WithTimeRange(50, 100)
+		task := s.getSuiteSyncTask(new(SyncPack).
+			WithDeleteData(s.getDeleteBuffer()).
+			WithDrop().
+			WithCheckpoint(&msgpb.MsgPosition{
+				ChannelName: s.channelName,
+				MsgID:       []byte{1, 2, 3, 4},
+				Timestamp:   100,
+			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-		task.WithCheckpoint(&msgpb.MsgPosition{
-			ChannelName: s.channelName,
-			MsgID:       []byte{1, 2, 3, 4},
-			Timestamp:   100,
-		})
-		task.WithDrop()
-		task.deltaBlob = &storage.Blob{
-			Key:   "100",
-			Value: []byte("test_data"),
-		}
-
 		err := task.Run(ctx)
 		s.NoError(err)
 	})
@@ -281,19 +258,15 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 	s.Run("pure_delete_l0_flush", func() {
-		task := s.getSuiteSyncTask()
-		task.deltaBlob = &storage.Blob{
-			Key:   "100",
-			Value: []byte("test_data"),
-		}
-		task.WithTimeRange(50, 100)
+		task := s.getSuiteSyncTask(new(SyncPack).
+			WithDeleteData(s.getDeleteBuffer()).
+			WithFlush().
+			WithCheckpoint(&msgpb.MsgPosition{
+				ChannelName: s.channelName,
+				MsgID:       []byte{1, 2, 3, 4},
+				Timestamp:   100,
+			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-		task.WithCheckpoint(&msgpb.MsgPosition{
-			ChannelName: s.channelName,
-			MsgID:       []byte{1, 2, 3, 4},
-			Timestamp:   100,
-		})
-		task.WithFlush()
 
 		err := task.Run(ctx)
 		s.NoError(err)
@@ -307,7 +280,7 @@ func (s *SyncTaskSuite) TestRunError() {
 		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(nil, false)
 		flag := false
 		handler := func(_ error) { flag = true }
-		task := s.getSuiteSyncTask().WithFailureCallback(handler)
+		task := s.getSuiteSyncTask(new(SyncPack)).WithFailureCallback(handler)
 
 		err := task.Run(ctx)
 
@@ -320,13 +293,14 @@ func (s *SyncTaskSuite) TestRunError() {
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().Collection().Return(s.collectionID).Maybe()
+	s.metacache.EXPECT().Schema().Return(s.schema).Maybe()
 
 	s.Run("allocate_id_fail", func() {
 		mockAllocator := allocator.NewMockAllocator(s.T())
 		mockAllocator.EXPECT().Alloc(mock.Anything).Return(0, 0, errors.New("mocked"))
 
-		task := s.getSuiteSyncTask()
-		task.allocator = mockAllocator
+		task := s.getSuiteSyncTask(new(SyncPack).WithFlush()).WithAllocator(mockAllocator)
 
 		err := task.Run(ctx)
 		s.Error(err)
@@ -335,14 +309,13 @@ func (s *SyncTaskSuite) TestRunError() {
 	s.Run("metawrite_fail", func() {
 		s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(errors.New("mocked"))
 
-		task := s.getSuiteSyncTask()
+		task := s.getSuiteSyncTask(new(SyncPack).
+			WithCheckpoint(&msgpb.MsgPosition{
+				ChannelName: s.channelName,
+				MsgID:       []byte{1, 2, 3, 4},
+				Timestamp:   100,
+			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1, retry.Attempts(1)))
-		task.WithTimeRange(50, 100)
-		task.WithCheckpoint(&msgpb.MsgPosition{
-			ChannelName: s.channelName,
-			MsgID:       []byte{1, 2, 3, 4},
-			Timestamp:   100,
-		})
 
 		err := task.Run(ctx)
 		s.Error(err)
@@ -353,14 +326,10 @@ func (s *SyncTaskSuite) TestRunError() {
 		handler := func(_ error) { flag = true }
 		s.chunkManager.ExpectedCalls = nil
 		s.chunkManager.EXPECT().RootPath().Return("files")
-		s.chunkManager.EXPECT().MultiWrite(mock.Anything, mock.Anything).Return(retry.Unrecoverable(errors.New("mocked")))
-		task := s.getSuiteSyncTask().WithFailureCallback(handler)
-		task.binlogBlobs[100] = &storage.Blob{
-			Key:   "100",
-			Value: []byte("test_data"),
-		}
-
-		task.WithWriteRetryOptions(retry.Attempts(1))
+		s.chunkManager.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(retry.Unrecoverable(errors.New("mocked")))
+		task := s.getSuiteSyncTask(new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})).
+			WithFailureCallback(handler).
+			WithWriteRetryOptions(retry.Attempts(1))
 
 		err := task.Run(ctx)
 
@@ -369,43 +338,26 @@ func (s *SyncTaskSuite) TestRunError() {
 	})
 }
 
-func (s *SyncTaskSuite) TestNextID() {
-	task := s.getSuiteSyncTask()
-
-	task.ids = []int64{0}
-	s.Run("normal_next", func() {
-		id := task.nextID()
-		s.EqualValues(0, id)
-	})
-	s.Run("id_exhausted", func() {
-		s.Panics(func() {
-			task.nextID()
-		})
-	})
-}
-
 func (s *SyncTaskSuite) TestSyncTask_MarshalJSON() {
 	t := &SyncTask{
-		segmentID:     12345,
-		batchRows:     100,
-		level:         datapb.SegmentLevel_L0,
-		tsFrom:        1000,
-		tsTo:          2000,
-		deltaRowCount: 10,
-		flushedSize:   1024,
-		execTime:      2 * time.Second,
+		segmentID:   12345,
+		batchRows:   100,
+		level:       datapb.SegmentLevel_L0,
+		tsFrom:      1000,
+		tsTo:        2000,
+		flushedSize: 1024,
+		execTime:    2 * time.Second,
 	}
 
 	tm := &metricsinfo.SyncTask{
-		SegmentID:     t.segmentID,
-		BatchRows:     t.batchRows,
-		SegmentLevel:  t.level.String(),
-		TSFrom:        tsoutil.PhysicalTimeFormat(t.tsFrom),
-		TSTo:          tsoutil.PhysicalTimeFormat(t.tsTo),
-		DeltaRowCount: t.deltaRowCount,
-		FlushSize:     t.flushedSize,
-		RunningTime:   t.execTime.String(),
-		NodeID:        paramtable.GetNodeID(),
+		SegmentID:    t.segmentID,
+		BatchRows:    t.batchRows,
+		SegmentLevel: t.level.String(),
+		TSFrom:       tsoutil.PhysicalTimeFormat(t.tsFrom),
+		TSTo:         tsoutil.PhysicalTimeFormat(t.tsTo),
+		FlushSize:    t.flushedSize,
+		RunningTime:  t.execTime.String(),
+		NodeID:       paramtable.GetNodeID(),
 	}
 	expectedBytes, err := json.Marshal(tm)
 	s.NoError(err)

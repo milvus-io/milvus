@@ -204,16 +204,6 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 	})
 }
 
-func (s *L0WriteBufferSuite) TestCreateFailure() {
-	metacache := metacache.NewMockMetaCache(s.T())
-	metacache.EXPECT().Collection().Return(s.collID)
-	metacache.EXPECT().Schema().Return(&schemapb.CollectionSchema{})
-	_, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
-		idAllocator: s.allocator,
-	})
-	s.Error(err)
-}
-
 func TestL0WriteBuffer(t *testing.T) {
 	suite.Run(t, new(L0WriteBufferSuite))
 }

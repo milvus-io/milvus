@@ -25,32 +25,23 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type storageV1Serializer struct {
-	collectionID int64
-	schema       *schemapb.CollectionSchema
-	pkField      *schemapb.FieldSchema
+	schema  *schemapb.CollectionSchema
+	pkField *schemapb.FieldSchema
 
 	inCodec *storage.InsertCodec
 
-	allocator  allocator.Interface
-	metacache  metacache.MetaCache
-	metaWriter MetaWriter
+	metacache metacache.MetaCache
 }
 
-func NewStorageSerializer(allocator allocator.Interface, metacache metacache.MetaCache, metaWriter MetaWriter) (*storageV1Serializer, error) {
-	collectionID := metacache.Collection()
+func NewStorageSerializer(metacache metacache.MetaCache) (*storageV1Serializer, error) {
 	schema := metacache.Schema()
 	pkField := lo.FindOrElse(schema.GetFields(), nil, func(field *schemapb.FieldSchema) bool { return field.GetIsPrimaryKey() })
 	if pkField == nil {
@@ -58,130 +49,21 @@ func NewStorageSerializer(allocator allocator.Interface, metacache metacache.Met
 	}
 	meta := &etcdpb.CollectionMeta{
 		Schema: schema,
-		ID:     collectionID,
 	}
 	inCodec := storage.NewInsertCodecWithSchema(meta)
 	return &storageV1Serializer{
-		collectionID: collectionID,
-		schema:       schema,
-		pkField:      pkField,
+		schema:  schema,
+		pkField: pkField,
 
-		inCodec:    inCodec,
-		allocator:  allocator,
-		metacache:  metacache,
-		metaWriter: metaWriter,
+		inCodec:   inCodec,
+		metacache: metacache,
 	}, nil
 }
 
-func (s *storageV1Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) (Task, error) {
-	task := NewSyncTask()
-	tr := timerecord.NewTimeRecorder("storage_serializer")
-
-	log := log.Ctx(ctx).With(
-		zap.Int64("segmentID", pack.segmentID),
-		zap.Int64("collectionID", pack.collectionID),
-		zap.String("channel", pack.channelName),
-	)
-
-	if len(pack.insertData) > 0 {
-		memSize := make(map[int64]int64)
-		for _, chunk := range pack.insertData {
-			for fieldID, fieldData := range chunk.Data {
-				memSize[fieldID] += int64(fieldData.GetMemorySize())
-			}
-		}
-		task.binlogMemsize = memSize
-
-		binlogBlobs, err := s.serializeBinlog(ctx, pack)
-		if err != nil {
-			log.Warn("failed to serialize binlog", zap.Error(err))
-			return nil, err
-		}
-		task.binlogBlobs = binlogBlobs
-
-		actions := []metacache.SegmentAction{}
-		singlePKStats, batchStatsBlob, err := s.serializeStatslog(pack)
-		if err != nil {
-			log.Warn("failed to serialized statslog", zap.Error(err))
-			return nil, err
-		}
-
-		task.batchStatsBlob = batchStatsBlob
-		actions = append(actions, metacache.RollStats(singlePKStats))
-
-		if len(pack.bm25Stats) > 0 {
-			statsBlobs, err := s.serializeBM25Stats(pack)
-			if err != nil {
-				return nil, err
-			}
-
-			task.bm25Blobs = statsBlobs
-			actions = append(actions, metacache.MergeBm25Stats(pack.bm25Stats))
-		}
-
-		s.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(pack.segmentID))
-	}
-
-	if pack.isFlush {
-		if pack.level != datapb.SegmentLevel_L0 {
-			mergedStatsBlob, err := s.serializeMergedPkStats(pack)
-			if err != nil {
-				log.Warn("failed to serialize merged stats log", zap.Error(err))
-				return nil, err
-			}
-			task.mergedStatsBlob = mergedStatsBlob
-
-			if hasBM25Function(s.schema) {
-				mergedBM25Blob, err := s.serializeMergedBM25Stats(pack)
-				if err != nil {
-					log.Warn("failed to serialize merged bm25 stats log", zap.Error(err))
-					return nil, err
-				}
-				task.mergedBm25Blob = mergedBM25Blob
-			}
-		}
-
-		task.WithFlush()
-	}
-
-	if pack.deltaData != nil {
-		deltaBlob, err := s.serializeDeltalog(pack)
-		if err != nil {
-			log.Warn("failed to serialize delta log", zap.Error(err))
-			return nil, err
-		}
-		task.deltaBlob = deltaBlob
-		task.deltaRowCount = pack.deltaData.RowCount
-	}
-	if pack.isDrop {
-		task.WithDrop()
-	}
-
-	s.setTaskMeta(task, pack)
-	task.WithAllocator(s.allocator)
-
-	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), pack.level.String()).Observe(float64(tr.RecordSpan().Milliseconds()))
-	return task, nil
-}
-
-func (s *storageV1Serializer) setTaskMeta(task *SyncTask, pack *SyncPack) {
-	task.WithCollectionID(pack.collectionID).
-		WithPartitionID(pack.partitionID).
-		WithChannelName(pack.channelName).
-		WithSegmentID(pack.segmentID).
-		WithBatchRows(pack.batchRows).
-		WithSchema(s.metacache.Schema()).
-		WithStartPosition(pack.startPosition).
-		WithCheckpoint(pack.checkpoint).
-		WithLevel(pack.level).
-		WithDataSource(pack.dataSource).
-		WithTimeRange(pack.tsFrom, pack.tsTo).
-		WithMetaCache(s.metacache).
-		WithMetaWriter(s.metaWriter).
-		WithFailureCallback(pack.errHandler)
-}
-
 func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPack) (map[int64]*storage.Blob, error) {
+	if len(pack.insertData) == 0 {
+		return make(map[int64]*storage.Blob), nil
+	}
 	log := log.Ctx(ctx)
 	blobs, err := s.inCodec.Serialize(pack.partitionID, pack.segmentID, pack.insertData...)
 	if err != nil {
@@ -202,6 +84,9 @@ func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPac
 }
 
 func (s *storageV1Serializer) serializeBM25Stats(pack *SyncPack) (map[int64]*storage.Blob, error) {
+	if len(pack.bm25Stats) == 0 {
+		return make(map[int64]*storage.Blob), nil
+	}
 	blobs := make(map[int64]*storage.Blob)
 	for fieldID, stats := range pack.bm25Stats {
 		bytes, err := stats.Serialize()
@@ -219,6 +104,9 @@ func (s *storageV1Serializer) serializeBM25Stats(pack *SyncPack) (map[int64]*sto
 }
 
 func (s *storageV1Serializer) serializeStatslog(pack *SyncPack) (*storage.PrimaryKeyStats, *storage.Blob, error) {
+	if len(pack.insertData) == 0 {
+		return nil, nil, nil
+	}
 	var rowNum int64
 	var pkFieldData []storage.FieldData
 	for _, chunk := range pack.insertData {
