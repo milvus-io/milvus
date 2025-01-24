@@ -463,9 +463,7 @@ func GenColumnsBasedSchema(schema *entity.Schema, option *GenDataOption) ([]colu
 		if field.AutoID {
 			continue
 		}
-		if option.fieldName == "" {
-			option.fieldName = field.Name
-		}
+		option.fieldName = field.Name
 		columns = append(columns, GenColumnData(option.nb, field.DataType, *option))
 	}
 	if schema.EnableDynamicField {
