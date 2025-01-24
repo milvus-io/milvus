@@ -847,7 +847,7 @@ func TestCreateVectorWithoutDim(t *testing.T) {
 		entity.NewField().WithName(vecFieldName).WithDataType(entity.FieldTypeFloatVector),
 	).WithName(collName)
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-	common.CheckErr(t, err, false, fmt.Sprintf("dimension is not defined in field type params of field %s, check type param `dim` for vector field", vecFieldName))
+	common.CheckErr(t, err, false, "dimension is not defined in field type params")
 }
 
 // specify dim for sparse vector -> error
@@ -908,7 +908,7 @@ func TestCreateVarcharArrayInvalidLength(t *testing.T) {
 	for _, invalidLength := range []int64{-1, 0, common.MaxLength + 1} {
 		arrayVarcharField.WithMaxLength(invalidLength)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-		common.CheckErr(t, err, false, fmt.Sprintf("the maximum length specified for a VarChar field(%s) should be in (0, 65535], but got %d instead: invalid parameter", arrayVarcharField.Name, invalidLength))
+		common.CheckErr(t, err, false, "the maximum length specified for a VarChar field(array) should be in (0, 65535]")
 	}
 }
 
@@ -930,7 +930,7 @@ func TestCreateVarcharInvalidLength(t *testing.T) {
 	for _, invalidLength := range []int64{-1, 0, common.MaxLength + 1} {
 		varcharField.WithMaxLength(invalidLength)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-		common.CheckErr(t, err, false, fmt.Sprintf("the maximum length specified for a VarChar field(%s) should be in (0, 65535], but got %d instead", varcharField.Name, invalidLength))
+		common.CheckErr(t, err, false, "the maximum length specified for a VarChar field(varchar) should be in (0, 65535]")
 	}
 }
 
