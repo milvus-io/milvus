@@ -359,7 +359,7 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
         case DataType::VECTOR_INT8: {
             auto length = count * dim;
             auto obj = vector_array->mutable_int8_vector();
-            obj->resize(length * sizeof(int8));
+            obj->resize(length);
             break;
         }
         default: {

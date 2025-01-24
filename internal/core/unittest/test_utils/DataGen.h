@@ -429,6 +429,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
             case DataType::VECTOR_INT8: {
                 auto dim = field_meta.get_dim();
                 vector<int8> final(dim * N);
+                srand(seed);
                 for (auto& x : final) {
                     x = int8_t(rand() % 256 - 128);
                 }
