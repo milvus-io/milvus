@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 )
 
@@ -39,27 +40,9 @@ const (
 	TriggerTypeSingle
 )
 
-func (t CompactionTriggerType) String() string {
-	switch t {
-	case TriggerTypeLevelZeroViewChange:
-		return "LevelZeroViewChange"
-	case TriggerTypeLevelZeroViewIDLE:
-		return "LevelZeroViewIDLE"
-	case TriggerTypeSegmentSizeViewChange:
-		return "SegmentSizeViewChange"
-	case TriggerTypeClustering:
-		return "Clustering"
-	case TriggerTypeSingle:
-		return "Single"
-	default:
-		return ""
-	}
-}
-
 type TriggerManager interface {
 	Start()
 	Stop()
-	OnCollectionUpdate(collectionID int64)
 	ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool) (UniqueID, error)
 }
 
@@ -78,6 +61,10 @@ type CompactionTriggerManager struct {
 	handler           Handler
 	allocator         allocator
 
+	view *FullViews
+	// todo handle this lock
+	viewGuard lock.RWMutex
+
 	meta             *meta
 	l0Policy         *l0CompactionPolicy
 	clusteringPolicy *clusteringCompactionPolicy
@@ -92,19 +79,16 @@ func NewCompactionTriggerManager(alloc allocator, handler Handler, compactionHan
 		allocator:         alloc,
 		handler:           handler,
 		compactionHandler: compactionHandler,
-		meta:              meta,
-		closeSig:          make(chan struct{}),
+		view: &FullViews{
+			collections: make(map[int64][]*SegmentView),
+		},
+		meta:     meta,
+		closeSig: make(chan struct{}),
 	}
 	m.l0Policy = newL0CompactionPolicy(meta)
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
 	m.singlePolicy = newSingleCompactionPolicy(meta, m.allocator, m.handler)
 	return m
-}
-
-// OnCollectionUpdate notifies L0Policy about latest collection's L0 segment changes
-// This tells the l0 triggers about which collections are active
-func (m *CompactionTriggerManager) OnCollectionUpdate(collectionID int64) {
-	m.l0Policy.OnCollectionUpdate(collectionID)
 }
 
 func (m *CompactionTriggerManager) Start() {
@@ -211,27 +195,47 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collection
 }
 
 func (m *CompactionTriggerManager) notify(ctx context.Context, eventType CompactionTriggerType, views []CompactionView) {
-	log := log.Ctx(ctx)
-	log.Debug("Start to trigger compactions", zap.String("eventType", eventType.String()))
 	for _, view := range views {
-		outView, reason := view.Trigger()
-		if outView == nil && eventType == TriggerTypeLevelZeroViewIDLE {
-			log.Info("Start to force trigger a level zero compaction")
-			outView, reason = view.ForceTrigger()
-		}
-
-		if outView != nil {
-			log.Info("Success to trigger a compaction, try to submit",
-				zap.String("eventType", eventType.String()),
-				zap.String("reason", reason),
-				zap.String("output view", outView.String()))
-
-			switch eventType {
-			case TriggerTypeLevelZeroViewChange, TriggerTypeLevelZeroViewIDLE:
+		switch eventType {
+		case TriggerTypeLevelZeroViewChange:
+			log.Debug("Start to trigger a level zero compaction by TriggerTypeLevelZeroViewChange")
+			outView, reason := view.Trigger()
+			if outView != nil {
+				log.Info("Success to trigger a LevelZeroCompaction output view, try to submit",
+					zap.String("reason", reason),
+					zap.String("output view", outView.String()))
 				m.SubmitL0ViewToScheduler(ctx, outView)
-			case TriggerTypeClustering:
+			}
+		case TriggerTypeLevelZeroViewIDLE:
+			log.Debug("Start to trigger a level zero compaction by TriggerTypLevelZeroViewIDLE")
+			outView, reason := view.Trigger()
+			if outView == nil {
+				log.Info("Start to force trigger a level zero compaction by TriggerTypLevelZeroViewIDLE")
+				outView, reason = view.ForceTrigger()
+			}
+
+			if outView != nil {
+				log.Info("Success to trigger a LevelZeroCompaction output view, try to submit",
+					zap.String("reason", reason),
+					zap.String("output view", outView.String()))
+				m.SubmitL0ViewToScheduler(ctx, outView)
+			}
+		case TriggerTypeClustering:
+			log.Debug("Start to trigger a clustering compaction by TriggerTypeClustering")
+			outView, reason := view.Trigger()
+			if outView != nil {
+				log.Info("Success to trigger a ClusteringCompaction output view, try to submit",
+					zap.String("reason", reason),
+					zap.String("output view", outView.String()))
 				m.SubmitClusteringViewToScheduler(ctx, outView)
-			case TriggerTypeSingle:
+			}
+		case TriggerTypeSingle:
+			log.Debug("Start to trigger a single compaction by TriggerTypeSingle")
+			outView, reason := view.Trigger()
+			if outView != nil {
+				log.Info("Success to trigger a L2SingleCompaction output view, try to submit",
+					zap.String("reason", reason),
+					zap.String("output view", outView.String()))
 				m.SubmitSingleViewToScheduler(ctx, outView)
 			}
 		}
