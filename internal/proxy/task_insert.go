@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -141,6 +142,16 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema.CollectionSchema
 
+	// Calculate embedding fields
+	if function.HasNonBM25Functions(schema.CollectionSchema.Functions, []int64{}) {
+		exec, err := function.NewFunctionExecutor(schema.CollectionSchema)
+		if err != nil {
+			return err
+		}
+		if err := exec.ProcessInsert(it.insertMsg); err != nil {
+			return err
+		}
+	}
 	rowNums := uint32(it.insertMsg.NRows())
 	// set insertTask.rowIDs
 	var rowIDBegin UniqueID

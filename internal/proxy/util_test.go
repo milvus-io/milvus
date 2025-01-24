@@ -2848,6 +2848,79 @@ func TestValidateFunction(t *testing.T) {
 	})
 }
 
+func TestValidateModelFunction(t *testing.T) {
+	t.Run("Valid model function schema", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector},
+				{
+					Name: "output_dense_field", DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "4"},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+				{
+					Name:             "text_embedding_func",
+					Type:             schemapb.FunctionType_TextEmbedding,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_dense_field"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "provider", Value: "openai"},
+						{Key: "model_name", Value: "text-embedding-ada-002"},
+						{Key: "api_key", Value: "mock"},
+						{Key: "url", Value: "mock_url"},
+						{Key: "dim", Value: "4"},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Invalid function schema - Invalid function info ", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector},
+				{Name: "output_dense_field", DataType: schemapb.DataType_FloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+				{
+					Name:             "text_embedding_func",
+					Type:             schemapb.FunctionType_TextEmbedding,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_dense_field"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "provider", Value: "UnkownProvider"},
+						{Key: "model_name", Value: "text-embedding-ada-002"},
+						{Key: "api_key", Value: "mock"},
+						{Key: "url", Value: "mock_url"},
+						{Key: "dim", Value: "4"},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema)
+		assert.Error(t, err)
+	})
+}
+
 func TestValidateFunctionInputField(t *testing.T) {
 	t.Run("Valid BM25 function input", func(t *testing.T) {
 		function := &schemapb.FunctionSchema{
@@ -2920,6 +2993,28 @@ func TestValidateFunctionInputField(t *testing.T) {
 		err := checkFunctionInputField(function, fields)
 		assert.Error(t, err)
 	})
+
+	t.Run("Invalid TextEmbedding function input - multiple fields", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_TextEmbedding,
+		}
+		fields := []*schemapb.FieldSchema{}
+		err := checkFunctionInputField(function, fields)
+		assert.Error(t, err)
+	})
+
+	t.Run("Invalid TextEmbedding function input - wrong type", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_TextEmbedding,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_Int64,
+			},
+		}
+		err := checkFunctionInputField(function, fields)
+		assert.Error(t, err)
+	})
 }
 
 func TestValidateFunctionOutputField(t *testing.T) {
@@ -2972,6 +3067,28 @@ func TestValidateFunctionOutputField(t *testing.T) {
 		fields := []*schemapb.FieldSchema{
 			{
 				DataType: schemapb.DataType_FloatVector,
+			},
+		}
+		err := checkFunctionOutputField(function, fields)
+		assert.Error(t, err)
+	})
+
+	t.Run("Invalid TextEmbedding function input - multiple fields", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_TextEmbedding,
+		}
+		fields := []*schemapb.FieldSchema{}
+		err := checkFunctionOutputField(function, fields)
+		assert.Error(t, err)
+	})
+
+	t.Run("Invalid TextEmbedding function input - wrong type", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_TextEmbedding,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_Int64,
 			},
 		}
 		err := checkFunctionOutputField(function, fields)
@@ -3078,6 +3195,36 @@ func TestValidateFunctionBasicParams(t *testing.T) {
 		err := checkFunctionBasicParams(function)
 		assert.Error(t, err)
 	})
+
+	t.Run("Empty text embedding params", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Name:             "textEmbeddingParam",
+			Type:             schemapb.FunctionType_TextEmbedding,
+			InputFieldNames:  []string{"input1"},
+			OutputFieldNames: []string{"output1"},
+		}
+		err := checkFunctionBasicParams(function)
+		assert.Error(t, err)
+	})
+}
+
+func TestIsBM25FunctionOutputField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+			{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"input_field"},
+				OutputFieldNames: []string{"output_field"},
+			},
+		},
+	}
+	assert.False(t, IsBM25FunctionOutputField(schema.Fields[0], schema))
+	assert.True(t, IsBM25FunctionOutputField(schema.Fields[1], schema))
 }
 
 func TestComputeRecall(t *testing.T) {
