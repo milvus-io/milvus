@@ -245,7 +245,9 @@ type taskScheduler struct {
 	channelTasks *ConcurrentMap[replicaChannelIndex, Task]
 	processQueue *taskQueue
 	waitQueue    *taskQueue
-	taskStats    *expirable.LRU[UniqueID, Task]
+
+	taskStats            *expirable.LRU[UniqueID, Task]
+	lastUpdateMetricTime atomic.Time
 
 	// nodeID -> collectionID -> taskDelta
 	segmentTaskDelta *ExecutingTaskDelta
@@ -364,6 +366,9 @@ func (scheduler *taskScheduler) Add(task Task) error {
 }
 
 func (scheduler *taskScheduler) updateTaskMetrics() {
+	if time.Since(scheduler.lastUpdateMetricTime.Load()) < 30*time.Second {
+		return
+	}
 	segmentGrowNum, segmentReduceNum, segmentUpdateNum, segmentMoveNum := 0, 0, 0, 0
 	leaderGrowNum, leaderReduceNum, leaderUpdateNum := 0, 0, 0
 	channelGrowNum, channelReduceNum, channelMoveNum := 0, 0, 0
@@ -421,6 +426,7 @@ func (scheduler *taskScheduler) updateTaskMetrics() {
 	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelGrowTaskLabel).Set(float64(channelGrowNum))
 	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelReduceTaskLabel).Set(float64(channelReduceNum))
 	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelMoveTaskLabel).Set(float64(channelMoveNum))
+	scheduler.lastUpdateMetricTime.Store(time.Now())
 }
 
 // check whether the task is valid to add,
