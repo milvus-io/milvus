@@ -226,7 +226,7 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 
 			// assign the channel to the target node.
 			if err := resource.Resource().StreamingNodeManagerClient().Assign(ctx, channel.CurrentAssignment()); err != nil {
-				b.logger.Warn("fail to assign channel", zap.Any("assignment", channel.CurrentAssignment()))
+				b.logger.Warn("fail to assign channel", zap.Any("assignment", channel.CurrentAssignment()), zap.Error(err))
 				return err
 			}
 			b.logger.Info("assign channel success", zap.Any("assignment", channel.CurrentAssignment()))
