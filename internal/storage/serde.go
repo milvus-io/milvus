@@ -18,7 +18,6 @@ package storage
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 	"math"
 	"sync"
@@ -36,8 +35,6 @@ import (
 )
 
 type Record interface {
-	Schema() map[FieldID]schemapb.DataType
-	ArrowSchema() *arrow.Schema
 	Column(i FieldID) arrow.Array
 	Len() int
 	Release()
@@ -64,8 +61,7 @@ type (
 
 // compositeRecord is a record being composed of multiple records, in which each only have 1 column
 type compositeRecord struct {
-	recs   map[FieldID]arrow.Record
-	schema map[FieldID]schemapb.DataType
+	recs map[FieldID]arrow.Record
 }
 
 var _ Record = (*compositeRecord)(nil)
@@ -93,26 +89,13 @@ func (r *compositeRecord) Retain() {
 	}
 }
 
-func (r *compositeRecord) Schema() map[FieldID]schemapb.DataType {
-	return r.schema
-}
-
-func (r *compositeRecord) ArrowSchema() *arrow.Schema {
-	var fields []arrow.Field
-	for _, rec := range r.recs {
-		fields = append(fields, rec.Schema().Field(0))
-	}
-	return arrow.NewSchema(fields, nil)
-}
-
 func (r *compositeRecord) Slice(start, end int) Record {
 	slices := make(map[FieldID]arrow.Record)
 	for i, rec := range r.recs {
 		slices[i] = rec.NewSlice(int64(start), int64(end))
 	}
 	return &compositeRecord{
-		recs:   slices,
-		schema: r.schema,
+		recs: slices,
 	}
 }
 
@@ -577,22 +560,12 @@ var _ Record = (*selectiveRecord)(nil)
 
 // selectiveRecord is a Record that only contains a single field, reusing existing Record.
 type selectiveRecord struct {
-	r               Record
-	selectedFieldId FieldID
-
-	schema map[FieldID]schemapb.DataType
-}
-
-func (r *selectiveRecord) Schema() map[FieldID]schemapb.DataType {
-	return r.schema
-}
-
-func (r *selectiveRecord) ArrowSchema() *arrow.Schema {
-	return r.r.ArrowSchema()
+	r       Record
+	fieldId FieldID
 }
 
 func (r *selectiveRecord) Column(i FieldID) arrow.Array {
-	if i == r.selectedFieldId {
+	if i == r.fieldId {
 		return r.r.Column(i)
 	}
 	return nil
@@ -660,17 +633,10 @@ func calculateArraySize(a arrow.Array) int {
 	return totalSize
 }
 
-func newSelectiveRecord(r Record, selectedFieldId FieldID) *selectiveRecord {
-	dt, ok := r.Schema()[selectedFieldId]
-	if !ok {
-		return nil
-	}
-	schema := make(map[FieldID]schemapb.DataType, 1)
-	schema[selectedFieldId] = dt
+func newSelectiveRecord(r Record, selectedFieldId FieldID) Record {
 	return &selectiveRecord{
-		r:               r,
-		selectedFieldId: selectedFieldId,
-		schema:          schema,
+		r:       r,
+		fieldId: selectedFieldId,
 	}
 }
 
@@ -678,26 +644,19 @@ var _ RecordWriter = (*CompositeRecordWriter)(nil)
 
 type CompositeRecordWriter struct {
 	writers map[FieldID]RecordWriter
-
-	writtenUncompressed uint64
 }
 
 func (crw *CompositeRecordWriter) GetWrittenUncompressed() uint64 {
-	return crw.writtenUncompressed
+	s := uint64(0)
+	for _, w := range crw.writers {
+		s += w.GetWrittenUncompressed()
+	}
+	return s
 }
 
 func (crw *CompositeRecordWriter) Write(r Record) error {
-	if len(r.Schema()) != len(crw.writers) {
-		return fmt.Errorf("schema length mismatch %d, expected %d", len(r.Schema()), len(crw.writers))
-	}
-
-	var bytes uint64
-	for fid := range r.Schema() {
-		arr := r.Column(fid)
-		bytes += uint64(calculateArraySize(arr))
-	}
-	crw.writtenUncompressed += bytes
 	for fieldId, w := range crw.writers {
+		// TODO: if field is not exist, write
 		sr := newSelectiveRecord(r, fieldId)
 		if err := w.Write(sr); err != nil {
 			return err
@@ -909,17 +868,12 @@ func NewSerializeRecordWriter[T any](rw RecordWriter, serializer Serializer[T], 
 }
 
 type simpleArrowRecord struct {
-	r      arrow.Record
-	schema map[FieldID]schemapb.DataType
+	r arrow.Record
 
 	field2Col map[FieldID]int
 }
 
 var _ Record = (*simpleArrowRecord)(nil)
-
-func (sr *simpleArrowRecord) Schema() map[FieldID]schemapb.DataType {
-	return sr.schema
-}
 
 func (sr *simpleArrowRecord) Column(i FieldID) arrow.Array {
 	colIdx, ok := sr.field2Col[i]
@@ -947,13 +901,12 @@ func (sr *simpleArrowRecord) ArrowSchema() *arrow.Schema {
 
 func (sr *simpleArrowRecord) Slice(start, end int) Record {
 	s := sr.r.NewSlice(int64(start), int64(end))
-	return newSimpleArrowRecord(s, sr.schema, sr.field2Col)
+	return newSimpleArrowRecord(s, sr.field2Col)
 }
 
-func newSimpleArrowRecord(r arrow.Record, schema map[FieldID]schemapb.DataType, field2Col map[FieldID]int) *simpleArrowRecord {
+func newSimpleArrowRecord(r arrow.Record, field2Col map[FieldID]int) *simpleArrowRecord {
 	return &simpleArrowRecord{
 		r:         r,
-		schema:    schema,
 		field2Col: field2Col,
 	}
 }

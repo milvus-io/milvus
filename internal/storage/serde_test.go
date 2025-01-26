@@ -127,27 +127,18 @@ func TestArrowSchema(t *testing.T) {
 	record := array.NewRecord(arrow.NewSchema(fields, nil), []arrow.Array{builder.NewArray()}, 1)
 	t.Run("test composite record", func(t *testing.T) {
 		cr := &compositeRecord{
-			recs:   make(map[FieldID]arrow.Record, 1),
-			schema: make(map[FieldID]schemapb.DataType, 1),
+			recs: make(map[FieldID]arrow.Record, 1),
 		}
 		cr.recs[0] = record
-		cr.schema[0] = schemapb.DataType_String
-		expected := arrow.NewSchema(fields, nil)
-		assert.Equal(t, expected, cr.ArrowSchema())
 	})
 
 	t.Run("test simple arrow record", func(t *testing.T) {
 		cr := &simpleArrowRecord{
 			r:         record,
-			schema:    make(map[FieldID]schemapb.DataType, 1),
 			field2Col: make(map[FieldID]int, 1),
 		}
-		cr.schema[0] = schemapb.DataType_String
 		expected := arrow.NewSchema(fields, nil)
 		assert.Equal(t, expected, cr.ArrowSchema())
-
-		sr := newSelectiveRecord(cr, 0)
-		assert.Equal(t, expected, sr.ArrowSchema())
 	})
 }
 

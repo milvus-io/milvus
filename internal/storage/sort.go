@@ -22,7 +22,6 @@ import (
 	"sort"
 
 	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 func Sort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate func(r Record, ri, i int) bool) (numRows int, err error) {
@@ -32,7 +31,7 @@ func Sort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate func(r 
 		ri int
 		i  int
 	}
-	indices := make([]index, 0)
+	indices := make([]*index, 0)
 
 	defer func() {
 		for _, r := range records {
@@ -50,7 +49,13 @@ func Sort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate func(r 
 				records = append(records, rec)
 				for i := 0; i < rec.Len(); i++ {
 					if predicate(rec, ri, i) {
-						indices = append(indices, index{ri, i})
+						numRows++
+						// if len(indices) > 0 && indices[len(indices)-1].ri == ri && indices[len(indices)-1].i+1 == i {
+						// 	indices[len(indices)-1].i = i
+						// } else {
+						// 	indices = append(indices, &index{ri, i})
+						// }
+						indices = append(indices, &index{ri, i})
 					}
 				}
 			} else if err == io.EOF {
@@ -65,14 +70,14 @@ func Sort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate func(r 
 		return 0, nil
 	}
 
-	switch records[0].Schema()[pkField] {
-	case schemapb.DataType_Int64:
+	switch records[0].Column(pkField).(type) {
+	case *array.Int64:
 		sort.Slice(indices, func(i, j int) bool {
 			pki := records[indices[i].ri].Column(pkField).(*array.Int64).Value(indices[i].i)
 			pkj := records[indices[j].ri].Column(pkField).(*array.Int64).Value(indices[j].i)
 			return pki < pkj
 		})
-	case schemapb.DataType_VarChar:
+	case *array.String:
 		sort.Slice(indices, func(i, j int) bool {
 			pki := records[indices[i].ri].Column(pkField).(*array.String).Value(indices[i].i)
 			pkj := records[indices[j].ri].Column(pkField).(*array.String).Value(indices[j].i)
@@ -80,16 +85,16 @@ func Sort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate func(r 
 		})
 	}
 
-	for _, i := range indices {
+	writeOne := func(i *index) error {
 		rec := records[i.ri].Slice(i.i, i.i+1)
-		err := rw.Write(rec)
-		rec.Release()
-		if err != nil {
-			return 0, err
-		}
+		defer rec.Release()
+		return rw.Write(rec)
+	}
+	for _, i := range indices {
+		writeOne(i)
 	}
 
-	return len(indices), nil
+	return numRows, nil
 }
 
 // A PriorityQueue implements heap.Interface and holds Items.
@@ -118,6 +123,7 @@ func (pq *PriorityQueue[T]) Pop() any {
 	old := pq.items
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	pq.items = old[0 : n-1]
 	return x
 }
@@ -167,12 +173,12 @@ func MergeSort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate fu
 	}
 
 	var pq *PriorityQueue[index]
-	switch recs[0].Schema()[pkField] {
-	case schemapb.DataType_Int64:
+	switch recs[0].Column(pkField).(type) {
+	case *array.Int64:
 		pq = NewPriorityQueue[index](func(x, y *index) bool {
 			return rr[x.ri].Record().Column(pkField).(*array.Int64).Value(x.i) < rr[y.ri].Record().Column(pkField).(*array.Int64).Value(y.i)
 		})
-	case schemapb.DataType_VarChar:
+	case *array.String:
 		pq = NewPriorityQueue[index](func(x, y *index) bool {
 			return rr[x.ri].Record().Column(pkField).(*array.String).Value(x.i) < rr[y.ri].Record().Column(pkField).(*array.String).Value(y.i)
 		})
@@ -200,6 +206,7 @@ func MergeSort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate fu
 		idx := pq.Dequeue()
 		sr := rr[idx.ri].Record().Slice(idx.i, idx.i+1)
 		err := rw.Write(sr)
+		sr.Release()
 		if err != nil {
 			return 0, err
 		}

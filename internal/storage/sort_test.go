@@ -20,8 +20,9 @@ import (
 	"testing"
 
 	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 func TestSort(t *testing.T) {
@@ -54,7 +55,7 @@ func TestSort(t *testing.T) {
 	}
 
 	t.Run("sort", func(t *testing.T) {
-		gotNumRows, err := Sort(getReaders(), common.RowIDField, rw, func(r Record, i int) bool {
+		gotNumRows, err := Sort(getReaders(), common.RowIDField, rw, func(r Record, ri, i int) bool {
 			return true
 		})
 		assert.NoError(t, err)
@@ -64,7 +65,7 @@ func TestSort(t *testing.T) {
 	})
 
 	t.Run("sort with predicate", func(t *testing.T) {
-		gotNumRows, err := Sort(getReaders(), common.RowIDField, rw, func(r Record, i int) bool {
+		gotNumRows, err := Sort(getReaders(), common.RowIDField, rw, func(r Record, ri, i int) bool {
 			pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
 			return pk >= 20
 		})
@@ -105,7 +106,7 @@ func TestMergeSort(t *testing.T) {
 	}
 
 	t.Run("merge sort", func(t *testing.T) {
-		gotNumRows, err := MergeSort(getReaders(), common.RowIDField, rw, func(r Record, i int) bool {
+		gotNumRows, err := MergeSort(getReaders(), common.RowIDField, rw, func(r Record, ri, i int) bool {
 			return true
 		})
 		assert.NoError(t, err)
@@ -115,7 +116,7 @@ func TestMergeSort(t *testing.T) {
 	})
 
 	t.Run("Sort with predicate", func(t *testing.T) {
-		gotNumRows, err := MergeSort(getReaders(), common.RowIDField, rw, func(r Record, i int) bool {
+		gotNumRows, err := MergeSort(getReaders(), common.RowIDField, rw, func(r Record, ri, i int) bool {
 			pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
 			return pk >= 20
 		})
@@ -123,5 +124,39 @@ func TestMergeSort(t *testing.T) {
 		assert.Equal(t, 3, gotNumRows)
 		err = rw.Close()
 		assert.NoError(t, err)
+	})
+}
+
+// Benchmark sort
+func BenchmarkSort(b *testing.B) {
+	batch := 100000
+	blobs, err := generateTestDataWithSeed(batch, batch)
+	assert.NoError(b, err)
+	reader10, err := NewCompositeBinlogRecordReader(blobs)
+	assert.NoError(b, err)
+	blobs, err = generateTestDataWithSeed(batch*2+1, batch)
+	assert.NoError(b, err)
+	reader20, err := NewCompositeBinlogRecordReader(blobs)
+	assert.NoError(b, err)
+	rr := []RecordReader{reader20, reader10}
+
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			return nil
+		},
+
+		closefn: func() error {
+			return nil
+		},
+	}
+
+	b.ResetTimer()
+
+	b.Run("sort", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			Sort(rr, common.RowIDField, rw, func(r Record, ri, i int) bool {
+				return true
+			})
+		}
 	})
 }
