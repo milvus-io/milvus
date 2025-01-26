@@ -664,15 +664,12 @@ func (c *Core) initBuiltinRoles() error {
 			return errors.Wrapf(err, "failed to create a builtin role: %s", role)
 		}
 		for _, privilege := range privilegesJSON[util.RoleConfigPrivileges] {
-			privilegeName := privilege[util.RoleConfigPrivilege]
-			if !util.IsAnyWord(privilege[util.RoleConfigPrivilege]) {
-				dbPrivName, err := c.getMetastorePrivilegeName(c.ctx, privilege[util.RoleConfigPrivilege])
-				if err != nil {
-					return errors.Wrapf(err, "failed to get metastore privilege name for: %s", privilege[util.RoleConfigPrivilege])
-				}
-				privilegeName = dbPrivName
+			privilegeName, err := c.getMetastorePrivilegeName(c.ctx, privilege[util.RoleConfigPrivilege])
+			if err != nil {
+				return errors.Wrapf(err, "failed to get metastore privilege name for: %s", privilege[util.RoleConfigPrivilege])
 			}
-			err := c.meta.OperatePrivilege(c.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+
+			err = c.meta.OperatePrivilege(c.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: role},
 				Object:     &milvuspb.ObjectEntity{Name: privilege[util.RoleConfigObjectType]},
 				ObjectName: privilege[util.RoleConfigObjectName],
@@ -2775,6 +2772,10 @@ func (c *Core) validatePrivilegeGroupParams(ctx context.Context, entity string, 
 }
 
 func (c *Core) getMetastorePrivilegeName(ctx context.Context, privName string) (string, error) {
+	// if it is '*', return directly
+	if util.IsAnyWord(privName) {
+		return privName, nil
+	}
 	// if it is built-in privilege, return the privilege name directly
 	if util.IsPrivilegeNameDefined(privName) {
 		return util.PrivilegeNameForMetastore(privName), nil
@@ -2787,7 +2788,7 @@ func (c *Core) getMetastorePrivilegeName(ctx context.Context, privName string) (
 	if customGroup {
 		return util.PrivilegeGroupNameForMetastore(privName), nil
 	}
-	return "", errors.New("not found the privilege name")
+	return "", errors.Newf("not found the privilege name [%s] from metastore", privName)
 }
 
 // SelectGrant select grant
