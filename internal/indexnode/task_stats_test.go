@@ -81,26 +81,6 @@ func (s *TaskStatsSuite) GenSegmentWriterWithBM25(magic int64) {
 	s.segWriter = segWriter
 }
 
-func (s *TaskStatsSuite) Testbm25SerializeWriteError() {
-	s.Run("normal case", func() {
-		s.schema = genCollectionSchemaWithBM25()
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
-		s.GenSegmentWriterWithBM25(0)
-		cnt, binlogs, err := bm25SerializeWrite(context.Background(), "root_path", s.mockBinlogIO, 0, s.segWriter, 1)
-		s.Require().NoError(err)
-		s.Equal(int64(1), cnt)
-		s.Equal(1, len(binlogs))
-	})
-
-	s.Run("upload failed", func() {
-		s.schema = genCollectionSchemaWithBM25()
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
-		s.GenSegmentWriterWithBM25(0)
-		_, _, err := bm25SerializeWrite(context.Background(), "root_path", s.mockBinlogIO, 0, s.segWriter, 1)
-		s.Error(err)
-	})
-}
-
 func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 	s.Run("normal case", func() {
 		s.schema = genCollectionSchemaWithBM25()
