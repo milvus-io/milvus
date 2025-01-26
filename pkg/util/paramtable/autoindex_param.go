@@ -90,7 +90,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		Key:          "autoIndex.params.build",
 		Version:      "2.2.0",
 		DefaultValue: `{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "COSINE"}`,
-		Formatter:    getBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.build"),
+		Formatter:    GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.build"),
 		Export:       true,
 	}
 	p.IndexParams.Init(base.mgr)
@@ -99,7 +99,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		Key:          "autoIndex.params.sparse.build",
 		Version:      "2.4.5",
 		DefaultValue: `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}`,
-		Formatter:    getBuildParamFormatter(SparseFloatVectorDefaultMetricType, "autoIndex.params.sparse.build"),
+		Formatter:    GetBuildParamFormatter(SparseFloatVectorDefaultMetricType, "autoIndex.params.sparse.build"),
 		Export:       true,
 	}
 	p.SparseIndexParams.Init(base.mgr)
@@ -108,7 +108,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		Key:          "autoIndex.params.binary.build",
 		Version:      "2.4.5",
 		DefaultValue: `{"nlist": 1024, "index_type": "BIN_IVF_FLAT", "metric_type": "HAMMING"}`,
-		Formatter:    getBuildParamFormatter(BinaryVectorDefaultMetricType, "autoIndex.params.sparse.build"),
+		Formatter:    GetBuildParamFormatter(BinaryVectorDefaultMetricType, "autoIndex.params.sparse.build"),
 		Export:       true,
 	}
 	p.BinaryIndexParams.Init(base.mgr)
@@ -272,7 +272,7 @@ func SetDefaultMetricTypeIfNotExist(dType schemapb.DataType, params map[string]s
 	}
 }
 
-func getBuildParamFormatter(defaultMetricsType metric.MetricType, tag string) func(string) string {
+func GetBuildParamFormatter(defaultMetricsType metric.MetricType, tag string) func(string) string {
 	return func(originValue string) string {
 		m, err := funcutil.JSONToMap(originValue)
 		if err != nil {

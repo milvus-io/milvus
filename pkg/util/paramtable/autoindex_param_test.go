@@ -135,7 +135,7 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		p := &AutoIndexConfig{
 			IndexParams: ParamItem{
 				Key:       "autoIndex.params.build",
-				Formatter: getBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.build"),
+				Formatter: GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.build"),
 			},
 		}
 		p.IndexParams.Init(mgr)
