@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -3287,6 +3288,21 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	return rsp, err
 }
 
+type hybridSearchRequestExprLogger struct {
+	*milvuspb.HybridSearchRequest
+}
+
+// String implements Stringer interface for lazy logging.
+func (l *hybridSearchRequestExprLogger) String() string {
+	builder := &strings.Builder{}
+
+	for idx, subReq := range l.Requests {
+		builder.WriteString(fmt.Sprintf("[No.%d req, expr: %s]", idx, subReq.GetDsl()))
+	}
+
+	return builder.String()
+}
+
 func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error) {
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
@@ -3339,6 +3355,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		zap.Any("OutputFields", request.OutputFields),
 		zap.String("ConsistencyLevel", request.GetConsistencyLevel().String()),
 		zap.Bool("useDefaultConsistency", request.GetUseDefaultConsistency()),
+		zap.Stringer("dsls", &hybridSearchRequestExprLogger{HybridSearchRequest: request}),
 	)
 
 	defer func() {
