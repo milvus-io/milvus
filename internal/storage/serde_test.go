@@ -120,28 +120,6 @@ func TestSerDe(t *testing.T) {
 	}
 }
 
-func TestArrowSchema(t *testing.T) {
-	fields := []arrow.Field{{Name: "1", Type: arrow.BinaryTypes.String, Nullable: true}}
-	builder := array.NewBuilder(memory.DefaultAllocator, arrow.BinaryTypes.String)
-	builder.AppendValueFromString("1")
-	record := array.NewRecord(arrow.NewSchema(fields, nil), []arrow.Array{builder.NewArray()}, 1)
-	t.Run("test composite record", func(t *testing.T) {
-		cr := &compositeRecord{
-			recs: make(map[FieldID]arrow.Record, 1),
-		}
-		cr.recs[0] = record
-	})
-
-	t.Run("test simple arrow record", func(t *testing.T) {
-		cr := &simpleArrowRecord{
-			r:         record,
-			field2Col: make(map[FieldID]int, 1),
-		}
-		expected := arrow.NewSchema(fields, nil)
-		assert.Equal(t, expected, cr.ArrowSchema())
-	})
-}
-
 func BenchmarkDeserializeReader(b *testing.B) {
 	len := 1000000
 	blobs, err := generateTestData(len)

@@ -61,18 +61,19 @@ type (
 
 // compositeRecord is a record being composed of multiple records, in which each only have 1 column
 type compositeRecord struct {
-	recs map[FieldID]arrow.Record
+	index map[FieldID]int16
+	recs  []arrow.Array
 }
 
 var _ Record = (*compositeRecord)(nil)
 
 func (r *compositeRecord) Column(i FieldID) arrow.Array {
-	return r.recs[i].Column(0)
+	return r.recs[r.index[i]]
 }
 
 func (r *compositeRecord) Len() int {
 	for _, rec := range r.recs {
-		return rec.Column(0).Len()
+		return rec.Len()
 	}
 	return 0
 }
@@ -90,12 +91,14 @@ func (r *compositeRecord) Retain() {
 }
 
 func (r *compositeRecord) Slice(start, end int) Record {
-	slices := make(map[FieldID]arrow.Record)
+	slices := make([]arrow.Array, len(r.index))
 	for i, rec := range r.recs {
-		slices[i] = rec.NewSlice(int64(start), int64(end))
+		d := array.NewSliceData(rec.Data(), int64(start), int64(end))
+		slices[i] = array.MakeFromData(d)
 	}
 	return &compositeRecord{
-		recs: slices,
+		index: r.index,
+		recs:  slices,
 	}
 }
 

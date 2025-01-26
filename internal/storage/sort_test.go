@@ -115,7 +115,7 @@ func TestMergeSort(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("Sort with predicate", func(t *testing.T) {
+	t.Run("merge sort with predicate", func(t *testing.T) {
 		gotNumRows, err := MergeSort(getReaders(), common.RowIDField, rw, func(r Record, ri, i int) bool {
 			pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
 			return pk >= 20
@@ -129,7 +129,7 @@ func TestMergeSort(t *testing.T) {
 
 // Benchmark sort
 func BenchmarkSort(b *testing.B) {
-	batch := 100000
+	batch := 500000
 	blobs, err := generateTestDataWithSeed(batch, batch)
 	assert.NoError(b, err)
 	reader10, err := NewCompositeBinlogRecordReader(blobs)

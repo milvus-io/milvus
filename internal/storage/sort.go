@@ -50,12 +50,11 @@ func Sort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate func(r 
 				for i := 0; i < rec.Len(); i++ {
 					if predicate(rec, ri, i) {
 						numRows++
-						// if len(indices) > 0 && indices[len(indices)-1].ri == ri && indices[len(indices)-1].i+1 == i {
-						// 	indices[len(indices)-1].i = i
-						// } else {
-						// 	indices = append(indices, &index{ri, i})
-						// }
-						indices = append(indices, &index{ri, i})
+						if len(indices) > 0 && indices[len(indices)-1].ri == ri && indices[len(indices)-1].i+1 == i {
+							indices[len(indices)-1].i = i
+						} else {
+							indices = append(indices, &index{ri, i})
+						}
 					}
 				}
 			} else if err == io.EOF {
@@ -202,17 +201,36 @@ func MergeSort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate fu
 		}
 	}
 
+	ri, istart, iend := -1, -1, -1
 	for pq.Len() > 0 {
 		idx := pq.Dequeue()
-		sr := rr[idx.ri].Record().Slice(idx.i, idx.i+1)
-		err := rw.Write(sr)
-		sr.Release()
-		if err != nil {
-			return 0, err
+		if ri == idx.ri {
+			// record end of cache, do nothing
+			iend = idx.i + 1
+		} else {
+			if ri != -1 {
+				// record changed, write old one and reset
+				sr := rr[ri].Record().Slice(istart, iend)
+				err := rw.Write(sr)
+				sr.Release()
+				if err != nil {
+					return 0, err
+				}
+			}
+			ri = idx.ri
+			istart = idx.i
+			iend = idx.i + 1
 		}
 
-		// If poped idx reaches end of segment, advance to next segment
+		// If poped idx reaches end of segment, invalidate cache and advance to next segment
 		if idx.i == rr[idx.ri].Record().Len()-1 {
+			sr := rr[ri].Record().Slice(istart, iend)
+			err := rw.Write(sr)
+			sr.Release()
+			if err != nil {
+				return 0, err
+			}
+			ri, istart, iend = -1, -1, -1
 			rec, err := advanceRecord(rr[idx.ri])
 			if err == io.EOF {
 				continue

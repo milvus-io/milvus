@@ -49,6 +49,7 @@ type CompositeBinlogRecordReader struct {
 	rrs []array.RecordReader
 
 	schema map[FieldID]schemapb.DataType
+	index  map[FieldID]int16
 	r      *compositeRecord
 }
 
@@ -71,6 +72,7 @@ func (crr *CompositeBinlogRecordReader) iterateNextBatch() error {
 		crr.rrs = make([]array.RecordReader, len(blobs))
 		crr.brs = make([]*BinlogReader, len(blobs))
 		crr.schema = make(map[FieldID]schemapb.DataType)
+		crr.index = make(map[FieldID]int16, len(blobs))
 	}
 
 	for i, b := range blobs {
@@ -90,6 +92,7 @@ func (crr *CompositeBinlogRecordReader) iterateNextBatch() error {
 			return err
 		}
 		crr.rrs[i] = rr
+		crr.index[reader.FieldID] = int16(i)
 		crr.brs[i] = reader
 	}
 	return nil
@@ -103,15 +106,16 @@ func (crr *CompositeBinlogRecordReader) Next() error {
 	}
 
 	composeRecord := func() bool {
-		recs := make(map[FieldID]arrow.Record, len(crr.rrs))
+		recs := make([]arrow.Array, len(crr.rrs))
 		for i, rr := range crr.rrs {
 			if ok := rr.Next(); !ok {
 				return false
 			}
-			recs[crr.brs[i].FieldID] = rr.Record()
+			recs[i] = rr.Record().Column(0)
 		}
 		crr.r = &compositeRecord{
-			recs: recs,
+			index: crr.index,
+			recs:  recs,
 		}
 		return true
 	}
