@@ -17,12 +17,12 @@
 package paramtable
 
 import (
-	"fmt"
 	"strconv"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -90,6 +90,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		Key:          "autoIndex.params.build",
 		Version:      "2.2.0",
 		DefaultValue: `{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "COSINE"}`,
+		Formatter:    GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.build"),
 		Export:       true,
 	}
 	p.IndexParams.Init(base.mgr)
@@ -98,6 +99,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		Key:          "autoIndex.params.sparse.build",
 		Version:      "2.4.5",
 		DefaultValue: `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}`,
+		Formatter:    GetBuildParamFormatter(SparseFloatVectorDefaultMetricType, "autoIndex.params.sparse.build"),
 		Export:       true,
 	}
 	p.SparseIndexParams.Init(base.mgr)
@@ -106,6 +108,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		Key:          "autoIndex.params.binary.build",
 		Version:      "2.4.5",
 		DefaultValue: `{"nlist": 1024, "index_type": "BIN_IVF_FLAT", "metric_type": "HAMMING"}`,
+		Formatter:    GetBuildParamFormatter(BinaryVectorDefaultMetricType, "autoIndex.params.sparse.build"),
 		Export:       true,
 	}
 	p.BinaryIndexParams.Init(base.mgr)
@@ -157,8 +160,6 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		Version:   "2.3.0",
 	}
 	p.AutoIndexTuningConfig.Init(base.mgr)
-
-	p.SetDefaultMetricType(base.mgr)
 
 	p.ScalarAutoIndexEnable = ParamItem{
 		Key:          "scalarAutoIndex.enable",
@@ -245,13 +246,6 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 	p.ScalarBoolIndexType.Init(base.mgr)
 }
 
-// SetDefaultMetricType The config check logic has been moved to internal package; only set defulat metric here
-func (p *AutoIndexConfig) SetDefaultMetricType(mgr *config.Manager) {
-	p.SetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
-	p.SetDefaultMetricTypeHelper(p.BinaryIndexParams.Key, p.BinaryIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector, mgr)
-	p.SetDefaultMetricTypeHelper(p.SparseIndexParams.Key, p.SparseIndexParams.GetAsJSONMap(), schemapb.DataType_SparseFloatVector, mgr)
-}
-
 func setDefaultIfNotExist(params map[string]string, key string, defaultValue string) {
 	_, exist := params[key]
 	if !exist {
@@ -278,20 +272,21 @@ func SetDefaultMetricTypeIfNotExist(dType schemapb.DataType, params map[string]s
 	}
 }
 
-func (p *AutoIndexConfig) SetDefaultMetricTypeHelper(key string, m map[string]string, dtype schemapb.DataType, mgr *config.Manager) {
-	if m == nil {
-		panic(fmt.Sprintf("%s invalid, should be json format", key))
+func GetBuildParamFormatter(defaultMetricsType metric.MetricType, tag string) func(string) string {
+	return func(originValue string) string {
+		m, err := funcutil.JSONToMap(originValue)
+		if err != nil {
+			panic(errors.Wrapf(err, "failed to parse %s config value", tag))
+		}
+		_, ok := m[common.MetricTypeKey]
+		if ok {
+			return originValue
+		}
+		m[common.MetricTypeKey] = defaultMetricsType
+		ret, err := funcutil.MapToJSON(m)
+		if err != nil {
+			panic(errors.Wrapf(err, "failed to convert updated %s map to json", tag))
+		}
+		return ret
 	}
-
-	SetDefaultMetricTypeIfNotExist(dtype, m)
-
-	p.reset(key, m, mgr)
-}
-
-func (p *AutoIndexConfig) reset(key string, m map[string]string, mgr *config.Manager) {
-	ret, err := funcutil.MapToJSON(m)
-	if err != nil {
-		panic(fmt.Sprintf("%s: convert to json failed, parameters invalid, error: %s", key, err.Error()))
-	}
-	mgr.SetConfig(key, ret)
 }
