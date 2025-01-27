@@ -108,7 +108,8 @@ func TestBulkPackWriter_Write(t *testing.T) {
 	cm.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	deletes := &storage.DeleteData{}
-	for i := 0; i < 10; i++ {
+	entriesNum := 10
+	for i := 0; i < entriesNum; i++ {
 		pk := storage.NewInt64PrimaryKey(int64(i + 1))
 		ts := uint64(100 + i)
 		deletes.Append(pk, ts)
@@ -124,41 +125,51 @@ func TestBulkPackWriter_Write(t *testing.T) {
 		name          string
 		pack          *SyncPack
 		wantInserts   map[int64]*datapb.FieldBinlog
-		wantDeltas    *datapb.FieldBinlog
+		wantDeltas    func(pack *SyncPack) *datapb.FieldBinlog
 		wantStats     map[int64]*datapb.FieldBinlog
 		wantBm25Stats map[int64]*datapb.FieldBinlog
-		wantSize      int64
+		wantSize      func(pack *SyncPack) int64
 		wantErr       error
 	}{
 		{
-			name:          "empty",
-			pack:          new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName),
-			wantInserts:   map[int64]*datapb.FieldBinlog{},
-			wantDeltas:    &datapb.FieldBinlog{},
+			name:        "empty",
+			pack:        new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName),
+			wantInserts: map[int64]*datapb.FieldBinlog{},
+			wantDeltas: func(pack *SyncPack) *datapb.FieldBinlog {
+				return &datapb.FieldBinlog{}
+			},
 			wantStats:     map[int64]*datapb.FieldBinlog{},
 			wantBm25Stats: map[int64]*datapb.FieldBinlog{},
-			wantSize:      0,
+			wantSize:      func(pack *SyncPack) int64 { return 0 },
 			wantErr:       nil,
 		},
 		{
 			name:        "with delete",
 			pack:        new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithDeleteData(deletes),
 			wantInserts: map[int64]*datapb.FieldBinlog{},
-			wantDeltas: &datapb.FieldBinlog{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{
-					{
-						EntriesNum: 10,
-						LogPath:    "files/delta_log/123/456/789/10000",
-						LogSize:    594,
-						MemorySize: 283,
+			wantDeltas: func(pack *SyncPack) *datapb.FieldBinlog {
+				s, _ := NewStorageSerializer(bw.metaCache)
+				deltaBlob, _ := s.serializeDeltalog(pack)
+				return &datapb.FieldBinlog{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{
+						{
+							EntriesNum: int64(entriesNum),
+							LogPath:    "files/delta_log/123/456/789/10000",
+							LogSize:    int64(len(deltaBlob.GetValue())),
+							MemorySize: deltaBlob.MemorySize,
+						},
 					},
-				},
+				}
 			},
 			wantStats:     map[int64]*datapb.FieldBinlog{},
 			wantBm25Stats: map[int64]*datapb.FieldBinlog{},
-			wantSize:      594,
-			wantErr:       nil,
+			wantSize: func(pack *SyncPack) int64 {
+				s, _ := NewStorageSerializer(bw.metaCache)
+				deltaBlob, _ := s.serializeDeltalog(pack)
+				return int64(len(deltaBlob.GetValue()))
+			},
+			wantErr: nil,
 		},
 	}
 	for _, tt := range tests {
@@ -171,8 +182,8 @@ func TestBulkPackWriter_Write(t *testing.T) {
 			if !reflect.DeepEqual(gotInserts, tt.wantInserts) {
 				t.Errorf("BulkPackWriter.Write() gotInserts = %v, want %v", gotInserts, tt.wantInserts)
 			}
-			if !reflect.DeepEqual(gotDeltas, tt.wantDeltas) {
-				t.Errorf("BulkPackWriter.Write() gotDeltas = %v, want %v", gotDeltas, tt.wantDeltas)
+			if !reflect.DeepEqual(gotDeltas, tt.wantDeltas(tt.pack)) {
+				t.Errorf("BulkPackWriter.Write() gotDeltas = %v, want %v", gotDeltas, tt.wantDeltas(tt.pack))
 			}
 			if !reflect.DeepEqual(gotStats, tt.wantStats) {
 				t.Errorf("BulkPackWriter.Write() gotStats = %v, want %v", gotStats, tt.wantStats)
@@ -180,8 +191,8 @@ func TestBulkPackWriter_Write(t *testing.T) {
 			if !reflect.DeepEqual(gotBm25Stats, tt.wantBm25Stats) {
 				t.Errorf("BulkPackWriter.Write() gotBm25Stats = %v, want %v", gotBm25Stats, tt.wantBm25Stats)
 			}
-			if gotSize != tt.wantSize {
-				t.Errorf("BulkPackWriter.Write() gotSize = %v, want %v", gotSize, tt.wantSize)
+			if gotSize != tt.wantSize(tt.pack) {
+				t.Errorf("BulkPackWriter.Write() gotSize = %v, want %v", gotSize, tt.wantSize(tt.pack))
 			}
 		})
 	}
