@@ -142,10 +142,16 @@ func (crr *CompositeBinlogRecordReader) Record() Record {
 func (crr *CompositeBinlogRecordReader) Close() error {
 	if crr.brs != nil {
 		for _, er := range crr.brs {
-			er.Close()
+			if er != nil {
+				er.Close()
+			}
 		}
+	}
+	if crr.rrs != nil {
 		for _, rr := range crr.rrs {
-			rr.Release()
+			if rr != nil {
+				rr.Release()
+			}
 		}
 	}
 	crr.r = nil

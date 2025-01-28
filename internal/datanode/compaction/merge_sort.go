@@ -114,13 +114,13 @@ func mergeSortMultipleSegments(ctx context.Context,
 		predicate = func(r storage.Record, ri, i int) bool {
 			pk := r.Column(pkField.FieldID).(*array.Int64).Value(i)
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
-			return segmentFilters[ri].Filtered(pk, uint64(ts))
+			return !segmentFilters[ri].Filtered(pk, uint64(ts))
 		}
 	case schemapb.DataType_VarChar:
 		predicate = func(r storage.Record, ri, i int) bool {
 			pk := r.Column(pkField.FieldID).(*array.String).Value(i)
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
-			return segmentFilters[ri].Filtered(pk, uint64(ts))
+			return !segmentFilters[ri].Filtered(pk, uint64(ts))
 		}
 	default:
 		log.Warn("compaction only support int64 and varchar pk field")

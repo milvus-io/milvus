@@ -21,10 +21,10 @@ func NewSegmentRecordReader(ctx context.Context, binlogPaths [][]string, binlogI
 			if err != nil {
 				return nil, err
 			}
-			pos++
 			blobs := lo.Map(bytesArr, func(v []byte, i int) *storage.Blob {
 				return &storage.Blob{Key: binlogPaths[pos][i], Value: v}
 			})
+			pos++
 			return blobs, nil
 		},
 	}
