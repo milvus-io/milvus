@@ -17,6 +17,7 @@
 #include "TermExpr.h"
 #include <memory>
 #include <utility>
+#include "common/Vector.h"
 #include "log/Log.h"
 #include "query/Utils.h"
 namespace milvus {
@@ -27,7 +28,7 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     if (is_pk_field_ && !has_offset_input_) {
-        result = ExecPkTermImpl();
+        result = ExecPkTermImpl(result);
         return;
     }
     switch (expr_->column_.data_type_) {
@@ -202,7 +203,7 @@ PhyTermFilterExpr::InitPkCacheOffset() {
 }
 
 VectorPtr
-PhyTermFilterExpr::ExecPkTermImpl() {
+PhyTermFilterExpr::ExecPkTermImpl(VectorPtr result) {
     if (!cached_bits_inited_) {
         InitPkCacheOffset();
     }
@@ -216,9 +217,15 @@ PhyTermFilterExpr::ExecPkTermImpl() {
         return nullptr;
     }
 
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    std::shared_ptr<ColumnVector> res_vec;
+    if (result != nullptr && result->size() == real_batch_size) {
+        res_vec = std::dynamic_pointer_cast<ColumnVector>(result);
+    } else {
+        res_vec = std::make_shared<ColumnVector>(TargetBitmap(real_batch_size),
+                                                 TargetBitmap(real_batch_size));
+    }
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    res.reset();
     // pk valid_bitmap is always all true
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     valid_res.set();
