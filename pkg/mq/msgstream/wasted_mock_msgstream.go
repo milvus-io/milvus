@@ -7,7 +7,7 @@ type WastedMockMsgStream struct {
 	AsProducerFunc    func(channels []string)
 	BroadcastMarkFunc func(*MsgPack) (map[string][]MessageID, error)
 	BroadcastFunc     func(*MsgPack) error
-	ChanFunc          func() <-chan *MsgPack
+	ChanFunc          func() <-chan *ConsumeMsgPack
 }
 
 func NewWastedMockMsgStream() *WastedMockMsgStream {
@@ -22,6 +22,6 @@ func (m WastedMockMsgStream) Broadcast(ctx context.Context, pack *MsgPack) (map[
 	return m.BroadcastMarkFunc(pack)
 }
 
-func (m WastedMockMsgStream) Chan() <-chan *MsgPack {
+func (m WastedMockMsgStream) Chan() <-chan *ConsumeMsgPack {
 	return m.ChanFunc()
 }

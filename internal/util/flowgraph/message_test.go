@@ -26,6 +26,7 @@ import (
 )
 
 type MockMsg struct {
+	*msgstream.BaseMsg
 	Ctx context.Context
 }
 
