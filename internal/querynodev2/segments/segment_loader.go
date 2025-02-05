@@ -355,7 +355,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			return errors.Wrap(err, "At LoadDeltaLogs")
 		}
 
-		loader.manager.Segment.Put(ctx, segmentType, segment)
+		if segment.Level() != datapb.SegmentLevel_L0 {
+			loader.manager.Segment.Put(ctx, segmentType, segment)
+		}
 		newSegments.GetAndRemove(segmentID)
 		loaded.Insert(segmentID, segment)
 		loader.notifyLoadFinish(loadInfo)
