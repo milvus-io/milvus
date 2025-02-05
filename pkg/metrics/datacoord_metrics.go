@@ -206,7 +206,6 @@ var (
 			Buckets:   longTaskBuckets,
 		}, []string{
 			isVectorFieldLabelName,
-			collectionIDLabelName,
 			channelNameLabelName,
 			compactionTypeLabelName,
 			stageLabelName,
@@ -327,6 +326,14 @@ var (
 			Name:      "index_node_num",
 			Help:      "number of IndexNodes managed by IndexCoord",
 		}, []string{})
+
+	ImportJobs = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "import_jobs",
+			Help:      "the import jobs grouping by state",
+		}, []string{"import_state"})
 
 	ImportTasks = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
