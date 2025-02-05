@@ -56,6 +56,9 @@ type SegmentInfo struct {
 	size            atomic.Int64
 	deltaRowcount   atomic.Int64
 	lastWrittenTime time.Time
+
+	// It is only to ensure mutual exclusion between L0 compacting and stats tasks
+	isStating bool
 }
 
 // NewSegmentInfo create `SegmentInfo` wrapper from `datapb.SegmentInfo`
@@ -278,6 +281,13 @@ func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
 	}
 }
 
+// SetIsStating sets stating status for segment
+func (s *SegmentsInfo) SetIsStating(segmentID UniqueID, isStating bool) {
+	if segment, ok := s.segments[segmentID]; ok {
+		s.segments[segmentID] = segment.ShadowClone(SetIsStating(isStating))
+	}
+}
+
 func (s *SegmentInfo) IsDeltaLogExists(logID int64) bool {
 	for _, deltaLogs := range s.GetDeltalogs() {
 		for _, l := range deltaLogs.GetBinlogs() {
@@ -462,6 +472,13 @@ func SetFlushTime(t time.Time) SegmentInfoOption {
 func SetIsCompacting(isCompacting bool) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.isCompacting = isCompacting
+	}
+}
+
+// SetIsStating is the option to set stats state for segment info
+func SetIsStating(isStating bool) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.isStating = isStating
 	}
 }
 

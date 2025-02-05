@@ -60,7 +60,7 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockCm = NewMockChannelManager(s.T())
 	s.mockSessMgr = session.NewMockDataNodeManager(s.T())
 	s.cluster = NewMockCluster(s.T())
-	s.handler = newCompactionPlanHandler(s.cluster, s.mockSessMgr, s.mockMeta, s.mockAlloc, nil, nil)
+	s.handler = newCompactionPlanHandler(s.cluster, s.mockSessMgr, s.mockMeta, s.mockAlloc, nil)
 	s.mockHandler = NewNMockHandler(s.T())
 	s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 }
@@ -130,6 +130,22 @@ func (s *CompactionPlanHandlerSuite) generateInitTasksForSchedule() {
 
 func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 	// dataNode 101's paralleTasks has 1 task running, not L0 task
+	s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return([]*SegmentInfo{
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				CollectionID: 2,
+				PartitionID:  3,
+			},
+			currRows:        0,
+			allocations:     nil,
+			lastFlushTime:   time.Time{},
+			isCompacting:    false,
+			lastWrittenTime: time.Time{},
+			isStating:       false,
+		},
+	})
+	s.mockMeta.EXPECT().CheckSegmentsStating(mock.Anything, mock.Anything).Return(true, false)
 	tests := []struct {
 		description string
 		tasks       []CompactionTask
@@ -236,6 +252,22 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 }
 
 func (s *CompactionPlanHandlerSuite) TestScheduleWithSlotLimit() {
+	s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return([]*SegmentInfo{
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				CollectionID: 2,
+				PartitionID:  3,
+			},
+			currRows:        0,
+			allocations:     nil,
+			lastFlushTime:   time.Time{},
+			isCompacting:    false,
+			lastWrittenTime: time.Time{},
+			isStating:       false,
+		},
+	})
+	s.mockMeta.EXPECT().CheckSegmentsStating(mock.Anything, mock.Anything).Return(true, false)
 	tests := []struct {
 		description string
 		tasks       []CompactionTask
@@ -312,6 +344,23 @@ func (s *CompactionPlanHandlerSuite) TestScheduleWithSlotLimit() {
 func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 	// dataNode 102's paralleTasks has running L0 tasks
 	// nothing of the same channel will be able to schedule
+
+	s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return([]*SegmentInfo{
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				CollectionID: 2,
+				PartitionID:  3,
+			},
+			currRows:        0,
+			allocations:     nil,
+			lastFlushTime:   time.Time{},
+			isCompacting:    false,
+			lastWrittenTime: time.Time{},
+			isStating:       false,
+		},
+	})
+	s.mockMeta.EXPECT().CheckSegmentsStating(mock.Anything, mock.Anything).Return(true, false)
 	tests := []struct {
 		description string
 		tasks       []CompactionTask
@@ -576,6 +625,22 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 		}
 		return ret
 	})
+	s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return([]*SegmentInfo{
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				CollectionID: 2,
+				PartitionID:  3,
+			},
+			currRows:        0,
+			allocations:     nil,
+			lastFlushTime:   time.Time{},
+			isCompacting:    false,
+			lastWrittenTime: time.Time{},
+			isStating:       false,
+		},
+	})
+	s.mockMeta.EXPECT().CheckSegmentsStating(mock.Anything, mock.Anything).Return(true, false)
 
 	for _, t := range inTasks {
 		s.handler.submitTask(t)
@@ -595,7 +660,7 @@ func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
 	paramtable.Get().Save("dataCoord.compaction.taskQueueCapacity", "1")
 	defer paramtable.Get().Reset("dataCoord.compaction.taskQueueCapacity")
 
-	s.handler = newCompactionPlanHandler(s.cluster, s.mockSessMgr, s.mockMeta, s.mockAlloc, nil, nil)
+	s.handler = newCompactionPlanHandler(s.cluster, s.mockSessMgr, s.mockMeta, s.mockAlloc, nil)
 
 	t1 := newMixCompactionTask(&datapb.CompactionTask{
 		TriggerID: 1,
@@ -621,7 +686,7 @@ func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
 func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.SetupTest()
 	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Maybe()
-	handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockMeta, s.mockAlloc, nil, nil)
+	handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockMeta, s.mockAlloc, nil)
 
 	task := &datapb.CompactionTask{
 		TriggerID: 1,
