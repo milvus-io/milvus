@@ -28,6 +28,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 
 	"github.com/milvus-io/milvus/internal/util/function/models/ali"
+	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
 	"github.com/milvus-io/milvus/internal/util/function/models/openai"
 	"github.com/milvus-io/milvus/internal/util/function/models/vertexai"
 	"github.com/milvus-io/milvus/internal/util/function/models/voyageai"
@@ -160,6 +161,22 @@ func CreateVertexAIEmbeddingServer() *httptest.Server {
 		res.Metadata = vertexai.Metadata{
 			BillableCharacterCount: 100,
 		}
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(res)
+		w.Write(data)
+	}))
+	return ts
+}
+
+func CreateCohereEmbeddingServer() *httptest.Server {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req cohere.EmbeddingRequest
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		json.Unmarshal(body, &req)
+		embs := mockEmbedding(req.Texts, 4)
+		var res cohere.EmbeddingResponse
+		res.Embeddings.Float = embs
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)
 		w.Write(data)
