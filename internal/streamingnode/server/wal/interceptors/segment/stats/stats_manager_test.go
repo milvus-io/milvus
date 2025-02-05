@@ -106,6 +106,25 @@ func TestStatsManager(t *testing.T) {
 	assert.Panics(t, func() {
 		m.UnregisterSealedSegment(1)
 	})
+	m.UnregisterAllStatsOnPChannel("pchannel")
+	m.UnregisterAllStatsOnPChannel("pchannel2")
+}
+
+func TestSealByTotalGrowingSegmentsSize(t *testing.T) {
+	m := NewStatsManager()
+	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 3}, 3, createSegmentStats(100, 100, 300))
+	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 4}, 4, createSegmentStats(100, 200, 300))
+	m.RegisterNewGrowingSegment(SegmentBelongs{PChannel: "pchannel", VChannel: "vchannel", CollectionID: 1, PartitionID: 2, SegmentID: 5}, 5, createSegmentStats(100, 100, 300))
+	belongs := m.SealByTotalGrowingSegmentsSize(401)
+	assert.Nil(t, belongs)
+	belongs = m.SealByTotalGrowingSegmentsSize(400)
+	assert.NotNil(t, belongs)
+	assert.Equal(t, int64(4), belongs.SegmentID)
+	m.UnregisterAllStatsOnPChannel("pchannel")
+	assert.Empty(t, m.pchannelStats)
+	assert.Empty(t, m.vchannelStats)
+	assert.Empty(t, m.segmentStats)
+	assert.Empty(t, m.segmentIndex)
 }
 
 func createSegmentStats(row uint64, binarySize uint64, maxBinarSize uint64) *SegmentStats {

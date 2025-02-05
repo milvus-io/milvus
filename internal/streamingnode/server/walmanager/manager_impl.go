@@ -101,7 +101,9 @@ func (m *managerImpl) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, erro
 	if currentTerm != channel.Term {
 		return nil, status.NewUnmatchedChannelTerm(channel.Name, channel.Term, currentTerm)
 	}
-	return l, nil
+	// wal's lifetime is fully managed by wal manager,
+	// so wrap the wal instance to prevent it from being closed by other components.
+	return nopCloseWAL{l}, nil
 }
 
 // GetAllAvailableChannels returns all available channel info.
@@ -175,4 +177,14 @@ func isRemoveable(state managerState) bool {
 
 func isOpenable(state managerState) bool {
 	return state&managerOpenable != 0
+}
+
+// wal can be only closed by the wal manager.
+// So wrap the wal instance to prevent it from being closed by other components.
+type nopCloseWAL struct {
+	wal.WAL
+}
+
+func (w nopCloseWAL) Close() {
+	// do nothing
 }
