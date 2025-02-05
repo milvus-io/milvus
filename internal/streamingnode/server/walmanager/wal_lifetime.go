@@ -6,7 +6,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -140,7 +139,6 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 	// term must be increasing or available -> unavailable, close current term wal is always applied.
 	term := currentState.Term()
 	if oldWAL := currentState.GetWAL(); oldWAL != nil {
-		resource.Resource().Flusher().UnregisterPChannel(w.channel)
 		oldWAL.Close()
 		logger.Info("close current term wal done")
 		// Push term to current state unavailable and open a new wal.
@@ -168,14 +166,6 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 		return
 	}
 	logger.Info("open new wal done")
-	err = resource.Resource().Flusher().RegisterPChannel(w.channel, l)
-	if err != nil {
-		logger.Warn("open flusher fail", zap.Error(err))
-		w.statePair.SetCurrentState(newUnavailableCurrentState(expectedState.Term(), err))
-		// wal is opened, if register flusher failure, we should close the wal.
-		l.Close()
-		return
-	}
 	// -> (expectedTerm,true)
 	w.statePair.SetCurrentState(newAvailableCurrentState(l))
 }

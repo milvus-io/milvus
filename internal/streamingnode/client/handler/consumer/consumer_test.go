@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
@@ -21,7 +22,7 @@ import (
 )
 
 func TestConsumer(t *testing.T) {
-	resultCh := make(message.ChanMessageHandler, 1)
+	resultCh := make(adaptor.ChanMessageHandler, 1)
 	c := newMockedConsumerImpl(t, context.Background(), resultCh)
 
 	mmsg, _ := message.NewInsertMessageBuilderV1().
@@ -70,7 +71,7 @@ func TestConsumer(t *testing.T) {
 }
 
 func TestConsumerWithCancellation(t *testing.T) {
-	resultCh := make(message.ChanMessageHandler, 1)
+	resultCh := make(adaptor.ChanMessageHandler, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	c := newMockedConsumerImpl(t, ctx, resultCh)
 

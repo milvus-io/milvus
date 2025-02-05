@@ -93,6 +93,7 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 		return b.ScoreBasedBalancer.BalanceReplica(ctx, replica)
 	}
 
+	// TODO: assign by channel
 	channelPlans = make([]ChannelAssignPlan, 0)
 	segmentPlans = make([]SegmentAssignPlan, 0)
 	for channelName := range channels {
