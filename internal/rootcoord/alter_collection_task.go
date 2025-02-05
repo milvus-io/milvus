@@ -102,6 +102,10 @@ func executeAlterCollectionTaskSteps(ctx context.Context,
 	oldColl.Properties = oldProperties
 	newColl := col.Clone()
 	newColl.Properties = newProperties
+	tso, err := core.tsoAllocator.GenerateTSO(1)
+	if err == nil {
+		newColl.UpdateTimestamp = tso
+	}
 	redoTask := newBaseRedoTask(core.stepExecutor)
 	redoTask.AddSyncStep(&AlterCollectionStep{
 		baseStep: baseStep{core: core},
@@ -280,6 +284,12 @@ func executeAlterCollectionFieldTaskSteps(ctx context.Context,
 	if err != nil {
 		return err
 	}
+
+	tso, err := core.tsoAllocator.GenerateTSO(1)
+	if err == nil {
+		newColl.UpdateTimestamp = tso
+	}
+
 	redoTask := newBaseRedoTask(core.stepExecutor)
 	redoTask.AddSyncStep(&AlterCollectionStep{
 		baseStep: baseStep{core: core},

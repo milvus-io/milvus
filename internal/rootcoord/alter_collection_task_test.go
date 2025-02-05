@@ -96,7 +96,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 		).Return(errors.New("err"))
 		meta.On("ListAliasesByID", mock.Anything, mock.Anything).Return([]string{})
 
-		core := newTestCore(withValidProxyManager(), withMeta(meta))
+		core := newTestCore(withValidProxyManager(), withMeta(meta), withInvalidTsoAllocator())
 		task := &alterCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterCollectionRequest{
@@ -131,7 +131,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			return errors.New("err")
 		}
 
-		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker))
+		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker), withInvalidTsoAllocator())
 		task := &alterCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterCollectionRequest{
@@ -166,7 +166,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			return errors.New("err")
 		}
 
-		core := newTestCore(withInvalidProxyManager(), withMeta(meta), withBroker(broker))
+		core := newTestCore(withInvalidProxyManager(), withMeta(meta), withBroker(broker), withInvalidTsoAllocator())
 		task := &alterCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterCollectionRequest{
@@ -200,7 +200,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 				},
 			},
 		}, nil)
-		core := newTestCore(withValidProxyManager(), withMeta(meta))
+		core := newTestCore(withValidProxyManager(), withMeta(meta), withInvalidTsoAllocator())
 		task := &alterCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterCollectionRequest{
@@ -254,7 +254,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 		ticker := newChanTimeTickSync(packChan)
 		ticker.addDmlChannels("by-dev-rootcoord-dml_1")
 
-		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker), withTtSynchronizer(ticker))
+		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker), withTtSynchronizer(ticker), withInvalidTsoAllocator())
 		newPros := append(properties, &commonpb.KeyValuePair{
 			Key:   common.ReplicateEndTSKey,
 			Value: "10000",
