@@ -19,8 +19,10 @@ package deletebuffer
 import (
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
@@ -124,6 +126,64 @@ func (s *ListDeleteBufferSuite) TestTryDiscard() {
 	s.Equal(1, len(buffer.ListAfter(10)), "discard will not happen if there is only one block")
 	s.EqualValues(1, entryNum)
 	s.EqualValues(120, memorySize)
+}
+
+func (s *ListDeleteBufferSuite) TestL0SegmentOperations() {
+	buffer := NewListDeleteBuffer[*Item](10, 1000, []string{"1", "dml-1"})
+
+	// Create mock segments with specific IDs
+	seg1 := segments.NewMockSegment(s.T())
+	seg1.On("ID").Return(int64(1))
+	seg1.On("Release", mock.Anything).Return()
+
+	seg2 := segments.NewMockSegment(s.T())
+	seg2.On("ID").Return(int64(2))
+	seg2.On("Release", mock.Anything).Return()
+
+	seg3 := segments.NewMockSegment(s.T())
+	seg3.On("Release", mock.Anything).Return()
+
+	// Test RegisterL0 with multiple segments
+	buffer.RegisterL0(seg1, seg2)
+	segments := buffer.ListL0()
+	s.Equal(2, len(segments))
+
+	// Verify segment IDs by collecting them first
+	ids := make([]int64, 0, len(segments))
+	for _, seg := range segments {
+		ids = append(ids, seg.ID())
+	}
+	s.ElementsMatch([]int64{1, 2}, ids, "expected segment IDs 1 and 2 in any order")
+
+	// Test ListL0 with empty buffer
+	emptyBuffer := NewListDeleteBuffer[*Item](10, 1000, []string{})
+	s.Equal(0, len(emptyBuffer.ListL0()))
+
+	// Test UnRegister
+	buffer.UnRegister(15, 1)
+	segments = buffer.ListL0()
+	s.Equal(1, len(segments))
+	s.Equal(int64(2), segments[0].ID())
+
+	// Verify Release was called on unregistered segment
+	seg1.AssertCalled(s.T(), "Release", mock.Anything)
+
+	// Test Clear
+	buffer.RegisterL0(seg3)
+	s.Equal(2, len(buffer.ListL0()))
+	buffer.Clear()
+	s.Equal(0, len(buffer.ListL0()))
+
+	// Verify Release was called on all segments
+	seg2.AssertCalled(s.T(), "Release", mock.Anything)
+	seg3.AssertCalled(s.T(), "Release", mock.Anything)
+
+	// Test UnRegister with non-existent segment
+	buffer.UnRegister(20, 999)
+
+	// Test RegisterL0 with nil segment (should not panic)
+	buffer.RegisterL0(nil)
+	s.Equal(0, len(buffer.ListL0()))
 }
 
 func TestListDeleteBuffer(t *testing.T) {
