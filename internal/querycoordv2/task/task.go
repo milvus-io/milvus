@@ -125,12 +125,14 @@ type baseTask struct {
 	span trace.Span
 
 	// startTs
-	startTs time.Time
+	startTs atomic.Time
 }
 
 func newBaseTask(ctx context.Context, source Source, collectionID typeutil.UniqueID, replica *meta.Replica, shard string, taskTag string) *baseTask {
 	ctx, cancel := context.WithCancel(ctx)
 	ctx, span := otel.Tracer(typeutil.QueryCoordRole).Start(ctx, taskTag)
+	startTs := atomic.Time{}
+	startTs.Store(time.Now())
 
 	return &baseTask{
 		source:       source,
@@ -145,7 +147,7 @@ func newBaseTask(ctx context.Context, source Source, collectionID typeutil.Uniqu
 		doneCh:   make(chan struct{}),
 		canceled: atomic.NewBool(false),
 		span:     span,
-		startTs:  time.Now(),
+		startTs:  startTs,
 	}
 }
 
@@ -208,11 +210,11 @@ func (task *baseTask) Index() string {
 }
 
 func (task *baseTask) RecordStartTs() {
-	task.startTs = time.Now()
+	task.startTs.Store(time.Now())
 }
 
 func (task *baseTask) GetTaskLatency() int64 {
-	return time.Since(task.startTs).Milliseconds()
+	return time.Since(task.startTs.Load()).Milliseconds()
 }
 
 func (task *baseTask) Err() error {

@@ -412,33 +412,38 @@ func (suite *TargetManagerSuite) TestGetTarget() {
 	current := &CollectionTarget{}
 	next := &CollectionTarget{}
 
+	t1 := typeutil.NewConcurrentMap[int64, *CollectionTarget]()
+	t2 := typeutil.NewConcurrentMap[int64, *CollectionTarget]()
+	t3 := typeutil.NewConcurrentMap[int64, *CollectionTarget]()
+	t4 := typeutil.NewConcurrentMap[int64, *CollectionTarget]()
+	t1.Insert(1000, current)
+	t2.Insert(1000, next)
+	t3.Insert(1000, current)
+	t4.Insert(1000, current)
+
 	bothMgr := &TargetManager{
 		current: &target{
-			collectionTargetMap: map[int64]*CollectionTarget{
-				1000: current,
-			},
+			collectionTargetMap: t1,
 		},
 		next: &target{
-			collectionTargetMap: map[int64]*CollectionTarget{
-				1000: next,
-			},
+			collectionTargetMap: t2,
 		},
 	}
 	currentMgr := &TargetManager{
 		current: &target{
-			collectionTargetMap: map[int64]*CollectionTarget{
-				1000: current,
-			},
+			collectionTargetMap: t3,
 		},
-		next: &target{},
+		next: &target{
+			collectionTargetMap: typeutil.NewConcurrentMap[int64, *CollectionTarget](),
+		},
 	}
 	nextMgr := &TargetManager{
 		next: &target{
-			collectionTargetMap: map[int64]*CollectionTarget{
-				1000: current,
-			},
+			collectionTargetMap: t4,
 		},
-		current: &target{},
+		current: &target{
+			collectionTargetMap: typeutil.NewConcurrentMap[int64, *CollectionTarget](),
+		},
 	}
 
 	cases := []testCase{
@@ -647,7 +652,7 @@ func BenchmarkTargetManager(b *testing.B) {
 
 	collectionNum := 10000
 	for i := 0; i < collectionNum; i++ {
-		mgr.current.collectionTargetMap[int64(i)] = NewCollectionTarget(segments, channels, nil)
+		mgr.current.collectionTargetMap.Insert(int64(i), NewCollectionTarget(segments, channels, nil))
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
