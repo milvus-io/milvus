@@ -16,26 +16,23 @@
 
 #pragma once
 
-#include <memory>
-#include <string>
+#include <random>
 
-#include "exec/Driver.h"
-#include "exec/expression/Expr.h"
 #include "exec/operator/Operator.h"
-#include "exec/QueryContext.h"
 
 namespace milvus {
 namespace exec {
-class PhyFilterBitsNode : public Operator {
+
+class PhyRandomSampleNode : public Operator {
  public:
-    PhyFilterBitsNode(
-        int32_t operator_id,
-        DriverContext* ctx,
-        const std::shared_ptr<const plan::FilterBitsNode>& filter);
+    PhyRandomSampleNode(int32_t operator_id,
+                        DriverContext* ctx,
+                        const std::shared_ptr<const plan::RandomSampleNode>&
+                            random_sample_node);
 
     bool
     IsFilter() override {
-        return true;
+        return false;
     }
 
     bool
@@ -54,8 +51,6 @@ class PhyFilterBitsNode : public Operator {
 
     void
     Close() override {
-        Operator::Close();
-        exprs_->Clear();
     }
 
     BlockingReason
@@ -63,21 +58,31 @@ class PhyFilterBitsNode : public Operator {
         return BlockingReason::kNotBlocked;
     }
 
-    bool
-    AllInputProcessed();
-
     virtual std::string
     ToString() const override {
-        return "PhyFilterBitsNode";
+        return "PhyRandomSample";
     }
 
  private:
-    std::unique_ptr<ExprSet> exprs_;
-    QueryContext* query_context_;
-    int64_t num_processed_rows_;
-    int64_t need_process_rows_;
-    // now, is_source_node is always false except for that random sample operator exists
-    bool is_source_node_{false};
+    // Samples M elements from 0 to N - 1 where every element has equal probability to be selected.
+    static FixedVector<uint32_t>
+    HashsetSample(const uint32_t N, const uint32_t M, std::mt19937& gen);
+
+    // Samples M elements from 0 to N - 1 where every element has equal probability to be selected.
+    static FixedVector<uint32_t>
+    StandardSample(const uint32_t N, const uint32_t M, std::mt19937& gen);
+
+    // Samples M elements from 0 to N - 1 where every element has equal probability to be selected.
+    // It decides which kinds of sample method we use for sampling. It is based on some experiments.
+    // Basically, the performance of HashsetSample is highly related to N * factor while StandardSample is highly
+    // related to N.
+    static FixedVector<uint32_t>
+    Sample(const uint32_t N, const float factor);
+
+    float factor_;
+    int64_t active_count_;
+    bool is_finished_{false};
 };
+
 }  // namespace exec
 }  // namespace milvus

@@ -237,14 +237,31 @@ ProtoParser::RetrievePlanNodeFromProto(
         } else {
             auto& query = plan_node_proto.query();
             if (query.has_predicates()) {
-                auto& predicate_proto = query.predicates();
-                auto expr_parser = [&]() -> plan::PlanNodePtr {
-                    auto expr = ParseExprs(predicate_proto);
-                    return std::make_shared<plan::FilterBitsNode>(
-                        milvus::plan::GetNextPlanNodeId(), expr);
-                }();
-                plannode = std::move(expr_parser);
-                sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+                auto* predicate_proto = &query.predicates();
+                bool has_predicate = true;
+                if (predicate_proto->expr_case() ==
+                    proto::plan::Expr::kRandomSampleExpr) {
+                    has_predicate = false;
+                    auto& sample_expr = predicate_proto->random_sample_expr();
+                    plannode = std::make_shared<milvus::plan::RandomSampleNode>(
+                        milvus::plan::GetNextPlanNodeId(),
+                        sample_expr.sample_factor());
+                    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+                    if (sample_expr.has_predicate()) {
+                        predicate_proto = &sample_expr.predicate();
+                        has_predicate = true;
+                    }
+                }
+
+                if (has_predicate) {
+                    auto expr_parser = [&]() -> plan::PlanNodePtr {
+                        auto expr = ParseExprs(*predicate_proto);
+                        return std::make_shared<plan::FilterBitsNode>(
+                            milvus::plan::GetNextPlanNodeId(), expr, sources);
+                    }();
+                    plannode = std::move(expr_parser);
+                    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+                }
             }
 
             plannode = std::make_shared<milvus::plan::MvccNode>(
