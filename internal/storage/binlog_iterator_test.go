@@ -66,6 +66,10 @@ func generateTestSchema() *schemapb.CollectionSchema {
 }
 
 func generateTestData(num int) ([]*Blob, error) {
+	return generateTestDataWithSeed(1, num)
+}
+
+func generateTestDataWithSeed(seed, num int) ([]*Blob, error) {
 	insertCodec := NewInsertCodecWithSchema(&etcdpb.CollectionMeta{ID: 1, Schema: generateTestSchema()})
 
 	var (
@@ -92,7 +96,7 @@ func generateTestData(num int) ([]*Blob, error) {
 		field106 [][]byte
 	)
 
-	for i := 1; i <= num; i++ {
+	for i := seed; i < seed+num; i++ {
 		field0 = append(field0, int64(i))
 		field1 = append(field1, int64(i))
 		field10 = append(field10, true)

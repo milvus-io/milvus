@@ -92,7 +92,7 @@ func TestBinlogStreamWriter(t *testing.T) {
 			[]arrow.Array{arr},
 			int64(size),
 		)
-		r := newSimpleArrowRecord(ar, map[FieldID]schemapb.DataType{1: schemapb.DataType_Bool}, map[FieldID]int{1: 0})
+		r := newSimpleArrowRecord(ar, map[FieldID]int{1: 0})
 		defer r.Release()
 		err = rw.Write(r)
 		assert.NoError(t, err)

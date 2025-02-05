@@ -30,6 +30,25 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 )
 
+type MockRecordWriter struct {
+	writefn func(Record) error
+	closefn func() error
+}
+
+var _ RecordWriter = (*MockRecordWriter)(nil)
+
+func (w *MockRecordWriter) Write(record Record) error {
+	return w.writefn(record)
+}
+
+func (w *MockRecordWriter) Close() error {
+	return w.closefn()
+}
+
+func (w *MockRecordWriter) GetWrittenUncompressed() uint64 {
+	return 0
+}
+
 func TestSerDe(t *testing.T) {
 	type args struct {
 		dt schemapb.DataType
@@ -99,37 +118,6 @@ func TestSerDe(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestArrowSchema(t *testing.T) {
-	fields := []arrow.Field{{Name: "1", Type: arrow.BinaryTypes.String, Nullable: true}}
-	builder := array.NewBuilder(memory.DefaultAllocator, arrow.BinaryTypes.String)
-	builder.AppendValueFromString("1")
-	record := array.NewRecord(arrow.NewSchema(fields, nil), []arrow.Array{builder.NewArray()}, 1)
-	t.Run("test composite record", func(t *testing.T) {
-		cr := &compositeRecord{
-			recs:   make(map[FieldID]arrow.Record, 1),
-			schema: make(map[FieldID]schemapb.DataType, 1),
-		}
-		cr.recs[0] = record
-		cr.schema[0] = schemapb.DataType_String
-		expected := arrow.NewSchema(fields, nil)
-		assert.Equal(t, expected, cr.ArrowSchema())
-	})
-
-	t.Run("test simple arrow record", func(t *testing.T) {
-		cr := &simpleArrowRecord{
-			r:         record,
-			schema:    make(map[FieldID]schemapb.DataType, 1),
-			field2Col: make(map[FieldID]int, 1),
-		}
-		cr.schema[0] = schemapb.DataType_String
-		expected := arrow.NewSchema(fields, nil)
-		assert.Equal(t, expected, cr.ArrowSchema())
-
-		sr := newSelectiveRecord(cr, 0)
-		assert.Equal(t, expected, sr.ArrowSchema())
-	})
 }
 
 func BenchmarkDeserializeReader(b *testing.B) {
