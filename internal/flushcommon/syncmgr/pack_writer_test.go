@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -35,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 func TestNextID(t *testing.T) {
@@ -112,7 +110,7 @@ func TestBulkPackWriter_Write(t *testing.T) {
 	deletes := &storage.DeleteData{}
 	for i := 0; i < 10; i++ {
 		pk := storage.NewInt64PrimaryKey(int64(i + 1))
-		ts := tsoutil.ComposeTSByTime(time.Now(), 0)
+		ts := uint64(100 + i)
 		deletes.Append(pk, ts)
 	}
 
@@ -152,14 +150,14 @@ func TestBulkPackWriter_Write(t *testing.T) {
 					{
 						EntriesNum: 10,
 						LogPath:    "files/delta_log/123/456/789/10000",
-						LogSize:    642,
-						MemorySize: 433,
+						LogSize:    594,
+						MemorySize: 283,
 					},
 				},
 			},
 			wantStats:     map[int64]*datapb.FieldBinlog{},
 			wantBm25Stats: map[int64]*datapb.FieldBinlog{},
-			wantSize:      642,
+			wantSize:      594,
 			wantErr:       nil,
 		},
 	}
