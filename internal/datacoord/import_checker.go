@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -42,12 +43,13 @@ type ImportChecker interface {
 }
 
 type importChecker struct {
-	meta    *meta
-	broker  broker.Broker
-	cluster Cluster
-	alloc   allocator.Allocator
-	imeta   ImportMeta
-	sjm     StatsJobManager
+	meta                *meta
+	broker              broker.Broker
+	cluster             Cluster
+	alloc               allocator.Allocator
+	imeta               ImportMeta
+	sjm                 StatsJobManager
+	l0CompactionTrigger TriggerManager
 
 	closeOnce sync.Once
 	closeChan chan struct{}
@@ -59,15 +61,17 @@ func NewImportChecker(meta *meta,
 	alloc allocator.Allocator,
 	imeta ImportMeta,
 	sjm StatsJobManager,
+	l0CompactionTrigger TriggerManager,
 ) ImportChecker {
 	return &importChecker{
-		meta:      meta,
-		broker:    broker,
-		cluster:   cluster,
-		alloc:     alloc,
-		imeta:     imeta,
-		sjm:       sjm,
-		closeChan: make(chan struct{}),
+		meta:                meta,
+		broker:              broker,
+		cluster:             cluster,
+		alloc:               alloc,
+		imeta:               imeta,
+		sjm:                 sjm,
+		l0CompactionTrigger: l0CompactionTrigger,
+		closeChan:           make(chan struct{}),
 	}
 }
 
@@ -87,6 +91,14 @@ func (c *importChecker) Start() {
 		case <-ticker1.C:
 			jobs := c.imeta.GetJobBy(context.TODO())
 			for _, job := range jobs {
+				if !funcutil.SliceSetEqual[string](job.GetVchannels(), job.GetReadyVchannels()) {
+					// wait for all channels to send signals
+					log.Info("waiting for all channels to send signals",
+						zap.Strings("vchannels", job.GetVchannels()),
+						zap.Strings("readyVchannels", job.GetReadyVchannels()),
+						zap.Int64("jobID", job.GetJobID())) // TODO fubang
+					continue
+				}
 				switch job.GetState() {
 				case internalpb.ImportJobState_Pending:
 					c.checkPendingJob(job)
@@ -203,6 +215,7 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 	log := log.With(zap.Int64("jobID", job.GetJobID()))
 	lacks := c.getLackFilesForPreImports(job)
 	if len(lacks) == 0 {
+		log.Info("import job start to preimport") // TODO fubang
 		return
 	}
 	fileGroups := lo.Chunk(lacks, Params.DataCoordCfg.FilesPerPreImportTask.GetAsInt())
@@ -280,7 +293,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 
 func (c *importChecker) checkImportingJob(job ImportJob) {
 	log := log.With(zap.Int64("jobID", job.GetJobID()))
-	tasks := c.imeta.GetTaskBy(context.TODO(), WithType(ImportTaskType), WithJob(job.GetJobID()))
+	tasks := c.imeta.GetTaskBy(context.TODO(), WithType(ImportTaskType), WithJob(job.GetJobID()), WithRequestSource())
 	for _, t := range tasks {
 		if t.GetState() != datapb.ImportTaskStateV2_Completed {
 			return
@@ -377,8 +390,26 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 			default:
 			}
 		}
-		log.Debug("waiting for import segments building index...", zap.Int64s("unindexed", unindexed))
+		// TODO fubang debug test
+		log.Info("waiting for import segments building index...", zap.Int64s("unindexed", unindexed))
 		return
+	}
+
+	// wait l0 segment import and block l0 compaction
+	log.Info("start to pause l0 segment compacting", zap.Int64("jobID", job.GetJobID()))
+	c.l0CompactionTrigger.PauseL0SegmentCompacting(job.GetCollectionID())
+	log.Info("l0 segment compacting paused", zap.Int64("jobID", job.GetJobID()))
+	defer c.l0CompactionTrigger.ResumeL0SegmentCompacting(job.GetCollectionID())
+	l0ImportTasks := c.imeta.GetTaskBy(context.TODO(), WithType(ImportTaskType), WithJob(job.GetJobID()), WithL0CompactionSource())
+	for _, t := range l0ImportTasks {
+		if t.GetState() != datapb.ImportTaskStateV2_Completed {
+			// TODO fubang debug test
+			log.Debug("waiting for l0 import task...",
+				zap.Int64s("taskIDs", lo.Map(l0ImportTasks, func(t ImportTask, _ int) int64 {
+					return t.GetTaskID()
+				})))
+			return
+		}
 	}
 
 	buildIndexDuration := job.GetTR().RecordSpan()

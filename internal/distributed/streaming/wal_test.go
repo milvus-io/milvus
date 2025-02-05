@@ -33,6 +33,7 @@ func TestWAL(t *testing.T) {
 	broadcastServce := mock_client.NewMockBroadcastService(t)
 	broadcastServce.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, bmm message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+			bmm = bmm.WithBroadcastID(1)
 			result := make(map[string]*types.AppendResult)
 			for idx, msg := range bmm.SplitIntoMutableMessage() {
 				result[msg.VChannel()] = &types.AppendResult{
@@ -44,6 +45,8 @@ func TestWAL(t *testing.T) {
 				AppendResults: result,
 			}, nil
 		})
+	broadcastServce.EXPECT().Ack(mock.Anything, mock.Anything).Return(nil)
+	broadcastServce.EXPECT().BlockUntilEvent(mock.Anything, mock.Anything).Return(nil)
 	coordClient.EXPECT().Broadcast().Return(broadcastServce)
 	handler := mock_handler.NewMockHandlerClient(t)
 	handler.EXPECT().Close().Return()
@@ -129,17 +132,36 @@ func TestWAL(t *testing.T) {
 	)
 	assert.NoError(t, resp.UnwrapFirstError())
 
-	r, err := w.BroadcastAppend(ctx, newBroadcastMessage([]string{vChannel1, vChannel2, vChannel3}))
+	r, err := w.Broadcast().Append(ctx, newBroadcastMessage([]string{vChannel1, vChannel2, vChannel3}))
 	assert.NoError(t, err)
 	assert.Len(t, r.AppendResults, 3)
+
+	err = w.Broadcast().Ack(ctx, types.BroadcastAckRequest{BroadcastID: 1, VChannel: vChannel1})
+	assert.NoError(t, err)
+
+	err = w.Broadcast().BlockUntilResourceKeyAckAll(ctx, message.NewCollectionNameResourceKey("r1"))
+	assert.NoError(t, err)
+
+	err = w.Broadcast().BlockUntilResourceKeyAckOnce(ctx, message.NewCollectionNameResourceKey("r2"))
+	assert.NoError(t, err)
 
 	w.Close()
 
 	resp = w.AppendMessages(ctx, newInsertMessage(vChannel1))
 	assert.Error(t, resp.UnwrapFirstError())
-	r, err = w.BroadcastAppend(ctx, newBroadcastMessage([]string{vChannel1, vChannel2, vChannel3}))
+
+	r, err = w.Broadcast().Append(ctx, newBroadcastMessage([]string{vChannel1, vChannel2, vChannel3}))
 	assert.Error(t, err)
 	assert.Nil(t, r)
+
+	err = w.Broadcast().Ack(ctx, types.BroadcastAckRequest{BroadcastID: 1, VChannel: vChannel1})
+	assert.Error(t, err)
+
+	err = w.Broadcast().BlockUntilResourceKeyAckAll(ctx, message.NewCollectionNameResourceKey("r1"))
+	assert.Error(t, err)
+
+	err = w.Broadcast().BlockUntilResourceKeyAckOnce(ctx, message.NewCollectionNameResourceKey("r2"))
+	assert.Error(t, err)
 }
 
 func newInsertMessage(vChannel string) message.MutableMessage {

@@ -14,11 +14,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package flusher
+package util
 
 import (
 	"context"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
@@ -28,4 +30,13 @@ type MsgHandler interface {
 	HandleFlush(vchannel string, flushMsg message.ImmutableFlushMessageV2) error
 
 	HandleManualFlush(vchannel string, flushMsg message.ImmutableManualFlushMessageV2) error
+
+	HandleImport(ctx context.Context, vchannel string, importMsg *msgpb.ImportMsg) error
+}
+
+func ConvertInternalImportFile(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
+	return &internalpb.ImportFile{
+		Id:    file.GetId(),
+		Paths: file.GetPaths(),
+	}
 }

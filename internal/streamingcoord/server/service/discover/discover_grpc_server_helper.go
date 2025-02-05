@@ -45,6 +45,8 @@ func (h *discoverGrpcServerHelper) SendFullAssignment(v typeutil.VersionInt64Pai
 // SendCloseResponse sends the close response to client.
 func (h *discoverGrpcServerHelper) SendCloseResponse() error {
 	return h.Send(&streamingpb.AssignmentDiscoverResponse{
-		Response: &streamingpb.AssignmentDiscoverResponse_Close{},
+		Response: &streamingpb.AssignmentDiscoverResponse_Close{
+			Close: &streamingpb.CloseAssignmentDiscoverResponse{},
+		},
 	})
 }

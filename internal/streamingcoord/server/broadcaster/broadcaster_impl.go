@@ -10,8 +10,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
@@ -25,28 +23,20 @@ func RecoverBroadcaster(
 	ctx context.Context,
 	appendOperator *syncutil.Future[AppendOperator],
 ) (Broadcaster, error) {
-	logger := resource.Resource().Logger().With(log.FieldComponent("broadcaster"))
 	tasks, err := resource.Resource().StreamingCatalog().ListBroadcastTask(ctx)
 	if err != nil {
 		return nil, err
 	}
-	pendings := make([]*broadcastTask, 0, len(tasks))
-	for _, task := range tasks {
-		if task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING {
-			// recover pending task
-			t := newTask(task, logger)
-			pendings = append(pendings, t)
-		}
-	}
+	manager, pendings := newBroadcastTaskManager(tasks)
 	b := &broadcasterImpl{
-		logger:                 logger,
+		manager:                manager,
 		lifetime:               typeutil.NewLifetime(),
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		pendings:               pendings,
-		backoffs:               typeutil.NewHeap[*broadcastTask](&broadcastTaskArray{}),
-		backoffChan:            make(chan *broadcastTask),
-		pendingChan:            make(chan *broadcastTask),
-		workerChan:             make(chan *broadcastTask),
+		backoffs:               typeutil.NewHeap[*pendingBroadcastTask](&pendingBroadcastTaskArray{}),
+		backoffChan:            make(chan *pendingBroadcastTask),
+		pendingChan:            make(chan *pendingBroadcastTask),
+		workerChan:             make(chan *pendingBroadcastTask),
 		appendOperator:         appendOperator,
 	}
 	go b.execute()
@@ -55,14 +45,14 @@ func RecoverBroadcaster(
 
 // broadcasterImpl is the implementation of Broadcaster
 type broadcasterImpl struct {
-	logger                 *log.MLogger
+	manager                *broadcastTaskManager
 	lifetime               *typeutil.Lifetime
 	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}]
-	pendings               []*broadcastTask
-	backoffs               typeutil.Heap[*broadcastTask]
-	pendingChan            chan *broadcastTask
-	backoffChan            chan *broadcastTask
-	workerChan             chan *broadcastTask
+	pendings               []*pendingBroadcastTask
+	backoffs               typeutil.Heap[*pendingBroadcastTask]
+	pendingChan            chan *pendingBroadcastTask
+	backoffChan            chan *pendingBroadcastTask
+	workerChan             chan *pendingBroadcastTask
 	appendOperator         *syncutil.Future[AppendOperator] // TODO: we can remove those lazy future in 2.6.0, by remove the msgstream broadcaster.
 }
 
@@ -72,18 +62,17 @@ func (b *broadcasterImpl) Broadcast(ctx context.Context, msg message.BroadcastMu
 		return nil, status.NewOnShutdownError("broadcaster is closing")
 	}
 	defer func() {
+		b.lifetime.Done()
 		if err != nil {
-			b.logger.Warn("broadcast message failed", zap.Error(err))
+			b.Logger().Warn("broadcast message failed", zap.Error(err))
 			return
 		}
 	}()
 
-	// Once the task is persisted, it must be successful.
-	task, err := b.persistBroadcastTask(ctx, msg)
+	t, err := b.manager.AddTask(ctx, msg)
 	if err != nil {
 		return nil, err
 	}
-	t := newTask(task, b.logger)
 	select {
 	case <-b.backgroundTaskNotifier.Context().Done():
 		// We can only check the background context but not the request context here.
@@ -98,24 +87,23 @@ func (b *broadcasterImpl) Broadcast(ctx context.Context, msg message.BroadcastMu
 	return t.BlockUntilTaskDone(ctx)
 }
 
-// persistBroadcastTask persists the broadcast task into catalog.
-func (b *broadcasterImpl) persistBroadcastTask(ctx context.Context, msg message.BroadcastMutableMessage) (*streamingpb.BroadcastTask, error) {
+// Ack acknowledges the message at the specified vchannel.
+func (b *broadcasterImpl) Ack(ctx context.Context, req types.BroadcastAckRequest) error {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return status.NewOnShutdownError("broadcaster is closing")
+	}
 	defer b.lifetime.Done()
 
-	id, err := resource.Resource().IDAllocator().Allocate(ctx)
-	if err != nil {
-		return nil, status.NewInner("allocate new id failed, %s", err.Error())
+	return b.manager.Ack(ctx, req.BroadcastID, req.VChannel)
+}
+
+func (b *broadcasterImpl) NewWatcher() (Watcher, error) {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, status.NewOnShutdownError("broadcaster is closing")
 	}
-	task := &streamingpb.BroadcastTask{
-		TaskId:  int64(id),
-		Message: &messagespb.Message{Payload: msg.Payload(), Properties: msg.Properties().ToRawMap()},
-		State:   streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
-	}
-	// Save the task into catalog to help recovery.
-	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, task); err != nil {
-		return nil, status.NewInner("save broadcast task failed, %s", err.Error())
-	}
-	return task, nil
+	defer b.lifetime.Done()
+
+	return newWatcher(b), nil
 }
 
 func (b *broadcasterImpl) Close() {
@@ -126,26 +114,30 @@ func (b *broadcasterImpl) Close() {
 	b.backgroundTaskNotifier.BlockUntilFinish()
 }
 
+func (b *broadcasterImpl) Logger() *log.MLogger {
+	return b.manager.Logger()
+}
+
 // execute the broadcaster
 func (b *broadcasterImpl) execute() {
 	workers := int(float64(hardware.GetCPUNum()) * paramtable.Get().StreamingCfg.WALBroadcasterConcurrencyRatio.GetAsFloat())
 	if workers < 1 {
 		workers = 1
 	}
-	b.logger.Info("broadcaster start to execute", zap.Int("workerNum", workers))
+	b.Logger().Info("broadcaster start to execute", zap.Int("workerNum", workers))
 
 	defer func() {
 		b.backgroundTaskNotifier.Finish(struct{}{})
-		b.logger.Info("broadcaster execute exit")
+		b.Logger().Info("broadcaster execute exit")
 	}()
 
 	// Wait for appendOperator ready
 	appendOperator, err := b.appendOperator.GetWithContext(b.backgroundTaskNotifier.Context())
 	if err != nil {
-		b.logger.Info("broadcaster is closed before appendOperator ready")
+		b.Logger().Info("broadcaster is closed before appendOperator ready")
 		return
 	}
-	b.logger.Info("broadcaster appendOperator ready, begin to start workers and dispatch")
+	b.Logger().Info("broadcaster appendOperator ready, begin to start workers and dispatch")
 
 	// Start n workers to handle the broadcast task.
 	wg := sync.WaitGroup{}
@@ -165,8 +157,8 @@ func (b *broadcasterImpl) execute() {
 
 func (b *broadcasterImpl) dispatch() {
 	for {
-		var workerChan chan *broadcastTask
-		var nextTask *broadcastTask
+		var workerChan chan *pendingBroadcastTask
+		var nextTask *pendingBroadcastTask
 		var nextBackOff <-chan time.Time
 		// Wait for new task.
 		if len(b.pendings) > 0 {
@@ -176,7 +168,7 @@ func (b *broadcasterImpl) dispatch() {
 		if b.backoffs.Len() > 0 {
 			var nextInterval time.Duration
 			nextBackOff, nextInterval = b.backoffs.Peek().NextTimer()
-			b.logger.Info("backoff task", zap.Duration("nextInterval", nextInterval))
+			b.Logger().Info("backoff task", zap.Duration("nextInterval", nextInterval))
 		}
 
 		select {
@@ -189,7 +181,7 @@ func (b *broadcasterImpl) dispatch() {
 			b.backoffs.Push(task)
 		case <-nextBackOff:
 			// backoff is done, move all the backoff done task into pending to retry.
-			newPops := make([]*broadcastTask, 0)
+			newPops := make([]*pendingBroadcastTask, 0)
 			for b.backoffs.Len() > 0 && b.backoffs.Peek().NextInterval() < time.Millisecond {
 				newPops = append(newPops, b.backoffs.Pop())
 			}
@@ -205,7 +197,7 @@ func (b *broadcasterImpl) dispatch() {
 }
 
 func (b *broadcasterImpl) worker(no int, appendOperator AppendOperator) {
-	logger := b.logger.With(zap.Int("workerNo", no))
+	logger := b.Logger().With(zap.Int("workerNo", no))
 	defer func() {
 		logger.Info("broadcaster worker exit")
 	}()

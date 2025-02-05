@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/magiconair/properties/assert"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -1186,4 +1187,61 @@ func TestCheckDelay(t *testing.T) {
 		StartTime: time.Now().Add(-100 * time.Minute).Unix(),
 	}, nil, nil, nil, nil, nil)
 	handler.checkDelay(t3)
+}
+
+func TestGetCompactionTasksNum(t *testing.T) {
+	queueTasks := NewCompactionQueue(10, DefaultPrioritizer)
+	queueTasks.Enqueue(
+		newMixCompactionTask(&datapb.CompactionTask{
+			StartTime:    time.Now().Add(-100 * time.Minute).Unix(),
+			CollectionID: 1,
+			Type:         datapb.CompactionType_MixCompaction,
+		}, nil, nil, nil),
+	)
+	queueTasks.Enqueue(
+		newL0CompactionTask(&datapb.CompactionTask{
+			StartTime:    time.Now().Add(-100 * time.Minute).Unix(),
+			CollectionID: 1,
+			Type:         datapb.CompactionType_Level0DeleteCompaction,
+		}, nil, nil, nil),
+	)
+	queueTasks.Enqueue(
+		newClusteringCompactionTask(&datapb.CompactionTask{
+			StartTime:    time.Now().Add(-100 * time.Minute).Unix(),
+			CollectionID: 10,
+			Type:         datapb.CompactionType_ClusteringCompaction,
+		}, nil, nil, nil, nil, nil),
+	)
+	executingTasks := make(map[int64]CompactionTask, 0)
+	executingTasks[1] = newMixCompactionTask(&datapb.CompactionTask{
+		StartTime:    time.Now().Add(-100 * time.Minute).Unix(),
+		CollectionID: 1,
+		Type:         datapb.CompactionType_MixCompaction,
+	}, nil, nil, nil)
+	executingTasks[2] = newL0CompactionTask(&datapb.CompactionTask{
+		StartTime:    time.Now().Add(-100 * time.Minute).Unix(),
+		CollectionID: 10,
+		Type:         datapb.CompactionType_Level0DeleteCompaction,
+	}, nil, nil, nil)
+
+	handler := &compactionPlanHandler{
+		queueTasks:     queueTasks,
+		executingTasks: executingTasks,
+	}
+	t.Run("no filter", func(t *testing.T) {
+		i := handler.getCompactionTasksNum()
+		assert.Equal(t, 5, i)
+	})
+	t.Run("collection id filter", func(t *testing.T) {
+		i := handler.getCompactionTasksNum(CollectionIDCompactionTaskFilter(1))
+		assert.Equal(t, 3, i)
+	})
+	t.Run("l0 compaction filter", func(t *testing.T) {
+		i := handler.getCompactionTasksNum(L0CompactionCompactionTaskFilter())
+		assert.Equal(t, 2, i)
+	})
+	t.Run("collection id and l0 compaction filter", func(t *testing.T) {
+		i := handler.getCompactionTasksNum(CollectionIDCompactionTaskFilter(1), L0CompactionCompactionTaskFilter())
+		assert.Equal(t, 1, i)
+	})
 }

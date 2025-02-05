@@ -28,6 +28,7 @@ type (
 	CommitTxnMessageHeader        = messagespb.CommitTxnMessageHeader
 	RollbackTxnMessageHeader      = messagespb.RollbackTxnMessageHeader
 	TxnMessageHeader              = messagespb.TxnMessageHeader
+	ImportMessageHeader           = messagespb.ImportMessageHeader
 )
 
 type (
@@ -60,6 +61,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&CommitTxnMessageHeader{}):        MessageTypeCommitTxn,
 	reflect.TypeOf(&RollbackTxnMessageHeader{}):      MessageTypeRollbackTxn,
 	reflect.TypeOf(&TxnMessageHeader{}):              MessageTypeTxn,
+	reflect.TypeOf(&ImportMessageHeader{}):           MessageTypeImport,
 }
 
 // A system preserved message, should not allowed to provide outside of the streaming system.
@@ -80,6 +82,7 @@ type (
 	MutableDropCollectionMessageV1   = specializedMutableMessage[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]
 	MutableCreatePartitionMessageV1  = specializedMutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
 	MutableDropPartitionMessageV1    = specializedMutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
+	MutableImportMessageV1           = specializedMutableMessage[*ImportMessageHeader, *msgpb.ImportMsg]
 	MutableCreateSegmentMessageV2    = specializedMutableMessage[*CreateSegmentMessageHeader, *CreateSegmentMessageBody]
 	MutableFlushMessageV2            = specializedMutableMessage[*FlushMessageHeader, *FlushMessageBody]
 	MutableBeginTxnMessageV2         = specializedMutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
@@ -93,6 +96,7 @@ type (
 	ImmutableDropCollectionMessageV1   = specializedImmutableMessage[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]
 	ImmutableCreatePartitionMessageV1  = specializedImmutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
 	ImmutableDropPartitionMessageV1    = specializedImmutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
+	ImmutableImportMessageV1           = specializedImmutableMessage[*ImportMessageHeader, *msgpb.ImportMsg]
 	ImmutableCreateSegmentMessageV2    = specializedImmutableMessage[*CreateSegmentMessageHeader, *CreateSegmentMessageBody]
 	ImmutableFlushMessageV2            = specializedImmutableMessage[*FlushMessageHeader, *FlushMessageBody]
 	ImmutableManualFlushMessageV2      = specializedImmutableMessage[*ManualFlushMessageHeader, *ManualFlushMessageBody]
@@ -110,6 +114,7 @@ var (
 	AsMutableDropCollectionMessageV1   = asSpecializedMutableMessage[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]
 	AsMutableCreatePartitionMessageV1  = asSpecializedMutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
 	AsMutableDropPartitionMessageV1    = asSpecializedMutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
+	AsMutableImportMessageV1           = asSpecializedMutableMessage[*ImportMessageHeader, *msgpb.ImportMsg]
 	AsMutableCreateSegmentMessageV2    = asSpecializedMutableMessage[*CreateSegmentMessageHeader, *CreateSegmentMessageBody]
 	AsMutableFlushMessageV2            = asSpecializedMutableMessage[*FlushMessageHeader, *FlushMessageBody]
 	AsMutableManualFlushMessageV2      = asSpecializedMutableMessage[*ManualFlushMessageHeader, *ManualFlushMessageBody]
@@ -124,6 +129,7 @@ var (
 	AsImmutableDropCollectionMessageV1   = asSpecializedImmutableMessage[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]
 	AsImmutableCreatePartitionMessageV1  = asSpecializedImmutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
 	AsImmutableDropPartitionMessageV1    = asSpecializedImmutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
+	AsImmutableImportMessageV1           = asSpecializedImmutableMessage[*ImportMessageHeader, *msgpb.ImportMsg]
 	AsImmutableCreateSegmentMessageV2    = asSpecializedImmutableMessage[*CreateSegmentMessageHeader, *CreateSegmentMessageBody]
 	AsImmutableFlushMessageV2            = asSpecializedImmutableMessage[*FlushMessageHeader, *FlushMessageBody]
 	AsImmutableManualFlushMessageV2      = asSpecializedImmutableMessage[*ManualFlushMessageHeader, *ManualFlushMessageBody]
@@ -143,7 +149,7 @@ var (
 // Return nil, nil if the message is not the target specialized message.
 // Return nil, error if the message is the target specialized message but failed to decode the specialized header.
 // Return specializedMutableMessage, nil if the message is the target specialized message and successfully decoded the specialized header.
-func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg MutableMessage) (specializedMutableMessage[H, B], error) {
+func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg BasicMessage) (specializedMutableMessage[H, B], error) {
 	underlying := msg.(*messageImpl)
 
 	var header H

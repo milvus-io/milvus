@@ -93,6 +93,24 @@ func (m *messageImpl) WithTxnContext(txnCtx TxnContext) MutableMessage {
 	return m
 }
 
+// WithBroadcastID sets the broadcast id of current message.
+func (m *messageImpl) WithBroadcastID(id uint64) BroadcastMutableMessage {
+	bh := m.broadcastHeader()
+	if bh == nil {
+		panic("there's a bug in the message codes, broadcast header lost in properties of broadcast message")
+	}
+	if bh.BroadcastId != 0 {
+		panic("broadcast id already set in properties of broadcast message")
+	}
+	bh.BroadcastId = id
+	bhVal, err := EncodeProto(bh)
+	if err != nil {
+		panic("should not happen on broadcast header proto")
+	}
+	m.properties.Set(messageBroadcastHeader, bhVal)
+	return m
+}
+
 // IntoImmutableMessage converts current message to immutable message.
 func (m *messageImpl) IntoImmutableMessage(id MessageID) ImmutableMessage {
 	return &immutableMessageImpl{
@@ -144,8 +162,10 @@ func (m *messageImpl) BarrierTimeTick() uint64 {
 // If the message is a all channel message, it will return "".
 // If the message is a broadcast message, it will panic.
 func (m *messageImpl) VChannel() string {
-	m.assertNotBroadcast()
-
+	if m.properties.Exist(messageBroadcastHeader) && !m.properties.Exist(messageVChannel) {
+		// If a message is a broadcast message, it must have a vchannel properties in it after split.
+		panic("there's a bug in the message codes, vchannel lost in properties of broadcast message")
+	}
 	value, ok := m.properties.Get(messageVChannel)
 	if !ok {
 		return ""
@@ -153,22 +173,38 @@ func (m *messageImpl) VChannel() string {
 	return value
 }
 
-// BroadcastVChannels returns the vchannels of current message that want to broadcast.
-// If the message is not a broadcast message, it will panic.
-func (m *messageImpl) BroadcastVChannels() []string {
-	m.assertBroadcast()
+// BroadcastHeader returns the broadcast header of current message.
+func (m *messageImpl) BroadcastHeader() *BroadcastHeader {
+	header := m.broadcastHeader()
+	return newBroadcastHeaderFromProto(header)
+}
 
-	value, _ := m.properties.Get(messageVChannels)
-	vcs := &messagespb.VChannels{}
-	if err := DecodeProto(value, vcs); err != nil {
-		panic("can not decode vchannels")
+// broadcastHeader returns the broadcast header of current message.
+func (m *messageImpl) broadcastHeader() *messagespb.BroadcastHeader {
+	value, ok := m.properties.Get(messageBroadcastHeader)
+	if !ok {
+		return nil
 	}
-	return vcs.Vchannels
+	header := &messagespb.BroadcastHeader{}
+	if err := DecodeProto(value, header); err != nil {
+		panic("can not decode broadcast header")
+	}
+	return header
 }
 
 // SplitIntoMutableMessage splits the current broadcast message into multiple messages.
 func (m *messageImpl) SplitIntoMutableMessage() []MutableMessage {
-	vchannels := m.BroadcastVChannels()
+	bh := m.broadcastHeader()
+	if bh == nil {
+		panic("there's a bug in the message codes, broadcast header lost in properties of broadcast message")
+	}
+	if len(bh.Vchannels) == 0 {
+		panic("there's a bug in the message codes, no vchannel in broadcast message")
+	}
+	if bh.BroadcastId == 0 {
+		panic("there's a bug in the message codes, no broadcast id in broadcast message")
+	}
+	vchannels := bh.Vchannels
 
 	vchannelExist := make(map[string]struct{}, len(vchannels))
 	msgs := make([]MutableMessage, 0, len(vchannels))
@@ -178,9 +214,7 @@ func (m *messageImpl) SplitIntoMutableMessage() []MutableMessage {
 
 		newProperties := make(propertiesImpl, len(m.properties))
 		for key, val := range m.properties {
-			if key != messageVChannels {
-				newProperties.Set(key, val)
-			}
+			newProperties.Set(key, val)
 		}
 		newProperties.Set(messageVChannel, vchannel)
 		if _, ok := vchannelExist[vchannel]; ok {
@@ -193,18 +227,6 @@ func (m *messageImpl) SplitIntoMutableMessage() []MutableMessage {
 		vchannelExist[vchannel] = struct{}{}
 	}
 	return msgs
-}
-
-func (m *messageImpl) assertNotBroadcast() {
-	if m.properties.Exist(messageVChannels) {
-		panic("current message is a broadcast message")
-	}
-}
-
-func (m *messageImpl) assertBroadcast() {
-	if !m.properties.Exist(messageVChannels) {
-		panic("current message is not a broadcast message")
-	}
 }
 
 type immutableMessageImpl struct {
