@@ -193,6 +193,9 @@ class SegmentSealedImpl : public SegmentSealed {
            const IdArray* pks,
            const Timestamp* timestamps) override;
 
+    SegcoreError
+    Delete(arrow::Array* pks, const Timestamp* timestamps) override;
+
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
     find_first(int64_t limit, const BitsetType& bitset) const override;
 

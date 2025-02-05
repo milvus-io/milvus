@@ -71,6 +71,10 @@ func (pks *Int64PrimaryKeys) Get(idx int) PrimaryKey {
 	return NewInt64PrimaryKey(pks.values[idx])
 }
 
+func (pks *Int64PrimaryKeys) GetValues() []int64 {
+	return pks.values
+}
+
 func (pks *Int64PrimaryKeys) Type() schemapb.DataType {
 	return schemapb.DataType_Int64
 }
@@ -133,6 +137,10 @@ func (pks *VarcharPrimaryKeys) MustAppend(values ...PrimaryKey) {
 
 func (pks *VarcharPrimaryKeys) Get(idx int) PrimaryKey {
 	return NewVarCharPrimaryKey(pks.values[idx])
+}
+
+func (pks *VarcharPrimaryKeys) GetValues() []string {
+	return pks.values
 }
 
 func (pks *VarcharPrimaryKeys) Type() schemapb.DataType {

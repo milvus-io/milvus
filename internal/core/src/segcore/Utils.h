@@ -44,6 +44,11 @@ ParsePksFromIDs(std::vector<PkType>& pks,
                 DataType data_type,
                 const IdArray& data);
 
+void
+ParsePksFromArray(std::vector<PkType>& pks,
+                  DataType data_type,
+                  arrow::Array* arr);
+
 int64_t
 GetSizeOfIdArray(const IdArray& data);
 

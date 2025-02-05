@@ -127,6 +127,7 @@ typedef struct CNewSegmentResult {
     CStatus status;
     CSegmentInterface segmentPtr;
 } CNewSegmentResult;
+
 #ifdef __cplusplus
 }
 
