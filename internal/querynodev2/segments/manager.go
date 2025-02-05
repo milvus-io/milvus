@@ -401,9 +401,7 @@ func (mgr *segmentManager) Put(ctx context.Context, segmentType SegmentType, seg
 		metrics.QueryNodeNumSegments.WithLabelValues(
 			fmt.Sprint(paramtable.GetNodeID()),
 			fmt.Sprint(segment.Collection()),
-			fmt.Sprint(segment.Partition()),
 			segment.Type().String(),
-			fmt.Sprint(len(segment.Indexes())),
 			segment.Level().String(),
 		).Inc()
 	}
@@ -707,9 +705,7 @@ func (mgr *segmentManager) release(ctx context.Context, segment Segment) {
 	metrics.QueryNodeNumSegments.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
 		fmt.Sprint(segment.Collection()),
-		fmt.Sprint(segment.Partition()),
 		segment.Type().String(),
-		fmt.Sprint(len(segment.Indexes())),
 		segment.Level().String(),
 	).Dec()
 
