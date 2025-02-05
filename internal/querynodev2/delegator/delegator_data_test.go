@@ -773,44 +773,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 				},
 			},
 		})
-		s.NoError(err)
-
-		// err = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
-		// 	Base:         commonpbutil.NewMsgBase(),
-		// 	DstNodeID:    1,
-		// 	CollectionID: s.collectionID,
-		// 	Infos: []*querypb.SegmentLoadInfo{
-		// 		{
-		// 			SegmentID:     200,
-		// 			PartitionID:   500,
-		// 			StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
-		// 			DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
-		// 			Level:         datapb.SegmentLevel_L1,
-		// 			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
-		// 		},
-		// 	},
-		// })
-
-		s.NoError(err)
-		sealed, _ := s.delegator.GetSegmentInfo(false)
-		s.Require().Equal(1, len(sealed))
-		s.Equal(int64(1), sealed[0].NodeID)
-		s.ElementsMatch([]SegmentEntry{
-			{
-				SegmentID:     100,
-				NodeID:        1,
-				PartitionID:   500,
-				TargetVersion: unreadableTargetVersion,
-				Level:         datapb.SegmentLevel_L1,
-			},
-			{
-				SegmentID:     200,
-				NodeID:        1,
-				PartitionID:   500,
-				TargetVersion: unreadableTargetVersion,
-				Level:         datapb.SegmentLevel_L0,
-			},
-		}, sealed[0].Segments)
+		s.ErrorIs(err, merr.ErrServiceInternal)
 	})
 
 	s.Run("load_segments_with_l0_delete_failed", func() {
@@ -1503,7 +1466,7 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 		s.manager.Segment.Put(context.Background(), segments.SegmentTypeGrowing, ms)
 	}
 
-	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{1}, []int64{2}, []int64{3, 4}, &msgpb.MsgPosition{})
+	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{1}, []int64{2}, []int64{3, 4}, &msgpb.MsgPosition{}, []int64{})
 	s.Equal(int64(5), s.delegator.GetTargetVersion())
 }
 
@@ -1535,7 +1498,7 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 		NumOfRows:     1,
 	})
 	l0.LoadDeltaData(context.TODO(), partitionDeleteData)
-	delegator.segmentManager.Put(context.TODO(), segments.SegmentTypeSealed, l0)
+	delegator.deleteBuffer.RegisterL0(l0)
 
 	l0Global, _ := segments.NewL0Segment(collection, segments.SegmentTypeSealed, 2, &querypb.SegmentLoadInfo{
 		CollectionID:  1,
@@ -1553,7 +1516,7 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	s.Empty(pks)
 
-	delegator.segmentManager.Put(context.TODO(), segments.SegmentTypeSealed, l0Global)
+	delegator.deleteBuffer.RegisterL0(l0Global)
 	pks, _ = delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	rawPks := make([]storage.PrimaryKey, 0, pks.Len())
 	for i := 0; i < pks.Len(); i++ {
@@ -1569,14 +1532,14 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	s.Equal(pks.Len(), 1)
 	s.True(pks.Get(0).EQ(allPartitionDeleteData.DeletePks().Get(0)))
 
-	delegator.segmentManager.Remove(context.TODO(), l0.ID(), querypb.DataScope_All)
+	delegator.deleteBuffer.UnRegister(0, l0.ID())
 	pks, _ = delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	s.True(pks.Get(0).EQ(allPartitionDeleteData.DeletePks().Get(0)))
 
 	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	s.True(pks.Get(0).EQ(allPartitionDeleteData.DeletePks().Get(0)))
 
-	delegator.segmentManager.Remove(context.TODO(), l0Global.ID(), querypb.DataScope_All)
+	delegator.deleteBuffer.UnRegister(0, l0Global.ID())
 	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	s.Empty(pks)
 }

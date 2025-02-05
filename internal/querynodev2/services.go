@@ -272,16 +272,9 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	defer func() {
 		if err != nil {
 			node.delegators.GetAndRemove(channel.GetChannelName())
+			delegator.Close()
 		}
 	}()
-
-	// create tSafe
-	// node.tSafeManager.Add(ctx, channel.ChannelName, channel.GetSeekPosition().GetTimestamp())
-	// defer func() {
-	// 	if err != nil {
-	// 		node.tSafeManager.Remove(ctx, channel.ChannelName)
-	// 	}
-	// }()
 
 	pipeline, err := node.pipelineManager.Add(req.GetCollectionID(), channel.GetChannelName())
 	if err != nil {
@@ -306,9 +299,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 			// remove legacy growing
 			node.manager.Segment.RemoveBy(ctx, segments.WithChannel(channel.GetChannelName()),
 				segments.WithType(segments.SegmentTypeGrowing))
-			// remove legacy l0 segments
-			node.manager.Segment.RemoveBy(ctx, segments.WithChannel(channel.GetChannelName()),
-				segments.WithLevel(datapb.SegmentLevel_L0))
 		}
 	}()
 
@@ -371,10 +361,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 
 		node.pipelineManager.Remove(req.GetChannelName())
 		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
-		_, sealed := node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
-		// node.tSafeManager.Remove(ctx, req.GetChannelName())
-
-		node.manager.Collection.Unref(req.GetCollectionID(), uint32(1+sealed))
+		node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	}
 	log.Info("unsubscribed channel")
 
@@ -1323,7 +1310,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			})
 			shardDelegator.AddExcludedSegments(flushedInfo)
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), req.GetLoadMeta().GetPartitionIDs(), action.GetGrowingInTarget(),
-				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint())
+				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint(), action.GetL0InTarget())
 		case querypb.SyncType_UpdatePartitionStats:
 			log.Info("sync update partition stats versions")
 			shardDelegator.SyncPartitionStats(ctx, action.PartitionStatsVersions)
