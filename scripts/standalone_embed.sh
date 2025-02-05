@@ -110,6 +110,15 @@ delete_container() {
         echo "Please stop Milvus service before delete."
         exit 1
     fi
+    
+    # Check if container exists before trying to remove it
+    res=`sudo docker ps -a|grep milvus-standalone|wc -l`
+    if [ $res -eq 0 ]
+    then
+        echo "Container milvus-standalone does not exist."
+        return 0
+    fi
+    
     sudo docker rm milvus-standalone 1> /dev/null
     if [ $? -ne 0 ]
     then
@@ -120,11 +129,17 @@ delete_container() {
 }
 
 delete() {
-    delete_container
-    sudo rm -rf $(pwd)/volumes
-    sudo rm -rf $(pwd)/embedEtcd.yaml
-    sudo rm -rf $(pwd)/user.yaml
-    echo "Delete successfully."
+    read -p "WARNING: This will permanently delete all Milvus data and containers. Are you sure? [y/N] > " check
+    if [ "$check" == "y" ] || [ "$check" == "Y" ]; then
+        delete_container
+        sudo rm -rf $(pwd)/volumes
+        sudo rm -rf $(pwd)/embedEtcd.yaml
+        sudo rm -rf $(pwd)/user.yaml
+        echo "Delete successfully."
+    else
+        echo "Delete operation cancelled."
+        exit 0
+    fi
 }
 
 upgrade() {
@@ -165,5 +180,6 @@ case $1 in
         ;;
     *)
         echo "please use bash standalone_embed.sh restart|start|stop|upgrade|delete"
+        echo "Note: 'delete' will remove ALL data and containers."
         ;;
 esac
