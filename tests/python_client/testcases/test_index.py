@@ -1193,7 +1193,7 @@ class TestIndexInvalid(TestcaseBase):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_index_with_invalid_index_name(self, connect, invalid_index_name):
+    def test_index_with_invalid_index_name(self, invalid_index_name):
         """
         target: test create index interface for invalid scenario
         method:
