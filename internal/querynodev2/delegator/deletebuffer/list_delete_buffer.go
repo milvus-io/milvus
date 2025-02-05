@@ -17,10 +17,13 @@
 package deletebuffer
 
 import (
+	"context"
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 )
 
@@ -30,6 +33,7 @@ func NewListDeleteBuffer[T timed](startTs uint64, sizePerBlock int64, labels []s
 		sizePerBlock: sizePerBlock,
 		list:         []*cacheBlock[T]{newCacheBlock[T](startTs, sizePerBlock)},
 		labels:       labels,
+		l0Segments:   make([]segments.Segment, 0),
 	}
 }
 
@@ -50,6 +54,60 @@ type listDeleteBuffer[T timed] struct {
 
 	// metrics labels
 	labels []string
+
+	// maintain l0 segment list
+	l0Segments []segments.Segment
+}
+
+func (b *listDeleteBuffer[T]) RegisterL0(segmentList ...segments.Segment) {
+	b.mut.Lock()
+	defer b.mut.Unlock()
+	// Filter out nil segments
+	for _, seg := range segmentList {
+		if seg != nil {
+			b.l0Segments = append(b.l0Segments, seg)
+		}
+	}
+
+	b.updateMetrics()
+}
+
+func (b *listDeleteBuffer[T]) ListL0() []segments.Segment {
+	b.mut.RLock()
+	defer b.mut.RUnlock()
+	return b.l0Segments
+}
+
+func (b *listDeleteBuffer[T]) UnRegister(ts uint64, segmentList ...int64) {
+	b.mut.Lock()
+	defer b.mut.Unlock()
+	var newSegments []segments.Segment
+
+	for _, s := range b.l0Segments {
+		if !lo.Contains(segmentList, s.ID()) {
+			newSegments = append(newSegments, s)
+		} else {
+			s.Release(context.TODO())
+		}
+	}
+	b.l0Segments = newSegments
+	b.tryCleanDelete(ts)
+	b.updateMetrics()
+}
+
+func (b *listDeleteBuffer[T]) Clear() {
+	b.mut.Lock()
+	defer b.mut.Unlock()
+
+	// clean l0 segments
+	for _, s := range b.l0Segments {
+		s.Release(context.TODO())
+	}
+	b.l0Segments = nil
+
+	// reset cache block
+	b.list = []*cacheBlock[T]{newCacheBlock[T](b.safeTs, b.sizePerBlock)}
+	b.updateMetrics()
 }
 
 func (b *listDeleteBuffer[T]) updateMetrics() {
@@ -93,6 +151,10 @@ func (b *listDeleteBuffer[T]) SafeTs() uint64 {
 func (b *listDeleteBuffer[T]) TryDiscard(ts uint64) {
 	b.mut.Lock()
 	defer b.mut.Unlock()
+	b.tryCleanDelete(ts)
+}
+
+func (b *listDeleteBuffer[T]) tryCleanDelete(ts uint64) {
 	if len(b.list) == 1 {
 		return
 	}

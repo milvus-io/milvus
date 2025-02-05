@@ -151,6 +151,11 @@ func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetData
 func (dh *distHandler) updateSegmentsDistribution(ctx context.Context, resp *querypb.GetDataDistributionResponse) {
 	updates := make([]*meta.Segment, 0, len(resp.GetSegments()))
 	for _, s := range resp.GetSegments() {
+		// To maintain compatibility with older versions of QueryNode,
+		// QueryCoord should neither process nor interact with L0 segments.
+		if s.GetLevel() == datapb.SegmentLevel_L0 {
+			continue
+		}
 		segmentInfo := dh.target.GetSealedSegment(ctx, s.GetCollection(), s.GetID(), meta.CurrentTargetFirst)
 		if segmentInfo == nil {
 			segmentInfo = &datapb.SegmentInfo{
@@ -211,8 +216,13 @@ func (dh *distHandler) updateLeaderView(ctx context.Context, resp *querypb.GetDa
 	collectionsToSync := typeutil.NewUniqueSet()
 	for _, lview := range resp.GetLeaderViews() {
 		segments := make(map[int64]*meta.Segment)
-
 		for ID, position := range lview.GrowingSegments {
+			// To maintain compatibility with older versions of QueryNode,
+			// QueryCoord should neither process nor interact with L0 segments.
+			segmentInfo := dh.target.GetSealedSegment(ctx, lview.GetCollection(), ID, meta.CurrentTargetFirst)
+			if segmentInfo != nil && segmentInfo.GetLevel() == datapb.SegmentLevel_L0 {
+				continue
+			}
 			segments[ID] = &meta.Segment{
 				SegmentInfo: &datapb.SegmentInfo{
 					ID:            ID,

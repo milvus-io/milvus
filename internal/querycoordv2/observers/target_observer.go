@@ -524,6 +524,7 @@ func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, lead
 
 	if channel != nil {
 		action.Checkpoint = channel.GetSeekPosition()
+		action.L0InTarget = channel.GetLevelZeroSegmentIds()
 	}
 
 	return action

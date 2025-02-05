@@ -410,6 +410,10 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		zap.Int64s("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
 	)
 
+	if req.GetInfos()[0].GetLevel() == datapb.SegmentLevel_L0 {
+		return merr.WrapErrServiceInternal("load L0 segment is not supported, l0 segment should only be loaded by watchChannel")
+	}
+
 	worker, err := sd.workerManager.GetWorker(ctx, targetNodeID)
 	if err != nil {
 		log.Warn("delegator failed to find worker", zap.Error(err))
@@ -420,17 +424,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	log.Debug("worker loads segments...")
 
 	sLoad := func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
-		info := req.GetInfos()[0]
-		// put meta l0, instead of load actual delta data
-		if info.GetLevel() == datapb.SegmentLevel_L0 && sd.l0ForwardPolicy == L0ForwardPolicyRemoteLoad {
-			l0Seg, err := segments.NewL0Segment(sd.collection, segments.SegmentTypeSealed, req.GetVersion(), info)
-			if err != nil {
-				return err
-			}
-			sd.collection.Ref(1)
-			sd.segmentManager.Put(ctx, segments.SegmentTypeSealed, l0Seg)
-			return nil
-		}
 		segmentID := req.GetInfos()[0].GetSegmentID()
 		nodeID := req.GetDstNodeID()
 		_, err, _ := sd.sf.Do(fmt.Sprintf("%d-%d", nodeID, segmentID), func() (struct{}, error) {
@@ -481,51 +474,76 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			Level:       info.GetLevel(),
 		}
 	})
-	if req.GetInfos()[0].GetLevel() == datapb.SegmentLevel_L0 {
-		sd.RefreshLevel0DeletionStats()
-	} else {
-		// load bloom filter only when candidate not exists
-		infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
-			return !sd.pkOracle.Exists(pkoracle.NewCandidateKey(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed), targetNodeID)
-		})
+	// load bloom filter only when candidate not exists
+	infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
+		return !sd.pkOracle.Exists(pkoracle.NewCandidateKey(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed), targetNodeID)
+	})
 
-		var bm25Stats *typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats]
-		if sd.idfOracle != nil {
-			bm25Stats, err = sd.loader.LoadBM25Stats(ctx, req.GetCollectionID(), infos...)
-			if err != nil {
-				log.Warn("failed to load bm25 stats for segment", zap.Error(err))
-				return err
-			}
-		}
-
-		candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), req.GetVersion(), infos...)
+	var bm25Stats *typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats]
+	if sd.idfOracle != nil {
+		bm25Stats, err = sd.loader.LoadBM25Stats(ctx, req.GetCollectionID(), infos...)
 		if err != nil {
-			log.Warn("failed to load bloom filter set for segment", zap.Error(err))
+			log.Warn("failed to load bm25 stats for segment", zap.Error(err))
 			return err
 		}
+	}
 
-		log.Debug("load delete...")
-		err = sd.loadStreamDelete(ctx, candidates, bm25Stats, infos, req, targetNodeID, worker)
-		if err != nil {
-			log.Warn("load stream delete failed", zap.Error(err))
-			return err
-		}
+	candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), req.GetVersion(), infos...)
+	if err != nil {
+		log.Warn("failed to load bloom filter set for segment", zap.Error(err))
+		return err
+	}
+
+	log.Debug("load delete...")
+	err = sd.loadStreamDelete(ctx, candidates, bm25Stats, infos, req, targetNodeID, worker)
+	if err != nil {
+		log.Warn("load stream delete failed", zap.Error(err))
+		return err
 	}
 
 	// alter distribution
 	sd.distribution.AddDistributions(entries...)
 
-	partStatsToReload := make([]UniqueID, 0)
-	lo.ForEach(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) {
-		partStatsToReload = append(partStatsToReload, info.PartitionID)
-	})
+	return nil
+}
 
+// LoadGrowing load growing segments locally.
+func (sd *shardDelegator) LoadL0(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error {
+	log := sd.getLogger(ctx)
+
+	segmentIDs := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })
+	log.Info("loading l0 segments...", zap.Int64s("segmentIDs", segmentIDs))
+
+	loaded := make([]segments.Segment, 0)
+	if sd.l0ForwardPolicy == L0ForwardPolicyRemoteLoad {
+		for _, info := range infos {
+			l0Seg, err := segments.NewL0Segment(sd.collection, segments.SegmentTypeSealed, version, info)
+			if err != nil {
+				return err
+			}
+			loaded = append(loaded, l0Seg)
+		}
+	} else {
+		var err error
+		loaded, err = sd.loader.Load(ctx, sd.collectionID, segments.SegmentTypeSealed, version, infos...)
+		if err != nil {
+			log.Warn("failed to load l0 segment", zap.Error(err))
+			return err
+		}
+	}
+
+	segmentIDs = lo.Map(loaded, func(segment segments.Segment, _ int) int64 { return segment.ID() })
+	log.Info("load growing segments done", zap.Int64s("segmentIDs", segmentIDs))
+
+	sd.deleteBuffer.RegisterL0(loaded...)
+	// register l0 segment
+	sd.RefreshLevel0DeletionStats()
 	return nil
 }
 
 func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkoracle.Candidate) (storage.PrimaryKeys, []storage.Timestamp) {
 	// TODO: this could be large, host all L0 delete on delegator might be a dangerous, consider mmap it on local segment and stream processing it
-	level0Segments := sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0), segments.WithChannel(sd.vchannelName))
+	level0Segments := sd.deleteBuffer.ListL0()
 	deltaData := storage.NewDeltaData(0)
 
 	for _, segment := range level0Segments {
@@ -554,13 +572,20 @@ func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkorac
 }
 
 func (sd *shardDelegator) RefreshLevel0DeletionStats() {
-	level0Segments := sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0), segments.WithChannel(sd.vchannelName))
+	level0Segments := sd.deleteBuffer.ListL0()
 	totalSize := int64(0)
 	for _, segment := range level0Segments {
 		segment := segment.(*segments.L0Segment)
 		pks, tss := segment.DeleteRecords()
 		totalSize += lo.SumBy(pks, func(pk storage.PrimaryKey) int64 { return pk.Size() }) + int64(len(tss)*8)
 	}
+
+	metrics.QueryNodeNumSegments.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()),
+		fmt.Sprint(sd.Collection()),
+		commonpb.SegmentState_Sealed.String(),
+		datapb.SegmentLevel_L0.String(),
+	).Set(float64(len(level0Segments)))
 
 	metrics.QueryNodeLevelZeroSize.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
@@ -844,14 +869,14 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	log := sd.getLogger(ctx)
 
 	targetNodeID := req.GetNodeID()
-	level0Segments := typeutil.NewSet(lo.Map(sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0), segments.WithChannel(sd.vchannelName)), func(segment segments.Segment, _ int) int64 {
+	level0Segments := typeutil.NewSet(lo.Map(sd.deleteBuffer.ListL0(), func(segment segments.Segment, _ int) int64 {
 		return segment.ID()
 	})...)
 	hasLevel0 := false
 	for _, segmentID := range req.GetSegmentIDs() {
 		hasLevel0 = level0Segments.Contain(segmentID)
 		if hasLevel0 {
-			break
+			return merr.WrapErrServiceInternal("release L0 segment is not supported, l0 segment should only be released by unSubChannel/SyncDataDistribution")
 		}
 	}
 
@@ -938,22 +963,17 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	if releaseErr != nil {
 		return releaseErr
 	}
-
-	if hasLevel0 {
-		sd.RefreshLevel0DeletionStats()
-	}
-	partitionsToReload := make([]UniqueID, 0)
-	lo.ForEach(req.GetSegmentIDs(), func(segmentID int64, _ int) {
-		segment := sd.segmentManager.Get(segmentID)
-		if segment != nil {
-			partitionsToReload = append(partitionsToReload, segment.Partition())
-		}
-	})
 	return nil
 }
 
-func (sd *shardDelegator) SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64,
-	sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition,
+func (sd *shardDelegator) SyncTargetVersion(
+	newVersion int64,
+	partitions []int64,
+	growingInTarget []int64,
+	sealedInTarget []int64,
+	droppedInTarget []int64,
+	checkpoint *msgpb.MsgPosition,
+	l0InTarget []int64,
 ) {
 	growings := sd.segmentManager.GetBy(
 		segments.WithType(segments.SegmentTypeGrowing),
@@ -984,8 +1004,24 @@ func (sd *shardDelegator) SyncTargetVersion(newVersion int64, partitions []int64
 		log.Warn("found redundant growing segments",
 			zap.Int64s("growingSegments", redundantGrowingIDs))
 	}
+	redundantL0IDs := make([]int64, 0)
+	l0Set := typeutil.NewUniqueSet(l0InTarget...)
+	for _, l0 := range sd.deleteBuffer.ListL0() {
+		if !l0Set.Contain(l0.ID()) {
+			redundantL0IDs = append(redundantL0IDs, l0.ID())
+		}
+	}
+
 	sd.distribution.SyncTargetVersion(newVersion, partitions, growingInTarget, sealedInTarget, redundantGrowingIDs)
-	sd.deleteBuffer.TryDiscard(checkpoint.GetTimestamp())
+	if len(redundantL0IDs) > 0 {
+		start := time.Now()
+		sd.deleteBuffer.UnRegister(checkpoint.GetTimestamp(), redundantL0IDs...)
+		log.Info("unregister l0 segments",
+			zap.Int64s("segment ids", redundantL0IDs),
+			zap.Duration("cost", time.Since(start)),
+		)
+		sd.RefreshLevel0DeletionStats()
+	}
 }
 
 func (sd *shardDelegator) GetTargetVersion() int64 {
