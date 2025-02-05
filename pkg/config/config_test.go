@@ -30,17 +30,17 @@ import (
 
 func TestConfigFromEnv(t *testing.T) {
 	mgr, _ := Init()
-	_, err := mgr.GetConfig("test.env")
+	_, _, err := mgr.GetConfig("test.env")
 	assert.ErrorIs(t, err, ErrKeyNotFound)
 
 	t.Setenv("TEST_ENV", "value")
 	mgr, _ = Init(WithEnvSource(formatKey))
 
-	v, err := mgr.GetConfig("test.env")
+	_, v, err := mgr.GetConfig("test.env")
 	assert.NoError(t, err)
 	assert.Equal(t, "value", v)
 
-	v, err = mgr.GetConfig("TEST_ENV")
+	_, v, err = mgr.GetConfig("TEST_ENV")
 	assert.NoError(t, err)
 	assert.Equal(t, "value", v)
 }
@@ -67,65 +67,65 @@ func TestConfigFromRemote(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("origin is empty", func(t *testing.T) {
-		_, err = mgr.GetConfig("test.etcd")
+		_, _, err = mgr.GetConfig("test.etcd")
 		assert.ErrorIs(t, err, ErrKeyNotFound)
 
 		client.KV.Put(ctx, "test/config/test/etcd", "value")
 
 		time.Sleep(100 * time.Millisecond)
 
-		v, err := mgr.GetConfig("test.etcd")
+		_, v, err := mgr.GetConfig("test.etcd")
 		assert.NoError(t, err)
 		assert.Equal(t, "value", v)
-		v, err = mgr.GetConfig("TEST_ETCD")
+		_, v, err = mgr.GetConfig("TEST_ETCD")
 		assert.NoError(t, err)
 		assert.Equal(t, "value", v)
 
 		client.KV.Delete(ctx, "test/config/test/etcd")
 		time.Sleep(100 * time.Millisecond)
 
-		_, err = mgr.GetConfig("TEST_ETCD")
+		_, _, err = mgr.GetConfig("TEST_ETCD")
 		assert.ErrorIs(t, err, ErrKeyNotFound)
 	})
 
 	t.Run("override origin value", func(t *testing.T) {
-		v, _ := mgr.GetConfig("tmp.key")
+		_, v, _ := mgr.GetConfig("tmp.key")
 		assert.Equal(t, "1", v)
 		client.KV.Put(ctx, "test/config/tmp/key", "2")
 
 		time.Sleep(100 * time.Millisecond)
 
-		v, _ = mgr.GetConfig("tmp.key")
+		_, v, _ = mgr.GetConfig("tmp.key")
 		assert.Equal(t, "2", v)
 
 		client.KV.Put(ctx, "test/config/tmp/key", "3")
 
 		time.Sleep(100 * time.Millisecond)
 
-		v, _ = mgr.GetConfig("tmp.key")
+		_, v, _ = mgr.GetConfig("tmp.key")
 		assert.Equal(t, "3", v)
 
 		client.KV.Delete(ctx, "test/config/tmp/key")
 		time.Sleep(100 * time.Millisecond)
 
-		v, _ = mgr.GetConfig("tmp.key")
+		_, v, _ = mgr.GetConfig("tmp.key")
 		assert.Equal(t, "1", v)
 	})
 
 	t.Run("multi priority", func(t *testing.T) {
-		v, _ := mgr.GetConfig("log.level")
+		_, v, _ := mgr.GetConfig("log.level")
 		assert.Equal(t, "info", v)
 		client.KV.Put(ctx, "test/config/log/level", "error")
 
 		time.Sleep(100 * time.Millisecond)
 
-		v, _ = mgr.GetConfig("log.level")
+		_, v, _ = mgr.GetConfig("log.level")
 		assert.Equal(t, "error", v)
 
 		client.KV.Delete(ctx, "test/config/log/level")
 		time.Sleep(100 * time.Millisecond)
 
-		v, _ = mgr.GetConfig("log.level")
+		_, v, _ = mgr.GetConfig("log.level")
 		assert.Equal(t, "info", v)
 	})
 
@@ -134,7 +134,7 @@ func TestConfigFromRemote(t *testing.T) {
 
 		client.KV.Put(ctx, "test/config/test/etcd", "value2")
 		assert.Eventually(t, func() bool {
-			_, err = mgr.GetConfig("test.etcd")
+			_, _, err = mgr.GetConfig("test.etcd")
 			return err != nil && errors.Is(err, ErrKeyNotFound)
 		}, 300*time.Millisecond, 10*time.Millisecond)
 	})

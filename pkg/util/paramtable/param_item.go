@@ -70,14 +70,14 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 		panic(fmt.Sprintf("manager is nil %s", pi.Key))
 	}
 	// raw value set only once
-	raw, err = pi.manager.GetConfig(pi.Key)
+	_, raw, err = pi.manager.GetConfig(pi.Key)
 	if err != nil || raw == pi.DefaultValue {
 		// try fallback if the entry is not exist or default value,
 		//  because default value may already defined in milvus.yaml
 		//	and we don't want the fallback keys be overridden.
 		for _, key := range pi.FallbackKeys {
 			var fallbackRaw string
-			fallbackRaw, err = pi.manager.GetConfig(key)
+			_, fallbackRaw, err = pi.manager.GetConfig(key)
 			if err == nil {
 				raw = fallbackRaw
 				break
