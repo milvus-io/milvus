@@ -100,7 +100,7 @@ jobs:
       - run: |
           zip -r code.zip . -x "./.docker/*" -x "./cmake_build/thirdparty/**" -x ".git/**"
       - name: Archive code
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: code
           path: code.zip
