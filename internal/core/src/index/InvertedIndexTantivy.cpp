@@ -90,6 +90,9 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
 
 template <typename T>
 InvertedIndexTantivy<T>::~InvertedIndexTantivy() {
+    if (wrapper_) {
+        wrapper_->free();
+    }
     auto local_chunk_manager =
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto prefix = path_;
