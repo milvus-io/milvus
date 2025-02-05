@@ -128,11 +128,12 @@ func Test_CheckAutoIndex(t *testing.T) {
 		mgr.SetConfig("autoIndex.params.build", `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
 		p := &paramtable.AutoIndexConfig{
 			IndexParams: paramtable.ParamItem{
-				Key: "autoIndex.params.build",
+				Key:       "autoIndex.params.build",
+				Formatter: paramtable.GetBuildParamFormatter(paramtable.FloatVectorDefaultMetricType, "autoIndex.params.build"),
 			},
 		}
 		p.IndexParams.Init(mgr)
-		p.SetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
+
 		assert.NotPanics(t, func() {
 			CheckAutoIndexHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector)
 		})
@@ -146,11 +147,12 @@ func Test_CheckAutoIndex(t *testing.T) {
 		mgr.SetConfig("autoIndex.params.binary.build", `{"nlist": 1024, "index_type": "BIN_IVF_FLAT"}`)
 		p := &paramtable.AutoIndexConfig{
 			BinaryIndexParams: paramtable.ParamItem{
-				Key: "autoIndex.params.binary.build",
+				Key:       "autoIndex.params.binary.build",
+				Formatter: paramtable.GetBuildParamFormatter(paramtable.BinaryVectorDefaultMetricType, "autoIndex.params.binary.build"),
 			},
 		}
 		p.BinaryIndexParams.Init(mgr)
-		p.SetDefaultMetricTypeHelper(p.BinaryIndexParams.Key, p.BinaryIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector, mgr)
+
 		assert.NotPanics(t, func() {
 			CheckAutoIndexHelper(p.BinaryIndexParams.Key, p.BinaryIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector)
 		})
@@ -164,11 +166,12 @@ func Test_CheckAutoIndex(t *testing.T) {
 		mgr.SetConfig("autoIndex.params.sparse.build", `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}`)
 		p := &paramtable.AutoIndexConfig{
 			SparseIndexParams: paramtable.ParamItem{
-				Key: "autoIndex.params.sparse.build",
+				Key:       "autoIndex.params.sparse.build",
+				Formatter: paramtable.GetBuildParamFormatter(paramtable.SparseFloatVectorDefaultMetricType, "autoIndex.params.sparse.build"),
 			},
 		}
 		p.SparseIndexParams.Init(mgr)
-		p.SetDefaultMetricTypeHelper(p.SparseIndexParams.Key, p.SparseIndexParams.GetAsJSONMap(), schemapb.DataType_SparseFloatVector, mgr)
+
 		assert.NotPanics(t, func() {
 			CheckAutoIndexHelper(p.SparseIndexParams.Key, p.SparseIndexParams.GetAsJSONMap(), schemapb.DataType_SparseFloatVector)
 		})
@@ -182,11 +185,12 @@ func Test_CheckAutoIndex(t *testing.T) {
 		mgr.SetConfig("autoIndex.params.build", `{"nlist": 30, "index_type": "IVF_FLAT"}`)
 		p := &paramtable.AutoIndexConfig{
 			IndexParams: paramtable.ParamItem{
-				Key: "autoIndex.params.build",
+				Key:       "autoIndex.params.build",
+				Formatter: paramtable.GetBuildParamFormatter(paramtable.FloatVectorDefaultMetricType, "autoIndex.params.build"),
 			},
 		}
 		p.IndexParams.Init(mgr)
-		p.SetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
+
 		assert.NotPanics(t, func() {
 			CheckAutoIndexHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector)
 		})
@@ -200,11 +204,12 @@ func Test_CheckAutoIndex(t *testing.T) {
 		mgr.SetConfig("autoIndex.params.build", `{"nlist": 30, "index_type": "IVF_FLAT"}`)
 		p := &paramtable.AutoIndexConfig{
 			IndexParams: paramtable.ParamItem{
-				Key: "autoIndex.params.build",
+				Key:       "autoIndex.params.build",
+				Formatter: paramtable.GetBuildParamFormatter(paramtable.FloatVectorDefaultMetricType, "autoIndex.params.build"),
 			},
 		}
 		p.IndexParams.Init(mgr)
-		p.SetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
+
 		assert.NotPanics(t, func() {
 			CheckAutoIndexHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector)
 		})
@@ -218,11 +223,12 @@ func Test_CheckAutoIndex(t *testing.T) {
 		mgr.SetConfig("autoIndex.params.build", `{"index_type": "DISKANN"}`)
 		p := &paramtable.AutoIndexConfig{
 			IndexParams: paramtable.ParamItem{
-				Key: "autoIndex.params.build",
+				Key:       "autoIndex.params.build",
+				Formatter: paramtable.GetBuildParamFormatter(paramtable.FloatVectorDefaultMetricType, "autoIndex.params.build"),
 			},
 		}
 		p.IndexParams.Init(mgr)
-		p.SetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
+
 		assert.NotPanics(t, func() {
 			CheckAutoIndexHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector)
 		})
@@ -236,11 +242,12 @@ func Test_CheckAutoIndex(t *testing.T) {
 		mgr.SetConfig("autoIndex.params.build", `{"index_type": "BIN_FLAT"}`)
 		p := &paramtable.AutoIndexConfig{
 			IndexParams: paramtable.ParamItem{
-				Key: "autoIndex.params.build",
+				Key:       "autoIndex.params.build",
+				Formatter: paramtable.GetBuildParamFormatter(paramtable.BinaryVectorDefaultMetricType, "autoIndex.params.binary.build"),
 			},
 		}
 		p.IndexParams.Init(mgr)
-		p.SetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector, mgr)
+
 		assert.NotPanics(t, func() {
 			CheckAutoIndexHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector)
 		})
@@ -254,11 +261,12 @@ func Test_CheckAutoIndex(t *testing.T) {
 		mgr.SetConfig("autoIndex.params.build", `{"nlist": 30, "index_type": "BIN_IVF_FLAT"}`)
 		p := &paramtable.AutoIndexConfig{
 			IndexParams: paramtable.ParamItem{
-				Key: "autoIndex.params.build",
+				Key:       "autoIndex.params.build",
+				Formatter: paramtable.GetBuildParamFormatter(paramtable.BinaryVectorDefaultMetricType, "autoIndex.params.binary.build"),
 			},
 		}
 		p.IndexParams.Init(mgr)
-		p.SetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector, mgr)
+
 		assert.NotPanics(t, func() {
 			CheckAutoIndexHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector)
 		})

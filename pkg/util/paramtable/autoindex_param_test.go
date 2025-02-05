@@ -23,7 +23,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/config"
 )
@@ -135,12 +134,14 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		mgr.SetConfig("autoIndex.params.build", "not in json format")
 		p := &AutoIndexConfig{
 			IndexParams: ParamItem{
-				Key: "autoIndex.params.build",
+				Key:       "autoIndex.params.build",
+				Formatter: GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.build"),
 			},
 		}
 		p.IndexParams.Init(mgr)
+
 		assert.Panics(t, func() {
-			p.SetDefaultMetricTypeHelper(p.IndexParams.Key, p.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector, mgr)
+			p.IndexParams.GetAsJSONMap()
 		})
 	})
 }
