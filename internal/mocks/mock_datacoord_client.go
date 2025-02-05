@@ -1336,6 +1336,80 @@ func (_c *MockDataCoordClient_GetComponentStates_Call) RunAndReturn(run func(con
 	return _c
 }
 
+// GetDataViewVersions provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataCoordClient) GetDataViewVersions(ctx context.Context, in *datapb.GetDataViewVersionsRequest, opts ...grpc.CallOption) (*datapb.GetDataViewVersionsResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDataViewVersions")
+	}
+
+	var r0 *datapb.GetDataViewVersionsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetDataViewVersionsRequest, ...grpc.CallOption) (*datapb.GetDataViewVersionsResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetDataViewVersionsRequest, ...grpc.CallOption) *datapb.GetDataViewVersionsResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GetDataViewVersionsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetDataViewVersionsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoordClient_GetDataViewVersions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDataViewVersions'
+type MockDataCoordClient_GetDataViewVersions_Call struct {
+	*mock.Call
+}
+
+// GetDataViewVersions is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.GetDataViewVersionsRequest
+//   - opts ...grpc.CallOption
+func (_e *MockDataCoordClient_Expecter) GetDataViewVersions(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetDataViewVersions_Call {
+	return &MockDataCoordClient_GetDataViewVersions_Call{Call: _e.mock.On("GetDataViewVersions",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataCoordClient_GetDataViewVersions_Call) Run(run func(ctx context.Context, in *datapb.GetDataViewVersionsRequest, opts ...grpc.CallOption)) *MockDataCoordClient_GetDataViewVersions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.GetDataViewVersionsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataCoordClient_GetDataViewVersions_Call) Return(_a0 *datapb.GetDataViewVersionsResponse, _a1 error) *MockDataCoordClient_GetDataViewVersions_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoordClient_GetDataViewVersions_Call) RunAndReturn(run func(context.Context, *datapb.GetDataViewVersionsRequest, ...grpc.CallOption) (*datapb.GetDataViewVersionsResponse, error)) *MockDataCoordClient_GetDataViewVersions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetFlushAllState provides a mock function with given fields: ctx, in, opts
 func (_m *MockDataCoordClient) GetFlushAllState(ctx context.Context, in *milvuspb.GetFlushAllStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushAllStateResponse, error) {
 	_va := make([]interface{}, len(opts))

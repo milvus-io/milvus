@@ -130,6 +130,13 @@ func Test_NewServer(t *testing.T) {
 		assert.NotNil(t, resp)
 	})
 
+	t.Run("GetDataViewVersions", func(t *testing.T) {
+		mockDataCoord.EXPECT().GetDataViewVersions(mock.Anything, mock.Anything).Return(&datapb.GetDataViewVersionsResponse{}, nil)
+		resp, err := server.GetDataViewVersions(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+	})
+
 	t.Run("GetRecoveryInfo", func(t *testing.T) {
 		mockDataCoord.EXPECT().GetRecoveryInfo(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponse{}, nil)
 		resp, err := server.GetRecoveryInfo(ctx, nil)
