@@ -1,18 +1,24 @@
-use std::ffi::{c_char, c_void, CStr};
+use std::{
+    ffi::{c_char, c_void, CStr},
+    ptr::null,
+};
 
 use crate::{
-    array::RustArray,
+    array::{RustArray, RustResult},
+    cstr_to_str,
     index_reader::IndexReaderWrapper,
     util::{create_binding, free_binding},
     util_c::tantivy_index_exist,
 };
 
 #[no_mangle]
-pub extern "C" fn tantivy_load_index(path: *const c_char) -> *mut c_void {
+pub extern "C" fn tantivy_load_index(path: *const c_char) -> RustResult {
     assert!(tantivy_index_exist(path));
-    let path_str = unsafe { CStr::from_ptr(path) };
-    let wrapper = IndexReaderWrapper::load(path_str.to_str().unwrap());
-    create_binding(wrapper)
+    let path_str = cstr_to_str!(path);
+    match IndexReaderWrapper::load(path_str) {
+        Ok(w) => RustResult::from_ptr(create_binding(w)),
+        Err(e) => RustResult::from_error(e.to_string()),
+    }
 }
 
 #[no_mangle]
@@ -22,18 +28,15 @@ pub extern "C" fn tantivy_free_index_reader(ptr: *mut c_void) {
 
 // -------------------------query--------------------
 #[no_mangle]
-pub extern "C" fn tantivy_index_count(ptr: *mut c_void) -> u32 {
+pub extern "C" fn tantivy_index_count(ptr: *mut c_void) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
-    unsafe { (*real).count() }
+    unsafe { (*real).count().into() }
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_term_query_i64(ptr: *mut c_void, term: i64) -> RustArray {
+pub extern "C" fn tantivy_term_query_i64(ptr: *mut c_void, term: i64) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
-    unsafe {
-        let hits = (*real).term_query_i64(term);
-        RustArray::from_vec(hits)
-    }
+    unsafe { (*real).term_query_i64(term).into() }
 }
 
 #[no_mangle]
@@ -41,11 +44,12 @@ pub extern "C" fn tantivy_lower_bound_range_query_i64(
     ptr: *mut c_void,
     lower_bound: i64,
     inclusive: bool,
-) -> RustArray {
+) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     unsafe {
-        let hits = (*real).lower_bound_range_query_i64(lower_bound, inclusive);
-        RustArray::from_vec(hits)
+        (*real)
+            .lower_bound_range_query_i64(lower_bound, inclusive)
+            .into()
     }
 }
 
@@ -54,11 +58,12 @@ pub extern "C" fn tantivy_upper_bound_range_query_i64(
     ptr: *mut c_void,
     upper_bound: i64,
     inclusive: bool,
-) -> RustArray {
+) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     unsafe {
-        let hits = (*real).upper_bound_range_query_i64(upper_bound, inclusive);
-        RustArray::from_vec(hits)
+        (*real)
+            .upper_bound_range_query_i64(upper_bound, inclusive)
+            .into()
     }
 }
 
@@ -69,21 +74,19 @@ pub extern "C" fn tantivy_range_query_i64(
     upper_bound: i64,
     lb_inclusive: bool,
     ub_inclusive: bool,
-) -> RustArray {
+) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     unsafe {
-        let hits = (*real).range_query_i64(lower_bound, upper_bound, lb_inclusive, ub_inclusive);
-        RustArray::from_vec(hits)
+        (*real)
+            .range_query_i64(lower_bound, upper_bound, lb_inclusive, ub_inclusive)
+            .into()
     }
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_term_query_f64(ptr: *mut c_void, term: f64) -> RustArray {
+pub extern "C" fn tantivy_term_query_f64(ptr: *mut c_void, term: f64) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
-    unsafe {
-        let hits = (*real).term_query_f64(term);
-        RustArray::from_vec(hits)
-    }
+    unsafe { (*real).term_query_f64(term).into() }
 }
 
 #[no_mangle]
@@ -91,11 +94,12 @@ pub extern "C" fn tantivy_lower_bound_range_query_f64(
     ptr: *mut c_void,
     lower_bound: f64,
     inclusive: bool,
-) -> RustArray {
+) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     unsafe {
-        let hits = (*real).lower_bound_range_query_f64(lower_bound, inclusive);
-        RustArray::from_vec(hits)
+        (*real)
+            .lower_bound_range_query_f64(lower_bound, inclusive)
+            .into()
     }
 }
 
@@ -104,11 +108,12 @@ pub extern "C" fn tantivy_upper_bound_range_query_f64(
     ptr: *mut c_void,
     upper_bound: f64,
     inclusive: bool,
-) -> RustArray {
+) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     unsafe {
-        let hits = (*real).upper_bound_range_query_f64(upper_bound, inclusive);
-        RustArray::from_vec(hits)
+        (*real)
+            .upper_bound_range_query_f64(upper_bound, inclusive)
+            .into()
     }
 }
 
@@ -119,31 +124,26 @@ pub extern "C" fn tantivy_range_query_f64(
     upper_bound: f64,
     lb_inclusive: bool,
     ub_inclusive: bool,
-) -> RustArray {
+) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     unsafe {
-        let hits = (*real).range_query_f64(lower_bound, upper_bound, lb_inclusive, ub_inclusive);
-        RustArray::from_vec(hits)
+        (*real)
+            .range_query_f64(lower_bound, upper_bound, lb_inclusive, ub_inclusive)
+            .into()
     }
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_term_query_bool(ptr: *mut c_void, term: bool) -> RustArray {
+pub extern "C" fn tantivy_term_query_bool(ptr: *mut c_void, term: bool) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
-    unsafe {
-        let hits = (*real).term_query_bool(term);
-        RustArray::from_vec(hits)
-    }
+    unsafe { (*real).term_query_bool(term).into() }
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_term_query_keyword(ptr: *mut c_void, term: *const c_char) -> RustArray {
+pub extern "C" fn tantivy_term_query_keyword(ptr: *mut c_void, term: *const c_char) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
-    unsafe {
-        let c_str = CStr::from_ptr(term);
-        let hits = (*real).term_query_keyword(c_str.to_str().unwrap());
-        RustArray::from_vec(hits)
-    }
+    let term = cstr_to_str!(term);
+    unsafe { (*real).term_query_keyword(term).into() }
 }
 
 #[no_mangle]
@@ -151,13 +151,13 @@ pub extern "C" fn tantivy_lower_bound_range_query_keyword(
     ptr: *mut c_void,
     lower_bound: *const c_char,
     inclusive: bool,
-) -> RustArray {
+) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
+    let lower_bound = cstr_to_str!(lower_bound);
     unsafe {
-        let c_lower_bound = CStr::from_ptr(lower_bound);
-        let hits =
-            (*real).lower_bound_range_query_keyword(c_lower_bound.to_str().unwrap(), inclusive);
-        RustArray::from_vec(hits)
+        (*real)
+            .lower_bound_range_query_keyword(lower_bound, inclusive)
+            .into()
     }
 }
 
@@ -166,13 +166,13 @@ pub extern "C" fn tantivy_upper_bound_range_query_keyword(
     ptr: *mut c_void,
     upper_bound: *const c_char,
     inclusive: bool,
-) -> RustArray {
+) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
+    let upper_bound = cstr_to_str!(upper_bound);
     unsafe {
-        let c_upper_bound = CStr::from_ptr(upper_bound);
-        let hits =
-            (*real).upper_bound_range_query_keyword(c_upper_bound.to_str().unwrap(), inclusive);
-        RustArray::from_vec(hits)
+        (*real)
+            .upper_bound_range_query_keyword(upper_bound, inclusive)
+            .into()
     }
 }
 
@@ -183,18 +183,14 @@ pub extern "C" fn tantivy_range_query_keyword(
     upper_bound: *const c_char,
     lb_inclusive: bool,
     ub_inclusive: bool,
-) -> RustArray {
+) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
+    let lower_bound = cstr_to_str!(lower_bound);
+    let upper_bound = cstr_to_str!(upper_bound);
     unsafe {
-        let c_lower_bound = CStr::from_ptr(lower_bound);
-        let c_upper_bound = CStr::from_ptr(upper_bound);
-        let hits = (*real).range_query_keyword(
-            c_lower_bound.to_str().unwrap(),
-            c_upper_bound.to_str().unwrap(),
-            lb_inclusive,
-            ub_inclusive,
-        );
-        RustArray::from_vec(hits)
+        (*real)
+            .range_query_keyword(lower_bound, upper_bound, lb_inclusive, ub_inclusive)
+            .into()
     }
 }
 
@@ -202,21 +198,15 @@ pub extern "C" fn tantivy_range_query_keyword(
 pub extern "C" fn tantivy_prefix_query_keyword(
     ptr: *mut c_void,
     prefix: *const c_char,
-) -> RustArray {
+) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
-    unsafe {
-        let c_str = CStr::from_ptr(prefix);
-        let hits = (*real).prefix_query_keyword(c_str.to_str().unwrap());
-        RustArray::from_vec(hits)
-    }
+    let prefix = cstr_to_str!(prefix);
+    unsafe { (*real).prefix_query_keyword(prefix).into() }
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_regex_query(ptr: *mut c_void, pattern: *const c_char) -> RustArray {
+pub extern "C" fn tantivy_regex_query(ptr: *mut c_void, pattern: *const c_char) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
-    unsafe {
-        let c_str = CStr::from_ptr(pattern);
-        let hits = (*real).regex_query(c_str.to_str().unwrap());
-        RustArray::from_vec(hits)
-    }
+    let pattern = cstr_to_str!(pattern);
+    unsafe { (*real).regex_query(pattern).into() }
 }

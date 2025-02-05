@@ -182,7 +182,6 @@ func NewCollectionLockerKey(collection string, rw bool) LockerKey {
 }
 
 func NewLockerKeyChain(lockerKeys ...LockerKey) LockerKey {
-	log.Info("NewLockerKeyChain", zap.Any("lockerKeys", len(lockerKeys)))
 	if len(lockerKeys) == 0 {
 		return nil
 	}
