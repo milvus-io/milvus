@@ -111,7 +111,9 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 		GroupName: consumer.consumerName,
 		MsgMutex:  consumer.msgMutex,
 	}
-	c.server.RegisterConsumer(cons)
+	if err := c.server.RegisterConsumer(cons); err != nil {
+		return nil, err
+	}
 
 	if options.SubscriptionInitialPosition == common.SubscriptionPositionLatest {
 		err = c.server.SeekToLatest(options.Topic, options.SubscriptionName)
