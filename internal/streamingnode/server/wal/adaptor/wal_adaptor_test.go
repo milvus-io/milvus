@@ -10,12 +10,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/mock_wab"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/timetick/mock_inspector"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/mock_walimpls"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
@@ -26,6 +26,8 @@ import (
 )
 
 func TestWalAdaptorReadFail(t *testing.T) {
+	resource.InitForTest(t)
+
 	l := mock_walimpls.NewMockWALImpls(t)
 	expectedErr := errors.New("test")
 	l.EXPECT().WALName().Return("test")
@@ -34,6 +36,15 @@ func TestWalAdaptorReadFail(t *testing.T) {
 		func(ctx context.Context, ro walimpls.ReadOption) (walimpls.ScannerImpls, error) {
 			return nil, expectedErr
 		})
+
+	writeAheadBuffer := mock_wab.NewMockROWriteAheadBuffer(t)
+	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
+	operator.EXPECT().Channel().Return(types.PChannelInfo{})
+	operator.EXPECT().Sync(mock.Anything).Return()
+	operator.EXPECT().WriteAheadBuffer(mock.Anything).Return(writeAheadBuffer, nil)
+	resource.Resource().TimeTickInspector().RegisterSyncOperator(
+		operator,
+	)
 
 	lAdapted := adaptImplsToWAL(l, nil, func() {})
 	scanner, err := lAdapted.Read(context.Background(), wal.ReadOption{
@@ -48,7 +59,6 @@ func TestWALAdaptor(t *testing.T) {
 	resource.InitForTest(t)
 
 	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
-	operator.EXPECT().TimeTickNotifier().Return(inspector.NewTimeTickNotifier())
 	operator.EXPECT().Channel().Return(types.PChannelInfo{})
 	operator.EXPECT().Sync(mock.Anything).Return()
 	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)

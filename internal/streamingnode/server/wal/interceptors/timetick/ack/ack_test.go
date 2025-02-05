@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -200,8 +201,10 @@ func TestAckManager(t *testing.T) {
 			time.Sleep(time.Duration(rand.Int31n(5)) * time.Millisecond)
 			id, err := resource.Resource().TSOAllocator().Allocate(ctx)
 			assert.NoError(t, err)
+			msg := mock_message.NewMockImmutableMessage(t)
+			msg.EXPECT().MessageID().Return(walimplstest.NewTestMessageID(int64(id))).Maybe()
 			ts.Ack(
-				OptMessageID(walimplstest.NewTestMessageID(int64(id))),
+				OptImmutableMessage(msg),
 			)
 		}()
 	}
@@ -216,9 +219,9 @@ func TestAckManager(t *testing.T) {
 			time.Sleep(time.Duration(rand.Int31n(5)) * time.Millisecond)
 			id, err := resource.Resource().TSOAllocator().Allocate(ctx)
 			assert.NoError(t, err)
-			ts.Ack(
-				OptMessageID(walimplstest.NewTestMessageID(int64(id))),
-			)
+			msg := mock_message.NewMockImmutableMessage(t)
+			msg.EXPECT().MessageID().Return(walimplstest.NewTestMessageID(int64(id))).Maybe()
+			ts.Ack(OptImmutableMessage(msg))
 		}(i)
 	}
 	wg.Wait()

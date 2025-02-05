@@ -28,3 +28,7 @@ func (v Version) String() string {
 func (v Version) GT(v2 Version) bool {
 	return v > v2
 }
+
+func (v Version) EQ(v2 Version) bool {
+	return v == v2
+}

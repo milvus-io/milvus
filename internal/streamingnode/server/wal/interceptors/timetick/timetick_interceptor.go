@@ -16,7 +16,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
-var _ interceptors.InterceptorWithReady = (*timeTickAppendInterceptor)(nil)
+var (
+	_ interceptors.InterceptorWithReady         = (*timeTickAppendInterceptor)(nil)
+	_ interceptors.InterceptorWithGracefulClose = (*timeTickAppendInterceptor)(nil)
+)
 
 // timeTickAppendInterceptor is a append interceptor.
 type timeTickAppendInterceptor struct {
@@ -56,7 +59,7 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 				return
 			}
 			acker.Ack(
-				ack.OptMessageID(msgID),
+				ack.OptImmutableMessage(msg.IntoImmutableMessage(msgID)),
 				ack.OptTxnSession(txnSession),
 			)
 		}()
@@ -201,7 +204,6 @@ func (impl *timeTickAppendInterceptor) appendMsg(
 	if err != nil {
 		return nil, err
 	}
-
 	utility.ReplaceAppendResultTimeTick(ctx, msg.TimeTick())
 	utility.ReplaceAppendResultTxnContext(ctx, msg.TxnContext())
 	return msgID, nil

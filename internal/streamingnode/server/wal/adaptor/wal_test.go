@@ -17,8 +17,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
-	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_flusher"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
@@ -67,20 +65,6 @@ func initResourceForTest(t *testing.T) {
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-
-	flusher := mock_flusher.NewMockFlusher(t)
-	flusher.EXPECT().RegisterPChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
-	flusher.EXPECT().UnregisterPChannel(mock.Anything).Return().Maybe()
-	flusher.EXPECT().RegisterVChannel(mock.Anything, mock.Anything).Return().Maybe()
-	flusher.EXPECT().UnregisterVChannel(mock.Anything).Return().Maybe()
-
-	resource.InitForTest(
-		t,
-		resource.OptRootCoordClient(fRootCoordClient),
-		resource.OptDataCoordClient(fDataCoordClient),
-		resource.OptFlusher(flusher),
-		resource.OptStreamingNodeCatalog(catalog),
-	)
 }
 
 func (f *walTestFramework) Run() {

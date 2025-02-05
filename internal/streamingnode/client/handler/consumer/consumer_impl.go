@@ -107,7 +107,7 @@ type consumerImpl struct {
 }
 
 // Close close the consumer client.
-func (c *consumerImpl) Close() {
+func (c *consumerImpl) Close() error {
 	// Send the close request to server.
 	if err := c.grpcStreamClient.Send(&streamingpb.ConsumeRequest{
 		Request: &streamingpb.ConsumeRequest_Close{},
@@ -118,7 +118,7 @@ func (c *consumerImpl) Close() {
 	if err := c.grpcStreamClient.CloseSend(); err != nil {
 		c.logger.Warn("close grpc stream failed", zap.Error(err))
 	}
-	<-c.finishErr.Done()
+	return c.finishErr.Get()
 }
 
 // Error returns the error of the consumer client.
@@ -189,9 +189,12 @@ func (c *consumerImpl) recvLoop() (err error) {
 				if c.txnBuilder != nil {
 					panic("unreachable code: txn builder should be nil if we receive a non-txn message")
 				}
-				if _, err := c.msgHandler.Handle(c.ctx, newImmutableMsg); err != nil {
+				if result := c.msgHandler.Handle(message.HandleParam{
+					Ctx:     c.ctx,
+					Message: newImmutableMsg,
+				}); result.Error != nil {
 					c.logger.Warn("message handle canceled", zap.Error(err))
-					return errors.Wrapf(err, "At Handler")
+					return errors.Wrapf(result.Error, "At Handler")
 				}
 			}
 		case *streamingpb.ConsumeResponse_Close:
@@ -255,7 +258,10 @@ func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
 			c.logger.Warn("failed to build txn message", zap.Any("messageID", commitMsg.MessageID()), zap.Error(err))
 			return nil
 		}
-		if _, err := c.msgHandler.Handle(c.ctx, msg); err != nil {
+		if result := c.msgHandler.Handle(message.HandleParam{
+			Ctx:     c.ctx,
+			Message: msg,
+		}); result.Error != nil {
 			c.logger.Warn("message handle canceled at txn", zap.Error(err))
 			return errors.Wrap(err, "At Handler Of Txn")
 		}
