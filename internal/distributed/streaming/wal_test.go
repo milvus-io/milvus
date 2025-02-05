@@ -70,7 +70,7 @@ func TestWAL(t *testing.T) {
 			return true
 		}
 	})
-	p.EXPECT().Produce(mock.Anything, mock.Anything).Return(&types.AppendResult{
+	p.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  10,
 		TxnCtx: &message.TxnContext{

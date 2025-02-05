@@ -242,7 +242,6 @@ func (s *Server) init() (err error) {
 		WithDataCoordClient(s.dataCoord).
 		WithSession(s.session).
 		WithMetaKV(s.metaKV).
-		WithChunkManager(s.chunkManager).
 		Build()
 	if err := s.streamingnode.Init(s.ctx); err != nil {
 		return errors.Wrap(err, "StreamingNode service init failed")

@@ -14,5 +14,5 @@ type Consumer interface {
 	Done() <-chan struct{}
 
 	// Close the consumer, release the underlying resources.
-	Close()
+	Close() error
 }

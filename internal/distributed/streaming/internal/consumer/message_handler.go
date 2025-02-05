@@ -1,8 +1,6 @@
 package consumer
 
 import (
-	"context"
-
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
@@ -13,16 +11,20 @@ type timeTickOrderMessageHandler struct {
 	lastTimeTick           uint64
 }
 
-func (mh *timeTickOrderMessageHandler) Handle(ctx context.Context, msg message.ImmutableMessage) (bool, error) {
-	lastConfirmedMessageID := msg.LastConfirmedMessageID()
-	timetick := msg.TimeTick()
-
-	ok, err := mh.inner.Handle(ctx, msg)
-	if ok {
-		mh.lastConfirmedMessageID = lastConfirmedMessageID
-		mh.lastTimeTick = timetick
+func (mh *timeTickOrderMessageHandler) Handle(handleParam message.HandleParam) message.HandleResult {
+	var lastConfirmedMessageID message.MessageID
+	var lastTimeTick uint64
+	if handleParam.Message != nil {
+		lastConfirmedMessageID = handleParam.Message.LastConfirmedMessageID()
+		lastTimeTick = handleParam.Message.TimeTick()
 	}
-	return ok, err
+
+	result := mh.inner.Handle(handleParam)
+	if result.MessageHandled {
+		mh.lastConfirmedMessageID = lastConfirmedMessageID
+		mh.lastTimeTick = lastTimeTick
+	}
+	return result
 }
 
 func (mh *timeTickOrderMessageHandler) Close() {
