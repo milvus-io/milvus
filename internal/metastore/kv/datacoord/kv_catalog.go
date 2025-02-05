@@ -451,23 +451,23 @@ func (kc *Catalog) DropChannel(ctx context.Context, channel string) error {
 }
 
 func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error) {
-	keys, values, err := kc.MetaKv.LoadWithPrefix(ChannelCheckpointPrefix)
-	if err != nil {
-		return nil, err
-	}
-
 	channelCPs := make(map[string]*msgpb.MsgPosition)
-	for i, key := range keys {
-		value := values[i]
+	applyFn := func(key []byte, value []byte) error {
 		channelCP := &msgpb.MsgPosition{}
-		err = proto.Unmarshal([]byte(value), channelCP)
+		err := proto.Unmarshal(value, channelCP)
 		if err != nil {
 			log.Error("unmarshal channelCP failed when ListChannelCheckpoint", zap.Error(err))
-			return nil, err
+			return err
 		}
-		ss := strings.Split(key, "/")
+		ss := strings.Split(string(key), "/")
 		vChannel := ss[len(ss)-1]
 		channelCPs[vChannel] = channelCP
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ChannelCheckpointPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
 	}
 
 	return channelCPs, nil
@@ -537,24 +537,23 @@ func (kc *Catalog) CreateIndex(ctx context.Context, index *model.Index) error {
 }
 
 func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
-	_, values, err := kc.MetaKv.LoadWithPrefix(util.FieldIndexPrefix)
-	if err != nil {
-		log.Error("list index meta fail", zap.String("prefix", util.FieldIndexPrefix), zap.Error(err))
-		return nil, err
-	}
-
 	indexes := make([]*model.Index, 0)
-	for _, value := range values {
+	applyFn := func(key []byte, value []byte) error {
 		meta := &indexpb.FieldIndex{}
-		err = proto.Unmarshal([]byte(value), meta)
+		err := proto.Unmarshal(value, meta)
 		if err != nil {
 			log.Warn("unmarshal index info failed", zap.Error(err))
-			return nil, err
+			return err
 		}
 
 		indexes = append(indexes, model.UnmarshalIndexModel(meta))
+		return nil
 	}
 
+	err := kc.MetaKv.WalkWithPrefix(util.FieldIndexPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
 	return indexes, nil
 }
 
@@ -614,22 +613,22 @@ func (kc *Catalog) CreateSegmentIndex(ctx context.Context, segIdx *model.Segment
 }
 
 func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentIndex, error) {
-	_, values, err := kc.MetaKv.LoadWithPrefix(util.SegmentIndexPrefix)
-	if err != nil {
-		log.Error("list segment index meta fail", zap.String("prefix", util.SegmentIndexPrefix), zap.Error(err))
-		return nil, err
-	}
-
 	segIndexes := make([]*model.SegmentIndex, 0)
-	for _, value := range values {
+	applyFn := func(key []byte, value []byte) error {
 		segmentIndexInfo := &indexpb.SegmentIndex{}
-		err = proto.Unmarshal([]byte(value), segmentIndexInfo)
+		err := proto.Unmarshal(value, segmentIndexInfo)
 		if err != nil {
 			log.Warn("unmarshal segment index info failed", zap.Error(err))
-			return segIndexes, err
+			return err
 		}
 
 		segIndexes = append(segIndexes, model.UnmarshalSegmentIndexModel(segmentIndexInfo))
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(util.SegmentIndexPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
 	}
 
 	return segIndexes, nil
@@ -671,17 +670,19 @@ func (kc *Catalog) SaveImportJob(job *datapb.ImportJob) error {
 
 func (kc *Catalog) ListImportJobs() ([]*datapb.ImportJob, error) {
 	jobs := make([]*datapb.ImportJob, 0)
-	_, values, err := kc.MetaKv.LoadWithPrefix(ImportJobPrefix)
-	if err != nil {
-		return nil, err
-	}
-	for _, value := range values {
+	applyFn := func(key []byte, value []byte) error {
 		job := &datapb.ImportJob{}
-		err = proto.Unmarshal([]byte(value), job)
+		err := proto.Unmarshal(value, job)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		jobs = append(jobs, job)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ImportJobPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
 	}
 	return jobs, nil
 }
@@ -703,19 +704,20 @@ func (kc *Catalog) SavePreImportTask(task *datapb.PreImportTask) error {
 func (kc *Catalog) ListPreImportTasks() ([]*datapb.PreImportTask, error) {
 	tasks := make([]*datapb.PreImportTask, 0)
 
-	_, values, err := kc.MetaKv.LoadWithPrefix(PreImportTaskPrefix)
+	applyFn := func(key []byte, value []byte) error {
+		task := &datapb.PreImportTask{}
+		err := proto.Unmarshal(value, task)
+		if err != nil {
+			return err
+		}
+		tasks = append(tasks, task)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(PreImportTaskPrefix, paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
-	for _, value := range values {
-		task := &datapb.PreImportTask{}
-		err = proto.Unmarshal([]byte(value), task)
-		if err != nil {
-			return nil, err
-		}
-		tasks = append(tasks, task)
-	}
-
 	return tasks, nil
 }
 
@@ -736,17 +738,19 @@ func (kc *Catalog) SaveImportTask(task *datapb.ImportTaskV2) error {
 func (kc *Catalog) ListImportTasks() ([]*datapb.ImportTaskV2, error) {
 	tasks := make([]*datapb.ImportTaskV2, 0)
 
-	_, values, err := kc.MetaKv.LoadWithPrefix(ImportTaskPrefix)
-	if err != nil {
-		return nil, err
-	}
-	for _, value := range values {
+	applyFn := func(key []byte, value []byte) error {
 		task := &datapb.ImportTaskV2{}
-		err = proto.Unmarshal([]byte(value), task)
+		err := proto.Unmarshal(value, task)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		tasks = append(tasks, task)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ImportTaskPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
 	}
 	return tasks, nil
 }
@@ -774,17 +778,19 @@ func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID type
 func (kc *Catalog) ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error) {
 	tasks := make([]*datapb.CompactionTask, 0)
 
-	_, values, err := kc.MetaKv.LoadWithPrefix(CompactionTaskPrefix)
-	if err != nil {
-		return nil, err
-	}
-	for _, value := range values {
+	applyFn := func(key []byte, value []byte) error {
 		info := &datapb.CompactionTask{}
-		err = proto.Unmarshal([]byte(value), info)
+		err := proto.Unmarshal(value, info)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		tasks = append(tasks, info)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(CompactionTaskPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
 	}
 	return tasks, nil
 }
@@ -811,17 +817,19 @@ func (kc *Catalog) DropCompactionTask(ctx context.Context, task *datapb.Compacti
 func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {
 	tasks := make([]*indexpb.AnalyzeTask, 0)
 
-	_, values, err := kc.MetaKv.LoadWithPrefix(AnalyzeTaskPrefix)
-	if err != nil {
-		return nil, err
-	}
-	for _, value := range values {
+	applyFn := func(key []byte, value []byte) error {
 		task := &indexpb.AnalyzeTask{}
-		err = proto.Unmarshal([]byte(value), task)
+		err := proto.Unmarshal(value, task)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		tasks = append(tasks, task)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(AnalyzeTaskPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
 	}
 	return tasks, nil
 }
@@ -849,17 +857,19 @@ func (kc *Catalog) DropAnalyzeTask(ctx context.Context, taskID typeutil.UniqueID
 func (kc *Catalog) ListPartitionStatsInfos(ctx context.Context) ([]*datapb.PartitionStatsInfo, error) {
 	infos := make([]*datapb.PartitionStatsInfo, 0)
 
-	_, values, err := kc.MetaKv.LoadWithPrefix(PartitionStatsInfoPrefix)
-	if err != nil {
-		return nil, err
-	}
-	for _, value := range values {
+	applyFn := func(key []byte, value []byte) error {
 		info := &datapb.PartitionStatsInfo{}
-		err = proto.Unmarshal([]byte(value), info)
+		err := proto.Unmarshal(value, info)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		infos = append(infos, info)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(PartitionStatsInfoPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
 	}
 	return infos, nil
 }

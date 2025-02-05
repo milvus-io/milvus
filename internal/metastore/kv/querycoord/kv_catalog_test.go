@@ -231,7 +231,7 @@ func (suite *CatalogTestSuite) TestCollectionTarget() {
 	mockStore := mocks.NewMetaKv(suite.T())
 	mockErr := errors.New("failed to access etcd")
 	mockStore.EXPECT().MultiSave(mock.Anything).Return(mockErr)
-	mockStore.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, mockErr)
+	mockStore.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
 
 	suite.catalog.cli = mockStore
 	err = suite.catalog.SaveCollectionTargets(&querypb.CollectionTarget{})
