@@ -14,14 +14,6 @@ import (
 
 var _ task = (*broadcastTask)(nil)
 
-// newBroadcastTask creates a new broadcast task.
-func newBroadcastTask(ctx context.Context, core *Core, msgs []message.MutableMessage) *broadcastTask {
-	return &broadcastTask{
-		baseTask: newBaseTask(ctx, core),
-		msgs:     msgs,
-	}
-}
-
 // BroadcastTask is used to implement the broadcast operation based on the msgstream
 // by using the streaming service interface.
 // msgstream will be deprecated since 2.6.0 with streaming service, so those code will be removed in the future version.

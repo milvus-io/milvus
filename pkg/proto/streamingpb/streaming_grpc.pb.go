@@ -109,6 +109,8 @@ var StreamingNodeStateService_ServiceDesc = grpc.ServiceDesc{
 
 const (
 	StreamingCoordBroadcastService_Broadcast_FullMethodName = "/milvus.proto.streaming.StreamingCoordBroadcastService/Broadcast"
+	StreamingCoordBroadcastService_Ack_FullMethodName       = "/milvus.proto.streaming.StreamingCoordBroadcastService/Ack"
+	StreamingCoordBroadcastService_Watch_FullMethodName     = "/milvus.proto.streaming.StreamingCoordBroadcastService/Watch"
 )
 
 // StreamingCoordBroadcastServiceClient is the client API for StreamingCoordBroadcastService service.
@@ -118,6 +120,10 @@ type StreamingCoordBroadcastServiceClient interface {
 	// Broadcast receives broadcast messages from other component and make sure that the message is broadcast to all wal.
 	// It performs an atomic broadcast to all wal, achieve eventual consistency.
 	Broadcast(ctx context.Context, in *BroadcastRequest, opts ...grpc.CallOption) (*BroadcastResponse, error)
+	// Ack acknowledge broadcast message is consumed.
+	Ack(ctx context.Context, in *BroadcastAckRequest, opts ...grpc.CallOption) (*BroadcastAckResponse, error)
+	// Watch watch the broadcast events.
+	Watch(ctx context.Context, opts ...grpc.CallOption) (StreamingCoordBroadcastService_WatchClient, error)
 }
 
 type streamingCoordBroadcastServiceClient struct {
@@ -137,6 +143,46 @@ func (c *streamingCoordBroadcastServiceClient) Broadcast(ctx context.Context, in
 	return out, nil
 }
 
+func (c *streamingCoordBroadcastServiceClient) Ack(ctx context.Context, in *BroadcastAckRequest, opts ...grpc.CallOption) (*BroadcastAckResponse, error) {
+	out := new(BroadcastAckResponse)
+	err := c.cc.Invoke(ctx, StreamingCoordBroadcastService_Ack_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *streamingCoordBroadcastServiceClient) Watch(ctx context.Context, opts ...grpc.CallOption) (StreamingCoordBroadcastService_WatchClient, error) {
+	stream, err := c.cc.NewStream(ctx, &StreamingCoordBroadcastService_ServiceDesc.Streams[0], StreamingCoordBroadcastService_Watch_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &streamingCoordBroadcastServiceWatchClient{stream}
+	return x, nil
+}
+
+type StreamingCoordBroadcastService_WatchClient interface {
+	Send(*BroadcastWatchRequest) error
+	Recv() (*BroadcastWatchResponse, error)
+	grpc.ClientStream
+}
+
+type streamingCoordBroadcastServiceWatchClient struct {
+	grpc.ClientStream
+}
+
+func (x *streamingCoordBroadcastServiceWatchClient) Send(m *BroadcastWatchRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *streamingCoordBroadcastServiceWatchClient) Recv() (*BroadcastWatchResponse, error) {
+	m := new(BroadcastWatchResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // StreamingCoordBroadcastServiceServer is the server API for StreamingCoordBroadcastService service.
 // All implementations should embed UnimplementedStreamingCoordBroadcastServiceServer
 // for forward compatibility
@@ -144,6 +190,10 @@ type StreamingCoordBroadcastServiceServer interface {
 	// Broadcast receives broadcast messages from other component and make sure that the message is broadcast to all wal.
 	// It performs an atomic broadcast to all wal, achieve eventual consistency.
 	Broadcast(context.Context, *BroadcastRequest) (*BroadcastResponse, error)
+	// Ack acknowledge broadcast message is consumed.
+	Ack(context.Context, *BroadcastAckRequest) (*BroadcastAckResponse, error)
+	// Watch watch the broadcast events.
+	Watch(StreamingCoordBroadcastService_WatchServer) error
 }
 
 // UnimplementedStreamingCoordBroadcastServiceServer should be embedded to have forward compatible implementations.
@@ -152,6 +202,12 @@ type UnimplementedStreamingCoordBroadcastServiceServer struct {
 
 func (UnimplementedStreamingCoordBroadcastServiceServer) Broadcast(context.Context, *BroadcastRequest) (*BroadcastResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Broadcast not implemented")
+}
+func (UnimplementedStreamingCoordBroadcastServiceServer) Ack(context.Context, *BroadcastAckRequest) (*BroadcastAckResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Ack not implemented")
+}
+func (UnimplementedStreamingCoordBroadcastServiceServer) Watch(StreamingCoordBroadcastService_WatchServer) error {
+	return status.Errorf(codes.Unimplemented, "method Watch not implemented")
 }
 
 // UnsafeStreamingCoordBroadcastServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -183,6 +239,50 @@ func _StreamingCoordBroadcastService_Broadcast_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _StreamingCoordBroadcastService_Ack_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BroadcastAckRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingCoordBroadcastServiceServer).Ack(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingCoordBroadcastService_Ack_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingCoordBroadcastServiceServer).Ack(ctx, req.(*BroadcastAckRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StreamingCoordBroadcastService_Watch_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(StreamingCoordBroadcastServiceServer).Watch(&streamingCoordBroadcastServiceWatchServer{stream})
+}
+
+type StreamingCoordBroadcastService_WatchServer interface {
+	Send(*BroadcastWatchResponse) error
+	Recv() (*BroadcastWatchRequest, error)
+	grpc.ServerStream
+}
+
+type streamingCoordBroadcastServiceWatchServer struct {
+	grpc.ServerStream
+}
+
+func (x *streamingCoordBroadcastServiceWatchServer) Send(m *BroadcastWatchResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *streamingCoordBroadcastServiceWatchServer) Recv() (*BroadcastWatchRequest, error) {
+	m := new(BroadcastWatchRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // StreamingCoordBroadcastService_ServiceDesc is the grpc.ServiceDesc for StreamingCoordBroadcastService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -194,8 +294,19 @@ var StreamingCoordBroadcastService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Broadcast",
 			Handler:    _StreamingCoordBroadcastService_Broadcast_Handler,
 		},
+		{
+			MethodName: "Ack",
+			Handler:    _StreamingCoordBroadcastService_Ack_Handler,
+		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Watch",
+			Handler:       _StreamingCoordBroadcastService_Watch_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
 	Metadata: "streaming.proto",
 }
 
