@@ -99,7 +99,11 @@ func (jm *statsJobManager) triggerSortStatsTask() {
 	segments := jm.mt.SelectSegments(jm.ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
 		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsImporting()
 	}))
+
 	for _, segment := range segments {
+		if !segment.GetIsInvisible() && jm.scheduler.GetTaskCount() > Params.DataCoordCfg.StatsTaskTriggerCount.GetAsInt() {
+			continue
+		}
 		jm.createSortStatsTaskForSegment(segment)
 	}
 }
