@@ -138,7 +138,7 @@ func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta
 		return fmt.Errorf("mark segment compacting failed, isCompacting: %v", !canDo)
 	}
 
-	if !compactionHandler.checkAndSetSegmentStating(st.segmentID) {
+	if !compactionHandler.checkAndSetSegmentStating(st.req.GetInsertChannel(), st.segmentID) {
 		log.Warn("segment is contains by l0 compaction, skip stats", zap.Int64("taskID", st.taskID),
 			zap.Int64("segmentID", st.segmentID))
 		st.SetState(indexpb.JobState_JobStateFailed, "segment is contains by l0 compaction")
@@ -252,7 +252,6 @@ func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClien
 	}
 
 	log.Ctx(ctx).Info("assign stats task success", zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID))
-	log.Ctx(ctx).Debug("assign stats task success, print request", zap.Any("req", st.req))
 	st.SetState(indexpb.JobState_JobStateInProgress, "")
 	return true
 }

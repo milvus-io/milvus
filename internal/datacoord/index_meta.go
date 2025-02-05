@@ -214,7 +214,7 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 	defer m.lastUpdateMetricTime.Store(time.Now())
 	taskMetrics := make(map[UniqueID]map[commonpb.IndexState]int)
 	for _, segIdx := range m.segmentBuildInfo.List() {
-		if segIdx.IsDeleted {
+		if segIdx.IsDeleted || !m.isIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 			continue
 		}
 		if _, ok := taskMetrics[segIdx.CollectionID]; !ok {
@@ -756,6 +756,10 @@ func (m *indexMeta) IsIndexExist(collID, indexID UniqueID) bool {
 	m.RLock()
 	defer m.RUnlock()
 
+	return m.isIndexExist(collID, indexID)
+}
+
+func (m *indexMeta) isIndexExist(collID, indexID UniqueID) bool {
 	fieldIndexes, ok := m.indexes[collID]
 	if !ok {
 		return false

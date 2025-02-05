@@ -1953,7 +1953,7 @@ func (s *taskSchedulerSuite) Test_reload() {
 				},
 			}))
 		compactionHandler := NewMockCompactionPlanContext(s.T())
-		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything).Return(true).Maybe()
+		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true).Maybe()
 		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
 		s.NotNil(scheduler)
 		s.True(mt.segments.segments[1000].isCompacting)
@@ -1989,7 +1989,7 @@ func (s *taskSchedulerSuite) Test_reload() {
 				},
 			}))
 		compactionHandler := NewMockCompactionPlanContext(s.T())
-		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything).Return(true).Maybe()
+		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true).Maybe()
 		mt.segments.segments[1000].isCompacting = true
 		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
 		s.NotNil(scheduler)
@@ -2026,11 +2026,85 @@ func (s *taskSchedulerSuite) Test_reload() {
 				},
 			}))
 		compactionHandler := NewMockCompactionPlanContext(s.T())
-		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything).Return(true).Maybe()
+		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true).Maybe()
 		mt.segments.segments[1000].isCompacting = true
 		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
 		s.NotNil(scheduler)
 		s.True(mt.segments.segments[1000].isCompacting)
+		task, ok := scheduler.tasks[statsTaskID]
+		s.True(ok)
+		s.Equal(indexpb.JobState_JobStateFailed, task.GetState())
+	})
+
+	s.Run("segment is in l0 compaction", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil)
+		workerManager := session.NewMockWorkerManager(s.T())
+		handler := NewNMockHandler(s.T())
+		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)),
+			withStatsTaskMeta(&statsTaskMeta{
+				ctx:     context.Background(),
+				catalog: catalog,
+				tasks: map[int64]*indexpb.StatsTask{
+					statsTaskID: {
+						CollectionID:    10000,
+						PartitionID:     10001,
+						SegmentID:       1000,
+						InsertChannel:   "",
+						TaskID:          statsTaskID,
+						Version:         1,
+						NodeID:          1,
+						State:           indexpb.JobState_JobStateInProgress,
+						FailReason:      "",
+						TargetSegmentID: 2000,
+						SubJobType:      indexpb.StatsSubJob_Sort,
+						CanRecycle:      false,
+					},
+				},
+			}))
+		compactionHandler := NewMockCompactionPlanContext(s.T())
+		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(false).Maybe()
+		mt.segments.segments[1000].isCompacting = false
+		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
+		s.NotNil(scheduler)
+		s.False(mt.segments.segments[1000].isCompacting)
+		task, ok := scheduler.tasks[statsTaskID]
+		s.False(ok)
+		s.Nil(task)
+	})
+
+	s.Run("drop task failed", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		workerManager := session.NewMockWorkerManager(s.T())
+		handler := NewNMockHandler(s.T())
+		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)),
+			withStatsTaskMeta(&statsTaskMeta{
+				ctx:     context.Background(),
+				catalog: catalog,
+				tasks: map[int64]*indexpb.StatsTask{
+					statsTaskID: {
+						CollectionID:    10000,
+						PartitionID:     10001,
+						SegmentID:       1000,
+						InsertChannel:   "",
+						TaskID:          statsTaskID,
+						Version:         1,
+						NodeID:          1,
+						State:           indexpb.JobState_JobStateInProgress,
+						FailReason:      "",
+						TargetSegmentID: 2000,
+						SubJobType:      indexpb.StatsSubJob_Sort,
+						CanRecycle:      false,
+					},
+				},
+			}))
+		compactionHandler := NewMockCompactionPlanContext(s.T())
+		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(false).Maybe()
+		mt.segments.segments[1000].isCompacting = false
+		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
+		s.NotNil(scheduler)
+		s.False(mt.segments.segments[1000].isCompacting)
 		task, ok := scheduler.tasks[statsTaskID]
 		s.True(ok)
 		s.Equal(indexpb.JobState_JobStateFailed, task.GetState())

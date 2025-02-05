@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -324,12 +325,12 @@ func validateDimension(field *schemapb.FieldSchema) error {
 	}
 	if typeutil.IsSparseFloatVectorType(field.DataType) {
 		if exist {
-			return fmt.Errorf("dim should not be specified for sparse vector field %s(%d)", field.Name, field.FieldID)
+			return fmt.Errorf("dim should not be specified for sparse vector field %s(%d)", field.GetName(), field.FieldID)
 		}
 		return nil
 	}
 	if !exist {
-		return errors.New("dimension is not defined in field type params, check type param `dim` for vector field")
+		return errors.Newf("dimension is not defined in field type params of field %s, check type param `dim` for vector field", field.GetName())
 	}
 
 	if dim <= 1 {
@@ -338,14 +339,14 @@ func validateDimension(field *schemapb.FieldSchema) error {
 
 	if typeutil.IsFloatVectorType(field.DataType) {
 		if dim > Params.ProxyCfg.MaxDimension.GetAsInt64() {
-			return fmt.Errorf("invalid dimension: %d. float vector dimension should be in range 2 ~ %d", dim, Params.ProxyCfg.MaxDimension.GetAsInt())
+			return fmt.Errorf("invalid dimension: %d of field %s. float vector dimension should be in range 2 ~ %d", dim, field.GetName(), Params.ProxyCfg.MaxDimension.GetAsInt())
 		}
 	} else {
 		if dim%8 != 0 {
-			return fmt.Errorf("invalid dimension: %d. binary vector dimension should be multiple of 8. ", dim)
+			return fmt.Errorf("invalid dimension: %d of field %s. binary vector dimension should be multiple of 8. ", dim, field.GetName())
 		}
 		if dim > Params.ProxyCfg.MaxDimension.GetAsInt64()*8 {
-			return fmt.Errorf("invalid dimension: %d. binary vector dimension should be in range 2 ~ %d", dim, Params.ProxyCfg.MaxDimension.GetAsInt()*8)
+			return fmt.Errorf("invalid dimension: %d of field %s. binary vector dimension should be in range 2 ~ %d", dim, field.GetName(), Params.ProxyCfg.MaxDimension.GetAsInt()*8)
 		}
 	}
 	return nil
@@ -365,13 +366,13 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 
 		defaultMaxVarCharLength := Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
 		if maxLengthPerRow > defaultMaxVarCharLength || maxLengthPerRow <= 0 {
-			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, %d]", defaultMaxVarCharLength)
+			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar field(%s) should be in (0, %d], but got %d instead", field.GetName(), defaultMaxVarCharLength, maxLengthPerRow)
 		}
 		exist = true
 	}
 	// if not exist type params max_length, return error
 	if !exist {
-		return fmt.Errorf("type param(max_length) should be specified for varChar field of collection %s", collectionName)
+		return fmt.Errorf("type param(max_length) should be specified for varChar field(%s) of collection %s", field.GetName(), collectionName)
 	}
 
 	return nil
@@ -386,7 +387,7 @@ func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchem
 
 		maxCapacityPerRow, err := strconv.ParseInt(param.Value, 10, 64)
 		if err != nil {
-			return fmt.Errorf("the value of %s must be an integer", common.MaxCapacityKey)
+			return fmt.Errorf("the value for %s of field %s must be an integer", common.MaxCapacityKey, field.GetName())
 		}
 		if maxCapacityPerRow > defaultMaxArrayCapacity || maxCapacityPerRow <= 0 {
 			return fmt.Errorf("the maximum capacity specified for a Array should be in (0, 4096]")
@@ -395,7 +396,7 @@ func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchem
 	}
 	// if not exist type params max_length, return error
 	if !exist {
-		return fmt.Errorf("type param(max_capacity) should be specified for array field of collection %s", collectionName)
+		return fmt.Errorf("type param(max_capacity) should be specified for array field %s of collection %s", field.GetName(), collectionName)
 	}
 
 	return nil
@@ -410,7 +411,7 @@ func validateVectorFieldMetricType(field *schemapb.FieldSchema) error {
 			return nil
 		}
 	}
-	return errors.New("vector float without metric_type")
+	return fmt.Errorf(`index param "metric_type" is not specified for index float vector %s`, field.GetName())
 }
 
 func validateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
@@ -418,7 +419,7 @@ func validateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
 	for _, field := range fields {
 		_, ok := names[field.Name]
 		if ok {
-			return errors.New("duplicated field name")
+			return errors.Newf("duplicated field name %s found", field.GetName())
 		}
 		names[field.Name] = true
 	}
@@ -2107,7 +2108,7 @@ func GetCostValue(status *commonpb.Status) int {
 }
 
 // GetRequestInfo returns collection name and rateType of request and return tokens needed.
-func GetRequestInfo(ctx context.Context, req interface{}) (int64, map[int64][]int64, internalpb.RateType, int, error) {
+func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]int64, internalpb.RateType, int, error) {
 	switch r := req.(type) {
 	case *milvuspb.InsertRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
@@ -2185,6 +2186,7 @@ func GetRequestInfo(ctx context.Context, req interface{}) (int64, map[int64][]in
 		if req == nil {
 			return util.InvalidDBID, map[int64][]int64{}, 0, 0, fmt.Errorf("null request")
 		}
+		log.RatedWarn(60, "not supported request type for rate limiter", zap.String("type", reflect.TypeOf(req).String()))
 		return util.InvalidDBID, map[int64][]int64{}, 0, 0, nil
 	}
 }

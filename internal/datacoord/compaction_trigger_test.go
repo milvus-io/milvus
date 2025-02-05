@@ -75,7 +75,7 @@ func (h *spyCompactionHandler) enqueueCompaction(task *datapb.CompactionTask) er
 	return err
 }
 
-func (h *spyCompactionHandler) checkAndSetSegmentStating(segmentID int64) bool {
+func (h *spyCompactionHandler) checkAndSetSegmentStating(channel string, segmentID int64) bool {
 	return false
 }
 

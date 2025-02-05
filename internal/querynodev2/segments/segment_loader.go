@@ -1519,6 +1519,11 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			}
 		} else {
 			shouldCalculateDataSize = true
+			// querynode will generate a (memory type) intermin index for vector type
+			interimIndexEnable := multiplyFactor.enableTempSegmentIndex && !isGrowingMmapEnable() && SupportInterimIndexDataType(fieldSchema.GetDataType())
+			if interimIndexEnable {
+				segmentMemorySize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
+			}
 		}
 
 		if shouldCalculateDataSize {
@@ -1532,11 +1537,6 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 				}
 			} else {
 				segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
-			}
-			// querynode will generate a (memory type) intermin index for vector type
-			interimIndexEnable := multiplyFactor.enableTempSegmentIndex && !isGrowingMmapEnable() && SupportInterimIndexDataType(fieldSchema.GetDataType())
-			if interimIndexEnable {
-				segmentMemorySize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
 			}
 		}
 
