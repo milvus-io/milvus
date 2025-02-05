@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -250,9 +251,12 @@ func (s *taskScheduler) run() {
 
 	s.policy(taskIDs)
 
+	// 1. pick an indexNode client
+	nodeSlots := s.nodeManager.QuerySlots()
+	log.Info("nodeSlots", zap.Any("slots", nodeSlots))
 	for _, taskID := range taskIDs {
 		s.taskLock.Lock(taskID)
-		ok := s.process(taskID)
+		ok := s.process(taskID, nodeSlots)
 		if !ok {
 			s.taskLock.Unlock(taskID)
 			log.Ctx(s.ctx).Info("there is no idle indexing node, waiting for retry...")
@@ -268,7 +272,7 @@ func (s *taskScheduler) removeTask(taskID UniqueID) {
 	delete(s.tasks, taskID)
 }
 
-func (s *taskScheduler) process(taskID UniqueID) bool {
+func (s *taskScheduler) process(taskID UniqueID, nodeSlots []session.WorkerSlots) bool {
 	task := s.getTask(taskID)
 
 	if !task.CheckTaskHealthy(s.meta) {
@@ -284,7 +288,7 @@ func (s *taskScheduler) process(taskID UniqueID) bool {
 		s.removeTask(taskID)
 
 	case indexpb.JobState_JobStateInit:
-		return s.processInit(task)
+		return s.processInit(task, nodeSlots)
 	case indexpb.JobState_JobStateFinished, indexpb.JobState_JobStateFailed:
 		return s.processFinished(task)
 	case indexpb.JobState_JobStateRetry:
@@ -371,19 +375,24 @@ func (s *taskScheduler) collectTaskMetrics() {
 	}
 }
 
-func (s *taskScheduler) processInit(task Task) bool {
+func (s *taskScheduler) processInit(task Task, nodeSlots []session.WorkerSlots) bool {
 	// 0. pre check task
 	// Determine whether the task can be performed or if it is truly necessary.
 	// for example: flat index doesn't need to actually build. checkPass is false.
-	checkPass := task.PreCheck(s.ctx, s)
+	checkPass, taskSLot := task.PreCheck(s.ctx, s)
 	if !checkPass {
 		return true
 	}
 
 	// 1. pick an indexNode client
-	nodeID, client := s.nodeManager.PickClient()
-	if client == nil {
-		log.Ctx(s.ctx).Debug("pick client failed")
+	nodeID, nodeOffset := pickNode(nodeSlots, taskSLot)
+	if nodeID == -1 {
+		log.Ctx(s.ctx).Debug("pick node failed", zap.Int64("taskID", task.GetTaskID()))
+		return false
+	}
+	client, exist := s.nodeManager.GetClientByID(nodeID)
+	if !exist || client == nil {
+		log.Ctx(s.ctx).Debug("get indexnode client failed", zap.Int64("nodeID", nodeID))
 		return false
 	}
 	log.Ctx(s.ctx).Info("pick client success", zap.Int64("taskID", task.GetTaskID()), zap.Int64("nodeID", nodeID))
@@ -422,7 +431,8 @@ func (s *taskScheduler) processInit(task Task) bool {
 		WithLabelValues(task.GetTaskType(), metrics.Pending).Observe(float64(queueingTime.Milliseconds()))
 	log.Ctx(s.ctx).Info("update task meta state to InProgress success", zap.Int64("taskID", task.GetTaskID()),
 		zap.Int64("nodeID", nodeID))
-	return s.processInProgress(task)
+	nodeSlots[nodeOffset].AvailableSlots = nodeSlots[nodeOffset].AvailableSlots - taskSLot
+	return true
 }
 
 func (s *taskScheduler) processFinished(task Task) bool {
@@ -444,6 +454,10 @@ func (s *taskScheduler) processFinished(task Task) bool {
 			return true
 		}
 	}
+	log.Ctx(s.ctx).Debug("task has been finished", zap.Int64("taskID", task.GetTaskID()),
+		zap.Int64("queueing time(ms)", task.GetStartTime().Sub(task.GetQueueTime()).Milliseconds()),
+		zap.Int64("running time(ms)", runningTime.Milliseconds()),
+		zap.Int64("total time(ms)", task.GetEndTime().Sub(task.GetQueueTime()).Milliseconds()))
 	s.removeTask(task.GetTaskID())
 	return true
 }
@@ -471,4 +485,22 @@ func (s *taskScheduler) processInProgress(task Task) bool {
 	}
 	task.SetState(indexpb.JobState_JobStateRetry, "node does not exist")
 	return true
+}
+
+func pickNode(nodeSlots []session.WorkerSlots, taskSlot int64) (int64, int) {
+	sort.Slice(nodeSlots, func(i, j int) bool {
+		if nodeSlots[i].AvailableSlots == nodeSlots[j].AvailableSlots {
+			return nodeSlots[i].TotalSlots > nodeSlots[j].TotalSlots
+		}
+		return nodeSlots[i].AvailableSlots > nodeSlots[j].AvailableSlots
+	})
+	for i, slots := range nodeSlots {
+		if slots.AvailableSlots >= taskSlot {
+			return slots.NodeID, i
+		} else if slots.TotalSlots == slots.AvailableSlots {
+			return slots.NodeID, i
+		}
+	}
+
+	return -1, -1
 }

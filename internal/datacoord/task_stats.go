@@ -147,20 +147,24 @@ func (st *statsTask) UpdateMetaBuildingState(meta *meta) error {
 	return meta.statsTaskMeta.UpdateBuildingTask(st.taskID)
 }
 
-func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bool {
+func (st *statsTask) calculateTaskSlotPolicy(segmentSize int64) int64 {
+	return Params.DataCoordCfg.StatsTaskSlotUsage.GetAsInt64()
+}
+
+func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) (bool, int64) {
 	// set segment compacting
 	log := log.Ctx(ctx).With(zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID))
 	segment := dependency.meta.GetHealthySegment(ctx, st.segmentID)
 	if segment == nil {
 		log.Warn("segment is node healthy, skip stats")
 		st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
-		return false
+		return false, 0
 	}
 
 	if segment.GetIsSorted() && st.subJobType == indexpb.StatsSubJob_Sort {
 		log.Info("stats task is marked as sorted, skip stats")
 		st.SetState(indexpb.JobState_JobStateNone, "segment is marked as sorted")
-		return false
+		return false, 0
 	}
 
 	collInfo, err := dependency.handler.GetCollection(ctx, segment.GetCollectionID())
@@ -168,14 +172,14 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		log.Warn("stats task get collection info failed", zap.Int64("collectionID",
 			segment.GetCollectionID()), zap.Error(err))
 		st.SetState(indexpb.JobState_JobStateInit, err.Error())
-		return false
+		return false, 0
 	}
 
 	collTtl, err := getCollectionTTL(collInfo.Properties)
 	if err != nil {
 		log.Warn("stats task get collection ttl failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
 		st.SetState(indexpb.JobState_JobStateInit, err.Error())
-		return false
+		return false, 0
 	}
 
 	binlogNum := (segment.getSegmentSize()/Params.DataNodeCfg.BinLogMaxSize.GetAsInt64() + 1) * int64(len(collInfo.Schema.GetFields())) * 100
@@ -184,8 +188,10 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 	if err != nil {
 		log.Warn("stats task alloc logID failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
 		st.SetState(indexpb.JobState_JobStateInit, err.Error())
-		return false
+		return false, 0
 	}
+
+	taskSlot := st.calculateTaskSlotPolicy(segment.getSegmentSize())
 
 	st.req = &workerpb.CreateStatsRequest{
 		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
@@ -206,9 +212,10 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		CollectionTtl:   collTtl.Nanoseconds(),
 		CurrentTs:       tsoutil.GetCurrentTime(),
 		BinlogMaxSize:   Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		TaskSlot:        taskSlot,
 	}
 
-	return true
+	return true, taskSlot
 }
 
 func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClient) bool {
