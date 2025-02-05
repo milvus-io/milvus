@@ -22,17 +22,17 @@ func (_m *MockCompactionPlanContext) EXPECT() *MockCompactionPlanContext_Expecte
 	return &MockCompactionPlanContext_Expecter{mock: &_m.Mock}
 }
 
-// checkAndSetSegmentStating provides a mock function with given fields: segmentID
-func (_m *MockCompactionPlanContext) checkAndSetSegmentStating(segmentID int64) bool {
-	ret := _m.Called(segmentID)
+// checkAndSetSegmentStating provides a mock function with given fields: channel, segmentID
+func (_m *MockCompactionPlanContext) checkAndSetSegmentStating(channel string, segmentID int64) bool {
+	ret := _m.Called(channel, segmentID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for checkAndSetSegmentStating")
 	}
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(int64) bool); ok {
-		r0 = rf(segmentID)
+	if rf, ok := ret.Get(0).(func(string, int64) bool); ok {
+		r0 = rf(channel, segmentID)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
@@ -46,14 +46,15 @@ type MockCompactionPlanContext_checkAndSetSegmentStating_Call struct {
 }
 
 // checkAndSetSegmentStating is a helper method to define mock.On call
+//   - channel string
 //   - segmentID int64
-func (_e *MockCompactionPlanContext_Expecter) checkAndSetSegmentStating(segmentID interface{}) *MockCompactionPlanContext_checkAndSetSegmentStating_Call {
-	return &MockCompactionPlanContext_checkAndSetSegmentStating_Call{Call: _e.mock.On("checkAndSetSegmentStating", segmentID)}
+func (_e *MockCompactionPlanContext_Expecter) checkAndSetSegmentStating(channel interface{}, segmentID interface{}) *MockCompactionPlanContext_checkAndSetSegmentStating_Call {
+	return &MockCompactionPlanContext_checkAndSetSegmentStating_Call{Call: _e.mock.On("checkAndSetSegmentStating", channel, segmentID)}
 }
 
-func (_c *MockCompactionPlanContext_checkAndSetSegmentStating_Call) Run(run func(segmentID int64)) *MockCompactionPlanContext_checkAndSetSegmentStating_Call {
+func (_c *MockCompactionPlanContext_checkAndSetSegmentStating_Call) Run(run func(channel string, segmentID int64)) *MockCompactionPlanContext_checkAndSetSegmentStating_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(string), args[1].(int64))
 	})
 	return _c
 }
@@ -63,7 +64,7 @@ func (_c *MockCompactionPlanContext_checkAndSetSegmentStating_Call) Return(_a0 b
 	return _c
 }
 
-func (_c *MockCompactionPlanContext_checkAndSetSegmentStating_Call) RunAndReturn(run func(int64) bool) *MockCompactionPlanContext_checkAndSetSegmentStating_Call {
+func (_c *MockCompactionPlanContext_checkAndSetSegmentStating_Call) RunAndReturn(run func(string, int64) bool) *MockCompactionPlanContext_checkAndSetSegmentStating_Call {
 	_c.Call.Return(run)
 	return _c
 }
