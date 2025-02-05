@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -1607,6 +1608,42 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 	}
 
 	return ids, nil
+}
+
+// for some varchar with analzyer
+// we need check char format before insert it to message queue
+// now only support utf-8
+func checkVarcharFormat(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+	checkeFields := lo.FilterMap(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) (int64, bool) {
+		if field.DataType != schemapb.DataType_VarChar {
+			return 0, false
+		}
+
+		for _, kv := range field.GetTypeParams() {
+			if kv.Key == common.EnableAnalyzerKey {
+				return field.GetFieldID(), true
+			}
+		}
+		return 0, false
+	})
+
+	if len(checkeFields) == 0 {
+		return nil
+	}
+
+	for _, fieldData := range insertMsg.FieldsData {
+		if !lo.Contains(checkeFields, fieldData.GetFieldId()) {
+			continue
+		}
+
+		for row, data := range fieldData.GetScalars().GetStringData().GetData() {
+			ok := utf8.ValidString(data)
+			if !ok {
+				return merr.WrapErrAsInputError(fmt.Errorf("varchar with analyzer should be utf-8 format, but row: %d not utf-8 varchar. data: %s", row, data))
+			}
+		}
+	}
+	return nil
 }
 
 func checkUpsertPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, *schemapb.IDs, error) {
