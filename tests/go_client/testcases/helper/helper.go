@@ -112,14 +112,44 @@ var (
 	FieldsFact  FieldsFactory
 )
 
+func mergeOptions(schema *entity.Schema, opts ...CreateCollectionOpt) clientv2.CreateCollectionOption {
+	//
+	collectionOption := clientv2.NewCreateCollectionOption(schema.CollectionName, schema)
+	tmpOption := &createCollectionOpt{}
+	for _, o := range opts {
+		o(tmpOption)
+	}
+
+	if !common.IsZeroValue(tmpOption.shardNum) {
+		collectionOption.WithShardNum(tmpOption.shardNum)
+	}
+
+	if !common.IsZeroValue(tmpOption.enabledDynamicSchema) {
+		collectionOption.WithDynamicSchema(tmpOption.enabledDynamicSchema)
+	}
+
+	if !common.IsZeroValue(tmpOption.properties) {
+		for k, v := range tmpOption.properties {
+			collectionOption.WithProperty(k, v)
+		}
+	}
+
+	if !common.IsZeroValue(tmpOption.consistencyLevel) {
+		collectionOption.WithConsistencyLevel(tmpOption.consistencyLevel)
+	}
+
+	return collectionOption
+}
+
 func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *testing.T, mc *base.MilvusClient,
-	cp *CreateCollectionParams, fieldOpt *GenFieldsOption, schemaOpt *GenSchemaOption,
+	cp *CreateCollectionParams, fieldOpt *GenFieldsOption, schemaOpt *GenSchemaOption, opts ...CreateCollectionOpt,
 ) (*CollectionPrepare, *entity.Schema) {
 	fields := FieldsFact.GenFieldsForCollection(cp.CollectionFieldsType, fieldOpt)
 	schemaOpt.Fields = fields
 	schema := GenSchema(schemaOpt)
 
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(schema.CollectionName, schema))
+	createCollectionOption := mergeOptions(schema, opts...)
+	err := mc.CreateCollection(ctx, createCollectionOption)
 	common.CheckErr(t, err, true)
 
 	t.Cleanup(func() {
