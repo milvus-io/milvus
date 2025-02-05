@@ -17,12 +17,6 @@ func (w *walAccesserImpl) appendToWAL(ctx context.Context, msg message.MutableMe
 	return p.Produce(ctx, msg)
 }
 
-func (w *walAccesserImpl) broadcastToWAL(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-	// The broadcast operation will be sent to the coordinator.
-	// The coordinator will dispatch the message to all the vchannels with an eventual consistency guarantee.
-	return w.streamingCoordClient.Broadcast().Broadcast(ctx, msg)
-}
-
 // createOrGetProducer creates or get a producer.
 // vchannel in same pchannel can share the same producer.
 func (w *walAccesserImpl) getProducer(pchannel string) *producer.ResumableProducer {

@@ -71,16 +71,6 @@ func (w *walAccesserImpl) RawAppend(ctx context.Context, msg message.MutableMess
 	return w.appendToWAL(ctx, msg)
 }
 
-func (w *walAccesserImpl) BroadcastAppend(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-	assertValidBroadcastMessage(msg)
-	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, ErrWALAccesserClosed
-	}
-	defer w.lifetime.Done()
-
-	return w.broadcastToWAL(ctx, msg)
-}
-
 // Read returns a scanner for reading records from the wal.
 func (w *walAccesserImpl) Read(_ context.Context, opts ReadOption) Scanner {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -102,6 +92,11 @@ func (w *walAccesserImpl) Read(_ context.Context, opts ReadOption) Scanner {
 		MessageHandler: opts.MessageHandler,
 	})
 	return rc
+}
+
+// Broadcast returns a broadcast for broadcasting records to the wal.
+func (w *walAccesserImpl) Broadcast() Broadcast {
+	return broadcast{w}
 }
 
 func (w *walAccesserImpl) Txn(ctx context.Context, opts TxnOption) (Txn, error) {

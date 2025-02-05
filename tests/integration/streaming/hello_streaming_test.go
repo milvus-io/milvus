@@ -46,6 +46,9 @@ type HelloStreamingSuite struct {
 
 func (s *HelloStreamingSuite) SetupSuite() {
 	streamingutil.SetStreamingServiceEnabled()
+	s.MiniClusterSuite.Opt = []integration.OptionV2{
+		integration.OptionSetParam("mq.type", "pulsar"),
+	}
 	s.MiniClusterSuite.SetupSuite()
 }
 

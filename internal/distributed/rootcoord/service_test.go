@@ -31,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
@@ -121,6 +122,7 @@ func TestRun(t *testing.T) {
 	paramtable.Init()
 	parameters := []string{"tikv", "etcd"}
 	for _, v := range parameters {
+		coordclient.ResetRegistration()
 		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
 		ctx := context.Background()
 		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
@@ -228,6 +230,7 @@ func TestServerRun_DataCoordClientInitErr(t *testing.T) {
 	paramtable.Init()
 	parameters := []string{"tikv", "etcd"}
 	for _, v := range parameters {
+		coordclient.ResetRegistration()
 		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
 		ctx := context.Background()
 		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
@@ -258,6 +261,7 @@ func TestServerRun_DataCoordClientStartErr(t *testing.T) {
 	paramtable.Init()
 	parameters := []string{"tikv", "etcd"}
 	for _, v := range parameters {
+		coordclient.ResetRegistration()
 		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
 		ctx := context.Background()
 		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
@@ -288,6 +292,7 @@ func TestServerRun_QueryCoordClientInitErr(t *testing.T) {
 	paramtable.Init()
 	parameters := []string{"tikv", "etcd"}
 	for _, v := range parameters {
+		coordclient.ResetRegistration()
 		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
 		ctx := context.Background()
 		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
@@ -318,6 +323,7 @@ func TestServer_QueryCoordClientStartErr(t *testing.T) {
 	paramtable.Init()
 	parameters := []string{"tikv", "etcd"}
 	for _, v := range parameters {
+		coordclient.ResetRegistration()
 		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
 		ctx := context.Background()
 		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {

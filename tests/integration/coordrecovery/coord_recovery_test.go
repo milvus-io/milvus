@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -244,6 +245,7 @@ func (s *CoordSwitchSuite) switchCoord() float64 {
 	start = time.Now()
 
 	registry.ResetRegistration()
+	coordclient.ResetRegistration()
 
 	c.StartRootCoord()
 	log.Info("=========================RootCoord restarted=========================")
