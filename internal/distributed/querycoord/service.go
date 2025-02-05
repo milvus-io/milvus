@@ -457,6 +457,10 @@ func (s *Server) ResumeBalance(ctx context.Context, req *querypb.ResumeBalanceRe
 	return s.queryCoord.ResumeBalance(ctx, req)
 }
 
+func (s *Server) CheckBalanceStatus(ctx context.Context, req *querypb.CheckBalanceStatusRequest) (*querypb.CheckBalanceStatusResponse, error) {
+	return s.queryCoord.CheckBalanceStatus(ctx, req)
+}
+
 func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeRequest) (*commonpb.Status, error) {
 	return s.queryCoord.SuspendNode(ctx, req)
 }
