@@ -119,14 +119,13 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 		return nil, 0, err
 	}
 
-	partSegments := policy.meta.GetSegmentsChanPart(func(segment *SegmentInfo) bool {
-		return segment.CollectionID == collectionID &&
-			isSegmentHealthy(segment) &&
+	partSegments := GetSegmentsChanPart(policy.meta, collectionID, SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		return isSegmentHealthy(segment) &&
 			isFlush(segment) &&
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
 			segment.GetLevel() != datapb.SegmentLevel_L0 // ignore level zero segments
-	})
+	}))
 
 	views := make([]CompactionView, 0)
 	// partSegments is list of chanPartSegments, which is channel-partition organized segments
