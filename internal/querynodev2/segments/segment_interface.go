@@ -72,6 +72,7 @@ type Segment interface {
 	ResourceUsageEstimate() ResourceUsage
 
 	// Index related
+	GetIndexByID(indexID int64) *IndexedFieldInfo
 	GetIndex(fieldID int64) *IndexedFieldInfo
 	ExistIndex(fieldID int64) bool
 	Indexes() []*IndexedFieldInfo

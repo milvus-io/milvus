@@ -21,6 +21,7 @@ from common.common_params import (
 from utils.util_pymilvus import *
 from common.constants import *
 from pymilvus.exceptions import MilvusException
+from pymilvus import DataType
 
 prefix = "index"
 default_schema = cf.gen_default_collection_schema()
@@ -1288,14 +1289,11 @@ class TestIndexInvalid(TestcaseBase):
         """
         target: test create scalar index on json field
         method: 1.create collection, and create index
-        expected: Raise exception
+        expected: success
         """
         collection_w = self.init_collection_general(prefix, is_index=False, vector_data_type=vector_data_type)[0]
-        scalar_index_params = {"index_type": "INVERTED"}
-        collection_w.create_index(ct.default_json_field_name, index_params=scalar_index_params,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1100,
-                                               ct.err_msg: "INVERTED are not supported on JSON field"})
+        scalar_index_params = {"index_type": "INVERTED", "json_cast_type": DataType.INT32, "json_path": ct.default_json_field_name+"['a']"}
+        collection_w.create_index(ct.default_json_field_name, index_params=scalar_index_params)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_inverted_index_on_array_field(self):

@@ -615,7 +615,6 @@ func TestCreateIndexJsonField(t *testing.T) {
 		errMsg string
 	}
 	inxError := []scalarIndexError{
-		{index.NewInvertedIndex(), "INVERTED are not supported on JSON field"},
 		{index.NewSortedIndex(), "STL_SORT are only supported on numeric field"},
 		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
 	}
