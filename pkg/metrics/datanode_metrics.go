@@ -91,18 +91,6 @@ var (
 			collectionIDLabelName,
 		})
 
-	DataNodeProduceTimeTickLag = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataNodeRole,
-			Name:      "produce_tt_lag_ms",
-			Help:      "now time minus tt pts per physical channel",
-		}, []string{
-			nodeIDLabelName,
-			collectionIDLabelName,
-			channelNameLabelName,
-		})
-
 	DataNodeConsumeMsgCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -282,7 +270,6 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	// deprecated metrics
 	registry.MustRegister(DataNodeForwardDeleteMsgTimeTaken)
 	registry.MustRegister(DataNodeNumProducers)
-	registry.MustRegister(DataNodeProduceTimeTickLag)
 }
 
 func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel string) {
@@ -292,14 +279,6 @@ func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel 
 				nodeIDLabelName:       fmt.Sprint(nodeID),
 				msgTypeLabelName:      AllLabel,
 				collectionIDLabelName: fmt.Sprint(collectionID),
-			})
-
-	DataNodeProduceTimeTickLag.
-		Delete(
-			prometheus.Labels{
-				nodeIDLabelName:       fmt.Sprint(nodeID),
-				collectionIDLabelName: fmt.Sprint(collectionID),
-				channelNameLabelName:  channel,
 			})
 
 	for _, label := range []string{AllLabel, DeleteLabel, InsertLabel} {
