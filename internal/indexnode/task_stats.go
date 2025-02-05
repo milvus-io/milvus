@@ -371,18 +371,14 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		return nil, err
 	}
 
-	var (
-		remainingRowCount int64 // the number of remaining entities
-		expiredRowCount   int64 // the number of expired entities
-	)
-
 	var isValueValid func(r storage.Record, ri, i int) bool
 	switch pkField.DataType {
 	case schemapb.DataType_Int64:
 		isValueValid = func(r storage.Record, ri, i int) bool {
 			v := r.Column(pkFieldID).(*array.Int64).Value(i)
-			ts, ok := deletePKs[v]
-			if ok && uint64(r.Column(common.TimeStampField).(*array.Int64).Value(i)) < ts {
+			deleteTs, ok := deletePKs[v]
+			ts := uint64(r.Column(common.TimeStampField).(*array.Int64).Value(i))
+			if ok && ts < deleteTs {
 				return false
 			}
 			return !st.isExpiredEntity(ts)
@@ -390,8 +386,9 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 	case schemapb.DataType_VarChar:
 		isValueValid = func(r storage.Record, ri, i int) bool {
 			v := r.Column(pkFieldID).(*array.String).Value(i)
-			ts, ok := deletePKs[v]
-			if ok && uint64(r.Column(common.TimeStampField).(*array.Int64).Value(i)) < ts {
+			deleteTs, ok := deletePKs[v]
+			ts := uint64(r.Column(common.TimeStampField).(*array.Int64).Value(i))
+			if ok && ts < deleteTs {
 				return false
 			}
 			return !st.isExpiredEntity(ts)
@@ -425,9 +422,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 	}
 
 	log.Info("download data success",
-		zap.Int64("old rows", numRows),
-		zap.Int64("remainingRowCount", remainingRowCount),
-		zap.Int64("expiredRowCount", expiredRowCount),
+		zap.Int64("numRows", numRows),
 		zap.Duration("download binlogs elapse", downloadTimeCost),
 	)
 

@@ -49,12 +49,7 @@ func Sort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate func(r 
 				records = append(records, rec)
 				for i := 0; i < rec.Len(); i++ {
 					if predicate(rec, ri, i) {
-						numRows++
-						if len(indices) > 0 && indices[len(indices)-1].ri == ri && indices[len(indices)-1].i+1 == i {
-							indices[len(indices)-1].i = i
-						} else {
-							indices = append(indices, &index{ri, i})
-						}
+						indices = append(indices, &index{ri, i})
 					}
 				}
 			} else if err == io.EOF {
@@ -90,6 +85,7 @@ func Sort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate func(r 
 		return rw.Write(rec)
 	}
 	for _, i := range indices {
+		numRows++
 		writeOne(i)
 	}
 
