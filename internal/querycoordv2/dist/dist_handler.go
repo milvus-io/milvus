@@ -247,11 +247,13 @@ func (dh *distHandler) updateLeaderView(ctx context.Context, resp *querypb.GetDa
 		// check leader serviceable
 		if err := utils.CheckDelegatorDataReady(dh.nodeManager, dh.target, view, meta.CurrentTarget); err != nil {
 			view.UnServiceableError = err
-			log.Info("leader is not available due to distribution not ready",
-				zap.Int64("collectionID", view.CollectionID),
-				zap.Int64("nodeID", view.ID),
-				zap.String("channel", view.Channel),
-				zap.Error(err))
+			log.Ctx(ctx).
+				WithRateGroup(fmt.Sprintf("distHandler.updateLeaderView.%s", view.Channel), 1, 60).
+				RatedInfo(10, "leader is not available due to distribution not ready",
+					zap.Int64("collectionID", view.CollectionID),
+					zap.Int64("nodeID", view.ID),
+					zap.String("channel", view.Channel),
+					zap.Error(err))
 			continue
 		}
 
@@ -266,11 +268,13 @@ func (dh *distHandler) updateLeaderView(ctx context.Context, resp *querypb.GetDa
 			// make dist handler pull next distribution until all delegator is serviceable
 			dh.lastUpdateTs = 0
 			collectionsToSync.Insert(lview.Collection)
-			log.Info("leader is not available due to target version not ready",
-				zap.Int64("collectionID", view.CollectionID),
-				zap.Int64("nodeID", view.ID),
-				zap.String("channel", view.Channel),
-				zap.Error(err))
+			log.Ctx(ctx).
+				WithRateGroup(fmt.Sprintf("distHandler.updateLeaderView.%s", view.Channel), 1, 60).
+				RatedInfo(10, "leader is not available due to target version not ready",
+					zap.Int64("collectionID", view.CollectionID),
+					zap.Int64("nodeID", view.ID),
+					zap.String("channel", view.Channel),
+					zap.Error(err))
 		}
 	}
 
