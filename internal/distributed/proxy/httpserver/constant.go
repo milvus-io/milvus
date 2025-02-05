@@ -55,6 +55,7 @@ const (
 const (
 	ContextRequest                = "request"
 	ContextUsername               = "username"
+	ContextToken                  = "token"
 	VectorCollectionsPath         = "/vector/collections"
 	VectorCollectionsCreatePath   = "/vector/collections/create"
 	VectorCollectionsDescribePath = "/vector/collections/describe"
