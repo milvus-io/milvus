@@ -332,6 +332,19 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			log.Ctx(ctx).Warn("stats wrong, failed to create text index", zap.Error(err))
 			return err
 		}
+	} else if st.req.GetSubJobType() == indexpb.StatsSubJob_JsonKeyIndexJob {
+		err = st.createJSONKeyIndex(ctx,
+			st.req.GetStorageConfig(),
+			st.req.GetCollectionID(),
+			st.req.GetPartitionID(),
+			st.req.GetTargetSegmentID(),
+			st.req.GetTaskVersion(),
+			st.req.GetTaskID(),
+			insertLogs)
+		if err != nil {
+			log.Warn("stats wrong, failed to create json index", zap.Error(err))
+			return err
+		}
 	}
 
 	return nil
@@ -713,5 +726,101 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
 		textIndexLogs)
+	return nil
+}
+
+func (st *statsTask) createJSONKeyIndex(ctx context.Context,
+	storageConfig *indexpb.StorageConfig,
+	collectionID int64,
+	partitionID int64,
+	segmentID int64,
+	version int64,
+	taskID int64,
+	insertBinlogs []*datapb.FieldBinlog,
+) error {
+	log := log.Ctx(ctx).With(
+		zap.String("clusterID", st.req.GetClusterID()),
+		zap.Int64("taskID", st.req.GetTaskID()),
+		zap.Int64("collectionID", st.req.GetCollectionID()),
+		zap.Int64("partitionID", st.req.GetPartitionID()),
+		zap.Int64("segmentID", st.req.GetSegmentID()),
+		zap.Any("statsJobType", st.req.GetSubJobType()),
+	)
+
+	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
+		return binlog.GetFieldID()
+	})
+
+	getInsertFiles := func(fieldID int64) ([]string, error) {
+		binlogs, ok := fieldBinlogs[fieldID]
+		if !ok {
+			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
+		}
+		result := make([]string, 0, len(binlogs))
+		for _, binlog := range binlogs {
+			for _, file := range binlog.GetBinlogs() {
+				result = append(result, metautil.BuildInsertLogPath(storageConfig.GetRootPath(), collectionID, partitionID, segmentID, fieldID, file.GetLogID()))
+			}
+		}
+		return result, nil
+	}
+
+	newStorageConfig, err := ParseStorageConfig(storageConfig)
+	if err != nil {
+		return err
+	}
+
+	jsonKeyIndexStats := make(map[int64]*datapb.JsonKeyStats)
+	for _, field := range st.req.GetSchema().GetFields() {
+		h := typeutil.CreateFieldSchemaHelper(field)
+		if !h.EnableJSONKeyIndex() {
+			continue
+		}
+		log.Info("field enable json key index, ready to create json key index", zap.Int64("field id", field.GetFieldID()))
+		files, err := getInsertFiles(field.GetFieldID())
+		if err != nil {
+			return err
+		}
+
+		buildIndexParams := &indexcgopb.BuildIndexInfo{
+			BuildID:       taskID,
+			CollectionID:  collectionID,
+			PartitionID:   partitionID,
+			SegmentID:     segmentID,
+			IndexVersion:  version,
+			InsertFiles:   files,
+			FieldSchema:   field,
+			StorageConfig: newStorageConfig,
+		}
+
+		uploaded, err := indexcgowrapper.CreateJSONKeyIndex(ctx, buildIndexParams)
+		if err != nil {
+			return err
+		}
+		jsonKeyIndexStats[field.GetFieldID()] = &datapb.JsonKeyStats{
+			FieldID: field.GetFieldID(),
+			Version: version,
+			BuildID: taskID,
+			Files:   lo.Keys(uploaded),
+		}
+		log.Info("field enable json key index, create json key index done",
+			zap.Int64("field id", field.GetFieldID()),
+			zap.Strings("files", lo.Keys(uploaded)),
+		)
+	}
+
+	totalElapse := st.tr.RecordSpan()
+
+	st.node.storeJSONKeyIndexResult(st.req.GetClusterID(),
+		st.req.GetTaskID(),
+		st.req.GetCollectionID(),
+		st.req.GetPartitionID(),
+		st.req.GetTargetSegmentID(),
+		st.req.GetInsertChannel(),
+		jsonKeyIndexStats)
+
+	log.Info("create json key index done",
+		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
+		zap.Duration("total elapse", totalElapse))
 	return nil
 }

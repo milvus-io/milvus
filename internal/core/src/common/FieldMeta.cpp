@@ -39,6 +39,11 @@ FieldMeta::enable_match() const {
 }
 
 bool
+FieldMeta::enable_jsonIndex() const {
+    return IsJsonDataType(type_);
+}
+
+bool
 FieldMeta::enable_analyzer() const {
     if (!IsStringDataType(type_)) {
         return false;

@@ -1145,6 +1145,7 @@ class TestCompactionOperation(TestcaseBase):
             assert len(plan.sources) == 1
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/31258")
     def test_compact_during_insert(self):
         """
         target: test compact during insert and flush
