@@ -267,7 +267,8 @@ inline std::unique_ptr<knowhere::sparse::SparseRow<float>[]>
 GenerateRandomSparseFloatVector(size_t rows,
                                 size_t cols = kTestSparseDim,
                                 float density = kTestSparseVectorDensity,
-                                int seed = 42) {
+                                int seed = 42,
+                                bool sparse_with_empty_row = false) {
     int32_t num_elements = static_cast<int32_t>(rows * cols * density);
 
     std::mt19937 rng(seed);
@@ -315,6 +316,22 @@ GenerateRandomSparseFloatVector(size_t rows,
         }
         tensor[i] = std::move(row);
     }
+
+    // if sparse_with_empty_row is true, set the first row to be implicitly
+    // empty row: all values are 0; set the second row to be explicitly empty
+    // row: has 0 elements.
+    if (sparse_with_empty_row) {
+        auto& row0 = tensor[0];
+        for (size_t i = 0; i < row0.size(); ++i) {
+            auto [idx, val] = row0[i];
+            row0.set_at(i, idx, 0);
+        }
+        if (rows > 1) {
+            knowhere::sparse::SparseRow<float> row(0);
+            tensor[1] = std::move(row);
+        }
+    }
+
     return tensor;
 }
 
@@ -326,7 +343,8 @@ inline GeneratedData DataGen(SchemaPtr schema,
                              int array_len = 10,
                              bool random_pk = false,
                              bool random_val = true,
-                             bool random_valid = false) {
+                             bool random_valid = false,
+                             bool sparse_with_empty_row = false) {
     using std::vector;
     std::default_random_engine random(seed);
     std::normal_distribution<> distr(0, 1);
@@ -402,8 +420,12 @@ inline GeneratedData DataGen(SchemaPtr schema,
                 break;
             }
             case DataType::VECTOR_SPARSE_FLOAT: {
-                auto res = GenerateRandomSparseFloatVector(
-                    N, kTestSparseDim, kTestSparseVectorDensity, seed);
+                auto res =
+                    GenerateRandomSparseFloatVector(N,
+                                                    kTestSparseDim,
+                                                    kTestSparseVectorDensity,
+                                                    seed,
+                                                    sparse_with_empty_row);
                 auto array = milvus::segcore::CreateDataArrayFrom(
                     res.get(), nullptr, N, field_meta);
                 insert_data->mutable_fields_data()->AddAllocated(
