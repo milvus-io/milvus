@@ -1,80 +1,19 @@
-use log::warn;
-use serde_json as json;
 use std::collections::HashMap;
-use tantivy::tokenizer::StopWordFilter;
 use tantivy::tokenizer::*;
+use serde_json as json;
 
 use crate::error::Result;
 use crate::error::TantivyBindingError;
-use crate::jieba_tokenizer::JiebaTokenizer;
-use crate::stop_words;
-use crate::tokenizer_filter::*;
-use crate::util::*;
+use crate::analyzer::{
+    build_in_analyzer::*,
+    tokenizers::get_builder_with_tokenizer,
+    filter::*,
+    util::*
+};
 
-// default build-in analyzer
-pub(crate) fn standard_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
-    let builder = standard_builder().filter(LowerCaser);
 
-    if stop_words.len() > 0 {
-        return builder.filter(StopWordFilter::remove(stop_words)).build();
-    }
-
-    builder.build()
-}
-
-fn chinese_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
-    let builder = jieba_builder().filter(CnAlphaNumOnlyFilter);
-    if stop_words.len() > 0 {
-        return builder.filter(StopWordFilter::remove(stop_words)).build();
-    }
-
-    builder.build()
-}
-
-fn english_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
-    let builder = standard_builder()
-        .filter(LowerCaser)
-        .filter(Stemmer::new(Language::English))
-        .filter(StopWordFilter::remove(
-            stop_words::ENGLISH.iter().map(|&word| word.to_owned()),
-        ));
-
-    if stop_words.len() > 0 {
-        return builder.filter(StopWordFilter::remove(stop_words)).build();
-    }
-
-    builder.build()
-}
-
-fn standard_builder() -> TextAnalyzerBuilder {
-    TextAnalyzer::builder(SimpleTokenizer::default()).dynamic()
-}
-
-fn whitespace_builder() -> TextAnalyzerBuilder {
-    TextAnalyzer::builder(WhitespaceTokenizer::default()).dynamic()
-}
-
-fn jieba_builder() -> TextAnalyzerBuilder {
-    TextAnalyzer::builder(JiebaTokenizer::new()).dynamic()
-}
-
-fn get_builder_by_name(name: &String) -> Result<TextAnalyzerBuilder> {
-    match name.as_str() {
-        "standard" => Ok(standard_builder()),
-        "whitespace" => Ok(whitespace_builder()),
-        "jieba" => Ok(jieba_builder()),
-        other => {
-            warn!("unsupported tokenizer: {}", other);
-            Err(TantivyBindingError::InternalError(format!(
-                "unsupported tokenizer: {}",
-                other
-            )))
-        }
-    }
-}
 
 struct AnalyzerBuilder<'a> {
-    // builder: TextAnalyzerBuilder
     filters: HashMap<String, SystemFilter>,
     params: &'a json::Map<String, json::Value>,
 }
@@ -87,20 +26,21 @@ impl AnalyzerBuilder<'_> {
         }
     }
 
-    fn get_tokenizer_name(&self) -> Result<String>{
+    fn get_tokenizer_params(&self) -> Result<&json::Value>{
         let tokenizer=self.params.get("tokenizer");
         if tokenizer.is_none(){
             return Err(TantivyBindingError::InternalError(format!(
                 "tokenizer name or type must be set"
             )));
         }
-        if !tokenizer.unwrap().is_string() {
-            return Err(TantivyBindingError::InternalError(format!(
-                "tokenizer name should be string"
-            )));
+        let value = tokenizer.unwrap();
+        if value.is_object() || value.is_string() {
+            return Ok(tokenizer.unwrap())
         }
 
-        Ok(tokenizer.unwrap().as_str().unwrap().to_string())
+        Err(TantivyBindingError::InternalError(format!(
+            "tokenizer name should be string or dict"
+        )))
     }
 
     fn add_custom_filter(
@@ -196,7 +136,7 @@ impl AnalyzerBuilder<'_> {
                 let str_list = get_string_list(value, "filter stop_words")?;
                 Ok(get_stop_words_list(str_list))
             }
-            None => Ok(vec![]),
+            _ => Ok(vec![]),
         }
     }
 
@@ -227,8 +167,8 @@ impl AnalyzerBuilder<'_> {
         };
 
         //build custom analyzer
-        let tokenizer_name = self.get_tokenizer_name()?;
-        let mut builder = get_builder_by_name(&tokenizer_name)?;
+        let tokenizer_params = self.get_tokenizer_params()?;
+        let mut builder = get_builder_with_tokenizer(&tokenizer_params)?;
 
         // build with option
         builder = self.build_option(builder)?;
@@ -236,7 +176,7 @@ impl AnalyzerBuilder<'_> {
     }
 }
 
-pub(crate) fn create_tokenizer_with_filter(params: &String) -> Result<TextAnalyzer> {
+pub(crate) fn create_analyzer_with_filter(params: &String) -> Result<TextAnalyzer> {
     match json::from_str::<json::Value>(&params) {
         Ok(value) => {
             if value.is_null() {
@@ -280,16 +220,16 @@ pub(crate) fn create_tokenizer_with_filter(params: &String) -> Result<TextAnalyz
     }
 }
 
-pub(crate) fn create_tokenizer(params: &str) -> Result<TextAnalyzer> {
+pub(crate) fn create_analyzer(params: &str) -> Result<TextAnalyzer> {
     if params.len() == 0 {
         return Ok(standard_analyzer(vec![]));
     }
-    create_tokenizer_with_filter(&format!("{{\"analyzer\":{}}}", params))
+    create_analyzer_with_filter(&format!("{{\"analyzer\":{}}}", params))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::tokenizer::create_tokenizer;
+    use crate::analyzer::analyzer::create_analyzer;
 
     #[test]
     fn test_standard_analyzer() {
@@ -298,7 +238,7 @@ mod tests {
             "stop_words": ["_english_"]
         }"#;
 
-        let tokenizer = create_tokenizer(&params.to_string());
+        let tokenizer = create_analyzer(&params.to_string());
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
     }
 
@@ -308,10 +248,34 @@ mod tests {
             "type": "chinese"
         }"#;
 
-        let tokenizer = create_tokenizer(&params.to_string());
+        let tokenizer = create_analyzer(&params.to_string());
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
         let mut bining = tokenizer.unwrap();
         let mut stream = bining.token_stream("系统安全;,'';lxyz密码");
+
+        let mut results = Vec::<String>::new();
+        while stream.advance() {
+            let token = stream.token();
+            results.push(token.text.clone());
+        }
+
+        print!("test tokens :{:?}\n", results)
+    }
+
+    #[test]
+    fn test_lindera_analyzer() {
+        let params = r#"{
+            "tokenizer": {
+                "type": "lindera",
+                "dict_kind": "ipadic"
+            }
+        }"#;
+
+        let tokenizer = create_analyzer(&params.to_string());
+        assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
+
+        let mut bining = tokenizer.unwrap();
+        let mut stream = bining.token_stream("東京スカイツリーの最寄り駅はとうきょうスカイツリー駅です");
 
         let mut results = Vec::<String>::new();
         while stream.advance() {
