@@ -5,7 +5,7 @@ use tantivy::{
 };
 
 use crate::error::Result;
-use crate::{index_reader::IndexReaderWrapper, tokenizer::standard_analyzer};
+use crate::{index_reader::IndexReaderWrapper, analyzer::standard_analyzer};
 
 impl IndexReaderWrapper {
     // split the query string into multiple tokens using index's default tokenizer,

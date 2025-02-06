@@ -14,15 +14,12 @@ mod index_writer_text_c;
 mod log;
 mod string_c;
 mod token_stream_c;
-mod tokenizer;
-mod tokenizer_filter;
+mod analyzer;
 mod tokenizer_c;
 mod util;
 mod error;
 mod util_c;
 mod vec_collector;
-mod stop_words;
-mod jieba_tokenizer;
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right
