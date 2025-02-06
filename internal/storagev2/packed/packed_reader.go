@@ -37,7 +37,6 @@ func NewPackedReader(path string, schema *arrow.Schema, bufferSize int) (*Packed
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
 	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
-
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
