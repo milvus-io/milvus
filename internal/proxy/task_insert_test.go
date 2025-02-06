@@ -405,6 +405,13 @@ func TestInsertTask_Function(t *testing.T) {
 
 	info := newSchemaInfo(schema)
 	cache := NewMockCache(t)
+	collectionID := UniqueID(0)
+	cache.On("GetCollectionID",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(collectionID, nil)
+
 	cache.On("GetCollectionSchema",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
