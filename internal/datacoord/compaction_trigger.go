@@ -327,7 +327,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 		}
 
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-			group.segments = FilterInIndexedSegments(t.handler, t.meta, signal.isForce, group.segments...)
+			group.segments = FilterInIndexedSegments(t.handler, t.meta, true, group.segments...)
 		}
 
 		coll, err := t.getCollection(group.collectionID)
@@ -629,7 +629,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 func (t *compactionTrigger) getCandidateSegments(channel string, partitionID UniqueID) []*SegmentInfo {
 	segments := t.meta.GetSegmentsByChannel(channel)
 	if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-		segments = FilterInIndexedSegments(t.handler, t.meta, false, segments...)
+		segments = FilterInIndexedSegments(t.handler, t.meta, true, segments...)
 	}
 
 	var res []*SegmentInfo
