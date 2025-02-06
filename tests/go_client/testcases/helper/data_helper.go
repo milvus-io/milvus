@@ -3,7 +3,9 @@ package helper
 import (
 	"bytes"
 	"encoding/json"
+	"math/rand"
 	"strconv"
+	"slices"
 
 	"go.uber.org/zap"
 
@@ -46,6 +48,8 @@ type GenDataOption struct {
 	maxCapacity  int
 	elementType  entity.FieldType
 	fieldName    string
+	textLang     string
+	textEmptyPercent int
 }
 
 func (opt *GenDataOption) TWithNb(nb int) *GenDataOption {
@@ -88,6 +92,16 @@ func (opt *GenDataOption) TWithElementType(eleType entity.FieldType) *GenDataOpt
 	return opt
 }
 
+func (opt *GenDataOption) TWithTextLang(lang string) *GenDataOption {
+	opt.textLang = lang
+	return opt
+}
+
+func (opt *GenDataOption) TWithTextEmptyPercent(percent int) *GenDataOption {
+	opt.textEmptyPercent = percent
+	return opt
+}
+
 func TNewDataOption() *GenDataOption {
 	return &GenDataOption{
 		nb:           common.DefaultNb,
@@ -97,6 +111,9 @@ func TNewDataOption() *GenDataOption {
 		sparseMaxLen: common.TestMaxLen,
 		maxCapacity:  common.TestCapacity,
 		elementType:  entity.FieldTypeNone,
+		fieldName:    "",
+		textLang:     "",
+		textEmptyPercent: 0,
 	}
 }
 
@@ -310,8 +327,35 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 
 	case entity.FieldTypeVarChar:
 		varcharValues := make([]string, 0, nb)
-		for i := start; i < start+nb; i++ {
-			varcharValues = append(varcharValues, strconv.Itoa(i))
+		if option.textLang != "" {
+			// Use language-specific text generation
+			var lang Language
+			switch option.textLang {
+			case "en":
+				lang = English
+			case "zh":
+				lang = Chinese
+			default:
+				// Fallback to sequential numbers for unsupported languages
+				for i := start; i < start+nb; i++ {
+					varcharValues = append(varcharValues, strconv.Itoa(i))
+				}
+				return column.NewColumnVarChar(fieldName, varcharValues)
+			}
+
+			// Generate text data with empty values based on textEmptyPercent
+			for i := 0; i < nb; i++ {
+				if rand.Float64()*100 < float64(option.textEmptyPercent) {
+					varcharValues = append(varcharValues, "")
+				} else {
+					varcharValues = append(varcharValues, GenerateRandomText(lang))
+				}
+			}
+		} else {
+			// Default behavior: sequential numbers
+			for i := start; i < start+nb; i++ {
+				varcharValues = append(varcharValues, strconv.Itoa(i))
+			}
 		}
 		return column.NewColumnVarChar(fieldName, varcharValues)
 
@@ -449,6 +493,16 @@ func MergeColumnsToDynamic(nb int, columns []column.Column, columnName string) *
 	return jsonColumn
 }
 
+func GetBm25FunctionsOutputFields(schema *entity.Schema) []string {
+	var outputFields []string
+	for _, fn := range schema.Functions {
+		if fn.Type == entity.FunctionTypeBM25 {
+			outputFields = append(outputFields, fn.OutputFieldNames...)
+		}
+	}
+	return outputFields
+}
+
 func GenColumnsBasedSchema(schema *entity.Schema, option *GenDataOption) ([]column.Column, []column.Column) {
 	if nil == schema || schema.CollectionName == "" {
 		log.Fatal("[GenColumnsBasedSchema] Nil Schema is not expected")
@@ -461,6 +515,9 @@ func GenColumnsBasedSchema(schema *entity.Schema, option *GenDataOption) ([]colu
 			option.TWithElementType(field.ElementType)
 		}
 		if field.AutoID {
+			continue
+		}
+		if slices.Contains(GetBm25FunctionsOutputFields(schema), field.Name) {
 			continue
 		}
 		columns = append(columns, GenColumnData(option.nb, field.DataType, *option))

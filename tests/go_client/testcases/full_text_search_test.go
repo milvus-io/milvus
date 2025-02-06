@@ -8,9 +8,36 @@ import (
 
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
+	// client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
+
+
+func TestFullTextSearchDefault(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	// create -> insert -> flush -> index -> load
+	analyzerParams := map[string]any{"tokenizer": "standard"}
+	fieldsOption := hp.TNewFieldsOption().TWithEnableAnalyzer(true).TWithAnalyzerParams(analyzerParams)
+	function := hp.TNewFunction("bm25_function", common.DefaultVarcharFieldName, common.DefaultSparseVecFieldName)
+	schemaOption := hp.TNewSchemaOption().TWithFunction(function)
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.FullTextSearchFields), fieldsOption, schemaOption)
+	insertOption := hp.TNewDataOption().TWithTextLang(common.DefaultTextLang)
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), insertOption)
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+	
+	indexparams := hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultVarcharFieldName: index.NewBM25Index()})
+	prepare.CreateIndex(ctx, t, mc, indexparams)
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	// search
+	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+	resSearch, err := mc.Search(ctx, milvusclient.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
+}
 
 // TestSearchFullTextBase tests basic full text search functionality with different languages
 func TestSearchFullTextBase(t *testing.T) {

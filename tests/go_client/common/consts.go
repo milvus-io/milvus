@@ -86,3 +86,8 @@ const (
 	DatabaseForceDenyReading = "database.force.deny.reading"
 	DatabaseDiskQuotaMb      = "database.diskQuota.mb"
 )
+
+// const for full text search
+const (
+	DefaultTextLang = "en"
+)
