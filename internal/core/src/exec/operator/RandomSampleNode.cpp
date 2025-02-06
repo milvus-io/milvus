@@ -47,12 +47,14 @@ FixedVector<uint32_t>
 PhyRandomSampleNode::HashsetSample(const uint32_t N,
                                    const uint32_t M,
                                    std::mt19937& gen) {
-    FixedVector<uint32_t> sampled(N);
-    std::iota(sampled.begin(), sampled.end(), 0);
+    std::uniform_int_distribution<> dis(0, N - 1);
+    std::unordered_set<uint32_t> sampled;
+    sampled.reserve(N);
+    while (sampled.size() < M) {
+        sampled.insert(dis(gen));
+    }
 
-    std::shuffle(sampled.begin(), sampled.end(), gen);
-    sampled.resize(M);
-    return sampled;
+    return FixedVector<uint32_t>(sampled.begin(), sampled.end());
 }
 
 FixedVector<uint32_t>
@@ -72,9 +74,11 @@ PhyRandomSampleNode::Sample(const uint32_t N, const float factor) {
     const uint32_t M = N * factor;
     std::random_device rd;
     std::mt19937 gen(rd());
-    if (factor <= 0.03 + std::numeric_limits<float>::epsilon() ||
-        N <= 10000000 &&
-            factor <= 0.05 + std::numeric_limits<float>::epsilon()) {
+    float epsilon = std::numeric_limits<float>::epsilon();
+    // It's derived from some experiments
+    if (factor <= 0.02 + epsilon ||
+        (N <= 10000000 && factor <= 0.045 + epsilon) ||
+        (N <= 60000000 && factor <= 0.025 + epsilon)) {
         return HashsetSample(N, M, gen);
     }
     return StandardSample(N, M, gen);
