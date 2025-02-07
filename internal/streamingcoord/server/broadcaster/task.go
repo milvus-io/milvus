@@ -7,9 +7,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
@@ -18,13 +15,11 @@ import (
 
 var errBroadcastTaskIsNotDone = errors.New("broadcast task is not done")
 
-// newTask creates a new task
-func newTask(task *streamingpb.BroadcastTask, logger *log.MLogger) *broadcastTask {
-	bt := message.NewBroadcastMutableMessage(task.Message.Payload, task.Message.Properties)
-	msgs := bt.SplitIntoMutableMessage()
-	return &broadcastTask{
-		logger:          logger.With(zap.Int64("taskID", task.TaskId), zap.Int("broadcastTotal", len(msgs))),
-		task:            task,
+// newPendingBroadcastTask creates a new pendingBroadcastTask.
+func newPendingBroadcastTask(task *broadcastTask) *pendingBroadcastTask {
+	msgs := task.PendingBroadcastMessages()
+	return &pendingBroadcastTask{
+		broadcastTask:   task,
 		pendingMessages: msgs,
 		appendResult:    make(map[string]*types.AppendResult, len(msgs)),
 		future:          syncutil.NewFuture[*types.BroadcastAppendResult](),
@@ -39,10 +34,9 @@ func newTask(task *streamingpb.BroadcastTask, logger *log.MLogger) *broadcastTas
 	}
 }
 
-// broadcastTask is the task for broadcasting messages.
-type broadcastTask struct {
-	logger          *log.MLogger
-	task            *streamingpb.BroadcastTask
+// pendingBroadcastTask is a task that is pending to be broadcasted.
+type pendingBroadcastTask struct {
+	*broadcastTask
 	pendingMessages []message.MutableMessage
 	appendResult    map[string]*types.AppendResult
 	future          *syncutil.Future[*types.BroadcastAppendResult]
@@ -52,14 +46,20 @@ type broadcastTask struct {
 // Execute reexecute the task, return nil if the task is done, otherwise not done.
 // Execute can be repeated called until the task is done.
 // Same semantics as the `Poll` operation in eventloop.
-func (b *broadcastTask) Execute(ctx context.Context, operator AppendOperator) error {
+func (b *pendingBroadcastTask) Execute(ctx context.Context, operator AppendOperator) error {
+	if err := b.broadcastTask.InitializeRecovery(ctx); err != nil {
+		b.Logger().Warn("broadcast task initialize recovery failed", zap.Error(err))
+		b.UpdateInstantWithNextBackOff()
+		return err
+	}
+
 	if len(b.pendingMessages) > 0 {
-		b.logger.Debug("broadcast task is polling to make sent...", zap.Int("pendingMessages", len(b.pendingMessages)))
+		b.Logger().Debug("broadcast task is polling to make sent...", zap.Int("pendingMessages", len(b.pendingMessages)))
 		resps := operator.AppendMessages(ctx, b.pendingMessages...)
 		newPendings := make([]message.MutableMessage, 0)
 		for idx, resp := range resps.Responses {
 			if resp.Error != nil {
-				b.logger.Warn("broadcast task append message failed", zap.Int("idx", idx), zap.Error(resp.Error))
+				b.Logger().Warn("broadcast task append message failed", zap.Int("idx", idx), zap.Error(resp.Error))
 				newPendings = append(newPendings, b.pendingMessages[idx])
 				continue
 			}
@@ -67,15 +67,15 @@ func (b *broadcastTask) Execute(ctx context.Context, operator AppendOperator) er
 		}
 		b.pendingMessages = newPendings
 		if len(newPendings) == 0 {
-			b.future.Set(&types.BroadcastAppendResult{AppendResults: b.appendResult})
+			b.future.Set(&types.BroadcastAppendResult{
+				BroadcastID:   b.header.BroadcastID,
+				AppendResults: b.appendResult,
+			})
 		}
-		b.logger.Info("broadcast task make a new broadcast done", zap.Int("backoffRetryMessages", len(b.pendingMessages)))
+		b.Logger().Info("broadcast task make a new broadcast done", zap.Int("backoffRetryMessages", len(b.pendingMessages)))
 	}
 	if len(b.pendingMessages) == 0 {
-		// There's no more pending message, mark the task as done.
-		b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
-		if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.task); err != nil {
-			b.logger.Warn("save broadcast task failed", zap.Error(err))
+		if err := b.broadcastTask.BroadcastDone(ctx); err != nil {
 			b.UpdateInstantWithNextBackOff()
 			return err
 		}
@@ -86,34 +86,35 @@ func (b *broadcastTask) Execute(ctx context.Context, operator AppendOperator) er
 }
 
 // BlockUntilTaskDone blocks until the task is done.
-func (b *broadcastTask) BlockUntilTaskDone(ctx context.Context) (*types.BroadcastAppendResult, error) {
+func (b *pendingBroadcastTask) BlockUntilTaskDone(ctx context.Context) (*types.BroadcastAppendResult, error) {
 	return b.future.GetWithContext(ctx)
 }
 
-type broadcastTaskArray []*broadcastTask
+// pendingBroadcastTaskArray is a heap of pendingBroadcastTask.
+type pendingBroadcastTaskArray []*pendingBroadcastTask
 
 // Len returns the length of the heap.
-func (h broadcastTaskArray) Len() int {
+func (h pendingBroadcastTaskArray) Len() int {
 	return len(h)
 }
 
 // Less returns true if the element at index i is less than the element at index j.
-func (h broadcastTaskArray) Less(i, j int) bool {
+func (h pendingBroadcastTaskArray) Less(i, j int) bool {
 	return h[i].NextInstant().Before(h[j].NextInstant())
 }
 
 // Swap swaps the elements at indexes i and j.
-func (h broadcastTaskArray) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h pendingBroadcastTaskArray) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 
 // Push pushes the last one at len.
-func (h *broadcastTaskArray) Push(x interface{}) {
+func (h *pendingBroadcastTaskArray) Push(x interface{}) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
-	*h = append(*h, x.(*broadcastTask))
+	*h = append(*h, x.(*pendingBroadcastTask))
 }
 
 // Pop pop the last one at len.
-func (h *broadcastTaskArray) Pop() interface{} {
+func (h *pendingBroadcastTaskArray) Pop() interface{} {
 	old := *h
 	n := len(old)
 	x := old[n-1]
@@ -123,6 +124,6 @@ func (h *broadcastTaskArray) Pop() interface{} {
 
 // Peek returns the element at the top of the heap.
 // Panics if the heap is empty.
-func (h *broadcastTaskArray) Peek() interface{} {
+func (h *pendingBroadcastTaskArray) Peek() interface{} {
 	return (*h)[0]
 }
