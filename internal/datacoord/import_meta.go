@@ -53,7 +53,7 @@ type importTasks struct {
 func newImportTasks() *importTasks {
 	return &importTasks{
 		tasks:     make(map[int64]ImportTask),
-		taskStats: expirable.NewLRU[UniqueID, ImportTask](64, nil, time.Minute*30),
+		taskStats: expirable.NewLRU[UniqueID, ImportTask](512, nil, time.Minute*30),
 	}
 }
 
