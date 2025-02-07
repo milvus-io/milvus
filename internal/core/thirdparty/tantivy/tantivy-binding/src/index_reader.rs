@@ -40,7 +40,7 @@ impl IndexReaderWrapper {
 
         let reader = index
             .reader_builder()
-            .reload_policy(ReloadPolicy::OnCommitWithDelay) // OnCommit serve for growing segment.
+            .reload_policy(ReloadPolicy::OnCommitWithDelay) // OnCommitWithDelay serve for growing segment.
             .try_into()?;
         reader.reload()?;
 
