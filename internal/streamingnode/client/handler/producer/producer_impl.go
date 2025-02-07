@@ -225,10 +225,10 @@ func (p *producerImpl) sendLoop() (err error) {
 		} else {
 			p.logger.Info("send arm of stream closed")
 		}
-		close(p.sendExitCh)
 		if err := p.grpcStreamClient.CloseSend(); err != nil {
 			p.logger.Warn("failed to close send", zap.Error(err))
 		}
+		close(p.sendExitCh)
 	}()
 
 	for {
@@ -260,16 +260,15 @@ func (p *producerImpl) recvLoop() (err error) {
 	defer func() {
 		if err != nil {
 			p.logger.Warn("recv arm of stream closed by unexpected error", zap.Error(err))
-			return
+		} else {
+			p.logger.Info("recv arm of stream closed")
 		}
-		p.logger.Info("recv arm of stream closed")
 		close(p.recvExitCh)
 	}()
 
 	for {
 		resp, err := p.grpcStreamClient.Recv()
 		if errors.Is(err, io.EOF) {
-			p.logger.Debug("stream closed successful")
 			return nil
 		}
 		if err != nil {

@@ -39,3 +39,6 @@ packages:
       StreamingNodeHandlerServiceClient:
       StreamingNodeHandlerService_ConsumeClient:
       StreamingNodeHandlerService_ProduceClient:
+      StreamingCoordBroadcastService_WatchServer:
+      StreamingCoordBroadcastServiceClient:
+      StreamingCoordBroadcastService_WatchClient:
