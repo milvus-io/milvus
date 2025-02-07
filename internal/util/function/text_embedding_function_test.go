@@ -493,6 +493,28 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			InputFieldIds:    []int64{101},
 			OutputFieldIds:   []int64{102},
 			Params: []*commonpb.KeyValuePair{
+				{Key: Provider, Value: siliconflowProvider},
+				{Key: modelNameParamKey, Value: bAAIBgeLargeZhV15},
+				{Key: apiKeyParamKey, Value: "mock"},
+			},
+		}
+
+		_, err := NewTextEmbeddingFunction(s.schema, fSchema)
+		s.NoError(err)
+		fSchema.Params = []*commonpb.KeyValuePair{}
+		_, err = NewTextEmbeddingFunction(s.schema, fSchema)
+		s.Error(err)
+	}
+
+	{
+		fSchema := &schemapb.FunctionSchema{
+			Name:             "test",
+			Type:             schemapb.FunctionType_TextEmbedding,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vector"},
+			InputFieldIds:    []int64{101},
+			OutputFieldIds:   []int64{102},
+			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: cohereProvider},
 				{Key: modelNameParamKey, Value: embedEnglishLightV20},
 				{Key: apiKeyParamKey, Value: "mock"},
