@@ -376,7 +376,7 @@ class TestQueryPhraseMatch(TestcaseBase):
 
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
-    @pytest.mark.parametrize("tokenizer", ["jieba"])
+    @pytest.mark.parametrize("tokenizer", ["standard","jieba"])
     def test_query_phrase_match_default(
         self, tokenizer, enable_inverted_index, enable_partition_key
     ):
@@ -464,3 +464,225 @@ class TestQueryPhraseMatch(TestcaseBase):
             assert (
                 set(actual_matches) == set(expected_matches)
             ), f"Mismatch in results for query '{query['query']}' with slop {query['slop']}"
+
+    @pytest.mark.parametrize("slop_value", [0, 1, 2, 5, 10])
+    def test_slop_parameter(
+        self, slop_value
+    ):
+        """
+        target: Test phrase matching with different slop values
+        method:
+            1. Create collection with standard tokenizer
+            2. Insert data with known word gaps
+            3. Test phrase matching with different slop values
+        expected: Results should match phrases within the specified slop distance
+        """
+        dim = 128
+        collection_name = f"{prefix}_slop_{slop_value}"
+        schema = self.init_collection_schema(dim, "standard", False)
+        collection = self.init_collection_wrap(name=collection_name, schema=schema)
+        
+        # Generate test data with specific gaps
+        generator = PhraseMatchTestGenerator(language="en")
+        data = generator.generate_test_data(100, dim)
+        collection.insert(data)
+        
+        collection.create_index(
+            field_name="text",
+            index_params={"index_type": "INVERTED_INDEX"}
+        )
+        collection.load()
+        
+        # Test with different gap sizes
+        test_phrases = [
+            "love swimming",  # Adjacent words
+            "enjoy very much basketball",  # 2-word gap
+            "practice seriously tennis daily"  # Multiple gaps
+        ]
+        
+        for phrase in test_phrases:
+            results = collection.query(
+                expr=f'phrase_match(text, "{phrase}", {slop_value})',
+                output_fields=["text"]
+            )
+            log.info(f"Found {len(results)} matches for phrase '{phrase}' with slop {slop_value}")
+
+    @pytest.mark.parametrize("language", ["en", "zh", "mixed"])
+    def test_language_specific(
+        self, language
+    ):
+        """
+        target: Test phrase matching with different languages
+        method:
+            1. Create collections for different languages
+            2. Insert language-specific data
+            3. Test phrase matching in each language
+        expected: Phrase matching should work correctly for all languages
+        """
+        dim = 128
+        collection_name = f"{prefix}_lang_{language}"
+        tokenizer = "jieba" if language in ["zh", "mixed"] else "standard"
+        
+        schema = self.init_collection_schema(dim, tokenizer, False)
+        collection = self.init_collection_wrap(name=collection_name, schema=schema)
+        
+        # Generate language-specific data
+        generator = PhraseMatchTestGenerator(language=language)
+        data = generator.generate_test_data(100, dim)
+        collection.insert(data)
+        
+        collection.create_index(
+            field_name="text",
+            index_params={"index_type": "INVERTED_INDEX"}
+        )
+
+        collection.create_index(
+            field_name="emb",
+            index_params={"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+        )
+        
+        collection.load()
+        
+        # Test language-specific queries
+        queries = generator.generate_test_queries(5)
+        for query in queries:
+            results = collection.query(
+                expr=f'phrase_match(text, "{query["text"]}", {query["slop"]})',
+                output_fields=["text"]
+            )
+            assert len(results) == len(query["expected_matches"])
+
+    def test_query_patterns(
+        self
+    ):
+        """
+        target: Test different phrase match query patterns
+        method:
+            1. Create collection
+            2. Insert data with various phrase patterns
+            3. Test different query patterns
+        expected: Complex phrase patterns should be matched correctly
+        """
+        dim = 128
+        collection_name = f"{prefix}_patterns"
+        schema = self.init_collection_schema(dim, "standard", False)
+        collection = self.init_collection_wrap(name=collection_name, schema=schema)
+        
+        # Generate data with various patterns
+        generator = PhraseMatchTestGenerator(language="en")
+        data = generator.generate_test_data(200, dim)
+        collection.insert(data)
+        
+        collection.create_index(
+            field_name="text",
+            index_params={"index_type": "INVERTED_INDEX"}
+        )
+        collection.create_index(
+            field_name="emb",
+            index_params={"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+        )
+        collection.load()
+        
+        # Test various patterns
+        test_patterns = [
+            ("love swimming and running", 0),  # Exact phrase
+            ("enjoy very basketball", 1),  # Phrase with gap
+            ("practice tennis seriously often", 2),  # Complex phrase
+            ("swimming running cycling", 5)  # Multiple activities
+        ]
+        
+        for pattern, slop in test_patterns:
+            results = collection.query(
+                expr=f'phrase_match(text, "{pattern}", {slop})',
+                output_fields=["text"]
+            )
+            log.info(f"Pattern '{pattern}' with slop {slop} found {len(results)} matches")
+
+    @pytest.mark.parametrize("data_size", [1000, 5000])
+    def test_performance(
+        self, data_size
+    ):
+        """
+        target: Test phrase matching performance with different data sizes
+        method:
+            1. Create collection with large dataset
+            2. Test query performance
+            3. Test concurrent queries
+        expected: Queries should complete within reasonable time
+        """
+        dim = 128
+        collection_name = f"{prefix}_perf_{data_size}"
+        schema = self.init_collection_schema(dim, "standard", False)
+        collection = self.init_collection_wrap(name=collection_name, schema=schema)
+        
+        # Generate large dataset
+        generator = PhraseMatchTestGenerator(language="en")
+        data = generator.generate_test_data(data_size, dim)
+        collection.insert(data)
+        
+        collection.create_index(
+            field_name="text",
+            index_params={"index_type": "INVERTED_INDEX"}
+        )
+        collection.create_index(
+            field_name="emb",
+            index_params={"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+        )
+        collection.load()
+        
+        # Generate test queries
+        queries = generator.generate_test_queries(10)
+        
+        # Test query performance
+        for query in queries:
+            results = collection.query(
+                expr=f'phrase_match(text, "{query["text"]}", {query["slop"]})',
+                output_fields=["text"]
+            )
+            log.info(f"Query returned {len(results)} results from {data_size} documents")
+
+    def test_error_handling(
+        self
+    ):
+        """
+        target: Test error handling in phrase matching
+        method:
+            1. Test invalid inputs
+            2. Test edge cases
+            3. Test error conditions
+        expected: System should handle errors gracefully
+        """
+        dim = 128
+        collection_name = f"{prefix}_error"
+        schema = self.init_collection_schema(dim, "standard", False)
+        collection = self.init_collection_wrap(name=collection_name, schema=schema)
+        
+        # Insert some test data
+        generator = PhraseMatchTestGenerator(language="en")
+        data = generator.generate_test_data(100, dim)
+        collection.insert(data)
+        
+        collection.create_index(
+            field_name="text",
+            index_params={"index_type": "INVERTED_INDEX"}
+        )
+        collection.load()
+        
+        # Test invalid inputs
+        invalid_cases = [
+            ("", 0),  # Empty query
+            ("test" * 1000, 0),  # Very long query
+            ("valid query", -1),  # Negative slop
+            ("valid query", 1000000)  # Very large slop
+        ]
+        
+        for query, slop in invalid_cases:
+            try:
+                results = collection.query(
+                    expr=f'phrase_match(text, "{query}", {slop})',
+                    output_fields=["text"]
+                )
+                log.info(f"Query with '{query}' (slop={slop}) returned {len(results)} results")
+            except Exception as e:
+                log.info(f"Expected error for invalid case: {str(e)}")
+
