@@ -144,7 +144,7 @@ func (t *mixCompactionTask) mergeSplit(
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	//
+
 	mWriter := NewMultiSegmentWriter(t.binlogIO, compAlloc, t.plan, t.maxRows, t.partitionID, t.collectionID, t.bm25FieldIDs)
 
 	deletedRowCount := int64(0)
@@ -191,7 +191,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		log.Warn("compact wrong, fail to download insertLogs", zap.Error(err))
 		return
 	}
-	// no added binlogPaths
+
 	blobs := lo.Map(allValues, func(v []byte, i int) *storage.Blob {
 		return &storage.Blob{Key: binlogPaths[i], Value: v}
 	})
@@ -231,7 +231,6 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				return
 			}
 		}
-		//
 		r := reader.Record()
 		pkArray := r.Column(pkField.FieldID)
 		tsArray := r.Column(common.TimeStampField).(*array.Int64)
@@ -251,7 +250,6 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			}
 			ts := typeutil.Timestamp(tsArray.Value(i))
 			if entityFilter.Filtered(pk, ts) {
-
 				if sliceStart != -1 {
 					err = writeSlice(r, sliceStart, i)
 					if err != nil {
@@ -347,7 +345,6 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 			return nil, err
 		}
 	} else {
-		//
 		res, err = t.mergeSplit(ctxTimeout, insertPaths, deltaPaths)
 		if err != nil {
 			log.Warn("compact wrong, failed to mergeSplit", zap.Error(err))

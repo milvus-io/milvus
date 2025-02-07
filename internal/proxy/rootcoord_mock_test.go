@@ -342,7 +342,7 @@ func (coord *RootCoordMock) AddField(ctx context.Context, req *milvuspb.AddField
 	if !exist {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
-			Reason:    fmt.Sprintf("collection not exist"),
+			Reason:    "collection not exist",
 		}, nil
 	}
 
@@ -351,7 +351,7 @@ func (coord *RootCoordMock) AddField(ctx context.Context, req *milvuspb.AddField
 	if !exist {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
-			Reason:    fmt.Sprintf("collection info not exist"),
+			Reason:    "collection info not exist",
 		}, nil
 	}
 

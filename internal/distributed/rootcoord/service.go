@@ -426,7 +426,7 @@ func (s *Server) ShowCollectionIDs(ctx context.Context, in *rootcoordpb.ShowColl
 	return s.rootCoord.ShowCollectionIDs(ctx, in)
 }
 
-// DescribeCollectionInternal gets meta info of a collection
+// AddField adds the specified field.
 func (s *Server) AddField(ctx context.Context, in *milvuspb.AddFieldRequest) (*commonpb.Status, error) {
 	return s.rootCoord.AddField(ctx, in)
 }

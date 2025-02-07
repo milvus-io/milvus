@@ -203,7 +203,7 @@ func (w *MultiSegmentWriter) writeInternal(writer *SegmentWriter) error {
 		if _, ok := w.cachedMeta[writer.segmentID]; !ok {
 			w.cachedMeta[writer.segmentID] = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
 		}
-		//
+
 		kvs, partialBinlogs, err := serializeWrite(context.TODO(), w.allocator.getLogIDAllocator(), writer)
 		if err != nil {
 			return err

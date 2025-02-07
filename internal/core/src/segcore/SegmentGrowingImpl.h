@@ -340,6 +340,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return insert_record_.search_pk(pk, insert_barrier);
     }
 
+    bool
+    is_field_exist(FieldId field_id) const override {
+        return insert_record_.is_data_exist(field_id);
+    }
+
  protected:
     int64_t
     num_chunk(FieldId field_id) const override;

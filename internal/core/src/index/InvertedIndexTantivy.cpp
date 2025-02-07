@@ -505,7 +505,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                         auto n = data->get_num_rows();
                         for (int i = 0; i < n; i++) {
                             if (!data->is_valid(i)) {
-                                null_offset.push_back(i);
+                                null_offset.push_back(offset);
                             }
                             wrapper_->add_multi_data<T>(
                                 static_cast<const T*>(data->RawValue(i)),
