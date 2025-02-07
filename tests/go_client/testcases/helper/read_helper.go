@@ -9,7 +9,9 @@ type LoadParams struct {
 	CollectionName       string
 	Replica              int
 	LoadFields           []string
+	ResourceGroups       []string
 	SkipLoadDynamicField bool
+	IsRefresh            bool
 }
 
 func NewLoadParams(collectionName string) *LoadParams {
@@ -23,6 +25,11 @@ func (opt *LoadParams) TWithReplica(replica int) *LoadParams {
 	return opt
 }
 
+func (opt *LoadParams) TWithResourceGroups(resourceGroups ...string) *LoadParams {
+	opt.ResourceGroups = resourceGroups
+	return opt
+}
+
 func (opt *LoadParams) TWithLoadFields(loadFields ...string) *LoadParams {
 	opt.LoadFields = loadFields
 	return opt
@@ -30,6 +37,11 @@ func (opt *LoadParams) TWithLoadFields(loadFields ...string) *LoadParams {
 
 func (opt *LoadParams) TWithSkipLoadDynamicField(skipFlag bool) *LoadParams {
 	opt.SkipLoadDynamicField = skipFlag
+	return opt
+}
+
+func (opt *LoadParams) TWithIsRefresh(isRefresh bool) *LoadParams {
+	opt.IsRefresh = isRefresh
 	return opt
 }
 
