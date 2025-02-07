@@ -1,6 +1,8 @@
 package message
 
-import "google.golang.org/protobuf/proto"
+import (
+	"google.golang.org/protobuf/proto"
+)
 
 var (
 	_ BasicMessage        = (*messageImpl)(nil)
@@ -39,7 +41,12 @@ type BasicMessage interface {
 	BarrierTimeTick() uint64
 
 	// TxnContext returns the transaction context of current message.
+	// If the message is not a transaction message, it will return nil.
 	TxnContext() *TxnContext
+
+	// BroadcastHeader returns the broadcast common header of the message.
+	// If the message is not a broadcast message, it will return 0.
+	BroadcastHeader() *BroadcastHeader
 }
 
 // MutableMessage is the mutable message interface.
@@ -87,11 +94,11 @@ type MutableMessage interface {
 type BroadcastMutableMessage interface {
 	BasicMessage
 
-	// BroadcastVChannels returns the target vchannels of the message broadcast.
-	// Those vchannels can be on multi pchannels.
-	BroadcastVChannels() []string
+	// WithBroadcastID sets the broadcast id of the message.
+	WithBroadcastID(broadcastID uint64) BroadcastMutableMessage
 
 	// SplitIntoMutableMessage splits the broadcast message into multiple mutable messages.
+	// The broadcast id will be set into the properties of each message.
 	SplitIntoMutableMessage() []MutableMessage
 }
 
