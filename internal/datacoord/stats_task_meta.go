@@ -100,10 +100,10 @@ func (stm *statsTaskMeta) AddStatsTask(t *indexpb.StatsTask) error {
 	defer stm.Unlock()
 
 	for _, st := range stm.tasks {
-		if st.GetSegmentID() == t.GetSegmentID() && st.GetSubJobType() == t.GetSubJobType() {
+		if st.GetTaskID() == t.GetTaskID() || (st.GetSegmentID() == t.GetSegmentID() && st.GetSubJobType() == t.GetSubJobType() && st.GetState() != indexpb.JobState_JobStateFailed) {
 			msg := fmt.Sprintf("stats task already exist in meta of segment %d with subJobType: %s",
 				t.GetSegmentID(), t.GetSubJobType().String())
-			log.Warn(msg)
+			log.RatedWarn(10, msg, zap.Int64("taskID", t.GetTaskID()), zap.Int64("exist taskID", st.GetTaskID()))
 			return merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeStatsJob.String(), msg)
 		}
 	}

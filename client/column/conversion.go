@@ -126,7 +126,8 @@ func values2FieldData[T any](values []T, fieldType entity.FieldType, dim int) *s
 		entity.FieldTypeFloat16Vector,
 		entity.FieldTypeBFloat16Vector,
 		entity.FieldTypeBinaryVector,
-		entity.FieldTypeSparseVector:
+		entity.FieldTypeSparseVector,
+		entity.FieldTypeInt8Vector:
 		fd.Field = &schemapb.FieldData_Vectors{
 			Vectors: values2Vectors(values, fieldType, int64(dim)),
 		}
@@ -265,8 +266,17 @@ func values2Vectors[T any](values []T, fieldType entity.FieldType, dim int64) *s
 				Contents: data,
 			},
 		}
+	case entity.FieldTypeInt8Vector:
+		var vectors []entity.Int8Vector
+		vectors, ok = any(values).([]entity.Int8Vector)
+		data := make([]byte, 0, int64(len(vectors))*dim)
+		for _, vector := range vectors {
+			data = append(data, vector.Serialize()...)
+		}
+		vectorField.Data = &schemapb.VectorField_Int8Vector{
+			Int8Vector: data,
+		}
 	}
-
 	if !ok {
 		panic(fmt.Sprintf("unexpected values type(%T) of fieldType %v", values, fieldType))
 	}

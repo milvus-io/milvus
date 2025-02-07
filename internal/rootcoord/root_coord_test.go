@@ -31,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
@@ -731,6 +732,78 @@ func TestRootCoord_ShowCollections(t *testing.T) {
 	})
 }
 
+func TestRootCoord_ShowCollectionIDs(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		c := newTestCore(withAbnormalCode())
+		ctx := context.Background()
+		resp, err := c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("test failed", func(t *testing.T) {
+		c := newTestCore(withHealthyCode())
+		meta := mockrootcoord.NewIMetaTable(t)
+		c.meta = meta
+
+		ctx := context.Background()
+
+		// specify db names
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(nil, fmt.Errorf("mock err"))
+		resp, err := c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{
+			DbNames:          []string{"db1"},
+			AllowUnavailable: true,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+		// not specify db names
+		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock err"))
+		resp, err = c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+		// list collections failed
+		meta.ExpectedCalls = nil
+		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(
+			[]*model.Database{model.NewDatabase(rand.Int63(), "db1", etcdpb.DatabaseState_DatabaseCreated, nil)}, nil)
+		meta.EXPECT().ListCollections(mock.Anything, mock.Anything, typeutil.MaxTimestamp, false).Return(nil, fmt.Errorf("mock err"))
+		resp, err = c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{
+			AllowUnavailable: true,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("normal case, everything is ok", func(t *testing.T) {
+		c := newTestCore(withHealthyCode())
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ListCollections(mock.Anything, mock.Anything, typeutil.MaxTimestamp, false).Return([]*model.Collection{}, nil)
+		c.meta = meta
+
+		ctx := context.Background()
+
+		// specify db names
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(
+			model.NewDatabase(rand.Int63(), "db1", etcdpb.DatabaseState_DatabaseCreated, nil), nil)
+		resp, err := c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{
+			DbNames:          []string{"db1"},
+			AllowUnavailable: true,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+		// not specify db names
+		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(
+			[]*model.Database{model.NewDatabase(rand.Int63(), "db1", etcdpb.DatabaseState_DatabaseCreated, nil)}, nil)
+		resp, err = c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{
+			AllowUnavailable: true,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+}
+
 func TestRootCoord_HasPartition(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
@@ -1358,6 +1431,7 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 	randVal := rand.Int()
 	paramtable.Init()
 	registry.ResetRegistration()
+	coordclient.ResetRegistration()
 	Params.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
 	// Need to reset global etcd to follow new path
 	kvfactory.CloseEtcdClient()
@@ -1419,6 +1493,7 @@ func TestRootcoord_DisableActiveStandby(t *testing.T) {
 	randVal := rand.Int()
 	paramtable.Init()
 	registry.ResetRegistration()
+	coordclient.ResetRegistration()
 	Params.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
 	// Need to reset global etcd to follow new path
 	kvfactory.CloseEtcdClient()
@@ -2133,6 +2208,40 @@ func TestCore_RestoreRBAC(t *testing.T) {
 	resp, err = c.RestoreRBAC(context.Background(), &milvuspb.RestoreRBACMetaRequest{})
 	assert.NoError(t, err)
 	assert.False(t, merr.Ok(resp))
+}
+
+func TestCore_getMetastorePrivilegeName(t *testing.T) {
+	meta := mockrootcoord.NewIMetaTable(t)
+	c := newTestCore(withHealthyCode(), withMeta(meta))
+
+	priv, err := c.getMetastorePrivilegeName(context.Background(), util.AnyWord)
+	assert.NoError(t, err)
+	assert.Equal(t, priv, util.AnyWord)
+
+	meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, "unknown").Return(false, nil)
+	_, err = c.getMetastorePrivilegeName(context.Background(), "unknown")
+	assert.Equal(t, err.Error(), "not found the privilege name [unknown] from metastore")
+}
+
+func TestCore_expandPrivilegeGroup(t *testing.T) {
+	meta := mockrootcoord.NewIMetaTable(t)
+	c := newTestCore(withHealthyCode(), withMeta(meta))
+
+	grants := []*milvuspb.GrantEntity{
+		{
+			ObjectName: "*",
+			Object: &milvuspb.ObjectEntity{
+				Name: "Global",
+			},
+			Role:    &milvuspb.RoleEntity{Name: "role"},
+			Grantor: &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "*"}},
+		},
+	}
+	groups := map[string][]*milvuspb.PrivilegeEntity{}
+	expandGrants, err := c.expandPrivilegeGroups(context.Background(), grants, groups)
+	assert.NoError(t, err)
+	assert.Equal(t, len(expandGrants), len(grants))
+	assert.Equal(t, expandGrants[0].Grantor.Privilege.Name, grants[0].Grantor.Privilege.Name)
 }
 
 type RootCoordSuite struct {

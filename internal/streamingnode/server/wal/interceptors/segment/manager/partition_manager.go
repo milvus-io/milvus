@@ -164,19 +164,14 @@ func (m *partitionSegmentManager) collectShouldBeSealedWithPolicy(predicates fun
 	return shouldBeSealedSegments
 }
 
-// CollectDirtySegmentsAndClear collects all segments in the manager and clear the maanger.
-func (m *partitionSegmentManager) CollectDirtySegmentsAndClear() []*segmentAllocManager {
+// CollectAllSegmentsAndClear collects all segments in the manager and clear the manager.
+func (m *partitionSegmentManager) CollectAllSegmentsAndClear() []*segmentAllocManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	dirtySegments := make([]*segmentAllocManager, 0, len(m.segments))
-	for _, segment := range m.segments {
-		if segment.IsDirtyEnough() {
-			dirtySegments = append(dirtySegments, segment)
-		}
-	}
-	m.segments = make([]*segmentAllocManager, 0)
-	return dirtySegments
+	segments := m.segments
+	m.segments = nil
+	return segments
 }
 
 // CollectAllCanBeSealedAndClear collects all segments that can be sealed and clear the manager.

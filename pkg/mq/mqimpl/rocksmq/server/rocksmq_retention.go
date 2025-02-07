@@ -63,7 +63,7 @@ func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInf
 	for _, key := range topicKeys {
 		topic := key[len(TopicIDTitle):]
 		ri.topicRetetionTime.Insert(topic, time.Now().Unix())
-		topicMu.Store(topic, new(sync.Mutex))
+		topicMu.LoadOrStore(topic, new(sync.Mutex))
 	}
 	return ri, nil
 }

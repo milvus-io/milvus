@@ -26,7 +26,7 @@ import (
 
 	"go.uber.org/zap"
 
-	config "github.com/milvus-io/milvus/pkg/config"
+	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -252,7 +252,8 @@ func (bt *BaseTable) UpdateSourceOptions(opts ...config.Option) {
 
 // Load loads an object with @key.
 func (bt *BaseTable) Load(key string) (string, error) {
-	return bt.mgr.GetConfig(key)
+	_, v, err := bt.mgr.GetConfig(key)
+	return v, err
 }
 
 func (bt *BaseTable) Get(key string) string {
@@ -265,7 +266,7 @@ func (bt *BaseTable) GetWithDefault(key, defaultValue string) string {
 		return defaultValue
 	}
 
-	str, err := bt.mgr.GetConfig(key)
+	_, str, err := bt.mgr.GetConfig(key)
 	if err != nil {
 		return defaultValue
 	}

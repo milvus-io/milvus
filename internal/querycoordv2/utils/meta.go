@@ -18,13 +18,16 @@ package utils
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -109,6 +112,13 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 			"replica=[%d] resource group=[%s], resource group num can only be 0, 1 or same as replica number", replicaNumber, strings.Join(resourceGroups, ","))
 	}
 
+	if streamingutil.IsStreamingServiceEnabled() {
+		streamingNodeCount := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Len()
+		if replicaNumber > int32(streamingNodeCount) {
+			return nil, merr.WrapErrStreamingNodeNotEnough(streamingNodeCount, int(replicaNumber), fmt.Sprintf("when load %d replica count", replicaNumber))
+		}
+	}
+
 	replicaNumInRG := make(map[string]int)
 	if len(resourceGroups) == 0 {
 		// All replicas should be spawned in default resource group.
@@ -160,6 +170,9 @@ func SpawnReplicasWithRG(ctx context.Context, m *meta.Meta, collection int64, re
 	}
 	// Active recover it.
 	RecoverReplicaOfCollection(ctx, m, collection)
+	if streamingutil.IsStreamingServiceEnabled() {
+		m.RecoverSQNodesInCollection(ctx, collection, snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs())
+	}
 	return replicas, nil
 }
 

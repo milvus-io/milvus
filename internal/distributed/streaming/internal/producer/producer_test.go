@@ -14,12 +14,13 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
 
 func TestResumableProducer(t *testing.T) {
 	p := mock_producer.NewMockProducer(t)
 	msgID := mock_message.NewMockMessageID(t)
-	p.EXPECT().Produce(mock.Anything, mock.Anything).Return(&producer.ProduceResult{
+	p.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{
 		MessageID: msgID,
 		TimeTick:  100,
 	}, nil)
@@ -47,11 +48,11 @@ func TestResumableProducer(t *testing.T) {
 		} else if i == 2 {
 			p := mock_producer.NewMockProducer(t)
 			msgID := mock_message.NewMockMessageID(t)
-			p.EXPECT().Produce(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*producer.ProduceResult, error) {
+			p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
 				}
-				return &producer.ProduceResult{
+				return &types.AppendResult{
 					MessageID: msgID,
 					TimeTick:  100,
 				}, nil

@@ -138,7 +138,7 @@ func (s *L0ImportSuite) TestL0Import() {
 			task.(*syncmgr.SyncTask).WithAllocator(alloc)
 
 			s.cm.(*mocks.ChunkManager).EXPECT().RootPath().Return("mock-rootpath")
-			s.cm.(*mocks.ChunkManager).EXPECT().MultiWrite(mock.Anything, mock.Anything).Return(nil)
+			s.cm.(*mocks.ChunkManager).EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			task.(*syncmgr.SyncTask).WithChunkManager(s.cm)
 
 			err := task.Run(context.Background())

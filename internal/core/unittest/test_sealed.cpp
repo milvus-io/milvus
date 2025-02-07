@@ -2197,6 +2197,8 @@ TEST(Sealed, QueryAllFields) {
         "float16_vec", DataType::VECTOR_FLOAT16, 128, metric_type);
     auto bfloat16_vec = schema->AddDebugField(
         "bfloat16_vec", DataType::VECTOR_BFLOAT16, 128, metric_type);
+    auto int8_vec = schema->AddDebugField(
+        "int8_vec", DataType::VECTOR_INT8, 128, metric_type);
     schema->set_primary_field_id(int64_field);
 
     std::map<std::string, std::string> index_params = {
@@ -2235,6 +2237,7 @@ TEST(Sealed, QueryAllFields) {
     auto vector_values = dataset.get_col<float>(vec);
     auto float16_vector_values = dataset.get_col<uint8_t>(float16_vec);
     auto bfloat16_vector_values = dataset.get_col<uint8_t>(bfloat16_vec);
+    auto int8_vector_values = dataset.get_col<int8>(int8_vec);
 
     auto ids_ds = GenRandomIds(dataset_size);
     auto bool_result =
@@ -2273,6 +2276,8 @@ TEST(Sealed, QueryAllFields) {
         segment->bulk_subscript(float16_vec, ids_ds->GetIds(), dataset_size);
     auto bfloat16_vec_result =
         segment->bulk_subscript(bfloat16_vec, ids_ds->GetIds(), dataset_size);
+    auto int8_vec_result =
+        segment->bulk_subscript(int8_vec, ids_ds->GetIds(), dataset_size);
 
     EXPECT_EQ(bool_result->scalars().bool_data().data_size(), dataset_size);
     EXPECT_EQ(int8_result->scalars().int_data().data_size(), dataset_size);
@@ -2290,6 +2295,8 @@ TEST(Sealed, QueryAllFields) {
               dataset_size * dim * 2);
     EXPECT_EQ(bfloat16_vec_result->vectors().bfloat16_vector().size(),
               dataset_size * dim * 2);
+    EXPECT_EQ(int8_vec_result->vectors().int8_vector().size(),
+              dataset_size * dim);
     EXPECT_EQ(int_array_result->scalars().array_data().data_size(),
               dataset_size);
     EXPECT_EQ(long_array_result->scalars().array_data().data_size(),

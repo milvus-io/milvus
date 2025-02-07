@@ -1903,6 +1903,15 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 	suite.Equal(2, scheduler.GetChannelTaskDelta(-1, -1))
 	suite.Equal(200, scheduler.GetSegmentTaskDelta(-1, -1))
 	suite.Equal(2, scheduler.GetChannelTaskDelta(-1, -1))
+
+	scheduler.remove(task1)
+	scheduler.remove(task2)
+	scheduler.remove(task3)
+	scheduler.remove(task4)
+	suite.Equal(0, scheduler.GetSegmentTaskDelta(nodeID, coll))
+	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID, coll))
+	suite.Equal(0, scheduler.GetSegmentTaskDelta(nodeID2, coll2))
+	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID2, coll2))
 }
 
 func TestTask(t *testing.T) {

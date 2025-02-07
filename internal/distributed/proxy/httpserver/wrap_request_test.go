@@ -345,6 +345,63 @@ func TestFieldData_AsSchemapb(t *testing.T) {
 		_, err := fieldData.AsSchemapb()
 		assert.Error(t, err)
 	})
+
+	t.Run("int8vector_ok_1", func(t *testing.T) {
+		fieldData := FieldData{
+			Type: schemapb.DataType_Int8Vector,
+			Field: []byte(`[
+				[1, 2, 3, 4],
+				[-11, -52, 37, 121],
+				[-128, -35, 31, 127]
+			]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.NoError(t, err)
+	})
+	t.Run("int8vector_ok_1", func(t *testing.T) {
+		fieldData := FieldData{
+			Type: schemapb.DataType_Int8Vector,
+			Field: []byte(`[
+				[-200, 141]
+			]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("int8vector_empty_err", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_Int8Vector,
+			Field: []byte(""),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("int8vector_dim0_err", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_Int8Vector,
+			Field: []byte(`[]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("int8vector_datatype_err", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_Int8Vector,
+			Field: []byte(`['a', 'b', 'c']`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
 }
 
 func Test_vector2Bytes(t *testing.T) {

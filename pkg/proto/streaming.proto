@@ -62,16 +62,17 @@ message VersionPair {
 
 // BroadcastTaskState is the state of the broadcast task.
 enum BroadcastTaskState {
-    BROADCAST_TASK_STATE_UNKNOWN = 0;  // should never used.
-    BROADCAST_TASK_STATE_PENDING = 1;  // task is pending.
-    BROADCAST_TASK_STATE_DONE = 2;     // task is done, the message is broadcasted, and the persisted task can be cleared.
+    BROADCAST_TASK_STATE_UNKNOWN = 0;          // should never used.
+    BROADCAST_TASK_STATE_PENDING = 1;          // task is pending.
+    BROADCAST_TASK_STATE_DONE = 2;             // task has been broadcasted and acknowledged, the resource lock is released, and the persisted task can be cleared.
+    BROADCAST_TASK_STATE_WAIT_ACK = 3;         // task has been broadcasted, waiting for ack, the resource lock is still acquired by some vchannels.
 }
 
-// BroadcastTask is the task to broadcast the message.
+// BroadcastTask is the task to broadcast the messake.
 message BroadcastTask {
-    int64 task_id = 1;                 // task id.
-    messages.Message message = 2;   // message to be broadcast.
-    BroadcastTaskState state = 3;   // state of the task.
+    messages.Message message = 1;      // message to be broadcast.
+    BroadcastTaskState state = 2;      // state of the task.
+    bytes acked_vchannel_bitmap = 3; // given vchannels that have been acked, the size of bitmap is same with message.BroadcastHeader().VChannels.
 }
 
 //
@@ -92,6 +93,12 @@ service StreamingCoordBroadcastService {
     // Broadcast receives broadcast messages from other component and make sure that the message is broadcast to all wal.
     // It performs an atomic broadcast to all wal, achieve eventual consistency.
     rpc Broadcast(BroadcastRequest) returns (BroadcastResponse) {}
+
+    // Ack acknowledge broadcast message is consumed.
+    rpc Ack(BroadcastAckRequest) returns (BroadcastAckResponse) {}
+
+    // Watch watch the broadcast events.
+    rpc Watch(stream BroadcastWatchRequest) returns (stream BroadcastWatchResponse) {}
 }
 
 // BroadcastRequest is the request of the Broadcast RPC.
@@ -102,6 +109,43 @@ message BroadcastRequest {
 // BroadcastResponse is the response of the Broadcast RPC.
 message BroadcastResponse {
     map<string,ProduceMessageResponseResult> results = 1; 
+    uint64 broadcast_id = 2;
+}
+
+message BroadcastAckRequest {
+    uint64 broadcast_id = 1;                  // broadcast id.
+    string vchannel = 2;                     // the vchannel that acked the message.
+}
+
+message BroadcastAckResponse {
+}
+
+message BroadcastWatchRequest {
+    oneof command {
+        BroadcastCreateEventWatchRequest create_event_watch = 1;
+        CloseBroadcastWatchRequest close = 2;
+    }
+}
+
+message BroadcastCreateEventWatchRequest {
+    messages.BroadcastEvent event = 1;
+}
+
+message CloseBroadcastWatchRequest {
+}
+
+message BroadcastWatchResponse {
+    oneof response {
+        BroadcastEventWatchResponse event_done = 1;
+        CloseBroadcastWatchResponse close = 2;
+    }
+}
+
+message BroadcastEventWatchResponse {
+    messages.BroadcastEvent event = 1;
+}
+
+message CloseBroadcastWatchResponse {
 }
 
 //
@@ -223,6 +267,7 @@ enum StreamingCode {
     STREAMING_CODE_TRANSACTION_EXPIRED    = 9;  // transaction expired
     STREAMING_CODE_INVALID_TRANSACTION_STATE = 10;  // invalid transaction state
     STREAMING_CODE_UNRECOVERABLE          = 11;  // unrecoverable error
+    STREAMING_CODE_RESOURCE_ACQUIRED      = 12; // resource is acquired by other operation
     STREAMING_CODE_UNKNOWN                   = 999;  // unknown error
 }
 

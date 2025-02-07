@@ -62,6 +62,8 @@ func (t FieldType) Name() string {
 		return "Float16Vector"
 	case FieldTypeBFloat16Vector:
 		return "BFloat16Vector"
+	case FieldTypeInt8Vector:
+		return "Int8Vector"
 	default:
 		return "undefined"
 	}
@@ -100,6 +102,8 @@ func (t FieldType) String() string {
 		return "[]byte"
 	case FieldTypeBFloat16Vector:
 		return "[]byte"
+	case FieldTypeInt8Vector:
+		return "[]int8"
 	default:
 		return "undefined"
 	}

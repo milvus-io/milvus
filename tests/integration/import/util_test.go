@@ -174,6 +174,17 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 			data = chunkedRows
 		case schemapb.DataType_SparseFloatVector:
 			data = insertData.Data[fieldID].(*storage.SparseFloatVectorFieldData).GetContents()
+		case schemapb.DataType_Int8Vector:
+			rows := insertData.Data[fieldID].GetDataRows().([]int8)
+			if dim != fieldData.(*storage.Int8VectorFieldData).Dim {
+				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, fieldData.(*storage.Int8VectorFieldData).Dim))
+			}
+			chunked := lo.Chunk(rows, dim)
+			chunkedRows := make([][dim]int8, len(chunked))
+			for i, innerSlice := range chunked {
+				copy(chunkedRows[i][:], innerSlice)
+			}
+			data = chunkedRows
 		default:
 			data = insertData.Data[fieldID].GetDataRows()
 		}

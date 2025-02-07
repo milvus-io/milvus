@@ -4469,3 +4469,28 @@ TEST(CApiTest, SearchIdTest) {
 TEST(CApiTest, IsLoadWithDisk) {
     ASSERT_TRUE(IsLoadWithDisk(INVERTED_INDEX_TYPE, 0));
 }
+
+TEST(CApiTest, TestGetValueFromConfig) {
+    nlohmann::json cfg = nlohmann::json::parse(
+        R"({"a" : 100, "b" : true, "c" : "true", "d" : 1.234})");
+    auto a_value = GetValueFromConfig<int64_t>(cfg, "a");
+    ASSERT_EQ(a_value.value(), 100);
+
+    auto b_value = GetValueFromConfig<bool>(cfg, "b");
+    ASSERT_TRUE(b_value.value());
+
+    auto c_value = GetValueFromConfig<bool>(cfg, "c");
+    ASSERT_TRUE(c_value.value());
+
+    auto d_value = GetValueFromConfig<double>(cfg, "d");
+    ASSERT_NEAR(d_value.value(), 1.234, 0.001);
+
+    try {
+        GetValueFromConfig<std::string>(cfg, "d");
+    } catch (const std::exception& e) {
+        std::cout << e.what() << std::endl;
+        ASSERT_EQ(std::string(e.what()).find("get value from config for key") !=
+                      std::string::npos,
+                  true);
+    }
+}

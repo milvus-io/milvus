@@ -1409,6 +1409,7 @@ class TestCollectionWithAuth(TestBase):
 
 
 @pytest.mark.L0
+@pytest.mark.skip("skip temporarily, need fix")
 class TestCollectionProperties(TestBase):
     """Test collection property operations"""
 

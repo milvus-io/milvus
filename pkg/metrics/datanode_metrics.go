@@ -91,18 +91,6 @@ var (
 			collectionIDLabelName,
 		})
 
-	DataNodeProduceTimeTickLag = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataNodeRole,
-			Name:      "produce_tt_lag_ms",
-			Help:      "now time minus tt pts per physical channel",
-		}, []string{
-			nodeIDLabelName,
-			collectionIDLabelName,
-			channelNameLabelName,
-		})
-
 	DataNodeConsumeMsgCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -113,18 +101,6 @@ var (
 			nodeIDLabelName,
 			msgTypeLabelName,
 			collectionIDLabelName,
-		})
-
-	DataNodeEncodeBufferLatency = prometheus.NewHistogramVec( // TODO: arguably
-		prometheus.HistogramOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataNodeRole,
-			Name:      "encode_buffer_latency",
-			Help:      "latency of encode buffer data",
-			Buckets:   buckets,
-		}, []string{
-			nodeIDLabelName,
-			segmentLevelLabelName,
 		})
 
 	DataNodeSave2StorageLatency = prometheus.NewHistogramVec(
@@ -268,7 +244,6 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeFlowGraphBufferDataSize)
 	// output related
 	registry.MustRegister(DataNodeAutoFlushBufferCount)
-	registry.MustRegister(DataNodeEncodeBufferLatency)
 	registry.MustRegister(DataNodeSave2StorageLatency)
 	registry.MustRegister(DataNodeFlushBufferCount)
 	registry.MustRegister(DataNodeFlushReqCounter)
@@ -282,7 +257,6 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	// deprecated metrics
 	registry.MustRegister(DataNodeForwardDeleteMsgTimeTaken)
 	registry.MustRegister(DataNodeNumProducers)
-	registry.MustRegister(DataNodeProduceTimeTickLag)
 }
 
 func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel string) {
@@ -292,14 +266,6 @@ func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel 
 				nodeIDLabelName:       fmt.Sprint(nodeID),
 				msgTypeLabelName:      AllLabel,
 				collectionIDLabelName: fmt.Sprint(collectionID),
-			})
-
-	DataNodeProduceTimeTickLag.
-		Delete(
-			prometheus.Labels{
-				nodeIDLabelName:       fmt.Sprint(nodeID),
-				collectionIDLabelName: fmt.Sprint(collectionID),
-				channelNameLabelName:  channel,
 			})
 
 	for _, label := range []string{AllLabel, DeleteLabel, InsertLabel} {

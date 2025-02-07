@@ -118,7 +118,7 @@ func (at *analyzeTask) GetFailReason() string {
 	return at.taskInfo.GetFailReason()
 }
 
-func (at *analyzeTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error {
+func (at *analyzeTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error {
 	if err := meta.analyzeMeta.UpdateVersion(at.GetTaskID(), nodeID); err != nil {
 		return err
 	}
@@ -227,7 +227,7 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 	return true
 }
 
-func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeClient) bool {
+func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeClient, meta *meta) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{

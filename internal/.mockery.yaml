@@ -15,10 +15,14 @@ packages:
   github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster:
     interfaces:
       AppendOperator:
+      Watcher:
   github.com/milvus-io/milvus/internal/streamingcoord/client:
     interfaces:
       Client:
       BroadcastService:
+  github.com/milvus-io/milvus/internal/streamingcoord/client/broadcast:
+    interfaces:
+      Watcher:
   github.com/milvus-io/milvus/internal/streamingnode/client/manager:
     interfaces:
       ManagerClient:

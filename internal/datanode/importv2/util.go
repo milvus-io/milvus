@@ -69,17 +69,6 @@ func NewSyncTask(ctx context.Context,
 		}, metacache.NewBM25StatsFactory)
 	}
 
-	var serializer syncmgr.Serializer
-	var err error
-	serializer, err = syncmgr.NewStorageSerializer(
-		allocator,
-		metaCache,
-		nil,
-	)
-	if err != nil {
-		return nil, err
-	}
-
 	segmentLevel := datapb.SegmentLevel_L1
 	if insertData == nil && deleteData != nil {
 		segmentLevel = datapb.SegmentLevel_L0
@@ -100,7 +89,8 @@ func NewSyncTask(ctx context.Context,
 		syncPack.WithBM25Stats(bm25Stats)
 	}
 
-	return serializer.EncodeBuffer(ctx, syncPack)
+	task := syncmgr.NewSyncTask().WithAllocator(allocator).WithMetaCache(metaCache).WithSyncPack(syncPack)
+	return task, nil
 }
 
 func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache.MetaCache) (*datapb.ImportSegmentInfo, error) {
@@ -209,11 +199,38 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
 }
 
 func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
+	if err := RunBm25Function(task, data); err != nil {
+		return err
+	}
+	if err := RunDenseEmbedding(task, data); err != nil {
+		return err
+	}
+	return nil
+}
+
+func RunDenseEmbedding(task *ImportTask, data *storage.InsertData) error {
+	schema := task.GetSchema()
+	if function.HasNonBM25Functions(schema.Functions, []int64{}) {
+		exec, err := function.NewFunctionExecutor(schema)
+		if err != nil {
+			return err
+		}
+		if err := exec.ProcessBulkInsert(data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
 	fns := task.GetSchema().GetFunctions()
 	for _, fn := range fns {
 		runner, err := function.NewFunctionRunner(task.GetSchema(), fn)
 		if err != nil {
 			return err
+		}
+		if runner == nil {
+			continue
 		}
 		inputDatas := make([]any, 0, len(fn.InputFieldIds))
 		for _, inputFieldID := range fn.InputFieldIds {
