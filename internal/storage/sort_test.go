@@ -55,7 +55,7 @@ func TestSort(t *testing.T) {
 	}
 
 	t.Run("sort", func(t *testing.T) {
-		gotNumRows, err := Sort(getReaders(), common.RowIDField, rw, func(r Record, ri, i int) bool {
+		gotNumRows, err := Sort(generateTestSchema(), getReaders(), common.RowIDField, rw, func(r Record, ri, i int) bool {
 			return true
 		})
 		assert.NoError(t, err)
@@ -65,7 +65,7 @@ func TestSort(t *testing.T) {
 	})
 
 	t.Run("sort with predicate", func(t *testing.T) {
-		gotNumRows, err := Sort(getReaders(), common.RowIDField, rw, func(r Record, ri, i int) bool {
+		gotNumRows, err := Sort(generateTestSchema(), getReaders(), common.RowIDField, rw, func(r Record, ri, i int) bool {
 			pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
 			return pk >= 20
 		})
@@ -106,7 +106,7 @@ func TestMergeSort(t *testing.T) {
 	}
 
 	t.Run("merge sort", func(t *testing.T) {
-		gotNumRows, err := MergeSort(getReaders(), common.RowIDField, rw, func(r Record, ri, i int) bool {
+		gotNumRows, err := MergeSort(generateTestSchema(), getReaders(), common.RowIDField, rw, func(r Record, ri, i int) bool {
 			return true
 		})
 		assert.NoError(t, err)
@@ -116,7 +116,7 @@ func TestMergeSort(t *testing.T) {
 	})
 
 	t.Run("merge sort with predicate", func(t *testing.T) {
-		gotNumRows, err := MergeSort(getReaders(), common.RowIDField, rw, func(r Record, ri, i int) bool {
+		gotNumRows, err := MergeSort(generateTestSchema(), getReaders(), common.RowIDField, rw, func(r Record, ri, i int) bool {
 			pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
 			return pk >= 20
 		})
@@ -154,7 +154,7 @@ func BenchmarkSort(b *testing.B) {
 
 	b.Run("sort", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			Sort(rr, common.RowIDField, rw, func(r Record, ri, i int) bool {
+			Sort(generateTestSchema(), rr, common.RowIDField, rw, func(r Record, ri, i int) bool {
 				return true
 			})
 		}

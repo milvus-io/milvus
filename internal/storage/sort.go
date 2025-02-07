@@ -20,11 +20,17 @@ import (
 	"container/heap"
 	"io"
 	"sort"
+	"strconv"
 
+	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
+	"github.com/apache/arrow/go/v12/arrow/memory"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
-func Sort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate func(r Record, ri, i int) bool) (numRows int, err error) {
+func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
+	pkField FieldID, rw RecordWriter, predicate func(r Record, ri, i int) bool,
+) (int, error) {
 	records := make([]Record, 0)
 
 	type index struct {
@@ -79,17 +85,54 @@ func Sort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate func(r 
 		})
 	}
 
-	writeOne := func(i *index) error {
-		rec := records[i.ri].Slice(i.i, i.i+1)
-		defer rec.Release()
-		return rw.Write(rec)
-	}
-	for _, i := range indices {
-		numRows++
-		writeOne(i)
+	// Due to current arrow impl (v12), the write performance is largely dependent on the batch size,
+	//	small batch size will cause write performance degradation. To work around this issue, we accumulate
+	//	records and write them in batches. This requires additional memory copy.
+	batchSize := 100000
+	builders := make([]array.Builder, len(schema.Fields))
+	for i, f := range schema.Fields {
+		b := array.NewBuilder(memory.DefaultAllocator, records[0].Column(f.FieldID).DataType())
+		b.Reserve(batchSize)
+		builders[i] = b
 	}
 
-	return numRows, nil
+	writeRecord := func(rowNum int64) {
+		arrays := make([]arrow.Array, len(builders))
+		fields := make([]arrow.Field, len(builders))
+		field2Col := make(map[FieldID]int, len(builders))
+
+		for c, builder := range builders {
+			arrays[c] = builder.NewArray()
+			fid := schema.Fields[c].FieldID
+			fields[c] = arrow.Field{
+				Name:     strconv.Itoa(int(fid)),
+				Type:     arrays[c].DataType(),
+				Nullable: true, // No nullable check here.
+			}
+			field2Col[fid] = c
+		}
+
+		rec := newSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, rowNum), field2Col)
+		rw.Write(rec)
+		rec.Release()
+	}
+
+	for i, idx := range indices {
+		for c, builder := range builders {
+			fid := schema.Fields[c].FieldID
+			appendValueAt(builder, records[idx.ri].Column(fid), idx.i)
+		}
+		if (i+1)%batchSize == 0 {
+			writeRecord(int64(batchSize))
+		}
+	}
+
+	// write the last batch
+	if len(indices)%batchSize != 0 {
+		writeRecord(int64(len(indices) % batchSize))
+	}
+
+	return len(indices), nil
 }
 
 // A PriorityQueue implements heap.Interface and holds Items.
@@ -140,7 +183,9 @@ func NewPriorityQueue[T any](less func(x, y *T) bool) *PriorityQueue[T] {
 	return &pq
 }
 
-func MergeSort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate func(r Record, ri, i int) bool) (numRows int, err error) {
+func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
+	pkField FieldID, rw RecordWriter, predicate func(r Record, ri, i int) bool,
+) (numRows int, err error) {
 	type index struct {
 		ri int
 		i  int
@@ -197,36 +242,55 @@ func MergeSort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate fu
 		}
 	}
 
-	ri, istart, iend := -1, -1, -1
+	// Due to current arrow impl (v12), the write performance is largely dependent on the batch size,
+	//	small batch size will cause write performance degradation. To work around this issue, we accumulate
+	//	records and write them in batches. This requires additional memory copy.
+	batchSize := 100000
+	builders := make([]array.Builder, len(schema.Fields))
+	for i, f := range schema.Fields {
+		b := array.NewBuilder(memory.DefaultAllocator, recs[0].Column(f.FieldID).DataType())
+		b.Reserve(batchSize)
+		builders[i] = b
+	}
+
+	writeRecord := func(rowNum int64) {
+		arrays := make([]arrow.Array, len(builders))
+		fields := make([]arrow.Field, len(builders))
+		field2Col := make(map[FieldID]int, len(builders))
+
+		for c, builder := range builders {
+			arrays[c] = builder.NewArray()
+			fid := schema.Fields[c].FieldID
+			fields[c] = arrow.Field{
+				Name:     strconv.Itoa(int(fid)),
+				Type:     arrays[c].DataType(),
+				Nullable: true, // No nullable check here.
+			}
+			field2Col[fid] = c
+		}
+
+		rec := newSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, rowNum), field2Col)
+		rw.Write(rec)
+		rec.Release()
+	}
+
+	rc := 0
 	for pq.Len() > 0 {
 		idx := pq.Dequeue()
-		if ri == idx.ri {
-			// record end of cache, do nothing
-			iend = idx.i + 1
+
+		for c, builder := range builders {
+			fid := schema.Fields[c].FieldID
+			appendValueAt(builder, rr[idx.ri].Record().Column(fid), idx.i)
+		}
+		if (rc+1)%batchSize == 0 {
+			writeRecord(int64(batchSize))
+			rc = 0
 		} else {
-			if ri != -1 {
-				// record changed, write old one and reset
-				sr := rr[ri].Record().Slice(istart, iend)
-				err := rw.Write(sr)
-				sr.Release()
-				if err != nil {
-					return 0, err
-				}
-			}
-			ri = idx.ri
-			istart = idx.i
-			iend = idx.i + 1
+			rc++
 		}
 
 		// If poped idx reaches end of segment, invalidate cache and advance to next segment
 		if idx.i == rr[idx.ri].Record().Len()-1 {
-			sr := rr[ri].Record().Slice(istart, iend)
-			err := rw.Write(sr)
-			sr.Release()
-			if err != nil {
-				return 0, err
-			}
-			ri, istart, iend = -1, -1, -1
 			rec, err := advanceRecord(rr[idx.ri])
 			if err == io.EOF {
 				continue
@@ -237,5 +301,11 @@ func MergeSort(rr []RecordReader, pkField FieldID, rw RecordWriter, predicate fu
 			enqueueAll(idx.ri, rec)
 		}
 	}
+
+	// write the last batch
+	if rc > 0 {
+		writeRecord(int64(rc))
+	}
+
 	return numRows, nil
 }
