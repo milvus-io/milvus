@@ -32,9 +32,7 @@ func TestHybridSearchDefault(t *testing.T) {
 	queryVec1 := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 	queryVec2 := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 
-	t.Log("https://github.com/milvus-io/milvus/issues/39559")
-	annReq1 := client.NewAnnRequest(common.DefaultFloatVecFieldName, common.DefaultLimit, queryVec1...)
-	// annReq1 := client.NewAnnRequest(common.DefaultFloatVecFieldName, common.DefaultLimit, queryVec1...).WithSearchParam("ef", "100")
+	annReq1 := client.NewAnnRequest(common.DefaultFloatVecFieldName, common.DefaultLimit, queryVec1...).WithSearchParam("ef", "100")
 	annReq2 := client.NewAnnRequest(common.DefaultFloatVecFieldName, common.DefaultLimit, queryVec2...)
 
 	searchRes, errSearch := mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit, annReq1, annReq2).WithOutputFields("*"))
@@ -167,6 +165,7 @@ func TestHybridSearchMultiVectorsDefault(t *testing.T) {
 // invalid fieldName: not exist
 // invalid metric type: mismatch
 func TestHybridSearchInvalidParams(t *testing.T) {
+	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
 
@@ -214,10 +213,9 @@ func TestHybridSearchInvalidParams(t *testing.T) {
 	common.CheckErr(t, errField, false, "failed to get field schema by name: fieldName(a) not found")
 
 	// invalid metric type: mismatch
-	t.Log("https://github.com/milvus-io/milvus/issues/39559")
-	/* annReq4 := client.NewAnnRequest(common.DefaultFloatVecFieldName, common.DefaultLimit, queryVec1...).WithSearchParam("ef", "100")
+	annReq4 := client.NewAnnRequest(common.DefaultFloatVecFieldName, common.DefaultLimit, queryVec1...).WithSearchParam("metric_type", "L2")
 	_, errMetric := mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit, annReq4))
-	common.CheckErr(t, errMetric, false, "metric type not match: invalid parameter") */
+	common.CheckErr(t, errMetric, false, "metric type not match: invalid parameter")
 }
 
 // vector type mismatch: vectors: float32, queryVec: binary
@@ -301,7 +299,7 @@ func TestHybridSearchMultiVectorsPagination(t *testing.T) {
 
 // hybrid search Pagination -> verify success
 func TestHybridSearchMultiVectorsRangeSearch(t *testing.T) {
-	t.Skip("https://github.com/milvus-io/milvus/issues/39559")
+	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
 
