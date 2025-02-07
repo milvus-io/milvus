@@ -75,7 +75,7 @@ func (c *client) Register(ctx context.Context, vchannel string, pos *Pos, subPos
 	}
 	ch, err := manager.Add(ctx, vchannel, pos, subPos)
 	if err != nil {
-		if manager.Num() == 0 {
+		if manager.NumTarget() == 0 {
 			manager.Close()
 			delete(c.managers, pchannel)
 		}
@@ -92,7 +92,7 @@ func (c *client) Deregister(vchannel string) {
 	defer c.managerMut.Unlock()
 	if manager, ok := c.managers[pchannel]; ok {
 		manager.Remove(vchannel)
-		if manager.Num() == 0 {
+		if manager.NumTarget() == 0 {
 			manager.Close()
 			delete(c.managers, pchannel)
 		}
