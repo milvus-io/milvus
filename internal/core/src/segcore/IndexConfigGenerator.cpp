@@ -43,13 +43,24 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
     build_params_[knowhere::indexparam::SSIZE] = std::to_string(
         std::max((int)(config_.get_chunk_rows() / config_.get_nlist()), 48));
 
-    if (is_sparse && metric_type_ == knowhere::metric::BM25) {
-        build_params_[knowhere::meta::BM25_K1] =
-            index_meta_.GetIndexParams().at(knowhere::meta::BM25_K1);
-        build_params_[knowhere::meta::BM25_B] =
-            index_meta_.GetIndexParams().at(knowhere::meta::BM25_B);
-        build_params_[knowhere::meta::BM25_AVGDL] =
-            index_meta_.GetIndexParams().at(knowhere::meta::BM25_AVGDL);
+    if (is_sparse) {
+        const auto& index_params = index_meta_.GetIndexParams();
+
+        if (auto algo_it =
+                index_params.find(knowhere::indexparam::INVERTED_INDEX_ALGO);
+            algo_it != index_params.end()) {
+            build_params_[knowhere::indexparam::INVERTED_INDEX_ALGO] =
+                algo_it->second;
+        }
+
+        if (metric_type_ == knowhere::metric::BM25) {
+            build_params_[knowhere::meta::BM25_K1] =
+                index_params.at(knowhere::meta::BM25_K1);
+            build_params_[knowhere::meta::BM25_B] =
+                index_params.at(knowhere::meta::BM25_B);
+            build_params_[knowhere::meta::BM25_AVGDL] =
+                index_params.at(knowhere::meta::BM25_AVGDL);
+        }
     }
 
     search_params_[knowhere::indexparam::NPROBE] =
