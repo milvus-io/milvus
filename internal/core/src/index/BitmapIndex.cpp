@@ -1123,7 +1123,7 @@ template <typename T>
 std::optional<T>
 BitmapIndex<T>::Reverse_Lookup(size_t idx) const {
     AssertInfo(is_built_, "index has not been built");
-    AssertInfo(idx < total_num_rows_, "out of range of total coun");
+    AssertInfo(idx < total_num_rows_, "out of range of total count");
 
     if (!valid_bitset_[idx]) {
         return std::nullopt;

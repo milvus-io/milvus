@@ -203,6 +203,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     ClearData() override;
 
+    bool
+    is_field_exist(FieldId field_id) const override {
+        return fields_.find(field_id) != fields_.end();
+    }
+
  protected:
     // blob and row_count
     SpanBase
