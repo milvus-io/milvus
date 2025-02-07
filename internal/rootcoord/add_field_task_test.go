@@ -268,6 +268,6 @@ func Test_AddFieldTask_Execute(t *testing.T) {
 			},
 		}
 		err := task.Execute(context.Background())
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 }

@@ -478,8 +478,8 @@ func (t *addFieldTask) PreExecute(ctx context.Context) error {
 	if t.oldSchema.EnableDynamicField {
 		return merr.WrapErrParameterInvalidMsg("not support to add field in an enable dynamic field collection")
 	}
-	if t.FieldSchema == nil {
-		return nil
+	if t.GetFieldSchema() == nil {
+		return merr.WrapErrParameterInvalidMsg("field schema is nil in add field task")
 	}
 	fieldList := typeutil.NewSet[string]()
 	for _, schema := range t.oldSchema.Fields {
@@ -522,7 +522,7 @@ func (t *addFieldTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if fieldList.Contain(t.FieldSchema.Name) {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprint("duplicate field name: %s", t.FieldSchema.GetName()))
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("duplicate field name: %s", t.FieldSchema.GetName()))
 	}
 
 	log.Info("PreExecute addField task done", zap.Any("field schema", t.FieldSchema))

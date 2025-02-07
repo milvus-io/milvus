@@ -79,11 +79,8 @@ func (crr *CompositeBinlogRecordReader) iterateNextBatch() error {
 		crr.index = make(map[FieldID]int16, len(blobs))
 	}
 
-	for i, b := range crr.blobs {
-		if b[crr.blobPos].Value == nil {
-
-		}
-		reader, err := NewBinlogReader(b[crr.blobPos].Value)
+	for i, b := range blobs {
+		reader, err := NewBinlogReader(b.Value)
 		if err != nil {
 			return err
 		}
@@ -162,13 +159,13 @@ func (crr *CompositeBinlogRecordReader) Close() error {
 	return nil
 }
 
-func parseBlobKey(blobKey string) (fieldID FieldID, logId UniqueID) {
-	if _, _, _, fieldID, logId, ok := metautil.ParseInsertLogPath(blobKey); ok {
-		return fieldID, logId
+func parseBlobKey(blobKey string) (colId FieldID, logId UniqueID) {
+	if _, _, _, colId, logId, ok := metautil.ParseInsertLogPath(blobKey); ok {
+		return colId, logId
 	}
-	if fieldID, err := strconv.ParseInt(blobKey, 10, 64); err == nil {
+	if colId, err := strconv.ParseInt(blobKey, 10, 64); err == nil {
 		// data_codec.go generate single field id as blob key.
-		return fieldID, 0
+		return colId, 0
 	}
 	return InvalidUniqueID, InvalidUniqueID
 }
@@ -176,19 +173,15 @@ func parseBlobKey(blobKey string) (fieldID FieldID, logId UniqueID) {
 func MakeBlobsReader(blobs []*Blob) ChunkedBlobsReader {
 	blobMap := make(map[FieldID][]*Blob)
 	for _, blob := range blobs {
-		//
-		fieldID, _ := parseBlobKey(blob.Key)
-		if _, exists := blobMap[fieldID]; !exists {
-			blobMap[fieldID] = []*Blob{blob}
+		colId, _ := parseBlobKey(blob.Key)
+		if _, exists := blobMap[colId]; !exists {
+			blobMap[colId] = []*Blob{blob}
 		} else {
-			blobMap[fieldID] = append(blobMap[fieldID], blob)
+			blobMap[colId] = append(blobMap[colId], blob)
 		}
 	}
 	sortedBlobs := make([][]*Blob, 0, len(blobMap))
-	sortedLogIDs := make([][]int64, 0, len(blobMap))
-	var tsLogIDs []int64
-	var tsBlobs []*Blob
-	for fieldID, blobsForField := range blobMap {
+	for _, blobsForField := range blobMap {
 		sort.Slice(blobsForField, func(i, j int) bool {
 			_, iLog := parseBlobKey(blobsForField[i].Key)
 			_, jLog := parseBlobKey(blobsForField[j].Key)
@@ -196,15 +189,6 @@ func MakeBlobsReader(blobs []*Blob) ChunkedBlobsReader {
 			return iLog < jLog
 		})
 		sortedBlobs = append(sortedBlobs, blobsForField)
-		logIDList := lo.Map(blobsForField, func(blob *Blob, i int) int64 {
-			_, iLog := parseBlobKey(blob.Key)
-			return iLog
-		})
-		sortedLogIDs = append(sortedLogIDs, logIDList)
-		if fieldID == common.TimeStampField {
-			tsLogIDs = logIDList
-			tsBlobs = blobsForField
-		}
 	}
 	chunkPos := 0
 	return func() ([]*Blob, error) {

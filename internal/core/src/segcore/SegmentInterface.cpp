@@ -67,7 +67,12 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
                                                   results.seg_offsets_.data(),
                                                   size,
                                                   target_dynamic_fields));
+        } else if (!is_field_exist(field_id)) {
+            auto& field_meta = plan->schema_[field_id];
+            field_data =
+                std::move(bulk_subscript_not_exist_field(field_meta, size));
         } else {
+            auto& field_meta = plan->schema_[field_id];
             field_data = std::move(
                 bulk_subscript(field_id, results.seg_offsets_.data(), size));
         }

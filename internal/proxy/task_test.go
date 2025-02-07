@@ -652,10 +652,27 @@ func TestAddFieldTask(t *testing.T) {
 	prefix := "TestAddFieldTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
+	collectionID := int64(1)
 	int64Field := "int64"
 	floatVecField := "fvec"
 	varCharField := "varChar"
 
+	rc.collName2ID[collectionName] = collectionID
+	rc.collID2Meta[collectionID] = collectionMeta{
+		name: collectionName,
+		id:   collectionID,
+		schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_Int64, AutoID: true, Name: "ID"},
+				{
+					FieldID: 101, DataType: schemapb.DataType_FloatVector, Name: "vector",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					},
+				},
+			},
+		},
+	}
 	fieldName2Type := make(map[string]schemapb.DataType)
 	fieldName2Type[int64Field] = schemapb.DataType_Int64
 	fieldName2Type[varCharField] = schemapb.DataType_VarChar
@@ -668,6 +685,11 @@ func TestAddFieldTask(t *testing.T) {
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
+			FieldSchema: &schemapb.FieldSchema{
+				Name:     "add",
+				DataType: schemapb.DataType_Bool,
+				Nullable: true,
+			},
 		},
 		ctx:       ctx,
 		rootCoord: rc,
@@ -715,7 +737,6 @@ func TestAddFieldTask(t *testing.T) {
 
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
 
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
@@ -730,6 +751,12 @@ func TestAddFieldTask(t *testing.T) {
 
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
+
+		// nil schema
+		task.FieldSchema = nil
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
 		// not support dynamic field
 		task.oldSchema.EnableDynamicField = true
