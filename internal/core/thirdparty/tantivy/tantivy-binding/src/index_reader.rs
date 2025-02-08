@@ -40,7 +40,7 @@ impl IndexReaderWrapper {
 
         let reader = index
             .reader_builder()
-            .reload_policy(ReloadPolicy::OnCommit) // OnCommit serve for growing segment.
+            .reload_policy(ReloadPolicy::OnCommitWithDelay) // OnCommitWithDelay serve for growing segment.
             .try_into()?;
         reader.reload()?;
 
@@ -108,11 +108,9 @@ impl IndexReaderWrapper {
         lower_bound: i64,
         inclusive: bool,
     ) -> Result<Vec<u32>> {
-        let q = RangeQuery::new_i64_bounds(
-            self.field_name.to_string(),
-            make_bounds(lower_bound, inclusive),
-            Bound::Unbounded,
-        );
+        let term = Term::from_field_i64(self.field, lower_bound);
+
+        let q = RangeQuery::new(make_bounds(term, inclusive), Bound::Unbounded);
         self.search(&q)
     }
 
@@ -121,11 +119,8 @@ impl IndexReaderWrapper {
         upper_bound: i64,
         inclusive: bool,
     ) -> Result<Vec<u32>> {
-        let q = RangeQuery::new_i64_bounds(
-            self.field_name.to_string(),
-            Bound::Unbounded,
-            make_bounds(upper_bound, inclusive),
-        );
+        let term = Term::from_field_i64(self.field, upper_bound);
+        let q = RangeQuery::new(Bound::Unbounded, make_bounds(term, inclusive));
         self.search(&q)
     }
 
@@ -136,9 +131,9 @@ impl IndexReaderWrapper {
         lb_inclusive: bool,
         ub_inclusive: bool,
     ) -> Result<Vec<u32>> {
-        let lb = make_bounds(lower_bound, lb_inclusive);
-        let ub = make_bounds(upper_bound, ub_inclusive);
-        let q = RangeQuery::new_i64_bounds(self.field_name.to_string(), lb, ub);
+        let lb = make_bounds(Term::from_field_i64(self.field, lower_bound), lb_inclusive);
+        let ub = make_bounds(Term::from_field_i64(self.field, upper_bound), ub_inclusive);
+        let q = RangeQuery::new(lb, ub);
         self.search(&q)
     }
 
@@ -155,9 +150,8 @@ impl IndexReaderWrapper {
         lower_bound: f64,
         inclusive: bool,
     ) -> Result<Vec<u32>> {
-        let q = RangeQuery::new_f64_bounds(
-            self.field_name.to_string(),
-            make_bounds(lower_bound, inclusive),
+        let q = RangeQuery::new(
+            make_bounds(Term::from_field_f64(self.field, lower_bound), inclusive),
             Bound::Unbounded,
         );
         self.search(&q)
@@ -168,10 +162,9 @@ impl IndexReaderWrapper {
         upper_bound: f64,
         inclusive: bool,
     ) -> Result<Vec<u32>> {
-        let q = RangeQuery::new_f64_bounds(
-            self.field_name.to_string(),
+        let q = RangeQuery::new(
             Bound::Unbounded,
-            make_bounds(upper_bound, inclusive),
+            make_bounds(Term::from_field_f64(self.field, upper_bound), inclusive),
         );
         self.search(&q)
     }
@@ -183,9 +176,9 @@ impl IndexReaderWrapper {
         lb_inclusive: bool,
         ub_inclusive: bool,
     ) -> Result<Vec<u32>> {
-        let lb = make_bounds(lower_bound, lb_inclusive);
-        let ub = make_bounds(upper_bound, ub_inclusive);
-        let q = RangeQuery::new_f64_bounds(self.field_name.to_string(), lb, ub);
+        let lb = make_bounds(Term::from_field_f64(self.field, lower_bound), lb_inclusive);
+        let ub = make_bounds(Term::from_field_f64(self.field, upper_bound), ub_inclusive);
+        let q = RangeQuery::new(lb, ub);
         self.search(&q)
     }
 
@@ -218,9 +211,8 @@ impl IndexReaderWrapper {
         lower_bound: &str,
         inclusive: bool,
     ) -> Result<Vec<u32>> {
-        let q = RangeQuery::new_str_bounds(
-            self.field_name.to_string(),
-            make_bounds(lower_bound, inclusive),
+        let q = RangeQuery::new(
+            make_bounds(Term::from_field_text(self.field, lower_bound), inclusive),
             Bound::Unbounded,
         );
         self.search(&q)
@@ -231,10 +223,9 @@ impl IndexReaderWrapper {
         upper_bound: &str,
         inclusive: bool,
     ) -> Result<Vec<u32>> {
-        let q = RangeQuery::new_str_bounds(
-            self.field_name.to_string(),
+        let q = RangeQuery::new(
             Bound::Unbounded,
-            make_bounds(upper_bound, inclusive),
+            make_bounds(Term::from_field_text(self.field, upper_bound), inclusive),
         );
         self.search(&q)
     }
@@ -246,9 +237,9 @@ impl IndexReaderWrapper {
         lb_inclusive: bool,
         ub_inclusive: bool,
     ) -> Result<Vec<u32>> {
-        let lb = make_bounds(lower_bound, lb_inclusive);
-        let ub = make_bounds(upper_bound, ub_inclusive);
-        let q = RangeQuery::new_str_bounds(self.field_name.to_string(), lb, ub);
+        let lb = make_bounds(Term::from_field_text(self.field, lower_bound), lb_inclusive);
+        let ub = make_bounds(Term::from_field_text(self.field, upper_bound), ub_inclusive);
+        let q = RangeQuery::new(lb, ub);
         self.search(&q)
     }
 
