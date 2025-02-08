@@ -1914,6 +1914,39 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID2, coll2))
 }
 
+func (suite *TaskSuite) TestRemoveTaskWithError() {
+	ctx := context.Background()
+	scheduler := suite.newScheduler()
+
+	mockTarget := meta.NewMockTargetManager(suite.T())
+	mockTarget.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&datapb.SegmentInfo{
+		NumOfRows: 100,
+	})
+
+	mockTarget.EXPECT().UpdateCollectionNextTarget(mock.Anything, mock.Anything).Return(nil)
+	scheduler.targetMgr = mockTarget
+
+	coll := int64(1001)
+	nodeID := int64(1)
+	// add segment task for collection
+	task1, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll,
+		suite.replica,
+		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", 1, querypb.DataScope_Historical),
+	)
+	suite.NoError(err)
+	err = scheduler.Add(task1)
+	suite.NoError(err)
+
+	task1.Fail(merr.ErrSegmentNotFound)
+	// when try to remove task with ErrSegmentNotFound, should trigger UpdateNextTarget
+	scheduler.remove(task1)
+	mockTarget.AssertExpectations(suite.T())
+}
+
 func TestTask(t *testing.T) {
 	suite.Run(t, new(TaskSuite))
 }
