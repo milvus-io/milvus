@@ -24,6 +24,7 @@
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "segcore/SegmentInterface.h"
+#include "exec/expression/Element.h"
 
 namespace milvus {
 namespace exec {
@@ -478,6 +479,10 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr> expr_;
+    SingleElement right_operand_arg_;
+    SingleElement value_arg_;
+    bool arg_inited_{false};
 };
+
 }  //namespace exec
 }  // namespace milvus
