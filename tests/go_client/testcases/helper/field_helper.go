@@ -107,7 +107,7 @@ const (
 	Int64MultiVec         CollectionFieldsType = 6 // int64 + floatVec + binaryVec + fp16Vec + bf16vec
 	AllFields             CollectionFieldsType = 7 // all fields excepted sparse
 	Int64VecAllScalar     CollectionFieldsType = 8 // int64 + floatVec + all scalar fields
-	FullTextSearchFields  CollectionFieldsType = 9 // int64 + varchar + sparse vector + analyzer + function
+	FullTextSearch        CollectionFieldsType = 9 // int64 + varchar + sparse vector + analyzer + function
 )
 
 type GenFieldsOption struct {
@@ -360,8 +360,8 @@ type FieldsFullTextSearch struct{}
 
 func (cf FieldsFullTextSearch) GenFields(option GenFieldsOption) []*entity.Field {
 	pkField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeInt64)).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
-	textField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeVarChar)).WithDataType(entity.FieldTypeVarChar).WithMaxLength(option.MaxLength).WithIsPartitionKey(option.IsPartitionKey).WithEnableAnalyzer(option.EnableAnalyzer).WithAnalyzerParams(option.AnalyzerParams)
-	sparseVecField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeSparseVector)).WithDataType(entity.FieldTypeSparseVector)
+	textField := entity.NewField().WithName(common.DefaultTextFieldName).WithDataType(entity.FieldTypeVarChar).WithMaxLength(option.MaxLength).WithIsPartitionKey(option.IsPartitionKey).WithEnableAnalyzer(true).WithAnalyzerParams(option.AnalyzerParams)
+	sparseVecField := entity.NewField().WithName(common.DefaultTextSparseVecFieldName).WithDataType(entity.FieldTypeSparseVector)
 	if option.AutoID {
 		pkField.WithIsAutoID(option.AutoID)
 	}
@@ -392,6 +392,8 @@ func (ff FieldsFactory) GenFieldsForCollection(collectionFieldsType CollectionFi
 		return FieldsAllFields{}.GenFields(*option)
 	case Int64VecAllScalar:
 		return FieldsInt64VecAllScalar{}.GenFields(*option)
+	case FullTextSearch:
+		return FieldsFullTextSearch{}.GenFields(*option)
 	default:
 		return FieldsInt64Vec{}.GenFields(*option)
 	}

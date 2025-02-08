@@ -15,17 +15,6 @@ type GenSchemaOption struct {
 	Function           *entity.Function
 }
 
-
-func TNewFunction(name string, inputField string, outputField string) *entity.Function {
-	bm25Function := entity.NewFunction().
-		WithName(name).
-		WithInputFields(inputField).
-		WithOutputFields(outputField).
-		WithType(entity.FunctionTypeBM25)
-
-	return bm25Function
-}
-
 func TNewSchemaOption() *GenSchemaOption {
 	return &GenSchemaOption{}
 }

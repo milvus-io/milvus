@@ -329,12 +329,12 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 		varcharValues := make([]string, 0, nb)
 		if option.textLang != "" {
 			// Use language-specific text generation
-			var lang Language
+			var lang string
 			switch option.textLang {
-			case "en":
-				lang = English
-			case "zh":
-				lang = Chinese
+			case "en", "english":
+				lang = "en"
+			case "zh", "chinese":
+				lang = "zh"
 			default:
 				// Fallback to sequential numbers for unsupported languages
 				for i := start; i < start+nb; i++ {
@@ -348,7 +348,7 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 				if rand.Float64()*100 < float64(option.textEmptyPercent) {
 					varcharValues = append(varcharValues, "")
 				} else {
-					varcharValues = append(varcharValues, GenerateRandomText(lang))
+					varcharValues = append(varcharValues, common.GenText(lang))
 				}
 			}
 		} else {
@@ -520,6 +520,9 @@ func GenColumnsBasedSchema(schema *entity.Schema, option *GenDataOption) ([]colu
 		if slices.Contains(GetBm25FunctionsOutputFields(schema), field.Name) {
 			continue
 		}
+		log.Info("GenColumnsBasedSchema", zap.Any("field", field))
+		//  set field name to option
+		option.TWithFieldName(field.Name)
 		columns = append(columns, GenColumnData(option.nb, field.DataType, *option))
 	}
 	if schema.EnableDynamicField {
