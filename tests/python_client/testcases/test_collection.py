@@ -1154,11 +1154,17 @@ class TestCollectionOperation(TestcaseBase):
         self._connect()
         fields = []
         for k, v in DataType.__members__.items():
-            if v and v != DataType.UNKNOWN and v != DataType.STRING \
-                    and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR \
-                    and v != DataType.BINARY_VECTOR and v != DataType.ARRAY \
+            if v and v != DataType.UNKNOWN and v != DataType.STRING and v != DataType.INT8_VECTOR \
+                    and v != DataType.FLOAT_VECTOR and v != DataType.BINARY_VECTOR \
                     and v != DataType.FLOAT16_VECTOR and v != DataType.BFLOAT16_VECTOR:
-                field, _ = self.field_schema_wrap.init_field_schema(name=k.lower(), dtype=v)
+                if v == DataType.VARCHAR:
+                    field, _ = self.field_schema_wrap.init_field_schema(name=k.lower(), dtype=DataType.VARCHAR, max_length=50)
+                elif v == DataType.ARRAY:
+                    field, _ = self.field_schema_wrap.init_field_schema(name=k.lower(), dtype=DataType.ARRAY,
+                                                                        element_type=DataType.VARCHAR,
+                                                                        max_capacity=10, max_length=50)
+                else:
+                    field, _ = self.field_schema_wrap.init_field_schema(name=k.lower(), dtype=v)
                 fields.append(field)
         fields.append(cf.gen_float_vec_field())
         schema, _ = self.collection_schema_wrap.init_collection_schema(fields,
