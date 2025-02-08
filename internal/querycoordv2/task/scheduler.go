@@ -946,7 +946,8 @@ func (scheduler *taskScheduler) remove(task Task) {
 
 	if errors.Is(task.Err(), merr.ErrSegmentNotFound) {
 		log.Info("segment in target has been cleaned, trigger force update next target", zap.Int64("collectionID", task.CollectionID()))
-		scheduler.targetMgr.UpdateCollectionNextTarget(task.Context(), task.CollectionID())
+		// Avoid using task.Ctx as it may be canceled before remove is called.
+		scheduler.targetMgr.UpdateCollectionNextTarget(scheduler.ctx, task.CollectionID())
 	}
 
 	task.Cancel(nil)
