@@ -558,7 +558,7 @@ func (c *Core) initRbac() error {
 		}
 	}
 
-	if Params.ProxyCfg.EnablePublicPrivilege.GetAsBool() {
+	if Params.CommonCfg.EnablePublicPrivilege.GetAsBool() {
 		err = c.initPublicRolePrivilege()
 		if err != nil {
 			return err

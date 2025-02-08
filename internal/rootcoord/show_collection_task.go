@@ -58,7 +58,7 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 			return privilegeColls, nil
 		}
 		curUser, err := contextutil.GetCurUserFromContext(ctx)
-		if err != nil || curUser == util.UserRoot {
+		if err != nil || (curUser == util.UserRoot && !Params.CommonCfg.RootShouldBindRole.GetAsBool()) {
 			if err != nil {
 				log.Warn("get current user from context failed", zap.Error(err))
 			}
@@ -78,6 +78,9 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 			if role.GetName() == util.RoleAdmin {
 				privilegeColls.Insert(util.AnyWord)
 				return privilegeColls, nil
+			}
+			if role.GetName() == util.RolePublic {
+				continue
 			}
 			entities, err := t.core.meta.SelectGrant("", &milvuspb.GrantEntity{
 				Role:   role,
