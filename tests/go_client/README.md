@@ -185,3 +185,7 @@ go test -v ./testcases/...
 2. Add comprehensive test cases
 3. Document new parameters and options
 4. Update this README for significant changes
+5. Ensure code quality standards:
+   - Run `golangci-lint run` to check for style mistakes
+   - Use `gofmt -w your/code/path` to format your code before submitting
+   - CI will verify both golint and go format compliance

@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"math/rand"
-	"strconv"
 	"slices"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -40,15 +40,15 @@ func (opt *InsertParams) TWithIsRows(isRows bool) *InsertParams {
 
 // GenColumnDataOption -- create column data --
 type GenDataOption struct {
-	nb           int
-	start        int
-	dim          int
-	maxLen       int
-	sparseMaxLen int
-	maxCapacity  int
-	elementType  entity.FieldType
-	fieldName    string
-	textLang     string
+	nb               int
+	start            int
+	dim              int
+	maxLen           int
+	sparseMaxLen     int
+	maxCapacity      int
+	elementType      entity.FieldType
+	fieldName        string
+	textLang         string
 	textEmptyPercent int
 }
 
@@ -104,15 +104,15 @@ func (opt *GenDataOption) TWithTextEmptyPercent(percent int) *GenDataOption {
 
 func TNewDataOption() *GenDataOption {
 	return &GenDataOption{
-		nb:           common.DefaultNb,
-		start:        0,
-		dim:          common.DefaultDim,
-		maxLen:       common.TestMaxLen,
-		sparseMaxLen: common.TestMaxLen,
-		maxCapacity:  common.TestCapacity,
-		elementType:  entity.FieldTypeNone,
-		fieldName:    "",
-		textLang:     "",
+		nb:               common.DefaultNb,
+		start:            0,
+		dim:              common.DefaultDim,
+		maxLen:           common.TestMaxLen,
+		sparseMaxLen:     common.TestMaxLen,
+		maxCapacity:      common.TestCapacity,
+		elementType:      entity.FieldTypeNone,
+		fieldName:        "",
+		textLang:         "",
 		textEmptyPercent: 0,
 	}
 }
