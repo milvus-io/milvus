@@ -7,8 +7,6 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
-
-	// client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -159,7 +157,6 @@ func TestSearchFullTextWithDynamicField(t *testing.T) {
 			common.CheckSearchResult(t, resSearch, len(queries), tc.topK)
 		})
 	}
-
 }
 
 // TestSearchFullTextWithPartitionKey tests full text search with partition key

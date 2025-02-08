@@ -66,10 +66,10 @@ func GenSearchVectors(nq int, dim int, dataType entity.FieldType) []entity.Vecto
 	return vectors
 }
 
-func GenFullTextQuery(nq int, lang string) []entity.Text {
-	queries := make([]entity.Text, 0, nq)
+func GenFullTextQuery(nq int, lang string) []string {
+	queries := make([]string, 0, nq)
 	for i := 0; i < nq; i++ {
-		queries = append(queries, entity.Text(common.GenText(lang)))
+		queries = append(queries, common.GenText(lang))
 	}
 	return queries
 }
