@@ -56,7 +56,6 @@ type mixCompactionTask struct {
 	partitionID  int64
 	targetSize   int64
 	maxRows      int64
-	pkID         int64
 
 	bm25FieldIDs []int64
 
@@ -131,8 +130,6 @@ func (t *mixCompactionTask) preCompact() error {
 
 func (t *mixCompactionTask) mergeSplit(
 	ctx context.Context,
-	insertPaths map[int64][]string,
-	deltaPaths map[int64][]string,
 ) ([]*datapb.CompactionSegment, error) {
 	_ = t.tr.RecordSpan()
 
@@ -154,9 +151,8 @@ func (t *mixCompactionTask) mergeSplit(
 		log.Warn("failed to get pk field from schema")
 		return nil, err
 	}
-	for segId, binlogPaths := range insertPaths {
-		deltaPaths := deltaPaths[segId]
-		del, exp, err := t.writeSegment(ctx, binlogPaths, deltaPaths, mWriter, pkField)
+	for _, seg := range t.plan.GetSegmentBinlogs() {
+		del, exp, err := t.writeSegment(ctx, seg, mWriter, pkField)
 		if err != nil {
 			return nil, err
 		}
@@ -180,21 +176,15 @@ func (t *mixCompactionTask) mergeSplit(
 }
 
 func (t *mixCompactionTask) writeSegment(ctx context.Context,
-	binlogPaths []string,
-	deltaPaths []string,
+	seg *datapb.CompactionSegmentBinlogs,
 	mWriter *MultiSegmentWriter, pkField *schemapb.FieldSchema,
 ) (deletedRowCount, expiredRowCount int64, err error) {
-	log := log.With(zap.Strings("paths", binlogPaths))
-	allValues, err := t.binlogIO.Download(ctx, binlogPaths)
-	if err != nil {
-		log.Warn("compact wrong, fail to download insertLogs", zap.Error(err))
-		return
+	deltaPaths := make([]string, 0)
+	for _, fieldBinlog := range seg.GetDeltalogs() {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			deltaPaths = append(deltaPaths, binlog.GetLogPath())
+		}
 	}
-
-	blobs := lo.Map(allValues, func(v []byte, i int) *storage.Blob {
-		return &storage.Blob{Key: binlogPaths[i], Value: v}
-	})
-
 	delta, err := mergeDeltalogs(ctx, t.binlogIO, deltaPaths)
 	if err != nil {
 		log.Warn("compact wrong, fail to merge deltalogs", zap.Error(err))
@@ -202,7 +192,30 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	entityFilter := newEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
-	reader, err := storage.NewCompositeBinlogRecordReader(blobs)
+	itr := 0
+	binlogs := seg.GetFieldBinlogs()
+	reader, err := storage.NewCompositeBinlogRecordReader(t.plan.GetSchema(), func() ([]*storage.Blob, error) {
+		if len(binlogs) <= 0 {
+			return nil, sio.EOF
+		}
+		paths := make([]string, len(binlogs))
+		for i, fieldBinlog := range binlogs {
+			if itr >= len(fieldBinlog.GetBinlogs()) {
+				return nil, sio.EOF
+			}
+			paths[i] = fieldBinlog.GetBinlogs()[itr].GetLogPath()
+		}
+		itr++
+		values, err := t.binlogIO.Download(ctx, paths)
+		if err != nil {
+			log.Warn("compact wrong, fail to download insertLogs", zap.Error(err))
+			return nil, err
+		}
+		blobs := lo.Map(values, func(v []byte, i int) *storage.Blob {
+			return &storage.Blob{Key: paths[i], Value: v}
+		})
+		return blobs, nil
+	})
 	if err != nil {
 		log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
 		return
@@ -302,15 +315,10 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	defer cancelAll()
 
 	log.Info("compact start")
-	deltaPaths, insertPaths, err := composePaths(t.plan.GetSegmentBinlogs())
-	if err != nil {
-		log.Warn("compact wrong, failed to composePaths", zap.Error(err))
-		return nil, err
-	}
 	// Unable to deal with all empty segments cases, so return error
 	isEmpty := true
-	for _, paths := range insertPaths {
-		if len(paths) > 0 {
+	for _, seg := range t.plan.GetSegmentBinlogs() {
+		if len(seg.GetFieldBinlogs()) > 0 {
 			isEmpty = false
 			break
 		}
@@ -328,13 +336,15 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 				break
 			}
 		}
-		if len(insertPaths) <= 1 || len(insertPaths) > paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt() {
+		if len(t.plan.GetSegmentBinlogs()) <= 1 ||
+			len(t.plan.GetSegmentBinlogs()) > paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt() {
 			// sort merge is not applicable if there is only one segment or too many segments
 			sortMergeAppicable = false
 		}
 	}
 
 	var res []*datapb.CompactionSegment
+	var err error
 	if sortMergeAppicable {
 		log.Info("compact by merge sort")
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
@@ -344,7 +354,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 			return nil, err
 		}
 	} else {
-		res, err = t.mergeSplit(ctxTimeout, insertPaths, deltaPaths)
+		res, err = t.mergeSplit(ctxTimeout)
 		if err != nil {
 			log.Warn("compact wrong, failed to mergeSplit", zap.Error(err))
 			return nil, err
