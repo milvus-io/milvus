@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type StreamPipelineSuite struct {
@@ -43,6 +44,7 @@ type StreamPipelineSuite struct {
 }
 
 func (suite *StreamPipelineSuite) SetupTest() {
+	paramtable.Init()
 	suite.channel = "test-channel"
 	suite.inChannel = make(chan *msgstream.MsgPack, 1)
 	suite.outChannel = make(chan msgstream.Timestamp)
