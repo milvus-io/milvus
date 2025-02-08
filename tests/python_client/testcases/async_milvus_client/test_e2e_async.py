@@ -217,6 +217,7 @@ class TestAsyncMilvusClient(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     async def test_async_client_with_schema(self, schema):
         # init client
+        pk_field_name = "id"
         milvus_client = self._connect(enable_milvus_client_api=True)
         self.init_async_milvus_client()
 
@@ -224,7 +225,7 @@ class TestAsyncMilvusClient(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         schema = self.async_milvus_client_wrap.create_schema(auto_id=False,
                                                              partition_key_field=ct.default_int64_field_name)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
+        schema.add_field(pk_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
         schema.add_field(ct.default_int64_field_name, DataType.INT64, is_partition_key=True)
         schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=ct.default_dim)
         schema.add_field(default_vector_name, DataType.FLOAT_VECTOR, dim=ct.default_dim)
@@ -234,7 +235,7 @@ class TestAsyncMilvusClient(TestcaseBase):
 
         # insert entities
         rows = [
-            {ct.default_string_field_name: str(i),
+            {pk_field_name: str(i),
              ct.default_int64_field_name: i,
              ct.default_float_vec_field_name: [random.random() for _ in range(ct.default_dim)],
              default_vector_name: [random.random() for _ in range(ct.default_dim)],
@@ -314,7 +315,7 @@ class TestAsyncMilvusClient(TestcaseBase):
 
         # get with ids
         get_task = self.async_milvus_client_wrap.get(c_name, ids=['0', '1'], output_fields=[ct.default_int64_field_name,
-                                                                                            ct.default_string_field_name])
+                                                                                            pk_field_name])
         tasks.append(get_task)
         await asyncio.gather(*tasks)
 
