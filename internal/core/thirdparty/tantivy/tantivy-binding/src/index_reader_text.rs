@@ -1,3 +1,4 @@
+use std::ffi::c_void;
 use tantivy::{
     query::{BooleanQuery, PhraseQuery},
     tokenizer::{TextAnalyzer, TokenStream},
@@ -10,7 +11,7 @@ use crate::{index_reader::IndexReaderWrapper, tokenizer::standard_analyzer};
 impl IndexReaderWrapper {
     // split the query string into multiple tokens using index's default tokenizer,
     // and then execute the disconjunction of term query.
-    pub(crate) fn match_query(&self, q: &str) -> Result<Vec<u32>> {
+    pub(crate) fn match_query(&self, q: &str, bitset: *mut c_void) -> Result<()> {
         let mut tokenizer = self
             .index
             .tokenizer_for_field(self.field)
@@ -23,12 +24,17 @@ impl IndexReaderWrapper {
             terms.push(Term::from_field_text(self.field, &token.text));
         }
         let query = BooleanQuery::new_multiterms_query(terms);
-        self.search(&query)
+        self.search(&query, bitset)
     }
 
     // split the query string into multiple tokens using index's default tokenizer,
     // and then execute the disconjunction of term query.
-    pub(crate) fn phrase_match_query(&self, q: &str, slop: u32) -> Result<Vec<u32>> {
+    pub(crate) fn phrase_match_query(
+        &self,
+        q: &str,
+        slop: u32,
+        bitset: *mut c_void,
+    ) -> Result<()> {
         // clone the tokenizer to make `match_query` thread-safe.
         let mut tokenizer = self
             .index
@@ -44,11 +50,11 @@ impl IndexReaderWrapper {
         if terms.len() <= 1 {
             // tantivy will panic when terms.len() <= 1, so we forward to text match instead.
             let query = BooleanQuery::new_multiterms_query(terms);
-            return self.search(&query);
+            return self.search(&query, bitset);
         }
         let terms = terms.into_iter().enumerate().collect();
         let phrase_query = PhraseQuery::new_with_offset_and_slop(terms, slop);
-        self.search(&phrase_query)
+        self.search(&phrase_query, bitset)
     }
 
     pub(crate) fn register_tokenizer(&self, tokenizer_name: String, tokenizer: TextAnalyzer) {

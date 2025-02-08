@@ -13,7 +13,7 @@ use tantivy::{doc, Document, Index, IndexWriter, SingleSegmentIndexWriter};
 use crate::data_type::TantivyDataType;
 
 use crate::error::Result;
-use crate::index_reader::IndexReaderWrapper;
+use crate::index_reader::{IndexReaderWrapper, SetBitsetFn};
 use crate::log::init_log;
 
 pub(crate) struct IndexWriterWrapper {
@@ -55,7 +55,10 @@ impl IndexWriterWrapper {
         overall_memory_budget_in_bytes: usize,
     ) -> Result<IndexWriterWrapper> {
         init_log();
-        info!("create index writer, field_name: {}, data_type: {:?}", field_name, data_type);
+        info!(
+            "create index writer, field_name: {}, data_type: {:?}",
+            field_name, data_type
+        );
         let mut schema_builder = Schema::builder();
         let field = schema_builder_add_field(&mut schema_builder, &field_name, data_type);
         // We cannot build direct connection from rows in multi-segments to milvus row data. So we have this doc_id field.
@@ -78,7 +81,10 @@ impl IndexWriterWrapper {
         path: String,
     ) -> Result<IndexWriterWrapper> {
         init_log();
-        info!("create single segment index writer, field_name: {}, data_type: {:?}", field_name, data_type);
+        info!(
+            "create single segment index writer, field_name: {}, data_type: {:?}",
+            field_name, data_type
+        );
         let mut schema_builder = Schema::builder();
         let field = schema_builder_add_field(&mut schema_builder, &field_name, data_type);
         let schema = schema_builder.build();
@@ -92,8 +98,11 @@ impl IndexWriterWrapper {
         })
     }
 
-    pub fn create_reader(&self) -> Result<IndexReaderWrapper> {
-        IndexReaderWrapper::from_index(self.index.clone())
+    pub fn create_reader(
+        &self,
+        set_bitset: SetBitsetFn,
+    ) -> Result<IndexReaderWrapper> {
+        IndexReaderWrapper::from_index(self.index.clone(), set_bitset)
     }
 
     fn index_writer_add_document(&self, document: Document) -> Result<()> {

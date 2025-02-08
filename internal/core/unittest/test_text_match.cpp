@@ -148,7 +148,7 @@ TEST(TextMatch, Index) {
                                          "unique_id",
                                          "milvus_tokenizer",
                                          "{}");
-    index->CreateReader();
+    index->CreateReader(index::SetBitset);
     index->AddText("football, basketball, pingpang", true, 0);
     index->AddText("", false, 1);
     index->AddText("swimming, football", true, 2);
@@ -170,7 +170,10 @@ TEST(TextMatch, Index) {
         ASSERT_FALSE(res2[1]);
         ASSERT_TRUE(res2[2]);
         res = index->MatchQuery("nothing");
-        ASSERT_EQ(res.size(), 0);
+        ASSERT_EQ(res.size(), 3);
+        ASSERT_FALSE(res[0]);
+        ASSERT_FALSE(res[1]);
+        ASSERT_FALSE(res[2]);
     }
 
     {
@@ -187,16 +190,66 @@ TEST(TextMatch, Index) {
         ASSERT_TRUE(res1[2]);
 
         auto res2 = index->PhraseMatchQuery("football swimming", 0);
-        ASSERT_EQ(res2.size(), 0);
+        ASSERT_EQ(res2.size(), 3);
+        ASSERT_FALSE(res2[0]);
+        ASSERT_FALSE(res2[1]);
+        ASSERT_FALSE(res2[2]);
 
         auto res3 = index->PhraseMatchQuery("football swimming", 1);
-        ASSERT_EQ(res3.size(), 0);
+        ASSERT_EQ(res3.size(), 3);
+        ASSERT_FALSE(res3[0]);
+        ASSERT_FALSE(res3[1]);
+        ASSERT_FALSE(res3[2]);
 
         auto res4 = index->PhraseMatchQuery("football swimming", 2);
         ASSERT_EQ(res4.size(), 3);
         ASSERT_FALSE(res4[0]);
         ASSERT_FALSE(res4[1]);
         ASSERT_TRUE(res4[2]);
+    }
+}
+
+TEST(TextMatch, TestPerf) {
+    auto schema = GenTestSchema();
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    std::string str = "football";
+    int64_t N = 10000000;
+    uint64_t seed = 19190504;
+    auto raw_data = DataGen(schema, N, seed);
+    auto str_col = raw_data.raw_->mutable_fields_data()
+                       ->at(1)
+                       .mutable_scalars()
+                       ->mutable_string_data()
+                       ->mutable_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col->at(i) = str;
+    }
+    seg->PreInsert(N);
+    seg->Insert(0,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
+
+    BitsetType final;
+    auto total_duration_ms = 0;
+    // while (true) {
+    for (int i = 0; i < 10; ++i) {
+        auto start = std::chrono::high_resolution_clock::now();
+        auto expr = GetMatchExpr(schema, "football", OpType::TextMatch);
+        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+                .count();
+        total_duration_ms += duration_ms;
+    }
+    std::cout << "Execution time for 10 times: " << total_duration_ms << " ms" << std::endl;
+    ASSERT_EQ(final.size(), N);
+    for (int64_t i = 0; i < N; i++) {
+        ASSERT_TRUE(final[i]);
     }
 }
 

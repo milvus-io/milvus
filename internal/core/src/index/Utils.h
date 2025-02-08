@@ -167,4 +167,7 @@ CheckAndUpdateKnowhereRangeSearchParam(const SearchInfo& search_info,
                                        const MetricType& metric_type,
                                        knowhere::Json& search_config);
 
+void
+SetBitset(void* bitset, uint32_t doc_id);
+
 }  // namespace milvus::index
