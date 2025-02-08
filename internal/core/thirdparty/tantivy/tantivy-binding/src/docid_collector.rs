@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use tantivy::{
     collector::{Collector, SegmentCollector},
     fastfield::Column,
@@ -29,13 +30,12 @@ impl Collector for DocIdCollector {
         &self,
         segment_fruits: Vec<<Self::Child as SegmentCollector>::Fruit>,
     ) -> tantivy::Result<Self::Fruit> {
-        let len: usize = segment_fruits.iter().map(|docset| docset.len()).sum();
-        let mut result = Vec::with_capacity(len);
-        for docs in segment_fruits {
-            for doc in docs {
-                result.push(doc);
-            }
-        }
+        // Each segment's fruit is sorted, allowing us to perform a k-way merge.
+        // The sorted output is more efficient for the caller to process and optimize.
+        let result = segment_fruits
+            .into_iter()
+            .kmerge_by(|left, right| left < right)
+            .collect_vec();
         Ok(result)
     }
 }
