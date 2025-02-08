@@ -6947,7 +6947,6 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		tokens := []string{}
 		for stream.Advance() {
 			token := stream.Token()
-			log.Info("Test--", zap.String("token", token))
 			tokens = append(tokens, token)
 		}
 		results[i] = &milvuspb.AnalyzerResult{
