@@ -240,10 +240,11 @@ type commonConfig struct {
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
 
-	AuthorizationEnabled ParamItem `refreshable:"false"`
-	SuperUsers           ParamItem `refreshable:"true"`
-	DefaultRootPassword  ParamItem `refreshable:"false"`
-	RootShouldBindRole   ParamItem `refreshable:"true"`
+	AuthorizationEnabled  ParamItem `refreshable:"false"`
+	SuperUsers            ParamItem `refreshable:"true"`
+	DefaultRootPassword   ParamItem `refreshable:"false"`
+	RootShouldBindRole    ParamItem `refreshable:"true"`
+	EnablePublicPrivilege ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -682,6 +683,22 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.RootShouldBindRole.Init(base.mgr)
+
+	p.EnablePublicPrivilege = ParamItem{
+		Key: "common.security.enablePublicPrivilege",
+		Formatter: func(originValue string) string { // compatible with old version
+			fallbackValue := base.Get("proxy.enablePublicPrivilege")
+			if fallbackValue == "false" {
+				return "false"
+			}
+			return originValue
+		},
+		Version:      "2.5.4",
+		Doc:          "Whether to enable public privilege",
+		DefaultValue: "true",
+		Export:       true,
+	}
+	p.EnablePublicPrivilege.Init(base.mgr)
 
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
@@ -1339,7 +1356,6 @@ type proxyConfig struct {
 	MustUsePartitionKey          ParamItem `refreshable:"true"`
 	SkipAutoIDCheck              ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck        ParamItem `refreshable:"true"`
-	EnablePublicPrivilege        ParamItem `refreshable:"false"`
 	MaxVarCharLength             ParamItem `refreshable:"false"`
 
 	AccessLog AccessLogConfig
@@ -1744,14 +1760,6 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall skip partition key check when inserting data",
 	}
 	p.SkipPartitionKeyCheck.Init(base.mgr)
-
-	p.EnablePublicPrivilege = ParamItem{
-		Key:          "proxy.enablePublicPrivilege",
-		Version:      "2.4.1",
-		DefaultValue: "true",
-		Doc:          "switch for whether proxy shall enable public privilege",
-	}
-	p.EnablePublicPrivilege.Init(base.mgr)
 
 	p.MaxVarCharLength = ParamItem{
 		Key:          "proxy.maxVarCharLength",
