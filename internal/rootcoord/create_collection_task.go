@@ -573,6 +573,10 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 			State:                     pb.PartitionState_PartitionCreated,
 		}
 	}
+	ConsistencyLevel := t.Req.ConsistencyLevel
+	if ok, level := getConsistencyLevel(t.Req.Properties...); ok {
+		ConsistencyLevel = level
+	}
 	collInfo := model.Collection{
 		CollectionID:         collID,
 		DBID:                 t.dbID,
@@ -585,7 +589,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		VirtualChannelNames:  vchanNames,
 		PhysicalChannelNames: chanNames,
 		ShardsNum:            t.Req.ShardsNum,
-		ConsistencyLevel:     t.Req.ConsistencyLevel,
+		ConsistencyLevel:     ConsistencyLevel,
 		CreateTime:           ts,
 		State:                pb.CollectionState_CollectionCreating,
 		Partitions:           partitions,
