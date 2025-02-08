@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package model
 
 import (
@@ -402,4 +418,80 @@ func TestCollection_Equal(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestClone(t *testing.T) {
+	collection := &Collection{
+		TenantID:     "1",
+		DBID:         2,
+		CollectionID: 3,
+		Partitions: []*Partition{
+			{
+				PartitionID:               4,
+				PartitionName:             "5",
+				PartitionCreatedTimestamp: 6,
+				CollectionID:              7,
+				State:                     pb.PartitionState_PartitionCreated,
+			},
+			{
+				PartitionID:               8,
+				PartitionName:             "9",
+				PartitionCreatedTimestamp: 10,
+				CollectionID:              11,
+				State:                     pb.PartitionState_PartitionCreating,
+			},
+		},
+		Name:        "12",
+		Description: "14",
+		AutoID:      true,
+		Fields: []*Field{
+			{
+				FieldID:         15,
+				Name:            "16",
+				IsPrimaryKey:    false,
+				Description:     "17",
+				DataType:        schemapb.DataType_Double,
+				TypeParams:      []*commonpb.KeyValuePair{{Key: "18", Value: "19"}},
+				IndexParams:     []*commonpb.KeyValuePair{{Key: "20", Value: "21"}},
+				AutoID:          true,
+				State:           schemapb.FieldState_FieldDropping,
+				IsDynamic:       true,
+				IsPartitionKey:  false,
+				IsClusteringKey: true,
+				DefaultValue:    nil,
+				ElementType:     schemapb.DataType_String,
+			},
+			{
+				FieldID:         22,
+				Name:            "23",
+				IsPrimaryKey:    true,
+				Description:     "24",
+				DataType:        schemapb.DataType_FloatVector,
+				TypeParams:      []*commonpb.KeyValuePair{{Key: "25", Value: "26"}},
+				IndexParams:     []*commonpb.KeyValuePair{{Key: "27", Value: "28"}},
+				AutoID:          true,
+				State:           schemapb.FieldState_FieldCreating,
+				IsDynamic:       true,
+				IsPartitionKey:  false,
+				IsClusteringKey: true,
+				DefaultValue:    nil,
+				ElementType:     schemapb.DataType_VarChar,
+			},
+		},
+		VirtualChannelNames:  []string{"c1", "c2"},
+		PhysicalChannelNames: []string{"c3", "c4"},
+		ShardsNum:            2,
+		StartPositions:       startPositions,
+		CreateTime:           1234,
+		ConsistencyLevel:     commonpb.ConsistencyLevel_Eventually,
+		Aliases:              []string{"a1", "a2"},
+		Properties:           []*commonpb.KeyValuePair{{Key: "32", Value: "33"}},
+		State:                pb.CollectionState_CollectionCreated,
+		EnableDynamicField:   true,
+	}
+
+	clone1 := collection.Clone()
+	assert.Equal(t, clone1, collection)
+	clone2 := collection.ShallowClone()
+	assert.Equal(t, clone2, collection)
 }
