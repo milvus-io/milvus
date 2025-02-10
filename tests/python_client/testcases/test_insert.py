@@ -2073,6 +2073,8 @@ class TestUpsertInvalid(TestcaseBase):
         cf.insert_data(collection_w)
         data = cf.gen_default_dataframe_data(nb=100)
         error = {ct.err_code: 999, ct.err_msg: "Invalid partition name"}
+        if partition_name == "n-ame":
+            error = {ct.err_code: 999, ct.err_msg: f"partition not found[partition={partition_name}]"}
         collection_w.upsert(data=data, partition_name=partition_name,
                             check_task=CheckTasks.err_res, check_items=error)
 

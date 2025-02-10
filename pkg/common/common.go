@@ -379,3 +379,15 @@ func ShouldFieldBeLoaded(kvs []*commonpb.KeyValuePair) (bool, error) {
 	}
 	return true, nil
 }
+
+func ValidateAutoIndexMmapConfig(autoIndexConfigEnable, isVectorField bool, indexParams map[string]string) error {
+	if !autoIndexConfigEnable {
+		return nil
+	}
+
+	_, ok := indexParams[MmapEnabledKey]
+	if ok && isVectorField {
+		return fmt.Errorf("mmap index is not supported to config for the collection in auto index mode")
+	}
+	return nil
+}

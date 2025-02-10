@@ -123,7 +123,9 @@ func (_m *MockSessionManager) CheckDNHealth(ctx context.Context) *healthcheck.Re
 	if rf, ok := ret.Get(0).(func(context.Context) *healthcheck.Result); ok {
 		r0 = rf(ctx)
 	} else {
-		r0 = ret.Get(0).(*healthcheck.Result)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*healthcheck.Result)
+		}
 	}
 
 	return r0
@@ -147,12 +149,12 @@ func (_c *MockSessionManager_CheckDNHealth_Call) Run(run func(ctx context.Contex
 	return _c
 }
 
-func (_c *MockSessionManager_CheckDNHealth_Call) Return(_a0 healthcheck.Result) *MockSessionManager_CheckDNHealth_Call {
+func (_c *MockSessionManager_CheckDNHealth_Call) Return(_a0 *healthcheck.Result) *MockSessionManager_CheckDNHealth_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSessionManager_CheckDNHealth_Call) RunAndReturn(run func(context.Context) healthcheck.Result) *MockSessionManager_CheckDNHealth_Call {
+func (_c *MockSessionManager_CheckDNHealth_Call) RunAndReturn(run func(context.Context) *healthcheck.Result) *MockSessionManager_CheckDNHealth_Call {
 	_c.Call.Return(run)
 	return _c
 }

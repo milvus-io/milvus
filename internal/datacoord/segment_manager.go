@@ -85,6 +85,8 @@ type Manager interface {
 	ExpireAllocations(channel string, ts Timestamp)
 	// DropSegmentsOfChannel drops all segments in a channel
 	DropSegmentsOfChannel(ctx context.Context, channel string)
+	// CleanZeroSealedSegmentsOfChannel try to clean real empty sealed segments in a channel
+	CleanZeroSealedSegmentsOfChannel(channel string, cpTs Timestamp)
 }
 
 // Allocation records the allocation info
@@ -497,9 +499,6 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 		return nil, err
 	}
 
-	// TODO: It's too frequent; perhaps each channel could check once per minute instead.
-	s.cleanupSealedSegment(t, channel)
-
 	sealed, ok := s.channel2Sealed.Get(channel)
 	if !ok {
 		return nil, nil
@@ -551,26 +550,35 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) {
 	})
 }
 
-func (s *SegmentManager) cleanupSealedSegment(ts Timestamp, channel string) {
+func (s *SegmentManager) CleanZeroSealedSegmentsOfChannel(channel string, cpTs Timestamp) {
+	s.channelLock.Lock(channel)
+	defer s.channelLock.Unlock(channel)
+
 	sealed, ok := s.channel2Sealed.Get(channel)
 	if !ok {
+		log.Info("try remove empty sealed segment after channel cp updated failed to get channel", zap.String("channel", channel))
 		return
 	}
 	sealed.Range(func(id int64) bool {
 		segment := s.meta.GetHealthySegment(id)
 		if segment == nil {
-			log.Warn("failed to get segment, remove it", zap.String("channel", channel), zap.Int64("segmentID", id))
+			log.Warn("try remove empty sealed segment, failed to get segment, remove it in channel2Sealed", zap.String("channel", channel), zap.Int64("segmentID", id))
 			sealed.Remove(id)
 			return true
 		}
 		// Check if segment is empty
-		if segment.GetLastExpireTime() <= ts && segment.currRows == 0 {
-			log.Info("remove empty sealed segment", zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id))
+		if segment.GetLastExpireTime() > 0 && segment.GetLastExpireTime() < cpTs && segment.currRows == 0 && segment.GetNumOfRows() == 0 {
+			log.Info("try remove empty sealed segment after channel cp updated",
+				zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id),
+				zap.String("channel", channel), zap.Any("cpTs", cpTs))
 			if err := s.meta.SetState(id, commonpb.SegmentState_Dropped); err != nil {
-				log.Warn("failed to set segment state to dropped", zap.String("channel", channel),
+				log.Warn("try remove empty sealed segment after channel cp updated, failed to set segment state to dropped", zap.String("channel", channel),
 					zap.Int64("segmentID", id), zap.Error(err))
 			} else {
 				sealed.Remove(id)
+				log.Info("succeed to remove empty sealed segment",
+					zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id),
+					zap.String("channel", channel), zap.Any("cpTs", cpTs), zap.Any("expireTs", segment.GetLastExpireTime()))
 			}
 		}
 		return true
