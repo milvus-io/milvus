@@ -121,6 +121,11 @@ func (s *SearchOptionSuite) TestPlaceHolder() {
 			expectType: commonpb.PlaceholderType_BinaryVector,
 		},
 		{
+			tag:        "int8_vector",
+			input:      []entity.Vector{entity.Int8Vector([]int8{})},
+			expectType: commonpb.PlaceholderType_Int8Vector,
+		},
+		{
 			tag:        "text",
 			input:      []entity.Vector{entity.Text("abc")},
 			expectType: commonpb.PlaceholderType_VarChar,
