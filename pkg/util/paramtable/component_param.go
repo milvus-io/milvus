@@ -222,6 +222,7 @@ type commonConfig struct {
 	AuthorizationEnabled ParamItem `refreshable:"false"`
 	SuperUsers           ParamItem `refreshable:"true"`
 	DefaultRootPassword  ParamItem `refreshable:"false"`
+	RootShouldBindRole   ParamItem `refreshable:"true"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -237,9 +238,10 @@ type commonConfig struct {
 	MetricsPort ParamItem `refreshable:"false"`
 
 	// lock related params
-	EnableLockMetrics        ParamItem `refreshable:"false"`
-	LockSlowLogInfoThreshold ParamItem `refreshable:"true"`
-	LockSlowLogWarnThreshold ParamItem `refreshable:"true"`
+	EnableLockMetrics           ParamItem `refreshable:"false"`
+	LockSlowLogInfoThreshold    ParamItem `refreshable:"true"`
+	LockSlowLogWarnThreshold    ParamItem `refreshable:"true"`
+	MaxWLockConditionalWaitTime ParamItem `refreshable:"true"`
 
 	StorageScheme             ParamItem `refreshable:"false"`
 	EnableStorageV2           ParamItem `refreshable:"false"`
@@ -661,6 +663,15 @@ like the old password verification when updating the credential`,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
 
+	p.RootShouldBindRole = ParamItem{
+		Key:          "common.security.rootShouldBindRole",
+		Version:      "2.4.21",
+		Doc:          "Whether the root user should bind a role when the authorization is enabled.",
+		DefaultValue: "false",
+		Export:       true,
+	}
+	p.RootShouldBindRole.Init(base.mgr)
+
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
 		Version:      "2.0.0",
@@ -745,6 +756,15 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.LockSlowLogWarnThreshold.Init(base.mgr)
+
+	p.MaxWLockConditionalWaitTime = ParamItem{
+		Key:          "common.locks.maxWLockConditionalWaitTime",
+		Version:      "2.4.21",
+		DefaultValue: "600",
+		Doc:          "maximum seconds for waiting wlock conditional",
+		Export:       true,
+	}
+	p.MaxWLockConditionalWaitTime.Init(base.mgr)
 
 	p.EnableStorageV2 = ParamItem{
 		Key:          "common.storage.enablev2",
@@ -2520,6 +2540,8 @@ type queryNodeConfig struct {
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 
+	// BF
+	SkipGrowingSegmentBF           ParamItem `refreshable:"true"`
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
 	QueryStreamBatchSize ParamItem `refreshable:"false"`
@@ -3223,6 +3245,14 @@ user-task-polling:
 		Export:       true,
 	}
 	p.QueryStreamBatchSize.Init(base.mgr)
+
+	p.SkipGrowingSegmentBF = ParamItem{
+		Key:          "queryNode.skipGrowingSegmentBF",
+		Version:      "2.5",
+		DefaultValue: "true",
+		Doc:          "indicates whether skipping the creation, maintenance, or checking of Bloom Filters for growing segments",
+	}
+	p.SkipGrowingSegmentBF.Init(base.mgr)
 
 	p.WorkerPoolingSize = ParamItem{
 		Key:          "queryNode.workerPooling.size",

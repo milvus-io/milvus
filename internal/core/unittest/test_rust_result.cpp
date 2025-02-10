@@ -9,33 +9,19 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#pragma once
+#include <cstdint>
+#include "gtest/gtest.h"
+#include "tantivy-binding.h"
+TEST(RustResultTest, TestResult) {
+    auto arr = test_enum_with_array();
+    auto len = arr.value.rust_array._0.len;
+    for (size_t i = 0; i < len; i++) {
+        EXPECT_EQ(i + 1, arr.value.rust_array._0.array[i]);
+    }
+    free_rust_result(arr);
 
-#include <stdint.h>
-#include "common/type_c.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-typedef void* CCollection;
-
-CStatus
-NewCollection(const void* schema_proto_blob,
-              const int64_t length,
-              CCollection* collection);
-
-CStatus
-SetIndexMeta(CCollection collection,
-             const void* proto_blob,
-             const int64_t length);
-
-void
-DeleteCollection(CCollection collection);
-
-const char*
-GetCollectionName(CCollection collection);
-
-#ifdef __cplusplus
+    auto ptr = test_enum_with_ptr();
+    EXPECT_EQ(1, *static_cast<uint32_t*>(ptr.value.ptr._0));
+    free_rust_result(ptr);
+    free_test_ptr(ptr.value.ptr._0);
 }
-#endif

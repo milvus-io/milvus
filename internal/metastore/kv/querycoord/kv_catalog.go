@@ -18,6 +18,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/compressor"
 )
 
+var paginationSize = 2000
+
 var ErrInvalidKey = errors.New("invalid load info key")
 
 const (
@@ -104,51 +106,57 @@ func (s Catalog) RemoveResourceGroup(rgName string) error {
 }
 
 func (s Catalog) GetCollections() ([]*querypb.CollectionLoadInfo, error) {
-	_, values, err := s.cli.LoadWithPrefix(CollectionLoadInfoPrefix)
-	if err != nil {
-		return nil, err
-	}
-	ret := make([]*querypb.CollectionLoadInfo, 0, len(values))
-	for _, v := range values {
+	ret := make([]*querypb.CollectionLoadInfo, 0)
+	applyFn := func(key []byte, value []byte) error {
 		info := querypb.CollectionLoadInfo{}
-		if err := proto.Unmarshal([]byte(v), &info); err != nil {
-			return nil, err
+		if err := proto.Unmarshal(value, &info); err != nil {
+			return err
 		}
 		ret = append(ret, &info)
+		return nil
+	}
+
+	err := s.cli.WalkWithPrefix(CollectionLoadInfoPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
 	}
 
 	return ret, nil
 }
 
 func (s Catalog) GetPartitions() (map[int64][]*querypb.PartitionLoadInfo, error) {
-	_, values, err := s.cli.LoadWithPrefix(PartitionLoadInfoPrefix)
-	if err != nil {
-		return nil, err
-	}
 	ret := make(map[int64][]*querypb.PartitionLoadInfo)
-	for _, v := range values {
+	applyFn := func(key []byte, value []byte) error {
 		info := querypb.PartitionLoadInfo{}
-		if err := proto.Unmarshal([]byte(v), &info); err != nil {
-			return nil, err
+		if err := proto.Unmarshal(value, &info); err != nil {
+			return err
 		}
 		ret[info.GetCollectionID()] = append(ret[info.GetCollectionID()], &info)
+		return nil
+	}
+
+	err := s.cli.WalkWithPrefix(PartitionLoadInfoPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
 	}
 
 	return ret, nil
 }
 
 func (s Catalog) GetReplicas() ([]*querypb.Replica, error) {
-	_, values, err := s.cli.LoadWithPrefix(ReplicaPrefix)
-	if err != nil {
-		return nil, err
-	}
-	ret := make([]*querypb.Replica, 0, len(values))
-	for _, v := range values {
+	ret := make([]*querypb.Replica, 0)
+	applyFn := func(key []byte, value []byte) error {
 		info := querypb.Replica{}
-		if err := proto.Unmarshal([]byte(v), &info); err != nil {
-			return nil, err
+		if err := proto.Unmarshal(value, &info); err != nil {
+			return err
 		}
 		ret = append(ret, &info)
+		return nil
+	}
+
+	err := s.cli.WalkWithPrefix(ReplicaPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
 	}
 
 	replicasV1, err := s.getReplicasFromV1()
@@ -295,21 +303,23 @@ func (s Catalog) RemoveCollectionTarget(collectionID int64) error {
 }
 
 func (s Catalog) GetCollectionTargets() (map[int64]*querypb.CollectionTarget, error) {
-	keys, values, err := s.cli.LoadWithPrefix(CollectionTargetPrefix)
-	if err != nil {
-		return nil, err
-	}
 	ret := make(map[int64]*querypb.CollectionTarget)
-	for i, v := range values {
+	applyFn := func(key []byte, value []byte) error {
 		var decompressed bytes.Buffer
-		compressor.ZstdDecompress(bytes.NewReader([]byte(v)), io.Writer(&decompressed))
+		compressor.ZstdDecompress(bytes.NewReader(value), io.Writer(&decompressed))
 		target := &querypb.CollectionTarget{}
 		if err := proto.Unmarshal(decompressed.Bytes(), target); err != nil {
 			// recover target from meta is a optimize policy, skip when failure happens
-			log.Warn("failed to unmarshal collection target", zap.String("key", keys[i]), zap.Error(err))
-			continue
+			log.Warn("failed to unmarshal collection target", zap.String("key", string(key)), zap.Error(err))
+			return nil
 		}
 		ret[target.GetCollectionID()] = target
+		return nil
+	}
+
+	err := s.cli.WalkWithPrefix(CollectionTargetPrefix, paginationSize, applyFn)
+	if err != nil {
+		return nil, err
 	}
 
 	return ret, nil

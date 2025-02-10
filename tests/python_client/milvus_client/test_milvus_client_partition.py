@@ -552,9 +552,10 @@ class TestMilvusClientReleasePartitionInvalid(TestcaseBase):
         client_w.create_collection(client, collection_name, default_dim)
         error = {ct.err_code: 1, ct.err_msg: f"partition not found[partition={not_exist_partition}]"}
         client_w.release_partitions(client, collection_name, partition_names,
-                                   check_task=CheckTasks.err_res, check_items=error)
+                                    check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/38223")
     def test_milvus_client_release_not_exist_partition_name(self):
         """
         target: test fast release partition -- invalid partition name type
@@ -714,7 +715,7 @@ class TestMilvusClientListPartitionInvalid(TestcaseBase):
         error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {collection_name}. the first character of a "
                                                 f"collection name must be an underscore or letter: invalid parameter"}
         client_w.list_partitions(client, collection_name,
-                                check_task=CheckTasks.err_res, check_items=error)
+                                 check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_list_partitions_collection_name_over_max_length(self):
@@ -729,7 +730,7 @@ class TestMilvusClientListPartitionInvalid(TestcaseBase):
         error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {collection_name}. the length of a collection name "
                                                 f"must be less than 255 characters: invalid parameter"}
         client_w.list_partitions(client, collection_name,
-                                check_task=CheckTasks.err_res, check_items=error)
+                                 check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_list_partitions_not_exist_collection_name(self):

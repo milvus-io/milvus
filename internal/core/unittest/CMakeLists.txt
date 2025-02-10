@@ -81,6 +81,7 @@ set(MILVUS_TEST_FILES
         test_futures.cpp
         test_bitmap_index.cpp
         test_monitor.cpp
+        test_rust_result.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )

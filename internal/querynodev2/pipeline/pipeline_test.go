@@ -109,9 +109,10 @@ func (suite *PipelineTestSuite) TestBasic() {
 	// init mock
 	//	mock collection manager
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
-	collection := segments.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
+	collection, err := segments.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
+	suite.Require().NoError(err)
 	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(collection)
 
 	//  mock mq factory

@@ -88,7 +88,7 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrCollectionNotLoaded("test_collection", "failed to alter index %s", "hnsw"), ErrCollectionNotLoaded)
 	s.ErrorIs(WrapErrCollectionOnRecovering("test_collection", "channel lost %s", "dev"), ErrCollectionOnRecovering)
 	s.ErrorIs(WrapErrCollectionVectorClusteringKeyNotAllowed("test_collection", "field"), ErrCollectionVectorClusteringKeyNotAllowed)
-
+	s.ErrorIs(WrapErrCollectionSchemaMisMatch("schema mismatch", "field"), ErrCollectionSchemaMismatch)
 	// Partition related
 	s.ErrorIs(WrapErrPartitionNotFound("test_partition", "failed to get partition"), ErrPartitionNotFound)
 	s.ErrorIs(WrapErrPartitionNotLoaded("test_partition", "failed to query"), ErrPartitionNotLoaded)
@@ -147,6 +147,7 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrMqTopicNotFound("unknown", "failed to get topic"), ErrMqTopicNotFound)
 	s.ErrorIs(WrapErrMqTopicNotEmpty("unknown", "topic is not empty"), ErrMqTopicNotEmpty)
 	s.ErrorIs(WrapErrMqInternal(errors.New("unknown"), "failed to consume"), ErrMqInternal)
+	s.ErrorIs(WrapErrTooManyConsumers("unknown", "too many consumers"), ErrTooManyConsumers)
 
 	// field related
 	s.ErrorIs(WrapErrFieldNotFound("meta", "failed to get field"), ErrFieldNotFound)

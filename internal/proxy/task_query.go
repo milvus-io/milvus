@@ -78,6 +78,7 @@ type queryParams struct {
 	limit             int64
 	offset            int64
 	reduceStopForBest bool
+	collectionID      int64
 }
 
 // translateToOutputFieldIDs translates output fields name to output fields id.
@@ -143,6 +144,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		offset            int64
 		reduceStopForBest bool
 		err               error
+		collectionID      int64
 	)
 	reduceStopForBestStr, err := funcutil.GetAttrByKeyFromRepeatedKV(ReduceStopForBestKey, queryParamsPair)
 	// if reduce_stop_for_best is provided
@@ -151,6 +153,15 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		if err != nil {
 			return nil, merr.WrapErrParameterInvalid("true or false", reduceStopForBestStr,
 				"value for reduce_stop_for_best is invalid")
+		}
+	}
+
+	collectionIdStr, err := funcutil.GetAttrByKeyFromRepeatedKV(CollectionID, queryParamsPair)
+	if err == nil {
+		collectionID, err = strconv.ParseInt(collectionIdStr, 0, 64)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalid("int value for collection_id", CollectionID,
+				"value for collection id is invalid")
 		}
 	}
 
@@ -182,6 +193,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		limit:             limit,
 		offset:            offset,
 		reduceStopForBest: reduceStopForBest,
+		collectionID:      collectionID,
 	}, nil
 }
 
@@ -344,6 +356,10 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	t.RetrieveRequest.ReduceStopForBest = queryParams.reduceStopForBest
+	if queryParams.collectionID > 0 && queryParams.collectionID != t.GetCollectionID() {
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("Input collection id is not consistent to collectionID in the context," +
+			"alias or database may have changed"))
+	}
 
 	t.queryParams = queryParams
 	t.RetrieveRequest.Limit = queryParams.limit + queryParams.offset

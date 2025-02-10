@@ -49,6 +49,7 @@ const (
 	IgnoreGrowingKey     = "ignore_growing"
 	ReduceStopForBestKey = "reduce_stop_for_best"
 	IteratorField        = "iterator"
+	CollectionID         = "collection_id"
 	GroupByFieldKey      = "group_by_field"
 	AnnsFieldKey         = "anns_field"
 	TopKKey              = "topk"
@@ -666,6 +667,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.Properties = result.Properties
 	t.result.DbName = result.GetDbName()
 	t.result.NumPartitions = result.NumPartitions
+	t.result.UpdateTimestamp = result.UpdateTimestamp
 	for _, field := range result.Schema.Fields {
 		if field.IsDynamic {
 			continue

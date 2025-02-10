@@ -66,7 +66,7 @@ jobs:
           fi
           make milvus
       - name: Upload Cmake log
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: ${{ failure() }}
         with:
           name: cmake-log

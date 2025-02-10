@@ -543,6 +543,23 @@ func TestServer_AlterIndex(t *testing.T) {
 		},
 	}
 
+	mockHandler := NewNMockHandler(t)
+
+	mockGetCollectionInfo := func() {
+		mockHandler.EXPECT().GetCollection(mock.Anything, collID).Return(&collectionInfo{
+			ID: collID,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:  fieldID,
+						Name:     "FieldFloatVector",
+						DataType: schemapb.DataType_FloatVector,
+					},
+				},
+			},
+		}, nil).Once()
+	}
+
 	s := &Server{
 		meta: &meta{
 			catalog:   catalog,
@@ -600,6 +617,7 @@ func TestServer_AlterIndex(t *testing.T) {
 		},
 		allocator:       newMockAllocator(),
 		notifyIndexChan: make(chan UniqueID, 1),
+		handler:         mockHandler,
 	}
 
 	t.Run("server not available", func(t *testing.T) {
@@ -612,6 +630,7 @@ func TestServer_AlterIndex(t *testing.T) {
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 
 	t.Run("mmap_unsupported", func(t *testing.T) {
+		mockGetCollectionInfo()
 		indexParams[0].Value = indexparamcheck.IndexRaftCagra
 
 		resp, err := s.AlterIndex(ctx, req)
@@ -622,6 +641,7 @@ func TestServer_AlterIndex(t *testing.T) {
 	})
 
 	t.Run("param_value_invalied", func(t *testing.T) {
+		mockGetCollectionInfo()
 		req.Params[0].Value = "abc"
 		resp, err := s.AlterIndex(ctx, req)
 		assert.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
@@ -630,6 +650,7 @@ func TestServer_AlterIndex(t *testing.T) {
 	})
 
 	t.Run("delete_params", func(t *testing.T) {
+		mockGetCollectionInfo()
 		deleteReq := &indexpb.AlterIndexRequest{
 			CollectionID: collID,
 			IndexName:    indexName,
@@ -649,6 +670,7 @@ func TestServer_AlterIndex(t *testing.T) {
 		}
 	})
 	t.Run("update_and_delete_params", func(t *testing.T) {
+		mockGetCollectionInfo()
 		updateAndDeleteReq := &indexpb.AlterIndexRequest{
 			CollectionID: collID,
 			IndexName:    indexName,
@@ -2482,6 +2504,57 @@ func TestValidateIndexParams(t *testing.T) {
 				{
 					Key:   common.MmapEnabledKey,
 					Value: "h",
+				},
+			},
+		}
+		err := ValidateIndexParams(index)
+		assert.Error(t, err)
+	})
+
+	t.Run("duplicated_index_params", func(t *testing.T) {
+		index := &model.Index{
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+			},
+		}
+		err := ValidateIndexParams(index)
+		assert.Error(t, err)
+	})
+
+	t.Run("duplicated_user_index_params", func(t *testing.T) {
+		index := &model.Index{
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+			},
+		}
+		err := ValidateIndexParams(index)
+		assert.Error(t, err)
+	})
+
+	t.Run("duplicated_user_index_params", func(t *testing.T) {
+		index := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
+				},
+				{
+					Key:   common.IndexTypeKey,
+					Value: indexparamcheck.AutoIndex,
 				},
 			},
 		}
