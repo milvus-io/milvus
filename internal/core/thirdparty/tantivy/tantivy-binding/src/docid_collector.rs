@@ -1,5 +1,3 @@
-use std::ffi::c_void;
-
 use tantivy::{
     collector::{Collector, SegmentCollector},
     fastfield::Column,
@@ -8,8 +6,8 @@ use tantivy::{
 
 use crate::bitset_wrapper::BitsetWrapper;
 
-// "warning": bitset_wrapper has no guarantee for thread safety, so `DocIdChildCollector` 
-// should be handled serializely which means we should only use single thread 
+// "warning": bitset_wrapper has no guarantee for thread safety, so `DocIdChildCollector`
+// should be handled serializely which means we should only use single thread
 // for executing query.
 pub(crate) struct DocIdCollector {
     pub(crate) bitset_wrapper: BitsetWrapper,
@@ -38,7 +36,7 @@ impl Collector for DocIdCollector {
     #[inline]
     fn merge_fruits(
         &self,
-        segment_fruits: Vec<<Self::Child as SegmentCollector>::Fruit>,
+        _: Vec<<Self::Child as SegmentCollector>::Fruit>,
     ) -> tantivy::Result<Self::Fruit> {
         Ok(())
     }

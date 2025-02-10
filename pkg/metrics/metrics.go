@@ -59,6 +59,7 @@ const (
 
 	StreamingDataSourceLabel  = "streaming"
 	BulkinsertDataSourceLabel = "bulkinsert"
+	CompactionDataSourceLabel = "compaction"
 
 	Leader     = "OnLeader"
 	FromLeader = "FromLeader"

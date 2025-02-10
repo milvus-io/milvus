@@ -1,4 +1,3 @@
-use log::warn;
 use tantivy::{
     collector::{Collector, SegmentCollector},
     DocId,
@@ -6,8 +5,8 @@ use tantivy::{
 
 use crate::bitset_wrapper::BitsetWrapper;
 
-// "warning": bitset_wrapper has no guarantee for thread safety, so `DocIdChildCollector` 
-// should be handled serializely which means we should only use single thread 
+// "warning": bitset_wrapper has no guarantee for thread safety, so `DocIdChildCollector`
+// should be handled serializely which means we should only use single thread
 // for executing query.
 pub struct VecCollector {
     pub(crate) bitset_wrapper: BitsetWrapper,
@@ -34,7 +33,7 @@ impl Collector for VecCollector {
     }
 
     #[inline]
-    fn merge_fruits(&self, segment_fruits: Vec<()>) -> tantivy::Result<()> {
+    fn merge_fruits(&self, _: Vec<()>) -> tantivy::Result<()> {
         Ok(())
     }
 }

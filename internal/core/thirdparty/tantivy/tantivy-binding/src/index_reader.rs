@@ -14,7 +14,7 @@ use crate::vec_collector::VecCollector;
 
 use crate::error::{Result, TantivyBindingError};
 
-pub(crate) type SetBitsetFn = extern "C" fn(*mut c_void, u32) -> c_void;
+pub(crate) type SetBitsetFn = extern "C" fn(*mut c_void, u32);
 
 pub(crate) struct IndexReaderWrapper {
     pub(crate) field_name: String,
@@ -26,10 +26,7 @@ pub(crate) struct IndexReaderWrapper {
 }
 
 impl IndexReaderWrapper {
-    pub fn load(
-        path: &str,
-        set_bitset: SetBitsetFn,
-    ) -> Result<IndexReaderWrapper> {
+    pub fn load(path: &str, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
         init_log();
 
         let index = Index::open_in_dir(path)?;
@@ -37,11 +34,7 @@ impl IndexReaderWrapper {
         IndexReaderWrapper::from_index(Arc::new(index), set_bitset)
     }
 
-    pub fn from_index(
-        index: Arc<Index>,
-        set_bitset: SetBitsetFn,
-    ) -> Result<IndexReaderWrapper> {
-        assert!(!(set_bitset as *const ()).is_null(), "SetBitsetFn is null");
+    pub fn from_index(index: Arc<Index>, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
         let field = index.schema().fields().next().unwrap().0;
         let schema = index.schema();
         let field_name = String::from(schema.get_field_name(field));
@@ -52,7 +45,7 @@ impl IndexReaderWrapper {
 
         let reader = index
             .reader_builder()
-            .reload_policy(ReloadPolicy::OnCommit) // OnCommit serve for growing segment.
+            .reload_policy(ReloadPolicy::OnCommitWithDelay) // OnCommitWithDelay serve for growing segment.
             .try_into()?;
         reader.reload()?;
 
@@ -89,10 +82,7 @@ impl IndexReaderWrapper {
                     .search(
                         q,
                         &DocIdCollector {
-                            bitset_wrapper: BitsetWrapper::new(
-                                bitset,
-                                self.set_bitset,
-                            ),
+                            bitset_wrapper: BitsetWrapper::new(bitset, self.set_bitset),
                         },
                     )
                     .map_err(TantivyBindingError::TantivyError)
@@ -103,10 +93,7 @@ impl IndexReaderWrapper {
                     .search(
                         q,
                         &VecCollector {
-                            bitset_wrapper: BitsetWrapper::new(
-                                bitset,
-                                self.set_bitset,
-                            ),
+                            bitset_wrapper: BitsetWrapper::new(bitset, self.set_bitset),
                         },
                     )
                     .map_err(TantivyBindingError::TantivyError)
@@ -128,11 +115,9 @@ impl IndexReaderWrapper {
         inclusive: bool,
         bitset: *mut c_void,
     ) -> Result<()> {
-        let q = RangeQuery::new_i64_bounds(
-            self.field_name.to_string(),
-            make_bounds(lower_bound, inclusive),
-            Bound::Unbounded,
-        );
+        let term = Term::from_field_i64(self.field, lower_bound);
+
+        let q = RangeQuery::new(make_bounds(term, inclusive), Bound::Unbounded);
         self.search(&q, bitset)
     }
 
@@ -142,11 +127,8 @@ impl IndexReaderWrapper {
         inclusive: bool,
         bitset: *mut c_void,
     ) -> Result<()> {
-        let q = RangeQuery::new_i64_bounds(
-            self.field_name.to_string(),
-            Bound::Unbounded,
-            make_bounds(upper_bound, inclusive),
-        );
+        let term = Term::from_field_i64(self.field, upper_bound);
+        let q = RangeQuery::new(Bound::Unbounded, make_bounds(term, inclusive));
         self.search(&q, bitset)
     }
 
@@ -158,9 +140,9 @@ impl IndexReaderWrapper {
         ub_inclusive: bool,
         bitset: *mut c_void,
     ) -> Result<()> {
-        let lb = make_bounds(lower_bound, lb_inclusive);
-        let ub = make_bounds(upper_bound, ub_inclusive);
-        let q = RangeQuery::new_i64_bounds(self.field_name.to_string(), lb, ub);
+        let lb = make_bounds(Term::from_field_i64(self.field, lower_bound), lb_inclusive);
+        let ub = make_bounds(Term::from_field_i64(self.field, upper_bound), ub_inclusive);
+        let q = RangeQuery::new(lb, ub);
         self.search(&q, bitset)
     }
 
@@ -178,9 +160,8 @@ impl IndexReaderWrapper {
         inclusive: bool,
         bitset: *mut c_void,
     ) -> Result<()> {
-        let q = RangeQuery::new_f64_bounds(
-            self.field_name.to_string(),
-            make_bounds(lower_bound, inclusive),
+        let q = RangeQuery::new(
+            make_bounds(Term::from_field_f64(self.field, lower_bound), inclusive),
             Bound::Unbounded,
         );
         self.search(&q, bitset)
@@ -192,10 +173,9 @@ impl IndexReaderWrapper {
         inclusive: bool,
         bitset: *mut c_void,
     ) -> Result<()> {
-        let q = RangeQuery::new_f64_bounds(
-            self.field_name.to_string(),
+        let q = RangeQuery::new(
             Bound::Unbounded,
-            make_bounds(upper_bound, inclusive),
+            make_bounds(Term::from_field_f64(self.field, upper_bound), inclusive),
         );
         self.search(&q, bitset)
     }
@@ -208,9 +188,9 @@ impl IndexReaderWrapper {
         ub_inclusive: bool,
         bitset: *mut c_void,
     ) -> Result<()> {
-        let lb = make_bounds(lower_bound, lb_inclusive);
-        let ub = make_bounds(upper_bound, ub_inclusive);
-        let q = RangeQuery::new_f64_bounds(self.field_name.to_string(), lb, ub);
+        let lb = make_bounds(Term::from_field_f64(self.field, lower_bound), lb_inclusive);
+        let ub = make_bounds(Term::from_field_f64(self.field, upper_bound), ub_inclusive);
+        let q = RangeQuery::new(lb, ub);
         self.search(&q, bitset)
     }
 
@@ -236,9 +216,8 @@ impl IndexReaderWrapper {
         inclusive: bool,
         bitset: *mut c_void,
     ) -> Result<()> {
-        let q = RangeQuery::new_str_bounds(
-            self.field_name.to_string(),
-            make_bounds(lower_bound, inclusive),
+        let q = RangeQuery::new(
+            make_bounds(Term::from_field_text(self.field, lower_bound), inclusive),
             Bound::Unbounded,
         );
         self.search(&q, bitset)
@@ -250,10 +229,9 @@ impl IndexReaderWrapper {
         inclusive: bool,
         bitset: *mut c_void,
     ) -> Result<()> {
-        let q = RangeQuery::new_str_bounds(
-            self.field_name.to_string(),
+        let q = RangeQuery::new(
             Bound::Unbounded,
-            make_bounds(upper_bound, inclusive),
+            make_bounds(Term::from_field_text(self.field, upper_bound), inclusive),
         );
         self.search(&q, bitset)
     }
@@ -266,9 +244,9 @@ impl IndexReaderWrapper {
         ub_inclusive: bool,
         bitset: *mut c_void,
     ) -> Result<()> {
-        let lb = make_bounds(lower_bound, lb_inclusive);
-        let ub = make_bounds(upper_bound, ub_inclusive);
-        let q = RangeQuery::new_str_bounds(self.field_name.to_string(), lb, ub);
+        let lb = make_bounds(Term::from_field_text(self.field, lower_bound), lb_inclusive);
+        let ub = make_bounds(Term::from_field_text(self.field, upper_bound), ub_inclusive);
+        let q = RangeQuery::new(lb, ub);
         self.search(&q, bitset)
     }
 
@@ -286,13 +264,15 @@ impl IndexReaderWrapper {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
+    use std::{ffi::c_void, sync::Arc};
 
     use tantivy::{
         doc,
-        schema::{self, Schema, STORED, STRING, TEXT},
-        Index, IndexWriter,
+        schema::{Schema, STORED, STRING},
+        Index,
     };
+
+    use crate::util::set_bitset;
 
     use super::IndexReaderWrapper;
 
@@ -312,10 +292,17 @@ mod test {
         index_writer.commit().unwrap();
 
         let index_shared = Arc::new(index);
-        let index_reader_wrapper = IndexReaderWrapper::from_index(index_shared).unwrap();
-        let mut res = index_reader_wrapper.prefix_query_keyword("^").unwrap();
+        let mut res: Vec<u32> = vec![];
+        let index_reader_wrapper =
+            IndexReaderWrapper::from_index(index_shared, set_bitset).unwrap();
+        index_reader_wrapper
+            .prefix_query_keyword("^", &mut res as *mut _ as *mut c_void)
+            .unwrap();
         assert_eq!(res.len(), 1);
-        res = index_reader_wrapper.prefix_query_keyword("$").unwrap();
+        res.clear();
+        index_reader_wrapper
+            .prefix_query_keyword("$", &mut res as *mut _ as *mut c_void)
+            .unwrap();
         assert_eq!(res.len(), 1);
     }
 }

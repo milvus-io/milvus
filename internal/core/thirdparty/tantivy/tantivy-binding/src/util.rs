@@ -73,3 +73,9 @@ pub(crate) fn get_stop_words_list(str_list: Vec<String>) -> Vec<String> {
     }
     stop_words
 }
+
+#[cfg(test)]
+pub extern "C" fn set_bitset(bitset: *mut c_void, doc_id: u32) {
+    let bitset = unsafe { &mut *(bitset as *mut Vec<u32>) };
+    bitset.push(doc_id);
+}

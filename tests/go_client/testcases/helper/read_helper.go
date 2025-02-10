@@ -66,6 +66,14 @@ func GenSearchVectors(nq int, dim int, dataType entity.FieldType) []entity.Vecto
 	return vectors
 }
 
+func GenFullTextQuery(nq int, lang string) []string {
+	queries := make([]string, 0, nq)
+	for i := 0; i < nq; i++ {
+		queries = append(queries, common.GenText(lang))
+	}
+	return queries
+}
+
 func GenFp16OrBf16VectorsFromFloatVector(nq int, dim int, dataType entity.FieldType) []entity.Vector {
 	vectors := make([]entity.Vector, 0, nq)
 	switch dataType {
