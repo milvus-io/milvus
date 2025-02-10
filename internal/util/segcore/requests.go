@@ -20,6 +20,7 @@ import (
 type RetrievePlanWithOffsets struct {
 	*RetrievePlan
 	Offsets []int64
+	FillPKs bool
 }
 
 type InsertRequest struct {

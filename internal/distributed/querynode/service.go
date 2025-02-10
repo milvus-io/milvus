@@ -360,6 +360,10 @@ func (s *Server) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (
 	return s.querynode.QuerySegments(ctx, req)
 }
 
+func (s *Server) QuerySegmentsOffset(ctx context.Context, req *querypb.QueryOffsetsRequest) (*internalpb.RetrieveResults, error) {
+	return s.querynode.QuerySegmentsOffset(ctx, req)
+}
+
 // SyncReplicaSegments syncs replica segment information to shard leader
 func (s *Server) SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {
 	return s.querynode.SyncReplicaSegments(ctx, req)

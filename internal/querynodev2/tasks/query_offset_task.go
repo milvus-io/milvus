@@ -9,30 +9,33 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var _ scheduler.Task = &QueryTask{}
 
-func NewQueryTask(ctx context.Context,
+func NewQueryOffsetTask(ctx context.Context,
 	collection *segments.Collection,
 	manager *segments.Manager,
-	req *querypb.QueryRequest,
-) *QueryTask {
+	req *querypb.QueryOffsetsRequest,
+) *QueryOffsetTask {
 	ctx, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "schedule")
-	return &QueryTask{
+	return &QueryOffsetTask{
 		ctx:            ctx,
 		collection:     collection,
 		segmentManager: manager,
@@ -43,11 +46,11 @@ func NewQueryTask(ctx context.Context,
 	}
 }
 
-type QueryTask struct {
+type QueryOffsetTask struct {
 	ctx            context.Context
 	collection     *segments.Collection
 	segmentManager *segments.Manager
-	req            *querypb.QueryRequest
+	req            *querypb.QueryOffsetsRequest
 	result         *internalpb.RetrieveResults
 	notifier       chan error
 	tr             *timerecord.TimeRecorder
@@ -56,16 +59,16 @@ type QueryTask struct {
 
 // Return the username which task is belong to.
 // Return "" if the task do not contain any user info.
-func (t *QueryTask) Username() string {
-	return t.req.Req.GetUsername()
+func (t *QueryOffsetTask) Username() string {
+	return t.req.GetUsername()
 }
 
-func (t *QueryTask) IsGpuIndex() bool {
+func (t *QueryOffsetTask) IsGpuIndex() bool {
 	return false
 }
 
 // PreExecute the task, only call once.
-func (t *QueryTask) PreExecute() error {
+func (t *QueryOffsetTask) PreExecute() error {
 	// Update task wait time metric before execute
 	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
 	inQueueDuration := t.tr.ElapseSpan()
@@ -90,38 +93,71 @@ func (t *QueryTask) PreExecute() error {
 	return nil
 }
 
-func (t *QueryTask) SearchResult() *internalpb.SearchResults {
+func (t *QueryOffsetTask) SearchResult() *internalpb.SearchResults {
 	return nil
 }
 
 // Execute the task, only call once.
-func (t *QueryTask) Execute() error {
+func (t *QueryOffsetTask) Execute() error {
 	if t.scheduleSpan != nil {
 		t.scheduleSpan.End()
 	}
-	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "QueryTask")
+	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "QueryOffsetTask")
+
+	helper, err := typeutil.CreateSchemaHelper(t.collection.Schema())
+	if err != nil {
+		return err
+	}
+
+	node, err := planparserv2.CreateRetrievePlan(helper, "", nil)
+	if err != nil {
+		return err
+	}
+	node.OutputFieldIds = t.req.GetOutputFieldsId()
+	// TODO shall not manual add timestamp field here
+	// remove this after support plain reduce
+	node.OutputFieldIds = append(node.OutputFieldIds, common.TimeStampField)
+	// TODO ugly here, add util function later
+	pkField, _ := helper.GetPrimaryKeyField()
+	hasPKField := false
+	for _, fieldID := range node.OutputFieldIds {
+		if pkField.GetFieldID() == fieldID {
+			hasPKField = true
+			break
+		}
+	}
+	if !hasPKField {
+		node.OutputFieldIds = append(node.OutputFieldIds, pkField.FieldID)
+	}
+
+	bs, err := proto.Marshal(node)
+	if err != nil {
+		return err
+	}
 
 	retrievePlan, err := segcore.NewRetrievePlan(
 		t.collection.GetCCollection(),
-		t.req.Req.GetSerializedExprPlan(),
-		t.req.Req.GetMvccTimestamp(),
-		t.req.Req.Base.GetMsgID(),
+		bs,
+		t.req.GetMvccTimestamp(),
+		t.req.Base.GetMsgID(),
 	)
 	if err != nil {
 		return err
 	}
 	defer retrievePlan.Delete()
-	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
+
+	results, pinnedSegments, err := segments.RetrieveByOffsets(t.ctx, t.segmentManager, retrievePlan, t.req)
 	defer t.segmentManager.Segment.Unpin(pinnedSegments)
 	if err != nil {
 		return err
 	}
 
+	// TODO add plan reducer since query by offset need not pk dedup logic
 	reducer := segments.CreateSegCoreReducer(
-		t.req.GetReq().GetIsCount(),
-		t.req.GetReq().GetLimit(),
-		t.req.GetReq().GetOutputFieldsId(),
-		t.req.GetReq().GetReduceType(),
+		false,
+		typeutil.Unlimited,
+		t.req.GetOutputFieldsId(),
+		0,
 		t.collection.Schema(),
 		t.segmentManager,
 	)
@@ -165,22 +201,22 @@ func (t *QueryTask) Execute() error {
 	return nil
 }
 
-func (t *QueryTask) Done(err error) {
+func (t *QueryOffsetTask) Done(err error) {
 	t.notifier <- err
 }
 
-func (t *QueryTask) Canceled() error {
+func (t *QueryOffsetTask) Canceled() error {
 	return t.ctx.Err()
 }
 
-func (t *QueryTask) Wait() error {
+func (t *QueryOffsetTask) Wait() error {
 	return <-t.notifier
 }
 
-func (t *QueryTask) Result() *internalpb.RetrieveResults {
+func (t *QueryOffsetTask) Result() *internalpb.RetrieveResults {
 	return t.result
 }
 
-func (t *QueryTask) NQ() int64 {
+func (t *QueryOffsetTask) NQ() int64 {
 	return 1
 }

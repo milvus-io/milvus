@@ -68,7 +68,8 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
                        CSegmentInterface c_segment,
                        CRetrievePlan c_plan,
                        int64_t* offsets,
-                       int64_t len);
+                       int64_t len,
+                       bool fill_pks);
 
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment);

@@ -50,6 +50,15 @@ const (
 	// TimeStampField is the ID of the Timestamp field reserved by the system
 	TimeStampField = 1
 
+	// OffSetField is the ID of the temp result index field reserved by the system
+	ResultIndexField = 97
+
+	// OffSetField is the ID of the temp offset field reserved by the system
+	OffsetField = 98
+
+	// SegmentIDField is the ID of temp segment id reserved by the system
+	SegmentIDField = 99
+
 	// RowIDFieldName defines the name of the RowID field
 	RowIDFieldName = "RowID"
 

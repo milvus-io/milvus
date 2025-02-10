@@ -535,6 +535,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 					r, err = segment.RetrieveByOffsets(ctx, &segcore.RetrievePlanWithOffsets{
 						RetrievePlan: plan,
 						Offsets:      theOffsets,
+						FillPKs:      false,
 					})
 					return err
 				}); err != nil {

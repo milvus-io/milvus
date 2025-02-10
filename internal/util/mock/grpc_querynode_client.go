@@ -98,6 +98,10 @@ func (m *GrpcQueryNodeClient) QuerySegments(ctx context.Context, in *querypb.Que
 	return &internalpb.RetrieveResults{}, m.Err
 }
 
+func (m *GrpcQueryNodeClient) QuerySegmentsOffset(ctx context.Context, in *querypb.QueryOffsetsRequest, opts ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
+	return &internalpb.RetrieveResults{}, m.Err
+}
+
 func (m *GrpcQueryNodeClient) QueryStreamSegments(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (querypb.QueryNode_QueryStreamSegmentsClient, error) {
 	return &streamrpc.LocalQueryClient{}, m.Err
 }

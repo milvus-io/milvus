@@ -69,6 +69,10 @@ func (w *LocalWorker) QuerySegments(ctx context.Context, req *querypb.QueryReque
 	return w.node.QuerySegments(ctx, req)
 }
 
+func (w *LocalWorker) QuerySegmentsOffset(ctx context.Context, req *querypb.QueryOffsetsRequest) (*internalpb.RetrieveResults, error) {
+	return w.node.QuerySegmentsOffset(ctx, req)
+}
+
 func (w *LocalWorker) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
 	return w.node.GetStatistics(ctx, req)
 }

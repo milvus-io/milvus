@@ -889,6 +889,75 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	return result, nil
 }
 
+func (node *QueryNode) QuerySegmentsOffset(ctx context.Context, req *querypb.QueryOffsetsRequest) (*internalpb.RetrieveResults, error) {
+	resp := &internalpb.RetrieveResults{
+		Status: merr.Success(),
+	}
+	msgID := req.Base.GetMsgID()
+	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
+	channel := req.GetShardName()
+	log := log.Ctx(ctx).With(
+		zap.Int64("msgID", msgID),
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.String("channel", channel),
+		// zap.String("scope", req.GetScope().String()),
+	)
+
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	defer node.lifetime.Done()
+
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader, fmt.Sprint(req.GetCollectionId())).Inc()
+	defer func() {
+		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.FromLeader, fmt.Sprint(req.GetCollectionId())).Inc()
+		}
+	}()
+
+	log.Debug("start do query segments with offset", zap.Int64s("segmentIDs", req.GetSegmentIds()))
+	// add cancel when error occurs
+	queryCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	tr := timerecord.NewTimeRecorder("querySegments")
+	collection := node.manager.Collection.Get(req.GetCollectionId())
+	if collection == nil {
+		resp.Status = merr.Status(merr.WrapErrCollectionNotLoaded(req.GetCollectionId()))
+		return resp, nil
+	}
+
+	// Send task to scheduler and wait until it finished.
+	task := tasks.NewQueryOffsetTask(queryCtx, collection, node.manager, req)
+	if err := node.scheduler.Add(task); err != nil {
+		log.Warn("failed to add query task into scheduler", zap.Error(err))
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	err := task.Wait()
+	if err != nil {
+		log.Warn("failed to query channel", zap.Error(err))
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s,  vChannel = %s, segmentIDs = %v",
+		traceID,
+		channel,
+		req.GetSegmentIds(),
+	))
+
+	// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
+	latency := tr.ElapseSpan()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.FromLeader, fmt.Sprint(req.GetCollectionId())).Inc()
+	result := task.Result()
+	result.GetCostAggregation().ResponseTime = latency.Milliseconds()
+	result.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
+	return result, nil
+}
+
 // Query performs replica query tasks.
 func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	log := log.Ctx(ctx).With(

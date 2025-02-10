@@ -116,6 +116,10 @@ func (qn *qnServerWrapper) QuerySegments(ctx context.Context, in *querypb.QueryR
 	return qn.QueryNode.QuerySegments(ctx, in)
 }
 
+func (qn *qnServerWrapper) QuerySegmentsOffset(ctx context.Context, in *querypb.QueryOffsetsRequest, opts ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
+	return qn.QueryNode.QuerySegmentsOffset(ctx, in)
+}
+
 func (qn *qnServerWrapper) QueryStreamSegments(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (querypb.QueryNode_QueryStreamSegmentsClient, error) {
 	streamer := streamrpc.NewInMemoryStreamer[*internalpb.RetrieveResults](ctx, 16)
 

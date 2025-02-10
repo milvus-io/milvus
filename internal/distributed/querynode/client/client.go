@@ -252,6 +252,12 @@ func (c *Client) QuerySegments(ctx context.Context, req *querypb.QueryRequest, _
 	})
 }
 
+func (c *Client) QuerySegmentsOffset(ctx context.Context, req *querypb.QueryOffsetsRequest, _ ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.RetrieveResults, error) {
+		return client.QuerySegmentsOffset(ctx, req)
+	})
+}
+
 func (c *Client) QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, _ ...grpc.CallOption) (querypb.QueryNode_QueryStreamSegmentsClient, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {

@@ -189,7 +189,7 @@ SegmentInternalInterface::FillTargetEntry(
         }
 
         auto& field_meta = plan->schema_[field_id];
-
+        
         auto col = bulk_subscript(field_id, offsets, size);
         if (field_meta.get_data_type() == DataType::ARRAY) {
             col->mutable_scalars()->mutable_array_data()->set_element_type(
@@ -238,11 +238,12 @@ std::unique_ptr<proto::segcore::RetrieveResults>
 SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    const query::RetrievePlan* Plan,
                                    const int64_t* offsets,
-                                   int64_t size) const {
+                                   int64_t size,
+                                   bool fill_pks) const {
     std::shared_lock lck(mutex_);
     tracer::AutoSpan span("RetrieveByOffsets", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
-    FillTargetEntry(trace_ctx, Plan, results, offsets, size, false, false);
+    FillTargetEntry(trace_ctx, Plan, results, offsets, size, false, fill_pks);
     return results;
 }
 
