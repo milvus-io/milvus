@@ -4,7 +4,7 @@ use crate::index_reader::SetBitsetFn;
 
 #[derive(Clone)]
 pub struct BitsetWrapper {
-    bitset: *mut c_void,
+    bitset: NonNull<c_void>,
     set_bitset: SetBitsetFn,
 }
 
@@ -14,11 +14,11 @@ unsafe impl Sync for BitsetWrapper {}
 
 impl BitsetWrapper {
     pub fn new(bitset: *mut c_void, set_bitset: SetBitsetFn) -> Self {
-        assert!(!bitset.is_null());
+        let bitset = NonNull::new(bitset).expect("bitset pointer must not be null");
         BitsetWrapper { bitset, set_bitset }
     }
 
     pub fn set(&self, doc_id: u32) -> c_void {
-        (self.set_bitset)(self.bitset, doc_id)
+        (self.set_bitset)(self.bitset.as_ptr(), doc_id)
     }
 }

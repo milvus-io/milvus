@@ -12,15 +12,6 @@
 #pragma once
 
 namespace milvus::index {
-inline void
-apply_hits(milvus::TargetBitmap& bitset,
-           const milvus::index::RustArrayWrapper& w,
-           bool v) {
-    for (size_t j = 0; j < w.array_.len; j++) {
-        bitset[w.array_.array[j]] = v;
-    }
-}
-
 inline size_t
 should_allocate_bitset_size(const milvus::index::RustArrayWrapper& w) {
     if (w.array_.len == 0) {

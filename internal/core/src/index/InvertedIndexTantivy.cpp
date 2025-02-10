@@ -246,7 +246,6 @@ InvertedIndexTantivy<T>::In(size_t n, const T* values) {
     TargetBitmap bitset(Count());
     for (size_t i = 0; i < n; ++i) {
         wrapper_->term_query(values[i], &bitset);
-        // apply_hits(bitset, array, true);
     }
     return bitset;
 }
@@ -303,8 +302,8 @@ InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
     TargetBitmap bitset(Count());
     for (size_t i = 0; i < n; ++i) {
         wrapper_->term_query(values[i], &bitset);
-        // apply_hits(bitset, array, false);
     }
+    // The expression is "not" in, so we flip the bit.
     bitset.flip();
     for (size_t i = 0; i < null_offset.size(); ++i) {
         bitset.reset(null_offset[i]);
@@ -320,19 +319,15 @@ InvertedIndexTantivy<T>::Range(T value, OpType op) {
     switch (op) {
         case OpType::LessThan: {
             wrapper_->upper_bound_range_query(value, false, &bitset);
-            // apply_hits(bitset, array, true);
         } break;
         case OpType::LessEqual: {
             wrapper_->upper_bound_range_query(value, true, &bitset);
-            // apply_hits(bitset, array, true);
         } break;
         case OpType::GreaterThan: {
             wrapper_->lower_bound_range_query(value, false, &bitset);
-            // apply_hits(bitset, array, true);
         } break;
         case OpType::GreaterEqual: {
             wrapper_->lower_bound_range_query(value, true, &bitset);
-            // apply_hits(bitset, array, true);
         } break;
         default:
             PanicInfo(OpTypeInvalid,
@@ -354,7 +349,6 @@ InvertedIndexTantivy<T>::Range(T lower_bound_value,
                           lb_inclusive,
                           ub_inclusive,
                           &bitset);
-    // apply_hits(bitset, array, true);
     return bitset;
 }
 
@@ -364,7 +358,6 @@ InvertedIndexTantivy<T>::PrefixMatch(const std::string_view prefix) {
     TargetBitmap bitset(Count());
     std::string s(prefix);
     wrapper_->prefix_query(s, &bitset);
-    // apply_hits(bitset, array, true);
     return bitset;
 }
 
@@ -390,7 +383,6 @@ const TargetBitmap
 InvertedIndexTantivy<T>::RegexQuery(const std::string& regex_pattern) {
     TargetBitmap bitset(Count());
     wrapper_->regex_query(regex_pattern, &bitset);
-    // apply_hits(bitset, array, true);
     return bitset;
 }
 
