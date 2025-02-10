@@ -765,26 +765,14 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 		suite.NoError(err)
 	}
 
-	growings := map[int64]*meta.Segment{}
-	for _, segment := range suite.releaseSegments[1:] {
-		growings[segment] = utils.CreateTestSegment(suite.collection, 1, segment, targetNode, 1, "")
-	}
-	suite.dist.LeaderViewManager.Update(targetNode, &meta.LeaderView{
-		ID:              targetNode,
-		GrowingSegments: growings,
-	})
-
 	segmentsNum := len(suite.releaseSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
 
-	// Process tasks
+	// Process tasks and Release done
 	suite.dispatchAndWait(targetNode)
-	suite.AssertTaskNum(segmentsNum-1, 0, 0, segmentsNum-1)
+	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
 
-	// Release done
-	suite.dist.LeaderViewManager.Update(targetNode)
-
-	// Process tasks done
+	// Tasks removed
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
@@ -1084,7 +1072,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 			CollectionID: suite.collection,
 		},
 	}, nil)
-	for _, segment := range suite.loadSegments {
+	for _, segment := range suite.loadSegments[1:] {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
 			{
 				ID:            segment,
@@ -1105,13 +1093,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 	}))
 	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
 	tasks := []Task{}
-	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
-		segments = append(segments, &datapb.SegmentInfo{
-			ID:            segment,
-			PartitionID:   1,
-			InsertChannel: channel.GetChannelName(),
-		})
 		task, err := NewSegmentTask(
 			ctx,
 			timeout,
@@ -1125,33 +1107,8 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segments, nil)
-	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(suite.collection, partition))
-	suite.target.UpdateCollectionNextTarget(suite.collection)
-	segmentsNum := len(suite.loadSegments)
-	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
 
-	// Process tasks
-	suite.dispatchAndWait(targetNode)
-	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
-
-	// Process tasks done
-	// Dist contains channels, first task stale
-	view := &meta.LeaderView{
-		ID:           targetNode,
-		CollectionID: suite.collection,
-		Segments:     map[int64]*querypb.SegmentDist{},
-		Channel:      channel.ChannelName,
-	}
-	for _, segment := range suite.loadSegments[1:] {
-		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
-	}
-	distSegments := lo.Map(segments, func(info *datapb.SegmentInfo, _ int) *meta.Segment {
-		return meta.SegmentFromInfo(info)
-	})
-	suite.dist.LeaderViewManager.Update(targetNode, view)
-	suite.dist.SegmentDistManager.Update(targetNode, distSegments...)
-	segments = make([]*datapb.SegmentInfo, 0)
+	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments[1:] {
 		segments = append(segments, &datapb.SegmentInfo{
 			ID:            segment,
@@ -1159,13 +1116,16 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 			InsertChannel: channel.GetChannelName(),
 		})
 	}
-	bakExpectations := suite.broker.ExpectedCalls
-	suite.broker.AssertExpectations(suite.T())
-	suite.broker.ExpectedCalls = suite.broker.ExpectedCalls[:0]
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segments, nil)
 
 	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(suite.collection, 2))
 	suite.target.UpdateCollectionNextTarget(suite.collection)
+
+	// process done
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+
+	// task removed
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
@@ -1178,7 +1138,6 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 			suite.NoError(task.Err())
 		}
 	}
-	suite.broker.ExpectedCalls = bakExpectations
 }
 
 func (suite *TaskSuite) TestChannelTaskReplace() {
@@ -1491,10 +1450,10 @@ func (suite *TaskSuite) AssertTaskNum(process, wait, channel, segment int) {
 
 	suite.Equal(process, scheduler.processQueue.Len())
 	suite.Equal(wait, scheduler.waitQueue.Len())
-	suite.Len(scheduler.segmentTasks, segment)
-	suite.Len(scheduler.channelTasks, channel)
-	suite.Equal(len(scheduler.tasks), process+wait)
-	suite.Equal(len(scheduler.tasks), segment+channel)
+	suite.Equal(scheduler.segmentTasks.Len(), segment)
+	suite.Equal(scheduler.channelTasks.Len(), channel)
+	suite.Equal(scheduler.tasks.Len(), process+wait)
+	suite.Equal(scheduler.tasks.Len(), segment+channel)
 }
 
 func (suite *TaskSuite) dispatchAndWait(node int64) {
@@ -1506,13 +1465,14 @@ func (suite *TaskSuite) dispatchAndWait(node int64) {
 		count = 0
 		keys = make([]any, 0)
 
-		for _, executor := range suite.scheduler.executors {
+		suite.scheduler.executors.Range(func(_ int64, executor *Executor) bool {
 			executor.executingTasks.Range(func(taskIndex string) bool {
 				keys = append(keys, taskIndex)
 				count++
 				return true
 			})
-		}
+			return true
+		})
 
 		if count == 0 {
 			return
