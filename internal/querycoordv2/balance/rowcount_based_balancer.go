@@ -393,7 +393,7 @@ func newNodeItem(currentScore int, nodeID int64) nodeItem {
 
 func (b *nodeItem) getPriority() int {
 	// if node lacks more score between assignedScore and currentScore, then higher priority
-	return int(b.currentScore - b.assignedScore)
+	return int(math.Ceil(b.currentScore - b.assignedScore))
 }
 
 func (b *nodeItem) setPriority(priority int) {
