@@ -73,7 +73,7 @@ func NewPackedRecordReader(path string, schema *schemapb.CollectionSchema, buffe
 	}
 	field2Col := make(map[FieldID]int)
 	for i, field := range schema.Fields {
-		field2Col[FieldID(field.FieldID)] = i
+		field2Col[field.FieldID] = i
 	}
 	return &packedRecordReader{
 		reader:     reader,
