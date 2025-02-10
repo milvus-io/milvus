@@ -105,6 +105,7 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
 template <typename T>
 InvertedIndexTantivy<T>::~InvertedIndexTantivy() {
     if (wrapper_) {
+        // TODO: remove this log after fixing the bug
         LOG_INFO("inverted index free wrapper: {}", path_);
         wrapper_->free();
     }
