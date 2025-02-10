@@ -17,9 +17,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
-	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_flusher"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
@@ -42,7 +44,13 @@ type walTestFramework struct {
 
 func TestWAL(t *testing.T) {
 	initResourceForTest(t)
-	b := registry.MustGetBuilder(walimplstest.WALName)
+	b := registry.MustGetBuilder(walimplstest.WALName,
+		redo.NewInterceptorBuilder(),
+		// TODO: current flusher interceptor cannot work well with the walimplstest.
+		// flusher.NewInterceptorBuilder(),
+		timetick.NewInterceptorBuilder(),
+		segment.NewInterceptorBuilder(),
+	)
 	f := &walTestFramework{
 		b:            b,
 		t:            t,
@@ -68,17 +76,10 @@ func initResourceForTest(t *testing.T) {
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
-	flusher := mock_flusher.NewMockFlusher(t)
-	flusher.EXPECT().RegisterPChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
-	flusher.EXPECT().UnregisterPChannel(mock.Anything).Return().Maybe()
-	flusher.EXPECT().RegisterVChannel(mock.Anything, mock.Anything).Return().Maybe()
-	flusher.EXPECT().UnregisterVChannel(mock.Anything).Return().Maybe()
-
 	resource.InitForTest(
 		t,
 		resource.OptRootCoordClient(fRootCoordClient),
 		resource.OptDataCoordClient(fDataCoordClient),
-		resource.OptFlusher(flusher),
 		resource.OptStreamingNodeCatalog(catalog),
 	)
 }

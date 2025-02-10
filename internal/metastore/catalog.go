@@ -231,4 +231,11 @@ type StreamingNodeCataLog interface {
 
 	// SaveSegmentAssignments save the segment assignments for the wal.
 	SaveSegmentAssignments(ctx context.Context, pChannelName string, infos []*streamingpb.SegmentAssignmentMeta) error
+
+	// GetConsumeCheckpoint gets the consuming checkpoint of the wal.
+	// Return nil, nil if the checkpoint is not exist.
+	GetConsumeCheckpoint(ctx context.Context, pChannelName string) (*streamingpb.WALCheckpoint, error)
+
+	// SaveConsumeCheckpoint saves the consuming checkpoint of the wal.
+	SaveConsumeCheckpoint(ctx context.Context, pChannelName string, checkpoint *streamingpb.WALCheckpoint) error
 }

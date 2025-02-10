@@ -204,8 +204,6 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 
 func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 	balancer := mock_balancer.NewMockBalancer(suite.T())
-	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
-
 	change := make(chan struct{})
 	balancer.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
 		versions := []typeutil.VersionInt64Pair{
@@ -249,6 +247,7 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 		<-ctx.Done()
 		return context.Cause(ctx)
 	})
+	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
 
 	ctx := context.Background()
 	err := suite.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(suite.collectionID, 2))
