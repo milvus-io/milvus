@@ -1,8 +1,6 @@
 package wal
 
 import (
-	"context"
-
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -19,7 +17,7 @@ type ReadOption struct {
 	VChannel       string // vchannel name
 	DeliverPolicy  options.DeliverPolicy
 	MessageFilter  []options.DeliverFilter
-	MesasgeHandler MessageHandler // message handler for message processing.
+	MesasgeHandler message.Handler // message handler for message processing.
 	// If the message handler is nil (no redundant operation need to apply),
 	// the default message handler will be used, and the receiver will be returned from Chan.
 	// Otherwise, Chan will panic.
@@ -44,28 +42,4 @@ type Scanner interface {
 	// Close the scanner, release the underlying resources.
 	// Return the error same with `Error`
 	Close() error
-}
-
-type HandleParam struct {
-	Ctx          context.Context
-	Upstream     <-chan message.ImmutableMessage
-	Message      message.ImmutableMessage
-	TimeTickChan <-chan struct{}
-}
-
-type HandleResult struct {
-	Incoming        message.ImmutableMessage // Not nil if upstream return new message.
-	MessageHandled  bool                     // True if Message is handled successfully.
-	TimeTickUpdated bool                     // True if TimeTickChan is triggered.
-	Error           error                    // Error is context is canceled.
-}
-
-// MessageHandler is used to handle message read from log.
-// TODO: should be removed in future after msgstream is removed.
-type MessageHandler interface {
-	// Handle is the callback for handling message.
-	Handle(param HandleParam) HandleResult
-
-	// Close is called after all messages are handled or handling is interrupted.
-	Close()
 }

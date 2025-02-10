@@ -159,7 +159,11 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     }
 
     auto opt_fields = GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
-    if (opt_fields.has_value() && index_.IsAdditionalScalarSupported()) {
+    auto is_partition_key_isolation =
+        GetValueFromConfig<bool>(build_config, "partition_key_isolation");
+    if (opt_fields.has_value() &&
+        index_.IsAdditionalScalarSupported(
+            is_partition_key_isolation.value_or(false))) {
         build_config[VEC_OPT_FIELDS_PATH] =
             file_manager_->CacheOptFieldToDisk(opt_fields.value());
         // `partition_key_isolation` is already in the config, so it falls through

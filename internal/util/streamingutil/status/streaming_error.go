@@ -55,6 +55,11 @@ func (e *StreamingError) IsTxnUnavilable() bool {
 		e.Code == streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE
 }
 
+// IsResourceAcquired returns true if the resource is acquired.
+func (e *StreamingError) IsResourceAcquired() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_RESOURCE_ACQUIRED
+}
+
 // NewOnShutdownError creates a new StreamingError with code STREAMING_CODE_ON_SHUTDOWN.
 func NewOnShutdownError(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, format, args...)
@@ -114,6 +119,11 @@ func NewInvalidTransactionState(operation string, expectState message.TxnState, 
 // NewUnrecoverableError creates a new StreamingError with code STREAMING_CODE_UNRECOVERABLE.
 func NewUnrecoverableError(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE, format, args...)
+}
+
+// NewResourceAcquired creates a new StreamingError with code STREAMING_CODE_RESOURCE_ACQUIRED.
+func NewResourceAcquired(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_RESOURCE_ACQUIRED, format, args...)
 }
 
 // New creates a new StreamingError with the given code and cause.

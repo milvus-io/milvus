@@ -82,6 +82,7 @@ func newIndexTaskStats(s *model.SegmentIndex) *metricsinfo.IndexTaskStats {
 		IndexVersion:    s.IndexVersion,
 		CreatedUTCTime:  typeutil.TimestampToString(s.CreatedUTCTime * 1000),
 		FinishedUTCTime: typeutil.TimestampToString(s.FinishedUTCTime * 1000),
+		NodeID:          s.NodeID,
 	}
 }
 
@@ -98,7 +99,7 @@ func newSegmentIndexBuildInfo() *segmentBuildInfo {
 		// build ID -> segment index
 		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
 		// build ID -> task stats
-		taskStats: expirable.NewLRU[UniqueID, *metricsinfo.IndexTaskStats](64, nil, time.Minute*30),
+		taskStats: expirable.NewLRU[UniqueID, *metricsinfo.IndexTaskStats](1024, nil, time.Minute*30),
 	}
 }
 

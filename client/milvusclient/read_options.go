@@ -85,6 +85,7 @@ func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *annReq
 		annField:       annField,
 		vectors:        vectors,
 		topK:           limit,
+		searchParam:    make(map[string]string),
 		templateParams: make(map[string]any),
 	}
 }
@@ -358,12 +359,7 @@ func (opt *searchOption) WithSearchParam(key, value string) *searchOption {
 
 func NewSearchOption(collectionName string, limit int, vectors []entity.Vector) *searchOption {
 	return &searchOption{
-		annRequest: &annRequest{
-			vectors:        vectors,
-			searchParam:    make(map[string]string),
-			topK:           limit,
-			templateParams: make(map[string]any),
-		},
+		annRequest:                 NewAnnRequest("", limit, vectors...),
 		collectionName:             collectionName,
 		useDefaultConsistencyLevel: true,
 		consistencyLevel:           entity.ClBounded,

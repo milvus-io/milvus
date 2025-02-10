@@ -69,6 +69,7 @@ message CollectionInfo {
   CollectionState state = 13; // To keep compatible with older version, default state is `Created`.
   repeated common.KeyValuePair properties = 14;
   int64 db_id = 15;
+  uint64 UpdateTimestamp = 16;
 }
 
 message PartitionInfo {

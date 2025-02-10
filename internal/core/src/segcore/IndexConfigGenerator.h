@@ -34,7 +34,7 @@ class VecIndexConfig {
         {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC, 0.1}};
 
     inline static const std::unordered_set<std::string> maintain_params = {
-        "radius", "range_filter", "drop_ratio_search"};
+        "radius", "range_filter", "drop_ratio_search", "dim_max_score_ratio"};
 
  public:
     VecIndexConfig(const int64_t max_index_row_count,

@@ -86,8 +86,8 @@ func (c *catalog) ListBroadcastTask(ctx context.Context) ([]*streamingpb.Broadca
 	return infos, nil
 }
 
-func (c *catalog) SaveBroadcastTask(ctx context.Context, task *streamingpb.BroadcastTask) error {
-	key := buildBroadcastTaskPath(task.TaskId)
+func (c *catalog) SaveBroadcastTask(ctx context.Context, broadcastID uint64, task *streamingpb.BroadcastTask) error {
+	key := buildBroadcastTaskPath(broadcastID)
 	if task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
 		return c.metaKV.Remove(ctx, key)
 	}
@@ -104,6 +104,6 @@ func buildPChannelInfoPath(name string) string {
 }
 
 // buildBroadcastTaskPath builds the path for broadcast task.
-func buildBroadcastTaskPath(id int64) string {
-	return BroadcastTaskPrefix + strconv.FormatInt(id, 10)
+func buildBroadcastTaskPath(id uint64) string {
+	return BroadcastTaskPrefix + strconv.FormatUint(id, 10)
 }

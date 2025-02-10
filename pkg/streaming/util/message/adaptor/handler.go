@@ -1,8 +1,6 @@
 package adaptor
 
 import (
-	"context"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
@@ -11,6 +9,32 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+type ChanMessageHandler chan message.ImmutableMessage
+
+func (h ChanMessageHandler) Handle(param message.HandleParam) message.HandleResult {
+	var sendingCh chan message.ImmutableMessage
+	if param.Message != nil {
+		sendingCh = h
+	}
+	select {
+	case <-param.Ctx.Done():
+		return message.HandleResult{Error: param.Ctx.Err()}
+	case msg, ok := <-param.Upstream:
+		if !ok {
+			return message.HandleResult{Error: message.ErrUpstreamClosed}
+		}
+		return message.HandleResult{Incoming: msg}
+	case sendingCh <- param.Message:
+		return message.HandleResult{MessageHandled: true}
+	case <-param.TimeTickChan:
+		return message.HandleResult{TimeTickUpdated: true}
+	}
+}
+
+func (d ChanMessageHandler) Close() {
+	close(d)
+}
+
 // NewMsgPackAdaptorHandler create a new message pack adaptor handler.
 func NewMsgPackAdaptorHandler() *MsgPackAdaptorHandler {
 	return &MsgPackAdaptorHandler{
@@ -18,7 +42,6 @@ func NewMsgPackAdaptorHandler() *MsgPackAdaptorHandler {
 	}
 }
 
-// MsgPackAdaptorHandler is the handler for message pack.
 type MsgPackAdaptorHandler struct {
 	base *BaseMsgPackAdaptorHandler
 }
@@ -29,20 +52,53 @@ func (m *MsgPackAdaptorHandler) Chan() <-chan *msgstream.MsgPack {
 }
 
 // Handle is the callback for handling message.
-func (m *MsgPackAdaptorHandler) Handle(ctx context.Context, msg message.ImmutableMessage) (bool, error) {
-	m.base.GenerateMsgPack(msg)
-	for m.base.PendingMsgPack.Len() > 0 {
+func (m *MsgPackAdaptorHandler) Handle(param message.HandleParam) message.HandleResult {
+	messageHandled := false
+	// not handle new message if there are pending msgPack.
+	if param.Message != nil && m.base.PendingMsgPack.Len() == 0 {
+		m.base.GenerateMsgPack(param.Message)
+		messageHandled = true
+	}
+
+	for {
+		var sendCh chan<- *msgstream.MsgPack
+		if m.base.PendingMsgPack.Len() != 0 {
+			sendCh = m.base.Channel
+		}
+
 		select {
-		case <-ctx.Done():
-			return true, ctx.Err()
-		case m.base.Channel <- m.base.PendingMsgPack.Next():
+		case <-param.Ctx.Done():
+			return message.HandleResult{
+				MessageHandled: messageHandled,
+				Error:          param.Ctx.Err(),
+			}
+		case msg, notClose := <-param.Upstream:
+			if !notClose {
+				return message.HandleResult{
+					MessageHandled: messageHandled,
+					Error:          message.ErrUpstreamClosed,
+				}
+			}
+			return message.HandleResult{
+				Incoming:       msg,
+				MessageHandled: messageHandled,
+			}
+		case sendCh <- m.base.PendingMsgPack.Next():
 			m.base.PendingMsgPack.UnsafeAdvance()
+			if m.base.PendingMsgPack.Len() > 0 {
+				continue
+			}
+			return message.HandleResult{MessageHandled: messageHandled}
+		case <-param.TimeTickChan:
+			return message.HandleResult{
+				MessageHandled:  messageHandled,
+				TimeTickUpdated: true,
+			}
 		}
 	}
-	return true, nil
 }
 
-// Close is the callback for closing message.
+// Close closes the handler.
 func (m *MsgPackAdaptorHandler) Close() {
 	close(m.base.Channel)
 }

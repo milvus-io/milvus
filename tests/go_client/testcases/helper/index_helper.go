@@ -55,6 +55,10 @@ var SupportBinIvfFlatMetricType = []entity.MetricType{
 	entity.HAMMING,
 }
 
+var SupportFullTextSearchMetricsType = []entity.MetricType{
+	entity.BM25,
+}
+
 var UnsupportedSparseVecMetricsType = []entity.MetricType{
 	entity.L2,
 	entity.COSINE,

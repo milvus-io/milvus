@@ -704,6 +704,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.Properties = result.Properties
 	t.result.DbName = result.GetDbName()
 	t.result.NumPartitions = result.NumPartitions
+	t.result.UpdateTimestamp = result.UpdateTimestamp
 	for _, field := range result.Schema.Fields {
 		if field.IsDynamic {
 			continue

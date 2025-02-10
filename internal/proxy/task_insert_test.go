@@ -405,6 +405,13 @@ func TestInsertTask_Function(t *testing.T) {
 
 	info := newSchemaInfo(schema)
 	cache := NewMockCache(t)
+	collectionID := UniqueID(0)
+	cache.On("GetCollectionID",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(collectionID, nil)
+
 	cache.On("GetCollectionSchema",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
@@ -436,4 +443,33 @@ func TestInsertTask_Function(t *testing.T) {
 	globalMetaCache = cache
 	err = task.PreExecute(ctx)
 	assert.NoError(t, err)
+}
+
+func TestInsertTaskForSchemaMismatch(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	mockCache := NewMockCache(t)
+	globalMetaCache = mockCache
+	ctx := context.Background()
+
+	t.Run("schema ts mismatch", func(t *testing.T) {
+		it := insertTask{
+			ctx: context.Background(),
+			insertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					DbName:         "hooooooo",
+					CollectionName: "fooooo",
+				},
+			},
+			schemaTimestamp: 99,
+		}
+		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+			updateTimestamp: 100,
+		}, nil)
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		err := it.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
+	})
 }

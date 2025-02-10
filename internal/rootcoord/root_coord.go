@@ -1224,6 +1224,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.Properties = collInfo.Properties
 	resp.NumPartitions = int64(len(collInfo.Partitions))
 	resp.DbId = collInfo.DBID
+	resp.UpdateTimestamp = collInfo.UpdateTimestamp
 	return resp
 }
 

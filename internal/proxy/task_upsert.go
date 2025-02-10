@@ -66,7 +66,8 @@ type upsertTask struct {
 	partitionKeys    *schemapb.FieldData
 	// automatic generate pk as new pk wehen autoID == true
 	// delete task need use the oldIds
-	oldIds *schemapb.IDs
+	oldIds          *schemapb.IDs
+	schemaTimestamp uint64
 }
 
 // TraceCtx returns upsertTask context
@@ -208,6 +209,14 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 			zap.Error(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
+
+	// check varchar with analyzer was utf-8 format
+	err = checkVarcharFormat(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+	if err != nil {
+		log.Warn("check varchar format failed", zap.Error(err))
+		return err
+	}
+
 	// set field ID to insert field data
 	err = fillFieldPropertiesBySchema(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.CollectionSchema)
 	if err != nil {
@@ -310,6 +319,24 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	}
 	if replicateID != "" {
 		return merr.WrapErrCollectionReplicateMode("upsert")
+	}
+
+	collID, err := globalMetaCache.GetCollectionID(context.Background(), it.req.GetDbName(), collectionName)
+	if err != nil {
+		log.Warn("fail to get collection id", zap.Error(err))
+		return err
+	}
+	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.req.GetDbName(), collectionName, collID)
+	if err != nil {
+		log.Warn("fail to get collection info", zap.Error(err))
+		return err
+	}
+	if it.schemaTimestamp != 0 {
+		if it.schemaTimestamp != colInfo.updateTimestamp {
+			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)
+			log.Info("collection schema mismatch", zap.String("collectionName", collectionName), zap.Error(err))
+			return err
+		}
 	}
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.req.GetDbName(), collectionName)

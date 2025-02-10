@@ -317,6 +317,7 @@ type IndexTaskStats struct {
 	IndexVersion    int64  `json:"index_version,omitempty,string"`
 	CreatedUTCTime  string `json:"create_time,omitempty"`
 	FinishedUTCTime string `json:"finished_time,omitempty"`
+	NodeID          int64  `json:"node_id,omitempty,string"`
 }
 
 type SyncTask struct {
@@ -394,6 +395,7 @@ type CompactionTask struct {
 	TotalRows      int64    `json:"total_rows,omitempty,string"`
 	InputSegments  []string `json:"input_segments,omitempty"`
 	ResultSegments []string `json:"result_segments,omitempty"`
+	NodeID         int64    `json:"node_id,omitempty,string"`
 }
 
 // RootCoordConfiguration records the configuration of RootCoord.

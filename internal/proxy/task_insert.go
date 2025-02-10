@@ -30,15 +30,16 @@ type insertTask struct {
 	insertMsg *BaseInsertTask
 	ctx       context.Context
 
-	result        *milvuspb.MutationResult
-	idAllocator   *allocator.IDAllocator
-	segIDAssigner *segIDAssigner
-	chMgr         channelsMgr
-	chTicker      channelsTimeTicker
-	vChannels     []vChan
-	pChannels     []pChan
-	schema        *schemapb.CollectionSchema
-	partitionKeys *schemapb.FieldData
+	result          *milvuspb.MutationResult
+	idAllocator     *allocator.IDAllocator
+	segIDAssigner   *segIDAssigner
+	chMgr           channelsMgr
+	chTicker        channelsTimeTicker
+	vChannels       []vChan
+	pChannels       []pChan
+	schema          *schemapb.CollectionSchema
+	partitionKeys   *schemapb.FieldData
+	schemaTimestamp uint64
 }
 
 // TraceCtx returns insertTask context
@@ -135,6 +136,24 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrCollectionReplicateMode("insert")
 	}
 
+	collID, err := globalMetaCache.GetCollectionID(context.Background(), it.insertMsg.GetDbName(), collectionName)
+	if err != nil {
+		log.Ctx(ctx).Warn("fail to get collection id", zap.Error(err))
+		return err
+	}
+	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
+	if err != nil {
+		log.Ctx(ctx).Warn("fail to get collection info", zap.Error(err))
+		return err
+	}
+	if it.schemaTimestamp != 0 {
+		if it.schemaTimestamp != colInfo.updateTimestamp {
+			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)
+			log.Ctx(ctx).Info("collection schema mismatch", zap.String("collectionName", collectionName), zap.Error(err))
+			return err
+		}
+	}
+
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Ctx(ctx).Warn("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
@@ -194,6 +213,13 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		log.Warn("check primary field data and hash primary key failed",
 			zap.Error(err))
+		return err
+	}
+
+	// check varchar with analyzer was utf-8 format
+	err = checkVarcharFormat(it.schema, it.insertMsg)
+	if err != nil {
+		log.Warn("check varchar format failed", zap.Error(err))
 		return err
 	}
 
