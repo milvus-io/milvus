@@ -75,6 +75,9 @@ func (suite *MapUtilSuite) TestConcurrentMap() {
 	currMap.GetOrInsert(200, "v-200")
 	currMap.GetOrInsert(300, "v-300")
 
+	suite.ElementsMatch([]int64{100, 200, 300}, currMap.Keys())
+	suite.ElementsMatch([]string{"v-100", "v-200", "v-300"}, currMap.Values())
+
 	var exist bool
 	v, exist = currMap.Get(100)
 	suite.Equal("v-100", v)
