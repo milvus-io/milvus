@@ -32,6 +32,7 @@ import (
 	"io"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -94,6 +95,7 @@ type baseSegment struct {
 	bloomFilterSet *pkoracle.BloomFilterSet
 	loadInfo       *atomic.Pointer[querypb.SegmentLoadInfo]
 	isLazyLoad     bool
+	skipGrowingBF  bool // Skip generating or maintaining BF for growing segments; deletion checks will be handled in segcore.
 	channel        metautil.Channel
 
 	resourceUsageCache *atomic.Pointer[ResourceUsage]
@@ -114,6 +116,7 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 		bloomFilterSet: pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType),
 		channel:        channel,
 		isLazyLoad:     isLazyLoad(collection, segmentType),
+		skipGrowingBF:  segmentType == SegmentTypeGrowing && paramtable.Get().QueryNodeCfg.SkipGrowingSegmentBF.GetAsBool(),
 
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
 		needUpdatedVersion: atomic.NewInt64(0),
@@ -183,6 +186,9 @@ func (s *baseSegment) LoadInfo() *querypb.SegmentLoadInfo {
 }
 
 func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
+	if s.skipGrowingBF {
+		return
+	}
 	s.bloomFilterSet.UpdateBloomFilter(pks)
 }
 
@@ -190,10 +196,20 @@ func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
 // false otherwise,
 // may returns true even the PK doesn't exist actually
 func (s *baseSegment) MayPkExist(pk *storage.LocationsCache) bool {
+	if s.skipGrowingBF {
+		return true
+	}
 	return s.bloomFilterSet.MayPkExist(pk)
 }
 
 func (s *baseSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
+	if s.skipGrowingBF {
+		allPositive := make([]bool, lc.Size())
+		for i := 0; i < lc.Size(); i++ {
+			allPositive[i] = true
+		}
+		return allPositive
+	}
 	return s.bloomFilterSet.BatchPkExist(lc)
 }
 
@@ -261,6 +277,7 @@ type LocalSegment struct {
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo]
 	space              *milvus_storage.Space
+	warmupDispatcher   *AsyncWarmupDispatcher
 }
 
 func NewSegment(ctx context.Context,
@@ -268,6 +285,7 @@ func NewSegment(ctx context.Context,
 	segmentType SegmentType,
 	version int64,
 	loadInfo *querypb.SegmentLoadInfo,
+	warmupDispatcher *AsyncWarmupDispatcher,
 ) (Segment, error) {
 	log := log.Ctx(ctx)
 	/*
@@ -326,9 +344,10 @@ func NewSegment(ctx context.Context,
 		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 
-		memSize:     atomic.NewInt64(-1),
-		rowNum:      atomic.NewInt64(-1),
-		insertCount: atomic.NewInt64(0),
+		memSize:          atomic.NewInt64(-1),
+		rowNum:           atomic.NewInt64(-1),
+		insertCount:      atomic.NewInt64(0),
+		warmupDispatcher: warmupDispatcher,
 	}
 
 	if err := segment.initializeSegment(); err != nil {
@@ -449,7 +468,7 @@ func (s *LocalSegment) initializeSegment() error {
 // Provide ONLY the read lock operations,
 // don't make `ptrLock` public to avoid abusing of the mutex.
 func (s *LocalSegment) PinIfNotReleased() error {
-	if !s.ptrLock.PinIfNotReleased() {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	return nil
@@ -465,10 +484,10 @@ func (s *LocalSegment) InsertCount() int64 {
 
 func (s *LocalSegment) RowNum() int64 {
 	// if segment is not loaded, return 0 (maybe not loaded or release by lru)
-	if !s.ptrLock.RLockIf(state.IsDataLoaded) {
+	if !s.ptrLock.PinIf(state.IsDataLoaded) {
 		return 0
 	}
-	defer s.ptrLock.RUnlock()
+	defer s.ptrLock.Unpin()
 
 	rowNum := s.rowNum.Load()
 	if rowNum < 0 {
@@ -485,10 +504,10 @@ func (s *LocalSegment) RowNum() int64 {
 }
 
 func (s *LocalSegment) MemSize() int64 {
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return 0
 	}
-	defer s.ptrLock.RUnlock()
+	defer s.ptrLock.Unpin()
 
 	memSize := s.memSize.Load()
 	if memSize < 0 {
@@ -522,10 +541,10 @@ func (s *LocalSegment) ExistIndex(fieldID int64) bool {
 }
 
 func (s *LocalSegment) HasRawData(fieldID int64) bool {
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return false
 	}
-	defer s.ptrLock.RUnlock()
+	defer s.ptrLock.Unpin()
 
 	ret := C.HasRawData(s.ptr, C.int64_t(fieldID))
 	return bool(ret)
@@ -561,11 +580,12 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 		zap.Int64("segmentID", s.ID()),
 		zap.String("segmentType", s.segmentType.String()),
 	)
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
-	defer s.ptrLock.RUnlock()
+	defer s.ptrLock.Unpin()
 
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
@@ -604,11 +624,10 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 }
 
 func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
-		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
-	defer s.ptrLock.RUnlock()
+	defer s.ptrLock.Unpin()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
@@ -673,18 +692,15 @@ func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan
 		return nil, merr.WrapErrParameterInvalid("segment offsets", "empty offsets")
 	}
 
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
-		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
-	defer s.ptrLock.RUnlock()
+	defer s.ptrLock.Unpin()
 
 	fields := []zap.Field{
 		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
 		zap.Int64("msgID", plan.msgID),
-		zap.String("segmentType", s.segmentType.String()),
 		zap.Int("resultNum", len(offsets)),
 	}
 
@@ -772,10 +788,10 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 	if s.Type() != SegmentTypeGrowing {
 		return fmt.Errorf("unexpected segmentType when segmentInsert, segmentType = %s", s.segmentType.String())
 	}
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
-	defer s.ptrLock.RUnlock()
+	defer s.ptrLock.Unpin()
 
 	offset, err := s.preInsert(ctx, len(rowIDs))
 	if err != nil {
@@ -837,10 +853,10 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.Primary
 	if len(primaryKeys) == 0 {
 		return nil
 	}
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
-	defer s.ptrLock.RUnlock()
+	defer s.ptrLock.Unpin()
 
 	cOffset := C.int64_t(0) // depre
 	cSize := C.int64_t(len(primaryKeys))
@@ -913,10 +929,10 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 	rowCount := loadInfo.GetNumOfRows()
 	fields := loadInfo.GetBinlogPaths()
 
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
-	defer s.ptrLock.RUnlock()
+	defer s.ptrLock.Unpin()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
@@ -986,10 +1002,10 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 }
 
 func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
-	defer s.ptrLock.RUnlock()
+	defer s.ptrLock.Unpin()
 
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("LoadFieldData-%d-%d", s.ID(), fieldID))
 	defer sp.End()
@@ -1161,10 +1177,10 @@ func (s *LocalSegment) LoadDeltaData2(ctx context.Context, schema *schemapb.Coll
 }
 
 func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fields []*datapb.FieldBinlog) error {
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
-	defer s.ptrLock.RUnlock()
+	defer s.ptrLock.Unpin()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
@@ -1214,10 +1230,10 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	pks, tss := deltaData.Pks, deltaData.Tss
 	rowNum := deltaData.RowCount
 
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
-	defer s.ptrLock.RUnlock()
+	defer s.ptrLock.Unpin()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
@@ -1450,10 +1466,10 @@ func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.F
 		zap.Int64("segmentID", s.ID()),
 		zap.Int64("fieldID", indexInfo.FieldID),
 	)
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
-	defer s.ptrLock.RUnlock()
+	defer s.ptrLock.Unpin()
 
 	var status C.CStatus
 	GetDynamicPool().Submit(func() (any, error) {
@@ -1488,10 +1504,10 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64, mmap
 		zap.Int64("fieldID", fieldID),
 		zap.Bool("mmapEnabled", mmapEnabled),
 	)
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return
 	}
-	defer s.ptrLock.RUnlock()
+	defer s.ptrLock.Unpin()
 
 	var status C.CStatus
 
@@ -1510,15 +1526,16 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64, mmap
 			return nil, nil
 		}).Await()
 	case "async":
-		GetWarmupPool().Submit(func() (any, error) {
-			// bad implemtation, warmup is async at another goroutine and hold the rlock.
-			// the state transition of segment in segment loader will blocked.
-			// add a waiter to avoid it.
-			s.ptrLock.BlockUntilDataLoadedOrReleased()
-			if !s.ptrLock.RLockIf(state.IsNotReleased) {
+		task := func() (any, error) {
+			// failed to wait for state update, return directly
+			if !s.ptrLock.BlockUntilDataLoadedOrReleased() {
 				return nil, nil
 			}
-			defer s.ptrLock.RUnlock()
+
+			if s.PinIfNotReleased() != nil {
+				return nil, nil
+			}
+			defer s.Unpin()
 
 			cFieldID := C.int64_t(fieldID)
 			cMmapEnabled := C.bool(mmapEnabled)
@@ -1529,7 +1546,8 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64, mmap
 			}
 			log.Info("warming up chunk cache asynchronously done")
 			return nil, nil
-		})
+		}
+		s.warmupDispatcher.AddTask(task)
 	default:
 		// no warming up
 	}
@@ -1610,12 +1628,6 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 
 	C.DeleteSegment(ptr)
 
-	localDiskUsage, err := GetLocalUsedSize(context.Background(), paramtable.Get().LocalStorageCfg.Path.GetValue())
-	// ignore error here, shall not block releasing
-	if err == nil {
-		metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(localDiskUsage) / 1024 / 1024) // in MB
-	}
-
 	log.Info("delete segment from memory")
 }
 
@@ -1673,4 +1685,56 @@ func (s *LocalSegment) indexNeedLoadRawData(schema *schemapb.CollectionSchema, i
 		return false, err
 	}
 	return !typeutil.IsVectorType(fieldSchema.DataType) && s.HasRawData(indexInfo.IndexInfo.FieldID), nil
+}
+
+type (
+	WarmupTask            = func() (any, error)
+	AsyncWarmupDispatcher struct {
+		mu     sync.RWMutex
+		tasks  []WarmupTask
+		notify chan struct{}
+	}
+)
+
+func NewWarmupDispatcher() *AsyncWarmupDispatcher {
+	return &AsyncWarmupDispatcher{
+		notify: make(chan struct{}, 1),
+	}
+}
+
+func (d *AsyncWarmupDispatcher) AddTask(task func() (any, error)) {
+	d.mu.Lock()
+	d.tasks = append(d.tasks, task)
+	d.mu.Unlock()
+	select {
+	case d.notify <- struct{}{}:
+	default:
+	}
+}
+
+func (d *AsyncWarmupDispatcher) Run(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-d.notify:
+			d.mu.RLock()
+			tasks := make([]WarmupTask, len(d.tasks))
+			copy(tasks, d.tasks)
+			d.mu.RUnlock()
+
+			for _, task := range tasks {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					GetWarmupPool().Submit(task)
+				}
+			}
+
+			d.mu.Lock()
+			d.tasks = d.tasks[len(tasks):]
+			d.mu.Unlock()
+		}
+	}
 }

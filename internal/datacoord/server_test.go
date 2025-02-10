@@ -824,7 +824,7 @@ func TestServer_getSystemInfoMetrics(t *testing.T) {
 
 func TestDropVirtualChannel(t *testing.T) {
 	t.Run("normal DropVirtualChannel", func(t *testing.T) {
-		segmentManager := NewMockManager(t)
+		segmentManager := NewMockSegmentManager(t)
 		svr := newTestServer(t, WithSegmentManager(segmentManager))
 
 		defer closeTestServer(t, svr)

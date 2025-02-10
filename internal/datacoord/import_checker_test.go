@@ -258,13 +258,17 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(mockErr)
+	catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
 	s.checker.checkPreImportingJob(job)
 	importTasks := s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(ImportTaskType))
 	s.Equal(0, len(importTasks))
-	s.Equal(internalpb.ImportJobState_PreImporting, s.imeta.GetJob(job.GetJobID()).GetState())
+	s.Equal(internalpb.ImportJobState_Failed, s.imeta.GetJob(job.GetJobID()).GetState())
 
 	alloc.ExpectedCalls = nil
 	alloc.EXPECT().allocN(mock.Anything).Return(0, 0, mockErr)
+	err := s.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
+	s.NoError(err)
+	s.checker.checkPreImportingJob(job)
 	importTasks = s.imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(ImportTaskType))
 	s.Equal(0, len(importTasks))
 	s.Equal(internalpb.ImportJobState_PreImporting, s.imeta.GetJob(job.GetJobID()).GetState())

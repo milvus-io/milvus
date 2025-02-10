@@ -474,7 +474,6 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 			State:                     pb.PartitionState_PartitionCreated,
 		}
 	}
-
 	collInfo := model.Collection{
 		CollectionID:         collID,
 		DBID:                 t.dbID,
@@ -492,6 +491,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		Partitions:           partitions,
 		Properties:           t.Req.Properties,
 		EnableDynamicField:   t.schema.EnableDynamicField,
+		UpdateTimestamp:      ts,
 	}
 
 	// We cannot check the idempotency inside meta table when adding collection, since we'll execute duplicate steps

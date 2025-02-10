@@ -76,6 +76,12 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	ts := a.GetTs()
+
+	tso, err := a.core.tsoAllocator.GenerateTSO(1)
+	if err == nil {
+		newColl.UpdateTimestamp = tso
+	}
+
 	redoTask := newBaseRedoTask(a.core.stepExecutor)
 	redoTask.AddSyncStep(&AlterCollectionStep{
 		baseStep: baseStep{core: a.core},
@@ -185,6 +191,12 @@ func (a *alterCollectionFieldTask) Execute(ctx context.Context) error {
 		return err
 	}
 	ts := a.GetTs()
+
+	tso, err := a.core.tsoAllocator.GenerateTSO(1)
+	if err == nil {
+		newColl.UpdateTimestamp = tso
+	}
+
 	redoTask := newBaseRedoTask(a.core.stepExecutor)
 	redoTask.AddSyncStep(&AlterCollectionStep{
 		baseStep: baseStep{core: a.core},

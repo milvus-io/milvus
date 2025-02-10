@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	pkgcommon "github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
@@ -275,6 +276,15 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 }
 
 func ValidateIndexParams(index *model.Index) error {
+	if err := CheckDuplidateKey(index.IndexParams, "indexParams"); err != nil {
+		return err
+	}
+	if err := CheckDuplidateKey(index.UserIndexParams, "userIndexParams"); err != nil {
+		return err
+	}
+	if err := CheckDuplidateKey(index.TypeParams, "typeParams"); err != nil {
+		return err
+	}
 	indexType := GetIndexType(index.IndexParams)
 	indexParams := funcutil.KeyValuePair2Map(index.IndexParams)
 	if err := indexparamcheck.ValidateMmapIndexParams(indexType, indexParams); err != nil {
@@ -283,6 +293,17 @@ func ValidateIndexParams(index *model.Index) error {
 	userIndexParams := funcutil.KeyValuePair2Map(index.UserIndexParams)
 	if err := indexparamcheck.ValidateMmapIndexParams(indexType, userIndexParams); err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid mmap user index params", err.Error())
+	}
+	return nil
+}
+
+func CheckDuplidateKey(kvs []*commonpb.KeyValuePair, tag string) error {
+	keySet := typeutil.NewSet[string]()
+	for _, kv := range kvs {
+		if keySet.Contain(kv.GetKey()) {
+			return merr.WrapErrParameterInvalidMsg("duplicate %s key in %s params", kv.GetKey(), tag)
+		}
+		keySet.Insert(kv.GetKey())
 	}
 	return nil
 }
@@ -353,8 +374,33 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 		return merr.Status(merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")), nil
 	}
 
+	collInfo, err := s.handler.GetCollection(ctx, req.GetCollectionID())
+	if err != nil {
+		log.Warn("failed to get collection", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	schemaHelper, err := typeutil.CreateSchemaHelper(collInfo.Schema)
+	if err != nil {
+		log.Warn("failed to create schema helper", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	reqIndexParamMap := funcutil.KeyValuePair2Map(req.GetParams())
+
 	for _, index := range indexes {
 		if len(req.GetParams()) > 0 {
+			fieldSchema, err := schemaHelper.GetFieldFromID(index.FieldID)
+			if err != nil {
+				log.Warn("failed to get field schema", zap.Error(err))
+				return merr.Status(err), nil
+			}
+			isVecIndex := typeutil.IsVectorType(fieldSchema.DataType)
+			err = pkgcommon.ValidateAutoIndexMmapConfig(Params.AutoIndexConfig.Enable.GetAsBool(), isVecIndex, reqIndexParamMap)
+			if err != nil {
+				log.Warn("failed to validate auto index mmap config", zap.Error(err))
+				return merr.Status(err), nil
+			}
+
 			// update user index params
 			newUserIndexParams := UpdateParams(index, index.UserIndexParams, req.GetParams())
 			log.Info("alter index user index params",
@@ -393,7 +439,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 		}
 	}
 
-	err := s.meta.indexMeta.AlterIndex(ctx, indexes...)
+	err = s.meta.indexMeta.AlterIndex(ctx, indexes...)
 	if err != nil {
 		log.Warn("failed to alter index", zap.Error(err))
 		return merr.Status(err), nil

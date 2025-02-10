@@ -170,6 +170,9 @@ mq:
     mergeCheckInterval: 1 # the interval time(in seconds) for dispatcher to check whether to merge
     targetBufSize: 16 # the lenth of channel buffer for targe
     maxTolerantLag: 3 # Default value: "3", the timeout(in seconds) that target sends msgPack
+    maxDispatcherNumPerPchannel: 5 # The maximum number of dispatchers per physical channel, primarily to limit the number of consumers and prevent performance issues(e.g., during recovery when a large number of channels are watched).
+    retrySleep: 3 # register retry sleep time in seconds
+    retryTimeout: 60 # register retry timeout in seconds
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
@@ -802,6 +805,7 @@ common:
     # like the old password verification when updating the credential
     superUsers: 
     defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
+    rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     rbac:
       overrideBuiltInPrivilegeGroups:
         enabled: false # Whether to override build-in privilege groups
@@ -836,6 +840,7 @@ common:
     threshold:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
+    maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
   storage:
     scheme: s3
     enablev2: false

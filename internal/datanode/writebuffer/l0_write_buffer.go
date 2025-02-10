@@ -165,23 +165,24 @@ func (wb *l0WriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 
 	if paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool() {
 		// In Skip BF mode, datanode no longer maintains bloom filters.
-		// So, here we skip filtering delete entries.
+		// So, here we skip generating BF (growing segment's BF will be regenerated during the sync phase)
+		// and also skip filtering delete entries by bf.
 		wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos)
 	} else {
 		// distribute delete msg
 		// bf write buffer check bloom filter of segment and current insert batch to decide which segment to write delete data
 		wb.dispatchDeleteMsgs(groups, deleteMsgs, startPos, endPos)
-	}
 
-	// update pk oracle
-	for _, inData := range groups {
-		// segment shall always exists after buffer insert
-		segments := wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(inData.segmentID))
-		for _, segment := range segments {
-			for _, fieldData := range inData.pkField {
-				err := segment.GetBloomFilterSet().UpdatePKRange(fieldData)
-				if err != nil {
-					return err
+		// update pk oracle
+		for _, inData := range groups {
+			// segment shall always exists after buffer insert
+			segments := wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(inData.segmentID))
+			for _, segment := range segments {
+				for _, fieldData := range inData.pkField {
+					err := segment.GetBloomFilterSet().UpdatePKRange(fieldData)
+					if err != nil {
+						return err
+					}
 				}
 			}
 		}
