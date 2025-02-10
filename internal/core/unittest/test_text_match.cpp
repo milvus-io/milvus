@@ -209,50 +209,6 @@ TEST(TextMatch, Index) {
     }
 }
 
-TEST(TextMatch, TestPerf) {
-    auto schema = GenTestSchema();
-    auto seg = CreateGrowingSegment(schema, empty_index_meta);
-    std::string str = "football";
-    int64_t N = 10000000;
-    uint64_t seed = 19190504;
-    auto raw_data = DataGen(schema, N, seed);
-    auto str_col = raw_data.raw_->mutable_fields_data()
-                       ->at(1)
-                       .mutable_scalars()
-                       ->mutable_string_data()
-                       ->mutable_data();
-    for (int64_t i = 0; i < N; i++) {
-        str_col->at(i) = str;
-    }
-    seg->PreInsert(N);
-    seg->Insert(0,
-                N,
-                raw_data.row_ids_.data(),
-                raw_data.timestamps_.data(),
-                raw_data.raw_);
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
-
-    BitsetType final;
-    auto total_duration_ms = 0;
-    // while (true) {
-    for (int i = 0; i < 10; ++i) {
-        auto start = std::chrono::high_resolution_clock::now();
-        auto expr = GetMatchExpr(schema, "football", OpType::TextMatch);
-        final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration_ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
-                .count();
-        total_duration_ms += duration_ms;
-    }
-    std::cout << "Execution time for 10 times: " << total_duration_ms << " ms" << std::endl;
-    ASSERT_EQ(final.size(), N);
-    for (int64_t i = 0; i < N; i++) {
-        ASSERT_TRUE(final[i]);
-    }
-}
-
 TEST(TextMatch, GrowingNaive) {
     auto schema = GenTestSchema();
     auto seg = CreateGrowingSegment(schema, empty_index_meta);

@@ -279,9 +279,8 @@ InvertedIndexTantivy<T>::InApplyFilter(
     TargetBitmap bitset(Count());
     for (size_t i = 0; i < n; ++i) {
         wrapper_->term_query(values[i], &bitset);
-        // todo(SpadeA): handle filter
-        // apply_hits_with_filter(bitset, array, filter);
-        PanicInfo(ErrorCode::NotImplemented, "InApplyFilter not implemented");
+        // todo(SpadeA): could push-down the filter to tantivy query
+        apply_hits_with_filter(bitset, filter);
     }
     return bitset;
 }
@@ -293,9 +292,8 @@ InvertedIndexTantivy<T>::InApplyCallback(
     for (size_t i = 0; i < n; ++i) {
         TargetBitmap bitset(Count());
         wrapper_->term_query(values[i], &bitset);
-        // todo(SpadeA): handle callback
-        // apply_hits_with_callback(array, callback);
-        PanicInfo(ErrorCode::NotImplemented, "InApplyCallback not implemented");
+        // todo(SpadeA): could push-down the callback to tantivy query
+        apply_hits_with_callback(bitset, callback);
     }
 }
 
