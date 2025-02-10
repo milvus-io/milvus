@@ -75,6 +75,9 @@ class ReduceHelper {
     FillPrimaryKey();
 
     void
+    FillSysData();
+
+    void
     ReduceResultData();
 
     virtual int64_t

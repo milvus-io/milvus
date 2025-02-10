@@ -11,6 +11,8 @@
 
 #include "Reduce.h"
 
+#include "common/Consts.h"
+#include "common/FieldMeta.h"
 #include "log/Log.h"
 #include <cstdint>
 #include <vector>
@@ -58,6 +60,7 @@ ReduceHelper::Reduce() {
     ReduceResultData();
     RefreshSearchResults();
     FillEntryData();
+    FillSysData();
 }
 
 void
@@ -200,6 +203,42 @@ ReduceHelper::FillEntryData() {
                 .count();
         monitor::internal_core_search_get_target_entry_latency.Observe(
             get_entry_cost / 1000);
+    }
+}
+
+void
+ReduceHelper::FillSysData() {
+    tracer::AutoSpan span("ReduceHelper::FillSysData", tracer::GetRootSpan());
+    for (auto search_result : search_results_) {
+        auto segment = static_cast<milvus::segcore::SegmentInterface*>(
+            search_result->segment_);
+        auto seg_id = segment->get_segment_id();
+        // fill segment id
+        auto field_meta_id = FieldMeta(FieldName("segment_id"),
+                                    SegmentIDFieldID,
+                                    DataType::INT64,
+                                    false);
+        auto seg_ids = CreateScalarDataArray(search_result->seg_offsets_.size(),
+                                        field_meta_id);
+        std::fill_n(seg_ids->mutable_scalars()
+                                 ->mutable_long_data()
+                                 ->mutable_data()
+                                 ->mutable_data(),
+                    search_result->seg_offsets_.size(),
+                    seg_id);
+        search_result->output_fields_data_[SegmentIDFieldID] = std::move(seg_ids);
+        // fill offset
+        auto field_meta_offset = FieldMeta(FieldName("offset"), OffsetFieldID, DataType::INT64, false);
+        auto offsets = CreateScalarDataArray(search_result->seg_offsets_.size(),
+                                        field_meta_offset);
+        std::copy_n(search_result->seg_offsets_.begin(),
+                    search_result->seg_offsets_.size(),
+                    offsets->mutable_scalars()
+                                             ->mutable_long_data()
+                                             ->mutable_data()
+                                             ->mutable_data());
+        auto seg_offset = search_result->seg_offsets_;
+        search_result->output_fields_data_[OffsetFieldID] = std::move(offsets);
     }
 }
 
@@ -442,6 +481,20 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
         search_result_data->mutable_fields_data()->AddAllocated(
             field_data.release());
     }
+    auto offset_meta = FieldMeta(FieldName("offset"), OffsetFieldID, DataType::INT64, false);
+    auto offset_data =
+            milvus::segcore::MergeDataArray(result_pairs, offset_meta);
+    search_result_data->mutable_fields_data()->AddAllocated(
+            offset_data.release());
+
+    auto id_meta = FieldMeta(FieldName("segment_id"),
+                                    SegmentIDFieldID,
+                                    DataType::INT64,
+                                    false);
+    auto segid_data =
+            milvus::segcore::MergeDataArray(result_pairs, id_meta);
+    search_result_data->mutable_fields_data()->AddAllocated(
+            segid_data.release());
 
     // SearchResultData to blob
     auto size = search_result_data->ByteSizeLong();
