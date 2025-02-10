@@ -114,7 +114,7 @@ func (m *ConcurrentMap[K, V]) Len() int {
 }
 
 func (m *ConcurrentMap[K, V]) Values() []V {
-	ret := make([]V, m.Len())
+	ret := make([]V, 0, m.Len())
 	m.inner.Range(func(key, value any) bool {
 		ret = append(ret, value.(V))
 		return true
@@ -123,7 +123,7 @@ func (m *ConcurrentMap[K, V]) Values() []V {
 }
 
 func (m *ConcurrentMap[K, V]) Keys() []K {
-	ret := make([]K, m.Len())
+	ret := make([]K, 0, m.Len())
 	m.inner.Range(func(key, value any) bool {
 		ret = append(ret, key.(K))
 		return true
