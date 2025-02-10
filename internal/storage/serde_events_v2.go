@@ -19,7 +19,6 @@ package storage
 import (
 	"fmt"
 	"io"
-	"strconv"
 
 	"github.com/apache/arrow/go/v12/arrow"
 
@@ -27,10 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-)
-
-const (
-	FieldIDMetaKey = "FieldID"
 )
 
 type packedRecordReader struct {
@@ -50,21 +45,6 @@ func (pr *packedRecordReader) Next() error {
 	rec, err := pr.reader.ReadNext()
 	if err != nil || rec == nil {
 		return io.EOF
-	}
-
-	if pr.field2Col == nil || len(pr.field2Col) == 0 {
-		pr.field2Col = make(map[FieldID]int)
-		for i, field := range rec.Schema().Fields() {
-			val, ok := field.Metadata.GetValue(FieldIDMetaKey)
-			if !ok {
-				return merr.WrapErrServiceInternal(fmt.Sprintf("no field id meta found for field [%s]", field.Name))
-			}
-			fid, err := strconv.Atoi(val)
-			if err != nil {
-				return merr.WrapErrServiceInternal(fmt.Sprintf("can not convert field id meta [%s] to int", val))
-			}
-			pr.field2Col[FieldID(fid)] = i
-		}
 	}
 	pr.r = newSimpleArrowRecord(rec, pr.field2Col)
 	return nil
@@ -91,11 +71,16 @@ func NewPackedRecordReader(path string, schema *schemapb.CollectionSchema, buffe
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("New binlog record packed reader error: %s", err.Error())
 	}
+	field2Col := make(map[FieldID]int)
+	for i, field := range schema.Fields {
+		field2Col[FieldID(field.FieldID)] = i
+	}
 	return &packedRecordReader{
 		reader:     reader,
 		schema:     schema,
 		bufferSize: bufferSize,
 		path:       path,
+		field2Col:  field2Col,
 	}, nil
 }
 

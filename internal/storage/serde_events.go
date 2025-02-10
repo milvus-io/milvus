@@ -403,17 +403,17 @@ func ValueSerializer(v []*Value, fieldSchema []*schemapb.FieldSchema) (Record, e
 	arrays := make([]arrow.Array, len(fieldSchema))
 	fields := make([]arrow.Field, len(fieldSchema))
 	field2Col := make(map[FieldID]int, len(fieldSchema))
-	for i, fid := range fieldSchema {
-		builder := builders[fid.FieldID]
+	for i, field := range fieldSchema {
+		builder := builders[field.FieldID]
 		arrays[i] = builder.NewArray()
 		builder.Release()
 		fields[i] = arrow.Field{
-			Name:     fid.Name,
+			Name:     field.Name,
 			Type:     arrays[i].DataType(),
 			Nullable: true, // No nullable check here.
-			Metadata: arrow.NewMetadata([]string{"FieldID"}, []string{strconv.Itoa(int(fid.FieldID))}),
+			Metadata: arrow.NewMetadata([]string{"FieldID"}, []string{strconv.Itoa(int(field.FieldID))}),
 		}
-		field2Col[fid.FieldID] = i
+		field2Col[field.FieldID] = i
 	}
 	return newSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(len(v))), field2Col), nil
 }
