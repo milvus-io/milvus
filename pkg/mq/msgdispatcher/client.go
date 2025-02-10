@@ -82,7 +82,7 @@ func (c *client) Register(ctx context.Context, vchannel string, pos *Pos, subPos
 	}
 	// Check if the consumer number limit has been reached.
 	limit := paramtable.Get().MQCfg.MaxDispatcherNumPerPchannel.GetAsInt()
-	if manager.Num() >= limit {
+	if manager.NumConsumer() >= limit {
 		return nil, merr.WrapErrTooManyConsumers(vchannel, fmt.Sprintf("limit=%d", limit))
 	}
 	// Begin to register
