@@ -1147,6 +1147,40 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 			},
 		}
 	}
+
+	s1 := &SegmentInfo{
+		SegmentInfo:   genSeg(1, 20),
+		lastFlushTime: time.Now().Add(-100 * time.Minute),
+	}
+	s2 := &SegmentInfo{
+		SegmentInfo:   genSeg(2, 20),
+		lastFlushTime: time.Now(),
+	}
+	s3 := &SegmentInfo{
+		SegmentInfo:   genSeg(3, 20),
+		lastFlushTime: time.Now(),
+	}
+	s4 := &SegmentInfo{
+		SegmentInfo:   genSeg(4, 20),
+		lastFlushTime: time.Now(),
+	}
+	s5 := &SegmentInfo{
+		SegmentInfo:   genSeg(5, 20),
+		lastFlushTime: time.Now(),
+	}
+	s6 := &SegmentInfo{
+		SegmentInfo:   genSeg(6, 20),
+		lastFlushTime: time.Now(),
+	}
+	segments := map[int64]*SegmentInfo{
+		1: s1,
+		2: s2,
+		3: s3,
+		4: s4,
+		5: s5,
+		6: s6,
+	}
+
 	tests := []struct {
 		name      string
 		fields    fields
@@ -1161,30 +1195,10 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 					channelCPs: newChannelCps(),
 
 					segments: &SegmentsInfo{
-						segments: map[int64]*SegmentInfo{
-							1: {
-								SegmentInfo:   genSeg(1, 20),
-								lastFlushTime: time.Now().Add(-100 * time.Minute),
-							},
-							2: {
-								SegmentInfo:   genSeg(2, 20),
-								lastFlushTime: time.Now(),
-							},
-							3: {
-								SegmentInfo:   genSeg(3, 20),
-								lastFlushTime: time.Now(),
-							},
-							4: {
-								SegmentInfo:   genSeg(4, 20),
-								lastFlushTime: time.Now(),
-							},
-							5: {
-								SegmentInfo:   genSeg(5, 20),
-								lastFlushTime: time.Now(),
-							},
-							6: {
-								SegmentInfo:   genSeg(6, 20),
-								lastFlushTime: time.Now(),
+						segments: segments,
+						secondaryIndexes: segmentInfoIndexes{
+							coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
+								2: segments,
 							},
 						},
 					},
@@ -1334,6 +1348,45 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 			},
 		}
 	}
+
+	s1 := &SegmentInfo{
+		SegmentInfo:   genSeg(1, 200),
+		lastFlushTime: time.Now().Add(-100 * time.Minute),
+	}
+	s2 := &SegmentInfo{
+		SegmentInfo:   genSeg(2, 200),
+		lastFlushTime: time.Now(),
+	}
+	s3 := &SegmentInfo{
+		SegmentInfo:   genSeg(3, 200),
+		lastFlushTime: time.Now(),
+	}
+	s4 := &SegmentInfo{
+		SegmentInfo:   genSeg(4, 200),
+		lastFlushTime: time.Now(),
+	}
+	s5 := &SegmentInfo{
+		SegmentInfo:   genSeg(5, 200),
+		lastFlushTime: time.Now(),
+	}
+	s6 := &SegmentInfo{
+		SegmentInfo:   genSeg(6, 200),
+		lastFlushTime: time.Now(),
+	}
+	s7 := &SegmentInfo{
+		SegmentInfo:   genSeg(7, 200),
+		lastFlushTime: time.Now(),
+	}
+	segments := map[int64]*SegmentInfo{
+		1: s1,
+		2: s2,
+		3: s3,
+		4: s4,
+		5: s5,
+		6: s6,
+		7: s7,
+	}
+
 	tests := []struct {
 		name      string
 		fields    fields
@@ -1349,34 +1402,10 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 					channelCPs: newChannelCps(),
 
 					segments: &SegmentsInfo{
-						segments: map[int64]*SegmentInfo{
-							1: {
-								SegmentInfo:   genSeg(1, 200),
-								lastFlushTime: time.Now().Add(-100 * time.Minute),
-							},
-							2: {
-								SegmentInfo:   genSeg(2, 200),
-								lastFlushTime: time.Now(),
-							},
-							3: {
-								SegmentInfo:   genSeg(3, 200),
-								lastFlushTime: time.Now(),
-							},
-							4: {
-								SegmentInfo:   genSeg(4, 200),
-								lastFlushTime: time.Now(),
-							},
-							5: {
-								SegmentInfo:   genSeg(5, 200),
-								lastFlushTime: time.Now(),
-							},
-							6: {
-								SegmentInfo:   genSeg(6, 200),
-								lastFlushTime: time.Now(),
-							},
-							7: {
-								SegmentInfo:   genSeg(7, 200),
-								lastFlushTime: time.Now(),
+						segments: segments,
+						secondaryIndexes: segmentInfoIndexes{
+							coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
+								2: segments,
 							},
 						},
 					},
@@ -1529,6 +1558,40 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 			},
 		}
 	}
+
+	s1 := &SegmentInfo{
+		SegmentInfo:   genSeg(1, 600),
+		lastFlushTime: time.Now().Add(-100 * time.Minute),
+	}
+	s2 := &SegmentInfo{
+		SegmentInfo:   genSeg(2, 600),
+		lastFlushTime: time.Now(),
+	}
+	s3 := &SegmentInfo{
+		SegmentInfo:   genSeg(3, 600),
+		lastFlushTime: time.Now(),
+	}
+	s4 := &SegmentInfo{
+		SegmentInfo:   genSeg(4, 600),
+		lastFlushTime: time.Now(),
+	}
+	s5 := &SegmentInfo{
+		SegmentInfo:   genSeg(5, 260),
+		lastFlushTime: time.Now(),
+	}
+	s6 := &SegmentInfo{
+		SegmentInfo:   genSeg(6, 260),
+		lastFlushTime: time.Now(),
+	}
+	segments := map[int64]*SegmentInfo{
+		1: s1,
+		2: s2,
+		3: s3,
+		4: s4,
+		5: s5,
+		6: s6,
+	}
+
 	tests := []struct {
 		name      string
 		fields    fields
@@ -1544,30 +1607,10 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 
 					// 4 small segments
 					segments: &SegmentsInfo{
-						segments: map[int64]*SegmentInfo{
-							1: {
-								SegmentInfo:   genSeg(1, 600),
-								lastFlushTime: time.Now().Add(-100 * time.Minute),
-							},
-							2: {
-								SegmentInfo:   genSeg(2, 600),
-								lastFlushTime: time.Now(),
-							},
-							3: {
-								SegmentInfo:   genSeg(3, 600),
-								lastFlushTime: time.Now(),
-							},
-							4: {
-								SegmentInfo:   genSeg(4, 600),
-								lastFlushTime: time.Now(),
-							},
-							5: {
-								SegmentInfo:   genSeg(5, 260),
-								lastFlushTime: time.Now(),
-							},
-							6: {
-								SegmentInfo:   genSeg(6, 260),
-								lastFlushTime: time.Now(),
+						segments: segments,
+						secondaryIndexes: segmentInfoIndexes{
+							coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
+								2: segments,
 							},
 						},
 					},
