@@ -60,7 +60,7 @@ func NewStorageSerializer(metacache metacache.MetaCache) (*storageV1Serializer, 
 	}, nil
 }
 
-func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPack) (map[int64]*storage.Blob, error) {
+func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncDataPack) (map[int64]*storage.Blob, error) {
 	if len(pack.insertData) == 0 {
 		return make(map[int64]*storage.Blob), nil
 	}
@@ -83,7 +83,7 @@ func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPac
 	return result, nil
 }
 
-func (s *storageV1Serializer) serializeBM25Stats(pack *SyncPack) (map[int64]*storage.Blob, error) {
+func (s *storageV1Serializer) serializeBM25Stats(pack *SyncDataPack) (map[int64]*storage.Blob, error) {
 	if len(pack.bm25Stats) == 0 {
 		return make(map[int64]*storage.Blob), nil
 	}
@@ -103,7 +103,7 @@ func (s *storageV1Serializer) serializeBM25Stats(pack *SyncPack) (map[int64]*sto
 	return blobs, nil
 }
 
-func (s *storageV1Serializer) serializeStatslog(pack *SyncPack) (*storage.PrimaryKeyStats, *storage.Blob, error) {
+func (s *storageV1Serializer) serializeStatslog(pack *SyncDataPack) (*storage.PrimaryKeyStats, *storage.Blob, error) {
 	if len(pack.insertData) == 0 {
 		return nil, nil, nil
 	}
@@ -130,7 +130,7 @@ func (s *storageV1Serializer) serializeStatslog(pack *SyncPack) (*storage.Primar
 	return stats, blob, nil
 }
 
-func (s *storageV1Serializer) serializeMergedPkStats(pack *SyncPack) (*storage.Blob, error) {
+func (s *storageV1Serializer) serializeMergedPkStats(pack *SyncDataPack) (*storage.Blob, error) {
 	segment, ok := s.metacache.GetSegmentByID(pack.segmentID)
 	if !ok {
 		return nil, merr.WrapErrSegmentNotFound(pack.segmentID)
@@ -153,7 +153,7 @@ func (s *storageV1Serializer) serializeMergedPkStats(pack *SyncPack) (*storage.B
 	return s.inCodec.SerializePkStatsList(stats, segment.NumOfRows())
 }
 
-func (s *storageV1Serializer) serializeMergedBM25Stats(pack *SyncPack) (map[int64]*storage.Blob, error) {
+func (s *storageV1Serializer) serializeMergedBM25Stats(pack *SyncDataPack) (map[int64]*storage.Blob, error) {
 	segment, ok := s.metacache.GetSegmentByID(pack.segmentID)
 	if !ok {
 		return nil, merr.WrapErrSegmentNotFound(pack.segmentID)
@@ -181,7 +181,7 @@ func (s *storageV1Serializer) serializeMergedBM25Stats(pack *SyncPack) (map[int6
 	return blobs, nil
 }
 
-func (s *storageV1Serializer) serializeDeltalog(pack *SyncPack) (*storage.Blob, error) {
+func (s *storageV1Serializer) serializeDeltalog(pack *SyncDataPack) (*storage.Blob, error) {
 	if len(pack.deltaData.Pks) == 0 {
 		return &storage.Blob{}, nil
 	}

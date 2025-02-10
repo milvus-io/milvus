@@ -135,7 +135,7 @@ func (s *StorageV1SerializerSuite) getDeleteBuffer() *storage.DeleteData {
 }
 
 func (s *StorageV1SerializerSuite) getBasicPack() *SyncPack {
-	pack := &SyncPack{}
+	pack := new(SyncPack)
 
 	pack.WithCollectionID(s.collectionID).
 		WithPartitionID(s.partitionID).
@@ -177,7 +177,7 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 		pack.WithTimeRange(50, 100)
 		pack.WithDrop()
 
-		_, err := s.serializer.serializeBinlog(ctx, pack)
+		_, err := s.serializer.serializeBinlog(ctx, pack.ConsumeData())
 		s.NoError(err)
 	})
 
@@ -186,7 +186,7 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 		pack.WithTimeRange(50, 100)
 		pack.WithInsertData([]*storage.InsertData{s.getEmptyInsertBuffer()}).WithBatchRows(0)
 
-		_, err := s.serializer.serializeBinlog(ctx, pack)
+		_, err := s.serializer.serializeBinlog(ctx, pack.ConsumeData())
 		s.Error(err)
 	})
 
@@ -194,11 +194,12 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 		pack := s.getBasicPack()
 		pack.WithTimeRange(50, 100)
 		pack.WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).WithBatchRows(10)
+		data := pack.ConsumeData()
 
-		blobs, err := s.serializer.serializeBinlog(ctx, pack)
+		blobs, err := s.serializer.serializeBinlog(ctx, data)
 		s.NoError(err)
 		s.Len(blobs, 4)
-		stats, blob, err := s.serializer.serializeStatslog(pack)
+		stats, blob, err := s.serializer.serializeStatslog(data)
 		s.NoError(err)
 		s.NotNil(stats)
 		s.NotNil(blob)
@@ -209,7 +210,7 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 		pack.WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).WithFlush()
 
 		s.mockCache.EXPECT().GetSegmentByID(s.segmentID).Return(nil, false).Once()
-		_, err := s.serializer.serializeMergedPkStats(pack)
+		_, err := s.serializer.serializeMergedPkStats(pack.ConsumeData())
 		s.Error(err)
 	})
 
@@ -223,17 +224,18 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 		segInfo := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
 		metacache.UpdateNumOfRows(1000)(segInfo)
 		s.mockCache.EXPECT().GetSegmentByID(s.segmentID).Return(segInfo, true)
+		data := pack.ConsumeData()
 
-		blobs, err := s.serializer.serializeBinlog(ctx, pack)
+		blobs, err := s.serializer.serializeBinlog(ctx, data)
 		s.NoError(err)
 		s.Len(blobs, 4)
-		stats, blob, err := s.serializer.serializeStatslog(pack)
+		stats, blob, err := s.serializer.serializeStatslog(data)
 		s.NoError(err)
 		s.NotNil(stats)
 		s.NotNil(blob)
 		action := metacache.RollStats(stats)
 		action(segInfo)
-		blob, err = s.serializer.serializeMergedPkStats(pack)
+		blob, err = s.serializer.serializeMergedPkStats(data)
 		s.NoError(err)
 		s.NotNil(blob)
 	})
@@ -245,9 +247,29 @@ func (s *StorageV1SerializerSuite) TestSerializeDelete() {
 		pack.WithDeleteData(s.getDeleteBuffer())
 		pack.WithTimeRange(50, 100)
 
-		blob, err := s.serializer.serializeDeltalog(pack)
+		blob, err := s.serializer.serializeDeltalog(pack.ConsumeData())
 		s.NoError(err)
 		s.NotNil(blob)
+	})
+}
+
+func (s *StorageV1SerializerSuite) TestConsume() {
+	pack := s.getBasicPack().
+		WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).
+		WithBM25Stats(map[int64]*storage.BM25Stats{101: {}}).
+		WithDeleteData(s.getDeleteBuffer())
+
+	data := pack.ConsumeData()
+	s.NotNil(data)
+	s.NotNil(data.insertData)
+	s.NotNil(data.bm25Stats)
+	s.NotNil(data.deltaData)
+	s.Nil(pack.insertData)
+	s.Nil(pack.bm25Stats)
+	s.Nil(pack.deltaData)
+
+	s.Panics(func() {
+		pack.ConsumeData()
 	})
 }
 

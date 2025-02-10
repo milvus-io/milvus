@@ -17,49 +17,59 @@
 package syncmgr
 
 import (
-	"context"
-
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-// Serializer is the interface for storage/storageV2 implementation to encoding
-// WriteBuffer into sync task.
-type Serializer interface {
-	EncodeBuffer(ctx context.Context, pack *SyncPack) (Task, error)
-}
-
 // SyncPack is the struct contains buffer sync data.
 type SyncPack struct {
-	metacache  metacache.MetaCache
-	metawriter MetaWriter
 	// data
-	insertData []*storage.InsertData
-	deltaData  *storage.DeleteData
-	bm25Stats  map[int64]*storage.BM25Stats
+	SyncDataPack
 
 	// statistics
-	tsFrom        typeutil.Timestamp
-	tsTo          typeutil.Timestamp
 	startPosition *msgpb.MsgPosition
 	checkpoint    *msgpb.MsgPosition
-	batchRows     int64 // batchRows is the row number of this sync task,not the total num of rows of segment
 	dataSource    string
-	isFlush       bool
 	isDrop        bool
 	// metadata
+	channelName string
+	// error handler function
+	errHandler func(err error)
+}
+
+// SyncDataPack is used to make a Consume semantics for SyncPack's ConsumeData function
+type SyncDataPack struct {
+	insertData   []*storage.InsertData
+	deltaData    *storage.DeleteData
+	bm25Stats    map[int64]*storage.BM25Stats
+	tsFrom       typeutil.Timestamp
+	tsTo         typeutil.Timestamp
+	batchRows    int64 // batchRows is the row number of this sync task,not the total num of rows of segment
+	isFlush      bool
 	collectionID int64
 	partitionID  int64
 	segmentID    int64
-	channelName  string
 	level        datapb.SegmentLevel
-	// error handler function
-	errHandler func(err error)
+
+	isConsumed bool // flag to indicate if the data is consumed, some big field should be gced as soon as possible
+}
+
+// ConsumeData is used to consume the data in SyncPack, and return a SyncDataPack for fast gc the big data field
+// It can only be consumed once, and will panic if consumed twice
+func (p *SyncPack) ConsumeData() *SyncDataPack {
+	if p.isConsumed {
+		panic("SyncDataPack data is alread consumed")
+	}
+	data := (*p).SyncDataPack
+	p.isConsumed = true
+	p.insertData = nil
+	p.deltaData = nil
+	p.bm25Stats = nil
+	return &data
 }
 
 func (p *SyncPack) WithInsertData(insertData []*storage.InsertData) *SyncPack {

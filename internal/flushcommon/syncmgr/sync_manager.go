@@ -116,7 +116,7 @@ func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...fu
 func (mgr *syncManager) safeSubmitTask(ctx context.Context, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 	taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
 	mgr.tasks.Insert(taskKey, task)
-	mgr.taskStats.Add(taskKey, task)
+	// mgr.taskStats.Add(taskKey, task)
 
 	key := task.SegmentID()
 	return mgr.submit(ctx, key, task, callbacks...)

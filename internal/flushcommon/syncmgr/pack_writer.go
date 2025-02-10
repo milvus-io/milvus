@@ -61,7 +61,7 @@ func NewBulkPackWriter(metaCache metacache.MetaCache, chunkManager storage.Chunk
 	}
 }
 
-func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
+func (bw *BulkPackWriter) Write(ctx context.Context, syncPack *SyncPack) (
 	inserts map[int64]*datapb.FieldBinlog,
 	deltas *datapb.FieldBinlog,
 	stats map[int64]*datapb.FieldBinlog,
@@ -69,6 +69,8 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 	size int64,
 	err error,
 ) {
+	pack := syncPack.ConsumeData()
+
 	err = bw.prefetchIDs(pack)
 	if err != nil {
 		log.Warn("failed allocate ids for sync task", zap.Error(err))
@@ -98,7 +100,7 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 }
 
 // prefetchIDs pre-allcates ids depending on the number of blobs current task contains.
-func (bw *BulkPackWriter) prefetchIDs(pack *SyncPack) error {
+func (bw *BulkPackWriter) prefetchIDs(pack *SyncDataPack) error {
 	totalIDCount := 0
 	if len(pack.insertData) > 0 {
 		totalIDCount += len(pack.insertData[0].Data) * 2 // binlogs and statslogs
@@ -137,7 +139,7 @@ func (bw *BulkPackWriter) nextID() int64 {
 }
 
 func (bw *BulkPackWriter) writeLog(ctx context.Context, blob *storage.Blob,
-	root, p string, pack *SyncPack,
+	root, p string, pack *SyncDataPack,
 ) (*datapb.Binlog, error) {
 	key := path.Join(bw.chunkManager.RootPath(), root, p)
 	err := retry.Do(ctx, func() error {
@@ -158,7 +160,7 @@ func (bw *BulkPackWriter) writeLog(ctx context.Context, blob *storage.Blob,
 	}, nil
 }
 
-func (bw *BulkPackWriter) writeInserts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
+func (bw *BulkPackWriter) writeInserts(ctx context.Context, pack *SyncDataPack) (map[int64]*datapb.FieldBinlog, error) {
 	if len(pack.insertData) == 0 {
 		return make(map[int64]*datapb.FieldBinlog), nil
 	}
@@ -188,7 +190,7 @@ func (bw *BulkPackWriter) writeInserts(ctx context.Context, pack *SyncPack) (map
 	return logs, nil
 }
 
-func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
+func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncDataPack) (map[int64]*datapb.FieldBinlog, error) {
 	if len(pack.insertData) == 0 {
 		return make(map[int64]*datapb.FieldBinlog), nil
 	}
@@ -235,7 +237,7 @@ func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[i
 	return logs, nil
 }
 
-func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
+func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncDataPack) (map[int64]*datapb.FieldBinlog, error) {
 	if len(pack.bm25Stats) == 0 {
 		return make(map[int64]*datapb.FieldBinlog), nil
 	}
@@ -293,7 +295,7 @@ func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (
 	return logs, nil
 }
 
-func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*datapb.FieldBinlog, error) {
+func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncDataPack) (*datapb.FieldBinlog, error) {
 	if pack.deltaData == nil {
 		return &datapb.FieldBinlog{}, nil
 	}

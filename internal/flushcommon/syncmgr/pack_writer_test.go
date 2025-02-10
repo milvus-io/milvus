@@ -50,7 +50,7 @@ func TestNextID(t *testing.T) {
 		return rt, nil
 	}
 	bw := NewBulkPackWriter(nil, nil, al)
-	bw.prefetchIDs(new(SyncPack).WithFlush())
+	bw.prefetchIDs(new(SyncPack).WithFlush().ConsumeData())
 
 	t.Run("normal_next", func(t *testing.T) {
 		id := bw.nextID()
