@@ -135,6 +135,8 @@ func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T
 	if nil == ip.Schema || ip.Schema.CollectionName == "" {
 		log.Fatal("[InsertData] Nil Schema is not expected")
 	}
+	// print option
+	log.Info("GenDataOption", zap.Any("option", option))
 	columns, dynamicColumns := GenColumnsBasedSchema(ip.Schema, option)
 	insertOpt := clientv2.NewColumnBasedInsertOption(ip.Schema.CollectionName).WithColumns(columns...).WithColumns(dynamicColumns...)
 	if ip.PartitionName != "" {
