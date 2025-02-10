@@ -13,7 +13,7 @@ expr:
 	| EmptyArray                                                                 # EmptyArray
 	| expr LIKE StringLiteral                                                    # Like
 	| TEXTMATCH'('Identifier',' StringLiteral')'                                 # TextMatch
-	| PHRASEMATCH'('Identifier',' StringLiteral (',' IntegerConstant)? ')'       # PhraseMatch
+	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			 # PhraseMatch
 	| expr POW expr											                     # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                     # Unary
 //	| '(' typeName ')' expr									                     # Cast

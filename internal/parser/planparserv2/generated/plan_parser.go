@@ -81,7 +81,7 @@ func planParserInit() {
 		5, 36, 0, 0, 31, 32, 5, 16, 0, 0, 32, 33, 5, 1, 0, 0, 33, 34, 5, 47, 0,
 		0, 34, 35, 5, 4, 0, 0, 35, 36, 5, 49, 0, 0, 36, 97, 5, 2, 0, 0, 37, 38,
 		5, 17, 0, 0, 38, 39, 5, 1, 0, 0, 39, 40, 5, 47, 0, 0, 40, 41, 5, 4, 0,
-		0, 41, 44, 5, 49, 0, 0, 42, 43, 5, 4, 0, 0, 43, 45, 5, 45, 0, 0, 44, 42,
+		0, 41, 44, 5, 49, 0, 0, 42, 43, 5, 4, 0, 0, 43, 45, 3, 0, 0, 0, 44, 42,
 		1, 0, 0, 0, 44, 45, 1, 0, 0, 0, 45, 46, 1, 0, 0, 0, 46, 97, 5, 2, 0, 0,
 		47, 48, 7, 1, 0, 0, 48, 97, 3, 0, 0, 22, 49, 50, 7, 2, 0, 0, 50, 51, 5,
 		1, 0, 0, 51, 52, 3, 0, 0, 0, 52, 53, 5, 4, 0, 0, 53, 54, 3, 0, 0, 0, 54,
@@ -1478,8 +1478,20 @@ func (s *PhraseMatchContext) StringLiteral() antlr.TerminalNode {
 	return s.GetToken(PlanParserStringLiteral, 0)
 }
 
-func (s *PhraseMatchContext) IntegerConstant() antlr.TerminalNode {
-	return s.GetToken(PlanParserIntegerConstant, 0)
+func (s *PhraseMatchContext) Expr() IExprContext {
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IExprContext)
 }
 
 func (s *PhraseMatchContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
@@ -2837,11 +2849,7 @@ func (p *PlanParser) expr(_p int) (localctx IExprContext) {
 			}
 			{
 				p.SetState(43)
-				p.Match(PlanParserIntegerConstant)
-				if p.HasError() {
-					// Recognition error - abort rule
-					goto errorExit
-				}
+				p.expr(0)
 			}
 
 		}
