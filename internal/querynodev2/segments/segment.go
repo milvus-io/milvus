@@ -1033,6 +1033,7 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 			IndexInfo: indexInfo,
 			IsLoaded:  true,
 		})
+		return nil
 	}
 
 	return s.innerLoadIndex(ctx, fieldSchema, indexInfo, tr, fieldType)
