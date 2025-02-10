@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
@@ -185,9 +187,22 @@ func (node *Proxy) GetQueryNodeDistribution(w http.ResponseWriter, req *http.Req
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	// skip marshal status to output
-	resp.Status = nil
-	bytes, err := json.Marshal(resp)
+
+	// Use string array for SealedSegmentIDs to prevent precision loss in JSON parsers.
+	// Large integers (int64) may be incorrectly rounded when parsed as double.
+	type distribution struct {
+		Channels         []string `json:"channel_names"`
+		SealedSegmentIDs []string `json:"sealed_segmentIDs"`
+	}
+
+	dist := distribution{
+		Channels: resp.ChannelNames,
+		SealedSegmentIDs: lo.Map(resp.SealedSegmentIDs, func(id int64, _ int) string {
+			return strconv.FormatInt(id, 10)
+		}),
+	}
+
+	bytes, err := json.Marshal(dist)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to get query node distribution, %s"}`, err.Error())))
