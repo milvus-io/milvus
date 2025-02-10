@@ -1463,7 +1463,6 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnChannelExclusive()
 }
 
 func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnStoppingNode() {
-	ctx := context.Background()
 	balancer := suite.balancer
 
 	// mock 10 collections with each collection has 1 channel
@@ -1474,9 +1473,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnStoppingNode() {
 		collection := utils.CreateTestCollection(collectionID, int32(1))
 		collection.LoadPercentage = 100
 		collection.Status = querypb.LoadStatus_Loaded
-		balancer.meta.CollectionManager.PutCollection(ctx, collection)
-		balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, collectionID))
-		balancer.meta.ReplicaManager.Spawn(ctx, collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
+		balancer.meta.CollectionManager.PutCollection(collection)
+		balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(collectionID, collectionID))
+		balancer.meta.ReplicaManager.Spawn(collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
 
 		channels := make([]*datapb.VchannelInfo, channelNum)
 		for i := 0; i < channelNum; i++ {
@@ -1485,8 +1484,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnStoppingNode() {
 		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
 			channels, nil, nil)
 		suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
-		balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
-		balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+		balancer.targetMgr.UpdateCollectionNextTarget(collectionID)
+		balancer.targetMgr.UpdateCollectionCurrentTarget(collectionID)
 	}
 
 	// mock querynode-1 to node manager
@@ -1498,7 +1497,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnStoppingNode() {
 	})
 	nodeInfo.SetState(session.NodeStateNormal)
 	suite.balancer.nodeManager.Add(nodeInfo)
-	suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	suite.balancer.meta.ResourceManager.HandleNodeUp(1)
 	utils.RecoverAllCollection(balancer.meta)
 
 	// mock channel distribution
@@ -1530,7 +1529,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnStoppingNode() {
 		Version:  common.Version,
 	})
 	suite.balancer.nodeManager.Add(nodeInfo2)
-	suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, 2)
+	suite.balancer.meta.ResourceManager.HandleNodeUp(2)
 	// mock querynode-2 and querynode-3 to node manager
 	nodeInfo3 := session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   3,
@@ -1539,11 +1538,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnStoppingNode() {
 		Version:  common.Version,
 	})
 	suite.balancer.nodeManager.Add(nodeInfo3)
-	suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, 3)
+	suite.balancer.meta.ResourceManager.HandleNodeUp(3)
 	utils.RecoverAllCollection(balancer.meta)
 	// mock querynode-1 to stopping, trigger stopping balance, expect to generate 10 balance channel task, and 5 for node-2, 5 for node-3
 	nodeInfo.SetState(session.NodeStateStopping)
-	suite.balancer.meta.ResourceManager.HandleNodeDown(ctx, 1)
+	suite.balancer.meta.ResourceManager.HandleNodeDown(1)
 	utils.RecoverAllCollection(balancer.meta)
 
 	node2Counter := atomic.NewInt32(0)
