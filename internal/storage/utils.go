@@ -546,7 +546,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 			srcData := srcField.GetVectors().GetFloatVector().GetData()
 			fieldData = &FloatVectorFieldData{
-				Data: lo.Map(srcData, func(v float32, _ int) float32 { return v }),
+				Data: srcData,
 				Dim:  dim,
 			}
 
@@ -560,7 +560,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			srcData := srcField.GetVectors().GetBinaryVector()
 
 			fieldData = &BinaryVectorFieldData{
-				Data: lo.Map(srcData, func(v byte, _ int) byte { return v }),
+				Data: srcData,
 				Dim:  dim,
 			}
 
@@ -574,7 +574,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			srcData := srcField.GetVectors().GetFloat16Vector()
 
 			fieldData = &Float16VectorFieldData{
-				Data: lo.Map(srcData, func(v byte, _ int) byte { return v }),
+				Data: srcData,
 				Dim:  dim,
 			}
 
@@ -588,7 +588,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			srcData := srcField.GetVectors().GetBfloat16Vector()
 
 			fieldData = &BFloat16VectorFieldData{
-				Data: lo.Map(srcData, func(v byte, _ int) byte { return v }),
+				Data: srcData,
 				Dim:  dim,
 			}
 
@@ -615,8 +615,8 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			validData := srcField.GetValidData()
 
 			fieldData = &BoolFieldData{
-				Data:      lo.Map(srcData, func(v bool, _ int) bool { return v }),
-				ValidData: lo.Map(validData, func(v bool, _ int) bool { return v }),
+				Data:      srcData,
+				ValidData: validData,
 			}
 
 		case schemapb.DataType_Int8:
@@ -625,7 +625,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 			fieldData = &Int8FieldData{
 				Data:      lo.Map(srcData, func(v int32, _ int) int8 { return int8(v) }),
-				ValidData: lo.Map(validData, func(v bool, _ int) bool { return v }),
+				ValidData: validData,
 			}
 
 		case schemapb.DataType_Int16:
@@ -634,7 +634,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 			fieldData = &Int16FieldData{
 				Data:      lo.Map(srcData, func(v int32, _ int) int16 { return int16(v) }),
-				ValidData: lo.Map(validData, func(v bool, _ int) bool { return v }),
+				ValidData: validData,
 			}
 
 		case schemapb.DataType_Int32:
@@ -642,15 +642,15 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			validData := srcField.GetValidData()
 
 			fieldData = &Int32FieldData{
-				Data:      lo.Map(srcData, func(v int32, _ int) int32 { return v }),
-				ValidData: lo.Map(validData, func(v bool, _ int) bool { return v }),
+				Data:      srcData,
+				ValidData: validData,
 			}
 
 		case schemapb.DataType_Int64:
 			switch field.FieldID {
 			case common.RowIDField: // rowIDs
 				fieldData = &Int64FieldData{
-					Data: lo.Map(msg.GetRowIDs(), func(v int64, _ int) int64 { return v }),
+					Data: msg.GetRowIDs(),
 				}
 			case common.TimeStampField: // Timestamps
 				fieldData = &Int64FieldData{
@@ -660,8 +660,8 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				srcData := srcField.GetScalars().GetLongData().GetData()
 				validData := srcField.GetValidData()
 				fieldData = &Int64FieldData{
-					Data:      lo.Map(srcData, func(v int64, _ int) int64 { return v }),
-					ValidData: lo.Map(validData, func(v bool, _ int) bool { return v }),
+					Data:      srcData,
+					ValidData: validData,
 				}
 			}
 
@@ -670,8 +670,8 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			validData := srcField.GetValidData()
 
 			fieldData = &FloatFieldData{
-				Data:      lo.Map(srcData, func(v float32, _ int) float32 { return v }),
-				ValidData: lo.Map(validData, func(v bool, _ int) bool { return v }),
+				Data:      srcData,
+				ValidData: validData,
 			}
 
 		case schemapb.DataType_Double:
@@ -679,8 +679,8 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			validData := srcField.GetValidData()
 
 			fieldData = &DoubleFieldData{
-				Data:      lo.Map(srcData, func(v float64, _ int) float64 { return v }),
-				ValidData: lo.Map(validData, func(v bool, _ int) bool { return v }),
+				Data:      srcData,
+				ValidData: validData,
 			}
 
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
@@ -688,8 +688,8 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			validData := srcField.GetValidData()
 
 			fieldData = &StringFieldData{
-				Data:      lo.Map(srcData, func(v string, _ int) string { return v }),
-				ValidData: lo.Map(validData, func(v bool, _ int) bool { return v }),
+				Data:      srcData,
+				ValidData: validData,
 			}
 
 		case schemapb.DataType_Array:
@@ -698,8 +698,8 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 			fieldData = &ArrayFieldData{
 				ElementType: field.GetElementType(),
-				Data:        lo.Map(srcData, func(v *schemapb.ScalarField, _ int) *schemapb.ScalarField { return v }),
-				ValidData:   lo.Map(validData, func(v bool, _ int) bool { return v }),
+				Data:        srcData,
+				ValidData:   validData,
 			}
 
 		case schemapb.DataType_JSON:
@@ -707,8 +707,8 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			validData := srcField.GetValidData()
 
 			fieldData = &JSONFieldData{
-				Data:      lo.Map(srcData, func(v []byte, _ int) []byte { return v }),
-				ValidData: lo.Map(validData, func(v bool, _ int) bool { return v }),
+				Data:      srcData,
+				ValidData: validData,
 			}
 
 		default:
