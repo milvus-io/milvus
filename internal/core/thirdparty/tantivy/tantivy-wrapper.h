@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "log/Log.h"
 #include "tantivy-binding.h"
 #include "rust-binding.h"
 #include "rust-array.h"
@@ -798,11 +799,13 @@ struct TantivyIndexWrapper {
     void
     free() {
         if (writer_ != nullptr) {
+            LOG_INFO("inverted index free writer:{}", path_);
             tantivy_free_index_writer(writer_);
             writer_ = nullptr;
         }
 
         if (reader_ != nullptr) {
+            LOG_INFO("inverted index free reader:{}", path_);
             tantivy_free_index_reader(reader_);
             reader_ = nullptr;
         }

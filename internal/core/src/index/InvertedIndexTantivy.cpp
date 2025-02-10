@@ -105,6 +105,7 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
 template <typename T>
 InvertedIndexTantivy<T>::~InvertedIndexTantivy() {
     if (wrapper_) {
+        LOG_INFO("inverted index free wrapper: {}", path_);
         wrapper_->free();
     }
     auto local_chunk_manager =
