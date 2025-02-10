@@ -525,11 +525,16 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 	if err != nil {
 		return err
 	}
-	var slop int64
-	if ctx.IntegerConstant() != nil {
-		slop, err = strconv.ParseInt(ctx.IntegerConstant().GetText(), 10, 64)
-		if err != nil {
-			return err
+	var slop int64 = 0
+	if ctx.Expr() != nil {
+		slopExpr := ctx.Expr().Accept(v)
+		slopValueExpr := getValueExpr(slopExpr)
+		if slopValueExpr == nil || slopValueExpr.GetValue() == nil {
+			return fmt.Errorf("\"slop\" should be a const integer expression. \"slop\" expression passed: %s", ctx.Expr().GetText())
+		}
+		slop = slopValueExpr.GetValue().GetInt64Val()
+		if slop <= 0 {
+			return fmt.Errorf("\"slop\" should be a positive interger. \"slop\" passed: %s", ctx.Expr().GetText())
 		}
 	}
 

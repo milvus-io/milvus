@@ -3,6 +3,7 @@ package planparserv2
 import (
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"testing"
 
@@ -269,9 +270,25 @@ func TestExpr_PhraseMatch(t *testing.T) {
 		`phrase_match(not_exist, "phrase")`,
 		`phrase_match(BoolField, "phrase")`,
 		`phrase_match(StringField, "phrase", -1)`,
+		`phrase_match(StringField, "phrase", 0)`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
+	}
+
+	unsupported = []string{
+		`phrase_match(StringField, "phrase", -1)`,
+		`phrase_match(StringField, "phrase", a)`,
+		`phrase_match(StringField, "phrase", -a)`,
+	}
+	errMsgs := []string{
+		`"slop" should be a positive interger. "slop" passed: -1`,
+		`"slop" should be a const integer expression. "slop" expression passed: a`,
+		`"slop" should be a const integer expression. "slop" expression passed: -a`,
+	}
+	for i, exprStr := range unsupported {
+		_, err := ParseExpr(helper, exprStr, nil)
+		assert.True(t, strings.HasSuffix(err.Error(), errMsgs[i]), fmt.Sprintf("Error expected: %v, actual %v", errMsgs[i], err.Error()))
 	}
 }
 
