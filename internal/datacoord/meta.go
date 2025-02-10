@@ -346,7 +346,7 @@ func GetSegmentsChanPart(m *meta, collectionID int64, filters ...SegmentFilter) 
 	mDimEntry := make(map[dim]*chanPartSegments)
 
 	filters = append(filters, WithCollection(collectionID))
-	candidates := m.SelectSegments(context.Background(), filters...)
+	candidates := m.SelectSegments(filters...)
 	for _, si := range candidates {
 		d := dim{si.PartitionID, si.InsertChannel}
 		entry, ok := mDimEntry[d]

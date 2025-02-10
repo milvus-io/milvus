@@ -225,8 +225,6 @@ func Test_compactionTrigger_force(t *testing.T) {
 		},
 	}
 
-	mock0Allocator := newMock0Allocator(t)
-
 	seg1 := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             1,
