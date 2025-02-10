@@ -36,7 +36,7 @@ cp -r milvus/configs milvus-deb/milvus/
 
 # set env
 apt update
-apt install gnupg pbuilder ubuntu-dev-tools apt-file dh-make build-essential libopenblas-dev brz-debian -y
+apt install gnupg pbuilder ubuntu-dev-tools apt-file dh-make build-essential libopenblas-openmp-dev brz-debian -y
 ## $3 is name, $4 is email
 bzr whoami "$3 $4"
 export DEBFULLNAME="$3"

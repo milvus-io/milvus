@@ -37,7 +37,7 @@ $ docker cp milvus:/milvus .
 ### Install Milvus dependencies
 
 ```shell
-$ sudo apt-get install libopenblas-dev
+$ sudo apt-get install libopenblas-openmp-dev
 $ sudo apt-get install libgomp1
 $ sudo apt-get install libtbb2
 ```
