@@ -218,6 +218,18 @@ func (c *Client) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectio
 	})
 }
 
+// ShowCollectionIDs returns all collection IDs.
+func (c *Client) ShowCollectionIDs(ctx context.Context, in *rootcoordpb.ShowCollectionIDsRequest, opts ...grpc.CallOption) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+		return client.ShowCollectionIDs(ctx, in)
+	})
+}
+
 func (c *Client) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	request = typeutil.Clone(request)
 	commonpbutil.UpdateMsgBase(

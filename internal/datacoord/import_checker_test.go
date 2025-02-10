@@ -49,7 +49,6 @@ func (s *ImportCheckerSuite) SetupTest() {
 	catalog.EXPECT().ListImportJobs().Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
 	catalog.EXPECT().ListImportTasks().Return(nil, nil)
-	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
@@ -64,10 +63,11 @@ func (s *ImportCheckerSuite) SetupTest() {
 	s.NoError(err)
 	s.imeta = imeta
 
-	meta, err := newMeta(context.TODO(), catalog, nil)
-	s.NoError(err)
-
 	broker := broker2.NewMockBroker(s.T())
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	s.NoError(err)
 
 	checker := NewImportChecker(meta, broker, cluster, alloc, imeta).(*importChecker)
 	s.checker = checker

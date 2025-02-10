@@ -37,6 +37,7 @@ const (
 	RootCoord_DescribeAlias_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/DescribeAlias"
 	RootCoord_ListAliases_FullMethodName                   = "/milvus.proto.rootcoord.RootCoord/ListAliases"
 	RootCoord_ShowCollections_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/ShowCollections"
+	RootCoord_ShowCollectionIDs_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/ShowCollectionIDs"
 	RootCoord_AlterCollection_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/AlterCollection"
 	RootCoord_AlterCollectionField_FullMethodName          = "/milvus.proto.rootcoord.RootCoord/AlterCollectionField"
 	RootCoord_CreatePartition_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/CreatePartition"
@@ -125,6 +126,7 @@ type RootCoordClient interface {
 	//
 	// @return StringListResponse, collection name list
 	ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error)
+	ShowCollectionIDs(ctx context.Context, in *ShowCollectionIDsRequest, opts ...grpc.CallOption) (*ShowCollectionIDsResponse, error)
 	AlterCollection(ctx context.Context, in *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	AlterCollectionField(ctx context.Context, in *milvuspb.AlterCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	// *
@@ -318,6 +320,15 @@ func (c *rootCoordClient) ListAliases(ctx context.Context, in *milvuspb.ListAlia
 func (c *rootCoordClient) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
 	out := new(milvuspb.ShowCollectionsResponse)
 	err := c.cc.Invoke(ctx, RootCoord_ShowCollections_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) ShowCollectionIDs(ctx context.Context, in *ShowCollectionIDsRequest, opts ...grpc.CallOption) (*ShowCollectionIDsResponse, error) {
+	out := new(ShowCollectionIDsResponse)
+	err := c.cc.Invoke(ctx, RootCoord_ShowCollectionIDs_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -730,6 +741,7 @@ type RootCoordServer interface {
 	//
 	// @return StringListResponse, collection name list
 	ShowCollections(context.Context, *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error)
+	ShowCollectionIDs(context.Context, *ShowCollectionIDsRequest) (*ShowCollectionIDsResponse, error)
 	AlterCollection(context.Context, *milvuspb.AlterCollectionRequest) (*commonpb.Status, error)
 	AlterCollectionField(context.Context, *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error)
 	// *
@@ -840,6 +852,9 @@ func (UnimplementedRootCoordServer) ListAliases(context.Context, *milvuspb.ListA
 }
 func (UnimplementedRootCoordServer) ShowCollections(context.Context, *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ShowCollections not implemented")
+}
+func (UnimplementedRootCoordServer) ShowCollectionIDs(context.Context, *ShowCollectionIDsRequest) (*ShowCollectionIDsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ShowCollectionIDs not implemented")
 }
 func (UnimplementedRootCoordServer) AlterCollection(context.Context, *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AlterCollection not implemented")
@@ -1221,6 +1236,24 @@ func _RootCoord_ShowCollections_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RootCoordServer).ShowCollections(ctx, req.(*milvuspb.ShowCollectionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_ShowCollectionIDs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShowCollectionIDsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).ShowCollectionIDs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_ShowCollectionIDs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).ShowCollectionIDs(ctx, req.(*ShowCollectionIDsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2007,6 +2040,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ShowCollections",
 			Handler:    _RootCoord_ShowCollections_Handler,
+		},
+		{
+			MethodName: "ShowCollectionIDs",
+			Handler:    _RootCoord_ShowCollectionIDs_Handler,
 		},
 		{
 			MethodName: "AlterCollection",

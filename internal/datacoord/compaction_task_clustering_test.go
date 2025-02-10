@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -57,7 +58,9 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	ctx := context.Background()
 	cm := storage.NewLocalChunkManager(storage.RootPath(""))
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-	meta, err := newMeta(ctx, catalog, cm)
+	broker := broker.NewMockBroker(s.T())
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	meta, err := newMeta(ctx, catalog, cm, broker)
 	s.NoError(err)
 	s.meta = meta
 
