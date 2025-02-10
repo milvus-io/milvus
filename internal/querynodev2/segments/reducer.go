@@ -30,11 +30,17 @@ type segCoreReducer interface {
 	Reduce(context.Context, []*segcorepb.RetrieveResults, []Segment, *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)
 }
 
-func CreateSegCoreReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema, manager *Manager) segCoreReducer {
-	if req.GetReq().GetIsCount() {
+func CreateSegCoreReducer(isCount bool,
+	limit int64,
+	outputFieldsIDs []int64,
+	reduceType int32,
+	schema *schemapb.CollectionSchema,
+	manager *Manager,
+) segCoreReducer {
+	if isCount {
 		return &cntReducerSegCore{}
 	}
-	return newDefaultLimitReducerSegcore(req, schema, manager)
+	return newDefaultLimitReducerSegcore(limit, outputFieldsIDs, reduceType, schema, manager)
 }
 
 type TimestampedRetrieveResult[T interface {

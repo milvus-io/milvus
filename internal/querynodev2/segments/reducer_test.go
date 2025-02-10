@@ -43,18 +43,11 @@ func (suite *ReducerFactorySuite) TestCreateInternalReducer() {
 }
 
 func (suite *ReducerFactorySuite) TestCreateSegCoreReducer() {
-	req := &querypb.QueryRequest{
-		Req: &internalpb.RetrieveRequest{
-			IsCount: false,
-		},
-	}
-
-	suite.sr = CreateSegCoreReducer(req, nil, nil)
+	suite.sr = CreateSegCoreReducer(false, 10, []int64{100, 101}, 0, nil, nil)
 	_, suite.ok = suite.sr.(*defaultLimitReducerSegcore)
 	suite.True(suite.ok)
 
-	req.Req.IsCount = true
-	suite.sr = CreateSegCoreReducer(req, nil, nil)
+	suite.sr = CreateSegCoreReducer(true, 10, []int64{100, 101}, 0, nil, nil)
 	_, suite.ok = suite.sr.(*cntReducerSegCore)
 	suite.True(suite.ok)
 }

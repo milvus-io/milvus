@@ -1503,6 +1503,7 @@ const (
 	QueryNode_Query_FullMethodName                = "/milvus.proto.query.QueryNode/Query"
 	QueryNode_QueryStream_FullMethodName          = "/milvus.proto.query.QueryNode/QueryStream"
 	QueryNode_QuerySegments_FullMethodName        = "/milvus.proto.query.QueryNode/QuerySegments"
+	QueryNode_QuerySegmentsOffset_FullMethodName  = "/milvus.proto.query.QueryNode/QuerySegmentsOffset"
 	QueryNode_QueryStreamSegments_FullMethodName  = "/milvus.proto.query.QueryNode/QueryStreamSegments"
 	QueryNode_ShowConfigurations_FullMethodName   = "/milvus.proto.query.QueryNode/ShowConfigurations"
 	QueryNode_GetMetrics_FullMethodName           = "/milvus.proto.query.QueryNode/GetMetrics"
@@ -1534,6 +1535,7 @@ type QueryNodeClient interface {
 	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*internalpb.RetrieveResults, error)
 	QueryStream(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (QueryNode_QueryStreamClient, error)
 	QuerySegments(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*internalpb.RetrieveResults, error)
+	QuerySegmentsOffset(ctx context.Context, in *QueryOffsetsRequest, opts ...grpc.CallOption) (*internalpb.RetrieveResults, error)
 	QueryStreamSegments(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (QueryNode_QueryStreamSegmentsClient, error)
 	ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
@@ -1739,6 +1741,15 @@ func (c *queryNodeClient) QuerySegments(ctx context.Context, in *QueryRequest, o
 	return out, nil
 }
 
+func (c *queryNodeClient) QuerySegmentsOffset(ctx context.Context, in *QueryOffsetsRequest, opts ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
+	out := new(internalpb.RetrieveResults)
+	err := c.cc.Invoke(ctx, QueryNode_QuerySegmentsOffset_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryNodeClient) QueryStreamSegments(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (QueryNode_QueryStreamSegmentsClient, error) {
 	stream, err := c.cc.NewStream(ctx, &QueryNode_ServiceDesc.Streams[1], QueryNode_QueryStreamSegments_FullMethodName, opts...)
 	if err != nil {
@@ -1847,6 +1858,7 @@ type QueryNodeServer interface {
 	Query(context.Context, *QueryRequest) (*internalpb.RetrieveResults, error)
 	QueryStream(*QueryRequest, QueryNode_QueryStreamServer) error
 	QuerySegments(context.Context, *QueryRequest) (*internalpb.RetrieveResults, error)
+	QuerySegmentsOffset(context.Context, *QueryOffsetsRequest) (*internalpb.RetrieveResults, error)
 	QueryStreamSegments(*QueryRequest, QueryNode_QueryStreamSegmentsServer) error
 	ShowConfigurations(context.Context, *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
@@ -1916,6 +1928,9 @@ func (UnimplementedQueryNodeServer) QueryStream(*QueryRequest, QueryNode_QuerySt
 }
 func (UnimplementedQueryNodeServer) QuerySegments(context.Context, *QueryRequest) (*internalpb.RetrieveResults, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method QuerySegments not implemented")
+}
+func (UnimplementedQueryNodeServer) QuerySegmentsOffset(context.Context, *QueryOffsetsRequest) (*internalpb.RetrieveResults, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method QuerySegmentsOffset not implemented")
 }
 func (UnimplementedQueryNodeServer) QueryStreamSegments(*QueryRequest, QueryNode_QueryStreamSegmentsServer) error {
 	return status.Errorf(codes.Unimplemented, "method QueryStreamSegments not implemented")
@@ -2277,6 +2292,24 @@ func _QueryNode_QuerySegments_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryNode_QuerySegmentsOffset_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryOffsetsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).QuerySegmentsOffset(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryNode_QuerySegmentsOffset_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).QuerySegmentsOffset(ctx, req.(*QueryOffsetsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _QueryNode_QueryStreamSegments_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(QueryRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -2480,6 +2513,10 @@ var QueryNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "QuerySegments",
 			Handler:    _QueryNode_QuerySegments_Handler,
+		},
+		{
+			MethodName: "QuerySegmentsOffset",
+			Handler:    _QueryNode_QuerySegmentsOffset_Handler,
 		},
 		{
 			MethodName: "ShowConfigurations",
