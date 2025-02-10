@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tantivy = { git = "https://github.com/sunby/tantivy", rev = "5add91c059cdbb2ab3280f6711c44d90d2cc37b7" } # we have make a private fix for milvus, should be removed in future after milvus fixing the bug.
+tantivy = { git = "https://github.com/sunby/tantivy", rev = "2e7aafeb77ff9457405dc56846110fb90c6ba985" } # we have make a private fix for milvus, should be removed in future after milvus fixing the bug.
 futures = "0.3.21"
 libc = "0.2"
 scopeguard = "1.2"
