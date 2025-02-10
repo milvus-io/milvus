@@ -2,6 +2,7 @@ package planparserv2
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -530,11 +531,15 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 		slopExpr := ctx.Expr().Accept(v)
 		slopValueExpr := getValueExpr(slopExpr)
 		if slopValueExpr == nil || slopValueExpr.GetValue() == nil {
-			return fmt.Errorf("\"slop\" should be a const integer expression. \"slop\" expression passed: %s", ctx.Expr().GetText())
+			return fmt.Errorf("\"slop\" should be a const integer expression with \"uint32\" value. \"slop\" expression passed: %s", ctx.Expr().GetText())
 		}
 		slop = slopValueExpr.GetValue().GetInt64Val()
-		if slop <= 0 {
-			return fmt.Errorf("\"slop\" should be a positive interger. \"slop\" passed: %s", ctx.Expr().GetText())
+		if slop < 0 {
+			return fmt.Errorf("\"slop\" should not be a negative interger. \"slop\" passed: %s", ctx.Expr().GetText())
+		}
+
+		if slop > math.MaxUint32 {
+			return fmt.Errorf("\"slop\" exceeds the range of \"uint32\". \"slop\" expression passed: %s", ctx.Expr().GetText())
 		}
 	}
 

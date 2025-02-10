@@ -261,6 +261,7 @@ func TestExpr_PhraseMatch(t *testing.T) {
 		`phrase_match(StringField, "phrase")`,
 		`phrase_match(StringField, "phrase", 1)`,
 		`phrase_match(VarCharField, "phrase", 11223)`,
+		`phrase_match(StringField, "phrase", 0)`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -270,7 +271,6 @@ func TestExpr_PhraseMatch(t *testing.T) {
 		`phrase_match(not_exist, "phrase")`,
 		`phrase_match(BoolField, "phrase")`,
 		`phrase_match(StringField, "phrase", -1)`,
-		`phrase_match(StringField, "phrase", 0)`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
@@ -280,11 +280,13 @@ func TestExpr_PhraseMatch(t *testing.T) {
 		`phrase_match(StringField, "phrase", -1)`,
 		`phrase_match(StringField, "phrase", a)`,
 		`phrase_match(StringField, "phrase", -a)`,
+		`phrase_match(StringField, "phrase", 4294967296)`,
 	}
 	errMsgs := []string{
-		`"slop" should be a positive interger. "slop" passed: -1`,
-		`"slop" should be a const integer expression. "slop" expression passed: a`,
-		`"slop" should be a const integer expression. "slop" expression passed: -a`,
+		`"slop" should not be a negative interger. "slop" passed: -1`,
+		`"slop" should be a const integer expression with "uint32" value. "slop" expression passed: a`,
+		`"slop" should be a const integer expression with "uint32" value. "slop" expression passed: -a`,
+		`"slop" exceeds the range of "uint32". "slop" expression passed: 4294967296`,
 	}
 	for i, exprStr := range unsupported {
 		_, err := ParseExpr(helper, exprStr, nil)
