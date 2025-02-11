@@ -1929,7 +1929,7 @@ func (suite *TaskSuite) TestRemoveTaskWithError() {
 		WrapIDSource(0),
 		coll,
 		suite.replica,
-		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", 1, querypb.DataScope_Historical),
+		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", 1, querypb.DataScope_Historical, 100),
 	)
 	suite.NoError(err)
 	err = scheduler.Add(task1)
