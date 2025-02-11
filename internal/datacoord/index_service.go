@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
+	"github.com/milvus-io/milvus/pkg/common"
 	pkgcommon "github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -243,13 +244,15 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			return merr.Status(err), nil
 		}
 	}
+	// exclude the mmap.enable param, because it will be conflict with the index's mmap.enable param
+	typeParams := DeleteParams(req.GetTypeParams(), []string{common.MmapEnabledKey})
 
 	index := &model.Index{
 		CollectionID:    req.GetCollectionID(),
 		FieldID:         req.GetFieldID(),
 		IndexID:         indexID,
 		IndexName:       req.GetIndexName(),
-		TypeParams:      req.GetTypeParams(),
+		TypeParams:      typeParams,
 		IndexParams:     req.GetIndexParams(),
 		CreateTime:      req.GetTimestamp(),
 		IsAutoIndex:     req.GetIsAutoIndex(),
@@ -340,7 +343,7 @@ func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*
 	})
 }
 
-func DeleteParams(index *model.Index, from []*commonpb.KeyValuePair, deletes []string) []*commonpb.KeyValuePair {
+func DeleteParams(from []*commonpb.KeyValuePair, deletes []string) []*commonpb.KeyValuePair {
 	params := make(map[string]string)
 	for _, param := range from {
 		params[param.GetKey()] = param.GetValue()
@@ -431,7 +434,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 			index.IndexParams = newIndexParams
 		} else if len(req.GetDeleteKeys()) > 0 {
 			// delete user index params
-			newUserIndexParams := DeleteParams(index, index.UserIndexParams, req.GetDeleteKeys())
+			newUserIndexParams := DeleteParams(index.UserIndexParams, req.GetDeleteKeys())
 			log.Info("alter index user deletekeys",
 				zap.String("indexName", index.IndexName),
 				zap.Any("params", newUserIndexParams),
@@ -439,7 +442,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 			index.UserIndexParams = newUserIndexParams
 
 			// delete index params
-			newIndexParams := DeleteParams(index, index.IndexParams, req.GetDeleteKeys())
+			newIndexParams := DeleteParams(index.IndexParams, req.GetDeleteKeys())
 			log.Info("alter index index deletekeys",
 				zap.String("indexName", index.IndexName),
 				zap.Any("params", newIndexParams),
