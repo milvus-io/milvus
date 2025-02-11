@@ -97,7 +97,7 @@ func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
 		builders[i] = b
 	}
 
-	writeRecord := func(rowNum int64) {
+	writeRecord := func(rowNum int64) error {
 		arrays := make([]arrow.Array, len(builders))
 		fields := make([]arrow.Field, len(builders))
 		field2Col := make(map[FieldID]int, len(builders))
@@ -114,23 +114,29 @@ func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
 		}
 
 		rec := newSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, rowNum), field2Col)
-		rw.Write(rec)
-		rec.Release()
+		defer rec.Release()
+		return rw.Write(rec)
 	}
 
 	for i, idx := range indices {
 		for c, builder := range builders {
 			fid := schema.Fields[c].FieldID
-			appendValueAt(builder, records[idx.ri].Column(fid), idx.i)
+			if err := appendValueAt(builder, records[idx.ri].Column(fid), idx.i); err != nil {
+				return 0, err
+			}
 		}
 		if (i+1)%batchSize == 0 {
-			writeRecord(int64(batchSize))
+			if err := writeRecord(int64(batchSize)); err != nil {
+				return 0, err
+			}
 		}
 	}
 
 	// write the last batch
 	if len(indices)%batchSize != 0 {
-		writeRecord(int64(len(indices) % batchSize))
+		if err := writeRecord(int64(len(indices) % batchSize)); err != nil {
+			return 0, err
+		}
 	}
 
 	return len(indices), nil
