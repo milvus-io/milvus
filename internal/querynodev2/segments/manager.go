@@ -253,7 +253,7 @@ func (segments segments) Put(_ context.Context, segmentType SegmentType, segment
 
 func (segments segments) Get(segmentID int64) (growing Segment, sealed Segment) {
 	growing, _ = segments.growingSegments.Get(segmentID)
-	sealed, _ = segments.growingSegments.Get(segmentID)
+	sealed, _ = segments.sealedSegments.Get(segmentID)
 	return growing, sealed
 }
 
