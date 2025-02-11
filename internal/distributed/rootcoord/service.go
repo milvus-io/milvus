@@ -347,6 +347,12 @@ func (s *Server) Stop() (err error) {
 		defer s.tikvCli.Close()
 	}
 
+	if s.rootCoord != nil {
+		log.Info("graceful stop rootCoord")
+		s.rootCoord.GracefulStop()
+		log.Info("graceful stop rootCoord done")
+	}
+
 	if s.grpcServer != nil {
 		utils.GracefulStopGRPCServer(s.grpcServer)
 	}

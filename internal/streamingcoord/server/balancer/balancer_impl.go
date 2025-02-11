@@ -65,7 +65,8 @@ func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb func(vers
 	}
 	defer b.lifetime.Done()
 
-	ctx, _ = contextutil.MergeContext(ctx, b.ctx)
+	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
+	defer cancel()
 	return b.channelMetaManager.WatchAssignmentResult(ctx, cb)
 }
 
@@ -75,6 +76,8 @@ func (b *balancerImpl) MarkAsUnavailable(ctx context.Context, pChannels []types.
 	}
 	defer b.lifetime.Done()
 
+	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
+	defer cancel()
 	return b.sendRequestAndWaitFinish(ctx, newOpMarkAsUnavailable(ctx, pChannels))
 }
 
@@ -85,6 +88,8 @@ func (b *balancerImpl) Trigger(ctx context.Context) error {
 	}
 	defer b.lifetime.Done()
 
+	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
+	defer cancel()
 	return b.sendRequestAndWaitFinish(ctx, newOpTrigger(ctx))
 }
 

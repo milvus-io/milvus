@@ -37,7 +37,7 @@ func TestCatalogConsumeCheckpoint(t *testing.T) {
 	kv.EXPECT().Load(mock.Anything, mock.Anything).Return("", merr.ErrIoKeyNotFound)
 	checkpoint, err = catalog.GetConsumeCheckpoint(ctx, "p1")
 	assert.Nil(t, checkpoint)
-	assert.Nil(t, checkpoint)
+	assert.Nil(t, err)
 
 	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	err = catalog.SaveConsumeCheckpoint(ctx, "p1", &streamingpb.WALCheckpoint{})
