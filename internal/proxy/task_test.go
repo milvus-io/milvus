@@ -679,17 +679,20 @@ func TestAddFieldTask(t *testing.T) {
 	fieldName2Type[floatVecField] = schemapb.DataType_FloatVector
 	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, int64Field, false)
 
+	fSchema := &schemapb.FieldSchema{
+		Name:     "add",
+		DataType: schemapb.DataType_Bool,
+		Nullable: true,
+	}
+	bytes, err := proto.Marshal(fSchema)
+	assert.NoError(t, err)
 	task := &addFieldTask{
 		Condition: NewTaskCondition(ctx),
 		AddFieldRequest: &milvuspb.AddFieldRequest{
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
-			FieldSchema: &schemapb.FieldSchema{
-				Name:     "add",
-				DataType: schemapb.DataType_Bool,
-				Nullable: true,
-			},
+			FieldSchema:    bytes,
 		},
 		ctx:       ctx,
 		rootCoord: rc,
@@ -767,49 +770,67 @@ func TestAddFieldTask(t *testing.T) {
 
 		// too many fields
 		Params.Save(Params.ProxyCfg.MaxFieldNum.Key, fmt.Sprint(task.oldSchema.Fields))
-		task.FieldSchema = &schemapb.FieldSchema{
+		fSchema := &schemapb.FieldSchema{
 			Name: "add_field",
 		}
+		bytes, err := proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.FieldSchema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
 		// invalid field type
-		task.FieldSchema = &schemapb.FieldSchema{
+		fSchema = &schemapb.FieldSchema{
 			DataType: schemapb.DataType_None,
 		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.FieldSchema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
 		// not support vector field
-		task.FieldSchema = &schemapb.FieldSchema{
+		fSchema = &schemapb.FieldSchema{
 			DataType: schemapb.DataType_FloatVector,
 		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.FieldSchema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
 		// not support system field
-		task.FieldSchema = &schemapb.FieldSchema{
+		fSchema = &schemapb.FieldSchema{
 			Name: common.TimeStampFieldName,
 		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.FieldSchema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
 		// must be nullable
-		task.FieldSchema = &schemapb.FieldSchema{
+		fSchema = &schemapb.FieldSchema{
 			Nullable: false,
 		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.FieldSchema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
 		// not support pk field
-		task.FieldSchema = &schemapb.FieldSchema{
+		fSchema = &schemapb.FieldSchema{
 			IsPrimaryKey: true,
 		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.FieldSchema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
@@ -822,25 +843,34 @@ func TestAddFieldTask(t *testing.T) {
 		Params.Reset(Params.ProxyCfg.MustUsePartitionKey.Key)
 
 		// not support autoID
-		task.FieldSchema = &schemapb.FieldSchema{
+		fSchema = &schemapb.FieldSchema{
 			AutoID: true,
 		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.FieldSchema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
 		// fieldName invalid
-		task.FieldSchema = &schemapb.FieldSchema{
+		fSchema = &schemapb.FieldSchema{
 			Name: "",
 		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.FieldSchema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
 		// duplicated FieldName
-		task.FieldSchema = &schemapb.FieldSchema{
+		fSchema = &schemapb.FieldSchema{
 			Name: varCharField,
 		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.FieldSchema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)

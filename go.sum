@@ -853,8 +853,8 @@ github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVs
 github.com/smartystreets/assertions v0.0.0-20180927180507-b2de0cb4f26d/go.mod h1:OnSkiWE9lh6wB0YB77sQom3nweQdgAjqCqsofrRNTgc=
 github.com/smartystreets/assertions v1.1.0/go.mod h1:tcbTF8ujkAEcZ8TElKY+i30BzYlVhC/LOxJk7iOWnoo=
 github.com/smartystreets/goconvey v1.6.4/go.mod h1:syvi0/a8iFYH4r/RixwvyeAJjdLS9QV7WQ/tjFTllLA=
-github.com/smellthemoon/milvus-proto/go-api/v2 v2.0.0-20250207103919-b71cbb5e58b7 h1:ATzzmDdRGvve8dHr23SGwsBI1s+HAzSszQzEWLxgylw=
-github.com/smellthemoon/milvus-proto/go-api/v2 v2.0.0-20250207103919-b71cbb5e58b7/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
+github.com/smellthemoon/milvus-proto/go-api/v2 v2.0.0-20250211103825-dcf1460a2d9d h1:WouqmWuS7cj7SNsA0/BOgcbV6uwbrlHLbuEuI4OWx0g=
+github.com/smellthemoon/milvus-proto/go-api/v2 v2.0.0-20250211103825-dcf1460a2d9d/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
 github.com/soheilhy/cmux v0.1.4/go.mod h1:IM3LyeVVIOuxMH7sFAkER9+bJ4dT7Ms6E4xg4kGIyLM=
 github.com/soheilhy/cmux v0.1.5 h1:jjzc5WVemNEDTLwv9tlmemhC73tI08BNOIGwBOo10Js=
 github.com/soheilhy/cmux v0.1.5/go.mod h1:T7TcVDs9LWfQgPlPsdngu6I6QIoyIFZDDC6sNE1GqG0=

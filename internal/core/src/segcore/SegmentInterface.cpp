@@ -72,7 +72,6 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
             field_data =
                 std::move(bulk_subscript_not_exist_field(field_meta, size));
         } else {
-            auto& field_meta = plan->schema_[field_id];
             field_data = std::move(
                 bulk_subscript(field_id, results.seg_offsets_.data(), size));
         }
@@ -192,10 +191,13 @@ SegmentInternalInterface::FillTargetEntry(
             fields_data->AddAllocated(col.release());
             continue;
         }
-
+        std::unique_ptr<DataArray> col;
         auto& field_meta = plan->schema_[field_id];
-
-        auto col = bulk_subscript(field_id, offsets, size);
+        if (!is_field_exist(field_id)) {
+            col = std::move(bulk_subscript_not_exist_field(field_meta, size));
+        } else {
+            col = bulk_subscript(field_id, offsets, size);
+        }
         if (field_meta.get_data_type() == DataType::ARRAY) {
             col->mutable_scalars()->mutable_array_data()->set_element_type(
                 proto::schema::DataType(field_meta.get_element_type()));
@@ -495,7 +497,6 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
         return result;
     };
     for (int64_t i = 0; i < count; ++i) {
-        auto result = CreateScalarDataArray(count, field_meta);
         auto res = result->mutable_valid_data()->mutable_data();
         res[i] = false;
     }
