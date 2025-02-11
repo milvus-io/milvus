@@ -103,6 +103,7 @@ func createNewInputFromDispatcher(initCtx context.Context,
 			retry.MaxSleepTime(paramtable.Get().MQCfg.RetryTimeout.GetAsDuration(time.Second))) // 5 minutes
 		if err != nil {
 			log.Warn("datanode consume failed after retried", zap.Error(err))
+			dispatcherClient.Deregister(vchannel)
 			return nil, err
 		}
 
@@ -130,6 +131,7 @@ func createNewInputFromDispatcher(initCtx context.Context,
 		retry.MaxSleepTime(paramtable.Get().MQCfg.RetryTimeout.GetAsDuration(time.Second))) // 5 minutes
 	if err != nil {
 		log.Warn("datanode consume failed after retried", zap.Error(err))
+		dispatcherClient.Deregister(vchannel)
 		return nil, err
 	}
 

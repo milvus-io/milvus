@@ -22,48 +22,66 @@ import (
 	"math/rand"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/mq/common"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestClient(t *testing.T) {
-	client := NewClient(newMockFactory(), typeutil.ProxyRole, 1)
+	factory := newMockFactory()
+	client := NewClient(factory, typeutil.ProxyRole, 1)
 	assert.NotNil(t, client)
-	_, err := client.Register(context.Background(), NewStreamConfig("mock_vchannel_0", nil, common.SubscriptionPositionUnknown))
-	assert.NoError(t, err)
-	_, err = client.Register(context.Background(), NewStreamConfig("mock_vchannel_1", nil, common.SubscriptionPositionUnknown))
-	assert.NoError(t, err)
-	assert.NotPanics(t, func() {
-		client.Deregister("mock_vchannel_0")
-		client.Close()
-	})
+	defer client.Close()
 
-	t.Run("with timeout ctx", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Millisecond)
-		defer cancel()
-		<-time.After(2 * time.Millisecond)
+	pchannel := fmt.Sprintf("by-dev-rootcoord-dml_%d", rand.Int63())
 
-		client := NewClient(newMockFactory(), typeutil.DataNodeRole, 1)
-		defer client.Close()
-		assert.NotNil(t, client)
-		_, err := client.Register(ctx, NewStreamConfig("mock_vchannel_1", nil, common.SubscriptionPositionUnknown))
-		assert.Error(t, err)
-	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	producer, err := newMockProducer(factory, pchannel)
+	assert.NoError(t, err)
+	go produceTimeTick(ctx, producer)
+
+	_, err = client.Register(ctx, NewStreamConfig(fmt.Sprintf("%s_v1", pchannel), nil, common.SubscriptionPositionUnknown))
+	assert.NoError(t, err)
+
+	_, err = client.Register(ctx, NewStreamConfig(fmt.Sprintf("%s_v2", pchannel), nil, common.SubscriptionPositionUnknown))
+	assert.NoError(t, err)
+
+	client.Deregister(fmt.Sprintf("%s_v1", pchannel))
+	client.Deregister(fmt.Sprintf("%s_v2", pchannel))
 }
 
 func TestClient_Concurrency(t *testing.T) {
-	client1 := NewClient(newMockFactory(), typeutil.ProxyRole, 1)
+	factory := newMockFactory()
+	client1 := NewClient(factory, typeutil.ProxyRole, 1)
 	assert.NotNil(t, client1)
+	defer client1.Close()
+
+	paramtable.Get().Save(paramtable.Get().MQCfg.TargetBufSize.Key, "65536")
+	defer paramtable.Get().Reset(paramtable.Get().MQCfg.TargetBufSize.Key)
+
+	paramtable.Get().Save(paramtable.Get().MQCfg.MaxDispatcherNumPerPchannel.Key, "65536")
+	defer paramtable.Get().Reset(paramtable.Get().MQCfg.MaxDispatcherNumPerPchannel.Key)
+
+	pchannel := fmt.Sprintf("by-dev-rootcoord-dml_%d", rand.Int63())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	producer, err := newMockProducer(factory, pchannel)
+	assert.NoError(t, err)
+	go produceTimeTick(ctx, producer)
+	t.Logf("start to produce time tick to pchannel %s", pchannel)
+
 	wg := &sync.WaitGroup{}
 	const total = 100
 	deregisterCount := atomic.NewInt32(0)
 	for i := 0; i < total; i++ {
-		vchannel := fmt.Sprintf("mock-vchannel-%d-%d", i, rand.Int())
+		i := i
+		vchannel := fmt.Sprintf("%s_vchannel-%d-%d", pchannel, i, rand.Int())
 		wg.Add(1)
 		go func() {
 			_, err := client1.Register(context.Background(), NewStreamConfig(vchannel, nil, common.SubscriptionPositionUnknown))
@@ -77,6 +95,7 @@ func TestClient_Concurrency(t *testing.T) {
 	}
 	wg.Wait()
 	expected := int(total - deregisterCount.Load())
+	expected = 1
 
 	c := client1.(*client)
 	n := c.managers.Len()

@@ -139,6 +139,7 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 		retry.MaxSleepTime(paramtable.Get().MQCfg.RetryTimeout.GetAsDuration(time.Second))) // 5 minutes
 	if err != nil {
 		log.Error("dispatcher register failed after retried", zap.String("channel", position.ChannelName), zap.Error(err))
+		p.dispatcher.Deregister(p.vChannel)
 		return WrapErrRegDispather(err)
 	}
 

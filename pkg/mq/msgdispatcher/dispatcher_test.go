@@ -17,8 +17,6 @@
 package msgdispatcher
 
 import (
-	"fmt"
-	"math/rand"
 	"sync"
 	"testing"
 	"time"
@@ -37,7 +35,8 @@ import (
 func TestDispatcher(t *testing.T) {
 	ctx := context.Background()
 	t.Run("test base", func(t *testing.T) {
-		d, err := NewDispatcher(ctx, newMockFactory(), true, "mock_pchannel_0", nil, "mock_subName_0", common.SubscriptionPositionEarliest, nil, nil, false)
+		d, err := NewDispatcher(ctx, newMockFactory(), true, "mock_pchannel_0",
+			nil, common.SubscriptionPositionEarliest, 0)
 		assert.NoError(t, err)
 		assert.NotPanics(t, func() {
 			d.Handle(start)
@@ -65,19 +64,24 @@ func TestDispatcher(t *testing.T) {
 				return ms, nil
 			},
 		}
-		d, err := NewDispatcher(ctx, factory, true, "mock_pchannel_0", nil, "mock_subName_0", common.SubscriptionPositionEarliest, nil, nil, false)
+		d, err := NewDispatcher(ctx, factory, true, "mock_pchannel_0",
+			nil, common.SubscriptionPositionEarliest, 0)
 
 		assert.Error(t, err)
 		assert.Nil(t, d)
 	})
 
 	t.Run("test target", func(t *testing.T) {
-		d, err := NewDispatcher(ctx, newMockFactory(), true, "mock_pchannel_0", nil, "mock_subName_0", common.SubscriptionPositionEarliest, nil, nil, false)
+		d, err := NewDispatcher(ctx, newMockFactory(), true, "mock_pchannel_0",
+			nil, common.SubscriptionPositionEarliest, 0)
 		assert.NoError(t, err)
 		output := make(chan *msgstream.MsgPack, 1024)
 
 		getTarget := func(vchannel string, pos *Pos, ch chan *msgstream.MsgPack) *target {
-			target := newTarget(vchannel, pos, nil)
+			target := newTarget(&StreamConfig{
+				VChannel: vchannel,
+				Pos:      pos,
+			})
 			target.ch = ch
 			return target
 		}
@@ -107,7 +111,7 @@ func TestDispatcher(t *testing.T) {
 	t.Run("test concurrent send and close", func(t *testing.T) {
 		for i := 0; i < 100; i++ {
 			output := make(chan *msgstream.MsgPack, 1024)
-			target := newTarget("mock_vchannel_0", nil, nil)
+			target := newTarget(&StreamConfig{VChannel: "mock_vchannel_0"})
 			target.ch = output
 			assert.Equal(t, cap(output), cap(target.ch))
 			wg := &sync.WaitGroup{}
@@ -130,7 +134,8 @@ func TestDispatcher(t *testing.T) {
 }
 
 func BenchmarkDispatcher_handle(b *testing.B) {
-	d, err := NewDispatcher(context.Background(), newMockFactory(), true, "mock_pchannel_0", nil, "mock_subName_0", common.SubscriptionPositionEarliest, nil, nil, false)
+	d, err := NewDispatcher(context.Background(), newMockFactory(), true, "mock_pchannel_0",
+		nil, common.SubscriptionPositionEarliest, 0)
 	assert.NoError(b, err)
 
 	for i := 0; i < b.N; i++ {
@@ -144,10 +149,14 @@ func BenchmarkDispatcher_handle(b *testing.B) {
 }
 
 func TestGroupMessage(t *testing.T) {
-	d, err := NewDispatcher(context.Background(), newMockFactory(), true, "mock_pchannel_0", nil, "mock_subName_0"+fmt.Sprintf("%d", rand.Int()), common.SubscriptionPositionEarliest, nil, nil, false)
+	d, err := NewDispatcher(context.Background(), newMockFactory(), true, "mock_pchannel_0",
+		nil, common.SubscriptionPositionEarliest, 0)
 	assert.NoError(t, err)
-	d.AddTarget(newTarget("mock_pchannel_0_1v0", nil, nil))
-	d.AddTarget(newTarget("mock_pchannel_0_2v0", nil, msgstream.GetReplicateConfig("local-test", "foo", "coo")))
+	d.AddTarget(newTarget(&StreamConfig{VChannel: "mock_pchannel_0_1v0"}))
+	d.AddTarget(newTarget(&StreamConfig{
+		VChannel:        "mock_pchannel_0_2v0",
+		ReplicateConfig: msgstream.GetReplicateConfig("local-test", "foo", "coo"),
+	}))
 	{
 		// no replicate msg
 		packs := d.groupingMsgs(&MsgPack{
@@ -286,7 +295,8 @@ func TestGroupMessage(t *testing.T) {
 
 	{
 		// replicate end
-		replicateTarget := d.targets["mock_pchannel_0_2v0"]
+		replicateTarget, ok := d.targets.Get("mock_pchannel_0_2v0")
+		assert.True(t, ok)
 		assert.NotNil(t, replicateTarget.replicateConfig)
 		packs := d.groupingMsgs(&MsgPack{
 			BeginTs: 1,

@@ -19,18 +19,19 @@ package msgdispatcher
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/mq/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -51,12 +52,11 @@ type dispatcherManager struct {
 	nodeID   int64
 	pchannel string
 
-	lagNotifyChan chan struct{}
-	lagTargets    *typeutil.ConcurrentMap[string, *target] // vchannel -> *target
+	registeredTargets *typeutil.ConcurrentMap[string, *target]
 
-	mu              sync.RWMutex // guards mainDispatcher and soloDispatchers
-	mainDispatcher  *Dispatcher
-	soloDispatchers map[string]*Dispatcher // vchannel -> *Dispatcher
+	mu                sync.RWMutex
+	mainDispatcher    *Dispatcher
+	deputyDispatchers map[int64]*Dispatcher // ID -> *Dispatcher
 
 	factory   msgstream.Factory
 	closeChan chan struct{}
@@ -67,103 +67,46 @@ func NewDispatcherManager(pchannel string, role string, nodeID int64, factory ms
 	log.Info("create new dispatcherManager", zap.String("role", role),
 		zap.Int64("nodeID", nodeID), zap.String("pchannel", pchannel))
 	c := &dispatcherManager{
-		role:            role,
-		nodeID:          nodeID,
-		pchannel:        pchannel,
-		lagNotifyChan:   make(chan struct{}, 1),
-		lagTargets:      typeutil.NewConcurrentMap[string, *target](),
-		soloDispatchers: make(map[string]*Dispatcher),
-		factory:         factory,
-		closeChan:       make(chan struct{}),
+		role:              role,
+		nodeID:            nodeID,
+		pchannel:          pchannel,
+		registeredTargets: typeutil.NewConcurrentMap[string, *target](),
+		deputyDispatchers: make(map[int64]*Dispatcher),
+		factory:           factory,
+		closeChan:         make(chan struct{}),
 	}
 	return c
 }
 
-func (c *dispatcherManager) constructSubName(vchannel string, isMain bool) string {
-	return fmt.Sprintf("%s-%d-%s-%t", c.role, c.nodeID, vchannel, isMain)
-}
-
 func (c *dispatcherManager) Add(ctx context.Context, streamConfig *StreamConfig) (<-chan *MsgPack, error) {
-	vchannel := streamConfig.VChannel
-	log := log.With(zap.String("role", c.role),
-		zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if _, ok := c.soloDispatchers[vchannel]; ok {
-		// current dispatcher didn't allow multiple subscriptions on same vchannel at same time
-		log.Warn("unreachable: solo vchannel dispatcher already exists")
-		return nil, fmt.Errorf("solo vchannel dispatcher already exists")
+	t := newTarget(streamConfig)
+	if _, ok := c.registeredTargets.GetOrInsert(t.vchannel, t); ok {
+		return nil, fmt.Errorf("vchannel %s already exists in the dispatcher", t.vchannel)
 	}
-	if c.mainDispatcher != nil {
-		if _, err := c.mainDispatcher.GetTarget(vchannel); err == nil {
-			// current dispatcher didn't allow multiple subscriptions on same vchannel at same time
-			log.Warn("unreachable: vchannel has been registered in main dispatcher, ")
-			return nil, fmt.Errorf("vchannel has been registered in main dispatcher")
-		}
-	}
-
-	isMain := c.mainDispatcher == nil
-	d, err := NewDispatcher(ctx, c.factory, isMain, c.pchannel, streamConfig.Pos, c.constructSubName(vchannel, isMain), streamConfig.SubPos, c.lagNotifyChan, c.lagTargets, false)
-	if err != nil {
-		return nil, err
-	}
-	t := newTarget(vchannel, streamConfig.Pos, streamConfig.ReplicateConfig)
-	d.AddTarget(t)
-	if isMain {
-		c.mainDispatcher = d
-		log.Info("add main dispatcher")
-	} else {
-		c.soloDispatchers[vchannel] = d
-		log.Info("add solo dispatcher")
-	}
-	d.Handle(start)
+	log.Info("target register done", zap.String("vchannel", t.vchannel))
 	return t.ch, nil
 }
 
 func (c *dispatcherManager) Remove(vchannel string) {
-	log := log.With(zap.String("role", c.role),
-		zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.mainDispatcher != nil {
-		c.mainDispatcher.Handle(pause)
-		c.mainDispatcher.CloseTarget(vchannel)
-		if c.mainDispatcher.TargetNum() == 0 && len(c.soloDispatchers) == 0 {
-			c.mainDispatcher.Handle(terminate)
-			c.mainDispatcher = nil
-		} else {
-			c.mainDispatcher.Handle(resume)
-		}
+	if _, ok := c.registeredTargets.GetAndRemove(vchannel); ok {
+		log.Info("target unregister done", zap.String("vchannel", vchannel))
 	}
-	if _, ok := c.soloDispatchers[vchannel]; ok {
-		c.soloDispatchers[vchannel].Handle(terminate)
-		c.soloDispatchers[vchannel].CloseTarget(vchannel)
-		delete(c.soloDispatchers, vchannel)
-		c.deleteMetric(vchannel)
-		log.Info("remove soloDispatcher done")
-	}
-	c.lagTargets.GetAndRemove(vchannel)
 }
 
 func (c *dispatcherManager) NumTarget() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	var res int
-	if c.mainDispatcher != nil {
-		res += c.mainDispatcher.TargetNum()
-	}
-	return res + len(c.soloDispatchers) + c.lagTargets.Len()
+	return c.registeredTargets.Len()
 }
 
 func (c *dispatcherManager) NumConsumer() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	var res int
+
+	numConsumer := 0
 	if c.mainDispatcher != nil {
-		res++
+		numConsumer++
 	}
-	return res + len(c.soloDispatchers)
+	numConsumer += len(c.deputyDispatchers)
+	return numConsumer
 }
 
 func (c *dispatcherManager) Close() {
@@ -188,87 +131,199 @@ func (c *dispatcherManager) Run() {
 		case <-ticker1.C:
 			c.uploadMetric()
 		case <-ticker2.C:
+			c.closeRedundantDispatchers()
+			c.buildDispatcher()
 			c.tryMerge()
-		case <-c.lagNotifyChan:
-			c.mu.Lock()
-			c.lagTargets.Range(func(vchannel string, t *target) bool {
-				c.split(t)
-				c.lagTargets.GetAndRemove(vchannel)
-				return true
-			})
-			c.mu.Unlock()
+		}
+	}
+}
+
+func (c *dispatcherManager) buildDispatcher() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	tr := timerecord.NewTimeRecorder("")
+	log := log.With(zap.String("role", c.role),
+		zap.Int64("nodeID", c.nodeID), zap.String("pchannel", c.pchannel))
+
+	allTargets := c.registeredTargets.Values()
+	// get lack targets to perform subscription
+	lackTargets := make([]*target, 0, len(allTargets))
+OUTER:
+	for _, t := range allTargets {
+		if c.mainDispatcher != nil && c.mainDispatcher.HasTarget(t.vchannel) {
+			continue
+		}
+		for _, dispatcher := range c.deputyDispatchers {
+			if dispatcher.HasTarget(t.vchannel) {
+				continue OUTER
+			}
+		}
+		lackTargets = append(lackTargets, t)
+	}
+
+	if len(lackTargets) == 0 {
+		return
+	}
+	vchannels := lo.Map(lackTargets, func(t *target, _ int) string {
+		return t.vchannel
+	})
+
+	log.Info("start to build dispatchers", zap.Int("numTargets", len(vchannels)),
+		zap.Strings("vchannels", vchannels))
+
+	sort.Slice(lackTargets, func(i, j int) bool {
+		return lackTargets[i].pos.GetTimestamp() < lackTargets[j].pos.GetTimestamp()
+	})
+
+	var (
+		// pullback from the earliest position
+		// to the latest position in lack targets
+		earliestTarget = lackTargets[0]
+		latestTarget   = lackTargets[len(lackTargets)-1]
+	)
+
+	isMain := c.mainDispatcher == nil
+
+	// TODO: fix context
+	d, err := NewDispatcher(context.Background(), c.factory, isMain, c.pchannel, earliestTarget.pos, earliestTarget.subPos, latestTarget.pos.GetTimestamp())
+	if err != nil {
+		panic(err)
+	}
+	for _, t := range lackTargets {
+		d.AddTarget(t)
+	}
+	d.Handle(start)
+	buildDur := tr.RecordSpan()
+
+	// block util pullback to the latest target position
+	d.BlockUtilPullbackDone()
+
+	var (
+		pullbackBeginTs   = earliestTarget.pos.GetTimestamp()
+		pullbackEndTs     = latestTarget.pos.GetTimestamp()
+		pullbackBeginTime = tsoutil.PhysicalTime(pullbackBeginTs)
+		pullbackEndTime   = tsoutil.PhysicalTime(pullbackEndTs)
+	)
+	log.Info("build dispatcher done",
+		zap.Int64("id", d.ID()),
+		zap.Int("numVchannels", len(vchannels)),
+		zap.Uint64("pullbackBeginTs", pullbackBeginTs),
+		zap.Uint64("pullbackEndTs", pullbackEndTs),
+		zap.Duration("lag", pullbackEndTime.Sub(pullbackBeginTime)),
+		zap.Time("pullbackBeginTime", pullbackBeginTime),
+		zap.Time("pullbackEndTime", pullbackEndTime),
+		zap.Duration("buildDur", buildDur),
+		zap.Duration("pullbackDur", tr.RecordSpan()),
+		zap.Strings("vchannels", vchannels),
+	)
+
+	if isMain {
+		c.mainDispatcher = d
+		log.Info("add main dispatcher", zap.Int64("id", d.ID()))
+	} else {
+		c.deputyDispatchers[d.ID()] = d
+		log.Info("add deputy dispatcher", zap.Int64("id", d.ID()))
+	}
+}
+
+func (c *dispatcherManager) closeRedundantDispatchers() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID))
+	redundantTargets := make(map[string]*target)
+	if c.mainDispatcher != nil {
+		for _, t := range c.mainDispatcher.GetTargets() {
+			if !c.registeredTargets.Contain(t.vchannel) {
+				redundantTargets[t.vchannel] = t
+			}
+		}
+		if len(redundantTargets) > 0 {
+			c.mainDispatcher.Handle(pause)
+			for vchannel := range redundantTargets {
+				c.mainDispatcher.CloseTarget(vchannel)
+			}
+			if c.mainDispatcher.TargetNum() == 0 && len(c.deputyDispatchers) == 0 {
+				c.mainDispatcher.Handle(terminate)
+				c.mainDispatcher = nil
+			} else {
+				c.mainDispatcher.Handle(resume)
+			}
+		}
+	}
+	for _, dispatcher := range c.deputyDispatchers {
+		redundantTargets = make(map[string]*target)
+		for _, t := range dispatcher.GetTargets() {
+			if !c.registeredTargets.Contain(t.vchannel) {
+				redundantTargets[t.vchannel] = t
+			}
+		}
+		if len(redundantTargets) > 0 {
+			dispatcher.Handle(pause)
+			for vchannel := range redundantTargets {
+				dispatcher.CloseTarget(vchannel)
+			}
+			if dispatcher.TargetNum() == 0 {
+				dispatcher.Handle(terminate)
+				delete(c.deputyDispatchers, dispatcher.ID())
+				log.Info("remove deputy dispatcher done", zap.Int64("id", dispatcher.ID()))
+			} else {
+				dispatcher.Handle(resume)
+			}
 		}
 	}
 }
 
 func (c *dispatcherManager) tryMerge() {
-	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID))
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	start := time.Now()
+	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID))
+
 	if c.mainDispatcher == nil || c.mainDispatcher.CurTs() == 0 {
 		return
 	}
-	candidates := make(map[string]struct{})
-	for vchannel, sd := range c.soloDispatchers {
+	candidates := make([]*Dispatcher, 0, len(c.deputyDispatchers))
+	for _, sd := range c.deputyDispatchers {
 		if sd.CurTs() == c.mainDispatcher.CurTs() {
-			candidates[vchannel] = struct{}{}
+			candidates = append(candidates, sd)
 		}
 	}
 	if len(candidates) == 0 {
 		return
 	}
 
-	log.Info("start merging...", zap.Any("vchannel", candidates))
+	log.Info("start merging...", zap.Int64s("dispatchers", lo.Map(candidates, func(d *Dispatcher, _ int) int64 {
+		return d.ID()
+	})))
+	mergeCandidates := make([]*Dispatcher, 0, len(candidates))
 	c.mainDispatcher.Handle(pause)
-	for vchannel := range candidates {
-		c.soloDispatchers[vchannel].Handle(pause)
+	for _, dispatcher := range candidates {
+		dispatcher.Handle(pause)
 		// after pause, check alignment again, if not, evict it and try to merge next time
-		if c.mainDispatcher.CurTs() != c.soloDispatchers[vchannel].CurTs() {
-			c.soloDispatchers[vchannel].Handle(resume)
-			delete(candidates, vchannel)
+		if c.mainDispatcher.CurTs() != dispatcher.CurTs() {
+			dispatcher.Handle(resume)
+			continue
 		}
+		mergeCandidates = append(mergeCandidates, dispatcher)
 	}
 	mergeTs := c.mainDispatcher.CurTs()
-	for vchannel := range candidates {
-		t, err := c.soloDispatchers[vchannel].GetTarget(vchannel)
-		if err == nil {
+	for _, dispatcher := range mergeCandidates {
+		targets := dispatcher.GetTargets()
+		for _, t := range targets {
 			c.mainDispatcher.AddTarget(t)
 		}
-		c.soloDispatchers[vchannel].Handle(terminate)
-		delete(c.soloDispatchers, vchannel)
-		c.deleteMetric(vchannel)
+		dispatcher.Handle(terminate)
+		delete(c.deputyDispatchers, dispatcher.ID())
 	}
 	c.mainDispatcher.Handle(resume)
-	log.Info("merge done", zap.Any("vchannel", candidates), zap.Uint64("mergeTs", mergeTs))
-}
-
-func (c *dispatcherManager) split(t *target) {
-	log := log.With(zap.String("role", c.role),
-		zap.Int64("nodeID", c.nodeID), zap.String("vchannel", t.vchannel))
-	log.Info("start splitting...")
-
-	// remove stale soloDispatcher if it existed
-	if _, ok := c.soloDispatchers[t.vchannel]; ok {
-		c.soloDispatchers[t.vchannel].Handle(terminate)
-		delete(c.soloDispatchers, t.vchannel)
-		c.deleteMetric(t.vchannel)
-	}
-
-	var newSolo *Dispatcher
-	err := retry.Do(context.Background(), func() error {
-		var err error
-		newSolo, err = NewDispatcher(context.Background(), c.factory, false, c.pchannel, t.pos, c.constructSubName(t.vchannel, false), common.SubscriptionPositionUnknown, c.lagNotifyChan, c.lagTargets, true)
-		return err
-	}, retry.Attempts(10))
-	if err != nil {
-		log.Error("split failed", zap.Error(err))
-		panic(err)
-	}
-	newSolo.AddTarget(t)
-	c.soloDispatchers[t.vchannel] = newSolo
-	newSolo.Handle(start)
-	log.Info("split done")
+	log.Info("merge done", zap.Int64s("dispatchers", lo.Map(candidates, func(d *Dispatcher, _ int) int64 {
+		return d.ID()
+	})),
+		zap.Uint64("mergeTs", mergeTs),
+		zap.Duration("dur", time.Since(start)))
 }
 
 // deleteMetric remove specific prometheus metric,
@@ -287,18 +342,21 @@ func (c *dispatcherManager) deleteMetric(channel string) {
 func (c *dispatcherManager) uploadMetric() {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
 	nodeIDStr := fmt.Sprintf("%d", c.nodeID)
 	fn := func(gauge *prometheus.GaugeVec) {
 		if c.mainDispatcher == nil {
 			return
 		}
-		// for main dispatcher, use pchannel as channel label
-		gauge.WithLabelValues(nodeIDStr, c.pchannel).Set(
-			float64(time.Since(tsoutil.PhysicalTime(c.mainDispatcher.CurTs())).Milliseconds()))
-		// for solo dispatchers, use vchannel as channel label
-		for vchannel, dispatcher := range c.soloDispatchers {
-			gauge.WithLabelValues(nodeIDStr, vchannel).Set(
-				float64(time.Since(tsoutil.PhysicalTime(dispatcher.CurTs())).Milliseconds()))
+		for _, t := range c.mainDispatcher.GetTargets() {
+			gauge.WithLabelValues(nodeIDStr, t.vchannel).Set(
+				float64(time.Since(tsoutil.PhysicalTime(c.mainDispatcher.CurTs())).Milliseconds()))
+		}
+		for _, dispatcher := range c.deputyDispatchers {
+			for _, t := range dispatcher.GetTargets() {
+				gauge.WithLabelValues(nodeIDStr, t.vchannel).Set(
+					float64(time.Since(tsoutil.PhysicalTime(dispatcher.CurTs())).Milliseconds()))
+			}
 		}
 	}
 	if c.role == typeutil.DataNodeRole {

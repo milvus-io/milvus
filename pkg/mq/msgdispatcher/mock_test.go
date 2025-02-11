@@ -226,3 +226,24 @@ func defaultInsertRepackFunc(
 	}
 	return pack, nil
 }
+
+func produceTimeTick(ctx context.Context, producer msgstream.MsgStream) {
+	tt := 1
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			ts := uint64(tt * 1000)
+			err := producer.Produce(ctx, &msgstream.MsgPack{
+				Msgs: []msgstream.TsMsg{genTimeTickMsg(ts)},
+			})
+			if err != nil {
+				panic(err)
+			}
+			tt++
+		}
+	}
+}

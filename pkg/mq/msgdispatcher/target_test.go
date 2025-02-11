@@ -14,7 +14,10 @@ import (
 )
 
 func TestSendTimeout(t *testing.T) {
-	target := newTarget("test1", &msgpb.MsgPosition{}, nil)
+	target := newTarget(&StreamConfig{
+		VChannel: "test1",
+		Pos:      &msgpb.MsgPosition{},
+	})
 
 	time.Sleep(paramtable.Get().MQCfg.MaxTolerantLag.GetAsDuration(time.Second))
 
