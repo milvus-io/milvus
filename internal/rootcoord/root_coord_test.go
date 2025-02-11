@@ -1997,11 +1997,11 @@ func TestCore_InitRBAC(t *testing.T) {
 		meta.EXPECT().OperatePrivilege(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(3)
 
 		Params.Save(Params.RoleCfg.Enabled.Key, "false")
-		Params.Save(Params.ProxyCfg.EnablePublicPrivilege.Key, "true")
+		Params.Save(Params.CommonCfg.EnablePublicPrivilege.Key, "true")
 
 		defer func() {
 			Params.Reset(Params.RoleCfg.Enabled.Key)
-			Params.Reset(Params.ProxyCfg.EnablePublicPrivilege.Key)
+			Params.Reset(Params.CommonCfg.EnablePublicPrivilege.Key)
 		}()
 
 		err := c.initRbac()
@@ -2017,12 +2017,33 @@ func TestCore_InitRBAC(t *testing.T) {
 
 		Params.Save(Params.RoleCfg.Enabled.Key, "true")
 		Params.Save(Params.RoleCfg.Roles.Key, builtinRoles)
-		Params.Save(Params.ProxyCfg.EnablePublicPrivilege.Key, "false")
+		Params.Save(Params.CommonCfg.EnablePublicPrivilege.Key, "false")
 
 		defer func() {
 			Params.Reset(Params.RoleCfg.Enabled.Key)
 			Params.Reset(Params.RoleCfg.Roles.Key)
-			Params.Reset(Params.ProxyCfg.EnablePublicPrivilege.Key)
+			Params.Reset(Params.CommonCfg.EnablePublicPrivilege.Key)
+		}()
+
+		err := c.initRbac()
+		assert.NoError(t, err)
+	})
+
+	t.Run("compact proxy setting", func(t *testing.T) {
+		builtinRoles := `{"db_admin": {"privileges": [{"object_type": "Global", "object_name": "*", "privilege": "CreateCollection", "db_name": "*"}]}}`
+		meta := mockrootcoord.NewIMetaTable(t)
+		c := newTestCore(withHealthyCode(), withMeta(meta))
+		meta.EXPECT().CreateRole(mock.Anything, mock.Anything).Return(nil).Times(3)
+		meta.EXPECT().OperatePrivilege(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+		Params.Save(Params.RoleCfg.Enabled.Key, "true")
+		Params.Save(Params.RoleCfg.Roles.Key, builtinRoles)
+		Params.Save("proxy.enablePublicPrivilege", "false")
+
+		defer func() {
+			Params.Reset(Params.RoleCfg.Enabled.Key)
+			Params.Reset(Params.RoleCfg.Roles.Key)
+			Params.Reset("proxy.enablePublicPrivilege")
 		}()
 
 		err := c.initRbac()
