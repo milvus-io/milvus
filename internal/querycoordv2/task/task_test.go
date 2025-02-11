@@ -763,7 +763,7 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
-			NewSegmentActionWithScope(targetNode, ActionTypeReduce, "", segment, querypb.DataScope_Streaming),
+			NewSegmentActionWithScope(targetNode, ActionTypeReduce, "", segment, querypb.DataScope_Streaming, 0),
 		)
 		suite.NoError(err)
 		tasks = append(tasks, task)
@@ -1819,12 +1819,6 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 	ctx := context.Background()
 	scheduler := suite.newScheduler()
 
-	mockTarget := meta.NewMockTargetManager(suite.T())
-	mockTarget.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&datapb.SegmentInfo{
-		NumOfRows: 100,
-	})
-	scheduler.targetMgr = mockTarget
-
 	coll := int64(1001)
 	nodeID := int64(1)
 	channelName := "channel-1"
@@ -1836,7 +1830,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		WrapIDSource(0),
 		coll,
 		suite.replica,
-		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", segmentID, querypb.DataScope_Historical),
+		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", segmentID, querypb.DataScope_Historical, 100),
 	)
 	suite.NoError(err)
 	err = scheduler.Add(task1)
@@ -1863,7 +1857,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		WrapIDSource(0),
 		coll2,
 		suite.replica,
-		NewSegmentActionWithScope(nodeID2, ActionTypeGrow, "", segmentID2, querypb.DataScope_Historical),
+		NewSegmentActionWithScope(nodeID2, ActionTypeGrow, "", segmentID2, querypb.DataScope_Historical, 100),
 	)
 	suite.NoError(err)
 	err = scheduler.Add(task3)
