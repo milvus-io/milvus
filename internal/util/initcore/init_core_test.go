@@ -45,3 +45,32 @@ func TestOtlpHang(t *testing.T) {
 		ResetTraceConfig(paramtable.Get())
 	})
 }
+
+func TestInitStorageV2FileSystem(t *testing.T) {
+	// init local storage
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, "/tmp")
+	err := InitStorageV2FileSystem(paramtable.Get())
+	assert.NoError(t, err)
+
+	// init remote storage
+	paramtable.Get().Save(paramtable.Get().MinioCfg.Address.Key, "oss-cn-hangzhou.aliyuncs.com")
+	paramtable.Get().Save(paramtable.Get().MinioCfg.BucketName.Key, "test-oss-0815")
+	paramtable.Get().Save(paramtable.Get().MinioCfg.AccessKeyID.Key, "test")
+	paramtable.Get().Save(paramtable.Get().MinioCfg.SecretAccessKey.Key, "test")
+	paramtable.Get().Save(paramtable.Get().MinioCfg.RootPath.Key, "test")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "remote")
+	paramtable.Get().Save(paramtable.Get().MinioCfg.CloudProvider.Key, "aliyun")
+	paramtable.Get().Save(paramtable.Get().MinioCfg.IAMEndpoint.Key, "")
+	paramtable.Get().Save(paramtable.Get().MinioCfg.LogLevel.Key, "warn")
+	paramtable.Get().Save(paramtable.Get().MinioCfg.Region.Key, "oss-cn-hangzhou")
+	paramtable.Get().Save(paramtable.Get().MinioCfg.UseSSL.Key, "false")
+	paramtable.Get().Save(paramtable.Get().MinioCfg.SslCACert.Key, "")
+	paramtable.Get().Save(paramtable.Get().MinioCfg.UseIAM.Key, "false")
+	paramtable.Get().Save(paramtable.Get().MinioCfg.UseVirtualHost.Key, "false")
+	paramtable.Get().Save(paramtable.Get().MinioCfg.RequestTimeoutMs.Key, "10000")
+
+	err = InitStorageV2FileSystem(paramtable.Get())
+	assert.NoError(t, err)
+}

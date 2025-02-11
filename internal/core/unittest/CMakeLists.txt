@@ -24,6 +24,9 @@ add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/te
 # TODO: better to use ls/find pattern
 set(MILVUS_TEST_FILES
         init_gtest.cpp
+        test_packed_c.cpp
+        test_arrow_fs_c.cpp
+        test_column_groups_c.cpp
         test_always_true_expr.cpp
         test_array_bitmap_index.cpp
         test_array_inverted_index.cpp
