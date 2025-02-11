@@ -26,6 +26,7 @@ import "C"
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"unsafe"
 
@@ -112,8 +113,13 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	}
 	collection.Ref(1)
 	m.collections[collectionID] = collection
+	m.updateMetric()
 
 	return nil
+}
+
+func (m *collectionManager) updateMetric() {
+	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(len(m.collections)))
 }
 
 func (m *collectionManager) Ref(collectionID int64, count uint32) bool {
@@ -140,6 +146,7 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 			DeleteCollection(collection)
 
 			metrics.CleanupQueryNodeCollectionMetrics(paramtable.GetNodeID(), collectionID)
+			m.updateMetric()
 			return true
 		}
 		return false
