@@ -31,6 +31,7 @@ extern int CPU_NUM;
 extern int64_t EXEC_EVAL_EXPR_BATCH_SIZE;
 extern int64_t JSON_INDEX_MEMORY_BUDGET;
 extern int64_t JSON_INDEX_COMMIT_INTERVAL;
+extern bool JSON_INDEX_ENABLED;
 void
 SetIndexSliceSize(const int64_t size);
 

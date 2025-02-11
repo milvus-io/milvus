@@ -124,9 +124,9 @@ func (jm *statsJobManager) enableBM25() bool {
 }
 
 func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
-	if isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		segment.GetIsSorted() {
-		return true
+	if !(isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
+		segment.GetIsSorted()) {
+		return false
 	}
 
 	if segment.GetTextStatsLogs() == nil {
@@ -142,9 +142,9 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 }
 
 func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
-	if isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		segment.GetIsSorted() {
-		return true
+	if !(isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
+		segment.GetIsSorted()) {
+		return false
 	}
 
 	if segment.GetJsonKeyStats() == nil {
@@ -196,7 +196,7 @@ func (jm *statsJobManager) triggerJsonKeyIndexStatsTask() {
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
 			h := typeutil.CreateFieldSchemaHelper(field)
-			if h.EnableJSONKeyIndex() && Params.DataCoordCfg.EnabledJsonKeyStats.GetAsBool() {
+			if h.EnableJSONKeyIndex() && Params.DataCoordCfg.EnabledJSONKeyStats.GetAsBool() {
 				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 			}
 		}

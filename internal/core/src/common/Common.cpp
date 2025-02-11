@@ -88,8 +88,7 @@ SetDefaultJSONKeyIndexCommitInterval(int64_t val) {
 void
 SetDefaultJSONKeyIndexEnable(bool val) {
     JSON_INDEX_ENABLED = val;
-    LOG_INFO("set default json key index enable: {}",
-             DEFAULT_JSON_INDEX_ENABLED);
+    LOG_INFO("set default json key index enable: {}", JSON_INDEX_ENABLED);
 }
 
 }  // namespace milvus

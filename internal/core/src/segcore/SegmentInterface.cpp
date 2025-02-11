@@ -408,8 +408,9 @@ index::JsonKeyInvertedIndex*
 SegmentInternalInterface::GetJsonKeyIndex(FieldId field_id) const {
     std::shared_lock lock(mutex_);
     auto iter = json_indexes_.find(field_id);
-    AssertInfo(iter != json_indexes_.end(),
-               "failed to get json index, json index not found");
+    if (iter == json_indexes_.end()) {
+        return nullptr;
+    }
     return iter->second.get();
 }
 

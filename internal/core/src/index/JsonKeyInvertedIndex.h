@@ -16,7 +16,6 @@
 
 #include "index/InvertedIndexTantivy.h"
 #include "common/jsmn.h"
-
 namespace milvus::index {
 
 using stdclock = std::chrono::high_resolution_clock;
@@ -50,23 +49,37 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
     const TargetBitmap
     FilterByPath(const std::string& path,
                  int32_t row,
+                 bool is_growing,
                  std::function<bool(uint32_t, uint16_t, uint16_t)> filter) {
-        if (shouldTriggerCommit()) {
-            Commit();
-            Reload();
-        }
-        TargetBitmap bitset(row);
-        auto array = wrapper_->term_query<std::string>(path);
-        LOG_INFO("json key filter size:{}", array.array_.len);
-        for (size_t j = 0; j < array.array_.len; j++) {
-            auto the_offset = array.array_.array[j];
-            auto tuple = DecodeOffset(the_offset);
-            auto row_id = std::get<0>(tuple);
-            bitset[row_id] = filter(
-                std::get<0>(tuple), std::get<1>(tuple), std::get<2>(tuple));
-        }
+        auto processArray = [this, &path, row, &filter]() {
+            TargetBitmap bitset(row);
+            auto array = wrapper_->term_query<std::string>(path);
+            LOG_INFO("json key filter size:{}", array.array_.len);
+            for (size_t j = 0; j < array.array_.len; j++) {
+                auto the_offset = array.array_.array[j];
+                auto tuple = DecodeOffset(the_offset);
+                auto row_id = std::get<0>(tuple);
+                if (row_id >= row) {
+                    continue;
+                }
+                bitset[row_id] = filter(
+                    std::get<0>(tuple), std::get<1>(tuple), std::get<2>(tuple));
+            }
 
-        return std::move(bitset);
+            return bitset;
+        };
+
+        if (is_growing) {
+            if (shouldTriggerCommit()) {
+                Commit();
+                Reload();
+                return processArray();
+            } else {
+                return processArray();
+            }
+        } else {
+            return processArray();
+        }
     }
 
     void

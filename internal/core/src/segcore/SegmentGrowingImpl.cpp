@@ -465,8 +465,8 @@ SegmentGrowingImpl::bulk_subscript(
     auto& src = *vec;
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        dst->at(i) = ExtractSubJson(std::string(src.view_element(offset)),
-                                    dynamic_field_names);
+        dst->at(i) =
+            ExtractSubJson(std::string(src[offset]), dynamic_field_names);
     }
     return result;
 }
@@ -972,10 +972,9 @@ SegmentGrowingImpl::GetJsonData(FieldId field_id, size_t offset) const {
     auto& field_meta = schema_->operator[](field_id);
     if (field_meta.is_nullable()) {
         auto valid_data_ptr = insert_record_.get_valid_data(field_id);
-        return {std::string_view(src.view_element(offset)),
-                valid_data_ptr->is_valid(offset)};
+        return  std::make_pair(std::string_view(src[offset]), valid_data_ptr->is_valid(offset));
     }
-    return {std::string_view(src.view_element(offset)), true};
+    return  std::make_pair(std::string_view(src[offset]), true);
 }
 
 }  // namespace milvus::segcore

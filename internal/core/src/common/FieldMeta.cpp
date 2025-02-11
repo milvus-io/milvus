@@ -12,7 +12,7 @@
 #include "common/FieldMeta.h"
 #include "common/SystemProperty.h"
 #include "common/protobuf_utils.h"
-
+#include "common/Common.h"
 #include <boost/lexical_cast.hpp>
 
 #include "Consts.h"
@@ -40,7 +40,7 @@ FieldMeta::enable_match() const {
 
 bool
 FieldMeta::enable_jsonIndex() const {
-    return IsJsonDataType(type_);
+    return IsJsonDataType(type_) && JSON_INDEX_ENABLED;
 }
 
 bool

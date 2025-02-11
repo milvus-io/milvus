@@ -122,8 +122,10 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentForIndex() {
                                                         uint16_t size) {
             return true;
         };
+        bool is_growing = segment_->type() == SegmentType::Growing;
         cached_index_chunk_res_ =
-            index->FilterByPath(pointer, active_count_, filter_func).clone();
+            index->FilterByPath(pointer, active_count_, is_growing, filter_func)
+                .clone();
         cached_index_chunk_id_ = 0;
     }
     TargetBitmap result;

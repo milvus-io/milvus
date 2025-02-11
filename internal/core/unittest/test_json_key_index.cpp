@@ -205,7 +205,7 @@ TEST_P(JsonKeyIndexTest, TestTermInFunc) {
             return term_set.find(int64_t(val.value())) != term_set.end();
         };
         auto pointer = milvus::Json::pointer(testcase.nested_path);
-        auto bitset = index_->FilterByPath(pointer, size_, filter_func);
+        auto bitset = index_->FilterByPath(pointer, size_, false, filter_func);
         ASSERT_EQ(bitset.size(), size_);
         for (int i = 0; i < bitset.size(); ++i) {
             if (nullable_ && !valid_data[i]) {
@@ -299,7 +299,8 @@ TEST_P(JsonKeyIndexTest, TestUnaryRangeInFunc) {
                 }
             };
             auto pointer = milvus::Json::pointer(testcase.nested_path);
-            auto bitset = index_->FilterByPath(pointer, size_, filter_func);
+            auto bitset =
+                index_->FilterByPath(pointer, size_, false, filter_func);
             ASSERT_EQ(bitset.size(), size_);
             for (int i = 0; i < bitset.size(); ++i) {
                 if (nullable_ && !valid_data[i]) {
@@ -376,7 +377,7 @@ TEST_P(JsonKeyIndexTest, TestBinaryRangeInFunc) {
             }
         };
         auto pointer = milvus::Json::pointer(testcase.nested_path);
-        auto bitset = index_->FilterByPath(pointer, size_, filter_func);
+        auto bitset = index_->FilterByPath(pointer, size_, false, filter_func);
         ASSERT_EQ(bitset.size(), size_);
         for (int i = 0; i < bitset.size(); ++i) {
             if (nullable_ && !valid_data[i]) {
@@ -414,7 +415,7 @@ TEST_P(JsonKeyIndexTest, TestExistInFunc) {
                 return this->data_[row_id].exist(pointer);
             };
 
-        auto bitset = index_->FilterByPath(pointer, size_, filter_func);
+        auto bitset = index_->FilterByPath(pointer, size_, false, filter_func);
         ASSERT_EQ(bitset.size(), size_);
         for (int i = 0; i < bitset.size(); ++i) {
             if (nullable_ && !valid_data[i]) {
@@ -471,7 +472,8 @@ TEST_P(JsonKeyIndexTest, TestJsonContainsAllFunc) {
                 return tmp_elements.empty();
             };
 
-            auto bitset = index_->FilterByPath(pointer, size_, filter_func);
+            auto bitset =
+                index_->FilterByPath(pointer, size_, false, filter_func);
             ASSERT_EQ(bitset.size(), size_);
             for (int i = 0; i < bitset.size(); ++i) {
                 if (nullable_ && !valid_data[i]) {
@@ -526,7 +528,8 @@ TEST(GrowingJsonKeyIndexTest, GrowingIndex) {
         return false;
     };
     auto pointer = milvus::Json::pointer({"int"});
-    auto bitset = index->FilterByPath(pointer, jsonDatas.size(), filter_func);
+    auto bitset =
+        index->FilterByPath(pointer, jsonDatas.size(), true, filter_func);
     ASSERT_EQ(bitset.size(), jsonDatas.size());
     for (int i = 0; i < bitset.size(); ++i) {
         auto val = jsons[i].template at<int64_t>(pointer).value();

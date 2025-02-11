@@ -3463,7 +3463,7 @@ type dataCoordConfig struct {
 	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 	BrokerTimeout                  ParamItem `refreshable:"false"`
 
-	EnabledJsonKeyStats ParamItem `refreshable:"true"`
+	EnabledJSONKeyStats ParamItem `refreshable:"true"`
 
 	// auto balance channel on datanode
 	AutoBalance                    ParamItem `refreshable:"true"`
@@ -4128,14 +4128,14 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.MinSegmentNumRowsToEnableIndex.Init(base.mgr)
 
-	p.EnabledJsonKeyStats = ParamItem{
+	p.EnabledJSONKeyStats = ParamItem{
 		Key:          "indexCoord.enabledJsonKeyStats",
 		Version:      "2.0.0",
 		DefaultValue: "true",
 		Doc:          "Indicates whether to enable JSON key stats",
 		Export:       true,
 	}
-	p.EnabledJsonKeyStats.Init(base.mgr)
+	p.EnabledJSONKeyStats.Init(base.mgr)
 
 	p.BindIndexNodeMode = ParamItem{
 		Key:          "indexCoord.bindIndexNodeMode.enable",

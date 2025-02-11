@@ -391,8 +391,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
             }
             return false;
         };
+        bool is_growing = segment_->type() == SegmentType::Growing;
         cached_index_chunk_res_ =
-            index->FilterByPath(pointer, active_count_, filter_func).clone();
+            index->FilterByPath(pointer, active_count_, is_growing, filter_func)
+                .clone();
         cached_index_chunk_id_ = 0;
     }
     TargetBitmap result;
@@ -553,8 +555,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
             }
             return false;
         };
+        bool is_growing = segment_->type() == SegmentType::Growing;
         cached_index_chunk_res_ =
-            index->FilterByPath(pointer, active_count_, filter_func).clone();
+            index->FilterByPath(pointer, active_count_, is_growing, filter_func)
+                .clone();
         cached_index_chunk_id_ = 0;
     }
     TargetBitmap result;
@@ -801,8 +805,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
             }
             return tmp_elements.empty();
         };
+        bool is_growing = segment_->type() == SegmentType::Growing;
         cached_index_chunk_res_ =
-            index->FilterByPath(pointer, active_count_, filter_func).clone();
+            index->FilterByPath(pointer, active_count_, is_growing, filter_func)
+                .clone();
         cached_index_chunk_id_ = 0;
     }
     TargetBitmap result;
@@ -1085,8 +1091,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
             }
             return tmp_elements_index.size() == 0;
         };
+        bool is_growing = segment_->type() == SegmentType::Growing;
         cached_index_chunk_res_ =
-            index->FilterByPath(pointer, active_count_, filter_func).clone();
+            index->FilterByPath(pointer, active_count_, is_growing, filter_func)
+                .clone();
         cached_index_chunk_id_ = 0;
     }
     TargetBitmap result;
@@ -1256,8 +1264,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
             }
             return exist_elements_index.size() == elements.size();
         };
+        bool is_growing = segment_->type() == SegmentType::Growing;
         cached_index_chunk_res_ =
-            index->FilterByPath(pointer, active_count_, filter_func).clone();
+            index->FilterByPath(pointer, active_count_, is_growing, filter_func)
+                .clone();
         cached_index_chunk_id_ = 0;
     }
     TargetBitmap result;
@@ -1514,8 +1524,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
             }
             return false;
         };
+        bool is_growing = segment_->type() == SegmentType::Growing;
         cached_index_chunk_res_ =
-            index->FilterByPath(pointer, active_count_, filter_func).clone();
+            index->FilterByPath(pointer, active_count_, is_growing, filter_func)
+                .clone();
         cached_index_chunk_id_ = 0;
     }
     TargetBitmap result;
