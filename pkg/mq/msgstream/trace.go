@@ -29,7 +29,7 @@ import (
 
 // ExtractCtx extracts trace span from msg.properties.
 // And it will attach some default tags to the span.
-func ExtractCtx(msg PackMsg, properties map[string]string) (context.Context, trace.Span) {
+func ExtractCtx(msg ConsumeMsg, properties map[string]string) (context.Context, trace.Span) {
 	ctx := context.Background()
 	if !allowTrace(msg) {
 		return ctx, trace.SpanFromContext(ctx)

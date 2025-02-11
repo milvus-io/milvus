@@ -166,8 +166,8 @@ func BuildConsumeMsgPack(pack *MsgPack) *ConsumeMsgPack {
 	return &ConsumeMsgPack{
 		BeginTs: pack.BeginTs,
 		EndTs:   pack.EndTs,
-		Msgs: lo.Map(pack.Msgs, func(msg TsMsg, _ int) PackMsg {
-			return &UnmarshalledMsg{msg: msg}
+		Msgs: lo.Map(pack.Msgs, func(msg TsMsg, _ int) ConsumeMsg {
+			return &UnmarshaledMsg{msg: msg}
 		}),
 		StartPositions: pack.StartPositions,
 		EndPositions:   pack.EndPositions,

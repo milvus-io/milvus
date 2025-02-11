@@ -61,14 +61,14 @@ type MsgPack struct {
 type ConsumeMsgPack struct {
 	BeginTs        Timestamp
 	EndTs          Timestamp
-	Msgs           []PackMsg
+	Msgs           []ConsumeMsg
 	StartPositions []*MsgPosition
 	EndPositions   []*MsgPosition
 }
 
-// PackMsg used for ConumserMsgPack
+// ConsumeMsg used for ConumserMsgPack
 // support fetch some properties metric
-type PackMsg interface {
+type ConsumeMsg interface {
 	GetPosition() *msgpb.MsgPosition
 	SetPosition(*msgpb.MsgPosition)
 
@@ -86,45 +86,45 @@ type PackMsg interface {
 	Unmarshal(unmarshalDispatcher UnmarshalDispatcher) (TsMsg, error)
 }
 
-// UnmarshalledMsg pack unmarshalled tsMsg as PackMsg
+// UnmarshaledMsg pack unmarshalled tsMsg as ConsumeMsg
 // For Compatibility or Test
-type UnmarshalledMsg struct {
+type UnmarshaledMsg struct {
 	msg TsMsg
 }
 
-func (m *UnmarshalledMsg) GetTimestamp() uint64 {
+func (m *UnmarshaledMsg) GetTimestamp() uint64 {
 	return m.msg.BeginTs()
 }
 
-func (m *UnmarshalledMsg) GetVChannel() string {
+func (m *UnmarshaledMsg) GetVChannel() string {
 	return m.msg.VChannel()
 }
 
-func (m *UnmarshalledMsg) GetPChannel() string {
+func (m *UnmarshaledMsg) GetPChannel() string {
 	return m.msg.Position().GetChannelName()
 }
 
-func (m *UnmarshalledMsg) GetMessageID() []byte {
+func (m *UnmarshaledMsg) GetMessageID() []byte {
 	return m.msg.Position().GetMsgID()
 }
 
-func (m *UnmarshalledMsg) GetID() int64 {
+func (m *UnmarshaledMsg) GetID() int64 {
 	return m.msg.ID()
 }
 
-func (m *UnmarshalledMsg) GetCollectionID() string {
+func (m *UnmarshaledMsg) GetCollectionID() string {
 	return strconv.FormatInt(m.msg.CollID(), 10)
 }
 
-func (m *UnmarshalledMsg) GetType() commonpb.MsgType {
+func (m *UnmarshaledMsg) GetType() commonpb.MsgType {
 	return m.msg.Type()
 }
 
-func (m *UnmarshalledMsg) GetSize() int {
+func (m *UnmarshaledMsg) GetSize() int {
 	return m.msg.Size()
 }
 
-func (m *UnmarshalledMsg) GetReplicateID() string {
+func (m *UnmarshaledMsg) GetReplicateID() string {
 	msgBase, ok := m.msg.(interface{ GetBase() *commonpb.MsgBase })
 	if !ok {
 		log.Warn("fail to get msg base, please check it", zap.Any("type", m.msg.Type()))
@@ -133,19 +133,19 @@ func (m *UnmarshalledMsg) GetReplicateID() string {
 	return msgBase.GetBase().GetReplicateInfo().GetReplicateID()
 }
 
-func (m *UnmarshalledMsg) SetPosition(pos *msgpb.MsgPosition) {
+func (m *UnmarshaledMsg) SetPosition(pos *msgpb.MsgPosition) {
 	m.msg.SetPosition(pos)
 }
 
-func (m *UnmarshalledMsg) GetPosition() *msgpb.MsgPosition {
+func (m *UnmarshaledMsg) GetPosition() *msgpb.MsgPosition {
 	return m.msg.Position()
 }
 
-func (m *UnmarshalledMsg) SetTraceCtx(ctx context.Context) {
+func (m *UnmarshaledMsg) SetTraceCtx(ctx context.Context) {
 	m.msg.SetTraceCtx(ctx)
 }
 
-func (m *UnmarshalledMsg) Unmarshal(unmarshalDispatcher UnmarshalDispatcher) (TsMsg, error) {
+func (m *UnmarshaledMsg) Unmarshal(unmarshalDispatcher UnmarshalDispatcher) (TsMsg, error) {
 	return m.msg, nil
 }
 
@@ -221,7 +221,7 @@ func (m *MarshaledMsg) Unmarshal(unmarshalDispatcher UnmarshalDispatcher) (TsMsg
 	return tsMsg, nil
 }
 
-func NewMarshaledMsg(msg common.Message, group string) (PackMsg, error) {
+func NewMarshaledMsg(msg common.Message, group string) (ConsumeMsg, error) {
 	properties := msg.Properties()
 	vchannel, ok := properties[common.ChannelTypeKey]
 	if !ok {
@@ -277,14 +277,14 @@ func NewMarshaledMsg(msg common.Message, group string) (PackMsg, error) {
 	return result, nil
 }
 
-// unmarshal common message to UnmarshalledMsg
-func UnmarshalMsg(msg common.Message, unmarshalDispatcher UnmarshalDispatcher) (PackMsg, error) {
+// unmarshal common message to UnmarshaledMsg
+func UnmarshalMsg(msg common.Message, unmarshalDispatcher UnmarshalDispatcher) (ConsumeMsg, error) {
 	tsMsg, err := GetTsMsgFromConsumerMsg(unmarshalDispatcher, msg)
 	if err != nil {
 		return nil, err
 	}
 
-	return &UnmarshalledMsg{
+	return &UnmarshaledMsg{
 		msg: tsMsg,
 	}, nil
 }
@@ -378,7 +378,7 @@ type Factory interface {
 type SimpleMsgDispatcher struct {
 	stream              MsgStream
 	unmarshalDispatcher UnmarshalDispatcher
-	filter              func(PackMsg) bool
+	filter              func(ConsumeMsg) bool
 	ch                  chan *MsgPack
 	chOnce              sync.Once
 
@@ -387,7 +387,7 @@ type SimpleMsgDispatcher struct {
 	wg        sync.WaitGroup
 }
 
-func NewSimpleMsgDispatcher(stream MsgStream, filter func(PackMsg) bool) *SimpleMsgDispatcher {
+func NewSimpleMsgDispatcher(stream MsgStream, filter func(ConsumeMsg) bool) *SimpleMsgDispatcher {
 	return &SimpleMsgDispatcher{
 		stream:              stream,
 		filter:              filter,

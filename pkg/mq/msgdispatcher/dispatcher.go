@@ -321,7 +321,7 @@ func (d *Dispatcher) groupAndParseMsgs(pack *msgstream.ConsumeMsgPack, unmarshal
 			continue
 		}
 		if _, ok := targetPacks[vchannel]; ok {
-			tsMsg, err := msg.Unmarshal(unmarshalDispatcher) // TODO AOIASD UNMARSHAL
+			tsMsg, err := msg.Unmarshal(unmarshalDispatcher)
 			if err != nil {
 				log.Warn("unmarshl message failed", zap.Error(err))
 				continue

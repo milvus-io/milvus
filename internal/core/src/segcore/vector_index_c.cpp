@@ -30,7 +30,7 @@ ValidateIndexParams(const char* index_type,
             std::make_unique<milvus::proto::indexcgo::IndexParams>();
         auto res =
             index_params->ParseFromArray(serialized_index_params, length);
-        AssertInfo(res, "Unmarshall index params failed");
+        AssertInfo(res, "Unmarshal index params failed");
 
         knowhere::Json json;
 

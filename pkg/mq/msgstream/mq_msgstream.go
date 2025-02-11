@@ -460,7 +460,7 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 			}
 
 			var err error
-			var packMsg PackMsg
+			var packMsg ConsumeMsg
 
 			packMsg, err = NewMarshaledMsg(msg, consumer.Subscription())
 			if err != nil {
@@ -480,7 +480,7 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 
 			packMsg.SetPosition(pos)
 			msgPack := ConsumeMsgPack{
-				Msgs:           []PackMsg{packMsg},
+				Msgs:           []ConsumeMsg{packMsg},
 				StartPositions: []*msgpb.MsgPosition{pos},
 				EndPositions:   []*msgpb.MsgPosition{pos},
 				BeginTs:        packMsg.GetTimestamp(),
@@ -548,7 +548,7 @@ var _ MsgStream = (*MqTtMsgStream)(nil)
 // MqTtMsgStream is a msgstream that contains timeticks
 type MqTtMsgStream struct {
 	*mqMsgStream
-	chanMsgBuf         map[mqwrapper.Consumer][]PackMsg
+	chanMsgBuf         map[mqwrapper.Consumer][]ConsumeMsg
 	chanMsgPos         map[mqwrapper.Consumer]*msgpb.MsgPosition
 	chanStopChan       map[mqwrapper.Consumer]chan bool
 	chanTtMsgTime      map[mqwrapper.Consumer]Timestamp
@@ -570,7 +570,7 @@ func NewMqTtMsgStream(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	chanMsgBuf := make(map[mqwrapper.Consumer][]PackMsg)
+	chanMsgBuf := make(map[mqwrapper.Consumer][]ConsumeMsg)
 	chanMsgPos := make(map[mqwrapper.Consumer]*msgpb.MsgPosition)
 	chanStopChan := make(map[mqwrapper.Consumer]chan bool)
 	chanTtMsgTime := make(map[mqwrapper.Consumer]Timestamp)
@@ -595,7 +595,7 @@ func (ms *MqTtMsgStream) addConsumer(consumer mqwrapper.Consumer, channel string
 	}
 	ms.consumers[channel] = consumer
 	ms.consumerChannels = append(ms.consumerChannels, channel)
-	ms.chanMsgBuf[consumer] = make([]PackMsg, 0)
+	ms.chanMsgBuf[consumer] = make([]ConsumeMsg, 0)
 	ms.chanMsgPos[consumer] = &msgpb.MsgPosition{
 		ChannelName: channel,
 		MsgID:       make([]byte, 0),
@@ -651,7 +651,7 @@ func (ms *MqTtMsgStream) Close() {
 	ms.mqMsgStream.Close()
 }
 
-func isDMLMsg(msg PackMsg) bool {
+func isDMLMsg(msg ConsumeMsg) bool {
 	return msg.GetType() == commonpb.MsgType_Insert || msg.GetType() == commonpb.MsgType_Delete
 }
 
@@ -702,7 +702,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 		case <-ms.ctx.Done():
 			return
 		default:
-			timeTickBuf := make([]PackMsg, 0)
+			timeTickBuf := make([]ConsumeMsg, 0)
 			// startMsgPosition := make([]*msgpb.MsgPosition, 0)
 			// endMsgPositions := make([]*msgpb.MsgPosition, 0)
 			startPositions := make(map[string]*msgpb.MsgPosition)
@@ -741,8 +741,8 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 					if _, ok := startPositions[channelName]; !ok {
 						startPositions[channelName] = startPos
 					}
-					tempBuffer := make([]PackMsg, 0)
-					var timeTickMsg PackMsg
+					tempBuffer := make([]ConsumeMsg, 0)
+					var timeTickMsg ConsumeMsg
 					for _, v := range msgs {
 						if v.GetType() == commonpb.MsgType_TimeTick {
 							timeTickMsg = v
@@ -790,7 +790,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			}
 
 			idset := make(typeutil.Set[int64])
-			uniqueMsgs := make([]PackMsg, 0, len(timeTickBuf))
+			uniqueMsgs := make([]ConsumeMsg, 0, len(timeTickBuf))
 			for _, msg := range timeTickBuf {
 				if isDMLMsg(msg) && idset.Contain(msg.GetID()) {
 					log.Ctx(ms.ctx).Warn("mqTtMsgStream, found duplicated msg", zap.Int64("msgID", msg.GetID()))
@@ -844,7 +844,7 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 			}
 
 			var err error
-			var packMsg PackMsg
+			var packMsg ConsumeMsg
 
 			packMsg, err = NewMarshaledMsg(msg, consumer.Subscription())
 			if err != nil {
@@ -980,7 +980,7 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 				consumer.Ack(msg)
 
 				var err error
-				var packMsg PackMsg
+				var packMsg ConsumeMsg
 
 				packMsg, err = NewMarshaledMsg(msg, consumer.Subscription())
 				if err != nil {
@@ -1014,7 +1014,7 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 					ms.chanMsgBuf[consumer] = append(ms.chanMsgBuf[consumer], packMsg)
 				} else {
 					log.Info("skip msg",
-						// zap.Int64("source", tsMsg.SourceID()), // TODO AOIASD SOURCE ID ?
+						// zap.Int64("source", tsMsg.SourceID()), // TODO SOURCE ID ?
 						zap.String("type", packMsg.GetType().String()),
 						zap.Int("size", packMsg.GetSize()),
 						zap.Uint64("msgTs", packMsg.GetTimestamp()),

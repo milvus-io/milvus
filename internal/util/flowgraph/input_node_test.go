@@ -46,7 +46,7 @@ func TestInputNode(t *testing.T) {
 	produceStream.AsProducer(context.TODO(), channels)
 	produceStream.Produce(context.TODO(), &msgPack)
 
-	dispatcher := msgstream.NewSimpleMsgDispatcher(msgStream, func(pm msgstream.PackMsg) bool { return true })
+	dispatcher := msgstream.NewSimpleMsgDispatcher(msgStream, func(pm msgstream.ConsumeMsg) bool { return true })
 	nodeName := "input_node"
 	inputNode := NewInputNode(dispatcher.Chan(), nodeName, 100, 100, "", 0, 0, "")
 	defer inputNode.Close()
@@ -91,7 +91,7 @@ func Test_InputNodeSkipMode(t *testing.T) {
 	outputCh := make(chan bool)
 
 	nodeName := "input_node"
-	dispatcher := msgstream.NewSimpleMsgDispatcher(msgStream, func(pm msgstream.PackMsg) bool { return true })
+	dispatcher := msgstream.NewSimpleMsgDispatcher(msgStream, func(pm msgstream.ConsumeMsg) bool { return true })
 	inputNode := NewInputNode(dispatcher.Chan(), nodeName, 100, 100, typeutil.DataNodeRole, 0, 0, "")
 	defer inputNode.Close()
 
