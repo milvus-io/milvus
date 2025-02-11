@@ -33,15 +33,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-func Test_AddFieldTask_Prepare(t *testing.T) {
+func Test_AddCollectionFieldTask_Prepare(t *testing.T) {
 	t.Run("invalid msg type", func(t *testing.T) {
-		task := &addFieldTask{Req: &milvuspb.AddFieldRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection}}}
-		err := task.Prepare(context.Background())
-		assert.Error(t, err)
-	})
-
-	t.Run("nil field schema", func(t *testing.T) {
-		task := &addFieldTask{Req: &milvuspb.AddFieldRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AddField}, FieldSchema: nil}}
+		task := &addCollectionFieldTask{Req: &milvuspb.AddCollectionFieldRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection}}}
 		err := task.Prepare(context.Background())
 		assert.Error(t, err)
 	})
@@ -57,7 +51,7 @@ func Test_AddFieldTask_Prepare(t *testing.T) {
 		}
 		bytes, err := proto.Marshal(fieldSchema)
 		assert.NoError(t, err)
-		task := &addFieldTask{Req: &milvuspb.AddFieldRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AddField}, FieldSchema: bytes}}
+		task := &addCollectionFieldTask{Req: &milvuspb.AddCollectionFieldRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AddCollectionField}, Schema: bytes}}
 		err = task.Prepare(context.Background())
 		assert.Error(t, err)
 	})
@@ -73,20 +67,20 @@ func Test_AddFieldTask_Prepare(t *testing.T) {
 		}
 		bytes, err := proto.Marshal(fieldSchema)
 		assert.NoError(t, err)
-		task := &addFieldTask{Req: &milvuspb.AddFieldRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AddField}, FieldSchema: bytes}}
+		task := &addCollectionFieldTask{Req: &milvuspb.AddCollectionFieldRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AddCollectionField}, Schema: bytes}}
 		err = task.Prepare(context.Background())
 		assert.NoError(t, err)
 	})
 }
 
-func Test_AddFieldTask_Execute(t *testing.T) {
+func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 	t.Run("failed to get collection", func(t *testing.T) {
 		metaTable := mockrootcoord.NewIMetaTable(t)
 		metaTable.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, "not_existed_coll", mock.Anything).Return(nil, merr.WrapErrCollectionNotFound("not_existed_coll"))
 		core := newTestCore(withMeta(metaTable))
-		task := &addFieldTask{
+		task := &addCollectionFieldTask{
 			baseTask: newBaseTask(context.Background(), core),
-			Req: &milvuspb.AddFieldRequest{
+			Req: &milvuspb.AddCollectionFieldRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
 				CollectionName: "not_existed_coll",
 			},
@@ -122,9 +116,9 @@ func Test_AddFieldTask_Execute(t *testing.T) {
 		meta.On("ListAliasesByID", mock.Anything, mock.Anything).Return([]string{})
 
 		core := newTestCore(withValidProxyManager(), withMeta(meta))
-		task := &addFieldTask{
+		task := &addCollectionFieldTask{
 			baseTask: newBaseTask(context.Background(), core),
-			Req: &milvuspb.AddFieldRequest{
+			Req: &milvuspb.AddCollectionFieldRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
 				CollectionName: "coll",
 			},
@@ -170,9 +164,9 @@ func Test_AddFieldTask_Execute(t *testing.T) {
 		}
 
 		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker))
-		task := &addFieldTask{
+		task := &addCollectionFieldTask{
 			baseTask: newBaseTask(context.Background(), core),
-			Req: &milvuspb.AddFieldRequest{
+			Req: &milvuspb.AddCollectionFieldRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
 				CollectionName: "coll",
 			},
@@ -218,9 +212,9 @@ func Test_AddFieldTask_Execute(t *testing.T) {
 		}
 
 		core := newTestCore(withInvalidProxyManager(), withMeta(meta), withBroker(broker))
-		task := &addFieldTask{
+		task := &addCollectionFieldTask{
 			baseTask: newBaseTask(context.Background(), core),
-			Req: &milvuspb.AddFieldRequest{
+			Req: &milvuspb.AddCollectionFieldRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
 				CollectionName: "coll",
 			},
@@ -266,9 +260,9 @@ func Test_AddFieldTask_Execute(t *testing.T) {
 		}
 
 		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker))
-		task := &addFieldTask{
+		task := &addCollectionFieldTask{
 			baseTask: newBaseTask(context.Background(), core),
-			Req: &milvuspb.AddFieldRequest{
+			Req: &milvuspb.AddCollectionFieldRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
 				CollectionName: "coll",
 			},

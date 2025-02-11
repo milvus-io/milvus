@@ -15,8 +15,6 @@
 // limitations under the License.
 
 #include "common/FieldData.h"
-#include <sys/_types/_int64_t.h>
-#include <sys/_types/_int8_t.h>
 
 #include "arrow/array/array_binary.h"
 #include "common/Array.h"

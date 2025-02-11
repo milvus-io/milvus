@@ -59,6 +59,7 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
     std::unique_ptr<DataArray> field_data;
     // fill other entries except primary key by result_offset
     for (auto field_id : plan->target_entries_) {
+        auto& field_meta = plan->schema_[field_id];
         if (plan->schema_.get_dynamic_field_id().has_value() &&
             plan->schema_.get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
@@ -68,7 +69,6 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
                                                   size,
                                                   target_dynamic_fields));
         } else if (!is_field_exist(field_id)) {
-            auto& field_meta = plan->schema_[field_id];
             field_data =
                 std::move(bulk_subscript_not_exist_field(field_meta, size));
         } else {
@@ -414,6 +414,12 @@ SegmentInternalInterface::GetTextIndex(FieldId field_id) const {
 std::unique_ptr<DataArray>
 SegmentInternalInterface::bulk_subscript_not_exist_field(
     const milvus::FieldMeta& field_meta, int64_t count) const {
+    auto data_type = field_meta.get_data_type();
+    if (IsVectorDataType(data_type)) {
+        PanicInfo(DataTypeInvalid,
+                  fmt::format("unsupported added field type {}",
+                              field_meta.get_data_type()));
+    }
     auto result = CreateScalarDataArray(count, field_meta);
     if (field_meta.default_value().has_value()) {
         auto res = result->mutable_valid_data()->mutable_data();

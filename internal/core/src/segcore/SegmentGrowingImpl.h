@@ -352,7 +352,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     is_field_exist(FieldId field_id) const override {
-        return insert_record_.is_data_exist(field_id);
+        return schema_->get_fields().find(field_id) !=
+               schema_->get_fields().end();
     }
 
  protected:

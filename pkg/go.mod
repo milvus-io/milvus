@@ -15,7 +15,7 @@ require (
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/json-iterator/go v1.1.12
 	github.com/klauspost/compress v1.17.7
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.0-beta.0.20250214033407-ad08272e542b
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.0-beta.0.20250220062641-e11dd9cee682
 	github.com/nats-io/nats-server/v2 v2.10.12
 	github.com/nats-io/nats.go v1.34.1
 	github.com/panjf2000/ants/v2 v2.7.2
@@ -186,5 +186,3 @@ replace (
 )
 
 exclude github.com/apache/pulsar-client-go/oauth2 v0.0.0-20211108044248-fe3b7c4e445b
-
-replace github.com/milvus-io/milvus-proto/go-api/v2 => github.com/smellthemoon/milvus-proto/go-api/v2 v2.0.0-20250211103825-dcf1460a2d9d

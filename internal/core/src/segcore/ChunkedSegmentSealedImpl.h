@@ -205,7 +205,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     bool
     is_field_exist(FieldId field_id) const override {
-        return fields_.find(field_id) != fields_.end();
+        return schema_->get_fields().find(field_id) !=
+               schema_->get_fields().end();
     }
 
  protected:

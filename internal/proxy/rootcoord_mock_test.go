@@ -326,7 +326,7 @@ func (coord *RootCoordMock) GetTimeTickChannel(ctx context.Context, req *interna
 	}, nil
 }
 
-func (coord *RootCoordMock) AddField(ctx context.Context, req *milvuspb.AddFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (coord *RootCoordMock) AddCollectionField(ctx context.Context, req *milvuspb.AddCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	code := coord.state.Load().(commonpb.StateCode)
 	if code != commonpb.StateCode_Healthy {
 		return &commonpb.Status{
@@ -354,9 +354,18 @@ func (coord *RootCoordMock) AddField(ctx context.Context, req *milvuspb.AddField
 			Reason:    "collection info not exist",
 		}, nil
 	}
+	fieldSchema := &schemapb.FieldSchema{}
 
-	req.FieldSchema.FieldID = int64(common.StartOfUserFieldID + len(collInfo.schema.Fields) + 1)
-	collInfo.schema.Fields = append(collInfo.schema.Fields, req.FieldSchema)
+	err := proto.Unmarshal(req.Schema, fieldSchema)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "invalid parameter",
+		}, nil
+	}
+
+	fieldSchema.FieldID = int64(common.StartOfUserFieldID + len(collInfo.schema.Fields) + 1)
+	collInfo.schema.Fields = append(collInfo.schema.Fields, fieldSchema)
 	ts := uint64(time.Now().Nanosecond())
 	coord.collID2Meta[collID] = collectionMeta{
 		name:                 req.CollectionName,

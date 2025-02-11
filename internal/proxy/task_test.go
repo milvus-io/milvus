@@ -686,13 +686,13 @@ func TestAddFieldTask(t *testing.T) {
 	}
 	bytes, err := proto.Marshal(fSchema)
 	assert.NoError(t, err)
-	task := &addFieldTask{
+	task := &addCollectionFieldTask{
 		Condition: NewTaskCondition(ctx),
-		AddFieldRequest: &milvuspb.AddFieldRequest{
+		AddCollectionFieldRequest: &milvuspb.AddCollectionFieldRequest{
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
-			FieldSchema:    bytes,
+			Schema:         bytes,
 		},
 		ctx:       ctx,
 		rootCoord: rc,
@@ -703,7 +703,7 @@ func TestAddFieldTask(t *testing.T) {
 	t.Run("on enqueue", func(t *testing.T) {
 		err := task.OnEnqueue()
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.MsgType_AddField, task.Type())
+		assert.Equal(t, commonpb.MsgType_AddCollectionField, task.Type())
 	})
 
 	t.Run("ctx", func(t *testing.T) {
@@ -736,6 +736,10 @@ func TestAddFieldTask(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
+		bytes, err := proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+
 		task.oldSchema = schema
 
 		err = task.PreExecute(ctx)
@@ -756,7 +760,7 @@ func TestAddFieldTask(t *testing.T) {
 		assert.NoError(t, err)
 
 		// nil schema
-		task.FieldSchema = nil
+		task.Schema = nil
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
@@ -775,10 +779,11 @@ func TestAddFieldTask(t *testing.T) {
 		}
 		bytes, err := proto.Marshal(fSchema)
 		assert.NoError(t, err)
-		task.FieldSchema = bytes
+		task.Schema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		Params.Reset(Params.ProxyCfg.MaxFieldNum.Key)
 
 		// invalid field type
 		fSchema = &schemapb.FieldSchema{
@@ -786,7 +791,7 @@ func TestAddFieldTask(t *testing.T) {
 		}
 		bytes, err = proto.Marshal(fSchema)
 		assert.NoError(t, err)
-		task.FieldSchema = bytes
+		task.Schema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
@@ -797,7 +802,7 @@ func TestAddFieldTask(t *testing.T) {
 		}
 		bytes, err = proto.Marshal(fSchema)
 		assert.NoError(t, err)
-		task.FieldSchema = bytes
+		task.Schema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
@@ -808,7 +813,7 @@ func TestAddFieldTask(t *testing.T) {
 		}
 		bytes, err = proto.Marshal(fSchema)
 		assert.NoError(t, err)
-		task.FieldSchema = bytes
+		task.Schema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
@@ -819,7 +824,7 @@ func TestAddFieldTask(t *testing.T) {
 		}
 		bytes, err = proto.Marshal(fSchema)
 		assert.NoError(t, err)
-		task.FieldSchema = bytes
+		task.Schema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
@@ -830,7 +835,7 @@ func TestAddFieldTask(t *testing.T) {
 		}
 		bytes, err = proto.Marshal(fSchema)
 		assert.NoError(t, err)
-		task.FieldSchema = bytes
+		task.Schema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
@@ -848,7 +853,22 @@ func TestAddFieldTask(t *testing.T) {
 		}
 		bytes, err = proto.Marshal(fSchema)
 		assert.NoError(t, err)
-		task.FieldSchema = bytes
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// more ClusteringKey field
+		fSchema = &schemapb.FieldSchema{
+			IsClusteringKey: true,
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		task.oldSchema = schema
+		task.oldSchema.Fields = append(task.oldSchema.Fields, &schemapb.FieldSchema{
+			IsClusteringKey: true,
+		})
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
@@ -859,7 +879,7 @@ func TestAddFieldTask(t *testing.T) {
 		}
 		bytes, err = proto.Marshal(fSchema)
 		assert.NoError(t, err)
-		task.FieldSchema = bytes
+		task.Schema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
@@ -870,7 +890,7 @@ func TestAddFieldTask(t *testing.T) {
 		}
 		bytes, err = proto.Marshal(fSchema)
 		assert.NoError(t, err)
-		task.FieldSchema = bytes
+		task.Schema = bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)

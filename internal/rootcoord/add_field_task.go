@@ -30,17 +30,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
-type addFieldTask struct {
+type addCollectionFieldTask struct {
 	baseTask
-	Req         *milvuspb.AddFieldRequest
+	Req         *milvuspb.AddCollectionFieldRequest
 	fieldSchema *schemapb.FieldSchema
 }
 
-func (t *addFieldTask) Prepare(ctx context.Context) error {
-	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_AddField); err != nil {
+func (t *addCollectionFieldTask) Prepare(ctx context.Context) error {
+	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_AddCollectionField); err != nil {
 		return err
 	}
-	err := proto.Unmarshal(t.Req.FieldSchema, t.fieldSchema)
+	t.fieldSchema = &schemapb.FieldSchema{}
+	err := proto.Unmarshal(t.Req.Schema, t.fieldSchema)
 	if err != nil {
 		return err
 	}
@@ -50,7 +51,7 @@ func (t *addFieldTask) Prepare(ctx context.Context) error {
 	return nil
 }
 
-func (t *addFieldTask) Execute(ctx context.Context) error {
+func (t *addCollectionFieldTask) Execute(ctx context.Context) error {
 	oldColl, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), t.ts)
 	if err != nil {
 		log.Ctx(ctx).Warn("get collection failed during add field",
@@ -58,17 +59,17 @@ func (t *addFieldTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	start := len(oldColl.Fields)
+	start := len(oldColl.Fields) - 2
 	// assign field id
-	t.fieldSchema.FieldID = int64(1 + StartOfUserFieldID + start)
+	t.fieldSchema.FieldID = int64(StartOfUserFieldID + start)
 
 	newField := model.UnmarshalFieldModel(t.fieldSchema)
 
 	ts := t.GetTs()
-	return executeAddFieldTaskSteps(ctx, t.core, oldColl, newField, t.Req, ts)
+	return executeAddCollectionFieldTaskSteps(ctx, t.core, oldColl, newField, t.Req, ts)
 }
 
-func (t *addFieldTask) GetLockerKey() LockerKey {
+func (t *addCollectionFieldTask) GetLockerKey() LockerKey {
 	collection := t.core.getCollectionIDStr(t.ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), 0)
 	return NewLockerKeyChain(
 		NewClusterLockerKey(false),
@@ -77,16 +78,16 @@ func (t *addFieldTask) GetLockerKey() LockerKey {
 	)
 }
 
-func executeAddFieldTaskSteps(ctx context.Context,
+func executeAddCollectionFieldTaskSteps(ctx context.Context,
 	core *Core,
 	col *model.Collection,
 	newField *model.Field,
-	req *milvuspb.AddFieldRequest,
+	req *milvuspb.AddCollectionFieldRequest,
 	ts Timestamp,
 ) error {
 	oldColl := col.Clone()
 	redoTask := newBaseRedoTask(core.stepExecutor)
-	redoTask.AddSyncStep(&AddFieldStep{
+	redoTask.AddSyncStep(&AddCollectionFieldStep{
 		baseStep: baseStep{core: core},
 		oldColl:  oldColl,
 		newField: newField,
@@ -111,7 +112,7 @@ func executeAddFieldTaskSteps(ctx context.Context,
 		dbName:          req.GetDbName(),
 		collectionNames: append(aliases, req.GetCollectionName()),
 		collectionID:    oldColl.CollectionID,
-		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AddField)},
+		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AddCollectionField)},
 	})
 
 	return redoTask.Execute(ctx)
