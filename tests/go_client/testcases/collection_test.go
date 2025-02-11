@@ -2,6 +2,7 @@ package testcases
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
@@ -38,6 +40,74 @@ func TestCreateCollection(t *testing.T) {
 		common.CheckErr(t, err, true)
 		require.Contains(t, collections, schema.CollectionName)
 	}
+}
+
+// fast: create -> index -> load
+func TestCreateCollectionFast(t *testing.T) {
+	// test collection property mmap
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	// create collection option: WithConsistencyLevel Strong,
+	collName := common.GenRandomString("alter", 6)
+	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim))
+	common.CheckErr(t, err, true)
+
+	// verify collection option
+	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	require.Equal(t, entity.FieldTypeInt64, coll.Schema.PKField().DataType)
+
+	// load -> insert
+	prepare, _ := hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), hp.TNewDataOption())
+	prepare.FlushData(ctx, t, mc, collName)
+
+	countRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter("").WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, _ := countRes.Fields[0].GetAsInt64(0)
+	require.EqualValues(t, common.DefaultNb, count)
+
+	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+	resSearch, err := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, vectors))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
+}
+
+func TestCreateCollectionFastOption(t *testing.T) {
+	// test create collection fast with option: ConsistencyLevel, varcharPk, indexOption
+	// Collection AutoID not works !!!, please set it on the field side~
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	// create collection option: WithConsistencyLevel Strong,
+	collName := common.GenRandomString("alter", 6)
+	index := index.NewHNSWIndex(entity.COSINE, 8, 96)
+	indexOption := client.NewCreateIndexOption(collName, common.DefaultFastVector, index)
+	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim).WithDynamicSchema(true).
+		WithConsistencyLevel(entity.ClStrong).WithIndexOptions(indexOption).WithVarcharPK(true, 10))
+	common.CheckErr(t, err, true)
+
+	// verify collection option
+	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	require.Equal(t, entity.ClStrong, coll.ConsistencyLevel)
+	require.Equal(t, entity.FieldTypeVarChar, coll.Schema.PKField().DataType)
+	t.Log("https://github.com/milvus-io/milvus/issues/39524")
+	// descIdx, _ := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(collName, common.DefaultFastVector))
+	// common.CheckIndex(t, descIdx, index, common.TNewCheckIndexOpt(common.DefaultNb))
+
+	// insert
+	hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), hp.TNewDataOption())
+
+	countRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("").WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, _ := countRes.Fields[0].GetAsInt64(0)
+	require.EqualValues(t, common.DefaultNb, count)
+
+	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+	resSearch, err := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, vectors).WithOutputFields(common.DefaultDynamicNumberField))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
+	common.CheckOutputFields(t, []string{common.DefaultDynamicNumberField}, resSearch[0].Fields)
 }
 
 func TestCreateAutoIdCollectionField(t *testing.T) {
@@ -122,7 +192,7 @@ func TestCreateAutoIdCollectionSchema(t *testing.T) {
 
 // test create auto collection with collection option
 func TestCreateAutoIdCollection(t *testing.T) {
-	t.Skip("waiting for valid AutoId from collection option")
+	t.Skip("https://github.com/milvus-io/milvus/issues/39523")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
 
@@ -132,7 +202,7 @@ func TestCreateAutoIdCollection(t *testing.T) {
 		pkField := entity.NewField().WithName("pk").WithDataType(pkFieldType).WithIsPrimaryKey(true).WithMaxLength(common.MaxLength)
 
 		// pk field with name
-		schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField)
+		schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithAutoID(true)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithAutoID(true))
 		common.CheckErr(t, err, true)
 
@@ -777,7 +847,7 @@ func TestCreateVectorWithoutDim(t *testing.T) {
 		entity.NewField().WithName(vecFieldName).WithDataType(entity.FieldTypeFloatVector),
 	).WithName(collName)
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-	common.CheckErr(t, err, false, fmt.Sprintf("dimension is not defined in field type params of field %s, check type param `dim` for vector field", vecFieldName))
+	common.CheckErr(t, err, false, "dimension is not defined in field type params")
 }
 
 // specify dim for sparse vector -> error
@@ -838,7 +908,7 @@ func TestCreateVarcharArrayInvalidLength(t *testing.T) {
 	for _, invalidLength := range []int64{-1, 0, common.MaxLength + 1} {
 		arrayVarcharField.WithMaxLength(invalidLength)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-		common.CheckErr(t, err, false, fmt.Sprintf("the maximum length specified for a VarChar field(%s) should be in (0, 65535], but got %d instead: invalid parameter", arrayVarcharField.Name, invalidLength))
+		common.CheckErr(t, err, false, "the maximum length specified for a VarChar field(array) should be in (0, 65535]")
 	}
 }
 
@@ -860,7 +930,7 @@ func TestCreateVarcharInvalidLength(t *testing.T) {
 	for _, invalidLength := range []int64{-1, 0, common.MaxLength + 1} {
 		varcharField.WithMaxLength(invalidLength)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-		common.CheckErr(t, err, false, fmt.Sprintf("the maximum length specified for a VarChar field(%s) should be in (0, 65535], but got %d instead", varcharField.Name, invalidLength))
+		common.CheckErr(t, err, false, "the maximum length specified for a VarChar field(varchar) should be in (0, 65535]")
 	}
 }
 
@@ -933,4 +1003,238 @@ func TestCreateCollectionInvalid(t *testing.T) {
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, mSchema.schema))
 		common.CheckErr(t, err, false, mSchema.errMsg)
 	}
+}
+
+// test rename collection
+func TestRenameCollection(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	// create collection
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
+
+	// rename collection and verify
+	newName := common.GenRandomString("new", 6)
+	err := mc.RenameCollection(ctx, client.NewRenameCollectionOption(schema.CollectionName, newName))
+	common.CheckErr(t, err, true)
+
+	collections, _ := mc.ListCollections(ctx, client.NewListCollectionOption())
+	require.Contains(t, collections, newName)
+	require.NotContains(t, collections, schema.CollectionName)
+
+	_, err = mc.ListIndexes(ctx, client.NewListIndexOption(schema.CollectionName))
+	common.CheckErr(t, err, false, "collection not found")
+
+	schema.CollectionName = newName
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+	resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors))
+	common.CheckErr(t, errSearch, true)
+	common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
+
+	stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(newName))
+	common.CheckErr(t, err, true)
+	require.Equal(t, map[string]string{common.RowCount: strconv.Itoa(common.DefaultNb)}, stats)
+}
+
+// There are collections with the same name in different db. Rename one of them.
+func TestRenameCollectionDb(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	// create collection
+	collectionName := common.GenRandomString("re", 6)
+	mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collectionName, common.DefaultDim))
+
+	// create a database and use database
+	dbName := common.GenRandomString("db", 4)
+	mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName))
+	mc.UseDatabase(ctx, client.NewUseDatabaseOption(dbName))
+	mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collectionName, common.DefaultDim))
+
+	// rename db collection rather than default db collection
+	newName := common.GenRandomString("new", 6)
+	err := mc.RenameCollection(ctx, client.NewRenameCollectionOption(collectionName, newName))
+	common.CheckErr(t, err, true)
+
+	collections, _ := mc.ListCollections(ctx, client.NewListCollectionOption())
+	require.Contains(t, collections, newName)
+	require.NotContains(t, collections, collectionName)
+
+	// verify default db collection
+	mc.UseDatabase(ctx, client.NewUseDatabaseOption(common.DefaultDb))
+	collectionsDefault, _ := mc.ListCollections(ctx, client.NewListCollectionOption())
+	require.Contains(t, collectionsDefault, collectionName)
+	require.NotContains(t, collectionsDefault, newName)
+}
+
+func TestRenameCollectionInvalidName(t *testing.T) {
+	// connect
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	// create collection
+	collectionName := common.GenRandomString("re", 6)
+	mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collectionName, common.DefaultDim))
+
+	// rename collection with invalid name
+	for _, invalidName := range common.GenInvalidNames() {
+		log.Debug("TestCreateCollectionWithInvalidFieldName", zap.String("fieldName", invalidName))
+		err := mc.RenameCollection(ctx, client.NewRenameCollectionOption(collectionName, invalidName))
+		common.CheckErr(t, err, false, "collection name should not be empty",
+			"the first character of a collection name must be an underscore or letter",
+			"collection name can only contain numbers, letters and underscores",
+			"the length of a collection name must be less than 255 characters",
+			"collection name can only contain numbers, letters, and underscores")
+	}
+}
+
+func TestRenameCollectionAdvanced(t *testing.T) {
+	// connect
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	// create 2 collections
+	name1 := common.GenRandomString("name1", 6)
+	name2 := common.GenRandomString("name2", 6)
+	mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(name1, common.DefaultDim))
+	mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(name2, common.DefaultDim))
+
+	// rename: old name same with new name
+	err := mc.RenameCollection(ctx, client.NewRenameCollectionOption(name1, name1))
+	common.CheckErr(t, err, false, "duplicated new collection name")
+
+	// rename to a existed name
+	err = mc.RenameCollection(ctx, client.NewRenameCollectionOption(name1, name2))
+	common.CheckErr(t, err, false, "duplicated new collection name")
+
+	// rename a not existed collection
+	err = mc.RenameCollection(ctx, client.NewRenameCollectionOption(common.GenRandomString("a", 2), common.GenRandomString("b", 2)))
+	common.CheckErr(t, err, false, "collection not found")
+}
+
+// alter collection ttl property
+func TestCollectionPropertyTtl(t *testing.T) {
+	// test collection property ttl
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	// create collection
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+	res, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("").WithOutputFields(common.QueryCountFieldName))
+	countBefore, _ := res.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.EqualValues(t, common.DefaultNb, countBefore)
+
+	err := mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(schema.CollectionName).WithProperty(common.CollectionTTLSeconds, 2))
+	common.CheckErr(t, err, true)
+	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
+	require.Equal(t, map[string]string{common.CollectionTTLSeconds: "2"}, coll.Properties)
+
+	time.Sleep(5 * time.Second)
+
+	res, _ = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("").WithOutputFields(common.QueryCountFieldName))
+	countAfter, _ := res.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.Contains(t, []int64{0, int64(common.DefaultNb)}, countAfter)
+
+	err = mc.DropCollectionProperties(ctx, client.NewDropCollectionPropertiesOption(schema.CollectionName, common.CollectionTTLSeconds))
+	common.CheckErr(t, err, true)
+	coll, _ = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
+	require.Equal(t, map[string]string{}, coll.Properties)
+}
+
+// create collection with property -> alter property -> writing and reading
+func TestCollectionWithPropertyAlterMmap(t *testing.T) {
+	// test collection property mmap
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	// create collection
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec),
+		hp.TNewFieldsOption(), hp.TNewSchemaOption(), hp.TWithProperties(map[string]any{common.MmapEnabled: false}))
+
+	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
+	require.Equal(t, map[string]string{common.MmapEnabled: "false"}, coll.Properties)
+	log.Info("TestCollectionPropertyMmap.DescribeCollection", zap.Any("properties", coll.Properties))
+
+	// alter properties
+	err := mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(schema.CollectionName).WithProperty(common.MmapEnabled, true))
+	common.CheckErr(t, err, true)
+	coll, _ = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
+	require.Equal(t, map[string]string{common.MmapEnabled: "true"}, coll.Properties)
+
+	// writing and reading
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+	res, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("").WithOutputFields(common.QueryCountFieldName))
+	countBefore, _ := res.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.EqualValues(t, common.DefaultNb, countBefore)
+}
+
+func TestCollectionPropertyMmap(t *testing.T) {
+	// test collection property mmap
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	// create collection
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec),
+		hp.TNewFieldsOption(), hp.TNewSchemaOption())
+
+	// alter properties
+	err := mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(schema.CollectionName).WithProperty(common.MmapEnabled, true))
+	common.CheckErr(t, err, true)
+	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
+	require.Equal(t, map[string]string{common.MmapEnabled: "true"}, coll.Properties)
+
+	// writing and reading
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+	res, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("").WithOutputFields(common.QueryCountFieldName))
+	countBefore, _ := res.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.EqualValues(t, common.DefaultNb, countBefore)
+
+	err = mc.DropCollectionProperties(ctx, client.NewDropCollectionPropertiesOption(schema.CollectionName, common.MmapEnabled))
+	common.CheckErr(t, err, false, "can not delete mmap properties if collection loaded")
+
+	// release collection and drop property
+	mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(schema.CollectionName))
+	err = mc.DropCollectionProperties(ctx, client.NewDropCollectionPropertiesOption(schema.CollectionName, common.MmapEnabled))
+	common.CheckErr(t, err, true)
+	coll, _ = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
+	require.Equal(t, map[string]string{}, coll.Properties)
+}
+
+func TestCollectionFakeProperties(t *testing.T) {
+	// test collection property mmap
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	// create collection with fake property
+	collName := common.GenRandomString("alter", 6)
+	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim).WithProperty("1", "bbb"))
+	common.CheckErr(t, err, true)
+	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	require.Equal(t, map[string]string{"1": "bbb"}, coll.Properties)
+
+	// alter collection with fake property
+	err = mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(collName).WithProperty("2", 1))
+	common.CheckErr(t, err, true)
+	coll, _ = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	require.Equal(t, map[string]string{"1": "bbb", "2": "1"}, coll.Properties)
+
+	err = mc.DropCollectionProperties(ctx, client.NewDropCollectionPropertiesOption(collName, "ccc"))
+	common.CheckErr(t, err, true)
+	coll, _ = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	require.Equal(t, map[string]string{"1": "bbb", "2": "1"}, coll.Properties)
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"reflect"
 	"strings"
 	"time"
 
@@ -208,4 +209,8 @@ func GenText(lang string) string {
 	default:
 		return "Unsupported language"
 	}
+}
+
+func IsZeroValue(value interface{}) bool {
+	return reflect.DeepEqual(value, reflect.Zero(reflect.TypeOf(value)).Interface())
 }
