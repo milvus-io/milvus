@@ -19,6 +19,7 @@ package packed
 
 #include <stdlib.h>
 #include "segcore/packed_writer_c.h"
+#include "segcore/column_groups_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
 */
@@ -33,20 +34,47 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
-func NewPackedWriter(path string, schema *arrow.Schema, bufferSize int) (*PackedWriter, error) {
+func NewPackedWriter(fsPath string, schema *arrow.Schema, bufferSize int, filePaths []string, columnGroups [][]int) (*PackedWriter, error) {
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
 	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
 
-	cPath := C.CString(path)
-	defer C.free(unsafe.Pointer(cPath))
+	cFsPath := C.CString(fsPath)
+	defer C.free(unsafe.Pointer(cFsPath))
 
 	cBufferSize := C.int64_t(bufferSize)
 
+	cFilePaths := make([]*C.char, len(filePaths))
+	for i, path := range filePaths {
+		cFilePaths[i] = C.CString(path)             // Convert Go string to C string
+		defer C.free(unsafe.Pointer(cFilePaths[i])) // Ensure memory is freed after use
+	}
+
+	// Create a pointer to the array of C strings (char**)
+	cFilePathsArray := (**C.char)(unsafe.Pointer(&cFilePaths[0]))
+	cNumPaths := C.int64_t(len(filePaths))
+
+	cColumnGroups := C.NewCColumnGroups()
+	for _, group := range columnGroups {
+		cGroup := C.malloc(C.size_t(len(group)) * C.size_t(unsafe.Sizeof(C.int(0))))
+		if cGroup == nil {
+			return nil, fmt.Errorf("failed to allocate memory for column groups")
+		}
+
+		cGroupSlice := (*[1 << 30]C.int)(cGroup)[:len(group):len(group)]
+		for i, val := range group {
+			cGroupSlice[i] = C.int(val)
+		}
+
+		C.AddCColumnGroup(cColumnGroups, (*C.int)(cGroup), C.int(len(group)))
+
+		C.free(cGroup)
+	}
+
 	var cPackedWriter C.CPackedWriter
-	status := C.NewPackedWriter(cPath, cSchema, cBufferSize, &cPackedWriter)
+	status := C.NewPackedWriter(cFsPath, cSchema, cBufferSize, cFilePathsArray, cNumPaths, cColumnGroups, &cPackedWriter)
 	if status != 0 {
-		return nil, fmt.Errorf("failed to new packed writer: %s, status: %d", path, status)
+		return nil, fmt.Errorf("failed to new packed writer: %s, status: %d", fsPath, status)
 	}
 	return &PackedWriter{cPackedWriter: cPackedWriter}, nil
 }

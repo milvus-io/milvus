@@ -25,11 +25,14 @@
 
 int
 NewPackedReader(const char* path,
+                char** paths,
+                int64_t num_paths,
                 struct ArrowSchema* schema,
                 const int64_t buffer_size,
                 CPackedReader* c_packed_reader) {
     try {
         auto truePath = std::string(path);
+        auto truePaths = std::vector<std::string>(paths, paths + num_paths);
         auto factory = std::make_shared<milvus_storage::FileSystemFactory>();
         auto conf = milvus_storage::StorageConfig();
         conf.uri = "file:///tmp/";
@@ -40,7 +43,7 @@ NewPackedReader(const char* path,
             needed_columns.emplace(i);
         }
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
-            *trueFs, path, trueSchema, needed_columns, buffer_size);
+            *trueFs, truePaths, trueSchema, needed_columns, buffer_size);
         *c_packed_reader = reader.release();
         return 0;
     } catch (std::exception& e) {

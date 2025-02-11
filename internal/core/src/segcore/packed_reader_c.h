@@ -34,6 +34,8 @@ typedef void* CArrowSchema;
  */
 int
 NewPackedReader(const char* path,
+                char** paths,
+                int64_t num_paths,
                 struct ArrowSchema* schema,
                 const int64_t buffer_size,
                 CPackedReader* c_packed_reader);

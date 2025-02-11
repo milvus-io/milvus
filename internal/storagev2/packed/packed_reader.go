@@ -33,19 +33,29 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
-func NewPackedReader(path string, schema *arrow.Schema, bufferSize int) (*PackedReader, error) {
+func NewPackedReader(fsPath string, filePaths []string, schema *arrow.Schema, bufferSize int) (*PackedReader, error) {
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
 	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
-	cPath := C.CString(path)
-	defer C.free(unsafe.Pointer(cPath))
+
+	cFsPath := C.CString(fsPath)
+	defer C.free(unsafe.Pointer(cFsPath))
+
+	cFilePaths := make([]*C.char, len(filePaths))
+	for i, path := range filePaths {
+		cFilePaths[i] = C.CString(path)
+		defer C.free(unsafe.Pointer(cFilePaths[i]))
+	}
+
+	cFilePathsArray := (**C.char)(unsafe.Pointer(&cFilePaths[0]))
+	cNumPaths := C.int64_t(len(filePaths))
 
 	cBufferSize := C.int64_t(bufferSize)
 
 	var cPackedReader C.CPackedReader
-	status := C.NewPackedReader(cPath, cSchema, cBufferSize, &cPackedReader)
+	status := C.NewPackedReader(cFsPath, cFilePathsArray, cNumPaths, cSchema, cBufferSize, &cPackedReader)
 	if status != 0 {
-		return nil, fmt.Errorf("failed to new packed reader: %s, status: %d", path, status)
+		return nil, fmt.Errorf("failed to new packed reader: %s, status: %d", fsPath, status)
 	}
 	return &PackedReader{cPackedReader: cPackedReader, schema: schema}, nil
 }

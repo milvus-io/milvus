@@ -68,8 +68,10 @@ func (suite *PackedTestSuite) TestPackedOneFile() {
 	batches := 100
 
 	path := "/tmp"
+	paths := []string{"/tmp/100"}
+	columnGroups := [][]int{{0, 1, 2}}
 	bufferSize := 10 * 1024 * 1024 // 10MB
-	pw, err := NewPackedWriter(path, suite.schema, bufferSize)
+	pw, err := NewPackedWriter(path, suite.schema, bufferSize, paths, columnGroups)
 	suite.NoError(err)
 	for i := 0; i < batches; i++ {
 		err = pw.WriteRecordBatch(suite.rec)
@@ -78,7 +80,7 @@ func (suite *PackedTestSuite) TestPackedOneFile() {
 	err = pw.Close()
 	suite.NoError(err)
 
-	reader, err := NewPackedReader(path, suite.schema, bufferSize)
+	reader, err := NewPackedReader(path, paths, suite.schema, bufferSize)
 	suite.NoError(err)
 	rr, err := reader.ReadNext()
 	suite.NoError(err)
@@ -118,8 +120,10 @@ func (suite *PackedTestSuite) TestPackedMultiFiles() {
 	rec := b.NewRecord()
 	defer rec.Release()
 	path := "/tmp"
+	paths := []string{"/tmp/100", "/tmp/101"}
+	columnGroups := [][]int{{2}, {0, 1}}
 	bufferSize := 10 * 1024 * 1024 // 10MB
-	pw, err := NewPackedWriter(path, suite.schema, bufferSize)
+	pw, err := NewPackedWriter(path, suite.schema, bufferSize, paths, columnGroups)
 	suite.NoError(err)
 	for i := 0; i < batches; i++ {
 		err = pw.WriteRecordBatch(rec)
@@ -128,7 +132,7 @@ func (suite *PackedTestSuite) TestPackedMultiFiles() {
 	err = pw.Close()
 	suite.NoError(err)
 
-	reader, err := NewPackedReader(path, suite.schema, bufferSize)
+	reader, err := NewPackedReader(path, paths, suite.schema, bufferSize)
 	suite.NoError(err)
 	var rows int64 = 0
 	var rr arrow.Record
