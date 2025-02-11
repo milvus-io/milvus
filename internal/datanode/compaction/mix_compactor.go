@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -151,6 +152,7 @@ func (t *mixCompactionTask) mergeSplit(
 		log.Warn("failed to get pk field from schema")
 		return nil, err
 	}
+
 	for _, seg := range t.plan.GetSegmentBinlogs() {
 		del, exp, err := t.writeSegment(ctx, seg, mWriter, pkField)
 		if err != nil {
@@ -315,14 +317,22 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	defer cancelAll()
 
 	log.Info("compact start")
-	// Unable to deal with all empty segments cases, so return error
-	isEmpty := true
-	for _, seg := range t.plan.GetSegmentBinlogs() {
-		if len(seg.GetFieldBinlogs()) > 0 {
-			isEmpty = false
-			break
-		}
+	// Decompress compaction binlogs first
+	if err := binlog.DecompressCompactionBinlogs(t.plan.SegmentBinlogs); err != nil {
+		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
+		return nil, err
 	}
+	// Unable to deal with all empty segments cases, so return error
+	isEmpty := func() bool {
+		for _, seg := range t.plan.GetSegmentBinlogs() {
+			for _, field := range seg.GetFieldBinlogs() {
+				if len(field.GetBinlogs()) > 0 {
+					return false
+				}
+			}
+		}
+		return true
+	}()
 	if isEmpty {
 		log.Warn("compact wrong, all segments' binlogs are empty")
 		return nil, errors.New("illegal compaction plan")
