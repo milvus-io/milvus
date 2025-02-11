@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // NewCataLog creates a new streaming-node catalog instance.
@@ -22,11 +23,13 @@ import (
 // └── wal
 //
 //	├── pchannel-1
+//	│   ├── checkpoint
 //	│   └── segment-assign
 //	│       ├── 456398247934
 //	│       ├── 456398247936
 //	│       └── 456398247939
 //	└── pchannel-2
+//	    ├── checkpoint
 //	    └── segment-assign
 //	        ├── 456398247934
 //	        ├── 456398247935
@@ -96,6 +99,33 @@ func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName strin
 	return nil
 }
 
+// GetConsumeCheckpoint gets the consuming checkpoint of the wal.
+func (c *catalog) GetConsumeCheckpoint(ctx context.Context, pchannelName string) (*streamingpb.WALCheckpoint, error) {
+	key := buildConsumeCheckpointPath(pchannelName)
+	value, err := c.metaKV.Load(ctx, key)
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	val := &streamingpb.WALCheckpoint{}
+	if err = proto.Unmarshal([]byte(value), &streamingpb.WALCheckpoint{}); err != nil {
+		return nil, err
+	}
+	return val, nil
+}
+
+// SaveConsumeCheckpoint saves the consuming checkpoint of the wal.
+func (c *catalog) SaveConsumeCheckpoint(ctx context.Context, pchannelName string, checkpoint *streamingpb.WALCheckpoint) error {
+	key := buildConsumeCheckpointPath(pchannelName)
+	value, err := proto.Marshal(checkpoint)
+	if err != nil {
+		return err
+	}
+	return c.metaKV.Save(ctx, key, string(value))
+}
+
 // buildSegmentAssignmentMetaPath builds the path for segment assignment
 func buildSegmentAssignmentMetaPath(pChannelName string) string {
 	return path.Join(buildWALDirectory(pChannelName), DirectorySegmentAssign) + "/"
@@ -104,6 +134,11 @@ func buildSegmentAssignmentMetaPath(pChannelName string) string {
 // buildSegmentAssignmentMetaPathOfSegment builds the path for segment assignment
 func buildSegmentAssignmentMetaPathOfSegment(pChannelName string, segmentID int64) string {
 	return path.Join(buildWALDirectory(pChannelName), DirectorySegmentAssign, strconv.FormatInt(segmentID, 10))
+}
+
+// buildConsumeCheckpointPath builds the path for consume checkpoint
+func buildConsumeCheckpointPath(pchannelName string) string {
+	return path.Join(buildWALDirectory(pchannelName), KeyConsumeCheckpoint)
 }
 
 // buildWALDirectory builds the path for wal directory

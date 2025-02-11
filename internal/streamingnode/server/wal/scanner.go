@@ -14,7 +14,9 @@ var ErrUpstreamClosed = errors.New("upstream closed")
 
 // ReadOption is the option for reading records from the wal.
 type ReadOption struct {
-	VChannel       string // vchannel name
+	VChannel string // vchannel is a optional field to select a vchannel to consume.
+	// If the vchannel is setup, the message that is not belong to these vchannel will be dropped by scanner.
+	// Otherwise all message on WAL will be sent.
 	DeliverPolicy  options.DeliverPolicy
 	MessageFilter  []options.DeliverFilter
 	MesasgeHandler message.Handler // message handler for message processing.

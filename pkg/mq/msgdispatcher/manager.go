@@ -38,7 +38,8 @@ import (
 type DispatcherManager interface {
 	Add(ctx context.Context, streamConfig *StreamConfig) (<-chan *MsgPack, error)
 	Remove(vchannel string)
-	Num() int
+	NumTarget() int
+	NumConsumer() int
 	Run()
 	Close()
 }
@@ -145,7 +146,17 @@ func (c *dispatcherManager) Remove(vchannel string) {
 	c.lagTargets.GetAndRemove(vchannel)
 }
 
-func (c *dispatcherManager) Num() int {
+func (c *dispatcherManager) NumTarget() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var res int
+	if c.mainDispatcher != nil {
+		res += c.mainDispatcher.TargetNum()
+	}
+	return res + len(c.soloDispatchers) + c.lagTargets.Len()
+}
+
+func (c *dispatcherManager) NumConsumer() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	var res int

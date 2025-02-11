@@ -40,7 +40,6 @@ packages:
       Consumer:
   github.com/milvus-io/milvus/internal/streamingnode/server/flusher:
     interfaces:
-      Flusher:
       FlushMsgHandler:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal:
     interfaces:
@@ -72,6 +71,9 @@ packages:
   github.com/milvus-io/milvus/internal/util/segcore:
     interfaces:
       CSegment:
+  github.com/milvus-io/milvus/internal/storage:
+    interfaces:
+      ChunkManager:
   github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer:
     interfaces:
       Discoverer:

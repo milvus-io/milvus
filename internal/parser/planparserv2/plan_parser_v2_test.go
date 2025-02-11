@@ -3,6 +3,7 @@ package planparserv2
 import (
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"testing"
 
@@ -260,6 +261,7 @@ func TestExpr_PhraseMatch(t *testing.T) {
 		`phrase_match(StringField, "phrase")`,
 		`phrase_match(StringField, "phrase", 1)`,
 		`phrase_match(VarCharField, "phrase", 11223)`,
+		`phrase_match(StringField, "phrase", 0)`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -272,6 +274,23 @@ func TestExpr_PhraseMatch(t *testing.T) {
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
+	}
+
+	unsupported = []string{
+		`phrase_match(StringField, "phrase", -1)`,
+		`phrase_match(StringField, "phrase", a)`,
+		`phrase_match(StringField, "phrase", -a)`,
+		`phrase_match(StringField, "phrase", 4294967296)`,
+	}
+	errMsgs := []string{
+		`"slop" should not be a negative interger. "slop" passed: -1`,
+		`"slop" should be a const integer expression with "uint32" value. "slop" expression passed: a`,
+		`"slop" should be a const integer expression with "uint32" value. "slop" expression passed: -a`,
+		`"slop" exceeds the range of "uint32". "slop" expression passed: 4294967296`,
+	}
+	for i, exprStr := range unsupported {
+		_, err := ParseExpr(helper, exprStr, nil)
+		assert.True(t, strings.HasSuffix(err.Error(), errMsgs[i]), fmt.Sprintf("Error expected: %v, actual %v", errMsgs[i], err.Error()))
 	}
 }
 

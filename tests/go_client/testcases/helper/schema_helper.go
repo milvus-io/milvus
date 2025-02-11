@@ -12,6 +12,7 @@ type GenSchemaOption struct {
 	AutoID             bool
 	Fields             []*entity.Field
 	EnableDynamicField bool
+	Function           *entity.Function
 }
 
 func TNewSchemaOption() *GenSchemaOption {
@@ -43,6 +44,11 @@ func (opt *GenSchemaOption) TWithFields(fields []*entity.Field) *GenSchemaOption
 	return opt
 }
 
+func (opt *GenSchemaOption) TWithFunction(function *entity.Function) *GenSchemaOption {
+	opt.Function = function
+	return opt
+}
+
 func GenSchema(option *GenSchemaOption) *entity.Schema {
 	if len(option.Fields) == 0 {
 		log.Fatal("Require at least a primary field and a vector field")
@@ -63,6 +69,9 @@ func GenSchema(option *GenSchemaOption) *entity.Schema {
 	}
 	if option.EnableDynamicField {
 		schema.WithDynamicFieldEnabled(option.EnableDynamicField)
+	}
+	if option.Function != nil {
+		schema.WithFunction(option.Function)
 	}
 	return schema
 }

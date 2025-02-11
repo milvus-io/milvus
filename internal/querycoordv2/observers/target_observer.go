@@ -175,13 +175,19 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 
 		case <-ticker.C:
 			ob.clean()
-			loaded := lo.FilterMap(ob.meta.GetAllCollections(ctx), func(collection *meta.Collection, _ int) (int64, bool) {
-				if collection.GetStatus() == querypb.LoadStatus_Loaded {
-					return collection.GetCollectionID(), true
+
+			collections := ob.meta.GetAllCollections(ctx)
+			var loadedIDs, loadingIDs []int64
+			for _, c := range collections {
+				if c.GetStatus() == querypb.LoadStatus_Loaded {
+					loadedIDs = append(loadedIDs, c.GetCollectionID())
+				} else {
+					loadingIDs = append(loadingIDs, c.GetCollectionID())
 				}
-				return 0, false
-			})
-			ob.loadedDispatcher.AddTask(loaded...)
+			}
+
+			ob.loadedDispatcher.AddTask(loadedIDs...)
+			ob.loadingDispatcher.AddTask(loadingIDs...)
 
 		case req := <-ob.updateChan:
 			log.Info("manually trigger update target",

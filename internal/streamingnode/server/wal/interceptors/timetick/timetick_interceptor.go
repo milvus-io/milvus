@@ -16,7 +16,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
-var _ interceptors.InterceptorWithReady = (*timeTickAppendInterceptor)(nil)
+var (
+	_ interceptors.InterceptorWithReady         = (*timeTickAppendInterceptor)(nil)
+	_ interceptors.InterceptorWithGracefulClose = (*timeTickAppendInterceptor)(nil)
+)
 
 // timeTickAppendInterceptor is a append interceptor.
 type timeTickAppendInterceptor struct {

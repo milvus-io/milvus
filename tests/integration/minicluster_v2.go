@@ -79,13 +79,14 @@ func DefaultParams() map[string]string {
 
 		// Notice: don't use ParamItem.Key here, the config key will be empty before param table init
 		configMap = map[string]string{
-			"mq.type":                         "rocksmq",
-			"etcd.rootPath":                   testPath,
-			"minio.rootPath":                  testPath,
-			"localStorage.path":               path.Join("/tmp", testPath),
-			"common.storageType":              "local",
-			"dataNode.memory.forceSyncEnable": "false", // local execution will print too many logs
-			"common.gracefulStopTimeout":      "30",
+			"mq.type":                           "rocksmq",
+			"etcd.rootPath":                     testPath,
+			"msgChannel.chanNamePrefix.cluster": testPath,
+			"minio.rootPath":                    testPath,
+			"localStorage.path":                 path.Join("/tmp", testPath),
+			"common.storageType":                "local",
+			"dataNode.memory.forceSyncEnable":   "false", // local execution will print too many logs
+			"common.gracefulStopTimeout":        "30",
 		}
 	})
 
