@@ -878,7 +878,7 @@ checksum = "e2355d85b9a3786f481747ced0e0ff2ba35213a1f9bd406ed906554d7af805a1"
 [[package]]
 name = "ownedbytes"
 version = "0.7.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=v0.1.0#608b2f5d3ffd6c9b79233f799f71631f9cbbd498"
+source = "git+https://github.com/milvus-io/tantivy?rev=4bf6415d9238004eb7c0d8b2a62ef94144f41719#4bf6415d9238004eb7c0d8b2a62ef94144f41719"
 dependencies = [
  "stable_deref_trait",
 ]
@@ -1241,7 +1241,7 @@ dependencies = [
 [[package]]
 name = "tantivy"
 version = "0.23.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=v0.1.0#608b2f5d3ffd6c9b79233f799f71631f9cbbd498"
+source = "git+https://github.com/milvus-io/tantivy?rev=4bf6415d9238004eb7c0d8b2a62ef94144f41719#4bf6415d9238004eb7c0d8b2a62ef94144f41719"
 dependencies = [
  "aho-corasick",
  "arc-swap",
@@ -1315,7 +1315,7 @@ dependencies = [
 [[package]]
 name = "tantivy-bitpacker"
 version = "0.6.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=v0.1.0#608b2f5d3ffd6c9b79233f799f71631f9cbbd498"
+source = "git+https://github.com/milvus-io/tantivy?rev=4bf6415d9238004eb7c0d8b2a62ef94144f41719#4bf6415d9238004eb7c0d8b2a62ef94144f41719"
 dependencies = [
  "bitpacking",
 ]
@@ -1323,7 +1323,7 @@ dependencies = [
 [[package]]
 name = "tantivy-columnar"
 version = "0.3.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=v0.1.0#608b2f5d3ffd6c9b79233f799f71631f9cbbd498"
+source = "git+https://github.com/milvus-io/tantivy?rev=4bf6415d9238004eb7c0d8b2a62ef94144f41719#4bf6415d9238004eb7c0d8b2a62ef94144f41719"
 dependencies = [
  "downcast-rs",
  "fastdivide",
@@ -1338,7 +1338,7 @@ dependencies = [
 [[package]]
 name = "tantivy-common"
 version = "0.7.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=v0.1.0#608b2f5d3ffd6c9b79233f799f71631f9cbbd498"
+source = "git+https://github.com/milvus-io/tantivy?rev=4bf6415d9238004eb7c0d8b2a62ef94144f41719#4bf6415d9238004eb7c0d8b2a62ef94144f41719"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -1361,7 +1361,7 @@ dependencies = [
 [[package]]
 name = "tantivy-query-grammar"
 version = "0.22.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=v0.1.0#608b2f5d3ffd6c9b79233f799f71631f9cbbd498"
+source = "git+https://github.com/milvus-io/tantivy?rev=4bf6415d9238004eb7c0d8b2a62ef94144f41719#4bf6415d9238004eb7c0d8b2a62ef94144f41719"
 dependencies = [
  "nom",
 ]
@@ -1369,7 +1369,7 @@ dependencies = [
 [[package]]
 name = "tantivy-sstable"
 version = "0.3.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=v0.1.0#608b2f5d3ffd6c9b79233f799f71631f9cbbd498"
+source = "git+https://github.com/milvus-io/tantivy?rev=4bf6415d9238004eb7c0d8b2a62ef94144f41719#4bf6415d9238004eb7c0d8b2a62ef94144f41719"
 dependencies = [
  "futures-util",
  "itertools",
@@ -1382,7 +1382,7 @@ dependencies = [
 [[package]]
 name = "tantivy-stacker"
 version = "0.3.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=v0.1.0#608b2f5d3ffd6c9b79233f799f71631f9cbbd498"
+source = "git+https://github.com/milvus-io/tantivy?rev=4bf6415d9238004eb7c0d8b2a62ef94144f41719#4bf6415d9238004eb7c0d8b2a62ef94144f41719"
 dependencies = [
  "murmurhash32",
  "rand_distr",
@@ -1392,7 +1392,7 @@ dependencies = [
 [[package]]
 name = "tantivy-tokenizer-api"
 version = "0.3.0"
-source = "git+https://github.com/milvus-io/tantivy?tag=v0.1.0#608b2f5d3ffd6c9b79233f799f71631f9cbbd498"
+source = "git+https://github.com/milvus-io/tantivy?rev=4bf6415d9238004eb7c0d8b2a62ef94144f41719#4bf6415d9238004eb7c0d8b2a62ef94144f41719"
 dependencies = [
  "serde",
 ]
