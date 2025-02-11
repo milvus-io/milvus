@@ -55,6 +55,9 @@ SetDefaultJSONKeyIndexMemoryBudget(int64_t val);
 void
 SetDefaultJSONKeyIndexCommitInterval(int64_t val);
 
+void
+SetDefaultJSONKeyIndexEnable(bool val);
+
 struct BufferView {
     struct Element {
         const char* data_;

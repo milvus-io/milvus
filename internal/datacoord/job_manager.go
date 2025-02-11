@@ -8,7 +8,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
@@ -125,9 +124,9 @@ func (jm *statsJobManager) enableBM25() bool {
 }
 
 func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
-	if !(isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		segment.GetIsSorted()) {
-		return false
+	if isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
+		segment.GetIsSorted() {
+		return true
 	}
 
 	if segment.GetTextStatsLogs() == nil {
@@ -143,9 +142,9 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 }
 
 func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
-	if !(isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		segment.GetIsSorted()) {
-		return false
+	if isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
+		segment.GetIsSorted() {
+		return true
 	}
 
 	if segment.GetJsonKeyStats() == nil {
@@ -196,7 +195,8 @@ func (jm *statsJobManager) triggerJsonKeyIndexStatsTask() {
 	for _, collection := range collections {
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
-			if field.GetDataType() == schemapb.DataType_JSON {
+			h := typeutil.CreateFieldSchemaHelper(field)
+			if h.EnableJSONKeyIndex() && Params.DataCoordCfg.EnabledJsonKeyStats.GetAsBool() {
 				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 			}
 		}

@@ -503,6 +503,7 @@ indexCoord:
     nodeID: 0
   segment:
     minSegmentNumRowsToEnableIndex: 1024 # It's a threshold. When the segment num rows is less than this value, the segment will not be indexed
+  enabledJsonKeyStats: true # Indicates whether to enable JSON key stats
 
 indexNode:
   scheduler:

@@ -76,7 +76,6 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 break;
             }
             auto type = expr_->vals_[0].val_case();
-            auto start = std::chrono::steady_clock::now();
             switch (type) {
                 case proto::plan::GenericValue::ValCase::kBoolVal:
                     result = ExecVisitorImplTemplateJson<bool>(input);
@@ -530,8 +529,8 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
         Assert(index != nullptr);
 
         auto filter_func = [segment, &term_set, &field_id](uint32_t row_id,
-                                                              uint16_t offset,
-                                                              uint16_t size) {
+                                                           uint16_t offset,
+                                                           uint16_t size) {
             auto json_pair = segment->GetJsonData(field_id, row_id);
             if (!json_pair.second) {
                 return false;

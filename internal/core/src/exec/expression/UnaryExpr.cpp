@@ -824,7 +824,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                                : batch_size_;
     auto pointerpath = milvus::Json::pointer(expr_->column_.nested_path_);
     auto pointerpair = SplitAtFirstSlashDigit(pointerpath);
-    std::string pointer = pointerpair.first;  
+    std::string pointer = pointerpair.first;
     std::string arrayIndex = pointerpair.second;
 
 #define UnaryRangeJSONIndexCompare(cmp)                       \

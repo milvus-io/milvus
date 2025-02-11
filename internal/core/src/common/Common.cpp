@@ -31,6 +31,7 @@ int64_t EXEC_EVAL_EXPR_BATCH_SIZE = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE;
 
 int64_t JSON_INDEX_MEMORY_BUDGET = DEFAULT_JSON_INDEX_MEMORY_BUDGET;
 int64_t JSON_INDEX_COMMIT_INTERVAL = DEFAULT_JSON_INDEX_COMMIT_INTERVAL;
+bool JSON_INDEX_ENABLED = DEFAULT_JSON_INDEX_ENABLED;
 
 void
 SetIndexSliceSize(const int64_t size) {
@@ -82,6 +83,13 @@ SetDefaultJSONKeyIndexCommitInterval(int64_t val) {
     JSON_INDEX_COMMIT_INTERVAL = val;
     LOG_INFO("set default json key index commit interval: {}",
              JSON_INDEX_COMMIT_INTERVAL);
+}
+
+void
+SetDefaultJSONKeyIndexEnable(bool val) {
+    JSON_INDEX_ENABLED = val;
+    LOG_INFO("set default json key index enable: {}",
+             DEFAULT_JSON_INDEX_ENABLED);
 }
 
 }  // namespace milvus

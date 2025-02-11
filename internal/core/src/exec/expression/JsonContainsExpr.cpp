@@ -367,8 +367,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
         auto filter_func = [segment, &elements, &field_id](uint32_t row_id,
-                                                              uint16_t offset,
-                                                              uint16_t size) {
+                                                           uint16_t offset,
+                                                           uint16_t size) {
             auto json_pair = segment->GetJsonData(field_id, row_id);
             if (!json_pair.second) {
                 return false;
@@ -528,8 +528,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
         auto filter_func = [segment, &elements, &field_id](uint32_t row_id,
-                                                              uint16_t offset,
-                                                              uint16_t size) {
+                                                           uint16_t offset,
+                                                           uint16_t size) {
             auto json_pair = segment->GetJsonData(field_id, row_id);
             if (!json_pair.second) {
                 return false;
@@ -776,8 +776,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
         auto filter_func = [segment, &elements, &field_id](uint32_t row_id,
-                                                              uint16_t offset,
-                                                              uint16_t size) {
+                                                           uint16_t offset,
+                                                           uint16_t size) {
             auto json_pair = segment->GetJsonData(field_id, row_id);
             if (!json_pair.second) {
                 return false;
@@ -1227,8 +1227,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
         auto filter_func = [segment, &elements, &field_id](uint32_t row_id,
-                                                              uint16_t offset,
-                                                              uint16_t size) {
+                                                           uint16_t offset,
+                                                           uint16_t size) {
             auto json_pair = segment->GetJsonData(field_id, row_id);
             if (!json_pair.second) {
                 return false;
@@ -1439,8 +1439,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
         auto filter_func = [segment, &elements, &field_id](uint32_t row_id,
-                                                              uint16_t offset,
-                                                              uint16_t size) {
+                                                           uint16_t offset,
+                                                           uint16_t size) {
             auto json_pair = segment->GetJsonData(field_id, row_id);
             if (!json_pair.second) {
                 return false;

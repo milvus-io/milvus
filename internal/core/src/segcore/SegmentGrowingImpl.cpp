@@ -315,7 +315,7 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         // build json match index
         if (field_meta.enable_jsonIndex()) {
             auto index = GetJsonKeyIndex(field_id);
-            index->BuildWithFieldData(field_data,field_meta.is_nullable());
+            index->BuildWithFieldData(field_data, field_meta.is_nullable());
             index->Commit();
             // Reload reader so that the index can be read immediately
             index->Reload();
@@ -465,8 +465,8 @@ SegmentGrowingImpl::bulk_subscript(
     auto& src = *vec;
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        dst->at(i) =
-            ExtractSubJson(std::string(src.view_element(offset)), dynamic_field_names);
+        dst->at(i) = ExtractSubJson(std::string(src.view_element(offset)),
+                                    dynamic_field_names);
     }
     return result;
 }
@@ -942,7 +942,7 @@ SegmentGrowingImpl::AddJSONDatas(FieldId field_id,
 void
 SegmentGrowingImpl::CreateJSONIndexes() {
     for (auto [field_id, field_meta] : schema_->get_fields()) {
-        if (IsJsonDataType(field_meta.get_data_type())) {
+        if (field_meta.enable_jsonIndex()) {
             CreateJSONIndex(FieldId(field_id));
         }
     }

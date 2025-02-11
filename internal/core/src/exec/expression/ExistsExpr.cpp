@@ -118,15 +118,9 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentForIndex() {
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
         auto filter_func = [segment, field_id, pointer](uint32_t row_id,
-                                                           uint16_t offset,
-                                                           uint16_t size) {
-            auto json_pair = segment->GetJsonData(field_id, row_id);
-            if (!json_pair.second) {
-                return false;
-            }
-            auto json =
-                milvus::Json(json_pair.first.data(), json_pair.first.size());
-            return json.exist(pointer);
+                                                        uint16_t offset,
+                                                        uint16_t size) {
+            return true;
         };
         cached_index_chunk_res_ =
             index->FilterByPath(pointer, active_count_, filter_func).clone();

@@ -486,34 +486,31 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonForIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [segment,
-                            &field_id,
-                            val1,
-                            val2,
-                            lower_inclusive,
-                            upper_inclusive](uint32_t row_id,
-                                             uint16_t offset,
-                                             uint16_t size) {
-            auto json_pair = segment->GetJsonData(field_id, row_id);
-            if (!json_pair.second) {
-                return false;
-            }
-            auto json =
-                milvus::Json(json_pair.first.data(), json_pair.first.size());
-            if (lower_inclusive && upper_inclusive) {
-                BinaryRangeJSONIndexCompare(val1 <= ValueType(val.value()) &&
-                                            ValueType(val.value()) <= val2);
-            } else if (lower_inclusive && !upper_inclusive) {
-                BinaryRangeJSONIndexCompare(val1 <= ValueType(val.value()) &&
-                                            ValueType(val.value()) < val2);
-            } else if (!lower_inclusive && upper_inclusive) {
-                BinaryRangeJSONIndexCompare(val1 < ValueType(val.value()) &&
-                                            ValueType(val.value()) <= val2);
-            } else {
-                BinaryRangeJSONIndexCompare(val1 < ValueType(val.value()) &&
-                                            ValueType(val.value()) < val2);
-            }
-        };
+        auto filter_func =
+            [segment, &field_id, val1, val2, lower_inclusive, upper_inclusive](
+                uint32_t row_id, uint16_t offset, uint16_t size) {
+                auto json_pair = segment->GetJsonData(field_id, row_id);
+                if (!json_pair.second) {
+                    return false;
+                }
+                auto json = milvus::Json(json_pair.first.data(),
+                                         json_pair.first.size());
+                if (lower_inclusive && upper_inclusive) {
+                    BinaryRangeJSONIndexCompare(val1 <=
+                                                    ValueType(val.value()) &&
+                                                ValueType(val.value()) <= val2);
+                } else if (lower_inclusive && !upper_inclusive) {
+                    BinaryRangeJSONIndexCompare(val1 <=
+                                                    ValueType(val.value()) &&
+                                                ValueType(val.value()) < val2);
+                } else if (!lower_inclusive && upper_inclusive) {
+                    BinaryRangeJSONIndexCompare(val1 < ValueType(val.value()) &&
+                                                ValueType(val.value()) <= val2);
+                } else {
+                    BinaryRangeJSONIndexCompare(val1 < ValueType(val.value()) &&
+                                                ValueType(val.value()) < val2);
+                }
+            };
         cached_index_chunk_res_ =
             index->FilterByPath(pointer, active_count_, filter_func).clone();
         cached_index_chunk_id_ = 0;
