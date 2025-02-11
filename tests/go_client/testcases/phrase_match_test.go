@@ -35,7 +35,7 @@ func TestPhraseMatchDefault(t *testing.T) {
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// Test exact phrase match (slop=0)
-	
+
 	expr := fmt.Sprintf("phrase_match(%s, \"%s\", 0)", common.DefaultTextFieldName, query)
 	queryRes, err := mc.Query(ctx, milvusclient.NewQueryOption(schema.CollectionName).WithFilter(expr))
 	common.CheckErr(t, err, true)
@@ -131,7 +131,7 @@ func TestPhraseMatchWithDiffLang(t *testing.T) {
 			indexparams := hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultTextSparseVecFieldName: index.NewSparseInvertedIndex(entity.BM25, 0.1)})
 			prepare.CreateIndex(ctx, t, mc, indexparams)
 			prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
-			
+
 			expr := fmt.Sprintf("phrase_match(%s, \"%s\", %d)", common.DefaultTextFieldName, query, tc.slop)
 			queryRes, err := mc.Query(ctx, milvusclient.NewQueryOption(schema.CollectionName).WithFilter(expr))
 			common.CheckErr(t, err, true)
