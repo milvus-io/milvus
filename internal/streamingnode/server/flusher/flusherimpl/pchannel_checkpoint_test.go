@@ -43,7 +43,9 @@ func TestPChannelCheckpointManager(t *testing.T) {
 
 	p.AddVChannel("vchannel-999", rmq.NewRmqID(1000000))
 	p.DropVChannel("vchannel-1000")
-	p.Update(vchannel, rmq.NewRmqID(1000001))
+	for _, vchannel := range vchannel {
+		p.Update(vchannel, rmq.NewRmqID(1000001))
+	}
 
 	assert.Eventually(t, func() bool {
 		newMinimum := minimumOne.Load()

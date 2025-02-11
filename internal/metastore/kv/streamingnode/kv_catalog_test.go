@@ -4,15 +4,52 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-func TestCatalog(t *testing.T) {
+func TestCatalogConsumeCheckpoint(t *testing.T) {
+	kv := mocks.NewMetaKv(t)
+	v := streamingpb.WALCheckpoint{}
+	vs, err := proto.Marshal(&v)
+	assert.NoError(t, err)
+
+	kv.EXPECT().Load(mock.Anything, mock.Anything).Return(string(vs), nil)
+	catalog := NewCataLog(kv)
+	ctx := context.Background()
+	checkpoint, err := catalog.GetConsumeCheckpoint(ctx, "p1")
+	assert.NotNil(t, checkpoint)
+	assert.NoError(t, err)
+
+	kv.EXPECT().Load(mock.Anything, mock.Anything).Unset()
+	kv.EXPECT().Load(mock.Anything, mock.Anything).Return("", errors.New("err"))
+	checkpoint, err = catalog.GetConsumeCheckpoint(ctx, "p1")
+	assert.Nil(t, checkpoint)
+	assert.Error(t, err)
+
+	kv.EXPECT().Load(mock.Anything, mock.Anything).Unset()
+	kv.EXPECT().Load(mock.Anything, mock.Anything).Return("", merr.ErrIoKeyNotFound)
+	checkpoint, err = catalog.GetConsumeCheckpoint(ctx, "p1")
+	assert.Nil(t, checkpoint)
+	assert.Nil(t, checkpoint)
+
+	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	err = catalog.SaveConsumeCheckpoint(ctx, "p1", &streamingpb.WALCheckpoint{})
+	assert.NoError(t, err)
+
+	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Unset()
+	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("err"))
+	err = catalog.SaveConsumeCheckpoint(ctx, "p1", &streamingpb.WALCheckpoint{})
+	assert.Error(t, err)
+}
+
+func TestCatalogSegmentAssignments(t *testing.T) {
 	kv := mocks.NewMetaKv(t)
 	k := "p1"
 	v := streamingpb.SegmentAssignmentMeta{}
