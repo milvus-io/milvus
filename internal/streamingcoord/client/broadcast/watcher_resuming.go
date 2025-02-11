@@ -108,13 +108,13 @@ func (r *resumingWatcher) execute(backoffConfig *typeutil.BackoffTimerConfig) {
 			r.evs.Notify(ev)
 		case <-nextTimer:
 			var err error
+			nextTimer = nil
 			if watcher, err = r.createNewWatcher(); err != nil {
 				r.Logger().Warn("create new watcher failed", zap.Error(err))
 				break
 			}
 			r.Logger().Info("create new watcher successful")
 			backoff.DisableBackoff()
-			nextTimer = nil
 		}
 		if watcher == nil && nextTimer == nil {
 			backoff.EnableBackoff()
