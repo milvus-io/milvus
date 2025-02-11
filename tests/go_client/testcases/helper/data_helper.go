@@ -97,6 +97,7 @@ func (opt *GenDataOption) TWithTextLang(lang string) *GenDataOption {
 	opt.textLang = lang
 	return opt
 }
+
 func (opt *GenDataOption) TWithTextData(texts []string) *GenDataOption {
 	opt.texts = texts
 	return opt
