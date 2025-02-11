@@ -33,8 +33,8 @@ func (_m *MockRootCoordClient) EXPECT() *MockRootCoordClient_Expecter {
 	return &MockRootCoordClient_Expecter{mock: &_m.Mock}
 }
 
-// AddField provides a mock function with given fields: ctx, in, opts
-func (_m *MockRootCoordClient) AddField(ctx context.Context, in *milvuspb.AddFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+// AddCollectionField provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -45,15 +45,15 @@ func (_m *MockRootCoordClient) AddField(ctx context.Context, in *milvuspb.AddFie
 	ret := _m.Called(_ca...)
 
 	if len(ret) == 0 {
-		panic("no return value specified for AddField")
+		panic("no return value specified for AddCollectionField")
 	}
 
 	var r0 *commonpb.Status
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddFieldRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddCollectionFieldRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
 		return rf(ctx, in, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddFieldRequest, ...grpc.CallOption) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddCollectionFieldRequest, ...grpc.CallOption) *commonpb.Status); ok {
 		r0 = rf(ctx, in, opts...)
 	} else {
 		if ret.Get(0) != nil {
@@ -61,7 +61,7 @@ func (_m *MockRootCoordClient) AddField(ctx context.Context, in *milvuspb.AddFie
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AddFieldRequest, ...grpc.CallOption) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AddCollectionFieldRequest, ...grpc.CallOption) error); ok {
 		r1 = rf(ctx, in, opts...)
 	} else {
 		r1 = ret.Error(1)
@@ -70,21 +70,21 @@ func (_m *MockRootCoordClient) AddField(ctx context.Context, in *milvuspb.AddFie
 	return r0, r1
 }
 
-// MockRootCoordClient_AddField_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddField'
-type MockRootCoordClient_AddField_Call struct {
+// MockRootCoordClient_AddCollectionField_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddCollectionField'
+type MockRootCoordClient_AddCollectionField_Call struct {
 	*mock.Call
 }
 
-// AddField is a helper method to define mock.On call
+// AddCollectionField is a helper method to define mock.On call
 //   - ctx context.Context
-//   - in *milvuspb.AddFieldRequest
+//   - in *milvuspb.AddCollectionFieldRequest
 //   - opts ...grpc.CallOption
-func (_e *MockRootCoordClient_Expecter) AddField(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_AddField_Call {
-	return &MockRootCoordClient_AddField_Call{Call: _e.mock.On("AddField",
+func (_e *MockRootCoordClient_Expecter) AddCollectionField(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_AddCollectionField_Call {
+	return &MockRootCoordClient_AddCollectionField_Call{Call: _e.mock.On("AddCollectionField",
 		append([]interface{}{ctx, in}, opts...)...)}
 }
 
-func (_c *MockRootCoordClient_AddField_Call) Run(run func(ctx context.Context, in *milvuspb.AddFieldRequest, opts ...grpc.CallOption)) *MockRootCoordClient_AddField_Call {
+func (_c *MockRootCoordClient_AddCollectionField_Call) Run(run func(ctx context.Context, in *milvuspb.AddCollectionFieldRequest, opts ...grpc.CallOption)) *MockRootCoordClient_AddCollectionField_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]grpc.CallOption, len(args)-2)
 		for i, a := range args[2:] {
@@ -92,17 +92,17 @@ func (_c *MockRootCoordClient_AddField_Call) Run(run func(ctx context.Context, i
 				variadicArgs[i] = a.(grpc.CallOption)
 			}
 		}
-		run(args[0].(context.Context), args[1].(*milvuspb.AddFieldRequest), variadicArgs...)
+		run(args[0].(context.Context), args[1].(*milvuspb.AddCollectionFieldRequest), variadicArgs...)
 	})
 	return _c
 }
 
-func (_c *MockRootCoordClient_AddField_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_AddField_Call {
+func (_c *MockRootCoordClient_AddCollectionField_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_AddCollectionField_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockRootCoordClient_AddField_Call) RunAndReturn(run func(context.Context, *milvuspb.AddFieldRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_AddField_Call {
+func (_c *MockRootCoordClient_AddCollectionField_Call) RunAndReturn(run func(context.Context, *milvuspb.AddCollectionFieldRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_AddCollectionField_Call {
 	_c.Call.Return(run)
 	return _c
 }

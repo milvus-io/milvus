@@ -124,55 +124,6 @@ func (_c *IMetaTable_AddCredential_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// AddField provides a mock function with given fields: ctx, oldColl, newField, ts
-func (_m *IMetaTable) AddField(ctx context.Context, oldColl *model.Collection, newField []*model.Field, ts uint64) error {
-	ret := _m.Called(ctx, oldColl, newField, ts)
-
-	if len(ret) == 0 {
-		panic("no return value specified for AddField")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *model.Collection, []*model.Field, uint64) error); ok {
-		r0 = rf(ctx, oldColl, newField, ts)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// IMetaTable_AddField_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddField'
-type IMetaTable_AddField_Call struct {
-	*mock.Call
-}
-
-// AddField is a helper method to define mock.On call
-//   - ctx context.Context
-//   - oldColl *model.Collection
-//   - newField []*model.Field
-//   - ts uint64
-func (_e *IMetaTable_Expecter) AddField(ctx interface{}, oldColl interface{}, newField interface{}, ts interface{}) *IMetaTable_AddField_Call {
-	return &IMetaTable_AddField_Call{Call: _e.mock.On("AddField", ctx, oldColl, newField, ts)}
-}
-
-func (_c *IMetaTable_AddField_Call) Run(run func(ctx context.Context, oldColl *model.Collection, newField []*model.Field, ts uint64)) *IMetaTable_AddField_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*model.Collection), args[2].([]*model.Field), args[3].(uint64))
-	})
-	return _c
-}
-
-func (_c *IMetaTable_AddField_Call) Return(_a0 error) *IMetaTable_AddField_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *IMetaTable_AddField_Call) RunAndReturn(run func(context.Context, *model.Collection, []*model.Field, uint64) error) *IMetaTable_AddField_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // AddPartition provides a mock function with given fields: ctx, partition
 func (_m *IMetaTable) AddPartition(ctx context.Context, partition *model.Partition) error {
 	ret := _m.Called(ctx, partition)

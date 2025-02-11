@@ -4197,7 +4197,6 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
     auto field_meta = schema->operator[](lack_null_binlog_id);
     auto array = milvus::segcore::CreateDataArrayFrom(
         data1.data(), valid_data1.data(), N / 2, field_meta);
-    raw_data.raw_->mutable_fields_data()->AddAllocated(array.release());
 
     auto storage_config = get_default_local_storage_config();
     auto cm = storage::CreateChunkManager(storage_config);
@@ -4208,6 +4207,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
                             storage_config.root_path + "/" + "test_load_sealed",
                             raw_data,
                             cm);
+    raw_data.raw_->mutable_fields_data()->AddAllocated(array.release());
 
     load_info.field_infos.emplace(
         lack_null_binlog_id.get(),

@@ -419,10 +419,10 @@ func (t *createCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type addFieldTask struct {
+type addCollectionFieldTask struct {
 	baseTask
 	Condition
-	*milvuspb.AddFieldRequest
+	*milvuspb.AddCollectionFieldRequest
 	ctx         context.Context
 	rootCoord   types.RootCoordClient
 	result      *commonpb.Status
@@ -430,55 +430,56 @@ type addFieldTask struct {
 	oldSchema   *schemapb.CollectionSchema
 }
 
-func (t *addFieldTask) TraceCtx() context.Context {
+func (t *addCollectionFieldTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *addFieldTask) ID() UniqueID {
+func (t *addCollectionFieldTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *addFieldTask) SetID(uid UniqueID) {
+func (t *addCollectionFieldTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *addFieldTask) Name() string {
+func (t *addCollectionFieldTask) Name() string {
 	return AddFieldTaskName
 }
 
-func (t *addFieldTask) Type() commonpb.MsgType {
+func (t *addCollectionFieldTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *addFieldTask) BeginTs() Timestamp {
+func (t *addCollectionFieldTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *addFieldTask) EndTs() Timestamp {
+func (t *addCollectionFieldTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *addFieldTask) SetTs(ts Timestamp) {
+func (t *addCollectionFieldTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *addFieldTask) OnEnqueue() error {
+func (t *addCollectionFieldTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
-	t.Base.MsgType = commonpb.MsgType_AddField
+	t.Base.MsgType = commonpb.MsgType_AddCollectionField
 	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
-func (t *addFieldTask) PreExecute(ctx context.Context) error {
+func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if t.oldSchema == nil {
 		return merr.WrapErrParameterInvalidMsg("empty old schema in add field task")
 	}
 	if t.oldSchema.EnableDynamicField {
 		return merr.WrapErrParameterInvalidMsg("not support to add field in an enable dynamic field collection")
 	}
-	err := proto.Unmarshal(t.FieldSchema, t.fieldSchema)
+	t.fieldSchema = &schemapb.FieldSchema{}
+	err := proto.Unmarshal(t.GetSchema(), t.fieldSchema)
 	if err != nil {
 		return err
 	}
@@ -514,10 +515,12 @@ func (t *addFieldTask) PreExecute(ctx context.Context) error {
 	if t.fieldSchema.AutoID {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("only primary field can speficy AutoID with true, field name = %s", t.fieldSchema.Name))
 	}
-	if t.fieldSchema.GetIsClusteringKey() && typeutil.IsVectorType(t.fieldSchema.GetDataType()) &&
-		!paramtable.Get().CommonCfg.EnableVectorClusteringKey.GetAsBool() {
-		return merr.WrapErrCollectionVectorClusteringKeyNotAllowed(t.CollectionName, fmt.Sprintf("field name = %s", t.fieldSchema.Name))
-
+	if t.fieldSchema.GetIsClusteringKey() {
+		for _, f := range t.oldSchema.Fields {
+			if f.GetIsClusteringKey() {
+				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("already has another clutering key field, field name: %s", t.fieldSchema.GetName()))
+			}
+		}
 	}
 	if err := ValidateField(t.fieldSchema, t.oldSchema); err != nil {
 		return err
@@ -530,13 +533,13 @@ func (t *addFieldTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *addFieldTask) Execute(ctx context.Context) error {
+func (t *addCollectionFieldTask) Execute(ctx context.Context) error {
 	var err error
-	t.result, err = t.rootCoord.AddField(ctx, t.AddFieldRequest)
+	t.result, err = t.rootCoord.AddCollectionField(ctx, t.AddCollectionFieldRequest)
 	return merr.CheckRPCCall(t.result, err)
 }
 
-func (t *addFieldTask) PostExecute(ctx context.Context) error {
+func (t *addCollectionFieldTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
