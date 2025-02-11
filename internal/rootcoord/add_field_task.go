@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -31,14 +32,19 @@ import (
 
 type addFieldTask struct {
 	baseTask
-	Req *milvuspb.AddFieldRequest
+	Req         *milvuspb.AddFieldRequest
+	fieldSchema *schemapb.FieldSchema
 }
 
 func (t *addFieldTask) Prepare(ctx context.Context) error {
 	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_AddField); err != nil {
 		return err
 	}
-	if err := checkFieldSchema([]*schemapb.FieldSchema{t.Req.GetFieldSchema()}); err != nil {
+	err := proto.Unmarshal(t.Req.FieldSchema, t.fieldSchema)
+	if err != nil {
+		return err
+	}
+	if err := checkFieldSchema([]*schemapb.FieldSchema{t.fieldSchema}); err != nil {
 		return err
 	}
 	return nil
@@ -54,9 +60,9 @@ func (t *addFieldTask) Execute(ctx context.Context) error {
 
 	start := len(oldColl.Fields)
 	// assign field id
-	t.Req.GetFieldSchema().FieldID = int64(1 + StartOfUserFieldID + start)
+	t.fieldSchema.FieldID = int64(1 + StartOfUserFieldID + start)
 
-	newField := model.UnmarshalFieldModel(t.Req.FieldSchema)
+	newField := model.UnmarshalFieldModel(t.fieldSchema)
 
 	ts := t.GetTs()
 	return executeAddFieldTaskSteps(ctx, t.core, oldColl, newField, t.Req, ts)
