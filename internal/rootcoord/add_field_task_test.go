@@ -23,6 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -39,6 +40,12 @@ func Test_AddFieldTask_Prepare(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("nil field schema", func(t *testing.T) {
+		task := &addFieldTask{Req: &milvuspb.AddFieldRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AddField}, FieldSchema: nil}}
+		err := task.Prepare(context.Background())
+		assert.Error(t, err)
+	})
+
 	t.Run("check field failed", func(t *testing.T) {
 		fieldSchema := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_Int64,
@@ -48,8 +55,10 @@ func Test_AddFieldTask_Prepare(t *testing.T) {
 				},
 			},
 		}
-		task := &addFieldTask{Req: &milvuspb.AddFieldRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AddField}, FieldSchema: fieldSchema}}
-		err := task.Prepare(context.Background())
+		bytes, err := proto.Marshal(fieldSchema)
+		assert.NoError(t, err)
+		task := &addFieldTask{Req: &milvuspb.AddFieldRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AddField}, FieldSchema: bytes}}
+		err = task.Prepare(context.Background())
 		assert.Error(t, err)
 	})
 
@@ -62,8 +71,10 @@ func Test_AddFieldTask_Prepare(t *testing.T) {
 				},
 			},
 		}
-		task := &addFieldTask{Req: &milvuspb.AddFieldRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AddField}, FieldSchema: fieldSchema}}
-		err := task.Prepare(context.Background())
+		bytes, err := proto.Marshal(fieldSchema)
+		assert.NoError(t, err)
+		task := &addFieldTask{Req: &milvuspb.AddFieldRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AddField}, FieldSchema: bytes}}
+		err = task.Prepare(context.Background())
 		assert.NoError(t, err)
 	})
 }
@@ -116,11 +127,11 @@ func Test_AddFieldTask_Execute(t *testing.T) {
 			Req: &milvuspb.AddFieldRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
 				CollectionName: "coll",
-				FieldSchema: &schemapb.FieldSchema{
-					Name:     "fid",
-					DataType: schemapb.DataType_Bool,
-					Nullable: true,
-				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				Name:     "fid",
+				DataType: schemapb.DataType_Bool,
+				Nullable: true,
 			},
 		}
 		err := task.Execute(context.Background())
@@ -164,11 +175,11 @@ func Test_AddFieldTask_Execute(t *testing.T) {
 			Req: &milvuspb.AddFieldRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
 				CollectionName: "coll",
-				FieldSchema: &schemapb.FieldSchema{
-					Name:     "fid",
-					DataType: schemapb.DataType_Bool,
-					Nullable: true,
-				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				Name:     "fid",
+				DataType: schemapb.DataType_Bool,
+				Nullable: true,
 			},
 		}
 		err := task.Execute(context.Background())
@@ -212,11 +223,11 @@ func Test_AddFieldTask_Execute(t *testing.T) {
 			Req: &milvuspb.AddFieldRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
 				CollectionName: "coll",
-				FieldSchema: &schemapb.FieldSchema{
-					Name:     "fid",
-					DataType: schemapb.DataType_Bool,
-					Nullable: true,
-				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				Name:     "fid",
+				DataType: schemapb.DataType_Bool,
+				Nullable: true,
 			},
 		}
 		err := task.Execute(context.Background())
@@ -260,11 +271,11 @@ func Test_AddFieldTask_Execute(t *testing.T) {
 			Req: &milvuspb.AddFieldRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
 				CollectionName: "coll",
-				FieldSchema: &schemapb.FieldSchema{
-					Name:     "fid",
-					DataType: schemapb.DataType_Bool,
-					Nullable: true,
-				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				Name:     "fid",
+				DataType: schemapb.DataType_Bool,
+				Nullable: true,
 			},
 		}
 		err := task.Execute(context.Background())

@@ -688,6 +688,11 @@ func (s *Server) DescribeCollection(ctx context.Context, request *milvuspb.Descr
 	return s.proxy.DescribeCollection(ctx, request)
 }
 
+// AddField add a field to collection
+func (s *Server) AddField(ctx context.Context, request *milvuspb.AddFieldRequest) (*commonpb.Status, error) {
+	return s.proxy.AddField(ctx, request)
+}
+
 // GetCollectionStatistics notifies Proxy to get a collection's Statistics
 func (s *Server) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
 	return s.proxy.GetCollectionStatistics(ctx, request)
