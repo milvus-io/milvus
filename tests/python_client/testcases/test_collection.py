@@ -1157,7 +1157,8 @@ class TestCollectionOperation(TestcaseBase):
             if v and v != DataType.UNKNOWN and v != DataType.STRING \
                     and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR \
                     and v != DataType.BINARY_VECTOR and v != DataType.ARRAY \
-                    and v != DataType.FLOAT16_VECTOR and v != DataType.BFLOAT16_VECTOR:
+                    and v != DataType.FLOAT16_VECTOR and v != DataType.BFLOAT16_VECTOR \
+                    and v != DataType.INT8_VECTOR:
                 field, _ = self.field_schema_wrap.init_field_schema(name=k.lower(), dtype=v)
                 fields.append(field)
         fields.append(cf.gen_float_vec_field())
