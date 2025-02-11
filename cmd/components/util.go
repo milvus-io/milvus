@@ -11,7 +11,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/storagev2/common/log"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -76,6 +76,9 @@ func dumpPprof(exec func() error) error {
 			name:     "cpu",
 			filename: baseFilePath + "_cpu.prof",
 			dump: func(f *os.File) error {
+				// Ensure no other CPU profiling is active before starting a new one.
+				// This prevents the "cpu profiling already in use" error.
+				pprof.StopCPUProfile()
 				return pprof.StartCPUProfile(f)
 			},
 		},
