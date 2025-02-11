@@ -18,7 +18,7 @@ dataCoordinator:
 dataNode:
   resources:
     limits:
-      cpu: "2"
+      cpu: "1"
     requests:
       cpu: "0.5"
       memory: 500Mi
@@ -239,6 +239,13 @@ queryCoordinator:
     requests:
       cpu: "0.2"
       memory: 100Mi
+streamingNode:
+  resources:
+    limits:
+      cpu: "2"
+    requests:
+      cpu: "0.5"
+      memory: 512Mi
 queryNode:
   disk:
     enabled: true
@@ -247,8 +254,15 @@ queryNode:
       cpu: "2"
     requests:
       cpu: "0.5"
-      memory: 500Mi
+      memory: 512Mi
 rootCoordinator:
+  resources:
+    limits:
+      cpu: "1"
+    requests:
+      cpu: "0.2"
+      memory: 256Mi
+mixCoordinator:
   resources:
     limits:
       cpu: "1"
