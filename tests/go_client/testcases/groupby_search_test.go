@@ -57,7 +57,7 @@ func genUnsupportedFloatGroupByIndex() []index.Index {
 
 func prepareDataForGroupBySearch(t *testing.T, loopInsert int, insertNi int, idx index.Index, withGrowing bool) (*base.MilvusClient, context.Context, string) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*5)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection with all datatype
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -205,7 +205,7 @@ func TestGroupBySearchSparseVector(t *testing.T) {
 	idxWand := index.NewSparseWANDIndex(entity.IP, 0.2)
 	for _, idx := range []index.Index{idxInverted, idxWand} {
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-		mc := createDefaultMilvusClient(ctx, t)
+		mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption().TWithMaxLen(common.TestMaxLen),
 			hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -264,7 +264,7 @@ func TestSearchGroupByBinaryDefault(t *testing.T) {
 	for _, metricType := range hp.SupportBinIvfFlatMetricType {
 		for _, idx := range genGroupByBinaryIndex(metricType) {
 			ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-			mc := createDefaultMilvusClient(ctx, t)
+			mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 			prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(),
 				hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -299,7 +299,7 @@ func TestSearchGroupByBinaryGrowing(t *testing.T) {
 	for _, metricType := range hp.SupportBinIvfFlatMetricType {
 		idxBinIvfFlat := index.NewBinIvfFlatIndex(metricType, 128)
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-		mc := createDefaultMilvusClient(ctx, t)
+		mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(),
 			hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -454,7 +454,7 @@ func TestSearchGroupByRangeSearch(t *testing.T) {
 	common.CheckErr(t, err, false, "Not allowed to do range-search when doing search-group-by")
 }
 
-// groupBy + advanced search
+// groupBy + L3cases search
 func TestSearchGroupByHybridSearch(t *testing.T) {
 	t.Skipf("Waiting for HybridSearch implemention")
 }
