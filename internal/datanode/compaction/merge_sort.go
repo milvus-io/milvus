@@ -126,7 +126,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		log.Warn("compaction only support int64 and varchar pk field")
 	}
 
-	if _, err = storage.MergeSort(segmentReaders, pkField.FieldID, writer, predicate); err != nil {
+	if _, err = storage.MergeSort(plan.GetSchema(), segmentReaders, pkField.FieldID, writer, predicate); err != nil {
 		return nil, err
 	}
 
