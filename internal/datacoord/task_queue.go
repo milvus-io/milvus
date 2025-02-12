@@ -25,6 +25,7 @@ type schedulePolicy interface {
 	Push(task Task)
 	// Pop get the task next ready to run.
 	Pop() Task
+	BatchPop(batch int) []Task
 	Get(taskID UniqueID) Task
 	Keys() []UniqueID
 	TaskCount() int
@@ -68,6 +69,30 @@ func (fqp *fairQueuePolicy) Pop() Task {
 	task := fqp.tasks[taskID]
 	delete(fqp.tasks, taskID)
 	return task
+}
+
+func (fqp *fairQueuePolicy) BatchPop(batch int) []Task {
+	fqp.lock.Lock()
+	defer fqp.lock.Unlock()
+	tasks := make([]Task, 0)
+	if len(fqp.taskIDs) <= batch {
+		for _, taskID := range fqp.taskIDs {
+			task := fqp.tasks[taskID]
+			delete(fqp.tasks, taskID)
+			tasks = append(tasks, task)
+		}
+		fqp.taskIDs = make([]UniqueID, 0)
+		return tasks
+	}
+
+	taskIDs := fqp.taskIDs[:batch]
+	for _, taskID := range taskIDs {
+		task := fqp.tasks[taskID]
+		delete(fqp.tasks, taskID)
+		tasks = append(tasks, task)
+	}
+	fqp.taskIDs = fqp.taskIDs[batch:]
+	return tasks
 }
 
 func (fqp *fairQueuePolicy) Get(taskID UniqueID) Task {

@@ -20,6 +20,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -377,27 +378,45 @@ func (s *taskScheduler) run() {
 	log.Ctx(s.ctx).Info("task scheduler", zap.Int("task num", pendingTaskNum), zap.Any("nodeSlots", nodeSlots))
 
 	for {
-		task := s.pendingTasks.Pop()
-		if task == nil {
+		tasks := s.pendingTasks.BatchPop(10)
+		if len(tasks) == 0 {
 			break
 		}
-		s.taskLock.Lock(task.GetTaskID())
-		ok := s.process(task, nodeSlots)
-		s.taskLock.Unlock(task.GetTaskID())
 
-		switch task.GetState() {
-		case indexpb.JobState_JobStateNone:
-			return
-		case indexpb.JobState_JobStateInit:
-			s.pendingTasks.Push(task)
-		default:
-			s.runningQueueLock.Lock()
-			s.runningTasks[task.GetTaskID()] = task
-			s.runningQueueLock.Unlock()
+		var (
+			wg         sync.WaitGroup
+			hasFailure atomic.Bool
+		)
+
+		for _, task := range tasks {
+			wg.Add(1)
+			go func(t Task) {
+				defer wg.Done()
+
+				s.taskLock.Lock(t.GetTaskID())
+				defer s.taskLock.Unlock(t.GetTaskID())
+
+				ok := s.process(t, nodeSlots)
+				switch t.GetState() {
+				case indexpb.JobState_JobStateNone:
+					return
+				case indexpb.JobState_JobStateInit:
+					s.pendingTasks.Push(t)
+				default:
+					s.runningQueueLock.Lock()
+					s.runningTasks[t.GetTaskID()] = t
+					s.runningQueueLock.Unlock()
+				}
+				if !ok {
+					hasFailure.Store(true)
+					log.Ctx(s.ctx).Info("there is no idle node, waiting retry...")
+					return
+				}
+			}(task)
 		}
 
-		if !ok {
-			log.Ctx(s.ctx).Info("there is no idle indexing node, waiting for retry...")
+		wg.Wait()
+		if hasFailure.Load() {
 			break
 		}
 	}
