@@ -15,6 +15,7 @@ require (
 	github.com/casbin/casbin/v2 v2.103.0
 	github.com/casbin/json-adapter/v2 v2.1.1
 	github.com/cockroachdb/errors v1.11.3
+	github.com/envoyproxy/go-control-plane v0.13.1
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-playground/validator/v10 v10.24.0
 	github.com/gofrs/flock v0.12.1
