@@ -191,8 +191,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            static_cast<ValueType>(
-                                long(x.value()) % long(right_operand)) == val);
+                            static_cast<ValueType>(long(x.value()) %
+                                                   long(right_operand)) == val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -240,8 +240,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompareNotEqual(
-                            static_cast<ValueType>(
-                                long(x.value()) % long(right_operand)) != val);
+                            static_cast<ValueType>(long(x.value()) %
+                                                   long(right_operand)) != val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -289,8 +289,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            static_cast<ValueType>(
-                                long(x.value()) % long(right_operand)) > val);
+                            static_cast<ValueType>(long(x.value()) %
+                                                   long(right_operand)) > val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -338,8 +338,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            static_cast<ValueType>(
-                                long(x.value()) % long(right_operand)) >= val);
+                            static_cast<ValueType>(long(x.value()) %
+                                                   long(right_operand)) >= val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -387,8 +387,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            static_cast<ValueType>(
-                                long(x.value()) % long(right_operand)) < val);
+                            static_cast<ValueType>(long(x.value()) %
+                                                   long(right_operand)) < val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -436,8 +436,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            static_cast<ValueType>(
-                                long(x.value()) % long(right_operand)) <= val);
+                            static_cast<ValueType>(long(x.value()) %
+                                                   long(right_operand)) <= val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -552,8 +552,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            static_cast<ValueType>(
-                                long(value) % long(right_operand)) == val);
+                            static_cast<ValueType>(long(value) %
+                                                   long(right_operand)) == val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -595,8 +595,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            static_cast<ValueType>(
-                                long(value) % long(right_operand)) != val);
+                            static_cast<ValueType>(long(value) %
+                                                   long(right_operand)) != val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -638,8 +638,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            static_cast<ValueType>(long(value) % long(right_operand)) >
-                            val);
+                            static_cast<ValueType>(long(value) %
+                                                   long(right_operand)) > val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -681,8 +681,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            static_cast<ValueType>(
-                                long(value) % long(right_operand)) >= val);
+                            static_cast<ValueType>(long(value) %
+                                                   long(right_operand)) >= val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -724,8 +724,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            static_cast<ValueType>(long(value) % long(right_operand)) <
-                            val);
+                            static_cast<ValueType>(long(value) %
+                                                   long(right_operand)) < val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -767,8 +767,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray() {
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            static_cast<ValueType>(
-                                long(value) % long(right_operand)) <= val);
+                            static_cast<ValueType>(long(value) %
+                                                   long(right_operand)) <= val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
