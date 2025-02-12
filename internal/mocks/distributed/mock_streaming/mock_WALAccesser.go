@@ -196,6 +196,63 @@ func (_c *MockWALAccesser_Broadcast_Call) RunAndReturn(run func() streaming.Broa
 	return _c
 }
 
+// GetLatestMVCCTimestampIfLocal provides a mock function with given fields: ctx, vchannel
+func (_m *MockWALAccesser) GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error) {
+	ret := _m.Called(ctx, vchannel)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLatestMVCCTimestampIfLocal")
+	}
+
+	var r0 uint64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (uint64, error)); ok {
+		return rf(ctx, vchannel)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) uint64); ok {
+		r0 = rf(ctx, vchannel)
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, vchannel)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLatestMVCCTimestampIfLocal'
+type MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call struct {
+	*mock.Call
+}
+
+// GetLatestMVCCTimestampIfLocal is a helper method to define mock.On call
+//   - ctx context.Context
+//   - vchannel string
+func (_e *MockWALAccesser_Expecter) GetLatestMVCCTimestampIfLocal(ctx interface{}, vchannel interface{}) *MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call {
+	return &MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call{Call: _e.mock.On("GetLatestMVCCTimestampIfLocal", ctx, vchannel)}
+}
+
+func (_c *MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call) Run(run func(ctx context.Context, vchannel string)) *MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call) Return(_a0 uint64, _a1 error) *MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call) RunAndReturn(run func(context.Context, string) (uint64, error)) *MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RawAppend provides a mock function with given fields: ctx, msgs, opts
 func (_m *MockWALAccesser) RawAppend(ctx context.Context, msgs message.MutableMessage, opts ...streaming.AppendOption) (*types.AppendResult, error) {
 	_va := make([]interface{}, len(opts))

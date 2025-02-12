@@ -91,6 +91,7 @@ func TestHandlerClient(t *testing.T) {
 	producer2.Close()
 	producer3.Close()
 
+	handler.GetLatestMVCCTimestampIfLocal(ctx, "pchannel")
 	producer4, err := handler.CreateProducer(ctx, &ProducerOptions{PChannel: "pchannel"})
 	assert.NoError(t, err)
 	assert.NotNil(t, producer4)
@@ -121,6 +122,8 @@ func TestHandlerClient(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrClientClosed)
 	assert.Nil(t, consumer)
+
+	handler.GetLatestMVCCTimestampIfLocal(ctx, "pchannel")
 }
 
 func TestDial(t *testing.T) {

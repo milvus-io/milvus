@@ -463,6 +463,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	guaranteeTs := t.request.GetGuaranteeTimestamp()
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
+	t.RetrieveRequest.ConsistencyLevel = t.request.GetConsistencyLevel()
 	if useDefaultConsistency {
 		consistencyLevel = collectionInfo.consistencyLevel
 		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
@@ -482,6 +483,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
 		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
 	}
+	t.RetrieveRequest.IsIterator = queryParams.isIterator
 
 	deadline, ok := t.TraceCtx().Deadline()
 	if ok {

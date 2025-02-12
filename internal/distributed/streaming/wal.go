@@ -64,6 +64,15 @@ func (w *walAccesserImpl) WALName() string {
 	return util.MustSelectWALName()
 }
 
+func (w *walAccesserImpl) GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error) {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return 0, ErrWALAccesserClosed
+	}
+	defer w.lifetime.Done()
+
+	return w.handlerClient.GetLatestMVCCTimestampIfLocal(ctx, vchannel)
+}
+
 // RawAppend writes a record to the log.
 func (w *walAccesserImpl) RawAppend(ctx context.Context, msg message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error) {
 	assertValidMessage(msg)

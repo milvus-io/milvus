@@ -3,6 +3,7 @@ package inspector
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
@@ -10,6 +11,9 @@ import (
 type TimeTickSyncOperator interface {
 	// Channel returns the pchannel info.
 	Channel() types.PChannelInfo
+
+	// MVCCManager returns the related mvcc timestamp manager of current wal.
+	MVCCManager(ctx context.Context) (*mvcc.MVCCManager, error)
 
 	// WriteAheadBuffer get the related WriteAhead buffer.
 	WriteAheadBuffer(ctx context.Context) (wab.ROWriteAheadBuffer, error)
