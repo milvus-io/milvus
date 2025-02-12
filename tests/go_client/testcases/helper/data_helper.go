@@ -3,9 +3,11 @@ package helper
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"slices"
 	"strconv"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -214,10 +216,13 @@ func GenArrayColumnData(nb int, eleType entity.FieldType, option GenDataOption) 
 }
 
 type JSONStruct struct {
-	Number int32  `json:"number,omitempty" milvus:"name:number"`
-	String string `json:"string,omitempty" milvus:"name:string"`
+	Number int32   `json:"number,omitempty" milvus:"name:number"`
+	String string  `json:"string,omitempty" milvus:"name:string"`
+	Float  float32 `json:"float,omitempty" milvus:"name:float"`
 	*BoolStruct
-	List []int64 `json:"list,omitempty" milvus:"name:list"`
+	List        []int64   `json:"list,omitempty" milvus:"name:list"`
+	FloatArray  []float64 `json:"floatArray,omitempty" milvus:"name:floatArray"`
+	StringArray []string  `json:"stringArray,omitempty" milvus:"name:stringArray"`
 }
 
 // GenDefaultJSONData gen default column with data
@@ -233,12 +238,15 @@ func GenDefaultJSONData(nb int, option GenDataOption) [][]byte {
 		if i < (start+nb)/2 {
 			if i%2 == 0 {
 				m = JSONStruct{
-					String:     strconv.Itoa(i),
-					BoolStruct: _bool,
+					String:      strconv.Itoa(i),
+					BoolStruct:  _bool,
+					FloatArray:  []float64{float64(i), float64(i), float64(i)},
+					StringArray: []string{fmt.Sprintf("%05d", i)},
 				}
 			} else {
 				m = JSONStruct{
 					Number:     int32(i),
+					Float:      float32(i),
 					String:     strconv.Itoa(i),
 					BoolStruct: _bool,
 					List:       []int64{int64(i), int64(i + 1)},
@@ -264,6 +272,24 @@ func GenDefaultJSONData(nb int, option GenDataOption) [][]byte {
 		jsonValues = append(jsonValues, bs)
 	}
 	return jsonValues
+}
+
+func GenNestedJSON(depth int, value any) map[string]interface{} {
+	if depth == 1 {
+		return map[string]interface{}{"value": value}
+	}
+	return map[string]interface{}{
+		fmt.Sprintf("level%d", depth): GenNestedJSON(depth-1, value),
+	}
+}
+
+func GenNestedJSONExprKey(depth int, jsonField string) string {
+	var pathParts []string
+	for i := depth; i > 1; i-- {
+		pathParts = append(pathParts, fmt.Sprintf("level%d", i))
+	}
+	pathParts = append(pathParts, "value")
+	return fmt.Sprintf("%s['%s']", jsonField, strings.Join(pathParts, "']['"))
 }
 
 // GenColumnData GenColumnDataOption except dynamic column
