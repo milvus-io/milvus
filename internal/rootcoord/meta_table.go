@@ -925,6 +925,11 @@ func (mt *MetaTable) GetPChannelInfo(ctx context.Context, pchannel string) *root
 		Collections: make([]*rootcoordpb.CollectionInfoOnPChannel, 0),
 	}
 	for _, collInfo := range mt.collID2Meta {
+		if collInfo.State != pb.CollectionState_CollectionCreated {
+			// streamingnode, skip non-created collections when recovering
+			// streamingnode will receive the createCollectionMessage to recover if the collection is creating.
+			continue
+		}
 		if idx := lo.IndexOf(collInfo.PhysicalChannelNames, pchannel); idx >= 0 {
 			partitions := make([]*rootcoordpb.PartitionInfoOnPChannel, 0, len(collInfo.Partitions))
 			for _, part := range collInfo.Partitions {
