@@ -260,7 +260,7 @@ func ExampleClient_AlterCollection_setTTL() {
 
 	defer cli.Close(ctx)
 
-	err = cli.AlterCollection(ctx, milvusclient.NewAlterCollectionOption("my_collection").WithProperty(common.CollectionTTLConfigKey, 60))
+	err = cli.AlterCollectionProperties(ctx, milvusclient.NewAlterCollectionPropertiesOption("my_collection").WithProperty(common.CollectionTTLConfigKey, 60))
 	if err != nil {
 		// handle error
 	}

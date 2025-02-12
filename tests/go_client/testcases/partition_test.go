@@ -106,7 +106,8 @@ func TestCreatePartitionInvalid(t *testing.T) {
 }
 
 func TestPartitionsNumExceedsMax(t *testing.T) {
-	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	// 120 seconds may timeout for 1024 partitions
+	ctx := hp.CreateContext(t, time.Second*300)
 	mc := createDefaultMilvusClient(ctx, t)
 
 	// create collection

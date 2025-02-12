@@ -16,48 +16,39 @@
 
 package entity
 
-type User struct {
-	UserName string
-	Roles    []string
+type ResourceGroup struct {
+	Name             string
+	Capacity         int32
+	NumAvailableNode int32
+	NumLoadedReplica map[string]int32
+	NumOutgoingNode  map[string]int32
+	NumIncomingNode  map[string]int32
+	Config           *ResourceGroupConfig
+	Nodes            []NodeInfo
 }
 
-type Role struct {
-	RoleName   string
-	Privileges []GrantItem
+type NodeInfo struct {
+	NodeID   int64
+	Address  string
+	HostName string
 }
 
-type GrantItem struct {
-	Object     string
-	ObjectName string
-	RoleName   string
-	Grantor    string
-	Privilege  string
+type ResourceGroupLimit struct {
+	NodeNum int32
 }
 
-type UserInfo struct {
-	UserDescription
-	Password string
+type ResourceGroupTransfer struct {
+	ResourceGroup string
 }
 
-// UserDescription is the model for RBAC user description object.
-type UserDescription struct {
-	Name  string
-	Roles []string
+type ResourceGroupNodeFilter struct {
+	NodeLabels map[string]string
 }
 
-type RBACMeta struct {
-	Users           []*UserInfo
-	Roles           []*Role
-	RoleGrants      []*RoleGrants
-	PrivilegeGroups []*PrivilegeGroup
-}
-
-// RoleGrants is the model for RBAC role description object.
-type RoleGrants struct {
-	Object        string
-	ObjectName    string
-	RoleName      string
-	GrantorName   string
-	PrivilegeName string
-	DbName        string
+type ResourceGroupConfig struct {
+	Requests     ResourceGroupLimit
+	Limits       ResourceGroupLimit
+	TransferFrom []*ResourceGroupTransfer
+	TransferTo   []*ResourceGroupTransfer
+	NodeFilter   ResourceGroupNodeFilter
 }

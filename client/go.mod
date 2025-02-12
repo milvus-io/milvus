@@ -7,7 +7,7 @@ require (
 	github.com/cockroachdb/errors v1.9.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.5
-	github.com/milvus-io/milvus/pkg v0.0.2-0.20241126032235-cb6542339e84
+	github.com/milvus-io/milvus/pkg v0.0.2-0.20250212080049-0f4d3ef8b640
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/samber/lo v1.27.0
 	github.com/stretchr/testify v1.9.0
@@ -99,7 +99,7 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/exp v0.0.0-20230224173230-c95f2b4c22f2 // indirect
-	golang.org/x/net v0.27.0 // indirect
+	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/sys v0.28.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
