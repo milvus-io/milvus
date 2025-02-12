@@ -449,7 +449,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments []*meta.Segment, replica *meta.Replica, scope querypb.DataScope) []task.Task {
 	ret := make([]task.Task, 0, len(segments))
 	for _, s := range segments {
-		action := task.NewSegmentActionWithScope(s.Node, task.ActionTypeReduce, s.GetInsertChannel(), s.GetID(), scope)
+		action := task.NewSegmentActionWithScope(s.Node, task.ActionTypeReduce, s.GetInsertChannel(), s.GetID(), scope, int(s.GetNumOfRows()))
 		task, err := task.NewSegmentTask(
 			ctx,
 			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),

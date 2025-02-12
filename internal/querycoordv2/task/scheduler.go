@@ -596,7 +596,7 @@ func (scheduler *taskScheduler) GetChannelTaskDelta(nodeID, collectionID int64) 
 
 func (scheduler *taskScheduler) incExecutingTaskDelta(task Task) {
 	for _, action := range task.Actions() {
-		delta := scheduler.computeActionDelta(task.CollectionID(), action)
+		delta := action.WorkLoadEffect()
 		switch action.(type) {
 		case *SegmentAction:
 			scheduler.segmentTaskDelta.Add(action.Node(), task.CollectionID(), delta)
@@ -608,7 +608,7 @@ func (scheduler *taskScheduler) incExecutingTaskDelta(task Task) {
 
 func (scheduler *taskScheduler) decExecutingTaskDelta(task Task) {
 	for _, action := range task.Actions() {
-		delta := scheduler.computeActionDelta(task.CollectionID(), action)
+		delta := action.WorkLoadEffect()
 		switch action.(type) {
 		case *SegmentAction:
 			scheduler.segmentTaskDelta.Sub(action.Node(), task.CollectionID(), delta)
@@ -616,30 +616,6 @@ func (scheduler *taskScheduler) decExecutingTaskDelta(task Task) {
 			scheduler.channelTaskDelta.Sub(action.Node(), task.CollectionID(), delta)
 		}
 	}
-}
-
-func (scheduler *taskScheduler) computeActionDelta(collectionID int64, action Action) int {
-	delta := 0
-	if action.Type() == ActionTypeGrow {
-		delta = 1
-	} else if action.Type() == ActionTypeReduce {
-		delta = -1
-	}
-
-	switch action := action.(type) {
-	case *SegmentAction:
-		// skip growing segment's count, cause doesn't know realtime row number of growing segment
-		if action.Scope == querypb.DataScope_Historical {
-			segment := scheduler.targetMgr.GetSealedSegment(scheduler.ctx, collectionID, action.SegmentID, meta.NextTargetFirst)
-			if segment != nil {
-				return int(segment.GetNumOfRows()) * delta
-			}
-		}
-	case *ChannelAction:
-		return delta
-	}
-
-	return 0
 }
 
 func (scheduler *taskScheduler) GetExecutedFlag(nodeID int64) <-chan struct{} {
@@ -946,7 +922,8 @@ func (scheduler *taskScheduler) remove(task Task) {
 
 	if errors.Is(task.Err(), merr.ErrSegmentNotFound) {
 		log.Info("segment in target has been cleaned, trigger force update next target", zap.Int64("collectionID", task.CollectionID()))
-		scheduler.targetMgr.UpdateCollectionNextTarget(task.Context(), task.CollectionID())
+		// Avoid using task.Ctx as it may be canceled before remove is called.
+		scheduler.targetMgr.UpdateCollectionNextTarget(scheduler.ctx, task.CollectionID())
 	}
 
 	task.Cancel(nil)
