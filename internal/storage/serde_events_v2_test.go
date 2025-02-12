@@ -31,7 +31,7 @@ func TestPackedSerde(t *testing.T) {
 		blobs, err := generateTestData(size)
 		assert.NoError(t, err)
 
-		reader, err := NewBinlogDeserializeReader(blobs, common.RowIDField)
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
 		assert.NoError(t, err)
 		defer reader.Close()
 
