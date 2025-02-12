@@ -113,9 +113,14 @@ func (m *messageImpl) WithBroadcastID(id uint64) BroadcastMutableMessage {
 
 // IntoImmutableMessage converts current message to immutable message.
 func (m *messageImpl) IntoImmutableMessage(id MessageID) ImmutableMessage {
+	// payload and id is always immutable, so we only clone the prop here is ok.
+	prop := m.properties.Clone()
 	return &immutableMessageImpl{
-		messageImpl: *m,
-		id:          id,
+		id: id,
+		messageImpl: messageImpl{
+			payload:    m.payload,
+			properties: prop,
+		},
 	}
 }
 
@@ -258,6 +263,26 @@ func (m *immutableMessageImpl) LastConfirmedMessageID() MessageID {
 		panic(fmt.Sprintf("there's a bug in the message codes, dirty last confirmed message in properties of message, id: %+v", m.id))
 	}
 	return id
+}
+
+// cloneForTxnBody clone the message and update timetick and last confirmed message id.
+func (m *immutableMessageImpl) cloneForTxnBody(timetick uint64, LastConfirmedMessageID MessageID) *immutableMessageImpl {
+	newMsg := m.clone()
+	newMsg.overwriteTimeTick(timetick)
+	newMsg.overwriteLastConfirmedMessageID(LastConfirmedMessageID)
+	return newMsg
+}
+
+// clone clones the current message.
+func (m *immutableMessageImpl) clone() *immutableMessageImpl {
+	// payload and message id is always immutable, so we only clone the prop here is ok.
+	return &immutableMessageImpl{
+		id: m.id,
+		messageImpl: messageImpl{
+			payload:    m.payload,
+			properties: m.properties.Clone(),
+		},
+	}
 }
 
 // overwriteTimeTick overwrites the time tick of current message.

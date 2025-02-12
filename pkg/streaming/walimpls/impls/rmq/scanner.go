@@ -22,7 +22,7 @@ func newScanner(
 		ScannerHelper: helper.NewScannerHelper(scannerName),
 		exclude:       exclude,
 		consumer:      consumer,
-		msgChannel:    make(chan message.ImmutableMessage, 1),
+		msgChannel:    make(chan message.ImmutableMessage),
 	}
 	go s.executeConsume()
 	return s
@@ -50,27 +50,30 @@ func (s *scannerImpl) Close() error {
 }
 
 // executeConsume consumes the message from the consumer.
-func (s *scannerImpl) executeConsume() {
-	defer close(s.msgChannel)
+func (s *scannerImpl) executeConsume() (err error) {
+	defer func() {
+		s.Finish(err)
+		close(s.msgChannel)
+	}()
+
 	for {
 		select {
 		case <-s.Context().Done():
-			s.Finish(nil)
-			return
+			return nil
 		case msg, ok := <-s.consumer.Chan():
 			if !ok {
-				s.Finish(errors.New("mq consumer unexpected channel closed"))
-				return
+				return errors.New("mq consumer unexpected channel closed")
 			}
 			msgID := rmqID(msg.ID().(*server.RmqID).MessageID)
 			// record the last message id to avoid repeated consume message.
 			// and exclude message id should be filterred.
 			if s.exclude == nil || !s.exclude.EQ(msgID) {
-				s.msgChannel <- message.NewImmutableMesasge(
-					msgID,
-					msg.Payload(),
-					msg.Properties(),
-				)
+				msg := message.NewImmutableMesasge(msgID, msg.Payload(), msg.Properties())
+				select {
+				case <-s.Context().Done():
+					return nil
+				case s.msgChannel <- msg:
+				}
 			}
 		}
 	}

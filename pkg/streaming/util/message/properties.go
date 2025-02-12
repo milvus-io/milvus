@@ -65,6 +65,14 @@ func (prop propertiesImpl) ToRawMap() map[string]string {
 	return map[string]string(prop)
 }
 
+func (prop propertiesImpl) Clone() propertiesImpl {
+	cloned := make(map[string]string, len(prop))
+	for k, v := range prop {
+		cloned[k] = v
+	}
+	return cloned
+}
+
 // EstimateSize returns the estimated size of properties.
 func (prop propertiesImpl) EstimateSize() int {
 	size := 0

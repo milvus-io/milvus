@@ -58,6 +58,9 @@ packages:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector:
     interfaces:
       TimeTickSyncOperator:
+  github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab:
+    interfaces:
+      ROWriteAheadBuffer:
   google.golang.org/grpc:
     interfaces:
       ClientStream:
