@@ -171,7 +171,6 @@ func (st *statsTask) calculateTaskSlotPolicy(segmentSize int64) int64 {
 }
 
 func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) (bool, int64) {
-	// set segment compacting
 	log := log.Ctx(ctx).With(zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID))
 	segment := dependency.meta.GetHealthySegment(ctx, st.segmentID)
 	if segment == nil {

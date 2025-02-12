@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -57,6 +58,8 @@ type IndexTaskQueue struct {
 	// maxTaskNum should keep still
 	maxTaskNum int64
 
+	usingSlot atomic.Int64
+
 	utBufChan chan int // to block scheduler
 
 	sched *TaskScheduler
@@ -87,21 +90,8 @@ func (queue *IndexTaskQueue) addUnissuedTask(t task) error {
 }
 
 func (queue *IndexTaskQueue) GetUsingSlot() int64 {
-	slot := int64(0)
 
-	queue.utLock.Lock()
-	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
-		slot += e.Value.(task).GetSlot()
-	}
-	queue.utLock.Unlock()
-
-	queue.atLock.Lock()
-	defer queue.atLock.Unlock()
-
-	for _, t := range queue.activeTasks {
-		slot += t.GetSlot()
-	}
-	return slot
+	return queue.usingSlot.Load()
 }
 
 // PopUnissuedTask pops a task from tasks queue.
@@ -141,6 +131,7 @@ func (queue *IndexTaskQueue) PopActiveTask(tName string) task {
 	t, ok := queue.activeTasks[tName]
 	if ok {
 		delete(queue.activeTasks, tName)
+		queue.usingSlot.Store(queue.usingSlot.Load() - t.GetSlot())
 		return t
 	}
 	log.Ctx(queue.sched.ctx).Debug("IndexNode task was not found in the active task list", zap.String("TaskName", tName))
@@ -153,7 +144,12 @@ func (queue *IndexTaskQueue) Enqueue(t task) error {
 	if err != nil {
 		return err
 	}
-	return queue.addUnissuedTask(t)
+	if err = queue.addUnissuedTask(t); err != nil {
+		return err
+	}
+
+	queue.usingSlot.Add(t.GetSlot())
+	return nil
 }
 
 func (queue *IndexTaskQueue) GetTaskNum() (int, int) {
@@ -182,6 +178,8 @@ func NewIndexBuildTaskQueue(sched *TaskScheduler) *IndexTaskQueue {
 
 		utBufChan: make(chan int, 1024),
 		sched:     sched,
+
+		usingSlot: atomic.Int64{},
 	}
 }
 
