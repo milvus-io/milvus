@@ -162,6 +162,36 @@ func (mc *MilvusClient) DropCollection(ctx context.Context, option client.DropCo
 	return err
 }
 
+// RenameCollection Rename Collection
+func (mc *MilvusClient) RenameCollection(ctx context.Context, option client.RenameCollectionOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.RenameCollection(ctx, option, callOptions...)
+	return err
+}
+
+// AlterCollectionProperties Alter collection properties
+func (mc *MilvusClient) AlterCollectionProperties(ctx context.Context, option client.AlterCollectionPropertiesOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.AlterCollectionProperties(ctx, option, callOptions...)
+	return err
+}
+
+// DropCollectionProperties Drop collection properties
+func (mc *MilvusClient) DropCollectionProperties(ctx context.Context, option client.DropCollectionPropertiesOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.DropCollectionProperties(ctx, option, callOptions...)
+	return err
+}
+
+// AlterCollectionField Alter collection field
+func (mc *MilvusClient) AlterCollectionField(ctx context.Context, option client.AlterCollectionFieldPropertiesOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.AlterCollectionFieldProperty(ctx, option, callOptions...)
+	return err
+}
+
+// GetCollectionStats Get collection stats
+func (mc *MilvusClient) GetCollectionStats(ctx context.Context, option client.GetCollectionOption) (map[string]string, error) {
+	stats, err := mc.mClient.GetCollectionStats(ctx, option)
+	return stats, err
+}
+
 // -- partition --
 
 // CreatePartition Create Partition

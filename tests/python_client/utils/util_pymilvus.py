@@ -8,7 +8,7 @@ import copy
 import numpy as np
 import requests
 from sklearn import preprocessing
-from pymilvus import Milvus, DataType
+from pymilvus import DataType
 from utils.util_log import test_log as log
 from utils.util_k8s import init_k8s_client_config
 

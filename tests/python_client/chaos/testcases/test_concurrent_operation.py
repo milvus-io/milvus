@@ -11,6 +11,7 @@ from chaos.checker import (InsertChecker,
                            HybridSearchChecker,
                            QueryChecker,
                            TextMatchChecker,
+                           PhraseMatchChecker,
                            DeleteChecker,
                            Op,
                            ResultAnalyzer
@@ -81,6 +82,7 @@ class TestOperations(TestBase):
             Op.hybrid_search: HybridSearchChecker(collection_name=c_name),
             Op.query: QueryChecker(collection_name=c_name),
             Op.text_match: TextMatchChecker(collection_name=c_name),
+            Op.phrase_match: PhraseMatchChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
         }
         log.info(f"init_health_checkers: {checkers}")
