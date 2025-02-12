@@ -8,80 +8,80 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.11.1
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.6.0
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.1.0
-	github.com/aliyun/credentials-go v1.2.7
+	github.com/aliyun/credentials-go v1.4.3
 	github.com/apache/arrow/go/v12 v12.0.1
-	github.com/bits-and-blooms/bloom/v3 v3.0.1
+	github.com/bits-and-blooms/bloom/v3 v3.7.0
 	github.com/blang/semver/v4 v4.0.0
-	github.com/casbin/casbin/v2 v2.44.2
-	github.com/casbin/json-adapter/v2 v2.0.0
-	github.com/cockroachdb/errors v1.9.1
-	github.com/gin-gonic/gin v1.9.1
-	github.com/go-playground/validator/v10 v10.14.0
-	github.com/gofrs/flock v0.8.1
+	github.com/casbin/casbin/v2 v2.103.0
+	github.com/casbin/json-adapter/v2 v2.1.1
+	github.com/cockroachdb/errors v1.11.3
+	github.com/gin-gonic/gin v1.10.0
+	github.com/go-playground/validator/v10 v10.24.0
+	github.com/gofrs/flock v0.12.1
 	github.com/golang/protobuf v1.5.4
-	github.com/google/btree v1.1.2
-	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
-	github.com/klauspost/compress v1.17.9
+	github.com/google/btree v1.1.3
+	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
+	github.com/klauspost/compress v1.17.11
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.0-beta.0.20250107132849-4099923438e6
-	github.com/minio/minio-go/v7 v7.0.73
-	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
-	github.com/prometheus/client_golang v1.14.0
-	github.com/prometheus/client_model v0.3.0
-	github.com/prometheus/common v0.42.0
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.5
+	github.com/minio/minio-go/v7 v7.0.85
+	github.com/pingcap/log v1.1.1-0.20241212030209-7e3ff8601a2a
+	github.com/prometheus/client_golang v1.20.5
+	github.com/prometheus/client_model v0.6.1
+	github.com/prometheus/common v0.62.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
-	github.com/samber/lo v1.27.0
-	github.com/sbinet/npyio v0.6.0
+	github.com/samber/lo v1.49.1
+	github.com/sbinet/npyio v0.9.0
 	github.com/soheilhy/cmux v0.1.5
-	github.com/spf13/cast v1.3.1
-	github.com/spf13/viper v1.8.1
-	github.com/stretchr/testify v1.9.0
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865
-	github.com/tikv/client-go/v2 v2.0.4
-	go.etcd.io/etcd/api/v3 v3.5.5
-	go.etcd.io/etcd/client/v3 v3.5.5
-	go.etcd.io/etcd/server/v3 v3.5.5
-	go.opentelemetry.io/otel v1.28.0
-	go.opentelemetry.io/otel/trace v1.28.0
+	github.com/spf13/cast v1.7.1
+	github.com/spf13/viper v1.19.0
+	github.com/stretchr/testify v1.10.0
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.1094
+	github.com/tikv/client-go/v2 v2.0.7
+	go.etcd.io/etcd/api/v3 v3.5.18
+	go.etcd.io/etcd/client/v3 v3.5.18
+	go.etcd.io/etcd/server/v3 v3.5.18
+	go.opentelemetry.io/otel v1.34.0
+	go.opentelemetry.io/otel/trace v1.34.0
 	go.uber.org/atomic v1.11.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/crypto v0.31.0
-	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842
-	golang.org/x/net v0.33.0
-	golang.org/x/oauth2 v0.21.0
-	golang.org/x/sync v0.10.0
-	golang.org/x/text v0.21.0
-	google.golang.org/grpc v1.65.0
-	google.golang.org/grpc/examples v0.0.0-20220617181431-3e7b97febc7f
+	golang.org/x/crypto v0.33.0
+	golang.org/x/exp v0.0.0-20250207012021-f9890c6ad9f3
+	golang.org/x/net v0.34.0
+	golang.org/x/oauth2 v0.26.0
+	golang.org/x/sync v0.11.0
+	golang.org/x/text v0.22.0
+	google.golang.org/grpc v1.70.0
+	google.golang.org/grpc/examples v0.0.0-20250207091334-e0d191d8adcd
 )
 
 require (
-	cloud.google.com/go/storage v1.43.0
+	cloud.google.com/go/storage v1.50.0
 	github.com/antlr4-go/antlr/v4 v4.13.1
 	github.com/aws/aws-sdk-go-v2 v1.32.6
 	github.com/aws/aws-sdk-go-v2/config v1.28.6
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.47
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.23.0
-	github.com/bits-and-blooms/bitset v1.10.0
-	github.com/bytedance/sonic v1.12.2
-	github.com/cenkalti/backoff/v4 v4.2.1
-	github.com/cockroachdb/redact v1.1.3
-	github.com/goccy/go-json v0.10.3
+	github.com/bits-and-blooms/bitset v1.20.0
+	github.com/bytedance/sonic v1.12.8
+	github.com/cenkalti/backoff/v4 v4.3.0
+	github.com/cockroachdb/redact v1.1.6
+	github.com/goccy/go-json v0.10.5
 	github.com/google/uuid v1.6.0
-	github.com/greatroar/blobloom v0.0.0-00010101000000-000000000000
+	github.com/greatroar/blobloom v0.8.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
-	github.com/milvus-io/milvus/pkg v0.0.2-0.20241126032235-cb6542339e84
+	github.com/milvus-io/milvus/pkg v0.0.2-0.20250210024444-82bdf8584c13
 	github.com/pkg/errors v0.9.1
 	github.com/remeh/sizedwaitgroup v1.0.0
-	github.com/shirou/gopsutil/v4 v4.24.10
-	github.com/tidwall/gjson v1.17.1
+	github.com/shirou/gopsutil/v4 v4.25.1
+	github.com/tidwall/gjson v1.18.0
 	github.com/valyala/fastjson v1.6.4
 	github.com/zeebo/xxh3 v1.0.2
-	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.49.0
-	google.golang.org/api v0.187.0
-	google.golang.org/protobuf v1.34.2
+	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0
+	google.golang.org/api v0.220.0
+	google.golang.org/protobuf v1.36.5
 	gopkg.in/yaml.v3 v3.0.1
 )
 
