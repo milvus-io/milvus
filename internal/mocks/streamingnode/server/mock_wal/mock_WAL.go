@@ -244,6 +244,63 @@ func (_c *MockWAL_Close_Call) RunAndReturn(run func()) *MockWAL_Close_Call {
 	return _c
 }
 
+// GetLatestMVCCTimestamp provides a mock function with given fields: ctx, vchannel
+func (_m *MockWAL) GetLatestMVCCTimestamp(ctx context.Context, vchannel string) (uint64, error) {
+	ret := _m.Called(ctx, vchannel)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLatestMVCCTimestamp")
+	}
+
+	var r0 uint64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (uint64, error)); ok {
+		return rf(ctx, vchannel)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) uint64); ok {
+		r0 = rf(ctx, vchannel)
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, vchannel)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockWAL_GetLatestMVCCTimestamp_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLatestMVCCTimestamp'
+type MockWAL_GetLatestMVCCTimestamp_Call struct {
+	*mock.Call
+}
+
+// GetLatestMVCCTimestamp is a helper method to define mock.On call
+//   - ctx context.Context
+//   - vchannel string
+func (_e *MockWAL_Expecter) GetLatestMVCCTimestamp(ctx interface{}, vchannel interface{}) *MockWAL_GetLatestMVCCTimestamp_Call {
+	return &MockWAL_GetLatestMVCCTimestamp_Call{Call: _e.mock.On("GetLatestMVCCTimestamp", ctx, vchannel)}
+}
+
+func (_c *MockWAL_GetLatestMVCCTimestamp_Call) Run(run func(ctx context.Context, vchannel string)) *MockWAL_GetLatestMVCCTimestamp_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockWAL_GetLatestMVCCTimestamp_Call) Return(_a0 uint64, _a1 error) *MockWAL_GetLatestMVCCTimestamp_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockWAL_GetLatestMVCCTimestamp_Call) RunAndReturn(run func(context.Context, string) (uint64, error)) *MockWAL_GetLatestMVCCTimestamp_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsAvailable provides a mock function with given fields:
 func (_m *MockWAL) IsAvailable() bool {
 	ret := _m.Called()

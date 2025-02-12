@@ -159,8 +159,12 @@ func (f *testOneWALFramework) testReadAndWrite(ctx context.Context, w wal.WAL) {
 
 	var newWritten []message.ImmutableMessage
 	var read1, read2 []message.ImmutableMessage
+	appendDone := make(chan struct{})
 	go func() {
-		defer wg.Done()
+		defer func() {
+			close(appendDone)
+			wg.Done()
+		}()
 		var err error
 		newWritten, err = f.testAppend(ctx, w)
 		assert.NoError(f.t, err)
@@ -178,6 +182,7 @@ func (f *testOneWALFramework) testReadAndWrite(ctx context.Context, w wal.WAL) {
 		assert.NoError(f.t, err)
 	}()
 	wg.Wait()
+
 	// read result should be sorted by timetick.
 	f.assertSortByTimeTickMessageList(read1)
 	f.assertSortByTimeTickMessageList(read2)
