@@ -2652,6 +2652,15 @@ func TestJsonIndex(t *testing.T) {
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))
 
+	// different json field with same json path
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     1,
+		IndexName:   "",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_String))}, {Key: common.JSONPathKey, Value: "json2[\"c\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.NoError(t, merr.CheckRPCCall(resp, err))
+
 	// duplicated index with same params
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,

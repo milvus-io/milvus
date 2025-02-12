@@ -121,12 +121,7 @@ impl IndexReaderWrapper {
     ) -> Result<Vec<u32>> {
         let lower_bound = make_bounds(Term::from_field_bool(self.field, lower_bound), inclusive);
         let upper_bound = Bound::Unbounded;
-        let q = RangeQuery::new_term_bounds(
-            self.field_name.to_string(),
-            tantivy::schema::Type::Bool,
-            &lower_bound,
-            &upper_bound,
-        );
+        let q = RangeQuery::new(lower_bound, upper_bound);
         self.search(&q)
     }
 
@@ -137,12 +132,7 @@ impl IndexReaderWrapper {
     ) -> Result<Vec<u32>> {
         let lower_bound = Bound::Unbounded;
         let upper_bound = make_bounds(Term::from_field_bool(self.field, upper_bound), inclusive);
-        let q = RangeQuery::new_term_bounds(
-            self.field_name.to_string(),
-            tantivy::schema::Type::Bool,
-            &lower_bound,
-            &upper_bound,
-        );
+        let q = RangeQuery::new(lower_bound, upper_bound);
         self.search(&q)
     }
 
@@ -176,12 +166,7 @@ impl IndexReaderWrapper {
     ) -> Result<Vec<u32>> {
         let lower_bound = make_bounds(Term::from_field_bool(self.field, lower_bound), lb_inclusive);
         let upper_bound = make_bounds(Term::from_field_bool(self.field, upper_bound), ub_inclusive);
-        let q = RangeQuery::new_term_bounds(
-            self.field_name.to_string(),
-            tantivy::schema::Type::Bool,
-            &lower_bound,
-            &upper_bound,
-        );
+        let q = RangeQuery::new(lower_bound, upper_bound);
         self.search(&q)
     }
 

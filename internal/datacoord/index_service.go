@@ -238,6 +238,9 @@ func (s *Server) parseAndVerifyNestedPath(identifier string, schema *schemapb.Co
 		nestedPath = append(nestedPath, r)
 	}
 	jsonKeyStr := identifier[len(fieldName):]
+	if !strings.Contains(jsonKeyStr, "][") {
+		return "/" + strings.Join(nestedPath, "/"), nil
+	}
 	ss := strings.Split(jsonKeyStr, "][")
 	for i := 0; i < len(ss); i++ {
 		path := strings.Trim(ss[i], "[]")
@@ -310,7 +313,12 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	if req.GetIndexName() == "" {
 		indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
-		var defaultIndexName string
+		fieldName, err := s.getFieldNameByID(schema, req.GetCollectionID(), req.GetFieldID())
+		if err != nil {
+			log.Warn("get field name from schema failed", zap.Int64("fieldID", req.GetFieldID()))
+			return merr.Status(err), nil
+		}
+		defaultIndexName := fieldName
 		if isJson {
 			jsonPath, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
 			if err != nil {
@@ -322,14 +330,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 				return err == nil && path == jsonPath
 			})
 
-			defaultIndexName = jsonPath
-		} else {
-			fieldName, err := s.getFieldNameByID(schema, req.GetCollectionID(), req.GetFieldID())
-			if err != nil {
-				log.Warn("get field name from schema failed", zap.Int64("fieldID", req.GetFieldID()))
-				return merr.Status(err), nil
-			}
-			defaultIndexName = fieldName
+			defaultIndexName += jsonPath
 		}
 
 		if len(indexes) == 0 {
