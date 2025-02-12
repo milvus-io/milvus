@@ -119,11 +119,11 @@ func (s *Server) balanceSegments(ctx context.Context,
 			zap.Int64("segmentID", plan.Segment.GetID()),
 		)
 		actions := make([]task.Action, 0)
-		loadAction := task.NewSegmentActionWithScope(plan.To, task.ActionTypeGrow, plan.Segment.GetInsertChannel(), plan.Segment.GetID(), querypb.DataScope_Historical)
+		loadAction := task.NewSegmentActionWithScope(plan.To, task.ActionTypeGrow, plan.Segment.GetInsertChannel(), plan.Segment.GetID(), querypb.DataScope_Historical, int(plan.Segment.GetNumOfRows()))
 		actions = append(actions, loadAction)
 		if !copyMode {
 			// if in copy mode, the release action will be skip
-			releaseAction := task.NewSegmentActionWithScope(plan.From, task.ActionTypeReduce, plan.Segment.GetInsertChannel(), plan.Segment.GetID(), querypb.DataScope_Historical)
+			releaseAction := task.NewSegmentActionWithScope(plan.From, task.ActionTypeReduce, plan.Segment.GetInsertChannel(), plan.Segment.GetID(), querypb.DataScope_Historical, int(plan.Segment.GetNumOfRows()))
 			actions = append(actions, releaseAction)
 		}
 

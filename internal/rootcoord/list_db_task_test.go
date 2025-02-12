@@ -131,6 +131,28 @@ func Test_ListDBTask(t *testing.T) {
 		}
 
 		{
+			// proxy node with root user, root user should bind role
+			Params.Save(Params.CommonCfg.RootShouldBindRole.Key, "true")
+			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+				Return([]*milvuspb.UserResult{
+					{
+						User: &milvuspb.UserEntity{
+							Name: "root",
+						},
+						Roles: []*milvuspb.RoleEntity{},
+					},
+				}, nil).Once()
+
+			ctx := GetContext(context.Background(), "root:root")
+			task := getTask()
+			err := task.Execute(ctx)
+			assert.NoError(t, err)
+			assert.Equal(t, 0, len(task.Resp.GetDbNames()))
+			assert.Equal(t, commonpb.ErrorCode_Success, task.Resp.GetStatus().GetErrorCode())
+			Params.Reset(Params.CommonCfg.RootShouldBindRole.Key)
+		}
+
+		{
 			// select role fail
 			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 				Return(nil, errors.New("mock select user error")).Once()
@@ -232,6 +254,28 @@ func Test_ListDBTask(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equal(t, 1, len(task.Resp.GetDbNames()))
 			assert.Equal(t, "fooDB", task.Resp.GetDbNames()[0])
+		}
+
+		{
+			// normal user and public role
+			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+				Return([]*milvuspb.UserResult{
+					{
+						User: &milvuspb.UserEntity{
+							Name: "foo",
+						},
+						Roles: []*milvuspb.RoleEntity{
+							{
+								Name: "public",
+							},
+						},
+					},
+				}, nil).Once()
+			ctx := GetContext(context.Background(), "foo:root")
+			task := getTask()
+			err := task.Execute(ctx)
+			assert.NoError(t, err)
+			assert.Equal(t, 0, len(task.Resp.GetDbNames()))
 		}
 
 		{
