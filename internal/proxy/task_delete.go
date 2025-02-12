@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
@@ -347,10 +349,13 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return ErrWithLog(log, "Failed to get collection schema", err)
 	}
 
+	start := time.Now()
 	dr.plan, err = planparserv2.CreateRetrievePlan(dr.schema.schemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues())
 	if err != nil {
+		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.FailLabel).Observe(float64(time.Since(start).Milliseconds()))
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err))
 	}
+	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.SuccessLabel).Observe(float64(time.Since(start).Milliseconds()))
 
 	if planparserv2.IsAlwaysTruePlan(dr.plan) {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))

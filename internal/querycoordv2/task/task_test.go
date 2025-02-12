@@ -1913,10 +1913,6 @@ func (suite *TaskSuite) TestRemoveTaskWithError() {
 	scheduler := suite.newScheduler()
 
 	mockTarget := meta.NewMockTargetManager(suite.T())
-	mockTarget.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&datapb.SegmentInfo{
-		NumOfRows: 100,
-	})
-
 	mockTarget.EXPECT().UpdateCollectionNextTarget(mock.Anything, mock.Anything).Return(nil)
 	scheduler.targetMgr = mockTarget
 
