@@ -2596,6 +2596,9 @@ class TestAdvancedSearchVector(TestBase):
         rsp = self.vector_client.vector_advanced_search(payload)
         assert rsp['code'] == 0
         assert len(rsp['data']) == 10
+        assert len(rsp['topks']) == 1
+        assert rsp['topks'][0] == 10
+        
 
 
 @pytest.mark.L0
