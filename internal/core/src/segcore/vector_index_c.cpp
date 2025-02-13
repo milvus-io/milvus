@@ -19,6 +19,7 @@
 #include "index/Meta.h"
 #include "index/IndexFactory.h"
 #include "pb/index_cgo_msg.pb.h"
+#include "segcore/SegcoreConfig.h"
 
 CStatus
 ValidateIndexParams(const char* index_type,
