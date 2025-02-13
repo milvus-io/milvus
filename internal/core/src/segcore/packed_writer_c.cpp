@@ -43,7 +43,7 @@ NewPackedWriter(struct ArrowSchema* schema,
         auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                 .GetArrowFileSystem();
         if (!trueFs) {
-            std::cout << "packed writer fs is nil" << std::endl;
+            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed, "Failed to get filesystem");
         }
 
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();

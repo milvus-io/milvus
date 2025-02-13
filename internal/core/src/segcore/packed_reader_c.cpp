@@ -35,6 +35,9 @@ NewPackedReader(char** paths,
     try {
         auto truePaths = std::vector<std::string>(paths, paths + num_paths);
         auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance().GetArrowFileSystem();
+        if (!trueFs) {
+            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed, "Failed to get filesystem");
+        }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
         std::set<int> needed_columns;
         for (int i = 0; i < trueSchema->num_fields(); i++) {

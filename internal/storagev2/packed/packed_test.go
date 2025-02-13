@@ -15,7 +15,6 @@
 package packed
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/apache/arrow/go/v12/arrow"
@@ -43,8 +42,7 @@ func (suite *PackedTestSuite) SetupSuite() {
 }
 
 func (suite *PackedTestSuite) SetupTest() {
-	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), "storage-v2")
-	initcore.InitLocalArrowFileSystem(localDataRootPath)
+	initcore.InitLocalArrowFileSystem("/tmp")
 	schema := arrow.NewSchema([]arrow.Field{
 		{Name: "a", Type: arrow.PrimitiveTypes.Int32},
 		{Name: "b", Type: arrow.PrimitiveTypes.Int64},
@@ -132,7 +130,7 @@ func (suite *PackedTestSuite) TestPackedMultiFiles() {
 	paths := []string{"/tmp/100", "/tmp/101"}
 	columnGroups := [][]int{{2}, {0, 1}}
 	bufferSize := int64(10 * 1024 * 1024) // 10MB
-	multiPartUploadSize := int64(0)       // 10MB
+	multiPartUploadSize := int64(0)
 	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, columnGroups)
 	suite.NoError(err)
 	for i := 0; i < batches; i++ {

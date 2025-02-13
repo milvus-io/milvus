@@ -24,7 +24,7 @@ InitLocalArrowFileSystemSingleton(const char* c_path) {
     try {
         std::string path(c_path);
         milvus_storage::ArrowFileSystemConfig conf;
-        conf.uri = path;
+        conf.uri = "file://" + path;
         conf.storage_type = "local";
         milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
 
