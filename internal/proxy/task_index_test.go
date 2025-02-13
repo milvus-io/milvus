@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"sort"
+	"strconv"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -708,7 +709,8 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
 
@@ -936,7 +938,8 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
 
@@ -965,7 +968,8 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
 
