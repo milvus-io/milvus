@@ -33,6 +33,9 @@ const (
 	// TypeParamMaxCapacity is the const for array type max capacity
 	TypeParamMaxCapacity = `max_capacity`
 
+	// TypeParamEnableMatch is the const for enable text match
+	TypeParamEnableMatch = `enable_match`
+
 	// ClStrong strong consistency level
 	ClStrong ConsistencyLevel = ConsistencyLevel(commonpb.ConsistencyLevel_Strong)
 	// ClBounded bounded consistency level with default tolerance of 5 seconds
