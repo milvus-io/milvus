@@ -508,7 +508,7 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 
 	topicMu.LoadOrStore(topicName, new(sync.Mutex))
 
-	rmq.consumers.Store(topicName, newConsumerList())
+	rmq.consumers.LoadOrStore(topicName, newConsumerList())
 	// msgSizeKey -> msgSize
 	// topicIDKey -> topic creating time
 	kvs := make(map[string]string)
@@ -638,12 +638,13 @@ func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) error {
 	defer mu.Unlock()
 
 	start := time.Now()
-	if val, ok := rmq.consumers.Load(consumer.Topic); ok {
-		val.(*consumerList).Add(consumer)
-	} else {
-		log.Warn("create consumer for unknown topic", zap.String("topic", consumer.Topic), zap.String("group", consumer.GroupName))
-		return fmt.Errorf("create consumer for unknown topic: %s, group: %s", consumer.Topic, consumer.GroupName)
+
+	val, ok := rmq.consumers.LoadOrStore(consumer.Topic, newConsumerList())
+	if !ok {
+		log.Warn("create consumer for topic not exist", zap.String("topic", consumer.Topic), zap.String("group", consumer.GroupName))
 	}
+	val.(*consumerList).Add(consumer)
+
 	log.Ctx(rmq.ctx).Debug("Rocksmq register consumer successfully ", zap.String("topic", consumer.Topic), zap.String("group", consumer.GroupName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
@@ -1162,24 +1163,30 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, firstID UniqueI
 
 	// 2. Update acked ts and acked size for pageIDs
 	if vals, ok := rmq.consumers.Load(topicName); ok {
-		consumers, ok := vals.([]*Consumer)
-		if !ok || len(consumers) == 0 {
+		consumers, ok := vals.(*consumerList)
+		if !ok || consumers.Len() == 0 {
 			log.Error("update ack with no consumer", zap.String("topic", topicName))
 			return nil
 		}
 
 		// find min id of all consumer
 		var minBeginID UniqueID = lastID
-		for _, consumer := range consumers {
-			if consumer.GroupName != groupName {
-				beginID, ok := rmq.getCurrentID(consumer.Topic, consumer.GroupName)
+		var err error
+		consumers.Range(func(c *Consumer) bool {
+			if c.GroupName != groupName {
+				beginID, ok := rmq.getCurrentID(c.Topic, c.GroupName)
 				if !ok {
-					return fmt.Errorf("currentID of topicName=%s, groupName=%s not exist", consumer.Topic, consumer.GroupName)
+					err = fmt.Errorf("currentID of topicName=%s, groupName=%s not exist", c.Topic, c.GroupName)
+					return false
 				}
 				if beginID < minBeginID {
 					minBeginID = beginID
 				}
 			}
+			return true
+		})
+		if err != nil {
+			return err
 		}
 
 		nowTs := strconv.FormatInt(time.Now().Unix(), 10)
@@ -1192,7 +1199,8 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, firstID UniqueI
 				ackedTsKvs[pageAckedTsKey] = nowTs
 			}
 		}
-		err := rmq.kv.MultiSave(context.TODO(), ackedTsKvs)
+
+		err = rmq.kv.MultiSave(context.TODO(), ackedTsKvs)
 		if err != nil {
 			return err
 		}
