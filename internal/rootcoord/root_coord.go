@@ -826,15 +826,18 @@ func (c *Core) revokeSession() {
 	}
 }
 
+func (c *Core) GracefulStop() {
+	if c.streamingCoord != nil {
+		c.streamingCoord.Stop()
+	}
+}
+
 // Stop stops rootCoord.
 func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
 	c.stopExecutor()
 	c.stopScheduler()
 
-	if c.streamingCoord != nil {
-		c.streamingCoord.Stop()
-	}
 	if c.proxyWatcher != nil {
 		c.proxyWatcher.Stop()
 	}

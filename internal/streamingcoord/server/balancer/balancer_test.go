@@ -3,6 +3,7 @@ package balancer_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -91,7 +93,6 @@ func TestBalancer(t *testing.T) {
 	b, err := balancer.RecoverBalancer(ctx, "pchannel_count_fair")
 	assert.NoError(t, err)
 	assert.NotNil(t, b)
-	defer b.Close()
 
 	b.MarkAsUnavailable(ctx, []types.PChannelInfo{{
 		Name: "test-channel-1",
@@ -113,4 +114,18 @@ func TestBalancer(t *testing.T) {
 		return nil
 	})
 	assert.ErrorIs(t, err, doneErr)
+
+	// create a inifite block watcher and can be interrupted by close of balancer.
+	f := syncutil.NewFuture[error]()
+	go func() {
+		err := b.WatchChannelAssignments(context.Background(), func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error {
+			return nil
+		})
+		f.Set(err)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	assert.False(t, f.Ready())
+
+	b.Close()
+	assert.ErrorIs(t, f.Get(), balancer.ErrBalancerClosed)
 }
