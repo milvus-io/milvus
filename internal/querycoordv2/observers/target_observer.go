@@ -219,7 +219,9 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 				delete(ob.readyNotifiers, req.CollectionID)
 				ob.mut.Unlock()
 
+				ob.keylocks.Lock(req.CollectionID)
 				ob.targetMgr.RemoveCollection(ctx, req.CollectionID)
+				ob.keylocks.Unlock(req.CollectionID)
 				req.Notifier <- nil
 			case ReleasePartition:
 				ob.targetMgr.RemovePartition(ctx, req.CollectionID, req.PartitionIDs...)
@@ -249,6 +251,11 @@ func (ob *TargetObserver) TriggerUpdateCurrentTarget(collectionID int64) {
 func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 	ob.keylocks.Lock(collectionID)
 	defer ob.keylocks.Unlock(collectionID)
+
+	// if collection release, skip check
+	if ob.meta.CollectionManager.GetCollection(ctx, collectionID) == nil {
+		return
+	}
 
 	if ob.shouldUpdateCurrentTarget(ctx, collectionID) {
 		ob.updateCurrentTarget(ctx, collectionID)
