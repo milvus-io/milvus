@@ -274,12 +274,15 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         self.create_database(client, db_name, properties=properties)
         dbs = self.list_databases(client)[0]
         assert db_name in dbs
-        describe = self.describe_database(client, db_name)[0]
-        assert "database.force.deny.writing" in describe
-        assert "database.replica.number" in describe
+        self.describe_database(client, db_name,
+                               check_task=CheckTasks.check_describe_database_property,
+                               check_items={"db_name": db_name,
+                                            "database.force.deny.writing": "true",
+                                            "database.replica.number": "3"})
         alter_properties = {"data.replica.number": 2}
         self.alter_database_properties(client, db_name, properties=alter_properties)
         describe = self.describe_database(client, db_name)[0]
+        self.drop_database(client, db_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("db_name", ["%$#", "test", " "])
