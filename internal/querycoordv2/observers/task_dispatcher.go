@@ -33,6 +33,7 @@ type taskDispatcher[K comparable] struct {
 	tasks      *typeutil.ConcurrentMap[K, bool]
 	pool       *conc.Pool[any]
 	notifyCh   chan struct{}
+	removeCh   chan K
 	taskRunner task[K]
 	wg         sync.WaitGroup
 	cancel     context.CancelFunc
@@ -46,6 +47,7 @@ func newTaskDispatcher[K comparable](runner task[K]) *taskDispatcher[K] {
 		tasks:      typeutil.NewConcurrentMap[K, bool](),
 		pool:       conc.NewPool[any](paramtable.Get().QueryCoordCfg.ObserverTaskParallel.GetAsInt()),
 		notifyCh:   make(chan struct{}, 1),
+		removeCh:   make(chan K),
 		taskRunner: runner,
 	}
 }
@@ -81,6 +83,10 @@ func (d *taskDispatcher[K]) AddTask(keys ...K) {
 	}
 }
 
+func (d *taskDispatcher[K]) RemoveTask(key K) {
+	d.removeCh <- key
+}
+
 func (d *taskDispatcher[K]) notify() {
 	select {
 	case d.notifyCh <- struct{}{}:
@@ -105,6 +111,8 @@ func (d *taskDispatcher[K]) schedule(ctx context.Context) {
 				}
 				return true
 			})
+		case key := <-d.removeCh:
+			d.tasks.Remove(key)
 		}
 	}
 }

@@ -219,6 +219,9 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 				delete(ob.readyNotifiers, req.CollectionID)
 				ob.mut.Unlock()
 
+				ob.loadedDispatcher.RemoveTask(req.CollectionID)
+				ob.loadingDispatcher.RemoveTask(req.CollectionID)
+
 				ob.targetMgr.RemoveCollection(ctx, req.CollectionID)
 				req.Notifier <- nil
 			case ReleasePartition:
