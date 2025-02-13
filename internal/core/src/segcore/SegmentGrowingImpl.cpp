@@ -186,8 +186,6 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 void
 SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
     // schema don't include system field
-    AssertInfo(infos.field_infos.size() == schema_->size(),
-               "lost some field data when load for growing segment");
     AssertInfo(infos.field_infos.find(TimestampFieldID.get()) !=
                    infos.field_infos.end(),
                "timestamps field data should be included");
