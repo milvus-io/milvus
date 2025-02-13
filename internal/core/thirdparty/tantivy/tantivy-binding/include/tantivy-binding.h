@@ -20,10 +20,17 @@ struct RustArray {
   size_t cap;
 };
 
+struct RustArrayI64 {
+  int64_t *array;
+  size_t len;
+  size_t cap;
+};
+
 struct Value {
   enum class Tag {
     None,
     RustArray,
+    RustArrayI64,
     U32,
     Ptr,
   };
@@ -34,6 +41,10 @@ struct Value {
 
   struct RustArray_Body {
     RustArray _0;
+  };
+
+  struct RustArrayI64_Body {
+    RustArrayI64 _0;
   };
 
   struct U32_Body {
@@ -48,6 +59,7 @@ struct Value {
   union {
     None_Body none;
     RustArray_Body rust_array;
+    RustArrayI64_Body rust_array_i64;
     U32_Body u32;
     Ptr_Body ptr;
   };
@@ -62,6 +74,8 @@ struct RustResult {
 extern "C" {
 
 void free_rust_array(RustArray array);
+
+void free_rust_array_i64(RustArrayI64 array);
 
 void free_rust_result(RustResult result);
 
