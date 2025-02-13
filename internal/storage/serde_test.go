@@ -127,7 +127,7 @@ func BenchmarkDeserializeReader(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		reader, err := NewBinlogDeserializeReader(blobs, common.RowIDField)
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
 		assert.NoError(b, err)
 		defer reader.Close()
 		for i := 0; i < len; i++ {

@@ -29,11 +29,11 @@ func TestSort(t *testing.T) {
 	getReaders := func() []RecordReader {
 		blobs, err := generateTestDataWithSeed(10, 3)
 		assert.NoError(t, err)
-		reader10, err := NewCompositeBinlogRecordReader(blobs)
+		reader10, err := NewCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
 		assert.NoError(t, err)
 		blobs, err = generateTestDataWithSeed(20, 3)
 		assert.NoError(t, err)
-		reader20, err := NewCompositeBinlogRecordReader(blobs)
+		reader20, err := NewCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
 		assert.NoError(t, err)
 		rr := []RecordReader{reader20, reader10}
 		return rr
@@ -80,11 +80,11 @@ func TestMergeSort(t *testing.T) {
 	getReaders := func() []RecordReader {
 		blobs, err := generateTestDataWithSeed(10, 3)
 		assert.NoError(t, err)
-		reader10, err := NewCompositeBinlogRecordReader(blobs)
+		reader10, err := NewCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
 		assert.NoError(t, err)
 		blobs, err = generateTestDataWithSeed(20, 3)
 		assert.NoError(t, err)
-		reader20, err := NewCompositeBinlogRecordReader(blobs)
+		reader20, err := NewCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
 		assert.NoError(t, err)
 		rr := []RecordReader{reader20, reader10}
 		return rr
@@ -132,11 +132,11 @@ func BenchmarkSort(b *testing.B) {
 	batch := 500000
 	blobs, err := generateTestDataWithSeed(batch, batch)
 	assert.NoError(b, err)
-	reader10, err := NewCompositeBinlogRecordReader(blobs)
+	reader10, err := NewCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
 	assert.NoError(b, err)
 	blobs, err = generateTestDataWithSeed(batch*2+1, batch)
 	assert.NoError(b, err)
-	reader20, err := NewCompositeBinlogRecordReader(blobs)
+	reader20, err := NewCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
 	assert.NoError(b, err)
 	rr := []RecordReader{reader20, reader10}
 
