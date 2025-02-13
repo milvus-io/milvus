@@ -55,11 +55,8 @@ func TestDatabase(t *testing.T) {
 	common.CheckErr(t, errList, true)
 	require.Containsf(t, dbs, dbName1, fmt.Sprintf("%s db not in dbs: %v", dbName1, dbs))
 
-	// new client with db1 -> using db
+	// new client with db1
 	clientDB1 := createMilvusClient(ctx, t, &client.ClientConfig{Address: *addr, DBName: dbName1})
-	t.Log("https://github.com/milvus-io/milvus/issues/34137")
-	err = clientDB1.UseDatabase(ctx, client.NewUseDatabaseOption(dbName1))
-	common.CheckErr(t, err, true)
 
 	// create collections -> verify collections contains
 	_, db1Col1 := hp.CollPrepare.CreateCollection(ctx, t, clientDB1, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -223,7 +220,6 @@ func TestUsingDb(t *testing.T) {
 }
 
 func TestClientWithDb(t *testing.T) {
-	t.Skip("https://github.com/milvus-io/milvus/issues/34137")
 	teardownSuite := teardownTest(t)
 	defer teardownSuite(t)
 

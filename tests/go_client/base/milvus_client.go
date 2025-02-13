@@ -316,3 +316,9 @@ func (mc *MilvusClient) Get(ctx context.Context, option client.QueryOption, call
 	resultSet, err := mc.mClient.Get(ctx, option, callOptions...)
 	return resultSet, err
 }
+
+// HybridSearch hybrid search from collection
+func (mc *MilvusClient) HybridSearch(ctx context.Context, option client.HybridSearchOption, callOptions ...grpc.CallOption) ([]client.ResultSet, error) {
+	resultSets, err := mc.mClient.HybridSearch(ctx, option, callOptions...)
+	return resultSets, err
+}
