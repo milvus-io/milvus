@@ -66,7 +66,7 @@ struct ConjunctElementFunc {
 class PhyConjunctFilterExpr : public Expr {
  public:
     PhyConjunctFilterExpr(std::vector<ExprPtr>&& inputs, bool is_and)
-        : Expr(DataType::BOOL, std::move(inputs), is_and ? "and" : "or"),
+        : Expr(DataType::BOOL, std::move(inputs), "PhyConjunctFilterExpr"),
           is_and_(is_and) {
         std::vector<DataType> input_types;
         input_types.reserve(inputs_.size());
@@ -101,6 +101,44 @@ class PhyConjunctFilterExpr : public Expr {
         return true;
     }
 
+    std::string
+    ToString() const {
+        std::vector<std::string> inputs;
+        for (auto& in : inputs_) {
+            inputs.push_back(in->ToString());
+        }
+        std::string input_str =
+            is_and_ ? Join(inputs, "&&") : Join(inputs, "||");
+        return fmt::format("[ConjuctExpr:{}]", input_str);
+    }
+
+    bool
+    IsSource() const override {
+        return false;
+    }
+
+    std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return std::nullopt;
+    }
+
+    void
+    Reorder(const std::vector<size_t>& exprs_order) {
+        input_order_ = exprs_order;
+    }
+
+    void
+    SetNextExprBitmapInput(const ColumnVectorPtr& vec, EvalCtx& context) {
+        TargetBitmapView last_res_bitmap(vec->GetRawData(), vec->size());
+        TargetBitmap next_input_bitmap(last_res_bitmap);
+        if (is_and_) {
+            context.set_bitmap_input(std::move(next_input_bitmap));
+        } else {
+            next_input_bitmap.flip();
+            context.set_bitmap_input(std::move(next_input_bitmap));
+        }
+    }
+
  private:
     int64_t
     UpdateResult(ColumnVectorPtr& input_result,
@@ -117,7 +155,7 @@ class PhyConjunctFilterExpr : public Expr {
     SkipFollowingExprs(int start);
     // true if conjunction (and), false if disjunction (or).
     bool is_and_;
-    std::vector<int32_t> input_order_;
+    std::vector<size_t> input_order_;
 };
 }  //namespace exec
 }  // namespace milvus
