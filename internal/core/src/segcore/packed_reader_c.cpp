@@ -26,7 +26,7 @@
 #include "common/type_c.h"
 
 
-int
+CStatus
 NewPackedReader(char** paths,
                 int64_t num_paths,
                 struct ArrowSchema* schema,
@@ -49,7 +49,7 @@ NewPackedReader(char** paths,
     }
 }
 
-int
+CStatus
 ReadNext(CPackedReader c_packed_reader,
          CArrowArray* out_array,
          CArrowSchema* out_schema) {
@@ -60,7 +60,7 @@ ReadNext(CPackedReader c_packed_reader,
         std::shared_ptr<arrow::RecordBatch> record_batch;
         auto status = packed_reader->ReadNext(&record_batch);
         if (!status.ok()) {
-            return milvus::FailureCStatus(ErrorCode.FileReadFailed, status.ToString());
+            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed, status.ToString());
         }
         if (record_batch == nullptr) {
             // end of file
@@ -72,7 +72,7 @@ ReadNext(CPackedReader c_packed_reader,
             auto status = arrow::ExportRecordBatch(
                 *record_batch, arr.get(), schema.get());
             if (!status.ok()) {
-                return milvus::FailureCStatus(ErrorCode.FileReadFailed, status.ToString());
+                return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed, status.ToString());
             }
             *out_array = arr.release();
             *out_schema = schema.release();
@@ -84,7 +84,7 @@ ReadNext(CPackedReader c_packed_reader,
     }
 }
 
-int
+CStatus
 CloseReader(CPackedReader c_packed_reader) {
     try {
         auto packed_reader =

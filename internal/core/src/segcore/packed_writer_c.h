@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#include <arrow/c/abi.h>
+#include "common/type_c.h"
 #include <arrow/c/abi.h>
 #include "segcore/column_groups_c.h"
 

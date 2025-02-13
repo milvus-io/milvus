@@ -14,27 +14,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+package packed
+
+/*
+#cgo pkg-config: milvus_core
 
 #include "common/type_c.h"
+#include "common/protobuf_utils_c.h"
+#include "segcore/segment_c.h"
+#include "storage/storage_c.h"
+*/
+import "C"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+import (
+	"unsafe"
 
-CStatus
-InitLocalArrowFileSystemSingleton(const char* c_path);
+	"github.com/milvus-io/milvus/pkg/util/merr"
+)
 
-void
-CleanLocalArrowFileSystemSingleton();
-
-CStatus
-InitRemoteArrowFileSystemSingleton(CStorageConfig c_storage_config);
-
-void
-CleanRemoteArrowFileSystemSingleton();
-
-
-#ifdef __cplusplus
+func ConsumeCStatusIntoError(status *C.CStatus) error {
+	if status == nil || status.error_code == 0 {
+		return nil
+	}
+	errorCode := status.error_code
+	errorMsg := C.GoString(status.error_msg)
+	C.free(unsafe.Pointer(status.error_msg))
+	return merr.SegcoreError(int32(errorCode), errorMsg)
 }
-#endif

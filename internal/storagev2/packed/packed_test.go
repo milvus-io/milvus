@@ -15,11 +15,14 @@
 package packed
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/arrow/memory"
+	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/exp/rand"
 )
@@ -30,11 +33,18 @@ func TestPackedReadAndWrite(t *testing.T) {
 
 type PackedTestSuite struct {
 	suite.Suite
-	schema *arrow.Schema
-	rec    arrow.Record
+	schema            *arrow.Schema
+	rec               arrow.Record
+	localDataRootPath string
+}
+
+func (suite *PackedTestSuite) SetupSuite() {
+	paramtable.Init()
 }
 
 func (suite *PackedTestSuite) SetupTest() {
+	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), "storage-v2")
+	initcore.InitLocalArrowFileSystem(localDataRootPath)
 	schema := arrow.NewSchema([]arrow.Field{
 		{Name: "a", Type: arrow.PrimitiveTypes.Int32},
 		{Name: "b", Type: arrow.PrimitiveTypes.Int64},
@@ -67,11 +77,11 @@ func (suite *PackedTestSuite) SetupTest() {
 func (suite *PackedTestSuite) TestPackedOneFile() {
 	batches := 100
 
-	path := "/tmp"
 	paths := []string{"/tmp/100"}
 	columnGroups := [][]int{{0, 1, 2}}
-	bufferSize := 10 * 1024 * 1024 // 10MB
-	pw, err := NewPackedWriter(path, suite.schema, bufferSize, paths, columnGroups)
+	bufferSize := int64(10 * 1024 * 1024) // 10MB
+	multiPartUploadSize := int64(0)
+	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, columnGroups)
 	suite.NoError(err)
 	for i := 0; i < batches; i++ {
 		err = pw.WriteRecordBatch(suite.rec)
@@ -80,7 +90,7 @@ func (suite *PackedTestSuite) TestPackedOneFile() {
 	err = pw.Close()
 	suite.NoError(err)
 
-	reader, err := NewPackedReader(path, paths, suite.schema, bufferSize)
+	reader, err := NewPackedReader(paths, suite.schema, bufferSize)
 	suite.NoError(err)
 	rr, err := reader.ReadNext()
 	suite.NoError(err)
@@ -119,11 +129,11 @@ func (suite *PackedTestSuite) TestPackedMultiFiles() {
 	}
 	rec := b.NewRecord()
 	defer rec.Release()
-	path := "/tmp"
 	paths := []string{"/tmp/100", "/tmp/101"}
 	columnGroups := [][]int{{2}, {0, 1}}
-	bufferSize := 10 * 1024 * 1024 // 10MB
-	pw, err := NewPackedWriter(path, suite.schema, bufferSize, paths, columnGroups)
+	bufferSize := int64(10 * 1024 * 1024) // 10MB
+	multiPartUploadSize := int64(0)       // 10MB
+	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, columnGroups)
 	suite.NoError(err)
 	for i := 0; i < batches; i++ {
 		err = pw.WriteRecordBatch(rec)
@@ -132,7 +142,7 @@ func (suite *PackedTestSuite) TestPackedMultiFiles() {
 	err = pw.Close()
 	suite.NoError(err)
 
-	reader, err := NewPackedReader(path, paths, suite.schema, bufferSize)
+	reader, err := NewPackedReader(paths, suite.schema, bufferSize)
 	suite.NoError(err)
 	var rows int64 = 0
 	var rr arrow.Record

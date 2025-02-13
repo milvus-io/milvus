@@ -20,7 +20,27 @@
 #include "common/type_c.h"
 
 CStatus
-InitArrowFileSystemSingleton(CStorageConfig c_storage_config) {
+InitLocalArrowFileSystemSingleton(const char* c_path) {
+    try {
+        std::string path(c_path);
+        milvus_storage::ArrowFileSystemConfig conf;
+        conf.uri = path;
+        conf.storage_type = "local";
+        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
+
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+void
+CleanLocalArrowFileSystemSingleton() {
+    milvus_storage::ArrowFileSystemSingleton::GetInstance().Release();
+}
+
+CStatus
+InitRemoteArrowFileSystemSingleton(CStorageConfig c_storage_config) {
     try {
         milvus_storage::ArrowFileSystemConfig conf;
         conf.uri = std::string(c_storage_config.address);
@@ -41,6 +61,6 @@ InitArrowFileSystemSingleton(CStorageConfig c_storage_config) {
 }
 
 void
-CleanArrowFileSystemSingleton() {
+CleanRemoteArrowFileSystemSingleton() {
     milvus_storage::ArrowFileSystemSingleton::GetInstance().Release();
 }

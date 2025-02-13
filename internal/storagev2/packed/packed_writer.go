@@ -31,25 +31,24 @@ import (
 
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/cdata"
-	"github.com/cockroachdb/errors"
 )
 
-func NewPackedWriter(filePaths []string, multiPartUploadSize int64, schema *arrow.Schema, bufferSize int, columnGroups [][]int) (*PackedWriter, error) {
+func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups [][]int) (*PackedWriter, error) {
+	cFilePaths := make([]*C.char, len(filePaths))
+	for i, path := range filePaths {
+		cFilePaths[i] = C.CString(path)
+		defer C.free(unsafe.Pointer(cFilePaths[i]))
+	}
+	cFilePathsArray := (**C.char)(unsafe.Pointer(&cFilePaths[0]))
+	cNumPaths := C.int64_t(len(filePaths))
+
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
 	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
 
 	cBufferSize := C.int64_t(bufferSize)
 
-	cFilePaths := make([]*C.char, len(filePaths))
-	for i, path := range filePaths {
-		cFilePaths[i] = C.CString(path)             // Convert Go string to C string
-		defer C.free(unsafe.Pointer(cFilePaths[i])) // Ensure memory is freed after use
-	}
-
-	// Create a pointer to the array of C strings (char**)
-	cFilePathsArray := (**C.char)(unsafe.Pointer(&cFilePaths[0]))
-	cNumPaths := C.int64_t(len(filePaths))
+	cMultiPartUploadSize := C.int64_t(multiPartUploadSize)
 
 	cColumnGroups := C.NewCColumnGroups()
 	for _, group := range columnGroups {
@@ -57,23 +56,18 @@ func NewPackedWriter(filePaths []string, multiPartUploadSize int64, schema *arro
 		if cGroup == nil {
 			return nil, fmt.Errorf("failed to allocate memory for column groups")
 		}
-
 		cGroupSlice := (*[1 << 30]C.int)(cGroup)[:len(group):len(group)]
 		for i, val := range group {
 			cGroupSlice[i] = C.int(val)
 		}
-
 		C.AddCColumnGroup(cColumnGroups, (*C.int)(cGroup), C.int(len(group)))
-
 		C.free(cGroup)
 	}
 
-	cMultiPartUploadSize := C.int64_t(multiPartUploadSize)
-
 	var cPackedWriter C.CPackedWriter
 	status := C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, &cPackedWriter)
-	if status != 0 {
-		return nil, fmt.Errorf("failed to new packed writer")
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, err
 	}
 	return &PackedWriter{cPackedWriter: cPackedWriter}, nil
 }
@@ -88,8 +82,8 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
 
 	status := C.WriteRecordBatch(pw.cPackedWriter, cArr, cSchema)
-	if status != 0 {
-		return errors.New("PackedWriter: failed to write record batch")
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return err
 	}
 
 	return nil
@@ -97,8 +91,8 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 
 func (pw *PackedWriter) Close() error {
 	status := C.CloseWriter(pw.cPackedWriter)
-	if status != 0 {
-		return errors.New("PackedWriter: failed to close file")
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return err
 	}
 	return nil
 }

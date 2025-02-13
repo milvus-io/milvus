@@ -23,6 +23,7 @@
 #include <arrow/filesystem/filesystem.h>
 #include "common/EasyAssert.h"
 #include "common/type_c.h"
+#include <iostream>
 
 
 CStatus
@@ -41,6 +42,9 @@ NewPackedWriter(struct ArrowSchema* schema,
 
         auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                 .GetArrowFileSystem();
+        if (!trueFs) {
+            std::cout << "packed writer fs is nil" << std::endl;
+        }
 
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
 
@@ -68,7 +72,7 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
             arrow::ImportRecordBatch(array, schema).ValueOrDie();
         auto status = packed_writer->Write(record_batch);
         if (!status.ok()) {
-            return milvus::FailureCStatus(ErrorCode.FileWriteFailed, status.ToString());
+            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed, status.ToString());
         }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -85,7 +89,7 @@ CloseWriter(CPackedWriter c_packed_writer) {
         auto status = packed_writer->Close();
         delete packed_writer;
         if (!status.ok()) {
-            return milvus::FailureCStatus(ErrorCode.FileWriteFailed, status.ToString());
+            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed, status.ToString());
         }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
