@@ -197,7 +197,9 @@ OUTER:
 	buildDur := tr.RecordSpan()
 
 	// block util pullback to the latest target position
-	d.BlockUtilPullbackDone()
+	if len(lackTargets) > 1 {
+		d.BlockUtilPullbackDone()
+	}
 
 	var (
 		pullbackBeginTs   = earliestTarget.pos.GetTimestamp()

@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -545,7 +546,15 @@ func (m *ChannelManagerImpl) advanceToNotifies(ctx context.Context, toNotifies [
 			zap.Int("total operation count", len(nodeAssign.Channels)),
 			zap.Strings("channel names", chNames),
 		)
-		for _, ch := range nodeAssign.Channels {
+
+		// Sort watch tasks by seek position to minimize lag between
+		// positions during batch subscription in the dispatcher.
+		channels := lo.Values(nodeAssign.Channels)
+		sort.Slice(channels, func(i, j int) bool {
+			return channels[i].GetWatchInfo().GetVchan().GetSeekPosition().GetTimestamp() <
+				channels[j].GetWatchInfo().GetVchan().GetSeekPosition().GetTimestamp()
+		})
+		for _, ch := range channels {
 			innerCh := ch
 			tmpWatchInfo := typeutil.Clone(innerCh.GetWatchInfo())
 			tmpWatchInfo.Vchan = m.h.GetDataVChanPositions(innerCh, allPartitionID)
