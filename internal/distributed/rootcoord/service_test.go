@@ -118,6 +118,9 @@ func (m *mockCore) Stop() error {
 	return fmt.Errorf("stop error")
 }
 
+func (m *mockCore) GracefulStop() {
+}
+
 func TestRun(t *testing.T) {
 	paramtable.Init()
 	parameters := []string{"tikv", "etcd"}
