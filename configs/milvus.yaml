@@ -756,7 +756,7 @@ log:
 grpc:
   log:
     level: WARNING
-  gracefulStopTimeout: 10 # second, time to wait graceful stop finish
+  gracefulStopTimeout: 3 # second, time to wait graceful stop finish
   client:
     compressionEnabled: false
     dialTimeout: 200

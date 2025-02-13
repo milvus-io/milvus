@@ -51,6 +51,7 @@ type ServiceParam struct {
 	RocksmqCfg      RocksmqConfig
 	NatsmqCfg       NatsmqConfig
 	MinioCfg        MinioConfig
+	ProfileCfg      ProfileConfig
 }
 
 func (p *ServiceParam) init(bt *BaseTable) {
@@ -64,6 +65,7 @@ func (p *ServiceParam) init(bt *BaseTable) {
 	p.RocksmqCfg.Init(bt)
 	p.NatsmqCfg.Init(bt)
 	p.MinioCfg.Init(bt)
+	p.ProfileCfg.Init(bt)
 }
 
 func (p *ServiceParam) RocksmqEnable() bool {
@@ -1387,4 +1389,26 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export: true,
 	}
 	p.ListObjectsMaxKeys.Init(base.mgr)
+}
+
+// profile config
+type ProfileConfig struct {
+	PprofPath ParamItem `refreshable:"false"`
+}
+
+func (p *ProfileConfig) Init(base *BaseTable) {
+	p.PprofPath = ParamItem{
+		Key:          "profile.pprof.path",
+		Version:      "2.5.5",
+		DefaultValue: "",
+		Doc:          "The folder that storing pprof files, by default will use localStoragePath/pprof",
+		Formatter: func(v string) string {
+			if len(v) == 0 {
+				return path.Join(base.Get("localStorage.path"), "pprof")
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.PprofPath.Init(base.mgr)
 }
