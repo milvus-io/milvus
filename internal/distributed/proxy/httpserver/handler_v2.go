@@ -2347,6 +2347,7 @@ func (h *HandlersV2) dropIndexProperties(ctx context.Context, c *gin.Context, an
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
 		DeleteKeys:     httpReq.PropertyKeys,
+		IndexName:      httpReq.IndexName,
 	}
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterIndex", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {

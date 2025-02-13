@@ -1090,7 +1090,6 @@ func TestSearchSparseVectorNotSupported(t *testing.T) {
 }
 
 func TestRangeSearchSparseVector(t *testing.T) {
-	t.Skipf("https://github.com/milvus-io/milvus/issues/38846")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 
@@ -1111,10 +1110,12 @@ func TestRangeSearchSparseVector(t *testing.T) {
 		log.Info("default search", zap.Any("score", res.Scores))
 	}
 
-	radius := 10
-	rangeFilter := 30
+	annParams := index.NewSparseAnnParam()
+	annParams.WithRadius(10)
+	annParams.WithRangeFilter(30)
+	annParams.WithDropRatio(0.2)
 	resRange, errSearch = mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).
-		WithSearchParam("drop_ratio_search", "0.2").WithSearchParam("radius", strconv.Itoa(radius)).WithSearchParam("range_filter", strconv.Itoa(rangeFilter)))
+		WithAnnParam(annParams))
 	common.CheckErr(t, errSearch, true)
 	common.CheckErr(t, errSearch, true)
 	require.Len(t, resRange, common.DefaultNq)

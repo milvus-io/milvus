@@ -32,6 +32,14 @@ func (b baseAnnParam) Params() map[string]any {
 	return b.params
 }
 
+func (b baseAnnParam) WithRadius(radius float64) {
+	b.WithExtraParam("radius", radius)
+}
+
+func (b baseAnnParam) WithRangeFilter(rangeFilter float64) {
+	b.WithExtraParam("range_filter", rangeFilter)
+}
+
 type CustomAnnParam struct {
 	baseAnnParam
 }

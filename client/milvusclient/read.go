@@ -71,6 +71,11 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 			sch:         schema,
 		}
 
+		// set recall if returned
+		if i < len(results.Recalls) {
+			entry.Recall = results.Recalls[i]
+		}
+
 		entry.IDs, entry.Err = column.IDColumns(schema, results.GetIds(), offset, offset+rc)
 		if entry.Err != nil {
 			offset += rc

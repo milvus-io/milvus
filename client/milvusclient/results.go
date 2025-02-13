@@ -37,6 +37,7 @@ type ResultSet struct {
 	IDs          column.Column // auto generated id, can be mapped to the columns from `Insert` API
 	Fields       DataSet       // output field data
 	Scores       []float32     // distance to the target vector
+	Recall       float32       // recall of the query vector's search result (estimated by zilliz cloud)
 	Err          error         // search error if any
 }
 

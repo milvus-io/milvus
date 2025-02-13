@@ -59,7 +59,8 @@ func New(ctx context.Context, config *ClientConfig) (*Client, error) {
 	}
 
 	c := &Client{
-		config: config,
+		config:    config,
+		currentDB: config.DBName,
 	}
 
 	// Parse remote address.

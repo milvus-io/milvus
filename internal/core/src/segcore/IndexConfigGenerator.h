@@ -31,7 +31,8 @@ enum class IndexConfigLevel {
 // when the segment is sealed before the index is built.
 class VecIndexConfig {
     inline static const std::map<std::string, double> index_build_ratio = {
-        {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC, 0.1}};
+        {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC, 0.1},
+        {knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR, 0.1}};
 
     inline static const std::unordered_set<std::string> maintain_params = {
         "radius", "range_filter", "drop_ratio_search", "dim_max_score_ratio"};

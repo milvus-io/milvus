@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -190,11 +191,13 @@ func (c *Client) RefreshLoad(ctx context.Context, option RefreshLoadOption, call
 }
 
 type FlushTask struct {
-	client         *Client
-	collectionName string
-	segmentIDs     []int64
-	flushTs        uint64
-	interval       time.Duration
+	client             *Client
+	collectionName     string
+	segmentIDs         []int64
+	flusheSegIDs       []int64
+	flushTs            uint64
+	channelCheckpoints map[string]*msgpb.MsgPosition
+	interval           time.Duration
 }
 
 func (t *FlushTask) Await(ctx context.Context) error {
@@ -237,6 +240,10 @@ func (t *FlushTask) Await(ctx context.Context) error {
 	}
 }
 
+func (t *FlushTask) GetFlushStats() (segIDs []int64, flushSegIDs []int64, flushTs uint64, channelCheckpoints map[string]*msgpb.MsgPosition) {
+	return t.segmentIDs, t.flusheSegIDs, t.flushTs, t.channelCheckpoints
+}
+
 func (c *Client) Flush(ctx context.Context, option FlushOption, callOptions ...grpc.CallOption) (*FlushTask, error) {
 	req := option.Request()
 	collectionName := option.CollectionName()
@@ -250,11 +257,13 @@ func (c *Client) Flush(ctx context.Context, option FlushOption, callOptions ...g
 		}
 
 		task = &FlushTask{
-			client:         c,
-			collectionName: collectionName,
-			segmentIDs:     resp.GetCollSegIDs()[collectionName].GetData(),
-			flushTs:        resp.GetCollFlushTs()[collectionName],
-			interval:       option.CheckInterval(),
+			client:             c,
+			collectionName:     collectionName,
+			segmentIDs:         resp.GetCollSegIDs()[collectionName].GetData(),
+			flusheSegIDs:       resp.GetFlushCollSegIDs()[collectionName].GetData(),
+			flushTs:            resp.GetCollFlushTs()[collectionName],
+			channelCheckpoints: resp.GetChannelCps(),
+			interval:           option.CheckInterval(),
 		}
 
 		return nil

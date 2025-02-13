@@ -61,3 +61,19 @@ func NewSparseWANDIndex(metricType MetricType, dropRatio float64) Index {
 		dropRatio: dropRatio,
 	}
 }
+
+type sparseAnnParam struct {
+	baseAnnParam
+}
+
+func NewSparseAnnParam() sparseAnnParam {
+	return sparseAnnParam{
+		baseAnnParam: baseAnnParam{
+			params: make(map[string]any),
+		},
+	}
+}
+
+func (b sparseAnnParam) WithDropRatio(dropRatio float64) {
+	b.WithExtraParam("drop_ratio_search", dropRatio)
+}

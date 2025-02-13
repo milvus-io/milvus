@@ -17,8 +17,11 @@
 package milvusclient
 
 import (
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
+	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
 type ListResourceGroupsOption interface {
@@ -89,4 +92,102 @@ func (opt *dropResourceGroupOption) Request() *milvuspb.DropResourceGroupRequest
 
 func NewDropResourceGroupOption(name string) *dropResourceGroupOption {
 	return &dropResourceGroupOption{name: name}
+}
+
+type DescribeResourceGroupOption interface {
+	Request() *milvuspb.DescribeResourceGroupRequest
+}
+
+type describeResourceGroupOption struct {
+	name string
+}
+
+func (opt *describeResourceGroupOption) Request() *milvuspb.DescribeResourceGroupRequest {
+	return &milvuspb.DescribeResourceGroupRequest{
+		ResourceGroup: opt.name,
+	}
+}
+
+func NewDescribeResourceGroupOption(name string) *describeResourceGroupOption {
+	return &describeResourceGroupOption{name: name}
+}
+
+type UpdateResourceGroupOption interface {
+	Request() *milvuspb.UpdateResourceGroupsRequest
+}
+
+type updateResourceGroupOption struct {
+	name     string
+	rgConfig *entity.ResourceGroupConfig
+}
+
+func (opt *updateResourceGroupOption) Request() *milvuspb.UpdateResourceGroupsRequest {
+	return &milvuspb.UpdateResourceGroupsRequest{
+		ResourceGroups: map[string]*rgpb.ResourceGroupConfig{
+			opt.name: {
+				Requests: &rgpb.ResourceGroupLimit{
+					NodeNum: opt.rgConfig.Requests.NodeNum,
+				},
+				Limits: &rgpb.ResourceGroupLimit{
+					NodeNum: opt.rgConfig.Limits.NodeNum,
+				},
+				TransferFrom: lo.Map(opt.rgConfig.TransferFrom, func(transfer *entity.ResourceGroupTransfer, i int) *rgpb.ResourceGroupTransfer {
+					return &rgpb.ResourceGroupTransfer{
+						ResourceGroup: transfer.ResourceGroup,
+					}
+				}),
+				TransferTo: lo.Map(opt.rgConfig.TransferTo, func(transfer *entity.ResourceGroupTransfer, i int) *rgpb.ResourceGroupTransfer {
+					return &rgpb.ResourceGroupTransfer{
+						ResourceGroup: transfer.ResourceGroup,
+					}
+				}),
+				NodeFilter: &rgpb.ResourceGroupNodeFilter{
+					NodeLabels: entity.MapKvPairs(opt.rgConfig.NodeFilter.NodeLabels),
+				},
+			},
+		},
+	}
+}
+
+func NewUpdateResourceGroupOption(name string, resourceGroupConfig *entity.ResourceGroupConfig) *updateResourceGroupOption {
+	return &updateResourceGroupOption{
+		name:     name,
+		rgConfig: resourceGroupConfig,
+	}
+}
+
+type TransferReplicaOption interface {
+	Request() *milvuspb.TransferReplicaRequest
+}
+
+type transferReplicaOption struct {
+	collectionName string
+	sourceRG       string
+	targetRG       string
+	replicaNum     int64
+	dbName         string
+}
+
+func (opt *transferReplicaOption) WithDBName(dbName string) *transferReplicaOption {
+	opt.dbName = dbName
+	return opt
+}
+
+func (opt *transferReplicaOption) Request() *milvuspb.TransferReplicaRequest {
+	return &milvuspb.TransferReplicaRequest{
+		CollectionName:      opt.collectionName,
+		SourceResourceGroup: opt.sourceRG,
+		TargetResourceGroup: opt.targetRG,
+		NumReplica:          opt.replicaNum,
+		DbName:              opt.dbName,
+	}
+}
+
+func NewTransferReplicaOption(collectionName, sourceGroup, targetGroup string, replicaNum int64) *transferReplicaOption {
+	return &transferReplicaOption{
+		collectionName: collectionName,
+		sourceRG:       sourceGroup,
+		targetRG:       targetGroup,
+		replicaNum:     replicaNum,
+	}
 }

@@ -376,6 +376,10 @@ func TestMeta_HasSameReq(t *testing.T) {
 				Key:   common.DimKey,
 				Value: "128",
 			},
+			{
+				Key:   common.MmapEnabledKey,
+				Value: "true",
+			},
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
