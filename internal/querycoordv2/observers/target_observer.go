@@ -254,7 +254,7 @@ func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 	defer ob.keylocks.Unlock(collectionID)
 
 	// if collection release, skip check
-	if ob.meta.CollectionManager.GetCollection(ctx, collectionID) == nil {
+	if ob.meta.CollectionManager.GetCollection(collectionID) == nil {
 		return
 	}
 
