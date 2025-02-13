@@ -482,7 +482,7 @@ queryNode:
   enableSegmentPrune: false # use partition stats to prune data in search/query on shard delegator
   queryStreamBatchSize: 4194304 # return min batch size of stream query
   queryStreamMaxBatchSize: 134217728 # return max batch size of stream query
-  bloomFilterApplyParallelFactor: 4 # parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM
+  bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   workerPooling:
     size: 10 # the size for worker querynode client pool
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
@@ -694,7 +694,7 @@ dataNode:
   clusteringCompaction:
     memoryBufferRatio: 0.3 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.
     workPoolSize: 8 # worker pool size for one clustering compaction job.
-  bloomFilterApplyParallelFactor: 4 # parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM
+  bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   storage:
     deltalog: json # deltalog format, options: [json, parquet]
   ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address

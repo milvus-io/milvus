@@ -876,7 +876,7 @@ This helps Milvus-CDC synchronize incremental data`,
 	p.BloomFilterApplyBatchSize = ParamItem{
 		Key:          "common.bloomFilterApplyBatchSize",
 		Version:      "2.4.5",
-		DefaultValue: "1000",
+		DefaultValue: "10000",
 		Doc:          "batch size when to apply pk to bloom filter",
 		Export:       true,
 	}
@@ -3315,8 +3315,8 @@ user-task-polling:
 		Key:          "queryNode.bloomFilterApplyParallelFactor",
 		FallbackKeys: []string{"queryNode.bloomFilterApplyBatchSize"},
 		Version:      "2.4.5",
-		DefaultValue: "4",
-		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
+		DefaultValue: "2",
+		Doc:          "parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM",
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
@@ -4800,8 +4800,8 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.bloomFilterApplyParallelFactor",
 		FallbackKeys: []string{"datanode.bloomFilterApplyBatchSize"},
 		Version:      "2.4.5",
-		DefaultValue: "4",
-		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
+		DefaultValue: "2",
+		Doc:          "parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM",
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
