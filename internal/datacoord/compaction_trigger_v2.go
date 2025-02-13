@@ -86,9 +86,8 @@ type CompactionTriggerManager struct {
 	clusteringPolicy *clusteringCompactionPolicy
 	singlePolicy     *singleCompactionPolicy
 
-	cancel   context.CancelFunc
-	closeSig chan struct{}
-	closeWg  sync.WaitGroup
+	cancel  context.CancelFunc
+	closeWg sync.WaitGroup
 }
 
 func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, compactionHandler compactionPlanContext, meta *meta) *CompactionTriggerManager {
@@ -97,7 +96,6 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, com
 		handler:           handler,
 		compactionHandler: compactionHandler,
 		meta:              meta,
-		closeSig:          make(chan struct{}),
 	}
 	m.l0Policy = newL0CompactionPolicy(meta)
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
@@ -122,7 +120,6 @@ func (m *CompactionTriggerManager) Start() {
 }
 
 func (m *CompactionTriggerManager) Stop() {
-	close(m.closeSig)
 	if m.cancel != nil {
 		m.cancel()
 	}
@@ -142,7 +139,7 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 	log.Info("Compaction trigger manager start")
 	for {
 		select {
-		case <-m.closeSig:
+		case <-ctx.Done():
 			log.Info("Compaction trigger manager checkLoop quit")
 			return
 		case <-l0Ticker.C:
