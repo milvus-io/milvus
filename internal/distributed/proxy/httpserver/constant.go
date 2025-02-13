@@ -100,6 +100,7 @@ const (
 	HTTPReturnRecalls        = "recalls"
 	HTTPReturnLoadState      = "loadState"
 	HTTPReturnLoadProgress   = "loadProgress"
+	HTTPReturnTopks          = "topks"
 
 	HTTPReturnHas = "has"
 
