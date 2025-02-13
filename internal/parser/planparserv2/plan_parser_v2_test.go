@@ -1520,6 +1520,7 @@ func randomChineseString(length int) string {
 }
 
 func BenchmarkWithString(b *testing.B) {
+	// (v2.5.5) BenchmarkWithString-12    	     672	   1759287 ns/op
 	schema := newTestSchema(true)
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(b, err)
@@ -1559,18 +1560,20 @@ func Test_convertHanToASCII(t *testing.T) {
 }
 
 func BenchmarkTemplateWithString(b *testing.B) {
+	// (v2.5.5) BenchmarkTemplateWithString-12    	   49556	     24201 ns/op
 	schema := newTestSchema(true)
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(b, err)
 
-	elements := make([]interface{}, 100)
+	elements := make([]string, 100)
 	for i := 0; i < 100; i++ {
-		elements[i] = generateTemplateValue(schemapb.DataType_String, fmt.Sprintf(`"%s",`, randomChineseString(rand.Intn(100))))
+		elements[i] = fmt.Sprintf(`"%s",`, randomChineseString(rand.Intn(100)))
 	}
 	expr := "StringField in {list}"
 
 	mv := map[string]*schemapb.TemplateValue{
-		"list": generateTemplateValue(schemapb.DataType_Array, elements),
+		"list": generateTemplateValue(schemapb.DataType_Array,
+			generateTemplateArrayValue(schemapb.DataType_String, elements)),
 	}
 
 	for i := 0; i < b.N; i++ {
@@ -1616,4 +1619,52 @@ func TestNestedPathWithChinese(t *testing.T) {
 	assert.Equal(t, "A", paths[0])
 	assert.Equal(t, "年份", paths[1])
 	assert.Equal(t, "月份", paths[2])
+}
+
+func BenchmarkA(b *testing.B) {
+	// (v2.5.5) BenchmarkA-12    	     854	   1334580 ns/op
+	schema := newTestSchema(true)
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(b, err)
+
+	expr := ""
+	for i := 0; i < 100; i++ {
+		expr += fmt.Sprintf(" %d < Int64Field <= %d && ", i, i+1)
+	}
+	expr += "100 < Int64Field <= 200"
+
+	for i := 0; i < b.N; i++ {
+		plan, err := CreateSearchPlan(schemaHelper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil)
+		require.NoError(b, err)
+		assert.NotNil(b, plan)
+	}
+}
+
+func BenchmarkTerm(b *testing.B) {
+	// (v2.5.5) BenchmarkTerm-12    	      22	  45767056 ns/op
+	schema := newTestSchema(true)
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(b, err)
+
+	expr := "Int64Field in ["
+	for i := 0; i < 10000; i++ {
+		expr += fmt.Sprintf("%d, ", i)
+	}
+	expr += "]"
+
+	for i := 0; i < b.N; i++ {
+		plan, err := CreateSearchPlan(schemaHelper, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil)
+		require.NoError(b, err)
+		assert.NotNil(b, plan)
+	}
 }
