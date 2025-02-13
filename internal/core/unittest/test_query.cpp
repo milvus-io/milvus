@@ -528,6 +528,7 @@ TEST(Query, FillSegment) {
     proto.set_name("col");
     proto.set_description("asdfhsalkgfhsadg");
     auto dim = 16;
+    double double_default_value = 20;
 
     {
         auto field = proto.add_fields();
@@ -594,6 +595,30 @@ TEST(Query, FillSegment) {
         return segment;
     }());
 
+    // add field
+    {
+        auto field = proto.add_fields();
+        field->set_name("lack_null_binlog");
+        field->set_nullable(true);
+        field->set_fieldid(103);
+        field->set_is_primary_key(false);
+        field->set_description("lack null binlog");
+        field->set_data_type(pb::schema::DataType::Float);
+    }
+
+    {
+        auto field = proto.add_fields();
+        field->set_name("lack_default_value_binlog");
+        field->set_nullable(true);
+        field->set_fieldid(104);
+        field->set_is_primary_key(false);
+        field->set_description("lack default value binlog");
+        field->set_data_type(pb::schema::DataType::Double);
+        field->mutable_default_value()->set_double_data(double_default_value);
+    }
+
+    schema = Schema::ParseFrom(proto);
+
     const char* raw_plan = R"(vector_anns: <
                                     field_id: 100
                                     query_info: <
@@ -613,20 +638,23 @@ TEST(Query, FillSegment) {
 
     auto topk = 5;
     auto num_queries = 10;
-
     for (auto& segment : segments) {
         plan->target_entries_.clear();
         plan->target_entries_.push_back(
             schema->get_field_id(FieldName("fakevec")));
         plan->target_entries_.push_back(
             schema->get_field_id(FieldName("the_value")));
+        plan->target_entries_.push_back(
+            schema->get_field_id(FieldName("lack_null_binlog")));
+        plan->target_entries_.push_back(
+            schema->get_field_id(FieldName("lack_default_value_binlog")));
         auto result = segment->Search(plan.get(), ph.get(), ts);
         result->result_offsets_.resize(topk * num_queries);
         segment->FillTargetEntry(plan.get(), *result);
         segment->FillPrimaryKeys(plan.get(), *result);
 
         auto& fields_data = result->output_fields_data_;
-        ASSERT_EQ(fields_data.size(), 2);
+        ASSERT_EQ(fields_data.size(), 4);
         for (auto field_id : plan->target_entries_) {
             ASSERT_EQ(fields_data.count(field_id), true);
         }
@@ -642,6 +670,22 @@ TEST(Query, FillSegment) {
         ASSERT_EQ(output_i32_field_data.size(), topk * num_queries);
         auto output_i32_valid_data = fields_data.at(i32_field_id)->valid_data();
         ASSERT_EQ(output_i32_valid_data.size(), topk * num_queries);
+        auto float_field_id =
+            schema->get_field_id(FieldName("lack_null_binlog"));
+        auto output_float_field_data =
+            fields_data.at(float_field_id)->scalars().float_data().data();
+        ASSERT_EQ(output_float_field_data.size(), topk * num_queries);
+        auto output_float_valid_data =
+            fields_data.at(float_field_id)->valid_data();
+        ASSERT_EQ(output_float_valid_data.size(), topk * num_queries);
+        auto double_field_id =
+            schema->get_field_id(FieldName("lack_default_value_binlog"));
+        auto output_double_field_data =
+            fields_data.at(double_field_id)->scalars().double_data().data();
+        ASSERT_EQ(output_double_field_data.size(), topk * num_queries);
+        auto output_double_valid_data =
+            fields_data.at(double_field_id)->valid_data();
+        ASSERT_EQ(output_double_valid_data.size(), topk * num_queries);
 
         for (int i = 0; i < topk * num_queries; i++) {
             int64_t val = std::get<int64_t>(result->primary_keys_[i]);
@@ -650,6 +694,9 @@ TEST(Query, FillSegment) {
             auto std_val = std_vec[internal_offset];
             auto std_i32 = std_i32_vec[internal_offset];
             auto std_i32_valid = i32_vec_valid_data[internal_offset];
+            auto std_float_valid = false;
+            auto std_double = double_default_value;
+            auto std_double_valid = true;
             std::vector<float> std_vfloat(dim);
             std::copy_n(std_vfloat_vec.begin() + dim * internal_offset,
                         dim,
@@ -672,6 +719,20 @@ TEST(Query, FillSegment) {
                 bool i32_valid;
                 memcpy(&i32_valid, &output_i32_valid_data[i], sizeof(bool));
                 ASSERT_EQ(i32_valid, std_i32_valid);
+
+                // check float field lack null field binlog valid field
+                bool f_valid;
+                memcpy(&f_valid, &output_float_valid_data[i], sizeof(bool));
+                ASSERT_EQ(f_valid, std_float_valid);
+
+                // check double field lack default value field binlog
+                double d;
+                memcpy(&d, &output_double_field_data[i], sizeof(double));
+                ASSERT_EQ(d, std_double);
+                // check double field lack default value field binlog valid field
+                bool d_valid;
+                memcpy(&d_valid, &output_double_valid_data[i], sizeof(bool));
+                ASSERT_EQ(d_valid, std_double_valid);
             }
         }
     }

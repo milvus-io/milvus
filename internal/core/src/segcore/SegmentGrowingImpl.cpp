@@ -217,6 +217,24 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         auto& pool =
             ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
 
+        int total = 0;
+        for (int num : info.entries_nums) {
+            total += num;
+        }
+        if (total != info.row_count) {
+            AssertInfo(total <= info.row_count,
+                       "binlog number should less than row_count");
+            auto field_meta = get_schema()[field_id];
+            auto lack_num = info.row_count - total;
+            auto field_data = storage::CreateFieldData(
+                static_cast<DataType>(field_meta.get_data_type()),
+                true,
+                1,
+                lack_num);
+            field_data->FillFieldData(field_meta.default_value(), lack_num);
+            channel->push(field_data);
+        }
+
         LOG_INFO("segment {} loads field {} with num_rows {}",
                  this->get_segment_id(),
                  field_id.get(),
@@ -438,8 +456,8 @@ std::unique_ptr<DataArray>
 SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                    const int64_t* seg_offsets,
                                    int64_t count) const {
-    auto vec_ptr = insert_record_.get_data_base(field_id);
     auto& field_meta = schema_->operator[](field_id);
+    auto vec_ptr = insert_record_.get_data_base(field_id);
     if (field_meta.is_vector()) {
         auto result = CreateVectorDataArray(count, field_meta);
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
@@ -502,6 +520,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
 
     AssertInfo(!field_meta.is_vector(),
                "Scalar field meta type is vector type");
+
     auto result = CreateScalarDataArray(count, field_meta);
     if (field_meta.is_nullable()) {
         auto valid_data_ptr = insert_record_.get_valid_data(field_id);

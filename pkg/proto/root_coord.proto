@@ -32,6 +32,15 @@ service RootCoord {
     rpc DropCollection(milvus.DropCollectionRequest) returns (common.Status) {}
 
     /**
+     * @brief This method is used to add collection field.
+     *
+     * @param AddFieldRequest, field schema is going to be added.
+     *
+     * @return Status
+     */
+    rpc AddField(milvus.AddFieldRequest) returns (common.Status) {}
+
+    /**
      * @brief This method is used to test collection existence.
      *
      * @param HasCollectionRequest, collection name is going to be tested.
