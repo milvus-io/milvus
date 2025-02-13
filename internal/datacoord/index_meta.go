@@ -245,13 +245,15 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 }
 
 func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
-	if len(fieldIndex.TypeParams) != len(req.TypeParams) {
+	metaTypeParams := DeleteParams(fieldIndex.TypeParams, []string{common.MmapEnabledKey})
+	reqTypeParams := DeleteParams(req.TypeParams, []string{common.MmapEnabledKey})
+	if len(metaTypeParams) != len(reqTypeParams) {
 		return false
 	}
 	notEq := false
-	for _, param1 := range fieldIndex.TypeParams {
+	for _, param1 := range metaTypeParams {
 		exist := false
-		for _, param2 := range req.TypeParams {
+		for _, param2 := range reqTypeParams {
 			if param2.Key == param1.Key && param2.Value == param1.Value {
 				exist = true
 			}
