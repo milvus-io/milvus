@@ -238,14 +238,11 @@ func (s *Server) parseAndVerifyNestedPath(identifier string, schema *schemapb.Co
 		nestedPath = append(nestedPath, r)
 	}
 	jsonKeyStr := identifier[len(fieldName):]
-	if !strings.Contains(jsonKeyStr, "][") {
-		return "/" + strings.Join(nestedPath, "/"), nil
-	}
 	ss := strings.Split(jsonKeyStr, "][")
 	for i := 0; i < len(ss); i++ {
 		path := strings.Trim(ss[i], "[]")
 		if path == "" {
-			return "", fmt.Errorf("invalid identifier: %s", identifier)
+			continue
 		}
 		if (strings.HasPrefix(path, "\"") && strings.HasSuffix(path, "\"")) ||
 			(strings.HasPrefix(path, "'") && strings.HasSuffix(path, "'")) {

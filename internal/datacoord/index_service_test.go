@@ -2715,4 +2715,13 @@ func TestJsonIndex(t *testing.T) {
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
 
+	// dynamic field
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     2,
+		IndexName:   "",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "dynamic_a_field"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.NoError(t, merr.CheckRPCCall(resp, err))
+
 }
