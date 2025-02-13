@@ -388,6 +388,14 @@ func (f *Field) WithAnalyzerParams(params map[string]any) *Field {
 	return f
 }
 
+func (f *Field) WithEnableMatch(enable bool) *Field {
+	if f.TypeParams == nil {
+		f.TypeParams = make(map[string]string)
+	}
+	f.TypeParams[TypeParamEnableMatch] = strconv.FormatBool(enable)
+	return f
+}
+
 // ReadProto parses FieldSchema
 func (f *Field) ReadProto(p *schemapb.FieldSchema) *Field {
 	f.ID = p.GetFieldID()
