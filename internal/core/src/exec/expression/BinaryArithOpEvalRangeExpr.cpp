@@ -117,11 +117,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     auto op_type = expr_->op_type_;
@@ -517,11 +517,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
 
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
@@ -1418,11 +1418,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
     auto value = GetValueFromProto<HighPrecisionType>(expr_->value_);
     auto right_operand =
         GetValueFromProto<HighPrecisionType>(expr_->right_operand_);
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
 
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;

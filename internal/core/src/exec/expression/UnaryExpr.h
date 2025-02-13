@@ -40,7 +40,6 @@ struct UnaryElementFuncForMatch {
 
     void
     operator()(const T* src,
-
                size_t size,
                IndexInnerType val,
                TargetBitmapView res,
@@ -337,10 +336,15 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         return true;
     }
 
+    std::string
+    ToString() const {
+        return fmt::format("{}", expr_->ToString());
+    }
+
  private:
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImpl(OffsetVector* input = nullptr);
+    ExecRangeVisitorImpl(EvalCtx& context);
 
     template <typename T>
     VectorPtr
@@ -348,23 +352,23 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImplForData(OffsetVector* input = nullptr);
+    ExecRangeVisitorImplForData(EvalCtx& context);
 
     template <typename ExprValueType>
     VectorPtr
-    ExecRangeVisitorImplJson(OffsetVector* input = nullptr);
+    ExecRangeVisitorImplJson(EvalCtx& context);
 
     template <typename ExprValueType>
     VectorPtr
-    ExecRangeVisitorImplArray(OffsetVector* input = nullptr);
+    ExecRangeVisitorImplArray(EvalCtx& context);
 
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImplArrayForIndex();
+    ExecRangeVisitorImplArrayForIndex(EvalCtx& context);
 
     template <typename T>
     VectorPtr
-    ExecArrayEqualForIndex(bool reverse);
+    ExecArrayEqualForIndex(EvalCtx& context, bool reverse);
 
     // Check overflow and cache result for performace
     template <typename T>
