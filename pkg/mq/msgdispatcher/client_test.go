@@ -94,8 +94,8 @@ func TestClient_Concurrency(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	expected := int(total - deregisterCount.Load())
-	expected = 1
+	// expected := int(total - deregisterCount.Load())
+	expected := 1
 
 	c := client1.(*client)
 	n := c.managers.Len()
