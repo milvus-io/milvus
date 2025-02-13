@@ -387,6 +387,8 @@ func (c *compactionPlanHandler) schedule(assigner NodeAssigner) []CompactionTask
 		// Do not move this check logic outside the lock; it needs to remain mutually exclusive with the stats task.
 		if t.GetTaskProto().GetType() == datapb.CompactionType_Level0DeleteCompaction {
 			if !t.PreparePlan() {
+				selected = selected[:len(selected)-1]
+				excluded = append(excluded, t)
 				c.executingGuard.Unlock()
 				continue
 			}
