@@ -233,6 +233,13 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, 100000, Params.PaginationSize.GetAsInt())
 		assert.Equal(t, 32, Params.ReadConcurrency.GetAsInt())
 	})
+
+	t.Run("test profile config", func(t *testing.T) {
+		params := &SParams.ProfileCfg
+		assert.Equal(t, "/var/lib/milvus/data/pprof", params.PprofPath.GetValue())
+		bt.Save(params.PprofPath.Key, "/tmp/pprof")
+		assert.Equal(t, "/tmp/pprof", params.PprofPath.GetValue())
+	})
 }
 
 func TestRuntimConfig(t *testing.T) {

@@ -67,8 +67,7 @@ func TestGrpcServerParams(t *testing.T) {
 	base.Save("grpc.serverMaxSendSize", "a")
 	assert.Equal(t, serverConfig.ServerMaxSendSize.GetAsInt(), DefaultServerMaxSendSize)
 
-	base.Save(serverConfig.GracefulStopTimeout.Key, "1")
-	assert.Equal(t, serverConfig.GracefulStopTimeout.GetAsInt(), 1)
+	assert.Equal(t, serverConfig.GracefulStopTimeout.GetAsInt(), 3)
 }
 
 func TestGrpcClientParams(t *testing.T) {
