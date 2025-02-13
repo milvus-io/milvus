@@ -34,13 +34,10 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
-func NewPackedWriter(fsPath string, schema *arrow.Schema, bufferSize int, filePaths []string, columnGroups [][]int) (*PackedWriter, error) {
+func NewPackedWriter(filePaths []string, multiPartUploadSize int64, schema *arrow.Schema, bufferSize int, columnGroups [][]int) (*PackedWriter, error) {
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
 	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
-
-	cFsPath := C.CString(fsPath)
-	defer C.free(unsafe.Pointer(cFsPath))
 
 	cBufferSize := C.int64_t(bufferSize)
 
@@ -71,10 +68,12 @@ func NewPackedWriter(fsPath string, schema *arrow.Schema, bufferSize int, filePa
 		C.free(cGroup)
 	}
 
+	cMultiPartUploadSize := C.int64_t(multiPartUploadSize)
+
 	var cPackedWriter C.CPackedWriter
-	status := C.NewPackedWriter(cFsPath, cSchema, cBufferSize, cFilePathsArray, cNumPaths, cColumnGroups, &cPackedWriter)
+	status := C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, &cPackedWriter)
 	if status != 0 {
-		return nil, fmt.Errorf("failed to new packed writer: %s, status: %d", fsPath, status)
+		return nil, fmt.Errorf("failed to new packed writer")
 	}
 	return &PackedWriter{cPackedWriter: cPackedWriter}, nil
 }

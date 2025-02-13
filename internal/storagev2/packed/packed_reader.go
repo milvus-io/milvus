@@ -33,13 +33,10 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
-func NewPackedReader(fsPath string, filePaths []string, schema *arrow.Schema, bufferSize int) (*PackedReader, error) {
+func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int) (*PackedReader, error) {
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
 	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
-
-	cFsPath := C.CString(fsPath)
-	defer C.free(unsafe.Pointer(cFsPath))
 
 	cFilePaths := make([]*C.char, len(filePaths))
 	for i, path := range filePaths {
@@ -53,9 +50,9 @@ func NewPackedReader(fsPath string, filePaths []string, schema *arrow.Schema, bu
 	cBufferSize := C.int64_t(bufferSize)
 
 	var cPackedReader C.CPackedReader
-	status := C.NewPackedReader(cFsPath, cFilePathsArray, cNumPaths, cSchema, cBufferSize, &cPackedReader)
+	status := C.NewPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, &cPackedReader)
 	if status != 0 {
-		return nil, fmt.Errorf("failed to new packed reader: %s, status: %d", fsPath, status)
+		return nil, fmt.Errorf("failed to new packed reader")
 	}
 	return &PackedReader{cPackedReader: cPackedReader, schema: schema}, nil
 }

@@ -21,23 +21,26 @@
 
 #include <arrow/c/bridge.h>
 #include <arrow/filesystem/filesystem.h>
+#include "common/EasyAssert.h"
+#include "common/type_c.h"
 
-int
-NewPackedWriter(const char* fsPath,
-                struct ArrowSchema* schema,
+
+CStatus
+NewPackedWriter(struct ArrowSchema* schema,
                 const int64_t buffer_size,
                 char** paths,
                 int64_t num_paths,
+                int64_t part_upload_size,
                 CColumnGroups column_groups,
                 CPackedWriter* c_packed_writer) {
     try {
-        auto trueFsPath = std::string(fsPath);
         auto truePaths = std::vector<std::string>(paths, paths + num_paths);
 
-        auto factory = std::make_shared<milvus_storage::FileSystemFactory>();
         auto conf = milvus_storage::StorageConfig();
-        conf.uri = "file:///tmp/";
-        auto trueFs = factory->BuildFileSystem(conf, &trueFsPath).value();
+        conf.part_size = part_upload_size;
+
+        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                .GetArrowFileSystem();
 
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
 
@@ -47,13 +50,13 @@ NewPackedWriter(const char* fsPath,
             trueFs, truePaths, trueSchema, conf, columnGroups, buffer_size);
 
         *c_packed_writer = writer.release();
-        return 0;
+        return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return -1;
+        return milvus::FailureCStatus(&e);
     }
 }
 
-int
+CStatus
 WriteRecordBatch(CPackedWriter c_packed_writer,
                  struct ArrowArray* array,
                  struct ArrowSchema* schema) {
@@ -65,15 +68,15 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
             arrow::ImportRecordBatch(array, schema).ValueOrDie();
         auto status = packed_writer->Write(record_batch);
         if (!status.ok()) {
-            return -1;
+            return milvus::FailureCStatus(ErrorCode.FileWriteFailed, status.ToString());
         }
-        return 0;
+        return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return -1;
+        return milvus::FailureCStatus(&e);
     }
 }
 
-int
+CStatus
 CloseWriter(CPackedWriter c_packed_writer) {
     try {
         auto packed_writer =
@@ -82,10 +85,10 @@ CloseWriter(CPackedWriter c_packed_writer) {
         auto status = packed_writer->Close();
         delete packed_writer;
         if (!status.ok()) {
-            return -1;
+            return milvus::FailureCStatus(ErrorCode.FileWriteFailed, status.ToString());
         }
-        return 0;
+        return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return -1;
+        return milvus::FailureCStatus(&e);
     }
 }

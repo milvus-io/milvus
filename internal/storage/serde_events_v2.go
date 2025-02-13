@@ -61,13 +61,13 @@ func (pr *packedRecordReader) Close() error {
 	return nil
 }
 
-func NewPackedRecordReader(path string, schema *schemapb.CollectionSchema, bufferSize int,
+func NewPackedRecordReader(paths []string, schema *schemapb.CollectionSchema, bufferSize int,
 ) (*packedRecordReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
 	}
-	reader, err := packed.NewPackedReader(path, arrowSchema, bufferSize)
+	reader, err := packed.NewPackedReader(paths, arrowSchema, bufferSize)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("New binlog record packed reader error: %s", err.Error())
 	}

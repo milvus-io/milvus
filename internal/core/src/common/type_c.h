@@ -95,6 +95,7 @@ typedef struct CStorageConfig {
     bool useVirtualHost;
     int64_t requestTimeoutMs;
     const char* gcp_credential_json;
+    bool use_custom_part_upload;
 } CStorageConfig;
 
 typedef struct CMmapConfig {

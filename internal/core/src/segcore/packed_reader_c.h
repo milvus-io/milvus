@@ -18,6 +18,7 @@
 extern "C" {
 #endif
 
+#include "common/type_c.h"
 #include <arrow/c/abi.h>
 
 typedef void* CPackedReader;
@@ -32,9 +33,8 @@ typedef void* CArrowSchema;
  * @param buffer_size The max buffer size of the packed reader.
  * @param c_packed_reader The output pointer of the packed reader.
  */
-int
-NewPackedReader(const char* path,
-                char** paths,
+CStatus
+NewPackedReader(char** paths,
                 int64_t num_paths,
                 struct ArrowSchema* schema,
                 const int64_t buffer_size,
@@ -48,7 +48,7 @@ NewPackedReader(const char* path,
  * @param out_array The output pointer of the arrow array.
  * @param out_schema The output pointer of the arrow schema.
  */
-int
+CStatus
 ReadNext(CPackedReader c_packed_reader,
          CArrowArray* out_array,
          CArrowSchema* out_schema);
@@ -58,7 +58,7 @@ ReadNext(CPackedReader c_packed_reader,
  *
  * @param c_packed_reader The packed reader to close.
  */
-int
+CStatus
 CloseReader(CPackedReader c_packed_reader);
 
 #ifdef __cplusplus
