@@ -551,6 +551,7 @@ func TestExpr_Constant(t *testing.T) {
 	}
 	for _, exprStr := range exprStrs {
 		expr := handleExpr(helper, exprStr)
+		assert.Nil(t, getError(expr), exprStr)
 		assert.NotNil(t, getExpr(expr).expr, exprStr)
 
 		// fmt.Printf("expr: %s\n", exprStr)
