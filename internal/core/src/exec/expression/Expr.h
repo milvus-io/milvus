@@ -61,7 +61,7 @@ class Expr {
     }
 
     std::string
-    get_name() {
+    name() {
         return name_;
     }
 
@@ -85,13 +85,33 @@ class Expr {
         return true;
     }
 
+    virtual std::string
+    ToString() const {
+        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+    }
+
+    virtual bool
+    IsSource() const {
+        false;
+    }
+
+    virtual std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const {
+        return std::nullopt;
+    }
+
+    std::vector<std::shared_ptr<Expr>>&
+    GetInputsRef() {
+        return inputs_;
+    }
+
  protected:
     DataType type_;
-    const std::vector<std::shared_ptr<Expr>> inputs_;
+    std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
     // NOTE: unused
     std::shared_ptr<VectorFunction> vector_func_;
-
+    
     // whether we have offset input and do expr filtering on these data
     // default is false which means we will do expr filtering on the total segment data
     bool has_offset_input_ = false;
@@ -149,6 +169,11 @@ class SegmentExpr : public Expr {
                 num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
             }
         }
+    }
+
+    virtual bool
+    IsSource() const {
+        true;
     }
 
     void

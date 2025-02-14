@@ -170,6 +170,21 @@ class PhyCompareFilterExpr : public Expr {
         }
     }
 
+    std::string
+    ToString() const {
+        return fmt::format("{}", expr_->ToString());
+    }
+
+    bool
+    IsSource() const override {
+        return true;
+    }
+
+    std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return std::nullopt;
+    }
+
  private:
     int64_t
     GetCurrentRows() {
