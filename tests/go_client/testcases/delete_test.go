@@ -2,6 +2,7 @@ package testcases
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -440,7 +441,6 @@ func TestDeleteComplexExpr(t *testing.T) {
 		expr  string
 		count int
 	}
-	capacity := common.TestCapacity
 	exprLimits := []exprCount{
 		{expr: fmt.Sprintf("%s >= 1000 || %s > 2000", common.DefaultInt64FieldName, common.DefaultInt64FieldName), count: 2000},
 
@@ -463,7 +463,58 @@ func TestDeleteComplexExpr(t *testing.T) {
 
 		// data type not match and no error
 		{expr: fmt.Sprintf("%s['number'] == '0' ", common.DefaultJSONFieldName), count: 0},
+	}
+	ch := make(chan struct{}, 5)
+	wg := sync.WaitGroup{}
+	testFunc := func(exprLimit exprCount) {
+		defer func() {
+			wg.Done()
+			<-ch
+		}()
+		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
+		mc := createDefaultMilvusClient(ctx, t)
 
+		// create collection and a partition
+		cp := hp.NewCreateCollectionParams(hp.Int64VecAllScalar)
+		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
+
+		// insert [0, 3000) into default
+		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithMaxCapacity(common.TestCapacity))
+		prepare.FlushData(ctx, t, mc, schema.CollectionName)
+
+		// index and load
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+		log.Debug("TestDeleteComplexExpr", zap.Any("expr", exprLimit.expr))
+
+		resDe, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(exprLimit.expr))
+		common.CheckErr(t, err, true)
+		log.Debug("delete count", zap.Bool("equal", int64(exprLimit.count) == resDe.DeleteCount))
+		// require.Equal(t, int64(exprLimit.count), resDe.DeleteCount)
+
+		resQuery, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprLimit.expr).WithConsistencyLevel(entity.ClStrong))
+		common.CheckErr(t, err, true)
+		require.Zero(t, resQuery.ResultCount)
+	}
+
+	for _, exprLimit := range exprLimits {
+		exprLimit := exprLimit
+		ch <- struct{}{}
+		wg.Add(1)
+		go testFunc(exprLimit)
+	}
+	wg.Wait()
+}
+
+// test delete json expr
+func TestDeleteComplexExprJson(t *testing.T) {
+	type exprCount struct {
+		expr  string
+		count int
+	}
+	capacity := common.TestCapacity
+	exprLimits := []exprCount{
 		// json field
 		{expr: fmt.Sprintf("%s > 1499.5", common.DefaultJSONFieldName), count: 1500 / 2},                                 // json >= 1500.0
 		{expr: fmt.Sprintf("%s like '21%%'", common.DefaultJSONFieldName), count: 100 / 4},                               // json like '21%'
