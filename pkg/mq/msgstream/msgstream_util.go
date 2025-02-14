@@ -20,10 +20,13 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	pcommon "github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/common"
@@ -140,4 +143,33 @@ func KafkaHealthCheck(clusterStatus *pcommon.MQClusterStatus) {
 
 	clusterStatus.Health = true
 	clusterStatus.Members = healthList
+}
+
+func GetPorperties(msg TsMsg) map[string]string {
+	properties := map[string]string{}
+	properties[common.ChannelTypeKey] = msg.VChannel()
+	properties[common.MsgTypeKey] = msg.Type().String()
+	properties[common.MsgIdTypeKey] = strconv.FormatInt(msg.ID(), 10)
+	properties[common.CollectionIDTypeKey] = strconv.FormatInt(msg.CollID(), 10)
+	msgBase, ok := msg.(interface{ GetBase() *commonpb.MsgBase })
+	if ok {
+		properties[common.TimestampTypeKey] = strconv.FormatUint(msgBase.GetBase().GetTimestamp(), 10)
+		if msgBase.GetBase().GetReplicateInfo() != nil {
+			properties[common.ReplicateIDTypeKey] = msgBase.GetBase().GetReplicateInfo().GetReplicateID()
+		}
+	}
+
+	return properties
+}
+
+func BuildConsumeMsgPack(pack *MsgPack) *ConsumeMsgPack {
+	return &ConsumeMsgPack{
+		BeginTs: pack.BeginTs,
+		EndTs:   pack.EndTs,
+		Msgs: lo.Map(pack.Msgs, func(msg TsMsg, _ int) ConsumeMsg {
+			return &UnmarshaledMsg{msg: msg}
+		}),
+		StartPositions: pack.StartPositions,
+		EndPositions:   pack.EndPositions,
+	}
 }

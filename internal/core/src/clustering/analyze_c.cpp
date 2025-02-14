@@ -58,7 +58,7 @@ Analyze(CAnalyze* res_analyze,
         auto analyze_info =
             std::make_unique<milvus::proto::clustering::AnalyzeInfo>();
         auto res = analyze_info->ParseFromArray(serialized_analyze_info, len);
-        AssertInfo(res, "Unmarshall analyze info failed");
+        AssertInfo(res, "Unmarshal analyze info failed");
         auto field_type =
             static_cast<DataType>(analyze_info->field_schema().data_type());
         auto field_id = analyze_info->field_schema().fieldid();
