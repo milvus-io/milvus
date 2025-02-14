@@ -21,7 +21,6 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -78,13 +77,13 @@ func (b *listDeleteBuffer[T]) ListL0() []segments.Segment {
 	return b.l0Segments
 }
 
-func (b *listDeleteBuffer[T]) UnRegister(ts uint64, segmentList ...int64) {
+func (b *listDeleteBuffer[T]) UnRegister(ts uint64) {
 	b.mut.Lock()
 	defer b.mut.Unlock()
 	var newSegments []segments.Segment
 
 	for _, s := range b.l0Segments {
-		if !lo.Contains(segmentList, s.ID()) {
+		if s.StartPosition().GetTimestamp() > ts {
 			newSegments = append(newSegments, s)
 		} else {
 			s.Release(context.TODO())

@@ -24,7 +24,6 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var errBufferFull = errors.New("buffer full")
@@ -49,7 +48,7 @@ type DeleteBuffer[T timed] interface {
 	// ListAll L0
 	ListL0() []segments.Segment
 	// Clean delete data, include l0 segment and delete buffer
-	UnRegister(ts uint64, segments ...int64)
+	UnRegister(ts uint64)
 
 	// clean up delete buffer
 	Clear()
@@ -93,14 +92,13 @@ func (c *doubleCacheBuffer[T]) ListL0() []segments.Segment {
 	return c.l0Segments
 }
 
-func (c *doubleCacheBuffer[T]) UnRegister(ts uint64, segmentList ...int64) {
+func (c *doubleCacheBuffer[T]) UnRegister(ts uint64) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 	var newSegments []segments.Segment
 
-	l0Set := typeutil.NewUniqueSet(segmentList...)
 	for _, s := range c.l0Segments {
-		if l0Set.Contain(s.ID()) {
+		if s.StartPosition().GetTimestamp() < ts {
 			s.Release(context.TODO())
 			continue
 		}

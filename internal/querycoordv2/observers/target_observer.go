@@ -524,7 +524,8 @@ func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, lead
 
 	if channel != nil {
 		action.Checkpoint = channel.GetSeekPosition()
-		action.L0InTarget = channel.GetLevelZeroSegmentIds()
+		// used to clean delete buffer in delegator, cause delete record before this ts already be dispatch to sealed segments
+		action.DeleteCP = channel.GetDeleteCheckpoint()
 	}
 
 	return action

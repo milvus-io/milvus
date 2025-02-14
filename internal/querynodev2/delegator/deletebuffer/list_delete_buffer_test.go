@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 )
@@ -135,10 +136,16 @@ func (s *ListDeleteBufferSuite) TestL0SegmentOperations() {
 	seg1 := segments.NewMockSegment(s.T())
 	seg1.On("ID").Return(int64(1))
 	seg1.On("Release", mock.Anything).Return()
+	seg1.On("StartPosition").Return(&msgpb.MsgPosition{
+		Timestamp: 10,
+	})
 
 	seg2 := segments.NewMockSegment(s.T())
 	seg2.On("ID").Return(int64(2))
 	seg2.On("Release", mock.Anything).Return()
+	seg2.On("StartPosition").Return(&msgpb.MsgPosition{
+		Timestamp: 20,
+	})
 
 	seg3 := segments.NewMockSegment(s.T())
 	seg3.On("Release", mock.Anything).Return()
@@ -160,7 +167,7 @@ func (s *ListDeleteBufferSuite) TestL0SegmentOperations() {
 	s.Equal(0, len(emptyBuffer.ListL0()))
 
 	// Test UnRegister
-	buffer.UnRegister(15, 1)
+	buffer.UnRegister(15)
 	segments = buffer.ListL0()
 	s.Equal(1, len(segments))
 	s.Equal(int64(2), segments[0].ID())
@@ -177,9 +184,6 @@ func (s *ListDeleteBufferSuite) TestL0SegmentOperations() {
 	// Verify Release was called on all segments
 	seg2.AssertCalled(s.T(), "Release", mock.Anything)
 	seg3.AssertCalled(s.T(), "Release", mock.Anything)
-
-	// Test UnRegister with non-existent segment
-	buffer.UnRegister(20, 999)
 
 	// Test RegisterL0 with nil segment (should not panic)
 	buffer.RegisterL0(nil)
