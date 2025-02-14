@@ -385,7 +385,8 @@ create_chunk(const FieldMeta& field_meta,
             break;
         }
         case milvus::DataType::VARCHAR:
-        case milvus::DataType::STRING: {
+        case milvus::DataType::STRING:
+        case milvus::DataType::TEXT: {
             w = std::make_shared<StringChunkWriter>(nullable);
             break;
         }
@@ -486,7 +487,8 @@ create_chunk(const FieldMeta& field_meta,
             break;
         }
         case milvus::DataType::VARCHAR:
-        case milvus::DataType::STRING: {
+        case milvus::DataType::STRING:
+        case milvus::DataType::TEXT: {
             w = std::make_shared<StringChunkWriter>(
                 file, file_offset, nullable);
             break;
