@@ -2,9 +2,8 @@ use regex;
 use serde_json as json;
 use tantivy::tokenizer::*;
 
-use crate::error::Result;
-use crate::error::TantivyBindingError;
-use crate::util::*;
+use crate::error::{Result,TantivyBindingError};
+use crate::analyzer::util::*;
 
 pub(crate) enum SystemFilter {
     Invalid,
@@ -79,7 +78,7 @@ fn get_decompounder_filter(params: &json::Map<String, json::Value>) -> Result<Sy
     for element in stop_words {
         match element.as_str() {
             Some(word) => str_list.push(word.to_string()),
-            None => {
+            _ => {
                 return Err(TantivyBindingError::InternalError(
                     "decompounder word list item should be string".to_string(),
                 ))
@@ -114,12 +113,10 @@ fn get_stemmer_filter(params: &json::Map<String, json::Value>) -> Result<SystemF
 }
 
 trait LanguageParser {
-    type Error;
     fn into_language(self) -> Result<Language>;
 }
 
 impl LanguageParser for &str {
-    type Error = TantivyBindingError;
     fn into_language(self) -> Result<Language> {
         match self.to_lowercase().as_str() {
             "arabig" => Ok(Language::Arabic),
