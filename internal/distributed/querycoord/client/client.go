@@ -458,6 +458,17 @@ func (c *Client) ResumeBalance(ctx context.Context, req *querypb.ResumeBalanceRe
 	})
 }
 
+func (c *Client) CheckBalanceStatus(ctx context.Context, req *querypb.CheckBalanceStatusRequest, opts ...grpc.CallOption) (*querypb.CheckBalanceStatusResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.CheckBalanceStatusResponse, error) {
+		return client.CheckBalanceStatus(ctx, req)
+	})
+}
+
 func (c *Client) SuspendNode(ctx context.Context, req *querypb.SuspendNodeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(

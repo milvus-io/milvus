@@ -52,6 +52,7 @@ const (
 
 	RouteSuspendQueryCoordBalance = "/management/querycoord/balance/suspend"
 	RouteResumeQueryCoordBalance  = "/management/querycoord/balance/resume"
+	RouteQueryCoordBalanceStatus  = "/management/querycoord/balance/status"
 	RouteTransferSegment          = "/management/querycoord/transfer/segment"
 	RouteTransferChannel          = "/management/querycoord/transfer/channel"
 
