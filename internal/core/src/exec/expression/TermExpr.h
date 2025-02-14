@@ -57,7 +57,8 @@ class PhyTermFilterExpr : public SegmentExpr {
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
         milvus::Timestamp timestamp,
-        int64_t batch_size)
+        int64_t batch_size,
+        int32_t consistency_level)
         : SegmentExpr(std::move(input),
                       name,
                       segment,
@@ -65,7 +66,8 @@ class PhyTermFilterExpr : public SegmentExpr {
                       expr->column_.nested_path_,
                       DataType::NONE,
                       active_count,
-                      batch_size),
+                      batch_size,
+                      consistency_level),
           expr_(expr),
           query_timestamp_(timestamp) {
     }
@@ -132,6 +134,7 @@ class PhyTermFilterExpr : public SegmentExpr {
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
     SingleElement arg_val_;
+    int32_t consistency_level_ = 0;
 };
 }  //namespace exec
 }  // namespace milvus
