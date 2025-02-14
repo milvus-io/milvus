@@ -14,7 +14,7 @@ expr:
 	| expr LIKE StringLiteral                                                    # Like
 	| TEXTMATCH'('Identifier',' StringLiteral')'                                 # TextMatch
 	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			 # PhraseMatch
-	| RANDOMSAMPLE'(' FloatingConstant (',' expr)? ')'						     # RandomSample
+	| RANDOMSAMPLE'(' expr ')'						     						 # RandomSample
 	| expr POW expr											                     # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                     # Unary
 //	| '(' typeName ')' expr									                     # Cast

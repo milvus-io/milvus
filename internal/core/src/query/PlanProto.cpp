@@ -235,7 +235,7 @@ ProtoParser::RetrievePlanNodeFromProto(
                 milvus::plan::GetNextPlanNodeId(), sources);
             node->plannodes_ = std::move(plannode);
         } else {
-            auto parse_expr = [&](const proto::plan::Expr& predicate_proto)
+            auto parse_expr_to_filter_node = [&](const proto::plan::Expr& predicate_proto)
                 -> plan::PlanNodePtr {
                 auto expr = ParseExprs(predicate_proto);
                 return std::make_shared<plan::FilterBitsNode>(
@@ -249,7 +249,7 @@ ProtoParser::RetrievePlanNodeFromProto(
                     proto::plan::Expr::kRandomSampleExpr) {
                     auto& sample_expr = predicate_proto->random_sample_expr();
                     if (sample_expr.has_predicate()) {
-                        auto expr_parser = parse_expr(sample_expr.predicate());
+                        auto expr_parser = parse_expr_to_filter_node(sample_expr.predicate());
                         plannode = std::move(expr_parser);
                         sources =
                             std::vector<milvus::plan::PlanNodePtr>{plannode};
@@ -262,7 +262,7 @@ ProtoParser::RetrievePlanNodeFromProto(
                             sources));
                     sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
                 } else {
-                    auto expr_parser = parse_expr(query.predicates());
+                    auto expr_parser = parse_expr_to_filter_node(query.predicates());
                     plannode = std::move(expr_parser);
                     sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
                 }

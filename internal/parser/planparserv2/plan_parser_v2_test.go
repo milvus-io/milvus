@@ -1472,24 +1472,26 @@ func TestRandomSampleWithFilter(t *testing.T) {
 	exprStrs := []string{
 		`random_sample(0.01)`,
 		`random_sample(0.9999)`,
-		`random_sample(0.01, BoolField in [true, false])`,
-		`random_sample(0.01, Int8Field < Int16Field)`,
-		`random_sample(0.01, Int16Field <= 1)`,
-		`random_sample(0.01, VarCharField like "prefix%")`,
-		`random_sample(0.01, VarCharField is null)`,
-		`random_sample(0.01, VarCharField IS NOT NULL)`,
-		`random_sample(0.01, 11.0 < DoubleField < 12.0)`,
-		`random_sample(0.01, 1 < JSONField < 3)`,
-		`random_sample(0.01, Int64Field + 1.1 == 2.1)`,
-		`random_sample(0.01, Int64Field % 10 != 9)`,
-		`random_sample(0.01, A * 15 > 16)`,
-		`random_sample(0.01, (Int16Field - 3 == 4) and (Int32Field * 5 != 6))`,
+		`BoolField in [true, false] && random_sample(0.01)`,
+		`Int8Field < Int16Field && random_sample(0.01)`,
+		`Int8Field < Int16Field && Int16Field <= 1 && random_sample(0.01)`,
+		`Int16Field <= 1 && random_sample(0.01)`,
+		`VarCharField like "prefix%" && random_sample(0.01)`,
+		`VarCharField is null && random_sample(0.01)`,
+		`VarCharField IS NOT NULL && random_sample(0.01)`,
+		`11.0 < DoubleField < 12.0 && random_sample(0.01)`,
+		`1 < JSONField < 3 && random_sample(0.01)`,
+		`Int64Field + 1.1 == 2.1 && random_sample(0.01)`,
+		`Int64Field % 10 != 9 && random_sample(0.01)`,
+		`A * 15 > 16 && random_sample(0.01)`,
+		`(Int16Field - 3 == 4) and (Int32Field * 5 != 6) && random_sample(0.01)`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
 	}
 
 	exprStrsInvalid := []string{
+		`random_sample(a)`,
 		`random_sample(1)`,
 		`random_sample(1.1)`,
 		`random_sample(0)`,
@@ -1497,7 +1499,7 @@ func TestRandomSampleWithFilter(t *testing.T) {
 		`random_sample(0.01, Int8Field < Int16Field) + 1`,
 		`random_sample(0.01, Int8Field < Int16Field) ** 2 == 1`,
 		`not random_sample(0.01, Int8Field < Int16Field)`,
-		`(Int16Field - 3 == 4) and random_sample(0.01)`,
+		`(Int16Field - 3 == 4) || random_sample(0.01)`,
 		`random_sample(0.01) and (Int16Field - 3 == 4)`,
 		`random_sample(0.01) or (Int16Field - 3 == 4)`,
 		`random_sample(0.01, FloatField)`,

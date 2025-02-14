@@ -581,48 +581,23 @@ func operationSupportSample(expr *ExprWithType) bool {
 const EPSILON = 1e-7
 
 func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) interface{} {
-	sampleFactor, err := strconv.ParseFloat(ctx.FloatingConstant().GetText(), 32)
-	if err != nil {
-		return err
+	if ctx.Expr() == nil {
+		return fmt.Errorf("sample factor missed: %s", ctx.GetText())
 	}
 
+	floatExpr := ctx.Expr().Accept(v)
+	if err := getError(floatExpr); err != nil {
+		return fmt.Errorf("cannot parse expression: %s, error: %s", ctx.Expr().GetText(), err)
+	}
+	floatValueExpr := getValueExpr(floatExpr)
+	if floatValueExpr == nil || floatValueExpr.GetValue() == nil {
+		return fmt.Errorf("\"float factor\" should be a const float expression: \"float factor\" passed: %s", ctx.Expr().GetText())
+	}
+
+	sampleFactor := floatValueExpr.GetValue().GetFloatVal()
 	if sampleFactor <= 0+EPSILON || sampleFactor >= 1-EPSILON {
 		return fmt.Errorf("sample factor should be in range (0, 1) exclusive, but got %f", sampleFactor)
 	}
-
-	if expr := ctx.Expr(); expr != nil {
-		parsedPredicate := expr.Accept(v)
-
-		if err := getError(parsedPredicate); err != nil {
-			return fmt.Errorf("cannot parse expression: %s, error: %s", expr.GetText(), err)
-		}
-
-		predicate := getExpr(parsedPredicate)
-		if predicate == nil {
-			return fmt.Errorf("cannot parse expression: %s", expr.GetText())
-		}
-
-		if !operationSupportSample(predicate) {
-			return fmt.Errorf("The predicate is not supported in random sampling: %s", expr.GetText())
-		}
-
-		if !canBeExecuted(predicate) {
-			return fmt.Errorf("predicate in random sample is not a boolean expression: %s, data type: %s", expr.GetText(), predicate.dataType)
-		}
-
-		return &ExprWithType{
-			expr: &planpb.Expr{
-				Expr: &planpb.Expr_RandomSampleExpr{
-					RandomSampleExpr: &planpb.RandomSampleExpr{
-						SampleFactor: float32(sampleFactor),
-						Predicate:    predicate.expr,
-					},
-				},
-			},
-			dataType: predicate.dataType,
-		}
-	}
-
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_RandomSampleExpr{
@@ -1050,22 +1025,34 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 	var rightExpr *ExprWithType
 	leftExpr = getExpr(left)
 	rightExpr = getExpr(right)
-	if randomSampleExpr(leftExpr) || randomSampleExpr(rightExpr) {
-		return fmt.Errorf("random sample expression cannot be used in logical and expression")
+	if randomSampleExpr(leftExpr) {
+		return fmt.Errorf("random sample expression can only be the last expression in the logical and expression")
 	}
 
-	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
+	if !canBeExecuted(leftExpr) {
 		return fmt.Errorf("'and' can only be used between boolean expressions")
 	}
-	expr := &planpb.Expr{
-		Expr: &planpb.Expr_BinaryExpr{
-			BinaryExpr: &planpb.BinaryExpr{
-				Left:  leftExpr.expr,
-				Right: rightExpr.expr,
-				Op:    planpb.BinaryExpr_LogicalAnd,
+
+	var expr *planpb.Expr
+	if randomSampleExpr(rightExpr) {
+		randomSampleExpr := rightExpr.expr.GetRandomSampleExpr()
+		randomSampleExpr.Predicate = leftExpr.expr
+		expr = &planpb.Expr{
+			Expr: &planpb.Expr_RandomSampleExpr{
+				RandomSampleExpr: randomSampleExpr,
 			},
-		},
-		IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
+		}
+	} else {
+		expr = &planpb.Expr{
+			Expr: &planpb.Expr_BinaryExpr{
+				BinaryExpr: &planpb.BinaryExpr{
+					Left:  leftExpr.expr,
+					Right: rightExpr.expr,
+					Op:    planpb.BinaryExpr_LogicalAnd,
+				},
+			},
+			IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
+		}
 	}
 
 	return &ExprWithType{
