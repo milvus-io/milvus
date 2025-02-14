@@ -191,7 +191,12 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 			}
 			return err
 		}
-		err = AppendSystemFieldsData(t, data)
+		rowNum := GetInsertDataRowCount(data, t.GetSchema())
+		if rowNum == 0 {
+			log.Info("0 row was imported, the data may have been deleted", WrapLogFields(t))
+			continue
+		}
+		err = AppendSystemFieldsData(t, data, rowNum)
 		if err != nil {
 			return err
 		}
