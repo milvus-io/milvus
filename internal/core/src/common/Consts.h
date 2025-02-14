@@ -31,6 +31,9 @@ const char MAX_LENGTH[] = "max_length";
 // const fieldID (rowID and timestamp)
 const milvus::FieldId RowFieldID = milvus::FieldId(0);
 const milvus::FieldId TimestampFieldID = milvus::FieldId(1);
+// segment id & offset
+const milvus::FieldId SegmentIDFieldID = milvus::FieldId(START_USER_FIELDID-1);
+const milvus::FieldId OffsetFieldID = milvus::FieldId(START_USER_FIELDID-2);
 
 // fill followed extra info to binlog file
 const char ORIGIN_SIZE_KEY[] = "original_size";
