@@ -174,13 +174,22 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         return;
     }
 
-    auto row_count = info.index->Count();
-    AssertInfo(row_count > 0, "Index count is 0");
-
     std::unique_lock lck(mutex_);
     AssertInfo(
         !get_bit(index_ready_bitset_, field_id),
         "scalar index has been exist at " + std::to_string(field_id.get()));
+
+    if (field_meta.get_data_type() == DataType::JSON) {
+        auto path = info.index_params.at(JSON_PATH);
+        JSONIndexKey key;
+        key.nested_path = path;
+        key.field_id = field_id;
+        json_indexings_[key] =
+            std::move(const_cast<LoadIndexInfo&>(info).index);
+        return;
+    }
+    auto row_count = info.index->Count();
+    AssertInfo(row_count > 0, "Index count is 0");
     if (num_rows_.has_value()) {
         AssertInfo(num_rows_.value() == row_count,
                    "field (" + std::to_string(field_id.get()) +
@@ -1840,6 +1849,8 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
                 field_indexing->indexing_.get());
             return vec_index->HasRawData();
         }
+    } else if (IsJsonDataType(field_meta.get_data_type())) {
+        return get_bit(field_data_ready_bitset_, fieldID);
     } else {
         auto scalar_index = scalar_indexings_.find(fieldID);
         if (scalar_index != scalar_indexings_.end()) {

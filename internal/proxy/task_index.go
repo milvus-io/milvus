@@ -426,7 +426,7 @@ func (cit *createIndexTask) getIndexedFieldAndFunction(ctx context.Context) erro
 		return fmt.Errorf("failed to get collection schema: %s", err)
 	}
 
-	field, err := schema.schemaHelper.GetFieldFromName(cit.req.GetFieldName())
+	field, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(cit.req.GetFieldName())
 	if err != nil {
 		log.Ctx(ctx).Error("create index on non-exist field", zap.Error(err))
 		return fmt.Errorf("cannot create index on non-exist field: %s", cit.req.GetFieldName())
