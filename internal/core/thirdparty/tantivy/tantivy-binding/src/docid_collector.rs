@@ -4,10 +4,17 @@ use tantivy::{
     DocId, Score, SegmentOrdinal, SegmentReader,
 };
 
-pub(crate) struct DocIdCollector;
+use crate::bitset_wrapper::BitsetWrapper;
+
+// "warning": bitset_wrapper has no guarantee for thread safety, so `DocIdChildCollector`
+// should be handled serializely which means we should only use single thread
+// for executing query.
+pub(crate) struct DocIdCollector {
+    pub(crate) bitset_wrapper: BitsetWrapper,
+}
 
 impl Collector for DocIdCollector {
-    type Fruit = Vec<u32>;
+    type Fruit = ();
     type Child = DocIdChildCollector;
 
     fn for_segment(
@@ -16,45 +23,40 @@ impl Collector for DocIdCollector {
         segment: &SegmentReader,
     ) -> tantivy::Result<Self::Child> {
         Ok(DocIdChildCollector {
-            docs: Vec::new(),
+            bitset_wrapper: self.bitset_wrapper.clone(),
             column: segment.fast_fields().i64("doc_id").unwrap(),
         })
     }
 
+    #[inline]
     fn requires_scoring(&self) -> bool {
         false
     }
 
+    #[inline]
     fn merge_fruits(
         &self,
-        segment_fruits: Vec<<Self::Child as SegmentCollector>::Fruit>,
+        _: Vec<<Self::Child as SegmentCollector>::Fruit>,
     ) -> tantivy::Result<Self::Fruit> {
-        let len: usize = segment_fruits.iter().map(|docset| docset.len()).sum();
-        let mut result = Vec::with_capacity(len);
-        for docs in segment_fruits {
-            for doc in docs {
-                result.push(doc);
-            }
-        }
-        Ok(result)
+        Ok(())
     }
 }
 
 pub(crate) struct DocIdChildCollector {
-    docs: Vec<u32>,
+    bitset_wrapper: BitsetWrapper,
     column: Column<i64>,
 }
 
 impl SegmentCollector for DocIdChildCollector {
-    type Fruit = Vec<u32>;
+    type Fruit = ();
 
+    #[inline]
     fn collect(&mut self, doc: DocId, _score: Score) {
         self.column.values_for_doc(doc).for_each(|doc_id| {
-            self.docs.push(doc_id as u32);
+            self.bitset_wrapper.set(doc_id as u32);
         })
     }
 
-    fn harvest(self) -> Self::Fruit {
-        self.docs
-    }
+    #[inline]
+    fn harvest(self) -> Self::Fruit {}
 }

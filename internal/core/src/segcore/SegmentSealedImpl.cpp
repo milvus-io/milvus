@@ -2045,7 +2045,7 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     }
 
     // create index reader.
-    index->CreateReader();
+    index->CreateReader(index::SetBitset);
     // release index writer.
     index->Finish();
 

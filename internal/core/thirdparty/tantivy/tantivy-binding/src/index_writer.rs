@@ -6,17 +6,14 @@ use futures::executor::block_on;
 use libc::c_char;
 use log::info;
 use tantivy::schema::{
-    Field, IndexRecordOption, OwnedValue, Schema, SchemaBuilder, TextFieldIndexing, TextOptions,
-    FAST, INDEXED,
+    Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, FAST, INDEXED,
 };
-use tantivy::{
-    doc, tokenizer, Document, Index, IndexWriter, SingleSegmentIndexWriter, TantivyDocument,
-};
+use tantivy::{doc, Index, IndexWriter, SingleSegmentIndexWriter, TantivyDocument};
 
 use crate::data_type::TantivyDataType;
 
 use crate::error::Result;
-use crate::index_reader::IndexReaderWrapper;
+use crate::index_reader::{IndexReaderWrapper, SetBitsetFn};
 use crate::log::init_log;
 
 pub(crate) struct IndexWriterWrapper {
@@ -101,8 +98,8 @@ impl IndexWriterWrapper {
         })
     }
 
-    pub fn create_reader(&self) -> Result<IndexReaderWrapper> {
-        IndexReaderWrapper::from_index(self.index.clone())
+    pub fn create_reader(&self, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
+        IndexReaderWrapper::from_index(self.index.clone(), set_bitset)
     }
 
     fn index_writer_add_document(&self, document: TantivyDocument) -> Result<()> {
