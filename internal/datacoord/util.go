@@ -72,7 +72,7 @@ func VerifyResponse(response interface{}, err error) error {
 	}
 }
 
-func FilterInIndexedSegments(handler Handler, mt *meta, skipNoIndexCollection bool, segments ...*SegmentInfo) []*SegmentInfo {
+func FilterInIndexedSegments(handler Handler, mt *meta, includeUnIndexedCollection bool, segments ...*SegmentInfo) []*SegmentInfo {
 	if len(segments) == 0 {
 		return nil
 	}
@@ -84,7 +84,7 @@ func FilterInIndexedSegments(handler Handler, mt *meta, skipNoIndexCollection bo
 	ret := make([]*SegmentInfo, 0)
 	for collection, segmentList := range collectionSegments {
 		// No segments will be filtered if there are no indices in the collection.
-		if skipNoIndexCollection && !mt.indexMeta.HasIndex(collection) {
+		if includeUnIndexedCollection && !mt.indexMeta.HasIndex(collection) {
 			ret = append(ret, segmentList...)
 			continue
 		}
