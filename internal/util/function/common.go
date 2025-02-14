@@ -117,6 +117,18 @@ const (
 	cohereAIAKEnvStr string = "MILVUSAI_COHERE_API_KEY"
 )
 
+// siliconflow
+
+const (
+	bAAIBgeLargeZhV15               string = "BAAI/bge-large-zh-v1.5"
+	bAAIBgeLargeEhV15               string = "BAAI/bge-large-eh-v1.5"
+	neteaseYoudaoBceEmbeddingBasev1 string = "netease-youdao/bce-embedding-base_v1"
+	bAAIBgeM3                       string = "BAAI/bge-m3"
+	proBAAIBgeM3                    string = "Pro/BAAI/bge-m3 "
+
+	siliconflowAKEnvStr string = "MILVUSAI_SILICONFLOW_API_KEY"
+)
+
 func parseAndCheckFieldDim(dimStr string, fieldDim int64, fieldName string) (int64, error) {
 	dim, err := strconv.ParseInt(dimStr, 10, 64)
 	if err != nil {
