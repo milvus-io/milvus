@@ -43,14 +43,15 @@ PhyMvccNode::GetOutput() {
         return nullptr;
     }
 
-    if (!is_source_node_ && input_ == nullptr) {
-        return nullptr;
-    }
-
     if (active_count_ == 0) {
         is_finished_ = true;
         return nullptr;
     }
+
+    if (!is_source_node_ && input_ == nullptr) {
+        return nullptr;
+    }
+
     // the first vector is filtering result and second bitset is a valid bitset
     // if valid_bitset[i]==false, means result[i] is null
     auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(

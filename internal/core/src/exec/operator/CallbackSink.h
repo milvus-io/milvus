@@ -26,7 +26,7 @@ class CallbackSink : public Operator {
         int32_t operator_id,
         DriverContext* ctx,
         std::function<BlockingReason(RowVectorPtr, ContinueFuture*)> callback)
-        : Operator(ctx, DataType::NONE, operator_id, "N/A", "CallbackSink"),
+        : Operator(ctx, RowType::None, operator_id, "N/A", "CallbackSink"),
           callback_(callback) {
     }
 
@@ -52,7 +52,7 @@ class CallbackSink : public Operator {
     }
 
     bool
-    IsFilter() override {
+    IsFilter() const override {
         return false;
     }
 
