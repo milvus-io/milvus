@@ -49,6 +49,7 @@ const char PAGE_RETAIN_ORDER[] = "page_retain_order";
 const char TEXT_LOG_ROOT_PATH[] = "text_log";
 const char ITERATIVE_FILTER[] = "iterative_filter";
 const char HINTS[] = "hints";
+const char JSON_KEY_INDEX_LOG_ROOT_PATH[] = "json_key_index_log";
 
 const char DEFAULT_PLANNODE_ID[] = "0";
 const char DEAFULT_QUERY_ID[] = "0";
@@ -77,3 +78,7 @@ const int64_t DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND = 500;
 const int64_t DEFAULT_HYBRID_INDEX_BITMAP_CARDINALITY_LIMIT = 100;
 
 const size_t MARISA_NULL_KEY_ID = -1;
+
+const int64_t DEFAULT_JSON_INDEX_MEMORY_BUDGET = 67108864;  // bytes, 64MB
+const int64_t DEFAULT_JSON_INDEX_COMMIT_INTERVAL = 200;
+const bool DEFAULT_JSON_INDEX_ENABLED = true;

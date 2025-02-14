@@ -12,13 +12,13 @@ use crate::util::free_binding;
 
 #[repr(C)]
 pub struct RustArray {
-    array: *mut u32,
+    array: *mut i64,
     len: size_t,
     cap: size_t,
 }
 
 impl RustArray {
-    pub fn from_vec(vec: Vec<u32>) -> RustArray {
+    pub fn from_vec(vec: Vec<i64>) -> RustArray {
         let len = vec.len();
         let cap = vec.capacity();
         let v = vec.leak();
@@ -40,8 +40,8 @@ impl std::default::Default for RustArray {
     }
 }
 
-impl From<Vec<u32>> for RustArray {
-    fn from(vec: Vec<u32>) -> Self {
+impl From<Vec<i64>> for RustArray {
+    fn from(vec: Vec<i64>) -> Self {
         RustArray::from_vec(vec)
     }
 }
@@ -74,7 +74,7 @@ macro_rules! impl_from_for_enum {
     };
 }
 
-impl_from_for_enum!(Value, None => (), RustArray => RustArray, RustArray => Vec<u32>, U32 => u32, Ptr => *mut c_void);
+impl_from_for_enum!(Value, None => (), RustArray => RustArray, RustArray => Vec<i64>, U32 => u32, Ptr => *mut c_void);
 
 #[repr(C)]
 pub struct RustResult {
