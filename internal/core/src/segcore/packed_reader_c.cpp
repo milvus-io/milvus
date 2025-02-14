@@ -22,33 +22,37 @@
 #include <arrow/filesystem/filesystem.h>
 #include <arrow/status.h>
 #include <memory>
+#include "common/EasyAssert.h"
+#include "common/type_c.h"
 
-int
-NewPackedReader(const char* path,
+
+CStatus
+NewPackedReader(char** paths,
+                int64_t num_paths,
                 struct ArrowSchema* schema,
                 const int64_t buffer_size,
                 CPackedReader* c_packed_reader) {
     try {
-        auto truePath = std::string(path);
-        auto factory = std::make_shared<milvus_storage::FileSystemFactory>();
-        auto conf = milvus_storage::StorageConfig();
-        conf.uri = "file:///tmp/";
-        auto trueFs = factory->BuildFileSystem(conf, &truePath).value();
+        auto truePaths = std::vector<std::string>(paths, paths + num_paths);
+        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance().GetArrowFileSystem();
+        if (!trueFs) {
+            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed, "Failed to get filesystem");
+        }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
         std::set<int> needed_columns;
         for (int i = 0; i < trueSchema->num_fields(); i++) {
             needed_columns.emplace(i);
         }
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
-            *trueFs, path, trueSchema, needed_columns, buffer_size);
+            trueFs, truePaths, trueSchema, needed_columns, buffer_size);
         *c_packed_reader = reader.release();
-        return 0;
+        return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return -1;
+        return milvus::FailureCStatus(&e);
     }
 }
 
-int
+CStatus
 ReadNext(CPackedReader c_packed_reader,
          CArrowArray* out_array,
          CArrowSchema* out_schema) {
@@ -59,11 +63,11 @@ ReadNext(CPackedReader c_packed_reader,
         std::shared_ptr<arrow::RecordBatch> record_batch;
         auto status = packed_reader->ReadNext(&record_batch);
         if (!status.ok()) {
-            return -1;
+            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed, status.ToString());
         }
         if (record_batch == nullptr) {
             // end of file
-            return 0;
+            return milvus::SuccessCStatus();
         } else {
             std::unique_ptr<ArrowArray> arr = std::make_unique<ArrowArray>();
             std::unique_ptr<ArrowSchema> schema =
@@ -71,27 +75,27 @@ ReadNext(CPackedReader c_packed_reader,
             auto status = arrow::ExportRecordBatch(
                 *record_batch, arr.get(), schema.get());
             if (!status.ok()) {
-                return -1;
+                return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed, status.ToString());
             }
             *out_array = arr.release();
             *out_schema = schema.release();
-            return 0;
+            return milvus::SuccessCStatus();
         }
-        return 0;
+        return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return -1;
+        return milvus::FailureCStatus(&e);
     }
 }
 
-int
+CStatus
 CloseReader(CPackedReader c_packed_reader) {
     try {
         auto packed_reader =
             static_cast<milvus_storage::PackedRecordBatchReader*>(
                 c_packed_reader);
         delete packed_reader;
-        return 0;
+        return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return -1;
+        return milvus::FailureCStatus(&e);
     }
 }
