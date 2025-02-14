@@ -98,6 +98,7 @@ message SubSearchRequest {
   int64 group_by_field_id = 10;
   int64 group_size = 11;
   int64 field_id = 12;
+  bool ignore_growing = 13;
 }
 
 message SearchRequest {
@@ -129,6 +130,7 @@ message SearchRequest {
   int64 field_id = 25;
   bool is_topk_reduce = 26;
   bool is_recall_evaluation = 27;
+  bool is_iterator = 28;
 }
 
 message SubSearchResults {
@@ -194,6 +196,7 @@ message RetrieveRequest {
   bool reduce_stop_for_best = 16; //deprecated
   int32 reduce_type = 17;
   common.ConsistencyLevel consistency_level = 18;
+  bool is_iterator = 19;
 }
 
 
@@ -324,7 +327,7 @@ message ImportFile {
 }
 
 message ImportRequestInternal {
-  int64 dbID = 1;
+  int64 dbID = 1 [deprecated=true];
   int64 collectionID = 2;
   string collection_name = 3;
   repeated int64 partitionIDs = 4;
@@ -332,6 +335,8 @@ message ImportRequestInternal {
   schema.CollectionSchema schema = 6;
   repeated ImportFile files = 7;
   repeated common.KeyValuePair options = 8;
+  uint64 data_timestamp = 9;
+  int64 jobID = 10;
 }
 
 message ImportRequest {
