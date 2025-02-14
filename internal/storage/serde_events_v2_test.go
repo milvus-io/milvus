@@ -45,8 +45,9 @@ func TestPackedSerde(t *testing.T) {
 			group = append(group, i)
 		}
 		columnGroups := [][]int{group}
-
-		writer, err := NewPackedSerializeWriter(paths, schema, bufferSize, 0, columnGroups, 7)
+		multiPartUploadSize := int64(0)
+		batchSize := 7
+		writer, err := NewPackedSerializeWriter(paths, schema, bufferSize, multiPartUploadSize, columnGroups, batchSize)
 		assert.NoError(t, err)
 
 		for i := 1; i <= size; i++ {

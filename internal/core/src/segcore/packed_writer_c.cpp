@@ -23,8 +23,6 @@
 #include <arrow/filesystem/filesystem.h>
 #include "common/EasyAssert.h"
 #include "common/type_c.h"
-#include <iostream>
-
 
 CStatus
 NewPackedWriter(struct ArrowSchema* schema,

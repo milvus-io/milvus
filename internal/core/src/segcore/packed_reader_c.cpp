@@ -44,7 +44,7 @@ NewPackedReader(char** paths,
             needed_columns.emplace(i);
         }
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
-            *trueFs, truePaths, trueSchema, needed_columns, buffer_size);
+            trueFs, truePaths, trueSchema, needed_columns, buffer_size);
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

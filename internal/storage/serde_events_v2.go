@@ -85,9 +85,7 @@ func NewPackedRecordReader(paths []string, schema *schemapb.CollectionSchema, bu
 func NewPackedDeserializeReader(paths []string, schema *schemapb.CollectionSchema,
 	bufferSize int64, pkFieldID FieldID,
 ) (*DeserializeReader[*Value], error) {
-	fmt.Println("create new packed reader")
 	reader, err := NewPackedRecordReader(paths, schema, bufferSize)
-	fmt.Println("!!! err: ", err)
 	if err != nil {
 		return nil, err
 	}
