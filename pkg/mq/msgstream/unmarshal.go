@@ -85,6 +85,7 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	operateUserRoleMsg := OperateUserRoleMsg{}
 	operatePrivilegeMsg := OperatePrivilegeMsg{}
 	replicateMsg := ReplicateMsg{}
+	importMsg := ImportMsg{}
 
 	p := &ProtoUnmarshalDispatcher{}
 	p.TempMap = make(map[commonpb.MsgType]UnmarshalFunc)
@@ -115,6 +116,7 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_OperateUserRole] = operateUserRoleMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_OperatePrivilege] = operatePrivilegeMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_Replicate] = replicateMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_Import] = importMsg.Unmarshal
 
 	return p
 }

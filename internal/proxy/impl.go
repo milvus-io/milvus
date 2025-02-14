@@ -46,7 +46,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -6535,143 +6534,46 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	method := "ImportV2"
 	tr := timerecord.NewTimeRecorder(method)
 	log.Info(rpcReceived(method))
-
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
-	defer func() {
-		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.TotalLabel, req.GetDbName(), req.GetCollectionName()).Inc()
-		if resp.GetStatus().GetCode() != 0 {
-			log.Warn("import failed", zap.String("err", resp.GetStatus().GetReason()))
-			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
-		} else {
-			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.SuccessLabel, req.GetDbName(), req.GetCollectionName()).Inc()
-		}
-	}()
+	metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.TotalLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
+	it := &importTask{
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		req:       req,
+		node:      node,
+		dataCoord: node.dataCoord,
+		resp:      resp,
 	}
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-	channels, err := node.chMgr.getVChannels(collectionID)
-	if err != nil {
+
+	if err := node.sched.dmQueue.Enqueue(it); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.AbandonLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	isBackup := importutilv2.IsBackup(req.GetOptions())
-	isL0Import := importutilv2.IsL0Import(req.GetOptions())
-	hasPartitionKey := typeutil.HasPartitionKey(schema.CollectionSchema)
+	log.Info(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", it.BeginTs()),
+		zap.Uint64("EndTs", it.EndTs()))
 
-	var partitionIDs []int64
-	if isBackup {
-		if req.GetPartitionName() == "" {
-			resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("partition not specified"))
-			return resp, nil
-		}
-		// Currently, Backup tool call import must with a partition name, each time restore a partition
-		partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.GetPartitionName())
-		if err != nil {
-			resp.Status = merr.Status(err)
-			return resp, nil
-		}
-		partitionIDs = []UniqueID{partitionID}
-	} else if isL0Import {
-		if req.GetPartitionName() == "" {
-			partitionIDs = []UniqueID{common.AllPartitionsID}
-		} else {
-			partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.PartitionName)
-			if err != nil {
-				resp.Status = merr.Status(err)
-				return resp, nil
-			}
-			partitionIDs = []UniqueID{partitionID}
-		}
-		// Currently, querynodes first load L0 segments and then load L1 segments.
-		// Therefore, to ensure the deletes from L0 import take effect,
-		// the collection needs to be in an unloaded state,
-		// and then all L0 and L1 segments should be loaded at once.
-		// We will remove this restriction after querynode supported to load L0 segments dynamically.
-		loaded, err := isCollectionLoaded(ctx, node.queryCoord, collectionID)
-		if err != nil {
-			resp.Status = merr.Status(err)
-			return resp, nil
-		}
-		if loaded {
-			resp.Status = merr.Status(merr.WrapErrImportFailed("for l0 import, collection cannot be loaded, please release it first"))
-			return resp, nil
-		}
-	} else {
-		if hasPartitionKey {
-			if req.GetPartitionName() != "" {
-				resp.Status = merr.Status(merr.WrapErrImportFailed("not allow to set partition name for collection with partition key"))
-				return resp, nil
-			}
-			partitions, err := globalMetaCache.GetPartitions(ctx, req.GetDbName(), req.GetCollectionName())
-			if err != nil {
-				resp.Status = merr.Status(err)
-				return resp, nil
-			}
-			_, partitionIDs, err = typeutil.RearrangePartitionsForPartitionKey(partitions)
-			if err != nil {
-				resp.Status = merr.Status(err)
-				return resp, nil
-			}
-		} else {
-			if req.GetPartitionName() == "" {
-				req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
-			}
-			partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.PartitionName)
-			if err != nil {
-				resp.Status = merr.Status(err)
-				return resp, nil
-			}
-			partitionIDs = []UniqueID{partitionID}
-		}
-	}
-
-	req.Files = lo.Filter(req.GetFiles(), func(file *internalpb.ImportFile, _ int) bool {
-		return len(file.GetPaths()) > 0
-	})
-	if len(req.Files) == 0 {
-		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("import request is empty"))
-		return resp, nil
-	}
-	if len(req.Files) > Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("The max number of import files should not exceed %d, but got %d",
-			Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(req.Files))))
-		return resp, nil
-	}
-	if !isBackup && !isL0Import {
-		// check file type
-		for _, file := range req.GetFiles() {
-			_, err = importutilv2.GetFileType(file)
-			if err != nil {
-				resp.Status = merr.Status(err)
-				return resp, nil
-			}
-		}
-	}
-	importRequest := &internalpb.ImportRequestInternal{
-		CollectionID:   collectionID,
-		CollectionName: req.GetCollectionName(),
-		PartitionIDs:   partitionIDs,
-		ChannelNames:   channels,
-		Schema:         schema.CollectionSchema,
-		Files:          req.GetFiles(),
-		Options:        req.GetOptions(),
-	}
-	resp, err = node.dataCoord.ImportV2(ctx, importRequest)
-	if err != nil {
-		log.Warn("import failed", zap.Error(err))
+	if err := it.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", it.BeginTs()),
+			zap.Uint64("EndTs", it.EndTs()))
 		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
+
+	metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.SuccessLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return resp, err
+	return resp, nil
 }
 
 func (node *Proxy) GetImportProgress(ctx context.Context, req *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {
