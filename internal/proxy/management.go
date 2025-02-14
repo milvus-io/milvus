@@ -82,6 +82,10 @@ func RegisterMgrRoute(proxy *Proxy) {
 			Path:        management.RouteCheckQueryNodeDistribution,
 			HandlerFunc: proxy.CheckQueryNodeDistribution,
 		})
+		management.Register(&management.Handler{
+			Path:        management.RouteQueryCoordBalanceStatus,
+			HandlerFunc: proxy.CheckQueryCoordBalanceStatus,
+		})
 	})
 }
 
@@ -247,6 +251,29 @@ func (node *Proxy) ResumeQueryCoordBalance(w http.ResponseWriter, req *http.Requ
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"msg": "OK"}`))
+}
+
+func (node *Proxy) CheckQueryCoordBalanceStatus(w http.ResponseWriter, req *http.Request) {
+	resp, err := node.queryCoord.CheckBalanceStatus(req.Context(), &querypb.CheckBalanceStatusRequest{
+		Base: commonpbutil.NewMsgBase(),
+	})
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to check balance status, %s"}`, err.Error())))
+		return
+	}
+
+	if !merr.Ok(resp.GetStatus()) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to check balance status, %s"}`, resp.GetStatus().GetReason())))
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	balanceStatus := "suspended"
+	if resp.IsActive {
+		balanceStatus = "active"
+	}
+	w.Write([]byte(fmt.Sprintf(`{"msg": "OK", "status": "%v"}`, balanceStatus)))
 }
 
 func (node *Proxy) SuspendQueryNode(w http.ResponseWriter, req *http.Request) {
