@@ -390,7 +390,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				Nq:                 subReq.GetNq(),
 				Topk:               subReq.GetTopk(),
 				MetricType:         subReq.GetMetricType(),
-				IgnoreGrowing:      req.GetReq().GetIgnoreGrowing(),
+				IgnoreGrowing:      subReq.GetIgnoreGrowing(),
 				Username:           req.GetReq().GetUsername(),
 				IsAdvanced:         false,
 				GroupByFieldId:     subReq.GetGroupByFieldId(),
