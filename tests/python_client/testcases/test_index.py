@@ -486,8 +486,7 @@ class TestNewIndexBase(TestcaseBase):
                                   index_name=ct.default_index_name,
                                   check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 999,
-                                               ct.err_msg: "cannot create index on non-existed field: int8"}
-                                  )
+                                               ct.err_msg: "cannot create index on non-existed field: int8"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_index_partition(self):
@@ -1191,7 +1190,7 @@ class TestIndexInvalid(TestcaseBase):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_index_with_invalid_index_name(self, connect, invalid_index_name):
+    def test_index_with_invalid_index_name(self, invalid_index_name):
         """
         target: test create index interface for invalid scenario
         method:
@@ -1396,8 +1395,9 @@ class TestIndexInvalid(TestcaseBase):
         expected: raise exception
         """
         collection_w = self.init_collection_general(prefix, is_index=False, is_all_data_type=True)[0]
-        scalar_index = ["Trie", "STL_SORT"]
-        scalar_fields = [ct.default_string_field_name, ct.default_int16_field_name]
+        # Trie support now
+        scalar_index = ["STL_SORT"]
+        scalar_fields = [ct.default_int16_field_name]
         for i in range(len(scalar_fields)):
             index_name = f"scalar_index_name_{i}"
             scalar_index_params = {"index_type": f"{scalar_index[i]}"}
