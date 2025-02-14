@@ -725,7 +725,7 @@ message SyncAction {
     repeated int64 droppedInTarget = 10;
     msg.MsgPosition checkpoint = 11;
     map<int64, int64> partition_stats_versions = 12;
-    repeated int64 l0InTarget = 13;
+    msg.MsgPosition deleteCP = 13;
 }
 
 message SyncDistributionRequest {
