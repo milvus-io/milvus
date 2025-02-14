@@ -607,8 +607,6 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	idCandidates := lo.SliceToMap(candidates, func(candidate *pkoracle.BloomFilterSet) (int64, *pkoracle.BloomFilterSet) {
 		return candidate.ID(), candidate
 	})
-	deltaPositions := req.GetDeltaPositions()
-
 	for _, info := range infos {
 		candidate := idCandidates[info.GetSegmentID()]
 		// forward l0 deletion
@@ -627,16 +625,6 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			zap.Int64("segmentID", info.GetSegmentID()),
 		)
 		candidate := idCandidates[info.GetSegmentID()]
-		position := info.GetDeltaPosition()
-		if position == nil { // for compatibility of rolling upgrade from 2.2.x to 2.3
-			// During rolling upgrade, Querynode(2.3) may receive merged LoadSegmentRequest
-			// from QueryCoord(2.2); In version 2.2.x, only segments with the same dmlChannel
-			// can be merged, and deltaPositions will be merged into a single deltaPosition,
-			// so we should use `deltaPositions[0]` as the seek position for all the segments
-			// within the same LoadSegmentRequest.
-			position = deltaPositions[0]
-		}
-
 		// after L0 segment feature
 		// growing segemnts should have load stream delete as well
 		deleteScope := querypb.DataScope_All
@@ -650,9 +638,9 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		deleteData := &storage.DeleteData{}
 		// start position is dml position for segment
 		// if this position is before deleteBuffer's safe ts, it means some delete shall be read from msgstream
-		if position.GetTimestamp() < sd.deleteBuffer.SafeTs() {
+		if info.GetStartPosition().GetTimestamp() < sd.deleteBuffer.SafeTs() {
 			log.Info("load delete from stream...")
-			streamDeleteData, err := sd.readDeleteFromMsgstream(ctx, position, sd.deleteBuffer.SafeTs(), candidate)
+			streamDeleteData, err := sd.readDeleteFromMsgstream(ctx, info.GetStartPosition(), sd.deleteBuffer.SafeTs(), candidate)
 			if err != nil {
 				log.Warn("failed to read delete data from msgstream", zap.Error(err))
 				return err
@@ -661,9 +649,8 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			deleteData.Merge(streamDeleteData)
 			log.Info("load delete from stream done")
 		}
-
 		// list buffered delete
-		deleteRecords := sd.deleteBuffer.ListAfter(position.GetTimestamp())
+		deleteRecords := sd.deleteBuffer.ListAfter(info.GetStartPosition().GetTimestamp())
 		for _, entry := range deleteRecords {
 			for _, record := range entry.Data {
 				if record.PartitionID != common.AllPartitionsID && candidate.Partition() != record.PartitionID {
@@ -973,7 +960,7 @@ func (sd *shardDelegator) SyncTargetVersion(
 	sealedInTarget []int64,
 	droppedInTarget []int64,
 	checkpoint *msgpb.MsgPosition,
-	l0InTarget []int64,
+	deleteSeekPos *msgpb.MsgPosition,
 ) {
 	growings := sd.segmentManager.GetBy(
 		segments.WithType(segments.SegmentTypeGrowing),
@@ -1004,24 +991,11 @@ func (sd *shardDelegator) SyncTargetVersion(
 		log.Warn("found redundant growing segments",
 			zap.Int64s("growingSegments", redundantGrowingIDs))
 	}
-	redundantL0IDs := make([]int64, 0)
-	l0Set := typeutil.NewUniqueSet(l0InTarget...)
-	for _, l0 := range sd.deleteBuffer.ListL0() {
-		if !l0Set.Contain(l0.ID()) {
-			redundantL0IDs = append(redundantL0IDs, l0.ID())
-		}
-	}
-
 	sd.distribution.SyncTargetVersion(newVersion, partitions, growingInTarget, sealedInTarget, redundantGrowingIDs)
-	if len(redundantL0IDs) > 0 {
-		start := time.Now()
-		sd.deleteBuffer.UnRegister(checkpoint.GetTimestamp(), redundantL0IDs...)
-		log.Info("unregister l0 segments",
-			zap.Int64s("segment ids", redundantL0IDs),
-			zap.Duration("cost", time.Since(start)),
-		)
-		sd.RefreshLevel0DeletionStats()
-	}
+	start := time.Now()
+	sd.deleteBuffer.UnRegister(deleteSeekPos.GetTimestamp())
+	log.Info("clean delete buffer cost", zap.Duration("cost", time.Since(start)))
+	sd.RefreshLevel0DeletionStats()
 }
 
 func (sd *shardDelegator) GetTargetVersion() int64 {

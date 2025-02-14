@@ -1466,7 +1466,7 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 		s.manager.Segment.Put(context.Background(), segments.SegmentTypeGrowing, ms)
 	}
 
-	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{1}, []int64{2}, []int64{3, 4}, &msgpb.MsgPosition{}, []int64{})
+	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{1}, []int64{2}, []int64{3, 4}, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
 	s.Equal(int64(5), s.delegator.GetTargetVersion())
 }
 
@@ -1496,6 +1496,9 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 		InsertChannel: delegator.vchannelName,
 		Level:         datapb.SegmentLevel_L0,
 		NumOfRows:     1,
+		StartPosition: &msgpb.MsgPosition{
+			Timestamp: 10,
+		},
 	})
 	l0.LoadDeltaData(context.TODO(), partitionDeleteData)
 	delegator.deleteBuffer.RegisterL0(l0)
@@ -1507,6 +1510,9 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 		InsertChannel: delegator.vchannelName,
 		Level:         datapb.SegmentLevel_L0,
 		NumOfRows:     int64(1),
+		StartPosition: &msgpb.MsgPosition{
+			Timestamp: 20,
+		},
 	})
 	l0Global.LoadDeltaData(context.TODO(), allPartitionDeleteData)
 
@@ -1532,14 +1538,14 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	s.Equal(pks.Len(), 1)
 	s.True(pks.Get(0).EQ(allPartitionDeleteData.DeletePks().Get(0)))
 
-	delegator.deleteBuffer.UnRegister(0, l0.ID())
+	delegator.deleteBuffer.UnRegister(uint64(11))
 	pks, _ = delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	s.True(pks.Get(0).EQ(allPartitionDeleteData.DeletePks().Get(0)))
 
 	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	s.True(pks.Get(0).EQ(allPartitionDeleteData.DeletePks().Get(0)))
 
-	delegator.deleteBuffer.UnRegister(0, l0Global.ID())
+	delegator.deleteBuffer.UnRegister(uint64(21))
 	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	s.Empty(pks)
 }
