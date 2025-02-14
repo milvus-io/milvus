@@ -101,19 +101,19 @@ func TestHybridSearchMultiVectorsDefault(t *testing.T) {
 
 		// hybrid search with different limit
 		type limitGroup struct {
-			limit1   int
-			limit2   int
-			limit3   int
-			expLimit int
+			subLimit1 int
+			subLimit2 int
+			limit     int
 		}
+		// Duplicates when aggregating multiple subquery results
 		limits := []limitGroup{
-			{limit1: 10, limit2: 5, limit3: 8, expLimit: 8},
-			{limit1: 10, limit2: 5, limit3: 15, expLimit: 15},
-			{limit1: 10, limit2: 5, limit3: 20, expLimit: 15},
+			{subLimit1: 10, subLimit2: 5, limit: 8},  // actual limit 8
+			{subLimit1: 10, subLimit2: 5, limit: 15}, // actual limit [10, 15]
+			{subLimit1: 10, subLimit2: 5, limit: 20}, // actual limit [10, 15]
 		}
 
 		expr := fmt.Sprintf("%s > 5", common.DefaultInt64FieldName)
-		allFieldsName := []string{}
+		var allFieldsName []string
 		for _, field := range schema.Fields {
 			allFieldsName = append(allFieldsName, field.Name)
 		}
@@ -133,14 +133,22 @@ func TestHybridSearchMultiVectorsDefault(t *testing.T) {
 
 			for _, limit := range limits {
 				// hybrid search
-				annReq1 := client.NewAnnRequest(common.DefaultFloatVecFieldName, limit.limit1, queryVec1...).WithFilter(expr)
-				annReq2 := client.NewAnnRequest(common.DefaultFloat16VecFieldName, limit.limit2, queryVec2...).WithFilter(expr)
+				annReq1 := client.NewAnnRequest(common.DefaultFloatVecFieldName, limit.subLimit1, queryVec1...).WithFilter(expr)
+				annReq2 := client.NewAnnRequest(common.DefaultFloat16VecFieldName, limit.subLimit2, queryVec2...).WithFilter(expr)
 
-				searchRes, errSearch := mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, limit.limit3, annReq1, annReq2).
+				searchRes, errSearch := mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, limit.limit, annReq1, annReq2).
 					WithReranker(reranker).WithOutputFields("*"))
 				common.CheckErr(t, errSearch, true)
-				common.CheckSearchResult(t, searchRes, common.DefaultNq, limit.expLimit)
+				actualLimitRange := make([]int, 2)
+				actualLimitRange[0] = min(max(limit.subLimit1, limit.subLimit2), limit.limit)
+				actualLimitRange[1] = min(limit.subLimit1+limit.subLimit2, limit.limit)
+				require.Len(t, searchRes, common.DefaultNq)
 				common.CheckOutputFields(t, allFieldsName, searchRes[0].Fields)
+				for _, res := range searchRes {
+					require.GreaterOrEqual(t, res.ResultCount, actualLimitRange[0])
+					require.LessOrEqual(t, res.ResultCount, actualLimitRange[1])
+					require.GreaterOrEqual(t, searchRes[0].IDs.Len(), actualLimitRange[0])
+				}
 			}
 		}
 
