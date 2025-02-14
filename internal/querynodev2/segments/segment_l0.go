@@ -105,7 +105,7 @@ func (s *L0Segment) LastDeltaTimestamp() uint64 {
 	return last
 }
 
-func (s *L0Segment) GetIndex(fieldID int64) *IndexedFieldInfo {
+func (s *L0Segment) GetIndex(fieldID int64) []*IndexedFieldInfo {
 	return nil
 }
 

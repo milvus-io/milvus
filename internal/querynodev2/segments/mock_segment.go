@@ -364,19 +364,19 @@ func (_c *MockSegment_GetBM25Stats_Call) RunAndReturn(run func() map[int64]*stor
 }
 
 // GetIndex provides a mock function with given fields: fieldID
-func (_m *MockSegment) GetIndex(fieldID int64) *IndexedFieldInfo {
+func (_m *MockSegment) GetIndex(fieldID int64) []*IndexedFieldInfo {
 	ret := _m.Called(fieldID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetIndex")
 	}
 
-	var r0 *IndexedFieldInfo
-	if rf, ok := ret.Get(0).(func(int64) *IndexedFieldInfo); ok {
+	var r0 []*IndexedFieldInfo
+	if rf, ok := ret.Get(0).(func(int64) []*IndexedFieldInfo); ok {
 		r0 = rf(fieldID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*IndexedFieldInfo)
+			r0 = ret.Get(0).([]*IndexedFieldInfo)
 		}
 	}
 
@@ -401,12 +401,12 @@ func (_c *MockSegment_GetIndex_Call) Run(run func(fieldID int64)) *MockSegment_G
 	return _c
 }
 
-func (_c *MockSegment_GetIndex_Call) Return(_a0 *IndexedFieldInfo) *MockSegment_GetIndex_Call {
+func (_c *MockSegment_GetIndex_Call) Return(_a0 []*IndexedFieldInfo) *MockSegment_GetIndex_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSegment_GetIndex_Call) RunAndReturn(run func(int64) *IndexedFieldInfo) *MockSegment_GetIndex_Call {
+func (_c *MockSegment_GetIndex_Call) RunAndReturn(run func(int64) []*IndexedFieldInfo) *MockSegment_GetIndex_Call {
 	_c.Call.Return(run)
 	return _c
 }

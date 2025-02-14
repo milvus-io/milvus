@@ -2724,4 +2724,39 @@ func TestJsonIndex(t *testing.T) {
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))
 
+	// wrong path: missing quotes
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "d",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[a][\"b\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.Error(t, merr.CheckRPCCall(resp, err))
+
+	// wrong path: missing closing quote
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "e",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"][\"b"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.Error(t, merr.CheckRPCCall(resp, err))
+
+	// wrong path: malformed brackets
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "f",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"[\"b]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.Error(t, merr.CheckRPCCall(resp, err))
+
+	// valid path with array index
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "g",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"][0][\"b\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.NoError(t, merr.CheckRPCCall(resp, err))
 }

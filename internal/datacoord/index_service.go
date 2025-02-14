@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -170,7 +171,7 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 	}
 }
 
-func (s *Server) getFieldNameByID(schema *schemapb.CollectionSchema, collID, fieldID int64) (string, error) {
+func (s *Server) getFieldNameByID(schema *schemapb.CollectionSchema, fieldID int64) (string, error) {
 	for _, field := range schema.GetFields() {
 		if field.FieldID == fieldID {
 			return field.Name, nil
@@ -214,53 +215,24 @@ func setIndexParam(indexParams []*commonpb.KeyValuePair, key, value string) {
 }
 
 func (s *Server) parseAndVerifyNestedPath(identifier string, schema *schemapb.CollectionSchema, fieldID int64) (string, error) {
-	fieldName := strings.Split(identifier, "[")[0]
-	nestedPath := make([]string, 0)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	if err != nil {
 		return "", err
 	}
-	field, err := helper.GetFieldFromNameDefaultJSON(fieldName)
+
+	var identifierExpr *planpb.Expr
+	err = planparserv2.ParseIdentifier(helper, identifier, func(expr *planpb.Expr) error {
+		identifierExpr = expr
+		return nil
+	})
 	if err != nil {
 		return "", err
 	}
-	if field.FieldID != fieldID {
+	if identifierExpr.GetColumnExpr().GetInfo().GetFieldId() != fieldID {
 		return "", fmt.Errorf("fieldID not match with field name")
 	}
-	if field.GetDataType() != schemapb.DataType_JSON &&
-		field.GetDataType() != schemapb.DataType_Array {
-		errMsg := fmt.Sprintf("%s data type not supported accessed with []", field.GetDataType())
-		return "", fmt.Errorf(errMsg)
-	}
-	if fieldName != field.Name {
-		r := strings.ReplaceAll(fieldName, "~", "~0")
-		r = strings.ReplaceAll(r, "/", "~1")
-		nestedPath = append(nestedPath, r)
-	}
-	jsonKeyStr := identifier[len(fieldName):]
-	ss := strings.Split(jsonKeyStr, "][")
-	for i := 0; i < len(ss); i++ {
-		path := strings.Trim(ss[i], "[]")
-		if path == "" {
-			continue
-		}
-		if (strings.HasPrefix(path, "\"") && strings.HasSuffix(path, "\"")) ||
-			(strings.HasPrefix(path, "'") && strings.HasSuffix(path, "'")) {
-			path = path[1 : len(path)-1]
-			if path == "" {
-				return "", fmt.Errorf("invalid identifier: %s", identifier)
-			}
-			if typeutil.IsArrayType(field.DataType) {
-				return "", fmt.Errorf("can only access array field with integer index")
-			}
-		} else if _, err := strconv.ParseInt(path, 10, 64); err != nil {
-			return "", fmt.Errorf("json key must be enclosed in double quotes or single quotes: \"%s\"", path)
-		}
-		r := strings.ReplaceAll(path, "~", "~0")
-		r = strings.ReplaceAll(r, "/", "~1")
-		nestedPath = append(nestedPath, r)
-	}
 
+	nestedPath := identifierExpr.GetColumnExpr().GetInfo().GetNestedPath()
 	return "/" + strings.Join(nestedPath, "/"), nil
 }
 
@@ -310,7 +282,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	if req.GetIndexName() == "" {
 		indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
-		fieldName, err := s.getFieldNameByID(schema, req.GetCollectionID(), req.GetFieldID())
+		fieldName, err := s.getFieldNameByID(schema, req.GetFieldID())
 		if err != nil {
 			log.Warn("get field name from schema failed", zap.Int64("fieldID", req.GetFieldID()))
 			return merr.Status(err), nil

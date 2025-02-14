@@ -1074,7 +1074,6 @@ func (m *indexMeta) AreAllDiskIndex(collectionID int64, schema *schemapb.Collect
 		return t.FieldID, GetIndexType(t.IndexParams)
 	})
 	vectorFieldsWithDiskIndex := lo.Filter(vectorFields, func(field *schemapb.FieldSchema, _ int) bool {
-
 		if indexType, ok := fieldIndexTypes[field.FieldID]; ok {
 			return vecindexmgr.GetVecIndexMgrInstance().IsDiskVecIndex(indexType)
 		}

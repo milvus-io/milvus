@@ -478,13 +478,13 @@ func (s *LocalSegment) GetIndexByID(indexID int64) *IndexedFieldInfo {
 	return info
 }
 
-func (s *LocalSegment) GetIndex(fieldID int64) *IndexedFieldInfo {
-	var info *IndexedFieldInfo
+func (s *LocalSegment) GetIndex(fieldID int64) []*IndexedFieldInfo {
+	var info []*IndexedFieldInfo
 	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {
 		if value.IndexInfo.FieldID == fieldID {
-			info = value
+			info = append(info, value)
 		}
-		return info == nil
+		return true
 	})
 	return info
 }
@@ -1017,7 +1017,7 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		zap.Int64("indexID", indexInfo.GetIndexID()),
 	)
 
-	old := s.GetIndex(indexInfo.GetIndexID())
+	old := s.GetIndexByID(indexInfo.GetIndexID())
 	// the index loaded
 	if old != nil && old.IsLoaded {
 		log.Warn("index already loaded")

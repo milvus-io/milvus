@@ -73,7 +73,7 @@ type Segment interface {
 
 	// Index related
 	GetIndexByID(indexID int64) *IndexedFieldInfo
-	GetIndex(fieldID int64) *IndexedFieldInfo
+	GetIndex(fieldID int64) []*IndexedFieldInfo
 	ExistIndex(fieldID int64) bool
 	Indexes() []*IndexedFieldInfo
 	HasRawData(fieldID int64) bool
