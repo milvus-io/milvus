@@ -7,6 +7,8 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	mvcc "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
+
 	types "github.com/milvus-io/milvus/pkg/streaming/util/types"
 
 	wab "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
@@ -66,6 +68,64 @@ func (_c *MockTimeTickSyncOperator_Channel_Call) Return(_a0 types.PChannelInfo) 
 }
 
 func (_c *MockTimeTickSyncOperator_Channel_Call) RunAndReturn(run func() types.PChannelInfo) *MockTimeTickSyncOperator_Channel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// MVCCManager provides a mock function with given fields: ctx
+func (_m *MockTimeTickSyncOperator) MVCCManager(ctx context.Context) (*mvcc.MVCCManager, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for MVCCManager")
+	}
+
+	var r0 *mvcc.MVCCManager
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (*mvcc.MVCCManager, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) *mvcc.MVCCManager); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*mvcc.MVCCManager)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockTimeTickSyncOperator_MVCCManager_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MVCCManager'
+type MockTimeTickSyncOperator_MVCCManager_Call struct {
+	*mock.Call
+}
+
+// MVCCManager is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockTimeTickSyncOperator_Expecter) MVCCManager(ctx interface{}) *MockTimeTickSyncOperator_MVCCManager_Call {
+	return &MockTimeTickSyncOperator_MVCCManager_Call{Call: _e.mock.On("MVCCManager", ctx)}
+}
+
+func (_c *MockTimeTickSyncOperator_MVCCManager_Call) Run(run func(ctx context.Context)) *MockTimeTickSyncOperator_MVCCManager_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockTimeTickSyncOperator_MVCCManager_Call) Return(_a0 *mvcc.MVCCManager, _a1 error) *MockTimeTickSyncOperator_MVCCManager_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockTimeTickSyncOperator_MVCCManager_Call) RunAndReturn(run func(context.Context) (*mvcc.MVCCManager, error)) *MockTimeTickSyncOperator_MVCCManager_Call {
 	_c.Call.Return(run)
 	return _c
 }

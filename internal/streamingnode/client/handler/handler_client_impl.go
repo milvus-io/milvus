@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -37,6 +38,28 @@ type handlerClientImpl struct {
 	rebalanceTrigger types.AssignmentRebalanceTrigger
 	newProducer      func(ctx context.Context, opts *producer.ProducerOptions, handler streamingpb.StreamingNodeHandlerServiceClient) (Producer, error)
 	newConsumer      func(ctx context.Context, opts *consumer.ConsumerOptions, handlerClient streamingpb.StreamingNodeHandlerServiceClient) (Consumer, error)
+}
+
+// GetLatestMVCCTimestampIfLocal gets the latest mvcc timestamp of the vchannel.
+func (hc *handlerClientImpl) GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error) {
+	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return 0, ErrClientClosed
+	}
+	defer hc.lifetime.Done()
+
+	pchannel := funcutil.ToPhysicalChannel(vchannel)
+	// Get current assignment of pchannel.
+	assign := hc.watcher.Get(ctx, pchannel)
+	if assign == nil {
+		return 0, ErrClientAssignmentNotReady
+	}
+
+	// Get the wal at local registry.
+	w, err := registry.GetAvailableWAL(assign.Channel)
+	if err != nil {
+		return 0, err
+	}
+	return w.GetLatestMVCCTimestamp(ctx, vchannel)
 }
 
 // CreateProducer creates a producer.
