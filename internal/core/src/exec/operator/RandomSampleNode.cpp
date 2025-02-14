@@ -73,7 +73,7 @@ PhyRandomSampleNode::StandardSample(const uint32_t N,
 
 FixedVector<uint32_t>
 PhyRandomSampleNode::Sample(const uint32_t N, const float factor) {
-    const uint32_t M = N * factor;
+    const uint32_t M = std::max(static_cast<uint32_t>(N * factor), 1u);
     std::random_device rd;
     std::mt19937 gen(rd());
     float epsilon = std::numeric_limits<float>::epsilon();
@@ -101,36 +101,55 @@ PhyRandomSampleNode::GetOutput() {
         return nullptr;
     }
 
-    auto sample_output = std::make_shared<ColumnVector>(
-        TargetBitmap(active_count_), TargetBitmap(active_count_));
-    TargetBitmapView data(sample_output->GetRawData(), sample_output->size());
-    // True in TargetBitmap means we don't want this row, while for readability, we set the relevant row be true
-    // if it's sampled. So we need to flip the bits at last.
-    // However, if sample rate is larger than 0.5, we use 1-factor for sampling so that in some cases, the sampling
-    // performance would be better. In that case, we don't need to flip at last.
-    bool need_flip = true;
-    float factor = factor_;
-    if (factor > 0.5) {
-        need_flip = false;
-        factor = 1.0 - factor;
-    }
-    auto sampled = Sample(active_count_, factor);
-    for (auto n : sampled) {
-        data[n] = true;
-    }
-
-    is_finished_ = true;
-    if (need_flip) {
-        data.flip();
-    }
-
     if (!is_source_node_) {
         auto input_col = GetColumnVector(input_);
         TargetBitmapView input_data(input_col->GetRawData(), input_col->size());
-        data |= input_data;
-    }
+        // note: false means the elemnt is hit
+        size_t input_false_count = input_data.size() - input_data.count();
+        FixedVector<uint32_t> pos{};
+        pos.reserve(input_false_count);
+        auto value = input_data.find_first(false);
+        while (value.has_value()) {
+            auto offset = value.value();
+            pos.push_back(offset);
+            value = input_data.find_next(offset, false);
+        }
+        assert(pos.size() == input_false_count);
 
-    return std::make_shared<RowVector>(std::vector<VectorPtr>{sample_output});
+        input_data.set();
+        auto sampled = Sample(input_false_count, factor_);
+        assert(sampled.back() < input_false_count);
+        for (auto i = 0; i < sampled.size(); ++i) {
+            input_data[pos[sampled[i]]] = false;
+        }
+        return std::make_shared<RowVector>(std::vector<VectorPtr>{input_col});
+    } else {
+        auto sample_output = std::make_shared<ColumnVector>(
+            TargetBitmap(active_count_), TargetBitmap(active_count_));
+        TargetBitmapView data(sample_output->GetRawData(),
+                              sample_output->size());
+        // true in TargetBitmap means we don't want this row, while for readability, we set the relevant row be true
+        // if it's sampled. So we need to flip the bits at last.
+        // However, if sample rate is larger than 0.5, we use 1-factor for sampling so that in some cases, the sampling
+        // performance would be better. In that case, we don't need to flip at last.
+        bool need_flip = true;
+        float factor = factor_;
+        if (factor > 0.5) {
+            need_flip = false;
+            factor = 1.0 - factor;
+        }
+        auto sampled = Sample(active_count_, factor);
+        for (auto n : sampled) {
+            data[n] = true;
+        }
+
+        is_finished_ = true;
+        if (need_flip) {
+            data.flip();
+        }
+        return std::make_shared<RowVector>(
+            std::vector<VectorPtr>{sample_output});
+    }
 }
 
 bool

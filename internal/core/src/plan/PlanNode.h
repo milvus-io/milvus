@@ -317,7 +317,7 @@ class RandomSampleNode : public PlanNode {
 
     std::vector<PlanNodePtr>
     sources() const override {
-        return std::vector<PlanNodePtr>{};
+        return sources_;
     }
 
     std::string_view

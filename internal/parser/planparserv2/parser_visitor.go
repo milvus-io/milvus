@@ -596,7 +596,7 @@ func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) inter
 
 	sampleFactor := floatValueExpr.GetValue().GetFloatVal()
 	if sampleFactor <= 0+EPSILON || sampleFactor >= 1-EPSILON {
-		return fmt.Errorf("sample factor should be in range (0, 1) exclusive, but got %f", sampleFactor)
+		return fmt.Errorf("sample factor should be in range (0, 1) exclusive, but got %s", ctx.Expr().GetText())
 	}
 	return &ExprWithType{
 		expr: &planpb.Expr{

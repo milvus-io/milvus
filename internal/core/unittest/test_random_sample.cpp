@@ -78,24 +78,30 @@ TEST_P(RandomSampleTest, SampleWithUnaryFiler) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     schema->set_primary_field_id(fid_64);
+    fid_64 = schema->AddDebugField("integer", DataType::INT64);
 
     const int64_t N = 3000;
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
-    SealedLoadFieldData(dataset, *segment);
 
-    auto i64_col = dataset.get_col<int64_t>(fid_64);
-    int64_t smallest = i64_col[0];
-    int64_t largest = i64_col[0];
+    auto size = dataset.raw_->mutable_fields_data()->size();
+    auto i64_col = dataset.raw_->mutable_fields_data()
+                       ->at(size - 1)
+                       .mutable_scalars()
+                       ->mutable_long_data()
+                       ->mutable_data();
     for (int i = 0; i < N; ++i) {
         if (i % 3 == 0) {
-            i64_col[i] = 1;
+            i64_col->at(i) = 1;
         } else if (i % 3 == 1) {
-            i64_col[i] = 2;
+            i64_col->at(i) = 2;
         } else {
-            i64_col[i] = 3;
+            i64_col->at(i) = 3;
         }
     }
+
+    SealedLoadFieldData(dataset, *segment);
+
     milvus::proto::plan::GenericValue val;
     val.set_int64_val(1);
     auto expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
