@@ -303,8 +303,11 @@ class MvccNode : public PlanNode {
 
 class RandomSampleNode : public PlanNode {
  public:
-    RandomSampleNode(const PlanNodeId& id, float factor)
-        : PlanNode(id), factor_(factor) {
+    RandomSampleNode(
+        const PlanNodeId& id,
+        float factor,
+        std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
+        : PlanNode(id), factor_(factor), sources_(std::move(sources)) {
     }
 
     DataType
@@ -334,6 +337,7 @@ class RandomSampleNode : public PlanNode {
 
  private:
     float factor_;
+    const std::vector<PlanNodePtr> sources_;
 };
 
 class VectorSearchNode : public PlanNode {

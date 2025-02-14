@@ -79,9 +79,10 @@ class PhyRandomSampleNode : public Operator {
     static FixedVector<uint32_t>
     Sample(const uint32_t N, const float factor);
 
-    float factor_;
-    int64_t active_count_;
+    float factor_{0};
+    int64_t active_count_{0};
     bool is_finished_{false};
+    bool is_source_node_{false};
 };
 
 }  // namespace exec

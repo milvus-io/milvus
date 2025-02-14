@@ -72,7 +72,7 @@ TEST_P(RandomSampleTest, SampleOnly) {
     assert(expected_size - 1 <= data_size && data_size <= expected_size + 1);
 }
 
-TEST_P(RandomSampleTest, SampleWithRangeFilterAllhit) {
+TEST_P(RandomSampleTest, SampleWithUnaryFiler) {
     double sample_factor = GetParam();
 
     auto schema = std::make_shared<Schema>();
@@ -88,21 +88,22 @@ TEST_P(RandomSampleTest, SampleWithRangeFilterAllhit) {
     int64_t smallest = i64_col[0];
     int64_t largest = i64_col[0];
     for (int i = 0; i < N; ++i) {
-        proto::plan::GenericValue val;
-        smallest = std::min(smallest, i64_col[i]);
-        largest = std::max(largest, i64_col[i]);
+        if (i % 3 == 0) {
+            i64_col[i] = 1;
+        } else if (i % 3 == 1) {
+            i64_col[i] = 2;
+        } else {
+            i64_col[i] = 3;
+        }
     }
-    milvus::proto::plan::GenericValue lower_val;
-    lower_val.set_int64_val(smallest);
-    milvus::proto::plan::GenericValue upper_val;
-    upper_val.set_int64_val(largest);
-    auto expr = std::make_shared<milvus::expr::BinaryRangeFilterExpr>(
+    milvus::proto::plan::GenericValue val;
+    val.set_int64_val(1);
+    auto expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
         milvus::expr::ColumnInfo(
             fid_64, DataType::INT64, std::vector<std::string>()),
-        lower_val,
-        upper_val,
-        smallest,
-        largest);
+        OpType::Equal,
+        val,
+        std::vector<proto::plan::GenericValue>{});
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->plannodes_ =
@@ -114,8 +115,14 @@ TEST_P(RandomSampleTest, SampleWithRangeFilterAllhit) {
         segment.get(), plan.get());
     Assert(retrieve_results->fields_data_size() == target_offsets.size());
     auto field = retrieve_results->fields_data(0);
+    auto field_data = field.scalars().long_data();
     int data_size = field.scalars().long_data().data_size();
-    int expected_size = static_cast<int>(N * sample_factor);
+
+    for (int i = 0; i < data_size; i++) {
+        ASSERT_EQ(field_data.data(i), 1);
+    }
+
+    int expected_size = static_cast<int>(N * sample_factor) / 3;
     // We can accept size one difference due to the float point calculation in sampling.
     assert(expected_size - 1 <= data_size && data_size <= expected_size + 1);
 }

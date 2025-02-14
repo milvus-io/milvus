@@ -16,6 +16,8 @@
 
 #include "RandomSampleNode.h"
 
+#include <exec/expression/Utils.h>
+
 namespace milvus {
 namespace exec {
 PhyRandomSampleNode::PhyRandomSampleNode(
@@ -35,12 +37,12 @@ PhyRandomSampleNode::PhyRandomSampleNode(
     active_count_ = operator_context_->get_exec_context()
                         ->get_query_context()
                         ->get_active_count();
+    is_source_node_ = random_sample_node->sources().size() == 0;
 }
 
 void
 PhyRandomSampleNode::AddInput(RowVectorPtr& input) {
-    PanicInfo(UnexpectedError,
-              "PhyRandomSampleNode should be the leaf source node");
+    input_ = std::move(input);
 }
 
 FixedVector<uint32_t>
@@ -90,14 +92,18 @@ PhyRandomSampleNode::GetOutput() {
         return nullptr;
     }
 
+    if (!is_source_node_ && input_ == nullptr) {
+        return nullptr;
+    }
+
     if (active_count_ == 0) {
         is_finished_ = true;
         return nullptr;
     }
 
-    auto col_input = std::make_shared<ColumnVector>(
+    auto sample_output = std::make_shared<ColumnVector>(
         TargetBitmap(active_count_), TargetBitmap(active_count_));
-    TargetBitmapView data(col_input->GetRawData(), col_input->size());
+    TargetBitmapView data(sample_output->GetRawData(), sample_output->size());
     // True in TargetBitmap means we don't want this row, while for readability, we set the relevant row be true
     // if it's sampled. So we need to flip the bits at last.
     // However, if sample rate is larger than 0.5, we use 1-factor for sampling so that in some cases, the sampling
@@ -117,7 +123,14 @@ PhyRandomSampleNode::GetOutput() {
     if (need_flip) {
         data.flip();
     }
-    return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});
+
+    if (!is_source_node_) {
+        auto input_col = GetColumnVector(input_);
+        TargetBitmapView input_data(input_col->GetRawData(), input_col->size());
+        data |= input_data;
+    }
+
+    return std::make_shared<RowVector>(std::vector<VectorPtr>{sample_output});
 }
 
 bool

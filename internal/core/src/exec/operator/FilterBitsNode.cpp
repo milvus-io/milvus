@@ -34,7 +34,6 @@ PhyFilterBitsNode::PhyFilterBitsNode(
     exprs_ = std::make_unique<ExprSet>(filters, exec_context);
     need_process_rows_ = query_context_->get_active_count();
     num_processed_rows_ = 0;
-    is_source_node_ = filter->sources().size() == 0;
 }
 
 void
@@ -58,10 +57,6 @@ PhyFilterBitsNode::IsFinished() {
 
 RowVectorPtr
 PhyFilterBitsNode::GetOutput() {
-    if (!is_source_node_ && input_ == nullptr) {
-        return nullptr;
-    }
-
     if (AllInputProcessed()) {
         return nullptr;
     }
@@ -70,30 +65,7 @@ PhyFilterBitsNode::GetOutput() {
         std::chrono::high_resolution_clock::now();
 
     EvalCtx eval_ctx(operator_context_->get_exec_context(), exprs_.get());
-    OffsetVector offsets{};
-    if (input_ != nullptr) {
-        offsets.reserve(input_->size());
-        // PhyFilterBitsNode is not the source node. Currently, only the PhyRandomSampleNode can be
-        // the source node of PhyFilterBitsNode.
-        AssertInfo(input_->size() == need_process_rows_,
-                   "inconsistency between input size and need_process_rows_, "
-                   "input size {}, need_process_rows_ {}",
-                   input_->size(),
-                   need_process_rows_);
-        AssertInfo(input_->childrens().size() == 1,
-                   "unexpected children size, expected 1, but get {}",
-                   input_->childrens().size());
-        auto& child = input_->childrens()[0];
-        auto col_vec = std::dynamic_pointer_cast<ColumnVector>(child);
-        AssertInfo(col_vec != nullptr, "unexpected");
-        TargetBitmapView data(col_vec->GetRawData(), col_vec->size());
-        for (int32_t i = 0; i < col_vec->size(); i++) {
-            if (!data[i]) {
-                offsets.push_back(i);
-            }
-        }
-        eval_ctx.set_offset_input(&offsets);
-    }
+
     TargetBitmap bitset;
     TargetBitmap valid_bitset;
     while (num_processed_rows_ < need_process_rows_) {
@@ -106,34 +78,13 @@ PhyFilterBitsNode::GetOutput() {
         if (auto col_vec =
                 std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
             if (col_vec->IsBitmap()) {
-                if (input_ == nullptr) {
-                    auto col_vec_size = col_vec->size();
-                    TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-                    bitset.append(view);
-                    TargetBitmapView valid_view(col_vec->GetValidRawData(),
-                                                col_vec_size);
-                    valid_bitset.append(valid_view);
-                    num_processed_rows_ += col_vec_size;
-                } else {
-                    // currently, process by providing offsets will handle all at once, so we can reassign the `bitset` and `valid_bitset`
-                    // directly.
-                    bitset = TargetBitmap{static_cast<size_t>(input_->size())};
-                    valid_bitset =
-                        TargetBitmap{static_cast<size_t>(input_->size())};
-                    auto col_vec_size = col_vec->size();
-                    TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-                    TargetBitmapView valid_view(col_vec->GetValidRawData(),
-                                                col_vec_size);
-                    for (auto i = 0; i < offsets.size(); ++i) {
-                        if (view[i] > 0) {
-                            bitset[offsets[i]] = true;
-                        }
-                        if (valid_view[i] > 0) {
-                            valid_bitset[offsets[i]] = true;
-                        }
-                    }
-                    num_processed_rows_ += input_->size();
-                }
+                auto col_vec_size = col_vec->size();
+                TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
+                bitset.append(view);
+                TargetBitmapView valid_view(col_vec->GetValidRawData(),
+                                            col_vec_size);
+                valid_bitset.append(valid_view);
+                num_processed_rows_ += col_vec_size;
             } else {
                 PanicInfo(ExprInvalid,
                           "PhyFilterBitsNode result should be bitmap");

@@ -76,8 +76,6 @@ class PhyFilterBitsNode : public Operator {
     QueryContext* query_context_;
     int64_t num_processed_rows_;
     int64_t need_process_rows_;
-    // now, is_source_node is always false except for that random sample operator exists
-    bool is_source_node_{false};
 };
 }  // namespace exec
 }  // namespace milvus
