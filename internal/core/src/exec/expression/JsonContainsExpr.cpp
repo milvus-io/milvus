@@ -183,9 +183,9 @@ PhyJsonContainsFilterExpr::ExecArrayContains(OffsetVector* input) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     valid_res.set();
 
-    std::unordered_set<GetType> elements;
-    for (auto const& element : expr_->vals_) {
-        elements.insert(GetValueFromProto<GetType>(element));
+    if (!arg_inited_) {
+        arg_set_ = std::make_shared<SortVectorElement<GetType>>(expr_->vals_);
+        arg_inited_ = true;
     }
     auto execute_sub_batch =
         []<FilterType filter_type = FilterType::sequential>(
@@ -195,11 +195,11 @@ PhyJsonContainsFilterExpr::ExecArrayContains(OffsetVector* input) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            const std::unordered_set<GetType>& elements) {
+            const std::shared_ptr<MultiElement>& elements) {
         auto executor = [&](size_t i) {
             const auto& array = data[i];
             for (int j = 0; j < array.length(); ++j) {
-                if (elements.count(array.template get_data<GetType>(j)) > 0) {
+                if (elements->In(array.template get_data<GetType>(j))) {
                     return true;
                 }
             }
@@ -226,10 +226,10 @@ PhyJsonContainsFilterExpr::ExecArrayContains(OffsetVector* input) {
                                                     input,
                                                     res,
                                                     valid_res,
-                                                    elements);
+                                                    arg_set_);
     } else {
         processed_size = ProcessDataChunks<milvus::ArrayView>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, elements);
+            execute_sub_batch, std::nullptr_t{}, res, valid_res, arg_set_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -258,10 +258,10 @@ PhyJsonContainsFilterExpr::ExecJsonContains(OffsetVector* input) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     valid_res.set();
 
-    std::unordered_set<GetType> elements;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-    for (auto const& element : expr_->vals_) {
-        elements.insert(GetValueFromProto<GetType>(element));
+    if (!arg_inited_) {
+        arg_set_ = std::make_shared<SortVectorElement<GetType>>(expr_->vals_);
+        arg_inited_ = true;
     }
     auto execute_sub_batch =
         []<FilterType filter_type = FilterType::sequential>(
@@ -272,7 +272,7 @@ PhyJsonContainsFilterExpr::ExecJsonContains(OffsetVector* input) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer,
-            const std::unordered_set<GetType>& elements) {
+            const std::shared_ptr<MultiElement>& elements) {
         auto executor = [&](size_t i) {
             auto doc = data[i].doc();
             auto array = doc.at_pointer(pointer).get_array();
@@ -284,7 +284,7 @@ PhyJsonContainsFilterExpr::ExecJsonContains(OffsetVector* input) {
                 if (val.error()) {
                     continue;
                 }
-                if (elements.count(val.value()) > 0) {
+                if (elements->In(val.value()) > 0) {
                     return true;
                 }
             }
@@ -311,14 +311,14 @@ PhyJsonContainsFilterExpr::ExecJsonContains(OffsetVector* input) {
                                                     res,
                                                     valid_res,
                                                     pointer,
-                                                    elements);
+                                                    arg_set_);
     } else {
         processed_size = ProcessDataChunks<Json>(execute_sub_batch,
                                                  std::nullptr_t{},
                                                  res,
                                                  valid_res,
                                                  pointer,
-                                                 elements);
+                                                 arg_set_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -442,7 +442,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(OffsetVector* input) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     valid_res.set();
 
-    std::unordered_set<GetType> elements;
+    std::set<GetType> elements;
     for (auto const& element : expr_->vals_) {
         elements.insert(GetValueFromProto<GetType>(element));
     }
@@ -455,9 +455,9 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(OffsetVector* input) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            const std::unordered_set<GetType>& elements) {
+            const std::set<GetType>& elements) {
         auto executor = [&](size_t i) {
-            std::unordered_set<GetType> tmp_elements(elements);
+            std::set<GetType> tmp_elements(elements);
             // Note: array can only be iterated once
             for (int j = 0; j < data[i].length(); ++j) {
                 tmp_elements.erase(data[i].template get_data<GetType>(j));
@@ -521,7 +521,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(OffsetVector* input) {
     valid_res.set();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-    std::unordered_set<GetType> elements;
+    std::set<GetType> elements;
     for (auto const& element : expr_->vals_) {
         elements.insert(GetValueFromProto<GetType>(element));
     }
@@ -535,14 +535,14 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(OffsetVector* input) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer,
-            const std::unordered_set<GetType>& elements) {
+            const std::set<GetType>& elements) {
         auto executor = [&](const size_t i) -> bool {
             auto doc = data[i].doc();
             auto array = doc.at_pointer(pointer).get_array();
             if (array.error()) {
                 return false;
             }
-            std::unordered_set<GetType> tmp_elements(elements);
+            std::set<GetType> tmp_elements(elements);
             // Note: array can only be iterated once
             for (auto&& it : array) {
                 auto val = it.template get<GetType>();
