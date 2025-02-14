@@ -180,11 +180,14 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 	for _, ch := range channels {
 		func(ch *meta.DmChannel) {
 			var targetNode *nodeItem
+			forceAssignChannel := forceAssign
 			if streamingutil.IsStreamingServiceEnabled() {
 				// When streaming service is enabled, we need to assign channel to the node where WAL is located.
 				nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(ch.GetChannelName())
 				if item, ok := nodeItemsMap[nodeID]; ok {
 					targetNode = item
+					// assgin channel to the node where WAL is located always has enough benefits.
+					forceAssignChannel = true
 				}
 			}
 			// for each channel, pick the node with the least score
@@ -196,10 +199,15 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 			scoreChanges := b.calculateChannelScore(ch, collectionID)
 
 			sourceNode := nodeItemsMap[ch.Node]
+			if sourceNode != nil && sourceNode.nodeID == targetNode.nodeID {
+				// if the channel is already on the target node, skip assignment operation.
+				return
+			}
+
 			// if segment's node exist, which means this segment comes from balancer. we should consider the benefit
 			// if the segment reassignment doesn't got enough benefit, we should skip this reassignment
 			// notice: we should skip benefit check for forceAssign
-			if !forceAssign && sourceNode != nil && !b.hasEnoughBenefit(sourceNode, targetNode, scoreChanges) {
+			if !forceAssignChannel && sourceNode != nil && !b.hasEnoughBenefit(sourceNode, targetNode, scoreChanges) {
 				br.AddRecord(StrRecordf("skip generate balance plan for channel %s since no enough benefit", ch.GetChannelName()))
 				return
 			}
