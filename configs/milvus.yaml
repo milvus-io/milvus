@@ -407,8 +407,11 @@ queryNode:
       # Milvus will eventually seals and indexes all segments, but enabling this optimizes search performance for immediate queries following data insertion.
       # This defaults to true, indicating that Milvus creates temporary index for growing segments and the sealed segments that are not indexed upon searches.
       enableIndex: true
-      nlist: 128 # temp index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8
+      nlist: 128 # interim index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8
       nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
+      subDim: 4 # interim index sub dim, recommend to (subDim % vector dim == 0)
+      refineRatio: 4.5 # interim index parameters, should set to be >= 1.0
+      denseVectorIndexType: IVF_FLAT_CC # Dense vector intermin index type
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     multipleChunkedEnable: true # Enable multiple chunked search

@@ -190,9 +190,34 @@ func InitMmapManager(params *paramtable.ComponentParam) error {
 		fix_file_size:            C.uint64_t(mmapFileSize),
 		growing_enable_mmap:      C.bool(params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()),
 		scalar_index_enable_mmap: C.bool(params.QueryNodeCfg.MmapScalarIndex.GetAsBool()),
+		scalar_field_enable_mmap: C.bool(params.QueryNodeCfg.MmapScalarField.GetAsBool()),
+		vector_index_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorIndex.GetAsBool()),
+		vector_field_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorField.GetAsBool()),
 	}
 	status := C.InitMmapManager(mmapConfig)
 	return HandleCStatus(&status, "InitMmapManager failed")
+}
+
+func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
+	enableInterminIndex := C.bool(params.QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool())
+	C.SegcoreSetEnableInterminSegmentIndex(enableInterminIndex)
+
+	nlist := C.int64_t(params.QueryNodeCfg.InterimIndexNlist.GetAsInt64())
+	C.SegcoreSetNlist(nlist)
+
+	nprobe := C.int64_t(params.QueryNodeCfg.InterimIndexNProbe.GetAsInt64())
+	C.SegcoreSetNprobe(nprobe)
+
+	subDim := C.int64_t(params.QueryNodeCfg.InterimIndexSubDim.GetAsInt64())
+	C.SegcoreSetSubDim(subDim)
+
+	refineRatio := C.float(params.QueryNodeCfg.InterimIndexRefineRatio.GetAsFloat())
+	C.SegcoreSetRefineRatio(refineRatio)
+
+	denseVecIndexType := C.CString(params.QueryNodeCfg.DenseVectorInterminIndexType.GetValue())
+	defer C.free(unsafe.Pointer(denseVecIndexType))
+	status := C.SegcoreSetDenseVectorInterminIndexType(denseVecIndexType)
+	return HandleCStatus(&status, "InitInterminIndexConfig failed")
 }
 
 func CleanRemoteChunkManager() {
