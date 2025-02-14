@@ -53,16 +53,12 @@ template <bool is_sealed = false>
 class DeletedRecord {
  public:
     DeletedRecord(InsertRecord<is_sealed>* insert_record,
-                  SegmentInternalInterface* segment)
+                  std::function<std::vector<SegOffset>(
+                      const PkType& pk, Timestamp timestamp)> search_pk_func,
+                  int64_t segment_id)
         : insert_record_(insert_record),
-          segment_(segment),
-          deleted_lists_(SortedDeleteList::createInstance()) {
-    }
-
-    // not binding segment, only for testing purposes
-    DeletedRecord(InsertRecord<is_sealed>* insert_record)
-        : insert_record_(insert_record),
-          segment_(nullptr),
+          search_pk_func_(search_pk_func),
+          segment_id_(segment_id),
           deleted_lists_(SortedDeleteList::createInstance()) {
     }
 
@@ -118,14 +114,8 @@ class DeletedRecord {
             if (deleted_ts > max_timestamp) {
                 max_timestamp = deleted_ts;
             }
-            std::vector<SegOffset> offsets;
-            if (segment_) {
-                offsets = segment_->search_pk(deleted_pk, deleted_ts);
-            } else {
-                // only for testing
-                offsets = std::move(
-                    insert_record_->search_pk(deleted_pk, deleted_ts));
-            }
+            std::vector<SegOffset> offsets =
+                search_pk_func_(deleted_pk, deleted_ts);
             for (auto& offset : offsets) {
                 auto row_id = offset.get();
                 // if alreay deleted, no need to add new record
@@ -170,11 +160,11 @@ class DeletedRecord {
         // try use snapshot to skip iterations
         bool hit_snapshot = false;
         SortedDeleteList::iterator next_iter;
-        if (!snapshots_.empty()) {
-            int loc = snapshots_.size() - 1;
+        {
+            std::shared_lock<std::shared_mutex> lock(snap_lock_);
             // find last meeted snapshot
-            {
-                std::shared_lock<std::shared_mutex> lock(snap_lock_);
+            if (!snapshots_.empty()) {
+                int loc = snapshots_.size() - 1;
                 while (snapshots_[loc].first > query_timestamp && loc >= 0) {
                     loc--;
                 }
@@ -293,7 +283,7 @@ class DeletedRecord {
                         dumped_size + DUMP_BATCH_SIZE,
                         total_size,
                         snapshots_.size(),
-                        segment_ ? segment_->get_segment_id() : 0);
+                        segment_id_);
                     last_dump_ts = dump_ts;
                 }
 
@@ -333,7 +323,9 @@ class DeletedRecord {
     std::atomic<int64_t> n_ = 0;
     std::atomic<int64_t> mem_size_ = 0;
     InsertRecord<is_sealed>* insert_record_;
-    SegmentInternalInterface* segment_;
+    std::function<std::vector<SegOffset>(const PkType& pk, Timestamp timestamp)>
+        search_pk_func_;
+    int64_t segment_id_{0};
     std::shared_ptr<SortedDeleteList> deleted_lists_;
     // max timestamp of deleted records which replayed in load process
     Timestamp max_load_timestamp_{0};
