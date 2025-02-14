@@ -205,21 +205,19 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStatsRe
 	defer i.lifetime.Done()
 	unissued, active := i.sched.TaskQueue.GetTaskNum()
 
-	slots := 0
-	if i.sched.buildParallel > unissued+active {
-		slots = i.sched.buildParallel - unissued - active
-	}
+	slots := i.totalSlot - i.sched.TaskQueue.GetUsingSlot()
 	log.Ctx(ctx).Info("Get Index Job Stats",
 		zap.Int("unissued", unissued),
 		zap.Int("active", active),
-		zap.Int("slot", slots),
+		zap.Int64("slots", slots),
 	)
 	return &workerpb.GetJobStatsResponse{
 		Status:           merr.Success(),
 		TotalJobNum:      int64(active) + int64(unissued),
 		InProgressJobNum: int64(active),
 		EnqueueJobNum:    int64(unissued),
-		TaskSlots:        int64(slots),
+		TotalSlots:       i.totalSlot,
+		TaskSlots:        slots,
 		EnableDisk:       Params.IndexNodeCfg.EnableDisk.GetAsBool(),
 	}, nil
 }
@@ -311,7 +309,9 @@ func (i *IndexNode) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2Re
 			zap.Int64("fieldID", indexRequest.GetFieldID()),
 			zap.String("fieldType", indexRequest.GetFieldType().String()),
 			zap.Any("field", indexRequest.GetField()),
+			zap.Int64("taskSlot", indexRequest.GetTaskSlot()),
 		)
+
 		taskCtx, taskCancel := context.WithCancel(i.loopCtx)
 		if oldInfo := i.loadOrStoreIndexTask(indexRequest.GetClusterID(), indexRequest.GetBuildID(), &indexTaskInfo{
 			cancel: taskCancel,
@@ -357,7 +357,9 @@ func (i *IndexNode) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2Re
 			zap.Int64("dim", analyzeRequest.GetDim()),
 			zap.Float64("trainSizeRatio", analyzeRequest.GetMaxTrainSizeRatio()),
 			zap.Int64("numClusters", analyzeRequest.GetNumClusters()),
+			zap.Int64("taskSlot", analyzeRequest.GetTaskSlot()),
 		)
+
 		taskCtx, taskCancel := context.WithCancel(i.loopCtx)
 		if oldInfo := i.loadOrStoreAnalyzeTask(analyzeRequest.GetClusterID(), analyzeRequest.GetTaskID(), &analyzeTaskInfo{
 			cancel: taskCancel,
@@ -382,10 +384,12 @@ func (i *IndexNode) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2Re
 		log.Info("receive stats job", zap.Int64("collectionID", statsRequest.GetCollectionID()),
 			zap.Int64("partitionID", statsRequest.GetPartitionID()),
 			zap.Int64("segmentID", statsRequest.GetSegmentID()),
+			zap.Int64("numRows", statsRequest.GetNumRows()),
 			zap.Int64("targetSegmentID", statsRequest.GetTargetSegmentID()),
 			zap.String("subJobType", statsRequest.GetSubJobType().String()),
 			zap.Int64("startLogID", statsRequest.GetStartLogID()),
 			zap.Int64("endLogID", statsRequest.GetEndLogID()),
+			zap.Int64("taskSlot", statsRequest.GetTaskSlot()),
 		)
 
 		taskCtx, taskCancel := context.WithCancel(i.loopCtx)
