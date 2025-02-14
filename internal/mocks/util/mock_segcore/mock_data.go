@@ -1238,7 +1238,7 @@ func GenSimpleRetrievePlan(collection *segcore.CCollection) (*segcore.RetrievePl
 		return nil, err
 	}
 
-	plan, err2 := segcore.NewRetrievePlan(collection, planBytes, timestamp, 100)
+	plan, err2 := segcore.NewRetrievePlan(collection, planBytes, timestamp, 100, 0)
 	return plan, err2
 }
 

@@ -416,6 +416,8 @@ queryNode:
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     multipleChunkedEnable: true # Enable multiple chunked search
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
+    jsonIndexMemoryBudgetInTantivy: 64 # the memory budget for the JSON index In Tantivy
+    jsonIndexCommitInterval: 200 # the commit interval for the JSON index to commit
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -504,6 +506,7 @@ indexCoord:
     nodeID: 0
   segment:
     minSegmentNumRowsToEnableIndex: 1024 # It's a threshold. When the segment num rows is less than this value, the segment will not be indexed
+  enabledJsonKeyStats: true # Indicates whether to enable JSON key stats
 
 indexNode:
   scheduler:

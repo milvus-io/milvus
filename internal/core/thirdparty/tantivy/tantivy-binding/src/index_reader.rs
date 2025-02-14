@@ -73,7 +73,7 @@ impl IndexReaderWrapper {
             Some(_) => {
                 // newer version with doc_id.
                 searcher
-                    .search(q, &DocIdCollector {})
+                    .search(q, &DocIdCollector::<u32>::default())
                     .map_err(TantivyBindingError::TantivyError)
             }
             None => {
@@ -83,6 +83,16 @@ impl IndexReaderWrapper {
                     .map_err(TantivyBindingError::TantivyError)
             }
         }
+    }
+
+    // Generally, we should use [`crate::search`], except for some special senarios where the doc_id could beyound
+    // the score of u32.
+    pub(crate) fn search_i64(&self, q: &dyn Query) -> Result<Vec<i64>> {
+        assert!(self.id_field.is_some());
+        let searcher = self.reader.searcher();
+        searcher
+            .search(q, &DocIdCollector::<i64>::default())
+            .map_err(TantivyBindingError::TantivyError)
     }
 
     pub fn term_query_i64(&self, term: i64) -> Result<Vec<u32>> {
@@ -193,6 +203,14 @@ impl IndexReaderWrapper {
             IndexRecordOption::Basic,
         );
         self.search(&q)
+    }
+
+    pub fn term_query_keyword_i64(&self, term: &str) -> Result<Vec<i64>> {
+        let q = TermQuery::new(
+            Term::from_field_text(self.field, term),
+            IndexRecordOption::Basic,
+        );
+        self.search_i64(&q)
     }
 
     pub fn lower_bound_range_query_keyword(

@@ -600,7 +600,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 		retrieveReq.MvccTimestamp = mvccTs
 		retrieveReq.GuaranteeTimestamp = mvccTs
 	}
-
+	retrieveReq.ConsistencyLevel = t.ConsistencyLevel
 	req := &querypb.QueryRequest{
 		Req:         retrieveReq,
 		DmlChannels: []string{channel},

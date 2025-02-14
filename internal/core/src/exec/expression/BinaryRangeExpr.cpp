@@ -345,6 +345,10 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(OffsetVector* input) {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
+    FieldId field_id = expr_->column_.field_id_;
+    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
+        return ExecRangeVisitorImplForJsonForIndex<ValueType>();
+    }
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -443,6 +447,87 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(OffsetVector* input) {
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+template <typename ValueType>
+VectorPtr
+PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonForIndex() {
+    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
+                                       std::string_view,
+                                       ValueType>;
+    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
+                               ? active_count_ - current_data_chunk_pos_
+                               : batch_size_;
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+#define BinaryRangeJSONIndexCompare(cmp)                      \
+    do {                                                      \
+        auto val = json.at<GetType>(offset, size);            \
+        if (val.error()) {                                    \
+            if constexpr (std::is_same_v<GetType, int64_t>) { \
+                auto val = json.at<double>(offset, size);     \
+                return !val.error() && (cmp);                 \
+            }                                                 \
+            return false;                                     \
+        }                                                     \
+        return (cmp);                                         \
+    } while (false)
+    bool lower_inclusive = expr_->lower_inclusive_;
+    bool upper_inclusive = expr_->upper_inclusive_;
+    ValueType val1 = GetValueFromProto<ValueType>(expr_->lower_val_);
+    ValueType val2 = GetValueFromProto<ValueType>(expr_->upper_val_);
+    if (cached_index_chunk_id_ != 0) {
+        const segcore::SegmentInternalInterface* segment = nullptr;
+        if (segment_->type() == SegmentType::Growing) {
+            segment =
+                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
+        } else if (segment_->type() == SegmentType::Sealed) {
+            segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        }
+        auto field_id = expr_->column_.field_id_;
+        auto* index = segment->GetJsonKeyIndex(field_id);
+        Assert(index != nullptr);
+        auto filter_func =
+            [segment, &field_id, val1, val2, lower_inclusive, upper_inclusive](
+                uint32_t row_id, uint16_t offset, uint16_t size) {
+                auto json_pair = segment->GetJsonData(field_id, row_id);
+                if (!json_pair.second) {
+                    return false;
+                }
+                auto json = milvus::Json(json_pair.first.data(),
+                                         json_pair.first.size());
+                if (lower_inclusive && upper_inclusive) {
+                    BinaryRangeJSONIndexCompare(val1 <=
+                                                    ValueType(val.value()) &&
+                                                ValueType(val.value()) <= val2);
+                } else if (lower_inclusive && !upper_inclusive) {
+                    BinaryRangeJSONIndexCompare(val1 <=
+                                                    ValueType(val.value()) &&
+                                                ValueType(val.value()) < val2);
+                } else if (!lower_inclusive && upper_inclusive) {
+                    BinaryRangeJSONIndexCompare(val1 < ValueType(val.value()) &&
+                                                ValueType(val.value()) <= val2);
+                } else {
+                    BinaryRangeJSONIndexCompare(val1 < ValueType(val.value()) &&
+                                                ValueType(val.value()) < val2);
+                }
+            };
+        bool is_growing = segment_->type() == SegmentType::Growing;
+        bool is_strong_consistency = consistency_level_ == 0;
+        cached_index_chunk_res_ = index
+                                      ->FilterByPath(pointer,
+                                                     active_count_,
+                                                     is_growing,
+                                                     is_strong_consistency,
+                                                     filter_func)
+                                      .clone();
+        cached_index_chunk_id_ = 0;
+    }
+    TargetBitmap result;
+    result.append(
+        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
+    current_data_chunk_pos_ += real_batch_size;
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          TargetBitmap(real_batch_size, true));
 }
 
 template <typename ValueType>

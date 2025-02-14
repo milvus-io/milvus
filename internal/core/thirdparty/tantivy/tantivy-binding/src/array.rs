@@ -55,9 +55,54 @@ pub extern "C" fn free_rust_array(array: RustArray) {
 }
 
 #[repr(C)]
+pub struct RustArrayI64 {
+    array: *mut i64,
+    len: size_t,
+    cap: size_t,
+}
+
+impl RustArrayI64 {
+    pub fn from_vec(vec: Vec<i64>) -> RustArrayI64 {
+        let len = vec.len();
+        let cap = vec.capacity();
+        let v = vec.leak();
+        RustArrayI64 {
+            array: v.as_mut_ptr(),
+            len,
+            cap,
+        }
+    }
+}
+
+impl std::default::Default for RustArrayI64 {
+    fn default() -> Self {
+        RustArrayI64 {
+            array: std::ptr::null_mut(),
+            len: 0,
+            cap: 0,
+        }
+    }
+}
+
+impl From<Vec<i64>> for RustArrayI64 {
+    fn from(vec: Vec<i64>) -> Self {
+        RustArrayI64::from_vec(vec)
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn free_rust_array_i64(array: RustArrayI64) {
+    let RustArrayI64 { array, len, cap } = array;
+    unsafe {
+        Vec::from_raw_parts(array, len, cap);
+    }
+}
+
+#[repr(C)]
 pub enum Value {
     None(()),
     RustArray(RustArray),
+    RustArrayI64(RustArrayI64),
     U32(u32),
     Ptr(*mut c_void),
 }
@@ -74,7 +119,7 @@ macro_rules! impl_from_for_enum {
     };
 }
 
-impl_from_for_enum!(Value, None => (), RustArray => RustArray, RustArray => Vec<u32>, U32 => u32, Ptr => *mut c_void);
+impl_from_for_enum!(Value, None => (), RustArrayI64 => RustArrayI64, RustArrayI64 => Vec<i64>, RustArray => RustArray, RustArray => Vec<u32>, U32 => u32, Ptr => *mut c_void);
 
 #[repr(C)]
 pub struct RustResult {
@@ -158,7 +203,7 @@ macro_rules! cstr_to_str {
 
 #[no_mangle]
 pub extern "C" fn test_enum_with_array() -> RustResult {
-    let array = vec![1, 2, 3];
+    let array: Vec<u32> = vec![1, 2, 3];
     RustResult::from(Result::Ok(array))
 }
 

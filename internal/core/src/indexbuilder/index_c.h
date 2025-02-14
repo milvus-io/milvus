@@ -37,6 +37,11 @@ CStatus
 DeleteIndex(CIndex index);
 
 CStatus
+BuildJsonKeyIndex(ProtoLayoutInterface c_binary_set,
+                  const uint8_t* serialized_build_index_info,
+                  const uint64_t len);
+
+CStatus
 BuildTextIndex(ProtoLayoutInterface c_binary_set,
                const uint8_t* serialized_build_index_info,
                const uint64_t len);

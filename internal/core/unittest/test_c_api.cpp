@@ -46,6 +46,7 @@
 #include "segcore/load_index_c.h"
 #include "test_utils/c_api_test_utils.h"
 #include "segcore/vector_index_c.h"
+#include "common/jsmn.h"
 
 namespace chrono = std::chrono;
 
@@ -69,7 +70,7 @@ CRetrieve(CSegmentInterface c_segment,
           uint64_t timestamp,
           CRetrieveResult** result) {
     auto future = AsyncRetrieve(
-        {}, c_segment, c_plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE, false);
+        {}, c_segment, c_plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE, false, 0);
     auto futurePtr = static_cast<milvus::futures::IFuture*>(
         static_cast<void*>(static_cast<CFuture*>(future)));
 
