@@ -683,7 +683,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				ValidData: validData,
 			}
 
-		case schemapb.DataType_String, schemapb.DataType_VarChar:
+		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 			srcData := srcField.GetScalars().GetStringData().GetData()
 			validData := srcField.GetValidData()
 

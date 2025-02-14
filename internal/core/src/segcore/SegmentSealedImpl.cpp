@@ -395,7 +395,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             int64_t field_data_size = 0;
             switch (data_type) {
                 case milvus::DataType::STRING:
-                case milvus::DataType::VARCHAR: {
+                case milvus::DataType::VARCHAR:
+                case milvus::DataType::TEXT: {
                     auto var_column = std::make_shared<
                         SingleChunkVariableColumn<std::string>>(
                         num_rows, field_meta, get_block_size());
@@ -571,7 +572,8 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     if (IsVariableDataType(data_type)) {
         switch (data_type) {
             case milvus::DataType::STRING:
-            case milvus::DataType::VARCHAR: {
+            case milvus::DataType::VARCHAR:
+            case milvus::DataType::TEXT: {
                 auto var_column =
                     std::make_shared<SingleChunkVariableColumn<std::string>>(
                         file,
@@ -1399,7 +1401,8 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
     }
     switch (field_meta.get_data_type()) {
         case DataType::VARCHAR:
-        case DataType::STRING: {
+        case DataType::STRING:
+        case DataType::TEXT: {
             bulk_subscript_ptr_impl<std::string>(
                 column.get(),
                 seg_offsets,

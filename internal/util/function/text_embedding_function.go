@@ -66,6 +66,10 @@ type TextEmbeddingFunction struct {
 	embProvider textEmbeddingProvider
 }
 
+func isValidInputDataType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_VarChar || dataType == schemapb.DataType_Text
+}
+
 func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema) (*TextEmbeddingFunction, error) {
 	if len(functionSchema.GetOutputFieldNames()) != 1 {
 		return nil, fmt.Errorf("Text function should only have one output field, but now is %d", len(functionSchema.GetOutputFieldNames()))
@@ -125,8 +129,8 @@ func (runner *TextEmbeddingFunction) ProcessInsert(inputs []*schemapb.FieldData)
 		return nil, fmt.Errorf("Text embedding function only receives one input field, but got [%d]", len(inputs))
 	}
 
-	if inputs[0].Type != schemapb.DataType_VarChar {
-		return nil, fmt.Errorf("Text embedding only supports varchar field as input field, but got %s", schemapb.DataType_name[int32(inputs[0].Type)])
+	if !isValidInputDataType(inputs[0].Type) {
+		return nil, fmt.Errorf("Text embedding only supports varchar or text field as input field, but got %s", schemapb.DataType_name[int32(inputs[0].Type)])
 	}
 
 	texts := inputs[0].GetScalars().GetStringData().GetData()
@@ -182,8 +186,8 @@ func (runner *TextEmbeddingFunction) ProcessBulkInsert(inputs []storage.FieldDat
 		return nil, fmt.Errorf("TextEmbedding function only receives one input, bug got [%d]", len(inputs))
 	}
 
-	if inputs[0].GetDataType() != schemapb.DataType_VarChar {
-		return nil, fmt.Errorf(" only supports varchar field, the input is not varchar")
+	if !isValidInputDataType(inputs[0].GetDataType()) {
+		return nil, fmt.Errorf("TextEmbedding function only supports varchar or text field as input field, but got %s", schemapb.DataType_name[int32(inputs[0].GetDataType())])
 	}
 
 	texts, ok := inputs[0].GetDataRows().([]string)
