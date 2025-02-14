@@ -334,6 +334,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 
 	m[schemapb.DataType_VarChar] = stringEntry
 	m[schemapb.DataType_String] = stringEntry
+	m[schemapb.DataType_Text] = stringEntry
 
 	// We're not using the deserialized data in go, so we can skip the heavy pb serde.
 	// If there is need in the future, just assign it to m[schemapb.DataType_Array]

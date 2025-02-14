@@ -288,7 +288,8 @@ SegmentChunkReader::GetChunkDataAccessor(DataType data_type,
         case DataType::DOUBLE:
             return GetChunkDataAccessor<double>(
                 field_id, chunk_id, data_barrier);
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             return GetChunkDataAccessor<std::string>(
                 field_id, chunk_id, data_barrier);
         }

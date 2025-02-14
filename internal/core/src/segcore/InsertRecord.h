@@ -452,7 +452,8 @@ struct InsertRecord {
                     this->append_data<double>(field_id, size_per_chunk);
                     break;
                 }
-                case DataType::VARCHAR: {
+                case DataType::VARCHAR:
+                case DataType::TEXT: {
                     this->append_data<std::string>(field_id, size_per_chunk);
                     break;
                 }

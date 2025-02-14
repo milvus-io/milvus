@@ -397,6 +397,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		// valid max length per row parameters
 		// if max_length not specified, return error
 		if field.DataType == schemapb.DataType_VarChar ||
+			field.DataType == schemapb.DataType_Text ||
 			(field.GetDataType() == schemapb.DataType_Array && field.GetElementType() == schemapb.DataType_VarChar) {
 			err = validateMaxLengthPerRow(t.schema.Name, field)
 			if err != nil {

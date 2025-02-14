@@ -294,6 +294,21 @@ func TestExpr_PhraseMatch(t *testing.T) {
 	}
 }
 
+func TestExpr_TextField(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	invalidExprs := []string{
+		`TextField == "query"`,
+		`text_match(TextField, "query")`,
+	}
+
+	for _, exprStr := range invalidExprs {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
 func TestExpr_IsNull(t *testing.T) {
 	schema := newTestSchema(false)
 	schema.EnableDynamicField = false
