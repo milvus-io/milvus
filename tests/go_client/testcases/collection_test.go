@@ -554,7 +554,7 @@ func TestCreateCollectionInvalidFields(t *testing.T) {
 		{fields: []*entity.Field{pkField, pkField2, vecField}, errMsg: "there are more than one primary key"},
 		{fields: []*entity.Field{pkField, vecField, noneField}, errMsg: "data type None is not valid"},
 		{fields: []*entity.Field{pkField, vecField, stringField}, errMsg: "string data type not supported yet, please use VarChar type instead"},
-		{fields: []*entity.Field{pkField, vecField, varcharField}, errMsg: "type param(max_length) should be specified for varChar field"},
+		{fields: []*entity.Field{pkField, vecField, varcharField}, errMsg: "type param(max_length) should be specified for the field"},
 	}
 
 	collName := common.GenRandomString(prefix, 6)
@@ -903,12 +903,12 @@ func TestCreateVarcharArrayInvalidLength(t *testing.T) {
 
 	// create collection
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-	common.CheckErr(t, err, false, "type param(max_length) should be specified for varChar field")
+	common.CheckErr(t, err, false, "type param(max_length) should be specified for the field")
 	// invalid Capacity
 	for _, invalidLength := range []int64{-1, 0, common.MaxLength + 1} {
 		arrayVarcharField.WithMaxLength(invalidLength)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-		common.CheckErr(t, err, false, "the maximum length specified for a VarChar field(array) should be in (0, 65535]")
+		common.CheckErr(t, err, false, "the maximum length specified for the field(array) should be in (0, 65535]")
 	}
 }
 
@@ -925,12 +925,12 @@ func TestCreateVarcharInvalidLength(t *testing.T) {
 	schema := entity.NewSchema().WithName(collName).WithField(varcharField).WithField(vecField)
 	// create collection
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-	common.CheckErr(t, err, false, "type param(max_length) should be specified for varChar field")
+	common.CheckErr(t, err, false, "type param(max_length) should be specified for the field")
 	// invalid Capacity
 	for _, invalidLength := range []int64{-1, 0, common.MaxLength + 1} {
 		varcharField.WithMaxLength(invalidLength)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-		common.CheckErr(t, err, false, "the maximum length specified for a VarChar field(varchar) should be in (0, 65535]")
+		common.CheckErr(t, err, false, "the maximum length specified for the field(varchar) should be in (0, 65535]")
 	}
 }
 

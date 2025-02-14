@@ -579,7 +579,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                             ->mutable_data());
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             bulk_subscript_ptr_impl<std::string>(vec_ptr,
                                                  seg_offsets,
                                                  count,

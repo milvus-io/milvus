@@ -76,6 +76,8 @@ enum class DataType {
     VARCHAR = 21,
     ARRAY = 22,
     JSON = 23,
+    // GEOMETRY = 24 // reserved in proto
+    TEXT = 25,
 
     // Some special Data type, start from after 50
     // just for internal use now, may sync proto in future
@@ -182,6 +184,8 @@ GetDataTypeName(DataType data_type) {
             return "array";
         case DataType::JSON:
             return "json";
+        case DataType::TEXT:
+            return "text";
         case DataType::VECTOR_FLOAT:
             return "vector_float";
         case DataType::VECTOR_BINARY:
@@ -255,6 +259,7 @@ IsStringDataType(DataType data_type) {
     switch (data_type) {
         case DataType::VARCHAR:
         case DataType::STRING:
+        case DataType::TEXT:
             return true;
         default:
             return false;
@@ -539,6 +544,12 @@ struct TypeTraits<DataType::STRING> : public TypeTraits<DataType::VARCHAR> {
 };
 
 template <>
+struct TypeTraits<DataType::TEXT> : public TypeTraits<DataType::VARCHAR> {
+    static constexpr DataType TypeKind = DataType::TEXT;
+    static constexpr const char* Name = "TEXT";
+};
+
+template <>
 struct TypeTraits<DataType::ARRAY> {
     using NativeType = void;
     static constexpr DataType TypeKind = DataType::ARRAY;
@@ -619,6 +630,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::VARCHAR:
                 name = "VARCHAR";
+                break;
+            case milvus::DataType::TEXT:
+                name = "TEXT";
                 break;
             case milvus::DataType::ARRAY:
                 name = "ARRAY";

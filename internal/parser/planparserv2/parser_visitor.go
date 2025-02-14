@@ -39,6 +39,10 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 		nestedPath = append(nestedPath, identifier)
 	}
 
+	if field.DataType == schemapb.DataType_Text {
+		return nil, fmt.Errorf("filter on text field (%s) is not supported yet", field.Name)
+	}
+
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_ColumnExpr{
@@ -493,6 +497,9 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 	}
 	if !typeutil.IsStringType(column.dataType) {
 		return fmt.Errorf("text match operation on non-string is unsupported")
+	}
+	if column.dataType == schemapb.DataType_Text {
+		return fmt.Errorf("text match operation on text field is not supported yet")
 	}
 
 	queryText, err := convertEscapeSingle(ctx.StringLiteral().GetText())
