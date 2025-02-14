@@ -615,12 +615,11 @@ struct TantivyIndexWrapper {
                    "TantivyIndexWrapper.term_query: invalid result type");
         return RustArrayWrapper(std::move(res.result_->value.rust_array._0));
     }
-    
+
     RustArrayI64Wrapper
     term_query_i64(std::string term) {
         auto array = [&]() {
-                return tantivy_term_query_keyword_i64(
-                    reader_, term.c_str());
+            return tantivy_term_query_keyword_i64(reader_, term.c_str());
         }();
 
         auto res = RustResultWrapper(array);
@@ -629,7 +628,8 @@ struct TantivyIndexWrapper {
                    res.result_->error);
         AssertInfo(res.result_->value.tag == Value::Tag::RustArrayI64,
                    "TantivyIndexWrapper.term_query_i64: invalid result type");
-        return RustArrayI64Wrapper(std::move(res.result_->value.rust_array_i64._0));
+        return RustArrayI64Wrapper(
+            std::move(res.result_->value.rust_array_i64._0));
     }
 
     template <typename T>
