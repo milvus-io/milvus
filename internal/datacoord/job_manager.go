@@ -96,10 +96,22 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 }
 
 func (jm *statsJobManager) triggerSortStatsTask() {
-	segments := jm.mt.SelectSegments(jm.ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsImporting()
+	invisibleSegments := jm.mt.SelectSegments(jm.ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
+		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsImporting() && seg.GetIsInvisible()
 	}))
-	for _, segment := range segments {
+
+	for _, seg := range invisibleSegments {
+		jm.createSortStatsTaskForSegment(seg)
+	}
+
+	visibleSegments := jm.mt.SelectSegments(jm.ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
+		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsImporting() && !seg.GetIsInvisible()
+	}))
+
+	for _, segment := range visibleSegments {
+		if jm.scheduler.GetTaskCount() > Params.DataCoordCfg.StatsTaskTriggerCount.GetAsInt() {
+			break
+		}
 		jm.createSortStatsTaskForSegment(segment)
 	}
 }

@@ -539,6 +539,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 4, Params.L0DeleteCompactionSlotUsage.GetAsInt())
 		params.Save("datacoord.scheduler.taskSlowThreshold", "1000")
 		assert.Equal(t, 1000*time.Second, Params.TaskSlowThreshold.GetAsDuration(time.Second))
+
+		params.Save("datacoord.statsTask.enable", "true")
+		assert.True(t, Params.EnableStatsTask.GetAsBool())
+		params.Save("datacoord.taskCheckInterval", "500")
+		assert.Equal(t, 500*time.Second, Params.TaskCheckInterval.GetAsDuration(time.Second))
+		params.Save("datacoord.statsTaskTriggerCount", "3")
+		assert.Equal(t, 3, Params.StatsTaskTriggerCount.GetAsInt())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
