@@ -3104,24 +3104,23 @@ class TestCollectionSearch(TestcaseBase):
                     assert set(ids).issubset(filter_ids_set)
 
                 # 5. search again with expression template and search hints
-                if expr != "":          # TODO: remove this when issue #39013 is fixed
-                    search_param = default_search_params.copy()
-                    search_param.update({"hints": "iterative_filter"})
-                    search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                                        search_param, nb,
-                                                        expr=expr, expr_params=expr_params, _async=_async,
-                                                        check_task=CheckTasks.check_search_results,
-                                                        check_items={"nq": default_nq,
-                                                                     "ids": insert_ids,
-                                                                     "limit": min(nb, len(filter_ids)),
-                                                                     "_async": _async})
-                    if _async:
-                        search_res.done()
-                        search_res = search_res.result()
-                    filter_ids_set = set(filter_ids)
-                    for hits in search_res:
-                        ids = hits.ids
-                        assert set(ids).issubset(filter_ids_set)
+                search_param = default_search_params.copy()
+                search_param.update({"hints": "iterative_filter"})
+                search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                                    search_param, nb,
+                                                    expr=expr, expr_params=expr_params, _async=_async,
+                                                    check_task=CheckTasks.check_search_results,
+                                                    check_items={"nq": default_nq,
+                                                                 "ids": insert_ids,
+                                                                 "limit": min(nb, len(filter_ids)),
+                                                                 "_async": _async})
+                if _async:
+                    search_res.done()
+                    search_res = search_res.result()
+                filter_ids_set = set(filter_ids)
+                for hits in search_res:
+                    ids = hits.ids
+                    assert set(ids).issubset(filter_ids_set)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("bool_type", [True, False, "true", "false"])
@@ -12860,7 +12859,8 @@ class TestSparseSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index", ct.all_index_types[9:11])
-    def test_sparse_index_search(self, index):
+    @pytest.mark.parametrize("inverted_index_algo", ct.inverted_index_algo)
+    def test_sparse_index_search(self, index, inverted_index_algo):
         """
         target: verify that sparse index for sparse vectors can be searched properly
         method: create connection, collection, insert and search
@@ -12873,12 +12873,16 @@ class TestSparseSearch(TestcaseBase):
         data = cf.gen_default_list_sparse_data(nb=3000)
         collection_w.insert(data)
         params = cf.get_index_params_params(index)
+        params.update({"inverted_index_algo": inverted_index_algo})
         index_params = {"index_type": index, "metric_type": "IP", "params": params}
         collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
         collection_w.load()
 
+        _params = cf.get_search_params_params(index)
+        _params.update({"dim_max_score_ratio": 1.05})
+        search_params = {"params": _params}
         collection_w.search(data[-1][0:default_nq], ct.default_sparse_vec_field_name,
-                            ct.default_sparse_search_params, default_limit,
+                            search_params, default_limit,
                             output_fields=[ct.default_sparse_vec_field_name],
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
@@ -12887,7 +12891,7 @@ class TestSparseSearch(TestcaseBase):
                                          "output_fields": [ct.default_sparse_vec_field_name]})
         expr = "int64 < 100 "
         collection_w.search(data[-1][0:default_nq], ct.default_sparse_vec_field_name,
-                            ct.default_sparse_search_params, default_limit,
+                            search_params, default_limit,
                             expr=expr, output_fields=[ct.default_sparse_vec_field_name],
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
@@ -12923,7 +12927,8 @@ class TestSparseSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.all_index_types[9:11])
-    def test_sparse_index_enable_mmap_search(self, index):
+    @pytest.mark.parametrize("inverted_index_algo", ct.inverted_index_algo)
+    def test_sparse_index_enable_mmap_search(self, index, inverted_index_algo):
         """
         target: verify that the sparse indexes of sparse vectors can be searched properly after turning on mmap
         method: create connection, collection, enable mmap,  insert and search
@@ -12939,6 +12944,7 @@ class TestSparseSearch(TestcaseBase):
         collection_w.insert(data)
 
         params = cf.get_index_params_params(index)
+        params.update({"inverted_index_algo": inverted_index_algo})
         index_params = {"index_type": index, "metric_type": "IP", "params": params}
         collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
 
@@ -12968,9 +12974,9 @@ class TestSparseSearch(TestcaseBase):
         assert len(res) == 4
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("ratio", [0.01, 0.1, 0.5, 0.9])
+    @pytest.mark.parametrize("drop_ratio_build", [0.01])
     @pytest.mark.parametrize("index", ct.all_index_types[9:11])
-    def test_search_sparse_ratio(self, ratio, index):
+    def test_search_sparse_ratio(self, drop_ratio_build, index):
         """
         target: create a sparse index by adjusting the ratio parameter.
         method: create a sparse index by adjusting the ratio parameter.
@@ -12982,16 +12988,28 @@ class TestSparseSearch(TestcaseBase):
         collection_w = self.init_collection_wrap(c_name, schema=schema)
         data = cf.gen_default_list_sparse_data(nb=4000)
         collection_w.insert(data)
-        params = {"index_type": index, "metric_type": "IP", "params": {"drop_ratio_build": ratio}}
+        params = {"index_type": index, "metric_type": "IP", "params": {"drop_ratio_build": drop_ratio_build}}
         collection_w.create_index(ct.default_sparse_vec_field_name, params, index_name=index)
         collection_w.load()
         assert collection_w.has_index(index_name=index)[0] is True
-        search_params = {"metric_type": "IP", "params": {"drop_ratio_search": ratio}}
-        collection_w.search(data[-1][0:default_nq], ct.default_sparse_vec_field_name,
-                            search_params, default_limit,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": default_limit})
+        _params = {"drop_ratio_search": 0.2}
+        for dim_max_score_ratio in [0.5, 0.99, 1, 1.3]:
+            _params.update({"dim_max_score_ratio": dim_max_score_ratio})
+            search_params = {"metric_type": "IP", "params": _params}
+            collection_w.search(data[-1][0:default_nq], ct.default_sparse_vec_field_name,
+                                search_params, default_limit,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "limit": default_limit})
+        error = {ct.err_code: 999,
+                 ct.err_msg: "should be in range [0.500000, 1.300000]"}
+        for invalid_ratio in [0.49, 1.4]:
+            _params.update({"dim_max_score_ratio": invalid_ratio})
+            search_params = {"metric_type": "IP", "params": _params}
+            collection_w.search(data[-1][0:default_nq], ct.default_sparse_vec_field_name,
+                                search_params, default_limit,
+                                check_task=CheckTasks.err_res,
+                                check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.all_index_types[9:11])
@@ -13024,8 +13042,8 @@ class TestSparseSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.all_index_types[9:11])
-    @pytest.mark.xfail(reason="issue #36174")
-    def test_sparse_vector_search_iterator(self, index):
+    @pytest.mark.parametrize("inverted_index_algo", ct.inverted_index_algo)
+    def test_sparse_vector_search_iterator(self, index, inverted_index_algo):
         """
         target: create sparse vectors and search iterator
         method: create sparse vectors and search iterator
@@ -13038,6 +13056,7 @@ class TestSparseSearch(TestcaseBase):
         data = cf.gen_default_list_sparse_data(nb=4000)
         collection_w.insert(data)
         params = cf.get_index_params_params(index)
+        params.update({"inverted_index_algo": inverted_index_algo})
         index_params = {"index_type": index, "metric_type": "IP", "params": params}
         collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
 

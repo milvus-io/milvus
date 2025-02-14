@@ -306,7 +306,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
                        "consistency_level": 0,
                        "enable_dynamic_field": False,
                        "num_partitions": 16,
-                       "id_name": "id_string",
+                       "primary_field": "id_string",
                        "vector_name": "embeddings"}
         if nullable:
             check_items["nullable_fields"] = ["nullable_field", "array_field"]

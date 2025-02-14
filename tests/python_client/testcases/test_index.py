@@ -1484,6 +1484,28 @@ class TestIndexInvalid(TestcaseBase):
                                               check_task=CheckTasks.err_res,
                                               check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("inverted_index_algo", ["INVALID_ALGO"])
+    @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
+    def test_invalid_sparse_inverted_index_algo(self, inverted_index_algo, index):
+        """
+        target: index creation for unsupported ratio parameter
+        method: indexing of unsupported ratio parameters
+        expected: raise exception
+        """
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema()
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        data = cf.gen_default_list_sparse_data()
+        collection_w.insert(data=data)
+        params = {"index_type": index, "metric_type": "IP", "params": {"inverted_index_algo": inverted_index_algo}}
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"sparse inverted index algo {inverted_index_algo} not found or not supported, "
+                             f"supported: [TAAT_NAIVE DAAT_WAND DAAT_MAXSCORE]"}
+        index, _ = self.index_wrap.init_index(collection_w.collection, ct.default_sparse_vec_field_name, params,
+                                              check_task=CheckTasks.err_res,
+                                              check_items=error)
+
 
 @pytest.mark.tags(CaseLabel.GPU)
 class TestNewIndexAsync(TestcaseBase):
