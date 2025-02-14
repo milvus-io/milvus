@@ -106,7 +106,6 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 			collections[segment.Collection()],
 			nodeID,
 			fmt.Sprint(segment.Collection()),
-			fmt.Sprint(segment.Partition()),
 			segments.SegmentTypeGrowing.String(),
 		).Set(float64(numEntities))
 	}
@@ -136,7 +135,6 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 			collections[segment.Collection()],
 			nodeID,
 			fmt.Sprint(segment.Collection()),
-			fmt.Sprint(segment.Partition()),
 			segments.SegmentTypeSealed.String(),
 		).Set(float64(numEntities))
 	}

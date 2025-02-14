@@ -60,6 +60,7 @@ type syncManager struct {
 
 	tasks     *typeutil.ConcurrentMap[string, Task]
 	taskStats *expirable.LRU[string, Task]
+	handler   config.EventHandler
 }
 
 func NewSyncManager(chunkManager storage.ChunkManager) SyncManager {
@@ -72,10 +73,12 @@ func NewSyncManager(chunkManager storage.ChunkManager) SyncManager {
 		keyLockDispatcher: dispatcher,
 		chunkManager:      chunkManager,
 		tasks:             typeutil.NewConcurrentMap[string, Task](),
-		taskStats:         expirable.NewLRU[string, Task](16, nil, time.Minute*15),
+		taskStats:         expirable.NewLRU[string, Task](64, nil, time.Minute*15),
 	}
 	// setup config update watcher
-	params.Watch(params.DataNodeCfg.MaxParallelSyncMgrTasks.Key, config.NewHandler("datanode.syncmgr.poolsize", syncMgr.resizeHandler))
+	handler := config.NewHandler("datanode.syncmgr.poolsize", syncMgr.resizeHandler)
+	syncMgr.handler = handler
+	params.Watch(params.DataNodeCfg.MaxParallelSyncMgrTasks.Key, handler)
 	return syncMgr
 }
 
@@ -155,6 +158,7 @@ func (mgr *syncManager) TaskStatsJSON() string {
 }
 
 func (mgr *syncManager) Close() error {
+	paramtable.Get().Unwatch(paramtable.Get().DataNodeCfg.MaxParallelSyncMgrTasks.Key, mgr.handler)
 	timeout := paramtable.Get().CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second)
 	return mgr.workerPool.ReleaseTimeout(timeout)
 }

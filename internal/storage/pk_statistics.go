@@ -149,15 +149,9 @@ func (st *PkStatistics) BatchPkExist(lc *BatchLocationsCache, hits []bool) []boo
 
 	// check bf first, TestLocation just do some bitset compute, cost is cheaper
 	locations := lc.Locations(st.PkFilter.K(), st.PkFilter.Type())
-	ret := st.PkFilter.BatchTestLocations(locations, hits)
-
-	// todo: a bit ugly, hits[i]'s value will depends on multi bf in single segment,
-	// hits array will be removed after we merge bf in segment
 	pks := lc.PKs()
-	for i := range ret {
-		if !hits[i] {
-			hits[i] = ret[i] && st.MinPK.LE(pks[i]) && st.MaxPK.GE(pks[i])
-		}
+	for i, hit := range hits {
+		hits[i] = hit || st.PkFilter.TestLocations(locations[i]) && st.MinPK.LE(pks[i]) && st.MaxPK.GE(pks[i])
 	}
 
 	return hits

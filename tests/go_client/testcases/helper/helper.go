@@ -104,7 +104,7 @@ func GetInvalidPartitionKeyFieldType() []entity.FieldType {
 	return nonPkFieldTypes
 }
 
-// ----------------- prepare data --------------------------
+// CollectionPrepare ----------------- prepare data --------------------------
 type CollectionPrepare struct{}
 
 var (
@@ -112,17 +112,53 @@ var (
 	FieldsFact  FieldsFactory
 )
 
+func mergeOptions(schema *entity.Schema, opts ...CreateCollectionOpt) clientv2.CreateCollectionOption {
+	//
+	collectionOption := clientv2.NewCreateCollectionOption(schema.CollectionName, schema)
+	tmpOption := &createCollectionOpt{}
+	for _, o := range opts {
+		o(tmpOption)
+	}
+
+	if !common.IsZeroValue(tmpOption.shardNum) {
+		collectionOption.WithShardNum(tmpOption.shardNum)
+	}
+
+	if !common.IsZeroValue(tmpOption.enabledDynamicSchema) {
+		collectionOption.WithDynamicSchema(tmpOption.enabledDynamicSchema)
+	}
+
+	if !common.IsZeroValue(tmpOption.properties) {
+		for k, v := range tmpOption.properties {
+			collectionOption.WithProperty(k, v)
+		}
+	}
+
+	if !common.IsZeroValue(tmpOption.consistencyLevel) {
+		collectionOption.WithConsistencyLevel(tmpOption.consistencyLevel)
+	}
+
+	return collectionOption
+}
+
 func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *testing.T, mc *base.MilvusClient,
-	cp *CreateCollectionParams, fieldOpt *GenFieldsOption, schemaOpt *GenSchemaOption,
+	cp *CreateCollectionParams, fieldOpt *GenFieldsOption, schemaOpt *GenSchemaOption, opts ...CreateCollectionOpt,
 ) (*CollectionPrepare, *entity.Schema) {
 	fields := FieldsFact.GenFieldsForCollection(cp.CollectionFieldsType, fieldOpt)
 	schemaOpt.Fields = fields
 	schema := GenSchema(schemaOpt)
 
-	err := mc.CreateCollection(ctx, clientv2.NewCreateCollectionOption(schema.CollectionName, schema))
+	createCollectionOption := mergeOptions(schema, opts...)
+	err := mc.CreateCollection(ctx, createCollectionOption)
 	common.CheckErr(t, err, true)
 
 	t.Cleanup(func() {
+		// The collection will be cleanup after the test
+		// But some ctx is setted with timeout for only a part of unittest,
+		// which will cause the drop collection failed with timeout.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second*10)
+		defer cancel()
+
 		err := mc.DropCollection(ctx, clientv2.NewDropCollectionOption(schema.CollectionName))
 		common.CheckErr(t, err, true)
 	})
@@ -135,6 +171,8 @@ func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T
 	if nil == ip.Schema || ip.Schema.CollectionName == "" {
 		log.Fatal("[InsertData] Nil Schema is not expected")
 	}
+	// print option
+	log.Info("GenDataOption", zap.Any("option", option))
 	columns, dynamicColumns := GenColumnsBasedSchema(ip.Schema, option)
 	insertOpt := clientv2.NewColumnBasedInsertOption(ip.Schema.CollectionName).WithColumns(columns...).WithColumns(dynamicColumns...)
 	if ip.PartitionName != "" {

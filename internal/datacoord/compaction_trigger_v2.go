@@ -86,8 +86,8 @@ type CompactionTriggerManager struct {
 	clusteringPolicy *clusteringCompactionPolicy
 	singlePolicy     *singleCompactionPolicy
 
-	closeSig chan struct{}
-	closeWg  sync.WaitGroup
+	cancel  context.CancelFunc
+	closeWg sync.WaitGroup
 }
 
 func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, compactionHandler compactionPlanContext, meta *meta) *CompactionTriggerManager {
@@ -96,7 +96,6 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, com
 		handler:           handler,
 		compactionHandler: compactionHandler,
 		meta:              meta,
-		closeSig:          make(chan struct{}),
 	}
 	m.l0Policy = newL0CompactionPolicy(meta)
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
@@ -112,19 +111,25 @@ func (m *CompactionTriggerManager) OnCollectionUpdate(collectionID int64) {
 
 func (m *CompactionTriggerManager) Start() {
 	m.closeWg.Add(1)
-	go m.startLoop()
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	go func() {
+		defer m.closeWg.Done()
+		m.loop(ctx)
+	}()
 }
 
 func (m *CompactionTriggerManager) Stop() {
-	close(m.closeSig)
+	if m.cancel != nil {
+		m.cancel()
+	}
 	m.closeWg.Wait()
 }
 
-func (m *CompactionTriggerManager) startLoop() {
+func (m *CompactionTriggerManager) loop(ctx context.Context) {
 	defer logutil.LogPanic()
-	defer m.closeWg.Done()
 
-	log := log.Ctx(context.TODO())
+	log := log.Ctx(ctx)
 	l0Ticker := time.NewTicker(Params.DataCoordCfg.L0CompactionTriggerInterval.GetAsDuration(time.Second))
 	defer l0Ticker.Stop()
 	clusteringTicker := time.NewTicker(Params.DataCoordCfg.ClusteringCompactionTriggerInterval.GetAsDuration(time.Second))
@@ -134,7 +139,7 @@ func (m *CompactionTriggerManager) startLoop() {
 	log.Info("Compaction trigger manager start")
 	for {
 		select {
-		case <-m.closeSig:
+		case <-ctx.Done():
 			log.Info("Compaction trigger manager checkLoop quit")
 			return
 		case <-l0Ticker.C:
@@ -150,7 +155,6 @@ func (m *CompactionTriggerManager) startLoop() {
 				log.Warn("Fail to trigger L0 policy", zap.Error(err))
 				continue
 			}
-			ctx := context.Background()
 			if len(events) > 0 {
 				for triggerType, views := range events {
 					m.notify(ctx, triggerType, views)
@@ -164,12 +168,11 @@ func (m *CompactionTriggerManager) startLoop() {
 				log.RatedInfo(10, "Skip trigger clustering compaction since compactionHandler is full")
 				continue
 			}
-			events, err := m.clusteringPolicy.Trigger()
+			events, err := m.clusteringPolicy.Trigger(ctx)
 			if err != nil {
 				log.Warn("Fail to trigger clustering policy", zap.Error(err))
 				continue
 			}
-			ctx := context.Background()
 			if len(events) > 0 {
 				for triggerType, views := range events {
 					m.notify(ctx, triggerType, views)
@@ -183,12 +186,11 @@ func (m *CompactionTriggerManager) startLoop() {
 				log.RatedInfo(10, "Skip trigger single compaction since compactionHandler is full")
 				continue
 			}
-			events, err := m.singlePolicy.Trigger()
+			events, err := m.singlePolicy.Trigger(ctx)
 			if err != nil {
 				log.Warn("Fail to trigger single policy", zap.Error(err))
 				continue
 			}
-			ctx := context.Background()
 			if len(events) > 0 {
 				for triggerType, views := range events {
 					m.notify(ctx, triggerType, views)
@@ -200,7 +202,7 @@ func (m *CompactionTriggerManager) startLoop() {
 
 func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool) (UniqueID, error) {
 	log.Ctx(ctx).Info("receive manual trigger", zap.Int64("collectionID", collectionID))
-	views, triggerID, err := m.clusteringPolicy.triggerOneCollection(context.Background(), collectionID, true)
+	views, triggerID, err := m.clusteringPolicy.triggerOneCollection(ctx, collectionID, true)
 	if err != nil {
 		return 0, err
 	}

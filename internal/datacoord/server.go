@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -328,12 +329,20 @@ func (s *Server) Init() error {
 
 func (s *Server) initDataCoord() error {
 	log := log.Ctx(s.ctx)
-	s.UpdateStateCode(commonpb.StateCode_Initializing)
-	var err error
-	if err = s.initRootCoordClient(); err != nil {
+	// wait for master init or healthy
+	log.Info("DataCoord try to wait for RootCoord ready")
+	if err := s.initRootCoordClient(); err != nil {
 		return err
 	}
 	log.Info("init rootcoord client done")
+	err := componentutil.WaitForComponentHealthy(s.ctx, s.rootCoordClient, "RootCoord", 1000000, time.Millisecond*200)
+	if err != nil {
+		log.Error("DataCoord wait for RootCoord ready failed", zap.Error(err))
+		return err
+	}
+	log.Info("DataCoord report RootCoord ready")
+
+	s.UpdateStateCode(commonpb.StateCode_Initializing)
 
 	s.broker = broker.NewCoordinatorBroker(s.rootCoordClient)
 	s.allocator = allocator.NewRootCoordAllocator(s.rootCoordClient)
@@ -373,14 +382,14 @@ func (s *Server) initDataCoord() error {
 	}
 	log.Info("init service discovery done")
 
+	s.initCompaction()
+	log.Info("init compaction done")
+
 	s.initTaskScheduler(storageCli)
 	log.Info("init task scheduler done")
 
 	s.initJobManager()
 	log.Info("init statsJobManager done")
-
-	s.initCompaction()
-	log.Info("init compaction done")
 
 	if err = s.initSegmentManager(); err != nil {
 		return err
@@ -657,7 +666,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	reloadEtcdFn := func() error {
 		var err error
 		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
-		s.meta, err = newMeta(s.ctx, catalog, chunkManager)
+		s.meta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
 		if err != nil {
 			return err
 		}
@@ -676,7 +685,8 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 
 func (s *Server) initTaskScheduler(manager storage.ChunkManager) {
 	if s.taskScheduler == nil {
-		s.taskScheduler = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler, s.allocator)
+		s.taskScheduler = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler, s.allocator, s.compactionHandler)
+		s.compactionHandler.setTaskScheduler(s.taskScheduler)
 	}
 }
 
@@ -693,7 +703,9 @@ func (s *Server) initIndexNodeManager() {
 }
 
 func (s *Server) initCompaction() {
-	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.meta, s.allocator, s.taskScheduler, s.handler)
+	cph := newCompactionPlanHandler(s.cluster, s.sessionManager, s.meta, s.allocator, s.handler)
+	cph.loadMeta()
+	s.compactionHandler = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler, s.meta)
 	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
 }

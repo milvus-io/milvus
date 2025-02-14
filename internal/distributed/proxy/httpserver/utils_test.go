@@ -287,6 +287,20 @@ func generateVectorFieldData(vectorType schemapb.DataType) schemapb.FieldData {
 			},
 			IsDynamic: false,
 		}
+	case schemapb.DataType_Int8Vector:
+		return schemapb.FieldData{
+			Type:      schemapb.DataType_Int8Vector,
+			FieldName: FieldBookIntro,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 2,
+					Data: &schemapb.VectorField_Int8Vector{
+						Int8Vector: []byte{0x00, 0x1, 0x2, 0x3, 0x4, 0x5},
+					},
+				},
+			},
+			IsDynamic: false,
+		}
 	default:
 		panic("unsupported vector type")
 	}
@@ -735,6 +749,8 @@ func TestCheckAndSetData(t *testing.T) {
 		float16VectorField.Name = "float16Vector"
 		bfloat16VectorField := generateVectorFieldSchema(schemapb.DataType_BFloat16Vector)
 		bfloat16VectorField.Name = "bfloat16Vector"
+		int8VectorField := generateVectorFieldSchema(schemapb.DataType_Int8Vector)
+		int8VectorField.Name = "int8Vector"
 		err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
 			Name: DefaultCollectionName,
 			Fields: []*schemapb.FieldSchema{
@@ -766,6 +782,15 @@ func TestCheckAndSetData(t *testing.T) {
 			Name: DefaultCollectionName,
 			Fields: []*schemapb.FieldSchema{
 				primaryField, bfloat16VectorField,
+			},
+			EnableDynamicField: true,
+		})
+		assert.Error(t, err)
+		assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
+		err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+			Name: DefaultCollectionName,
+			Fields: []*schemapb.FieldSchema{
+				primaryField, int8VectorField,
 			},
 			EnableDynamicField: true,
 		})
@@ -962,6 +987,27 @@ func TestSerialize(t *testing.T) {
 		}
 		requestBody, _ := json.Marshal(request)
 		values, err = serializeByteVectors(gjson.Get(string(requestBody), HTTPRequestData).Raw, dataType, -1, 2)
+		assert.Nil(t, err)
+		placeholderValue = &commonpb.PlaceholderValue{
+			Tag:    "$0",
+			Values: values,
+		}
+		_, err = proto.Marshal(&commonpb.PlaceholderGroup{
+			Placeholders: []*commonpb.PlaceholderValue{
+				placeholderValue,
+			},
+		})
+		assert.Nil(t, err)
+	}
+
+	{
+		request := map[string]interface{}{
+			HTTPRequestData: []interface{}{
+				[]int8{1, 2},
+			},
+		}
+		requestBody, _ := json.Marshal(request)
+		values, err = serializeInt8Vectors(gjson.Get(string(requestBody), HTTPRequestData).Raw, schemapb.DataType_Int8Vector, 2, typeutil.Int8ArrayToBytes)
 		assert.Nil(t, err)
 		placeholderValue = &commonpb.PlaceholderValue{
 			Tag:    "$0",
@@ -1611,6 +1657,9 @@ func newFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schemapb.Data
 	case schemapb.DataType_BFloat16Vector:
 		vectorField := generateVectorFieldData(firstFieldType)
 		return []*schemapb.FieldData{&vectorField}
+	case schemapb.DataType_Int8Vector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
 	case schemapb.DataType_Array:
 		return []*schemapb.FieldData{&fieldData10}
 	case schemapb.DataType_JSON:
@@ -1850,6 +1899,9 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 	case schemapb.DataType_BFloat16Vector:
 		vectorField := generateVectorFieldData(firstFieldType)
 		return []*schemapb.FieldData{&vectorField}
+	case schemapb.DataType_Int8Vector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
 	case schemapb.DataType_Array:
 		return []*schemapb.FieldData{&fieldData10}
 	case schemapb.DataType_JSON:
@@ -2047,6 +2099,7 @@ func TestVector(t *testing.T) {
 	float16Vector := "vector-float16"
 	bfloat16Vector := "vector-bfloat16"
 	sparseFloatVector := "vector-sparse-float"
+	int8Vector := "vector-int8"
 	testcaseRows := []map[string]interface{}{
 		{
 			FieldBookID:       int64(1),
@@ -2055,6 +2108,7 @@ func TestVector(t *testing.T) {
 			float16Vector:     []byte{1, 1, 11, 11},
 			bfloat16Vector:    []byte{1, 1, 11, 11},
 			sparseFloatVector: map[uint32]float32{0: 0.1, 1: 0.11},
+			int8Vector:        []int8{1, 11},
 		},
 		{
 			FieldBookID:       int64(2),
@@ -2063,6 +2117,7 @@ func TestVector(t *testing.T) {
 			float16Vector:     []byte{2, 2, 22, 22},
 			bfloat16Vector:    []byte{2, 2, 22, 22},
 			sparseFloatVector: map[uint32]float32{1000: 0.3, 200: 0.44},
+			int8Vector:        []int8{2, 22},
 		},
 		{
 			FieldBookID:       int64(3),
@@ -2071,6 +2126,7 @@ func TestVector(t *testing.T) {
 			float16Vector:     []byte{3, 3, 33, 33},
 			bfloat16Vector:    []byte{3, 3, 33, 33},
 			sparseFloatVector: map[uint32]float32{987621: 32190.31, 32189: 0.0001},
+			int8Vector:        []int8{3, 33},
 		},
 		{
 			FieldBookID:       int64(4),
@@ -2079,6 +2135,7 @@ func TestVector(t *testing.T) {
 			float16Vector:     []float32{0.4, 0.44},
 			bfloat16Vector:    []float32{0.4, 0.44},
 			sparseFloatVector: map[uint32]float32{25: 0.1, 1: 0.11},
+			int8Vector:        []int8{4, 44},
 		},
 		{
 			FieldBookID:       int64(5),
@@ -2087,6 +2144,7 @@ func TestVector(t *testing.T) {
 			float16Vector:     []int64{99999999, -99999999},
 			bfloat16Vector:    []int64{99999999, -99999999},
 			sparseFloatVector: map[uint32]float32{1121: 0.1, 3: 0.11},
+			int8Vector:        []int8{-128, 127},
 		},
 	}
 	body, err := wrapRequestBody(testcaseRows)
@@ -2102,6 +2160,8 @@ func TestVector(t *testing.T) {
 	bfloat16VectorField.Name = bfloat16Vector
 	sparseFloatVectorField := generateVectorFieldSchema(schemapb.DataType_SparseFloatVector)
 	sparseFloatVectorField.Name = sparseFloatVector
+	int8VectorField := generateVectorFieldSchema(schemapb.DataType_Int8Vector)
+	int8VectorField.Name = int8Vector
 	collectionSchema := &schemapb.CollectionSchema{
 		Name:        DefaultCollectionName,
 		Description: "",
@@ -2167,7 +2227,8 @@ func TestBuildQueryResps(t *testing.T) {
 	}
 
 	dataTypes := []schemapb.DataType{
-		schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_SparseFloatVector,
+		schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector, schemapb.DataType_SparseFloatVector, schemapb.DataType_Int8Vector,
 		schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32,
 		schemapb.DataType_Float, schemapb.DataType_Double,
 		schemapb.DataType_String, schemapb.DataType_VarChar,

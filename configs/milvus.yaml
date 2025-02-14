@@ -482,7 +482,7 @@ queryNode:
   enableSegmentPrune: false # use partition stats to prune data in search/query on shard delegator
   queryStreamBatchSize: 4194304 # return min batch size of stream query
   queryStreamMaxBatchSize: 134217728 # return max batch size of stream query
-  bloomFilterApplyParallelFactor: 4 # parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM
+  bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   workerPooling:
     size: 10 # the size for worker querynode client pool
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
@@ -572,6 +572,7 @@ dataCoord:
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
     dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)
     gcInterval: 1800 # The time interval in seconds for compaction gc
+    scheduleInterval: 500 # The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be ajusted upwards to 100ms
     mix:
       triggerInterval: 60 # The time interval in seconds to trigger mix compaction
     levelzero:
@@ -693,7 +694,7 @@ dataNode:
   clusteringCompaction:
     memoryBufferRatio: 0.3 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.
     workPoolSize: 8 # worker pool size for one clustering compaction job.
-  bloomFilterApplyParallelFactor: 4 # parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM
+  bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   storage:
     deltalog: json # deltalog format, options: [json, parquet]
   ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address
@@ -772,7 +773,7 @@ log:
 grpc:
   log:
     level: WARNING
-  gracefulStopTimeout: 10 # second, time to wait graceful stop finish
+  gracefulStopTimeout: 3 # second, time to wait graceful stop finish
   client:
     compressionEnabled: false
     dialTimeout: 200
@@ -831,6 +832,7 @@ common:
     superUsers: 
     defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
+    enablePublicPrivilege: true # Whether to enable public privilege
     rbac:
       overrideBuiltInPrivilegeGroups:
         enabled: false # Whether to override build-in privilege groups
@@ -1130,6 +1132,9 @@ streaming:
     concurrencyRatio: 1 # The concurrency ratio based on number of CPU for wal broadcaster, 1 by default.
   txn:
     defaultKeepaliveTimeout: 10s # The default keepalive timeout for wal txn, 10s by default
+  walWriteAheadBuffer:
+    capacity: 64m # The capacity of write ahead buffer of each wal, 64M by default
+    keepalive: 30s # The keepalive duration for entries in write ahead buffer of each wal, 30s by default
 
 # Any configuration related to the knowhere vector search engine
 knowhere:

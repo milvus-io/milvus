@@ -14,13 +14,14 @@ import (
 // newAssignmentDiscoverClient creates a new assignment discover client.
 func newAssignmentDiscoverClient(w *watcher, streamClient streamingpb.StreamingCoordAssignmentService_AssignmentDiscoverClient) *assignmentDiscoverClient {
 	c := &assignmentDiscoverClient{
-		lifetime:     typeutil.NewLifetime(),
-		w:            w,
-		streamClient: streamClient,
-		logger:       log.With(),
-		requestCh:    make(chan *streamingpb.AssignmentDiscoverRequest, 16),
-		exitCh:       make(chan struct{}),
-		wg:           sync.WaitGroup{},
+		lifetime:              typeutil.NewLifetime(),
+		w:                     w,
+		streamClient:          streamClient,
+		logger:                log.With(),
+		requestCh:             make(chan *streamingpb.AssignmentDiscoverRequest, 16),
+		exitCh:                make(chan struct{}),
+		wg:                    sync.WaitGroup{},
+		lastErrorReportedTerm: make(map[string]int64),
 	}
 	c.executeBackgroundTask()
 	return c
@@ -28,13 +29,14 @@ func newAssignmentDiscoverClient(w *watcher, streamClient streamingpb.StreamingC
 
 // assignmentDiscoverClient is the client for assignment discover.
 type assignmentDiscoverClient struct {
-	lifetime     *typeutil.Lifetime
-	w            *watcher
-	logger       *log.MLogger
-	requestCh    chan *streamingpb.AssignmentDiscoverRequest
-	exitCh       chan struct{}
-	wg           sync.WaitGroup
-	streamClient streamingpb.StreamingCoordAssignmentService_AssignmentDiscoverClient
+	lifetime              *typeutil.Lifetime
+	w                     *watcher
+	logger                *log.MLogger
+	requestCh             chan *streamingpb.AssignmentDiscoverRequest
+	exitCh                chan struct{}
+	wg                    sync.WaitGroup
+	streamClient          streamingpb.StreamingCoordAssignmentService_AssignmentDiscoverClient
+	lastErrorReportedTerm map[string]int64
 }
 
 // ReportAssignmentError reports the assignment error to server.
@@ -101,10 +103,26 @@ func (c *assignmentDiscoverClient) sendLoop() (err error) {
 			}
 			return c.streamClient.CloseSend()
 		}
+		if c.shouldIgnore(req) {
+			continue
+		}
 		if err := c.streamClient.Send(req); err != nil {
 			return err
 		}
 	}
+}
+
+// shouldIgnore checks if the request should be ignored.
+func (c *assignmentDiscoverClient) shouldIgnore(req *streamingpb.AssignmentDiscoverRequest) bool {
+	switch req := req.Command.(type) {
+	case *streamingpb.AssignmentDiscoverRequest_ReportError:
+		if term, ok := c.lastErrorReportedTerm[req.ReportError.Pchannel.Name]; ok && req.ReportError.Pchannel.Term <= term {
+			// If the error at newer term has been reported, ignore it right now.
+			return true
+		}
+		c.lastErrorReportedTerm[req.ReportError.Pchannel.Name] = req.ReportError.Pchannel.Term
+	}
+	return false
 }
 
 // recvLoop receives the message from server.

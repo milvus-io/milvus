@@ -195,7 +195,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 	if exist && specifyIndexType != "" {
 		if err := indexparamcheck.ValidateMmapIndexParams(specifyIndexType, indexParamsMap); err != nil {
 			log.Ctx(ctx).Warn("Invalid mmap type params", zap.String(common.IndexTypeKey, specifyIndexType), zap.Error(err))
-			return merr.WrapErrParameterInvalidMsg("invalid mmap type params", err.Error())
+			return merr.WrapErrParameterInvalidMsg("invalid mmap type params: %s", err.Error())
 		}
 		checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(specifyIndexType)
 		// not enable hybrid index for user, used in milvus internally
@@ -594,7 +594,7 @@ func (t *alterIndexTask) SetID(uid UniqueID) {
 }
 
 func (t *alterIndexTask) Name() string {
-	return CreateIndexTaskName
+	return AlterIndexTaskName
 }
 
 func (t *alterIndexTask) Type() commonpb.MsgType {

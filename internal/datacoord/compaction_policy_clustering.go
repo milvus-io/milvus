@@ -49,9 +49,8 @@ func (policy *clusteringCompactionPolicy) Enable() bool {
 		Params.DataCoordCfg.ClusteringCompactionAutoEnable.GetAsBool()
 }
 
-func (policy *clusteringCompactionPolicy) Trigger() (map[CompactionTriggerType][]CompactionView, error) {
+func (policy *clusteringCompactionPolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
 	log.Info("start trigger clusteringCompactionPolicy...")
-	ctx := context.Background()
 	collections := policy.meta.GetCollections()
 
 	events := make(map[CompactionTriggerType][]CompactionView, 0)

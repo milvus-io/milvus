@@ -763,7 +763,7 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
-			NewSegmentActionWithScope(targetNode, ActionTypeReduce, "", segment, querypb.DataScope_Streaming),
+			NewSegmentActionWithScope(targetNode, ActionTypeReduce, "", segment, querypb.DataScope_Streaming, 0),
 		)
 		suite.NoError(err)
 		tasks = append(tasks, task)
@@ -1819,12 +1819,6 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 	ctx := context.Background()
 	scheduler := suite.newScheduler()
 
-	mockTarget := meta.NewMockTargetManager(suite.T())
-	mockTarget.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&datapb.SegmentInfo{
-		NumOfRows: 100,
-	})
-	scheduler.targetMgr = mockTarget
-
 	coll := int64(1001)
 	nodeID := int64(1)
 	channelName := "channel-1"
@@ -1836,7 +1830,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		WrapIDSource(0),
 		coll,
 		suite.replica,
-		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", segmentID, querypb.DataScope_Historical),
+		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", segmentID, querypb.DataScope_Historical, 100),
 	)
 	suite.NoError(err)
 	err = scheduler.Add(task1)
@@ -1863,7 +1857,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		WrapIDSource(0),
 		coll2,
 		suite.replica,
-		NewSegmentActionWithScope(nodeID2, ActionTypeGrow, "", segmentID2, querypb.DataScope_Historical),
+		NewSegmentActionWithScope(nodeID2, ActionTypeGrow, "", segmentID2, querypb.DataScope_Historical, 100),
 	)
 	suite.NoError(err)
 	err = scheduler.Add(task3)
@@ -1903,6 +1897,44 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 	suite.Equal(2, scheduler.GetChannelTaskDelta(-1, -1))
 	suite.Equal(200, scheduler.GetSegmentTaskDelta(-1, -1))
 	suite.Equal(2, scheduler.GetChannelTaskDelta(-1, -1))
+
+	scheduler.remove(task1)
+	scheduler.remove(task2)
+	scheduler.remove(task3)
+	scheduler.remove(task4)
+	suite.Equal(0, scheduler.GetSegmentTaskDelta(nodeID, coll))
+	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID, coll))
+	suite.Equal(0, scheduler.GetSegmentTaskDelta(nodeID2, coll2))
+	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID2, coll2))
+}
+
+func (suite *TaskSuite) TestRemoveTaskWithError() {
+	ctx := context.Background()
+	scheduler := suite.newScheduler()
+
+	mockTarget := meta.NewMockTargetManager(suite.T())
+	mockTarget.EXPECT().UpdateCollectionNextTarget(mock.Anything, mock.Anything).Return(nil)
+	scheduler.targetMgr = mockTarget
+
+	coll := int64(1001)
+	nodeID := int64(1)
+	// add segment task for collection
+	task1, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll,
+		suite.replica,
+		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", 1, querypb.DataScope_Historical, 100),
+	)
+	suite.NoError(err)
+	err = scheduler.Add(task1)
+	suite.NoError(err)
+
+	task1.Fail(merr.ErrSegmentNotFound)
+	// when try to remove task with ErrSegmentNotFound, should trigger UpdateNextTarget
+	scheduler.remove(task1)
+	mockTarget.AssertExpectations(suite.T())
 }
 
 func TestTask(t *testing.T) {

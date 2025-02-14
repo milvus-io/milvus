@@ -184,6 +184,9 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrChannelLack.code():
 		return commonpb.ErrorCode_MetaFailed
 
+	case ErrCollectionSchemaMismatch.code():
+		return commonpb.ErrorCode_SchemaMismatch
+
 	default:
 		return commonpb.ErrorCode_UnexpectedError
 	}
@@ -550,6 +553,14 @@ func WrapErrCollectionVectorClusteringKeyNotAllowed(collection any, msgAndArgs .
 	return err
 }
 
+func WrapErrCollectionSchemaMisMatch(collection any, msg ...string) error {
+	err := wrapFields(ErrCollectionSchemaMismatch, value("collection", collection))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
 func WrapErrAliasNotFound(db any, alias any, msg ...string) error {
 	err := wrapFields(ErrAliasNotFound,
 		value("database", db),
@@ -647,6 +658,15 @@ func WrapErrResourceGroupReachLimit(rg any, limit any, msg ...string) error {
 // WrapErrResourceGroupIllegalConfig wraps ErrResourceGroupIllegalConfig with resource group
 func WrapErrResourceGroupIllegalConfig(rg any, cfg any, msg ...string) error {
 	err := wrapFields(ErrResourceGroupIllegalConfig, value("rg", rg), value("config", cfg))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+// WrapErrStreamingNodeNotEnough make a streaming node is not enough error
+func WrapErrStreamingNodeNotEnough(current int, expected int, msg ...string) error {
+	err := wrapFields(ErrServiceResourceInsufficient, value("currentStreamingNode", current), value("expectedStreamingNode", expected))
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}

@@ -12,26 +12,26 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-// NewMutableMessage creates a new mutable message.
+// NewMutableMessageBeforeAppend creates a new mutable message.
 // !!! Only used at server side for streamingnode internal service, don't use it at client side.
-func NewMutableMessage(payload []byte, properties map[string]string) MutableMessage {
+func NewMutableMessageBeforeAppend(payload []byte, properties map[string]string) MutableMessage {
 	m := &messageImpl{
 		payload:    payload,
 		properties: properties,
 	}
-	// make a assertion by vchannel function.
-	m.assertNotBroadcast()
 	return m
 }
 
-// NewBroadcastMutableMessage creates a new broadcast mutable message.
+// NewBroadcastMutableMessageBeforeAppend creates a new broadcast mutable message.
 // !!! Only used at server side for streamingcoord internal service, don't use it at client side.
-func NewBroadcastMutableMessage(payload []byte, properties map[string]string) BroadcastMutableMessage {
+func NewBroadcastMutableMessageBeforeAppend(payload []byte, properties map[string]string) BroadcastMutableMessage {
 	m := &messageImpl{
 		payload:    payload,
 		properties: properties,
 	}
-	m.assertBroadcast()
+	if !m.properties.Exist(messageBroadcastHeader) {
+		panic("current message is not a broadcast message")
+	}
 	return m
 }
 
@@ -126,7 +126,7 @@ func (b *mutableMesasgeBuilder[H, B]) WithVChannel(vchannel string) *mutableMesa
 }
 
 // WithBroadcast creates a new builder with broadcast property.
-func (b *mutableMesasgeBuilder[H, B]) WithBroadcast(vchannels []string) *mutableMesasgeBuilder[H, B] {
+func (b *mutableMesasgeBuilder[H, B]) WithBroadcast(vchannels []string, resourceKeys ...ResourceKey) *mutableMesasgeBuilder[H, B] {
 	if len(vchannels) < 1 {
 		panic("broadcast message must have at least one vchannel")
 	}
@@ -137,19 +137,21 @@ func (b *mutableMesasgeBuilder[H, B]) WithBroadcast(vchannels []string) *mutable
 		panic("a broadcast message cannot set up vchannel property")
 	}
 	deduplicated := typeutil.NewSet(vchannels...)
-	vcs, err := EncodeProto(&messagespb.VChannels{
-		Vchannels: deduplicated.Collect(),
+
+	bh, err := EncodeProto(&messagespb.BroadcastHeader{
+		Vchannels:    deduplicated.Collect(),
+		ResourceKeys: newProtoFromResourceKey(resourceKeys...),
 	})
 	if err != nil {
 		panic("failed to encode vchannels")
 	}
-	b.properties.Set(messageVChannels, vcs)
+	b.properties.Set(messageBroadcastHeader, bh)
 	return b
 }
 
 // WithAllVChannel creates a new builder with all vchannel property.
 func (b *mutableMesasgeBuilder[H, B]) WithAllVChannel() *mutableMesasgeBuilder[H, B] {
-	if b.properties.Exist(messageVChannel) || b.properties.Exist(messageVChannels) {
+	if b.properties.Exist(messageVChannel) || b.properties.Exist(messageBroadcastHeader) {
 		panic("a vchannel or broadcast message cannot set up all vchannel property")
 	}
 	b.allVChannel = true
@@ -191,7 +193,7 @@ func (b *mutableMesasgeBuilder[H, B]) BuildMutable() (MutableMessage, error) {
 // Panic if not set payload and message type.
 // should only used at client side.
 func (b *mutableMesasgeBuilder[H, B]) BuildBroadcast() (BroadcastMutableMessage, error) {
-	if !b.properties.Exist(messageVChannels) {
+	if !b.properties.Exist(messageBroadcastHeader) {
 		panic("a broadcast message builder not ready for vchannel field")
 	}
 
@@ -292,16 +294,16 @@ func newImmutableTxnMesasgeFromWAL(
 		return nil, err
 	}
 	// we don't need to modify the begin message's timetick, but set all the timetick of body messages.
-	for _, m := range body {
-		m.(*immutableMessageImpl).overwriteTimeTick(commit.TimeTick())
-		m.(*immutableMessageImpl).overwriteLastConfirmedMessageID(commit.LastConfirmedMessageID())
+	for idx, m := range body {
+		body[idx] = m.(*immutableMessageImpl).cloneForTxnBody(commit.TimeTick(), commit.LastConfirmedMessageID())
 	}
-	immutableMsg := msg.WithTimeTick(commit.TimeTick()).
+
+	immutableMessage := msg.WithTimeTick(commit.TimeTick()).
 		WithLastConfirmed(commit.LastConfirmedMessageID()).
 		WithTxnContext(*commit.TxnContext()).
 		IntoImmutableMessage(commit.MessageID())
 	return &immutableTxnMessageImpl{
-		immutableMessageImpl: *immutableMsg.(*immutableMessageImpl),
+		immutableMessageImpl: *immutableMessage.(*immutableMessageImpl),
 		begin:                begin,
 		messages:             body,
 		commit:               commit,

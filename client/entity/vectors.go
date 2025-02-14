@@ -56,7 +56,7 @@ func (fv FloatVector) ToBFloat16Vector() BFloat16Vector {
 	return typeutil.Float32ArrayToBFloat16Bytes(fv)
 }
 
-// FloatVector float32 vector wrapper.
+// Float16Vector float16 vector wrapper.
 type Float16Vector []byte
 
 // Dim returns vector dimension.
@@ -77,7 +77,7 @@ func (fv Float16Vector) ToFloat32Vector() FloatVector {
 	return typeutil.Float16BytesToFloat32Vector(fv)
 }
 
-// FloatVector float32 vector wrapper.
+// BFloat16Vector bfloat16 vector wrapper.
 type BFloat16Vector []byte
 
 // Dim returns vector dimension.
@@ -130,4 +130,22 @@ func (t Text) FieldType() FieldType {
 
 func (t Text) Serialize() []byte {
 	return []byte(t)
+}
+
+// Int8Vector []int8 vector wrapper
+type Int8Vector []int8
+
+// Dim return vector dimension
+func (iv Int8Vector) Dim() int {
+	return len(iv)
+}
+
+// Serialize just return bytes
+func (iv Int8Vector) Serialize() []byte {
+	return typeutil.Int8ArrayToBytes(iv)
+}
+
+// entity.FieldType returns coresponding field type.
+func (iv Int8Vector) FieldType() FieldType {
+	return FieldTypeInt8Vector
 }

@@ -62,6 +62,7 @@ type taskScheduler struct {
 	indexEngineVersionManager IndexEngineVersionManager
 	handler                   Handler
 	allocator                 allocator.Allocator
+	compactionHandler         compactionPlanContext
 
 	taskStats *expirable.LRU[UniqueID, Task]
 }
@@ -73,6 +74,7 @@ func newTaskScheduler(
 	indexEngineVersionManager IndexEngineVersionManager,
 	handler Handler,
 	allocator allocator.Allocator,
+	compactionHandler compactionPlanContext,
 ) *taskScheduler {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -91,7 +93,8 @@ func newTaskScheduler(
 		handler:                   handler,
 		indexEngineVersionManager: indexEngineVersionManager,
 		allocator:                 allocator,
-		taskStats:                 expirable.NewLRU[UniqueID, Task](64, nil, time.Minute*15),
+		taskStats:                 expirable.NewLRU[UniqueID, Task](512, nil, time.Minute*15),
+		compactionHandler:         compactionHandler,
 	}
 	ts.reloadFromMeta()
 	return ts
@@ -153,6 +156,33 @@ func (s *taskScheduler) reloadFromMeta() {
 	allStatsTasks := s.meta.statsTaskMeta.GetAllTasks()
 	for taskID, t := range allStatsTasks {
 		if t.GetState() != indexpb.JobState_JobStateFinished && t.GetState() != indexpb.JobState_JobStateFailed {
+			if t.GetState() == indexpb.JobState_JobStateInProgress || t.GetState() == indexpb.JobState_JobStateRetry {
+				if t.GetState() == indexpb.JobState_JobStateInProgress || t.GetState() == indexpb.JobState_JobStateRetry {
+					exist, canDo := s.meta.CheckAndSetSegmentsCompacting(context.TODO(), []UniqueID{t.GetSegmentID()})
+					if !exist || !canDo {
+						log.Ctx(s.ctx).Warn("segment is not exist or is compacting, skip stats, but this should not have happened, try to remove the stats task",
+							zap.Int64("taskID", taskID), zap.Bool("exist", exist), zap.Bool("canDo", canDo))
+						err := s.meta.statsTaskMeta.DropStatsTask(t.GetTaskID())
+						if err == nil {
+							continue
+						}
+						log.Ctx(s.ctx).Warn("remove stats task failed, set to failed", zap.Int64("taskID", taskID), zap.Error(err))
+						t.State = indexpb.JobState_JobStateFailed
+						t.FailReason = "segment is not exist or is compacting"
+					} else {
+						if !s.compactionHandler.checkAndSetSegmentStating(t.GetInsertChannel(), t.GetSegmentID()) {
+							s.meta.SetSegmentsCompacting(context.TODO(), []UniqueID{t.GetSegmentID()}, false)
+							err := s.meta.statsTaskMeta.DropStatsTask(t.GetTaskID())
+							if err == nil {
+								continue
+							}
+							log.Ctx(s.ctx).Warn("remove stats task failed, set to failed", zap.Int64("taskID", taskID), zap.Error(err))
+							t.State = indexpb.JobState_JobStateFailed
+							t.FailReason = "segment is not exist or is l0 compacting"
+						}
+					}
+				}
+			}
 			s.enqueue(&statsTask{
 				taskID:          taskID,
 				segmentID:       t.GetSegmentID(),
@@ -389,14 +419,14 @@ func (s *taskScheduler) processInit(task Task) bool {
 	log.Ctx(s.ctx).Info("pick client success", zap.Int64("taskID", task.GetTaskID()), zap.Int64("nodeID", nodeID))
 
 	// 2. update version
-	if err := task.UpdateVersion(s.ctx, nodeID, s.meta); err != nil {
+	if err := task.UpdateVersion(s.ctx, nodeID, s.meta, s.compactionHandler); err != nil {
 		log.Ctx(s.ctx).Warn("update task version failed", zap.Int64("taskID", task.GetTaskID()), zap.Error(err))
 		return false
 	}
 	log.Ctx(s.ctx).Info("update task version success", zap.Int64("taskID", task.GetTaskID()))
 
 	// 3. assign task to indexNode
-	success := task.AssignTask(s.ctx, client)
+	success := task.AssignTask(s.ctx, client, s.meta)
 	if !success {
 		log.Ctx(s.ctx).Warn("assign task to client failed", zap.Int64("taskID", task.GetTaskID()),
 			zap.String("new state", task.GetState().String()), zap.String("fail reason", task.GetFailReason()))
@@ -465,6 +495,7 @@ func (s *taskScheduler) processInProgress(task Task) bool {
 	if exist {
 		task.QueryResult(s.ctx, client)
 		if task.GetState() == indexpb.JobState_JobStateFinished || task.GetState() == indexpb.JobState_JobStateFailed {
+			task.ResetTask(s.meta)
 			return s.processFinished(task)
 		}
 		return true

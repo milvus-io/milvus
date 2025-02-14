@@ -689,11 +689,18 @@ message ChannelNodeInfo {
 message Replica {
     int64 ID = 1;
     int64 collectionID = 2;
+    // nodes and ro_nodes can only load sealed segment.
+    // only manage the legacy querynode that not embedded in the streamingnode.
     repeated int64 nodes = 3; // all (read and write) nodes. mutual exclusive with ro_nodes.
     string resource_group = 4;
     repeated int64 ro_nodes = 5; // the in-using node but should not be assigned to these replica.
-    // can not load new channel or segment on it anymore.
-   map<string, ChannelNodeInfo> channel_node_infos = 6;
+    // cannot load segment on it anymore.
+    map<string, ChannelNodeInfo> channel_node_infos = 6;
+    // rw_sq_nodes and ro_sq_nodes can only watch channel and assign segment, will be removed in 3.0.
+    // only manage the querynode embedded in the streamingnode.
+    repeated int64 rw_sq_nodes = 7; // all (read and write) nodes. mutual exclusive with ro_sq_nodes.
+    repeated int64 ro_sq_nodes = 8; // the in-using node but should not be assigned to these replica.
+    // cannot watch channel on it anymore.
 }
 
 enum SyncType {

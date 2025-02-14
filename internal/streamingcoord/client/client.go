@@ -40,6 +40,15 @@ type AssignmentService interface {
 type BroadcastService interface {
 	// Broadcast sends a broadcast message to the streaming service.
 	Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
+
+	// Ack sends a broadcast ack to the streaming service.
+	Ack(ctx context.Context, req types.BroadcastAckRequest) error
+
+	// BlockUntilEvent blocks until the event happens.
+	BlockUntilEvent(ctx context.Context, ev *message.BroadcastEvent) error
+
+	// Close closes the broadcast service.
+	Close()
 }
 
 // Client is the interface of log service client.
@@ -84,7 +93,7 @@ func NewClient(etcdCli *clientv3.Client) Client {
 		conn:              conn,
 		rb:                rb,
 		assignmentService: assignmentServiceImpl,
-		broadcastService:  broadcast.NewBroadcastService(util.MustSelectWALName(), broadcastService),
+		broadcastService:  broadcast.NewGRPCBroadcastService(util.MustSelectWALName(), broadcastService),
 	}
 }
 

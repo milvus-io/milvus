@@ -1,21 +1,22 @@
 package adaptor
 
 import (
+	"context"
+
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var _ wal.Scanner = (*scannerAdaptorImpl)(nil)
@@ -28,11 +29,8 @@ func newScannerAdaptor(
 	scanMetrics *metricsutil.ScannerMetrics,
 	cleanup func(),
 ) wal.Scanner {
-	if readOption.VChannel == "" {
-		panic("vchannel of scanner must be set")
-	}
 	if readOption.MesasgeHandler == nil {
-		readOption.MesasgeHandler = defaultMessageHandler(make(chan message.ImmutableMessage))
+		readOption.MesasgeHandler = adaptor.ChanMessageHandler(make(chan message.ImmutableMessage))
 	}
 	options.GetFilterFunc(readOption.MessageFilter)
 	logger := resource.Resource().Logger().With(
@@ -41,35 +39,33 @@ func newScannerAdaptor(
 		zap.String("channel", l.Channel().Name),
 	)
 	s := &scannerAdaptorImpl{
-		logger:           logger,
-		innerWAL:         l,
-		readOption:       readOption,
-		filterFunc:       options.GetFilterFunc(readOption.MessageFilter),
-		reorderBuffer:    utility.NewReOrderBuffer(),
-		pendingQueue:     utility.NewPendingQueue(),
-		txnBuffer:        utility.NewTxnBuffer(logger, scanMetrics),
-		cleanup:          cleanup,
-		ScannerHelper:    helper.NewScannerHelper(name),
-		lastTimeTickInfo: inspector.TimeTickInfo{},
-		metrics:          scanMetrics,
+		logger:        logger,
+		innerWAL:      l,
+		readOption:    readOption,
+		filterFunc:    options.GetFilterFunc(readOption.MessageFilter),
+		reorderBuffer: utility.NewReOrderBuffer(),
+		pendingQueue:  utility.NewPendingQueue(),
+		txnBuffer:     utility.NewTxnBuffer(logger, scanMetrics),
+		cleanup:       cleanup,
+		ScannerHelper: helper.NewScannerHelper(name),
+		metrics:       scanMetrics,
 	}
-	go s.executeConsume()
+	go s.execute()
 	return s
 }
 
 // scannerAdaptorImpl is a wrapper of ScannerImpls to extend it into a Scanner interface.
 type scannerAdaptorImpl struct {
 	*helper.ScannerHelper
-	logger           *log.MLogger
-	innerWAL         walimpls.WALImpls
-	readOption       wal.ReadOption
-	filterFunc       func(message.ImmutableMessage) bool
-	reorderBuffer    *utility.ReOrderByTimeTickBuffer // only support time tick reorder now.
-	pendingQueue     *utility.PendingQueue
-	txnBuffer        *utility.TxnBuffer // txn buffer for txn message.
-	cleanup          func()
-	lastTimeTickInfo inspector.TimeTickInfo
-	metrics          *metricsutil.ScannerMetrics
+	logger        *log.MLogger
+	innerWAL      walimpls.WALImpls
+	readOption    wal.ReadOption
+	filterFunc    func(message.ImmutableMessage) bool
+	reorderBuffer *utility.ReOrderByTimeTickBuffer // support time tick reorder.
+	pendingQueue  *utility.PendingQueue
+	txnBuffer     *utility.TxnBuffer // txn buffer for txn message.
+	cleanup       func()
+	metrics       *metricsutil.ScannerMetrics
 }
 
 // Channel returns the channel assignment info of the wal.
@@ -79,7 +75,7 @@ func (s *scannerAdaptorImpl) Channel() types.PChannelInfo {
 
 // Chan returns the message channel of the scanner.
 func (s *scannerAdaptorImpl) Chan() <-chan message.ImmutableMessage {
-	return s.readOption.MesasgeHandler.(defaultMessageHandler)
+	return s.readOption.MesasgeHandler.(adaptor.ChanMessageHandler)
 }
 
 // Close the scanner, release the underlying resources.
@@ -93,33 +89,73 @@ func (s *scannerAdaptorImpl) Close() error {
 	return err
 }
 
-func (s *scannerAdaptorImpl) executeConsume() {
-	defer s.readOption.MesasgeHandler.Close()
+func (s *scannerAdaptorImpl) execute() {
+	defer func() {
+		s.readOption.MesasgeHandler.Close()
+		s.Finish(nil)
+		s.logger.Info("scanner is closed")
+	}()
+	s.logger.Info("scanner start background task")
 
-	innerScanner, err := s.innerWAL.Read(s.Context(), walimpls.ReadOption{
-		Name:          s.Name(),
-		DeliverPolicy: s.readOption.DeliverPolicy,
-	})
-	if err != nil {
-		s.Finish(err)
+	msgChan := make(chan message.ImmutableMessage)
+	ch := make(chan struct{})
+	// TODO: optimize the extra goroutine here after msgstream is removed.
+	go func() {
+		defer close(ch)
+		err := s.produceEventLoop(msgChan)
+		if errors.Is(err, context.Canceled) {
+			s.logger.Info("the produce event loop of scanner is closed")
+			return
+		}
+		s.logger.Warn("the produce event loop of scanner is closed with unexpected error", zap.Error(err))
+	}()
+
+	err := s.consumeEventLoop(msgChan)
+	if errors.Is(err, context.Canceled) {
+		s.logger.Info("the consuming event loop of scanner is closed")
 		return
 	}
-	defer innerScanner.Close()
+	s.logger.Warn("the consuming event loop of scanner is closed with unexpected error", zap.Error(err))
 
-	timeTickNotifier := resource.Resource().TimeTickInspector().MustGetOperator(s.Channel()).TimeTickNotifier()
+	// waiting for the produce event loop to close.
+	<-ch
+}
 
+// produceEventLoop produces the message from the wal and write ahead buffer.
+func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMessage) error {
+	wb, err := resource.Resource().TimeTickInspector().MustGetOperator(s.Channel()).WriteAheadBuffer(s.Context())
+	if err != nil {
+		return err
+	}
+
+	scanner := newSwithableScanner(s.Name(), s.logger, s.innerWAL, wb, s.readOption.DeliverPolicy, msgChan)
+	s.logger.Info("start produce loop of scanner at mode", zap.String("mode", scanner.Mode()))
 	for {
+		if scanner, err = scanner.Do(s.Context()); err != nil {
+			return err
+		}
+		s.logger.Info("switch scanner mode", zap.String("mode", scanner.Mode()))
+	}
+}
+
+// consumeEventLoop consumes the message from the message channel and handle it.
+func (s *scannerAdaptorImpl) consumeEventLoop(msgChan <-chan message.ImmutableMessage) error {
+	for {
+		var upstream <-chan message.ImmutableMessage
+		if s.pendingQueue.Len() > 16 {
+			// If the pending queue is full, we need to wait until it's consumed to avoid scanner overloading.
+			upstream = nil
+		} else {
+			upstream = msgChan
+		}
 		// generate the event channel and do the event loop.
-		// TODO: Consume from local cache.
-		handleResult := s.readOption.MesasgeHandler.Handle(wal.HandleParam{
-			Ctx:          s.Context(),
-			Upstream:     s.getUpstream(innerScanner),
-			TimeTickChan: s.getTimeTickUpdateChan(timeTickNotifier),
-			Message:      s.pendingQueue.Next(),
+		handleResult := s.readOption.MesasgeHandler.Handle(message.HandleParam{
+			Ctx:      s.Context(),
+			Upstream: upstream,
+			Message:  s.pendingQueue.Next(),
 		})
 		if handleResult.Error != nil {
-			s.Finish(handleResult.Error)
-			return
+			return handleResult.Error
 		}
 		if handleResult.MessageHandled {
 			s.pendingQueue.UnsafeAdvance()
@@ -128,30 +164,10 @@ func (s *scannerAdaptorImpl) executeConsume() {
 		if handleResult.Incoming != nil {
 			s.handleUpstream(handleResult.Incoming)
 		}
-		// If the timetick just updated with a non persist operation,
-		// we just make a fake message to keep timetick sync if there are no more pending message.
-		if handleResult.TimeTickUpdated {
-			s.handleTimeTickUpdated(timeTickNotifier)
-		}
 	}
 }
 
-func (s *scannerAdaptorImpl) getTimeTickUpdateChan(timeTickNotifier *inspector.TimeTickNotifier) <-chan struct{} {
-	if s.pendingQueue.Len() == 0 && s.reorderBuffer.Len() == 0 && !s.lastTimeTickInfo.IsZero() {
-		return timeTickNotifier.WatchAtMessageID(s.lastTimeTickInfo.MessageID, s.lastTimeTickInfo.TimeTick)
-	}
-	return nil
-}
-
-func (s *scannerAdaptorImpl) getUpstream(scanner walimpls.ScannerImpls) <-chan message.ImmutableMessage {
-	// TODO: configurable pending buffer count.
-	// If the pending queue is full, we need to wait until it's consumed to avoid scanner overloading.
-	if s.pendingQueue.Len() > 16 {
-		return nil
-	}
-	return scanner.Chan()
-}
-
+// handleUpstream handles the incoming message from the upstream.
 func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	// Observe the message.
 	s.metrics.ObserveMessage(msg.MessageType(), msg.EstimateSize())
@@ -165,22 +181,24 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 		msgs := s.txnBuffer.HandleImmutableMessages(messages, msg.TimeTick())
 		s.metrics.UpdateTxnBufSize(s.txnBuffer.Bytes())
 
-		// Push the confirmed messages into pending queue for consuming.
-		// and push forward timetick info.
-		s.pendingQueue.Add(msgs)
-		s.metrics.UpdatePendingQueueSize(s.pendingQueue.Bytes())
-		s.lastTimeTickInfo = inspector.TimeTickInfo{
-			MessageID:              msg.MessageID(),
-			TimeTick:               msg.TimeTick(),
-			LastConfirmedMessageID: msg.LastConfirmedMessageID(),
+		if len(msgs) > 0 {
+			// Push the confirmed messages into pending queue for consuming.
+			s.pendingQueue.Add(msgs)
+		} else if s.pendingQueue.Len() == 0 {
+			// If there's no new message incoming and there's no pending message in the queue.
+			// Add current timetick message into pending queue to make timetick push forward.
+			// TODO: current milvus can only run on timetick pushing,
+			// after qview is applied, those trival time tick message can be erased.
+			s.pendingQueue.Add([]message.ImmutableMessage{msg})
 		}
+		s.metrics.UpdatePendingQueueSize(s.pendingQueue.Bytes())
 		return
 	}
 
 	// Filtering the vchannel
 	// If the message is not belong to any vchannel, it should be broadcasted to all vchannels.
 	// Otherwise, it should be filtered by vchannel.
-	if msg.VChannel() != "" && s.readOption.VChannel != msg.VChannel() {
+	if msg.VChannel() != "" && s.readOption.VChannel != "" && s.readOption.VChannel != msg.VChannel() {
 		return
 	}
 	// Filtering the message if needed.
@@ -190,7 +208,9 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	}
 	// otherwise add message into reorder buffer directly.
 	if err := s.reorderBuffer.Push(msg); err != nil {
-		s.metrics.ObserveTimeTickViolation(msg.MessageType())
+		if errors.Is(err, utility.ErrTimeTickVoilation) {
+			s.metrics.ObserveTimeTickViolation(msg.MessageType())
+		}
 		s.logger.Warn("failed to push message into reorder buffer",
 			zap.Any("msgID", msg.MessageID()),
 			zap.Uint64("timetick", msg.TimeTick()),
@@ -200,22 +220,4 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	// Observe the filtered message.
 	s.metrics.UpdateTimeTickBufSize(s.reorderBuffer.Bytes())
 	s.metrics.ObserveFilteredMessage(msg.MessageType(), msg.EstimateSize())
-}
-
-func (s *scannerAdaptorImpl) handleTimeTickUpdated(timeTickNotifier *inspector.TimeTickNotifier) {
-	timeTickInfo := timeTickNotifier.Get()
-	if timeTickInfo.MessageID.EQ(s.lastTimeTickInfo.MessageID) && timeTickInfo.TimeTick > s.lastTimeTickInfo.TimeTick {
-		s.lastTimeTickInfo.TimeTick = timeTickInfo.TimeTick
-		msg, err := timetick.NewTimeTickMsg(
-			s.lastTimeTickInfo.TimeTick,
-			s.lastTimeTickInfo.LastConfirmedMessageID,
-			paramtable.GetNodeID(),
-		)
-		if err != nil {
-			s.logger.Warn("unreachable: a marshal timetick operation must be success")
-			return
-		}
-		s.pendingQueue.AddOne(msg.IntoImmutableMessage(s.lastTimeTickInfo.MessageID))
-		s.metrics.UpdatePendingQueueSize(s.pendingQueue.Bytes())
-	}
 }

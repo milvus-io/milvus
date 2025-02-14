@@ -28,7 +28,8 @@ import (
 )
 
 const (
-	TombValue = "TOMB_VAULE"
+	TombValue     = "TOMB_VAULE"
+	RuntimeSource = "RuntimeSource"
 )
 
 type Filter func(key string) (string, bool)
@@ -118,7 +119,7 @@ func (m *Manager) GetCachedValue(key string) (interface{}, bool) {
 func (m *Manager) CASCachedValue(key string, origin string, value interface{}) bool {
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
-	current, err := m.GetConfig(key)
+	_, current, err := m.GetConfig(key)
 	if errors.Is(err, ErrKeyNotFound) {
 		m.configCache[key] = value
 		return true
@@ -147,20 +148,21 @@ func (m *Manager) EvictCacheValueByFormat(keys ...string) {
 	clear(m.configCache)
 }
 
-func (m *Manager) GetConfig(key string) (string, error) {
+func (m *Manager) GetConfig(key string) (string, string, error) {
 	realKey := formatKey(key)
 	v, ok := m.overlays.Get(realKey)
 	if ok {
 		if v == TombValue {
-			return "", errors.Wrap(ErrKeyNotFound, key) // fmt.Errorf("key not found %s", key)
+			return "", "", errors.Wrap(ErrKeyNotFound, key) // fmt.Errorf("key not found %s", key)
 		}
-		return v, nil
+		return RuntimeSource, v, nil
 	}
 	sourceName, ok := m.keySourceMap.Get(realKey)
 	if !ok {
-		return "", errors.Wrap(ErrKeyNotFound, key) // fmt.Errorf("key not found: %s", key)
+		return "", "", errors.Wrap(ErrKeyNotFound, key) // fmt.Errorf("key not found: %s", key)
 	}
-	return m.getConfigValueBySource(realKey, sourceName)
+	v, err := m.getConfigValueBySource(realKey, sourceName)
+	return sourceName, v, err
 }
 
 // GetConfigs returns all the key values
@@ -168,7 +170,7 @@ func (m *Manager) GetConfigs() map[string]string {
 	config := make(map[string]string)
 
 	m.keySourceMap.Range(func(key, value string) bool {
-		sValue, err := m.GetConfig(key)
+		_, sValue, err := m.GetConfig(key)
 		if err != nil {
 			return true
 		}
@@ -185,15 +187,40 @@ func (m *Manager) GetConfigs() map[string]string {
 	return config
 }
 
+func (m *Manager) GetConfigsView() map[string]string {
+	config := make(map[string]string)
+
+	valueFmt := func(source, value string) string {
+		return fmt.Sprintf("%s[%s]", value, source)
+	}
+
+	m.keySourceMap.Range(func(key, value string) bool {
+		source, sValue, err := m.GetConfig(key)
+		if err != nil {
+			return true
+		}
+
+		config[key] = valueFmt(source, sValue)
+		return true
+	})
+
+	m.overlays.Range(func(key, value string) bool {
+		config[key] = valueFmt(RuntimeSource, value)
+		return true
+	})
+
+	return config
+}
+
 func (m *Manager) GetBy(filters ...Filter) map[string]string {
 	matchedConfig := make(map[string]string)
 
-	m.keySourceMap.Range(func(key, value string) bool {
+	m.keySourceMap.Range(func(key string, value string) bool {
 		newkey, ok := filterate(key, filters...)
 		if !ok {
 			return true
 		}
-		sValue, err := m.GetConfig(key)
+		_, sValue, err := m.GetConfig(key)
 		if err != nil {
 			return true
 		}

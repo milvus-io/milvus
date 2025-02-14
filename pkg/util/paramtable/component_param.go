@@ -175,6 +175,10 @@ func (p *ComponentParam) GetAll() map[string]string {
 	return p.baseTable.mgr.GetConfigs()
 }
 
+func (p *ComponentParam) GetConfigsView() map[string]string {
+	return p.baseTable.mgr.GetConfigsView()
+}
+
 func (p *ComponentParam) Watch(key string, watcher config.EventHandler) {
 	p.baseTable.mgr.Dispatcher.Register(key, watcher)
 }
@@ -236,10 +240,11 @@ type commonConfig struct {
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
 
-	AuthorizationEnabled ParamItem `refreshable:"false"`
-	SuperUsers           ParamItem `refreshable:"true"`
-	DefaultRootPassword  ParamItem `refreshable:"false"`
-	RootShouldBindRole   ParamItem `refreshable:"true"`
+	AuthorizationEnabled  ParamItem `refreshable:"false"`
+	SuperUsers            ParamItem `refreshable:"true"`
+	DefaultRootPassword   ParamItem `refreshable:"false"`
+	RootShouldBindRole    ParamItem `refreshable:"true"`
+	EnablePublicPrivilege ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -679,6 +684,22 @@ like the old password verification when updating the credential`,
 	}
 	p.RootShouldBindRole.Init(base.mgr)
 
+	p.EnablePublicPrivilege = ParamItem{
+		Key: "common.security.enablePublicPrivilege",
+		Formatter: func(originValue string) string { // compatible with old version
+			fallbackValue := base.Get("proxy.enablePublicPrivilege")
+			if fallbackValue == "false" {
+				return "false"
+			}
+			return originValue
+		},
+		Version:      "2.5.4",
+		Doc:          "Whether to enable public privilege",
+		DefaultValue: "true",
+		Export:       true,
+	}
+	p.EnablePublicPrivilege.Init(base.mgr)
+
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
 		Version:      "2.0.0",
@@ -855,7 +876,7 @@ This helps Milvus-CDC synchronize incremental data`,
 	p.BloomFilterApplyBatchSize = ParamItem{
 		Key:          "common.bloomFilterApplyBatchSize",
 		Version:      "2.4.5",
-		DefaultValue: "1000",
+		DefaultValue: "10000",
 		Doc:          "batch size when to apply pk to bloom filter",
 		Export:       true,
 	}
@@ -1335,7 +1356,6 @@ type proxyConfig struct {
 	MustUsePartitionKey          ParamItem `refreshable:"true"`
 	SkipAutoIDCheck              ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck        ParamItem `refreshable:"true"`
-	EnablePublicPrivilege        ParamItem `refreshable:"false"`
 	MaxVarCharLength             ParamItem `refreshable:"false"`
 
 	AccessLog AccessLogConfig
@@ -1740,14 +1760,6 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall skip partition key check when inserting data",
 	}
 	p.SkipPartitionKeyCheck.Init(base.mgr)
-
-	p.EnablePublicPrivilege = ParamItem{
-		Key:          "proxy.enablePublicPrivilege",
-		Version:      "2.4.1",
-		DefaultValue: "true",
-		Doc:          "switch for whether proxy shall enable public privilege",
-	}
-	p.EnablePublicPrivilege.Init(base.mgr)
 
 	p.MaxVarCharLength = ParamItem{
 		Key:          "proxy.maxVarCharLength",
@@ -3303,8 +3315,8 @@ user-task-polling:
 		Key:          "queryNode.bloomFilterApplyParallelFactor",
 		FallbackKeys: []string{"queryNode.bloomFilterApplyBatchSize"},
 		Version:      "2.4.5",
-		DefaultValue: "4",
-		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
+		DefaultValue: "2",
+		Doc:          "parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM",
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
@@ -3370,7 +3382,8 @@ type dataCoordConfig struct {
 	CompactionTimeoutInSeconds       ParamItem `refreshable:"true"`
 	CompactionDropToleranceInSeconds ParamItem `refreshable:"true"`
 	CompactionGCIntervalInSeconds    ParamItem `refreshable:"true"`
-	CompactionCheckIntervalInSeconds ParamItem `refreshable:"false"`
+	CompactionCheckIntervalInSeconds ParamItem `refreshable:"false"` // deprecated
+	CompactionScheduleInterval       ParamItem `refreshable:"false"`
 	MixCompactionTriggerInterval     ParamItem `refreshable:"false"`
 	L0CompactionTriggerInterval      ParamItem `refreshable:"false"`
 	GlobalCompactionInterval         ParamItem `refreshable:"false"`
@@ -3745,6 +3758,22 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "3",
 	}
 	p.CompactionCheckIntervalInSeconds.Init(base.mgr)
+
+	p.CompactionScheduleInterval = ParamItem{
+		Key:          "dataCoord.compaction.scheduleInterval",
+		Version:      "2.4.21",
+		DefaultValue: "500",
+		Export:       true,
+		Formatter: func(value string) string {
+			ms := getAsInt64(value)
+			if ms < 100 {
+				ms = 100
+			}
+			return strconv.FormatInt(ms, 10)
+		},
+		Doc: "The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be ajusted upwards to 100ms",
+	}
+	p.CompactionScheduleInterval.Init(base.mgr)
 
 	p.SingleCompactionRatioThreshold = ParamItem{
 		Key:          "dataCoord.compaction.single.ratio.threshold",
@@ -4771,8 +4800,8 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.bloomFilterApplyParallelFactor",
 		FallbackKeys: []string{"datanode.bloomFilterApplyBatchSize"},
 		Version:      "2.4.5",
-		DefaultValue: "4",
-		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
+		DefaultValue: "2",
+		Doc:          "parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM",
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
@@ -4874,6 +4903,10 @@ type streamingConfig struct {
 
 	// txn
 	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
+
+	// write ahead buffer
+	WALWriteAheadBufferCapacity  ParamItem `refreshable:"true"`
+	WALWriteAheadBufferKeepalive ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -4923,6 +4956,23 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 		Export:       true,
 	}
 	p.TxnDefaultKeepaliveTimeout.Init(base.mgr)
+
+	p.WALWriteAheadBufferCapacity = ParamItem{
+		Key:          "streaming.walWriteAheadBuffer.capacity",
+		Version:      "2.6.0",
+		Doc:          "The capacity of write ahead buffer of each wal, 64M by default",
+		DefaultValue: "64m",
+		Export:       true,
+	}
+	p.WALWriteAheadBufferCapacity.Init(base.mgr)
+	p.WALWriteAheadBufferKeepalive = ParamItem{
+		Key:          "streaming.walWriteAheadBuffer.keepalive",
+		Version:      "2.6.0",
+		Doc:          "The keepalive duration for entries in write ahead buffer of each wal, 30s by default",
+		DefaultValue: "30s",
+		Export:       true,
+	}
+	p.WALWriteAheadBufferKeepalive.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

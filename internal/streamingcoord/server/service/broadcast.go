@@ -4,8 +4,10 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/service/broadcast"
 	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
@@ -32,7 +34,7 @@ func (s *broadcastServceImpl) Broadcast(ctx context.Context, req *streamingpb.Br
 	if err != nil {
 		return nil, err
 	}
-	results, err := broadcaster.Broadcast(ctx, message.NewBroadcastMutableMessage(req.Message.Payload, req.Message.Properties))
+	results, err := broadcaster.Broadcast(ctx, message.NewBroadcastMutableMessageBeforeAppend(req.Message.Payload, req.Message.Properties))
 	if err != nil {
 		return nil, err
 	}
@@ -40,5 +42,38 @@ func (s *broadcastServceImpl) Broadcast(ctx context.Context, req *streamingpb.Br
 	for vchannel, result := range results.AppendResults {
 		protoResult[vchannel] = result.IntoProto()
 	}
-	return &streamingpb.BroadcastResponse{Results: protoResult}, nil
+	return &streamingpb.BroadcastResponse{
+		BroadcastId: results.BroadcastID,
+		Results:     protoResult,
+	}, nil
+}
+
+// Ack acknowledges the message at the specified vchannel.
+func (s *broadcastServceImpl) Ack(ctx context.Context, req *streamingpb.BroadcastAckRequest) (*streamingpb.BroadcastAckResponse, error) {
+	broadcaster, err := s.broadcaster.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := broadcaster.Ack(ctx, types.BroadcastAckRequest{
+		BroadcastID: req.BroadcastId,
+		VChannel:    req.Vchannel,
+	}); err != nil {
+		return nil, err
+	}
+	return &streamingpb.BroadcastAckResponse{}, nil
+}
+
+func (s *broadcastServceImpl) Watch(svr streamingpb.StreamingCoordBroadcastService_WatchServer) error {
+	broadcaster, err := s.broadcaster.GetWithContext(svr.Context())
+	if err != nil {
+		return err
+	}
+	watcher, err := broadcaster.NewWatcher()
+	if err != nil {
+		return err
+	}
+	defer watcher.Close()
+
+	server := broadcast.NewBroadcastWatchServer(watcher, svr)
+	return server.Execute()
 }

@@ -3,167 +3,90 @@ package adaptor
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/rmq"
 )
 
 func TestMsgPackAdaptorHandler(t *testing.T) {
-	id := rmq.NewRmqID(1)
+	messageID := rmq.NewRmqID(1)
+	tt := uint64(100)
+	msg := message.CreateTestInsertMessage(
+		t,
+		1,
+		1000,
+		tt,
+		messageID,
+	)
+	immutableMsg := msg.IntoImmutableMessage(messageID)
 
+	upstream := make(chan message.ImmutableMessage, 1)
+
+	ctx := context.Background()
 	h := NewMsgPackAdaptorHandler()
-	insertMsg := message.CreateTestInsertMessage(t, 1, 100, 10, id)
-	insertImmutableMessage := insertMsg.IntoImmutableMessage(id)
-	ch := make(chan *msgstream.MsgPack, 1)
+	done := make(chan struct{})
 	go func() {
-		for msgPack := range h.Chan() {
-			ch <- msgPack
+		for range h.Chan() {
 		}
-		close(ch)
+		close(done)
 	}()
-	ok, err := h.Handle(context.Background(), insertImmutableMessage)
-	assert.True(t, ok)
-	assert.NoError(t, err)
-	msgPack := <-ch
+	upstream <- immutableMsg
+	resp := h.Handle(message.HandleParam{
+		Ctx:      ctx,
+		Upstream: upstream,
+		Message:  nil,
+	})
+	assert.Equal(t, resp.Incoming, immutableMsg)
+	assert.False(t, resp.MessageHandled)
+	assert.NoError(t, resp.Error)
 
-	assert.Equal(t, uint64(10), msgPack.BeginTs)
-	assert.Equal(t, uint64(10), msgPack.EndTs)
-	for _, tsMsg := range msgPack.Msgs {
-		assert.Equal(t, uint64(10), tsMsg.BeginTs())
-		assert.Equal(t, uint64(10), tsMsg.EndTs())
-		for _, ts := range tsMsg.(*msgstream.InsertMsg).Timestamps {
-			assert.Equal(t, uint64(10), ts)
-		}
-	}
-
-	deleteMsg, err := message.NewDeleteMessageBuilderV1().
-		WithVChannel("vchan1").
-		WithHeader(&message.DeleteMessageHeader{
-			CollectionId: 1,
-		}).
-		WithBody(&msgpb.DeleteRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_Delete,
-			},
-			CollectionID: 1,
-			PartitionID:  1,
-			Timestamps:   []uint64{10},
-		}).
-		BuildMutable()
-	assert.NoError(t, err)
-
-	deleteImmutableMsg := deleteMsg.
-		WithTimeTick(11).
-		WithLastConfirmedUseMessageID().
-		IntoImmutableMessage(id)
-
-	ok, err = h.Handle(context.Background(), deleteImmutableMsg)
-	assert.True(t, ok)
-	assert.NoError(t, err)
-	msgPack = <-ch
-	assert.Equal(t, uint64(11), msgPack.BeginTs)
-	assert.Equal(t, uint64(11), msgPack.EndTs)
-	for _, tsMsg := range msgPack.Msgs {
-		assert.Equal(t, uint64(11), tsMsg.BeginTs())
-		assert.Equal(t, uint64(11), tsMsg.EndTs())
-		for _, ts := range tsMsg.(*msgstream.DeleteMsg).Timestamps {
-			assert.Equal(t, uint64(11), ts)
-		}
-	}
-
-	// Create a txn message
-	msg, err := message.NewBeginTxnMessageBuilderV2().
-		WithVChannel("vchan1").
-		WithHeader(&message.BeginTxnMessageHeader{
-			KeepaliveMilliseconds: 1000,
-		}).
-		WithBody(&message.BeginTxnMessageBody{}).
-		BuildMutable()
-	assert.NoError(t, err)
-	assert.NotNil(t, msg)
-
-	txnCtx := message.TxnContext{
-		TxnID:     1,
-		Keepalive: time.Second,
-	}
-
-	beginImmutableMsg, err := message.AsImmutableBeginTxnMessageV2(msg.WithTimeTick(9).
-		WithTxnContext(txnCtx).
-		WithLastConfirmedUseMessageID().
-		IntoImmutableMessage(rmq.NewRmqID(2)))
-	assert.NoError(t, err)
-
-	msg, err = message.NewCommitTxnMessageBuilderV2().
-		WithVChannel("vchan1").
-		WithHeader(&message.CommitTxnMessageHeader{}).
-		WithBody(&message.CommitTxnMessageBody{}).
-		BuildMutable()
-	assert.NoError(t, err)
-
-	commitImmutableMsg, err := message.AsImmutableCommitTxnMessageV2(msg.WithTimeTick(12).
-		WithTxnContext(txnCtx).
-		WithTxnContext(message.TxnContext{}).
-		WithLastConfirmedUseMessageID().
-		IntoImmutableMessage(rmq.NewRmqID(3)))
-	assert.NoError(t, err)
-
-	txn, err := message.NewImmutableTxnMessageBuilder(beginImmutableMsg).
-		Add(insertMsg.WithTxnContext(txnCtx).IntoImmutableMessage(id)).
-		Add(deleteMsg.WithTxnContext(txnCtx).IntoImmutableMessage(id)).
-		Build(commitImmutableMsg)
-	assert.NoError(t, err)
-
-	ok, err = h.Handle(context.Background(), txn)
-	assert.True(t, ok)
-	assert.NoError(t, err)
-	msgPack = <-ch
-
-	assert.Equal(t, uint64(12), msgPack.BeginTs)
-	assert.Equal(t, uint64(12), msgPack.EndTs)
-
-	// Create flush message
-	msg, err = message.NewFlushMessageBuilderV2().
-		WithVChannel("vchan1").
-		WithHeader(&message.FlushMessageHeader{}).
-		WithBody(&message.FlushMessageBody{}).
-		BuildMutable()
-	assert.NoError(t, err)
-
-	flushMsg := msg.
-		WithTimeTick(13).
-		WithLastConfirmedUseMessageID().
-		IntoImmutableMessage(rmq.NewRmqID(4))
-
-	ok, err = h.Handle(context.Background(), flushMsg)
-	assert.True(t, ok)
-	assert.NoError(t, err)
-
-	msgPack = <-ch
-
-	assert.Equal(t, uint64(13), msgPack.BeginTs)
-	assert.Equal(t, uint64(13), msgPack.EndTs)
-
+	resp = h.Handle(message.HandleParam{
+		Ctx:      ctx,
+		Upstream: upstream,
+		Message:  resp.Incoming,
+	})
+	assert.NoError(t, resp.Error)
+	assert.Nil(t, resp.Incoming)
+	assert.True(t, resp.MessageHandled)
 	h.Close()
-	<-ch
+
+	<-done
 }
 
-func TestMsgPackAdaptorHandlerTimeout(t *testing.T) {
-	id := rmq.NewRmqID(1)
+func TestDefaultHandler(t *testing.T) {
+	h := make(ChanMessageHandler, 1)
+	done := make(chan struct{})
+	go func() {
+		for range h {
+		}
+		close(done)
+	}()
 
-	insertMsg := message.CreateTestInsertMessage(t, 1, 100, 10, id)
-	insertImmutableMessage := insertMsg.IntoImmutableMessage(id)
+	upstream := make(chan message.ImmutableMessage, 1)
+	msg := mock_message.NewMockImmutableMessage(t)
+	upstream <- msg
+	resp := h.Handle(message.HandleParam{
+		Ctx:      context.Background(),
+		Upstream: upstream,
+		Message:  nil,
+	})
+	assert.NotNil(t, resp.Incoming)
+	assert.NoError(t, resp.Error)
+	assert.False(t, resp.MessageHandled)
+	assert.Equal(t, resp.Incoming, msg)
 
-	h := NewMsgPackAdaptorHandler()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	resp = h.Handle(message.HandleParam{
+		Ctx:      context.Background(),
+		Upstream: upstream,
+		Message:  resp.Incoming,
+	})
+	assert.NoError(t, resp.Error)
+	assert.Nil(t, resp.Incoming)
+	assert.True(t, resp.MessageHandled)
 
-	ok, err := h.Handle(ctx, insertImmutableMessage)
-	assert.True(t, ok)
-	assert.ErrorIs(t, err, ctx.Err())
+	h.Close()
+	<-done
 }

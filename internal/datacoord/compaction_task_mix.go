@@ -290,6 +290,14 @@ func (t *mixCompactionTask) SetTask(task *datapb.CompactionTask) {
 	t.taskProto.Store(task)
 }
 
+func (t *mixCompactionTask) PreparePlan() bool {
+	return true
+}
+
+func (t *mixCompactionTask) CheckCompactionContainsSegment(segmentID int64) bool {
+	return false
+}
+
 func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
 	beginLogID, _, err := t.allocator.AllocN(1)

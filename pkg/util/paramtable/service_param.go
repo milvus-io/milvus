@@ -51,6 +51,7 @@ type ServiceParam struct {
 	RocksmqCfg      RocksmqConfig
 	NatsmqCfg       NatsmqConfig
 	MinioCfg        MinioConfig
+	ProfileCfg      ProfileConfig
 }
 
 func (p *ServiceParam) init(bt *BaseTable) {
@@ -64,6 +65,7 @@ func (p *ServiceParam) init(bt *BaseTable) {
 	p.RocksmqCfg.Init(bt)
 	p.NatsmqCfg.Init(bt)
 	p.MinioCfg.Init(bt)
+	p.ProfileCfg.Init(bt)
 }
 
 func (p *ServiceParam) RocksmqEnable() bool {
@@ -459,6 +461,7 @@ type MetaStoreConfig struct {
 	SnapshotTTLSeconds         ParamItem `refreshable:"true"`
 	SnapshotReserveTimeSeconds ParamItem `refreshable:"true"`
 	PaginationSize             ParamItem `refreshable:"true"`
+	ReadConcurrency            ParamItem `refreshable:"true"`
 }
 
 func (p *MetaStoreConfig) Init(base *BaseTable) {
@@ -492,10 +495,18 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 	p.PaginationSize = ParamItem{
 		Key:          "metastore.paginationSize",
 		Version:      "2.5.1",
-		DefaultValue: "10000",
+		DefaultValue: "100000",
 		Doc:          `limits the number of results to return from metastore.`,
 	}
 	p.PaginationSize.Init(base.mgr)
+
+	p.ReadConcurrency = ParamItem{
+		Key:          "metastore.readConcurrency",
+		Version:      "2.5.1",
+		DefaultValue: "32",
+		Doc:          `read concurrency for fetching metadata from the metastore.`,
+	}
+	p.ReadConcurrency.Init(base.mgr)
 
 	// TODO: The initialization operation of metadata storage is called in the initialization phase of every node.
 	// There should be a single initialization operation for meta store, then move the metrics registration to there.
@@ -1392,4 +1403,26 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export: true,
 	}
 	p.ListObjectsMaxKeys.Init(base.mgr)
+}
+
+// profile config
+type ProfileConfig struct {
+	PprofPath ParamItem `refreshable:"false"`
+}
+
+func (p *ProfileConfig) Init(base *BaseTable) {
+	p.PprofPath = ParamItem{
+		Key:          "profile.pprof.path",
+		Version:      "2.5.5",
+		DefaultValue: "",
+		Doc:          "The folder that storing pprof files, by default will use localStoragePath/pprof",
+		Formatter: func(v string) string {
+			if len(v) == 0 {
+				return path.Join(base.Get("localStorage.path"), "pprof")
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.PprofPath.Init(base.mgr)
 }

@@ -146,9 +146,10 @@ func (insertCodec *InsertCodec) SerializePkStats(stats *PrimaryKeyStats, rowNum 
 
 	buffer := statsWriter.GetBuffer()
 	return &Blob{
-		Key:    blobKey,
-		Value:  buffer,
-		RowNum: rowNum,
+		Key:        blobKey,
+		Value:      buffer,
+		RowNum:     rowNum,
+		MemorySize: int64(len(buffer)),
 	}, nil
 }
 

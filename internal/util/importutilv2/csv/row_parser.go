@@ -337,6 +337,19 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 			return nil, err
 		}
 		return vec2, nil
+	case schemapb.DataType_Int8Vector:
+		if nullable && obj == r.nullkey {
+			return nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+		}
+		var vec []int8
+		err := json.Unmarshal([]byte(obj), &vec)
+		if err != nil {
+			return nil, r.wrapTypeError(obj, field)
+		}
+		if len(vec) != r.name2Dim[field.GetName()] {
+			return nil, r.wrapDimError(len(vec), field)
+		}
+		return vec, nil
 	case schemapb.DataType_Array:
 		if nullable && obj == r.nullkey {
 			return nil, nil

@@ -4,9 +4,12 @@ import (
 	"context"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -121,9 +124,16 @@ func (s *sealOperationInspectorImpl) background() {
 				return true
 			})
 		case <-mustSealTicker.C:
-			segmentBelongs := resource.Resource().SegmentAssignStatsManager().SealByTotalGrowingSegmentsSize()
+			threshold := paramtable.Get().DataCoordCfg.GrowingSegmentsMemSizeInMB.GetAsUint64() * 1024 * 1024
+			segmentBelongs := resource.Resource().SegmentAssignStatsManager().SealByTotalGrowingSegmentsSize(threshold)
+			if segmentBelongs == nil {
+				continue
+			}
+			s.logger.Info("seal by total growing segments size", zap.String("vchannel", segmentBelongs.VChannel),
+				zap.Uint64("sealThreshold", threshold),
+				zap.Int64("sealSegment", segmentBelongs.SegmentID))
 			if pm, ok := s.managers.Get(segmentBelongs.PChannel); ok {
-				pm.MustSealSegments(s.taskNotifier.Context(), segmentBelongs)
+				pm.MustSealSegments(s.taskNotifier.Context(), *segmentBelongs)
 			}
 		}
 	}

@@ -1157,7 +1157,8 @@ class TestCollectionOperation(TestcaseBase):
             if v and v != DataType.UNKNOWN and v != DataType.STRING \
                     and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR \
                     and v != DataType.BINARY_VECTOR and v != DataType.ARRAY \
-                    and v != DataType.FLOAT16_VECTOR and v != DataType.BFLOAT16_VECTOR:
+                    and v != DataType.FLOAT16_VECTOR and v != DataType.BFLOAT16_VECTOR \
+                    and v != DataType.INT8_VECTOR:
                 field, _ = self.field_schema_wrap.init_field_schema(name=k.lower(), dtype=v)
                 fields.append(field)
         fields.append(cf.gen_float_vec_field())
@@ -1608,7 +1609,7 @@ class TestCollectionCountBinary(TestcaseBase):
         collection_w = self.init_collection_wrap(schema=c_schema,
                                                  check_task=CheckTasks.err_res,
                                                  check_items={"err_code": 1,
-                                                              "err_msg": f"invalid dimension: {dim}. binary vector dimension should be multiple of 8."})
+                                                              "err_msg": f"invalid dimension: {dim} of field {ct.default_binary_vec_field_name}. binary vector dimension should be multiple of 8."})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_collection_count_no_entities(self):
@@ -3878,7 +3879,7 @@ class TestCollectionString(TestcaseBase):
         max_length = 65535 + 1
         string_field = cf.gen_string_field(max_length=max_length)
         schema = cf.gen_collection_schema([int_field, string_field, vec_field])
-        error = {ct.err_code: 65535, ct.err_msg: "the maximum length specified for a VarChar should be in (0, 65535]"}
+        error = {ct.err_code: 65535, ct.err_msg: f"the maximum length specified for a VarChar field({ct.default_string_field_name}) should be in (0, 65535]"}
         self.collection_wrap.init_collection(name=c_name, schema=schema,
                                              check_task=CheckTasks.err_res, check_items=error)
 

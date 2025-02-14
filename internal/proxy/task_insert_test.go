@@ -10,7 +10,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
@@ -306,5 +310,166 @@ func TestMaxInsertSize(t *testing.T) {
 		err := it.PreExecute(context.Background())
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	})
+}
+
+func TestInsertTask_Function(t *testing.T) {
+	ts := function.CreateOpenAIEmbeddingServer()
+	defer ts.Close()
+	data := []*schemapb.FieldData{}
+	f := schemapb.FieldData{
+		Type:      schemapb.DataType_VarChar,
+		FieldId:   101,
+		FieldName: "text",
+		IsDynamic: false,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: []string{"sentence", "sentence"},
+					},
+				},
+			},
+		},
+	}
+	data = append(data, &f)
+	collectionName := "TestInsertTask_function"
+	schema := &schemapb.CollectionSchema{
+		Name:        collectionName,
+		Description: "TestInsertTask_function",
+		AutoID:      true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{
+				FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "200"},
+				},
+			},
+			{
+				FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				},
+				IsFunctionOutput: true,
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "test_function",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldIds:    []int64{101},
+				InputFieldNames:  []string{"text"},
+				OutputFieldIds:   []int64{102},
+				OutputFieldNames: []string{"vector"},
+				Params: []*commonpb.KeyValuePair{
+					{Key: "provider", Value: "openai"},
+					{Key: "model_name", Value: "text-embedding-ada-002"},
+					{Key: "api_key", Value: "mock"},
+					{Key: "url", Value: ts.URL},
+					{Key: "dim", Value: "4"},
+				},
+			},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rc := mocks.NewMockRootCoordClient(t)
+	rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+		Status: merr.Status(nil),
+		ID:     11198,
+		Count:  10,
+	}, nil)
+	idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
+	idAllocator.Start()
+	defer idAllocator.Close()
+	assert.NoError(t, err)
+	task := insertTask{
+		ctx: context.Background(),
+		insertMsg: &BaseInsertTask{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: collectionName,
+				DbName:         "hooooooo",
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				Version:    msgpb.InsertDataVersion_ColumnBased,
+				FieldsData: data,
+				NumRows:    2,
+			},
+		},
+		schema:      schema,
+		idAllocator: idAllocator,
+	}
+
+	info := newSchemaInfo(schema)
+	cache := NewMockCache(t)
+	collectionID := UniqueID(0)
+	cache.On("GetCollectionID",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(collectionID, nil)
+
+	cache.On("GetCollectionSchema",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(info, nil)
+
+	cache.On("GetPartitionInfo",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+	).Return(&partitionInfo{
+		name:                "p1",
+		partitionID:         10,
+		createdTimestamp:    10001,
+		createdUtcTimestamp: 10002,
+	}, nil)
+	cache.On("GetCollectionInfo",
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+	).Return(&collectionInfo{schema: info}, nil)
+	cache.On("GetDatabaseInfo",
+		mock.Anything,
+		mock.Anything,
+	).Return(&databaseInfo{properties: []*commonpb.KeyValuePair{}}, nil)
+
+	globalMetaCache = cache
+	err = task.PreExecute(ctx)
+	assert.NoError(t, err)
+}
+
+func TestInsertTaskForSchemaMismatch(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	mockCache := NewMockCache(t)
+	globalMetaCache = mockCache
+	ctx := context.Background()
+
+	t.Run("schema ts mismatch", func(t *testing.T) {
+		it := insertTask{
+			ctx: context.Background(),
+			insertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					DbName:         "hooooooo",
+					CollectionName: "fooooo",
+				},
+			},
+			schemaTimestamp: 99,
+		}
+		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+			updateTimestamp: 100,
+		}, nil)
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		err := it.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
 	})
 }

@@ -82,13 +82,23 @@ void inline CheckParameter(Config& conf,
 template <typename T>
 inline std::optional<T>
 GetValueFromConfig(const Config& cfg, const std::string& key) {
-    // cfg value are all string type
     if (cfg.contains(key)) {
-        if constexpr (std::is_same_v<T, bool>) {
-            return boost::algorithm::to_lower_copy(
-                       cfg.at(key).get<std::string>()) == "true";
+        try {
+            // compatibility for boolean string
+            if constexpr (std::is_same_v<T, bool>) {
+                if (cfg.at(key).is_boolean()) {
+                    return cfg.at(key).get<bool>();
+                }
+                return boost::algorithm::to_lower_copy(
+                           cfg.at(key).get<std::string>()) == "true";
+            }
+            return cfg.at(key).get<T>();
+        } catch (std::exception& e) {
+            PanicInfo(ErrorCode::UnexpectedError,
+                      "get value from config for key {} failed, error: {}",
+                      key,
+                      e.what());
         }
-        return cfg.at(key).get<T>();
     }
     return std::nullopt;
 }

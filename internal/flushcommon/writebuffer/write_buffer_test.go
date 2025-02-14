@@ -17,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -225,39 +224,6 @@ func (s *WriteBufferSuite) TestGetCheckpoint() {
 	})
 }
 
-func (s *WriteBufferSuite) TestSyncSegmentsError() {
-	wb, err := newWriteBufferBase(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
-		pkStatsFactory: func(vchannel *datapb.SegmentInfo) pkoracle.PkStat {
-			return pkoracle.NewBloomFilterSet()
-		},
-	})
-	s.Require().NoError(err)
-
-	serializer := syncmgr.NewMockSerializer(s.T())
-
-	wb.serializer = serializer
-
-	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-		ID: 1,
-	}, nil, nil)
-	s.metacache.EXPECT().GetSegmentByID(int64(1)).Return(segment, true)
-	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-
-	s.Run("segment_not_found", func() {
-		serializer.EXPECT().EncodeBuffer(mock.Anything, mock.Anything).Return(nil, merr.WrapErrSegmentNotFound(1)).Once()
-		s.NotPanics(func() {
-			wb.syncSegments(context.Background(), []int64{1})
-		})
-	})
-
-	s.Run("other_err", func() {
-		serializer.EXPECT().EncodeBuffer(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
-		s.Panics(func() {
-			wb.syncSegments(context.Background(), []int64{1})
-		})
-	})
-}
-
 func (s *WriteBufferSuite) TestEvictBuffer() {
 	wb, err := newWriteBufferBase(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
 		pkStatsFactory: func(vchannel *datapb.SegmentInfo) pkoracle.PkStat {
@@ -265,10 +231,6 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		},
 	})
 	s.Require().NoError(err)
-
-	serializer := syncmgr.NewMockSerializer(s.T())
-
-	wb.serializer = serializer
 
 	s.Run("no_checkpoint", func() {
 		wb.mut.Lock()
@@ -281,8 +243,6 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		}()
 
 		wb.EvictBuffer(GetOldestBufferPolicy(1))
-
-		serializer.AssertNotCalled(s.T(), "EncodeBuffer")
 	})
 
 	s.Run("trigger_sync", func() {
@@ -314,7 +274,6 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		}, nil, nil)
 		s.metacache.EXPECT().GetSegmentByID(int64(2)).Return(segment, true)
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-		serializer.EXPECT().EncodeBuffer(mock.Anything, mock.Anything).Return(syncmgr.NewSyncTask(), nil)
 		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything, mock.Anything).Return(conc.Go[struct{}](func() (struct{}, error) {
 			return struct{}{}, nil
 		}), nil)

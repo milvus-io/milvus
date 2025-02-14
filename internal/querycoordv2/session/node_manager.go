@@ -24,6 +24,7 @@ import (
 	"github.com/blang/semver/v4"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/metrics"
 )
 
@@ -150,6 +151,10 @@ func (n *NodeInfo) Hostname() string {
 
 func (n *NodeInfo) Labels() map[string]string {
 	return n.immutableInfo.Labels
+}
+
+func (n *NodeInfo) IsEmbeddedQueryNodeInStreamingNode() bool {
+	return n.immutableInfo.Labels[sessionutil.LabelStreamingNodeEmbeddedQueryNode] == "1"
 }
 
 func (n *NodeInfo) SegmentCnt() int {

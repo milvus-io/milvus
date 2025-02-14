@@ -166,21 +166,33 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		s.Run("segment is compacting", func() {
 			s.mt.segments.segments[s.segID].isCompacting = true
 
-			s.Error(st.UpdateVersion(context.Background(), 1, s.mt))
+			s.Error(st.UpdateVersion(context.Background(), 1, s.mt, nil))
+		})
+
+		s.Run("segment is in l0 compaction", func() {
+			s.mt.segments.segments[s.segID].isCompacting = false
+			compactionHandler := NewMockCompactionPlanContext(s.T())
+			compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(false)
+			s.Error(st.UpdateVersion(context.Background(), 1, s.mt, compactionHandler))
+			s.False(s.mt.segments.segments[s.segID].isCompacting)
 		})
 
 		s.Run("normal case", func() {
 			s.mt.segments.segments[s.segID].isCompacting = false
+			compactionHandler := NewMockCompactionPlanContext(s.T())
+			compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true)
 
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
-			s.NoError(st.UpdateVersion(context.Background(), 1, s.mt))
+			s.NoError(st.UpdateVersion(context.Background(), 1, s.mt, compactionHandler))
 		})
 
 		s.Run("failed case", func() {
 			s.mt.segments.segments[s.segID].isCompacting = false
+			compactionHandler := NewMockCompactionPlanContext(s.T())
+			compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true)
 
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("error")).Once()
-			s.Error(st.UpdateVersion(context.Background(), 1, s.mt))
+			s.Error(st.UpdateVersion(context.Background(), 1, s.mt, compactionHandler))
 		})
 	})
 
@@ -365,7 +377,20 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 				Reason:    "mock error",
 			}, nil)
 
-			s.False(st.AssignTask(context.Background(), in))
+			mt := &meta{
+				segments: &SegmentsInfo{
+					segments: map[int64]*SegmentInfo{
+						st.segmentID: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    st.segmentID,
+								State: commonpb.SegmentState_Flushed,
+							},
+						},
+					},
+				},
+			}
+
+			s.False(st.AssignTask(context.Background(), in, mt))
 		})
 
 		s.Run("assign success", func() {
@@ -375,7 +400,20 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 				Reason:    "",
 			}, nil)
 
-			s.True(st.AssignTask(context.Background(), in))
+			mt := &meta{
+				segments: &SegmentsInfo{
+					segments: map[int64]*SegmentInfo{
+						st.segmentID: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    st.segmentID,
+								State: commonpb.SegmentState_Flushed,
+							},
+						},
+					},
+				},
+			}
+
+			s.True(st.AssignTask(context.Background(), in, mt))
 		})
 	})
 

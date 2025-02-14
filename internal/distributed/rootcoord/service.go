@@ -347,6 +347,12 @@ func (s *Server) Stop() (err error) {
 		defer s.tikvCli.Close()
 	}
 
+	if s.rootCoord != nil {
+		log.Info("graceful stop rootCoord")
+		s.rootCoord.GracefulStop()
+		log.Info("graceful stop rootCoord done")
+	}
+
 	if s.grpcServer != nil {
 		utils.GracefulStopGRPCServer(s.grpcServer)
 	}
@@ -419,6 +425,11 @@ func (s *Server) DescribeCollectionInternal(ctx context.Context, in *milvuspb.De
 // ShowCollections gets all collections
 func (s *Server) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return s.rootCoord.ShowCollections(ctx, in)
+}
+
+// ShowCollectionIDs returns all collection IDs.
+func (s *Server) ShowCollectionIDs(ctx context.Context, in *rootcoordpb.ShowCollectionIDsRequest) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+	return s.rootCoord.ShowCollectionIDs(ctx, in)
 }
 
 // CreatePartition creates a partition in a collection

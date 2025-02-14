@@ -10,7 +10,7 @@ const (
 	messageLastConfirmed                    = "_lc"  // message last confirmed message id.
 	messageLastConfirmedIDSameWithMessageID = "_lcs" // message last confirmed message id is the same with message id.
 	messageVChannel                         = "_vc"  // message virtual channel.
-	messageVChannels                        = "_vcs" // message virtual channels for broadcast message.
+	messageBroadcastHeader                  = "_bh"  // message broadcast header.
 	messageHeader                           = "_h"   // specialized message header.
 	messageTxnContext                       = "_tx"  // transaction context.
 )
@@ -63,6 +63,14 @@ func (prop propertiesImpl) Delete(key string) {
 
 func (prop propertiesImpl) ToRawMap() map[string]string {
 	return map[string]string(prop)
+}
+
+func (prop propertiesImpl) Clone() propertiesImpl {
+	cloned := make(map[string]string, len(prop))
+	for k, v := range prop {
+		cloned[k] = v
+	}
+	return cloned
 }
 
 // EstimateSize returns the estimated size of properties.

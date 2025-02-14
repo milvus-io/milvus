@@ -175,13 +175,19 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 
 		case <-ticker.C:
 			ob.clean()
-			loaded := lo.FilterMap(ob.meta.GetAllCollections(ctx), func(collection *meta.Collection, _ int) (int64, bool) {
-				if collection.GetStatus() == querypb.LoadStatus_Loaded {
-					return collection.GetCollectionID(), true
+
+			collections := ob.meta.GetAllCollections(ctx)
+			var loadedIDs, loadingIDs []int64
+			for _, c := range collections {
+				if c.GetStatus() == querypb.LoadStatus_Loaded {
+					loadedIDs = append(loadedIDs, c.GetCollectionID())
+				} else {
+					loadingIDs = append(loadingIDs, c.GetCollectionID())
 				}
-				return 0, false
-			})
-			ob.loadedDispatcher.AddTask(loaded...)
+			}
+
+			ob.loadedDispatcher.AddTask(loadedIDs...)
+			ob.loadingDispatcher.AddTask(loadingIDs...)
 
 		case req := <-ob.updateChan:
 			log.Info("manually trigger update target",
@@ -213,7 +219,9 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 				delete(ob.readyNotifiers, req.CollectionID)
 				ob.mut.Unlock()
 
+				ob.keylocks.Lock(req.CollectionID)
 				ob.targetMgr.RemoveCollection(ctx, req.CollectionID)
+				ob.keylocks.Unlock(req.CollectionID)
 				req.Notifier <- nil
 			case ReleasePartition:
 				ob.targetMgr.RemovePartition(ctx, req.CollectionID, req.PartitionIDs...)
@@ -243,6 +251,11 @@ func (ob *TargetObserver) TriggerUpdateCurrentTarget(collectionID int64) {
 func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 	ob.keylocks.Lock(collectionID)
 	defer ob.keylocks.Unlock(collectionID)
+
+	// if collection release, skip check
+	if ob.meta.CollectionManager.GetCollection(ctx, collectionID) == nil {
+		return
+	}
 
 	if ob.shouldUpdateCurrentTarget(ctx, collectionID) {
 		ob.updateCurrentTarget(ctx, collectionID)

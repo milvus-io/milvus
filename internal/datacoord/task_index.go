@@ -120,7 +120,7 @@ func (it *indexBuildTask) GetFailReason() string {
 	return it.taskInfo.FailReason
 }
 
-func (it *indexBuildTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error {
+func (it *indexBuildTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error {
 	if err := meta.indexMeta.UpdateVersion(it.taskID, nodeID); err != nil {
 		return err
 	}
@@ -260,11 +260,13 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	}
 
 	log.Ctx(ctx).Info("index task pre check successfully", zap.Int64("taskID", it.GetTaskID()),
-		zap.Int64("segID", segment.GetID()))
+		zap.Int64("segID", segment.GetID()),
+		zap.Int32("CurrentIndexVersion", it.req.GetCurrentIndexVersion()),
+		zap.Int32("CurrentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()))
 	return true
 }
 
-func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNodeClient) bool {
+func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNodeClient, meta *meta) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{

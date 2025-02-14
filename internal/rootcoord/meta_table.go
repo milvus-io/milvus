@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -190,6 +191,9 @@ func (mt *MetaTable) reload() error {
 		collectionNum := int64(0)
 
 		mt.names.createDbIfNotExist(dbName)
+
+		start := time.Now()
+		// TODO: async list collections to accelerate cases with multiple databases.
 		collections, err := mt.catalog.ListCollections(mt.ctx, db.ID, typeutil.MaxTimestamp)
 		if err != nil {
 			return err
@@ -213,7 +217,8 @@ func (mt *MetaTable) reload() error {
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
 		log.Ctx(mt.ctx).Info("collections recovered from db", zap.String("db_name", dbName),
 			zap.Int64("collection_num", collectionNum),
-			zap.Int64("partition_num", partitionNum))
+			zap.Int64("partition_num", partitionNum),
+			zap.Duration("dur", time.Since(start)))
 	}
 
 	// recover aliases from db namespace
@@ -920,6 +925,11 @@ func (mt *MetaTable) GetPChannelInfo(ctx context.Context, pchannel string) *root
 		Collections: make([]*rootcoordpb.CollectionInfoOnPChannel, 0),
 	}
 	for _, collInfo := range mt.collID2Meta {
+		if collInfo.State != pb.CollectionState_CollectionCreated {
+			// streamingnode, skip non-created collections when recovering
+			// streamingnode will receive the createCollectionMessage to recover if the collection is creating.
+			continue
+		}
 		if idx := lo.IndexOf(collInfo.PhysicalChannelNames, pchannel); idx >= 0 {
 			partitions := make([]*rootcoordpb.PartitionInfoOnPChannel, 0, len(collInfo.Partitions))
 			for _, part := range collInfo.Partitions {

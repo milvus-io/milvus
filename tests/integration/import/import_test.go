@@ -244,6 +244,11 @@ func (s *BulkInsertSuite) TestMultiFileTypes() {
 		s.metricType = metric.L2
 		s.run()
 
+		s.vecType = schemapb.DataType_Int8Vector
+		s.indexType = "HNSW"
+		s.metricType = metric.L2
+		s.run()
+
 		// TODO: not support numpy for SparseFloatVector by now
 		if fileType != importutilv2.Numpy {
 			s.vecType = schemapb.DataType_SparseFloatVector

@@ -37,6 +37,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	grpcdatacoord "github.com/milvus-io/milvus/internal/distributed/datacoord"
 	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
@@ -54,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/distributed/streamingnode"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -77,12 +79,14 @@ func DefaultParams() map[string]string {
 
 		// Notice: don't use ParamItem.Key here, the config key will be empty before param table init
 		configMap = map[string]string{
-			"etcd.rootPath":                   testPath,
-			"minio.rootPath":                  testPath,
-			"localStorage.path":               path.Join("/tmp", testPath),
-			"common.storageType":              "local",
-			"dataNode.memory.forceSyncEnable": "false", // local execution will print too many logs
-			"common.gracefulStopTimeout":      "30",
+			"mq.type":                           "rocksmq",
+			"etcd.rootPath":                     testPath,
+			"msgChannel.chanNamePrefix.cluster": testPath,
+			"minio.rootPath":                    testPath,
+			"localStorage.path":                 path.Join("/tmp", testPath),
+			"common.storageType":                "local",
+			"dataNode.memory.forceSyncEnable":   "false", // local execution will print too many logs
+			"common.gracefulStopTimeout":        "30",
 		}
 	})
 
@@ -151,6 +155,8 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 	for k, v := range cluster.params {
 		params.Save(k, v)
 	}
+	paramtable.SetRole(typeutil.StandaloneRole)
+
 	// setup etcd client
 	etcdConfig := &paramtable.Get().EtcdCfg
 	etcdCli, err := etcd.GetEtcdClient(
@@ -166,9 +172,9 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 	}
 	cluster.EtcdCli = etcdCli
 
-	if streamingutil.IsStreamingServiceEnabled() {
-		streaming.Init()
-	}
+	coordclient.ResetRegistration()
+	registry.ResetRegistration()
+	streaming.Init()
 
 	cluster.MetaWatcher = &EtcdMetaWatcher{
 		rootPath: etcdConfig.RootPath.GetValue(),
@@ -365,6 +371,7 @@ func (cluster *MiniClusterV2) Start() error {
 	}
 
 	if streamingutil.IsStreamingServiceEnabled() {
+		paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
 		runComponent(cluster.StreamingNode)
 	}
 
@@ -389,6 +396,7 @@ func (cluster *MiniClusterV2) StopRootCoord() {
 
 func (cluster *MiniClusterV2) StartRootCoord() {
 	if cluster.RootCoord == nil {
+		coordclient.ResetRootCoordRegistration()
 		var err error
 		if cluster.RootCoord, err = grpcrootcoord.NewServer(cluster.ctx, cluster.factory); err != nil {
 			panic(err)
@@ -406,6 +414,7 @@ func (cluster *MiniClusterV2) StopDataCoord() {
 
 func (cluster *MiniClusterV2) StartDataCoord() {
 	if cluster.DataCoord == nil {
+		coordclient.ResetRootCoordRegistration()
 		var err error
 		if cluster.DataCoord, err = grpcdatacoord.NewServer(cluster.ctx, cluster.factory); err != nil {
 			panic(err)
@@ -423,6 +432,7 @@ func (cluster *MiniClusterV2) StopQueryCoord() {
 
 func (cluster *MiniClusterV2) StartQueryCoord() {
 	if cluster.QueryCoord == nil {
+		coordclient.ResetQueryCoordRegistration()
 		var err error
 		if cluster.QueryCoord, err = grpcquerycoord.NewServer(cluster.ctx, cluster.factory); err != nil {
 			panic(err)
@@ -486,10 +496,6 @@ func (cluster *MiniClusterV2) Stop() error {
 	cluster.StopAllStreamingNodes()
 	cluster.StopAllQueryNodes()
 
-	if streamingutil.IsStreamingServiceEnabled() {
-		streaming.Release()
-	}
-
 	cluster.IndexNode.Stop()
 	log.Info("mini cluster indexNode stopped")
 
@@ -505,6 +511,7 @@ func (cluster *MiniClusterV2) Stop() error {
 		}
 	}
 	cluster.ChunkManager.RemoveWithPrefix(cluster.ctx, cluster.ChunkManager.RootPath())
+	streaming.Release()
 	return nil
 }
 
