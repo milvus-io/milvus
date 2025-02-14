@@ -79,11 +79,13 @@ std::unique_ptr<SearchResult>
 SegmentInternalInterface::Search(
     const query::Plan* plan,
     const query::PlaceholderGroup* placeholder_group,
-    Timestamp timestamp) const {
+    Timestamp timestamp,
+    int32_t consistency_level) const {
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
     check_search(plan);
-    query::ExecPlanNodeVisitor visitor(*this, timestamp, placeholder_group);
+    query::ExecPlanNodeVisitor visitor(
+        *this, timestamp, placeholder_group, consistency_level);
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;
@@ -95,11 +97,12 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    const query::RetrievePlan* plan,
                                    Timestamp timestamp,
                                    int64_t limit_size,
-                                   bool ignore_non_pk) const {
+                                   bool ignore_non_pk,
+                                   int32_t consistency_level) const {
     std::shared_lock lck(mutex_);
     tracer::AutoSpan span("Retrieve", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
-    query::ExecPlanNodeVisitor visitor(*this, timestamp);
+    query::ExecPlanNodeVisitor visitor(*this, timestamp, consistency_level);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
     retrieve_results.segment_ = (void*)this;
     results->set_has_more_result(retrieve_results.has_more_result);
@@ -266,7 +269,8 @@ SegmentInternalInterface::get_real_count() const {
         milvus::plan::GetNextPlanNodeId(), sources);
     plan->plan_node_->plannodes_ = plannode;
     plan->plan_node_->is_count_ = true;
-    auto res = Retrieve(nullptr, plan.get(), MAX_TIMESTAMP, INT64_MAX, false);
+    auto res =
+        Retrieve(nullptr, plan.get(), MAX_TIMESTAMP, INT64_MAX, false, 0);
     AssertInfo(res->fields_data().size() == 1,
                "count result should only have one column");
     AssertInfo(res->fields_data()[0].has_scalars(),
@@ -410,5 +414,4 @@ SegmentInternalInterface::GetJsonKeyIndex(FieldId field_id) const {
     }
     return iter->second.get();
 }
-
 }  // namespace milvus::segcore

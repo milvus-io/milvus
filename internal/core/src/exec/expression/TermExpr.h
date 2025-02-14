@@ -56,13 +56,15 @@ class PhyTermFilterExpr : public SegmentExpr {
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
         milvus::Timestamp timestamp,
-        int64_t batch_size)
+        int64_t batch_size,
+        int32_t consistency_level)
         : SegmentExpr(std::move(input),
                       name,
                       segment,
                       expr->column_.field_id_,
                       active_count,
-                      batch_size),
+                      batch_size,
+                      consistency_level),
           expr_(expr),
           query_timestamp_(timestamp) {
     }
@@ -126,6 +128,7 @@ class PhyTermFilterExpr : public SegmentExpr {
     milvus::Timestamp query_timestamp_;
     bool cached_bits_inited_{false};
     TargetBitmap cached_bits_;
+    int32_t consistency_level_ = 0;
 };
 }  //namespace exec
 }  // namespace milvus

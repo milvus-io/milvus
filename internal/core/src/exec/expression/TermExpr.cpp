@@ -544,9 +544,14 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
             return term_set.find(ValueType(val.value())) != term_set.end();
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
-        cached_index_chunk_res_ =
-            index->FilterByPath(pointer, active_count_, is_growing, filter_func)
-                .clone();
+        bool is_strong_consistency = consistency_level_ == 0;
+        cached_index_chunk_res_ = index
+                                      ->FilterByPath(pointer,
+                                                     active_count_,
+                                                     is_growing,
+                                                     is_strong_consistency,
+                                                     filter_func)
+                                      .clone();
         cached_index_chunk_id_ = 0;
     }
 

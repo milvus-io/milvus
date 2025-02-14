@@ -50,6 +50,7 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
     FilterByPath(const std::string& path,
                  int32_t row,
                  bool is_growing,
+                 bool is_strong_consistency,
                  std::function<bool(uint32_t, uint16_t, uint16_t)> filter) {
         auto processArray = [this, &path, row, &filter]() {
             TargetBitmap bitset(row);
@@ -70,9 +71,11 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
         };
 
         if (is_growing) {
-            if (shouldTriggerCommit()) {
-                Commit();
-                Reload();
+            if (shouldTriggerCommit() || is_strong_consistency) {
+                if (is_data_uncommitted_) {
+                    Commit();
+                    Reload();
+                }
                 return processArray();
             } else {
                 return processArray();
@@ -140,5 +143,6 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
     mutable std::mutex mtx_;
     std::atomic<stdclock::time_point> last_commit_time_;
     int64_t commit_interval_in_ms_;
+    std::atomic<bool> is_data_uncommitted_ = false;
 };
 }  // namespace milvus::index

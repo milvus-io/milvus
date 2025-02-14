@@ -64,14 +64,16 @@ class SegmentInterface {
     virtual std::unique_ptr<SearchResult>
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_group,
-           Timestamp timestamp) const = 0;
+           Timestamp timestamp,
+           int32_t consistency_level = 0) const = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
              const query::RetrievePlan* Plan,
              Timestamp timestamp,
              int64_t limit_size,
-             bool ignore_non_pk) const = 0;
+             bool ignore_non_pk,
+             int32_t consistency_level = 0) const = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
@@ -249,7 +251,8 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unique_ptr<SearchResult>
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_group,
-           Timestamp timestamp) const override;
+           Timestamp timestamp,
+           int32_t consistency_level = 0) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,
@@ -264,7 +267,8 @@ class SegmentInternalInterface : public SegmentInterface {
              const query::RetrievePlan* Plan,
              Timestamp timestamp,
              int64_t limit_size,
-             bool ignore_non_pk) const override;
+             bool ignore_non_pk,
+             int32_t consistency_level = 0) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,

@@ -901,8 +901,9 @@ func (t *searchTask) Requery(span trace.Span) error {
 				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
-			ReqID:        paramtable.GetNodeID(),
-			PartitionIDs: t.GetPartitionIDs(), // use search partitionIDs
+			ReqID:            paramtable.GetNodeID(),
+			PartitionIDs:     t.GetPartitionIDs(), // use search partitionIDs
+			ConsistencyLevel: t.ConsistencyLevel,
 		},
 		request:      queryReq,
 		plan:         plan,

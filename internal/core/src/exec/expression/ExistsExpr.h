@@ -42,13 +42,15 @@ class PhyExistsFilterExpr : public SegmentExpr {
         const std::string& name,
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
-        int64_t batch_size)
+        int64_t batch_size,
+        int32_t consistency_level)
         : SegmentExpr(std::move(input),
                       name,
                       segment,
                       expr->column_.field_id_,
                       active_count,
-                      batch_size),
+                      batch_size,
+                      consistency_level),
           expr_(expr) {
     }
 

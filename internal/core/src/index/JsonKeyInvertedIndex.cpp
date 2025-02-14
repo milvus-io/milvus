@@ -297,6 +297,7 @@ JsonKeyInvertedIndex::AddJSONDatas(size_t n,
         }
         AddJson(jsonDatas[i].c_str(), offset);
     }
+    is_data_uncommitted_ = true;
     LOG_INFO("build json key index done for AddJSONDatas");
     if (shouldTriggerCommit()) {
         Commit();
@@ -320,6 +321,7 @@ void
 JsonKeyInvertedIndex::Commit() {
     std::unique_lock<std::mutex> lck(mtx_, std::defer_lock);
     if (lck.try_lock()) {
+        is_data_uncommitted_ = false;
         wrapper_->commit();
         last_commit_time_.store(stdclock::now());
     }

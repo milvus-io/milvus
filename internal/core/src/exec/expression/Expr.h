@@ -113,12 +113,14 @@ class SegmentExpr : public Expr {
                 const segcore::SegmentInternalInterface* segment,
                 const FieldId& field_id,
                 int64_t active_count,
-                int64_t batch_size)
+                int64_t batch_size,
+                int32_t consistency_level)
         : Expr(DataType::BOOL, std::move(input), name),
           segment_(segment),
           field_id_(field_id),
           active_count_(active_count),
-          batch_size_(batch_size) {
+          batch_size_(batch_size),
+          consistency_level_(consistency_level) {
         size_per_chunk_ = segment_->size_per_chunk();
         AssertInfo(
             batch_size_ > 0,
@@ -1114,6 +1116,7 @@ class SegmentExpr : public Expr {
 
     // Cache for text match.
     std::shared_ptr<TargetBitmap> cached_match_res_{nullptr};
+    int32_t consistency_level_{0};
 };
 
 void
