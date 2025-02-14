@@ -2747,3 +2747,17 @@ func (t *ListResourceGroupsTask) Execute(ctx context.Context) error {
 func (t *ListResourceGroupsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
+
+// isIgnoreGrowing is used to check if the request should ignore growing
+func isIgnoreGrowing(params []*commonpb.KeyValuePair) (bool, error) {
+	for _, kv := range params {
+		if kv.GetKey() == IgnoreGrowingKey {
+			ignoreGrowing, err := strconv.ParseBool(kv.GetValue())
+			if err != nil {
+				return false, errors.New("parse ignore growing field failed")
+			}
+			return ignoreGrowing, nil
+		}
+	}
+	return false, nil
+}

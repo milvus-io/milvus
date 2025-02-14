@@ -98,6 +98,7 @@ message SubSearchRequest {
   int64 group_by_field_id = 10;
   int64 group_size = 11;
   int64 field_id = 12;
+  bool ignore_growing = 13;
 }
 
 message SearchRequest {

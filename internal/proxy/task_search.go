@@ -193,19 +193,9 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 	t.SearchRequest.Nq = nq
 
-	var ignoreGrowing bool
-	// parse common search params
-	for i, kv := range t.request.GetSearchParams() {
-		if kv.GetKey() == IgnoreGrowingKey {
-			ignoreGrowing, err = strconv.ParseBool(kv.GetValue())
-			if err != nil {
-				return errors.New("parse search growing failed")
-			}
-			t.request.SearchParams = append(t.request.GetSearchParams()[:i], t.request.GetSearchParams()[i+1:]...)
-			break
-		}
+	if t.SearchRequest.IgnoreGrowing, err = isIgnoreGrowing(t.request.SearchParams); err != nil {
+		return err
 	}
-	t.SearchRequest.IgnoreGrowing = ignoreGrowing
 
 	outputFieldIDs, err := getOutputFieldIDs(t.schema, t.request.GetOutputFields())
 	if err != nil {
@@ -371,6 +361,14 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			return err
 		}
 
+		ignoreGrowing := t.SearchRequest.IgnoreGrowing
+		if !ignoreGrowing {
+			// fetch ignore_growing from sub search param if not set in search request
+			if ignoreGrowing, err = isIgnoreGrowing(subReq.GetSearchParams()); err != nil {
+				return err
+			}
+		}
+
 		internalSubReq := &internalpb.SubSearchRequest{
 			Dsl:                subReq.GetDsl(),
 			PlaceholderGroup:   subReq.GetPlaceholderGroup(),
@@ -383,6 +381,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			MetricType:         queryInfo.GetMetricType(),
 			GroupByFieldId:     t.rankParams.GetGroupByFieldId(),
 			GroupSize:          t.rankParams.GetGroupSize(),
+			IgnoreGrowing:      ignoreGrowing,
 		}
 
 		internalSubReq.FieldId = queryInfo.GetQueryFieldId()
