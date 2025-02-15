@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
+	"github.com/samber/lo"
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/internal/json"
@@ -140,6 +141,13 @@ func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (Imp
 func (m *importMeta) AddJob(ctx context.Context, job ImportJob) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	originJob := m.jobs[job.GetJobID()]
+	if originJob != nil {
+		originJob := originJob.Clone()
+		internalJob := originJob.(*importJob).ImportJob
+		internalJob.ReadyVchannels = lo.Union(originJob.GetReadyVchannels(), job.GetReadyVchannels())
+		job = originJob
+	}
 	err := m.catalog.SaveImportJob(ctx, job.(*importJob).ImportJob)
 	if err != nil {
 		return err

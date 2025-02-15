@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -165,4 +166,14 @@ func (dc *dataCoordBroker) UpdateSegmentStatistics(ctx context.Context, req *dat
 	}
 
 	return nil
+}
+
+func (dc *dataCoordBroker) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+	resp, err := dc.client.ImportV2(ctx, in)
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		log.Ctx(ctx).Warn("failed to ImportV2", zap.Error(err))
+		return resp, err
+	}
+
+	return resp, nil
 }

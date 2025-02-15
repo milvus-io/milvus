@@ -6,6 +6,8 @@ import (
 	context "context"
 
 	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
+	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
+
 	mock "github.com/stretchr/testify/mock"
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -211,6 +213,65 @@ func (_c *MockBroker_GetSegmentInfo_Call) Return(_a0 []*datapb.SegmentInfo, _a1 
 }
 
 func (_c *MockBroker_GetSegmentInfo_Call) RunAndReturn(run func(context.Context, []int64) ([]*datapb.SegmentInfo, error)) *MockBroker_GetSegmentInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ImportV2 provides a mock function with given fields: ctx, in
+func (_m *MockBroker) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+	ret := _m.Called(ctx, in)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ImportV2")
+	}
+
+	var r0 *internalpb.ImportResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error)); ok {
+		return rf(ctx, in)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ImportRequestInternal) *internalpb.ImportResponse); ok {
+		r0 = rf(ctx, in)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.ImportResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.ImportRequestInternal) error); ok {
+		r1 = rf(ctx, in)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroker_ImportV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ImportV2'
+type MockBroker_ImportV2_Call struct {
+	*mock.Call
+}
+
+// ImportV2 is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *internalpb.ImportRequestInternal
+func (_e *MockBroker_Expecter) ImportV2(ctx interface{}, in interface{}) *MockBroker_ImportV2_Call {
+	return &MockBroker_ImportV2_Call{Call: _e.mock.On("ImportV2", ctx, in)}
+}
+
+func (_c *MockBroker_ImportV2_Call) Run(run func(ctx context.Context, in *internalpb.ImportRequestInternal)) *MockBroker_ImportV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.ImportRequestInternal))
+	})
+	return _c
+}
+
+func (_c *MockBroker_ImportV2_Call) Return(_a0 *internalpb.ImportResponse, _a1 error) *MockBroker_ImportV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBroker_ImportV2_Call) RunAndReturn(run func(context.Context, *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error)) *MockBroker_ImportV2_Call {
 	_c.Call.Return(run)
 	return _c
 }
