@@ -1926,6 +1926,38 @@ func (_c *RootCoord_GetTimeTickChannel_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// GracefulStop provides a mock function with given fields:
+func (_m *RootCoord) GracefulStop() {
+	_m.Called()
+}
+
+// RootCoord_GracefulStop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GracefulStop'
+type RootCoord_GracefulStop_Call struct {
+	*mock.Call
+}
+
+// GracefulStop is a helper method to define mock.On call
+func (_e *RootCoord_Expecter) GracefulStop() *RootCoord_GracefulStop_Call {
+	return &RootCoord_GracefulStop_Call{Call: _e.mock.On("GracefulStop")}
+}
+
+func (_c *RootCoord_GracefulStop_Call) Run(run func()) *RootCoord_GracefulStop_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *RootCoord_GracefulStop_Call) Return() *RootCoord_GracefulStop_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *RootCoord_GracefulStop_Call) RunAndReturn(run func()) *RootCoord_GracefulStop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // HasCollection provides a mock function with given fields: _a0, _a1
 func (_m *RootCoord) HasCollection(_a0 context.Context, _a1 *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	ret := _m.Called(_a0, _a1)

@@ -104,6 +104,7 @@ type ImportJob interface {
 	GetCollectionName() string
 	GetPartitionIDs() []int64
 	GetVchannels() []string
+	GetReadyVchannels() []string
 	GetSchema() *schemapb.CollectionSchema
 	GetTimeoutTs() uint64
 	GetCleanupTs() uint64
@@ -115,6 +116,7 @@ type ImportJob interface {
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair
 	GetTR() *timerecord.TimeRecorder
+	GetDataTs() uint64
 	Clone() ImportJob
 }
 
