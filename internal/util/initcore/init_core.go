@@ -127,6 +127,13 @@ func callWithTimeout(fn func(), timeoutHandler func(), timeout time.Duration) {
 	}
 }
 
+func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
+	if params.CommonCfg.StorageType.GetValue() == "local" {
+		return InitLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue())
+	}
+	return InitRemoteArrowFileSystem(params)
+}
+
 func InitLocalArrowFileSystem(path string) error {
 	CLocalRootPath := C.CString(path)
 	defer C.free(unsafe.Pointer(CLocalRootPath))
@@ -135,6 +142,7 @@ func InitLocalArrowFileSystem(path string) error {
 }
 
 func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
+	// cAddress := C.CString("oss-cn-hangzhou.aliyuncs.com")
 	cAddress := C.CString(params.MinioCfg.Address.GetValue())
 	cBucketName := C.CString(params.MinioCfg.BucketName.GetValue())
 	cAccessKey := C.CString(params.MinioCfg.AccessKeyID.GetValue())
@@ -159,6 +167,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 		access_key_value:       cAccessValue,
 		storage_type:           cStorageType,
 		cloud_provider:         cCloudProvider,
+		region:                 cRegion,
 		use_custom_part_upload: true,
 	}
 

@@ -43,7 +43,7 @@ CStatus
 InitRemoteArrowFileSystemSingleton(CStorageConfig c_storage_config) {
     try {
         milvus_storage::ArrowFileSystemConfig conf;
-        conf.uri = std::string(c_storage_config.address);
+        conf.uri = "https://" + std::string(c_storage_config.bucket_name) + "." + std::string(c_storage_config.address);
         conf.storage_type = std::string(c_storage_config.storage_type);
         conf.bucket_name = std::string(c_storage_config.bucket_name);
         conf.access_key_id = std::string(c_storage_config.access_key_id);
@@ -51,7 +51,6 @@ InitRemoteArrowFileSystemSingleton(CStorageConfig c_storage_config) {
         conf.cloud_provider = std::string(c_storage_config.cloud_provider);
         conf.region = std::string(c_storage_config.region);
         conf.use_custom_part_upload = c_storage_config.use_custom_part_upload;
-       
         milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
 
         return milvus::SuccessCStatus();
