@@ -162,5 +162,16 @@ GetValueFromProtoWithOverflow(
     return GetValueFromProtoInternal<T>(value_proto, overflowed);
 }
 
+inline std::string
+sanitizeName(const std::string& name) {
+    std::string sanitizedName;
+    sanitizedName.resize(name.size());
+    std::transform(
+        name.begin(), name.end(), sanitizedName.begin(), [](unsigned char c) {
+            return std::tolower(c);
+        });
+    return sanitizedName;
+}
+
 }  // namespace exec
 }  // namespace milvus

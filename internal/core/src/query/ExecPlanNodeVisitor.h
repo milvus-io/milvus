@@ -91,9 +91,17 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
         return expr_use_pk_index_;
     }
 
-    static BitsetType
+    static RowVectorPtr
     ExecuteTask(plan::PlanFragment& plan,
                 std::shared_ptr<milvus::exec::QueryContext> query_context);
+
+    void
+    setupRetrieveResult(
+        const RowVectorPtr& result,
+        const std::shared_ptr<milvus::exec::QueryContext> query_context,
+        const RetrievePlanNode& node,
+        RetrieveResult& tmp_retrieve_result,
+        const segcore::SegmentInternalInterface* segment);
 
  private:
     template <typename VectorType>
@@ -120,12 +128,15 @@ ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
 
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
         DEAFULT_QUERY_ID, segment, active_count, timestamp);
-    auto bitset =
-        ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
-
-    // For test case, bitset 1 indicates true but executor is verse
-    bitset.flip();
-    return bitset;
+    auto row = ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
+    AssertInfo(
+        row->childrens().size() == 1,
+        "query expr operator's result vector's children size not equal one");
+    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
+    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    BitsetType query_view(view);
+    query_view.flip();
+    return query_view;
 }
 
 }  // namespace milvus::query
