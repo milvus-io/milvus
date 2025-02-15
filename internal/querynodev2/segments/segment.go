@@ -295,7 +295,7 @@ type LocalSegment struct {
 
 	lastDeltaTimestamp *atomic.Uint64
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
-	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo]
+	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo] // indexID -> IndexedFieldInfo
 	warmupDispatcher   *AsyncWarmupDispatcher
 	fieldJSONStats     []int64
 }
@@ -383,13 +383,14 @@ func (s *LocalSegment) initializeSegment() error {
 	indexedFieldInfos, fieldBinlogs := separateIndexAndBinlog(loadInfo)
 	schemaHelper, _ := typeutil.CreateSchemaHelper(s.collection.Schema())
 
-	for fieldID, info := range indexedFieldInfos {
+	for _, info := range indexedFieldInfos {
+		fieldID := info.IndexInfo.FieldID
 		field, err := schemaHelper.GetFieldFromID(fieldID)
 		if err != nil {
 			return err
 		}
 		indexInfo := info.IndexInfo
-		s.fieldIndexes.Insert(indexInfo.GetFieldID(), &IndexedFieldInfo{
+		s.fieldIndexes.Insert(indexInfo.GetIndexID(), &IndexedFieldInfo{
 			FieldBinlog: &datapb.FieldBinlog{
 				FieldID: indexInfo.GetFieldID(),
 			},
@@ -473,17 +474,32 @@ func (s *LocalSegment) LastDeltaTimestamp() uint64 {
 	return s.lastDeltaTimestamp.Load()
 }
 
-func (s *LocalSegment) GetIndex(fieldID int64) *IndexedFieldInfo {
-	info, _ := s.fieldIndexes.Get(fieldID)
+func (s *LocalSegment) GetIndexByID(indexID int64) *IndexedFieldInfo {
+	info, _ := s.fieldIndexes.Get(indexID)
+	return info
+}
+
+func (s *LocalSegment) GetIndex(fieldID int64) []*IndexedFieldInfo {
+	var info []*IndexedFieldInfo
+	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {
+		if value.IndexInfo.FieldID == fieldID {
+			info = append(info, value)
+		}
+		return true
+	})
 	return info
 }
 
 func (s *LocalSegment) ExistIndex(fieldID int64) bool {
-	fieldInfo, ok := s.fieldIndexes.Get(fieldID)
-	if !ok {
-		return false
-	}
-	return fieldInfo.IndexInfo != nil
+	contain := false
+	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {
+		if value.IndexInfo.FieldID == fieldID {
+			contain = true
+		}
+		return !contain
+	})
+
+	return contain
 }
 
 func (s *LocalSegment) HasRawData(fieldID int64) bool {
@@ -1002,9 +1018,9 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		zap.Int64("indexID", indexInfo.GetIndexID()),
 	)
 
-	old := s.GetIndex(indexInfo.GetFieldID())
+	old := s.GetIndexByID(indexInfo.GetIndexID())
 	// the index loaded
-	if old != nil && old.IndexInfo.GetIndexID() == indexInfo.GetIndexID() && old.IsLoaded {
+	if old != nil && old.IsLoaded {
 		log.Warn("index already loaded")
 		return nil
 	}
@@ -1208,7 +1224,7 @@ func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.F
 		return err
 	}
 
-	s.fieldIndexes.Insert(indexInfo.GetFieldID(), &IndexedFieldInfo{
+	s.fieldIndexes.Insert(indexInfo.GetIndexID(), &IndexedFieldInfo{
 		FieldBinlog: &datapb.FieldBinlog{
 			FieldID: indexInfo.GetFieldID(),
 		},

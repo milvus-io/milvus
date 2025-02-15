@@ -164,7 +164,7 @@ func (c *IndexChecker) checkSegment(segment *meta.Segment, indexInfos []*indexpb
 	var result []int64
 	for _, indexInfo := range indexInfos {
 		fieldID, indexID := indexInfo.FieldID, indexInfo.IndexID
-		info, ok := segment.IndexInfo[fieldID]
+		info, ok := segment.IndexInfo[indexID]
 		if !ok {
 			result = append(result, fieldID)
 			continue

@@ -107,13 +107,23 @@ RustResult tantivy_term_query_i64(void *ptr, int64_t term);
 
 RustResult tantivy_lower_bound_range_query_i64(void *ptr, int64_t lower_bound, bool inclusive);
 
+RustResult tantivy_lower_bound_range_query_bool(void *ptr, bool lower_bound, bool inclusive);
+
 RustResult tantivy_upper_bound_range_query_i64(void *ptr, int64_t upper_bound, bool inclusive);
+
+RustResult tantivy_upper_bound_range_query_bool(void *ptr, bool upper_bound, bool inclusive);
 
 RustResult tantivy_range_query_i64(void *ptr,
                                    int64_t lower_bound,
                                    int64_t upper_bound,
                                    bool lb_inclusive,
                                    bool ub_inclusive);
+
+RustResult tantivy_range_query_bool(void *ptr,
+                                    bool lower_bound,
+                                    bool upper_bound,
+                                    bool lb_inclusive,
+                                    bool ub_inclusive);
 
 RustResult tantivy_term_query_f64(void *ptr, double term);
 

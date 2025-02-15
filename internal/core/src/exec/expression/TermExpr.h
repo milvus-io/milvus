@@ -63,6 +63,7 @@ class PhyTermFilterExpr : public SegmentExpr {
                       name,
                       segment,
                       expr->column_.field_id_,
+                      expr->column_.nested_path_,
                       active_count,
                       batch_size,
                       consistency_level),
