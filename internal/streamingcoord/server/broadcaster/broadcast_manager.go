@@ -63,17 +63,39 @@ type broadcastTaskManager struct {
 
 // AddTask adds a new broadcast task into the manager.
 func (bm *broadcastTaskManager) AddTask(ctx context.Context, msg message.BroadcastMutableMessage) (*pendingBroadcastTask, error) {
-	id, err := resource.Resource().IDAllocator().Allocate(ctx)
-	if err != nil {
-		return nil, errors.Wrapf(err, "allocate new id failed")
+	var err error
+	if msg, err = bm.assignID(ctx, msg); err != nil {
+		return nil, err
 	}
-	msg = msg.WithBroadcastID(id)
-
 	task, err := bm.addBroadcastTask(msg)
 	if err != nil {
 		return nil, err
 	}
 	return newPendingBroadcastTask(task), nil
+}
+
+func (bm *broadcastTaskManager) assignID(ctx context.Context, msg message.BroadcastMutableMessage) (message.BroadcastMutableMessage, error) {
+	// TODO: current implementation the header cannot be seen at flusher itself.
+	// only import message use it, so temporarily set the broadcast id here.
+	// need to refactor the message to make the broadcast header visible to flusher.
+	if msg.MessageType() == message.MessageTypeImport {
+		importMsg, err := message.AsMutableImportMessageV1(msg)
+		if err != nil {
+			return nil, err
+		}
+		body, err := importMsg.Body()
+		if err != nil {
+			return nil, err
+		}
+		return msg.WithBroadcastID(uint64(body.JobID)), nil
+	}
+
+	id, err := resource.Resource().IDAllocator().Allocate(ctx)
+	if err != nil {
+		return nil, errors.Wrapf(err, "allocate new id failed")
+	}
+	msg = msg.WithBroadcastID(id)
+	return msg, nil
 }
 
 // Ack acknowledges the message at the specified vchannel.

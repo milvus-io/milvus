@@ -23,17 +23,22 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
@@ -74,8 +79,13 @@ func (s *ImportCheckerSuite) SetupTest() {
 	s.NoError(err)
 
 	sjm := NewMockStatsJobManager(s.T())
+	l0CompactionTrigger := NewMockTriggerManager(s.T())
+	compactionChan := make(chan struct{}, 1)
+	close(compactionChan)
+	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
+	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 
-	checker := NewImportChecker(meta, broker, cluster, s.alloc, imeta, sjm).(*importChecker)
+	checker := NewImportChecker(meta, broker, cluster, s.alloc, imeta, sjm, l0CompactionTrigger).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{
@@ -507,4 +517,209 @@ func (s *ImportCheckerSuite) TestCheckCollection() {
 
 func TestImportChecker(t *testing.T) {
 	suite.Run(t, new(ImportCheckerSuite))
+}
+
+func TestImportCheckerCompaction(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.DataCoordCfg.ImportCheckIntervalHigh.Key, "1")
+	defer Params.Reset(Params.DataCoordCfg.ImportCheckIntervalHigh.Key)
+	Params.Save(Params.DataCoordCfg.ImportCheckIntervalLow.Key, "10000")
+	defer Params.Reset(Params.DataCoordCfg.ImportCheckIntervalLow.Key)
+
+	// prepare objects
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+
+	cluster := NewMockCluster(t)
+	alloc := allocator.NewMockAllocator(t)
+
+	imeta, err := NewImportMeta(context.TODO(), catalog)
+	assert.NoError(t, err)
+
+	broker := broker2.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	sjm := NewMockStatsJobManager(t)
+	l0CompactionTrigger := NewMockTriggerManager(t)
+	compactionChan := make(chan struct{}, 1)
+	close(compactionChan)
+	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
+	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
+
+	checker := NewImportChecker(meta, broker, cluster, alloc, imeta, sjm, l0CompactionTrigger).(*importChecker)
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:          1001,
+			CollectionID:   1,
+			PartitionIDs:   []int64{2},
+			ReadyVchannels: []string{"ch0"},
+			Vchannels:      []string{"ch0", "ch1"},
+			State:          internalpb.ImportJobState_Pending,
+			TimeoutTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour), 0),
+			CleanupTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour), 0),
+			Files: []*internalpb.ImportFile{
+				{
+					Id:    1,
+					Paths: []string{"a.json"},
+				},
+				{
+					Id:    2,
+					Paths: []string{"b.json"},
+				},
+				{
+					Id:    3,
+					Paths: []string{"c.json"},
+				},
+			},
+		},
+		tr: timerecord.NewTimeRecorder("import job"),
+	}
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+	err = imeta.AddJob(context.TODO(), job)
+	assert.NoError(t, err)
+	jobID := job.GetJobID()
+
+	// start check
+	go checker.Start()
+
+	// sleep 1.5s and ready the job, go to pending stats
+	time.Sleep(1500 * time.Millisecond)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+	job2 := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:          1001,
+			CollectionID:   1,
+			PartitionIDs:   []int64{2},
+			ReadyVchannels: []string{"ch1"},
+			Vchannels:      []string{"ch0", "ch1"},
+			State:          internalpb.ImportJobState_Pending,
+			TimeoutTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour), 0),
+			CleanupTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour), 0),
+			Files: []*internalpb.ImportFile{
+				{
+					Id:    1,
+					Paths: []string{"a.json"},
+				},
+				{
+					Id:    2,
+					Paths: []string{"b.json"},
+				},
+				{
+					Id:    3,
+					Paths: []string{"c.json"},
+				},
+			},
+		},
+		tr: timerecord.NewTimeRecorder("import job"),
+	}
+	err = imeta.AddJob(context.TODO(), job2)
+	assert.NoError(t, err)
+	log.Info("job ready")
+
+	// check pending
+	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+		id := rand.Int63()
+		return id, id + n, nil
+	}).Maybe()
+	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil).Maybe()
+	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil).Twice()
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+	assert.Eventually(t, func() bool {
+		job := imeta.GetJob(context.TODO(), jobID)
+		preimportTasks := imeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(PreImportTaskType))
+		taskLen := len(preimportTasks)
+		log.Info("job pre-importing", zap.Any("taskLen", taskLen), zap.Any("jobState", job.GetState()))
+		return taskLen == 2 && job.GetState() == internalpb.ImportJobState_PreImporting
+	}, 2*time.Second, 500*time.Millisecond)
+	log.Info("job pre-importing")
+
+	// check pre-importing
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil).Twice()
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+	preimportTasks := imeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(PreImportTaskType))
+	for _, pt := range preimportTasks {
+		err := imeta.UpdateTask(context.TODO(), pt.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed))
+		assert.NoError(t, err)
+	}
+	assert.Eventually(t, func() bool {
+		job := imeta.GetJob(context.TODO(), jobID)
+		importTasks := imeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(ImportTaskType))
+		return len(importTasks) == 1 && job.GetState() == internalpb.ImportJobState_Importing
+	}, 2*time.Second, 100*time.Millisecond)
+	log.Info("job importing")
+
+	// check importing
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
+	importTasks := imeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(ImportTaskType))
+	for _, it := range importTasks {
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            rand.Int63(),
+				State:         commonpb.SegmentState_Flushed,
+				IsImporting:   true,
+				InsertChannel: "ch0",
+			},
+		}
+		err := checker.meta.AddSegment(context.Background(), segment)
+		assert.NoError(t, err)
+		err = imeta.UpdateTask(context.TODO(), it.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed),
+			UpdateSegmentIDs([]int64{segment.GetID()}), UpdateStatsSegmentIDs([]int64{rand.Int63()}))
+		assert.NoError(t, err)
+		err = checker.meta.UpdateChannelCheckpoint(context.TODO(), segment.GetInsertChannel(), &msgpb.MsgPosition{MsgID: []byte{0}})
+		assert.NoError(t, err)
+	}
+	assert.Eventually(t, func() bool {
+		job := imeta.GetJob(context.TODO(), jobID)
+		return job.GetState() == internalpb.ImportJobState_Stats
+	}, 2*time.Second, 100*time.Millisecond)
+	log.Info("job stats")
+
+	// check stats
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+	sjm.EXPECT().GetStatsTask(mock.Anything, mock.Anything).Return(&indexpb.StatsTask{
+		State: indexpb.JobState_JobStateFinished,
+	}).Once()
+	assert.Eventually(t, func() bool {
+		job := imeta.GetJob(context.TODO(), jobID)
+		return job.GetState() == internalpb.ImportJobState_IndexBuilding
+	}, 2*time.Second, 100*time.Millisecond)
+	log.Info("job index building")
+
+	// wait l0 import task
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
+	imeta.AddTask(context.TODO(), &importTask{
+		ImportTaskV2: &datapb.ImportTaskV2{
+			JobID:  jobID,
+			TaskID: 100000,
+			Source: datapb.ImportTaskSourceV2_L0Compaction,
+			State:  datapb.ImportTaskStateV2_InProgress,
+		},
+	})
+	time.Sleep(1200 * time.Millisecond)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
+	imeta.UpdateTask(context.TODO(), 100000, UpdateState(datapb.ImportTaskStateV2_Completed))
+	log.Info("job l0 compaction")
+
+	// check index building
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+	assert.Eventually(t, func() bool {
+		job := imeta.GetJob(context.TODO(), jobID)
+		return job.GetState() == internalpb.ImportJobState_Completed
+	}, 2*time.Second, 100*time.Millisecond)
+	log.Info("job completed")
 }

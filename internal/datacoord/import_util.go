@@ -156,7 +156,7 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		defer cancel()
 		for size > 0 {
 			segmentInfo, err := AllocImportSegment(ctx, alloc, meta,
-				task.GetJobID(), task.GetTaskID(), task.GetCollectionID(), partitionID, vchannel, segmentLevel)
+				task.GetJobID(), task.GetTaskID(), task.GetCollectionID(), partitionID, vchannel, job.GetDataTs(), segmentLevel)
 			if err != nil {
 				return err
 			}
@@ -183,6 +183,7 @@ func AllocImportSegment(ctx context.Context,
 	jobID int64, taskID int64,
 	collectionID UniqueID, partitionID UniqueID,
 	channelName string,
+	dataTimestamp uint64,
 	level datapb.SegmentLevel,
 ) (*SegmentInfo, error) {
 	log := log.Ctx(ctx)
@@ -191,9 +192,12 @@ func AllocImportSegment(ctx context.Context,
 		log.Error("failed to alloc id for import segment", zap.Error(err))
 		return nil, err
 	}
-	ts, err := alloc.AllocTimestamp(ctx)
-	if err != nil {
-		return nil, err
+	ts := dataTimestamp
+	if ts == 0 {
+		ts, err = alloc.AllocTimestamp(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 	position := &msgpb.MsgPosition{
 		ChannelName: channelName,
@@ -263,9 +267,13 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	ts, err := alloc.AllocTimestamp(ctx)
-	if err != nil {
-		return nil, err
+	ts := job.GetDataTs()
+	var err error
+	if ts == 0 {
+		ts, err = alloc.AllocTimestamp(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	totalRows := lo.SumBy(task.GetFileStats(), func(stat *datapb.ImportFileStats) int64 {

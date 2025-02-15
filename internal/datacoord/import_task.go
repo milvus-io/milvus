@@ -68,6 +68,18 @@ func WithStates(states ...datapb.ImportTaskStateV2) ImportTaskFilter {
 	}
 }
 
+func WithRequestSource() ImportTaskFilter {
+	return func(task ImportTask) bool {
+		return task.GetSource() == datapb.ImportTaskSourceV2_Request
+	}
+}
+
+func WithL0CompactionSource() ImportTaskFilter {
+	return func(task ImportTask) bool {
+		return task.GetSource() == datapb.ImportTaskSourceV2_L0Compaction
+	}
+}
+
 type UpdateAction func(task ImportTask)
 
 func UpdateState(state datapb.ImportTaskStateV2) UpdateAction {
@@ -150,6 +162,7 @@ type ImportTask interface {
 	GetTR() *timerecord.TimeRecorder
 	GetSlots() int64
 	Clone() ImportTask
+	GetSource() datapb.ImportTaskSourceV2
 }
 
 type preImportTask struct {
@@ -174,6 +187,10 @@ func (p *preImportTask) Clone() ImportTask {
 		PreImportTask: proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
 		tr:            p.tr,
 	}
+}
+
+func (p *preImportTask) GetSource() datapb.ImportTaskSourceV2 {
+	return datapb.ImportTaskSourceV2_Request
 }
 
 func (p *preImportTask) MarshalJSON() ([]byte, error) {

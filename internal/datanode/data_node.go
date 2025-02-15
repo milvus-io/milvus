@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/channel"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
+	"github.com/milvus-io/milvus/internal/datanode/msghandlerimpl"
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
@@ -470,5 +471,6 @@ func getPipelineParams(node *DataNode) *util2.PipelineParams {
 		WriteBufferManager: node.writeBufferManager,
 		CheckpointUpdater:  node.channelCheckpointUpdater,
 		Allocator:          node.allocator,
+		MsgHandler:         msghandlerimpl.NewMsgHandlerImpl(node.broker),
 	}
 }

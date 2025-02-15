@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -39,8 +40,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -52,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -1609,6 +1613,13 @@ func TestProxy_ReplicateMessage(t *testing.T) {
 }
 
 func TestProxy_ImportV2(t *testing.T) {
+	wal := mock_streaming.NewMockWALAccesser(t)
+	b := mock_streaming.NewMockBroadcast(t)
+	wal.EXPECT().Broadcast().Return(b).Maybe()
+	b.EXPECT().BlockUntilResourceKeyAckOnce(mock.Anything, mock.Anything).Return(nil).Maybe()
+	b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil).Maybe()
+	streaming.SetWALForTest(wal)
+	defer streaming.RecoverWALForTest()
 	ctx := context.Background()
 	mockErr := errors.New("mock error")
 
@@ -1623,6 +1634,22 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		factory := dependency.NewDefaultFactory(true)
+		node, err = NewProxy(ctx, factory)
+		assert.NoError(t, err)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		node.tsoAllocator = &timestampAllocator{
+			tso: newMockTimestampAllocatorInterface(),
+		}
+		scheduler, err := newTaskScheduler(ctx, node.tsoAllocator, factory)
+		assert.NoError(t, err)
+		node.sched = scheduler
+		err = node.sched.Start()
+		assert.NoError(t, err)
+		chMgr := NewMockChannelsMgr(t)
+		chMgr.EXPECT().getChannels(mock.Anything).Return([]string{"p1"}, nil)
+		node.chMgr = chMgr
 
 		// no such collection
 		mc := NewMockCache(t)
@@ -1650,9 +1677,7 @@ func TestProxy_ImportV2(t *testing.T) {
 			}},
 		}, nil)
 		globalMetaCache = mc
-		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getVChannels(mock.Anything).Return(nil, mockErr)
-		node.chMgr = chMgr
+		chMgr.EXPECT().getVChannels(mock.Anything).Return(nil, mockErr).Once()
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
@@ -1660,6 +1685,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		// set partition name and with partition key
 		chMgr = NewMockChannelsMgr(t)
 		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"ch0"}, nil)
+		chMgr.EXPECT().getChannels(mock.Anything).Return([]string{"p1"}, nil)
 		node.chMgr = chMgr
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa", PartitionName: "bbb"})
 		assert.NoError(t, err)
@@ -1716,9 +1742,17 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
 
 		// normal case
-		dataCoord := mocks.NewMockDataCoordClient(t)
-		dataCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(nil, nil)
-		node.dataCoord = dataCoord
+		rc := mocks.NewMockRootCoordClient(t)
+		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+			ID:    rand.Int63(),
+			Count: 1,
+		}, nil).Once()
+		idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
+		assert.NoError(t, err)
+		node.rowIDAllocator = idAllocator
+		err = idAllocator.Start()
+		assert.NoError(t, err)
+
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{
 			CollectionName: "aaa",
 			Files: []*internalpb.ImportFile{{

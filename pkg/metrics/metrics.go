@@ -78,11 +78,12 @@ const (
 	Executing = "executing"
 	Done      = "done"
 
-	ImportStagePending    = "pending"
-	ImportStagePreImport  = "preimport"
-	ImportStageImport     = "import"
-	ImportStageStats      = "stats"
-	ImportStageBuildIndex = "build_index"
+	ImportStagePending      = "pending"
+	ImportStagePreImport    = "preimport"
+	ImportStageImport       = "import"
+	ImportStageStats        = "stats"
+	ImportStageBuildIndex   = "build_index"
+	ImportStageWaitL0Import = "wait_l0_import"
 
 	compactionTypeLabelName  = "compaction_type"
 	isVectorFieldLabelName   = "is_vector_field"

@@ -4,8 +4,10 @@ import (
 	"context"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
@@ -13,10 +15,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -32,6 +36,7 @@ type CompactionTriggerManagerSuite struct {
 	mockPlanContext *MockCompactionPlanContext
 	testLabel       *CompactionGroupLabel
 	meta            *meta
+	imeta           ImportMeta
 
 	triggerManager *CompactionTriggerManager
 }
@@ -51,8 +56,14 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 	for id, segment := range segments {
 		s.meta.segments.SetSegment(id, segment)
 	}
-
-	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.mockPlanContext, s.meta)
+	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{}, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{}, nil)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{}, nil)
+	importMeta, err := NewImportMeta(context.TODO(), catalog)
+	s.Require().NoError(err)
+	s.imeta = importMeta
+	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.mockPlanContext, s.meta, s.imeta)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
@@ -307,4 +318,74 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 
 		s.Equal(int64(100*1024*1024), getExpectedSegmentSize(s.triggerManager.meta, collection))
 	})
+}
+
+func TestCompactionAndImport(t *testing.T) {
+	paramtable.Init()
+	mockAlloc := allocator.NewMockAllocator(t)
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: 1,
+	}, nil)
+	mockPlanContext := NewMockCompactionPlanContext(t)
+	mockPlanContext.EXPECT().isFull().Return(false)
+
+	testLabel := &CompactionGroupLabel{
+		CollectionID: 1,
+		PartitionID:  10,
+		Channel:      "ch-1",
+	}
+	segments := genSegmentsForMeta(testLabel)
+	catelog := mocks.NewDataCoordCatalog(t)
+	catelog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	meta := &meta{
+		segments: NewSegmentsInfo(),
+		catalog:  catelog,
+	}
+	for id, segment := range segments {
+		meta.segments.SetSegment(id, segment)
+	}
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{}, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{}, nil)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{
+		{
+			JobID:        100,
+			CollectionID: 1,
+			State:        internalpb.ImportJobState_Importing,
+		},
+	}, nil).Once()
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+	importMeta, err := NewImportMeta(context.TODO(), catalog)
+	assert.NoError(t, err)
+	imeta := importMeta
+	triggerManager := NewCompactionTriggerManager(mockAlloc, handler, mockPlanContext, meta, imeta)
+
+	Params.Save(Params.DataCoordCfg.L0CompactionTriggerInterval.Key, "1")
+	defer Params.Reset(Params.DataCoordCfg.L0CompactionTriggerInterval.Key)
+	Params.Save(Params.DataCoordCfg.ClusteringCompactionTriggerInterval.Key, "6000000")
+	defer Params.Reset(Params.DataCoordCfg.ClusteringCompactionTriggerInterval.Key)
+	Params.Save(Params.DataCoordCfg.MixCompactionTriggerInterval.Key, "6000000")
+	defer Params.Reset(Params.DataCoordCfg.MixCompactionTriggerInterval.Key)
+
+	mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
+	mockAlloc.EXPECT().AllocN(mock.Anything).Return(195300, 195300, nil)
+	mockAlloc.EXPECT().AllocTimestamp(mock.Anything).Return(30000, nil)
+	mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).
+		RunAndReturn(func(task *datapb.CompactionTask) error {
+			assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetType())
+			expectedSegs := []int64{100, 101, 102}
+			assert.ElementsMatch(t, expectedSegs, task.GetInputSegments())
+			return nil
+		}).Return(nil)
+	mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
+
+	<-triggerManager.GetPauseCompactionChan(100, 10)
+	defer func() {
+		<-triggerManager.GetResumeCompactionChan(100, 10)
+	}()
+
+	triggerManager.Start()
+	defer triggerManager.Stop()
+	time.Sleep(3 * time.Second)
 }
