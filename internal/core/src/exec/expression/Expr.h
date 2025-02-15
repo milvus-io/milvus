@@ -20,12 +20,15 @@
 #include <memory>
 #include <string>
 
+#include "common/FieldDataInterface.h"
+#include "common/Json.h"
 #include "common/Types.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/VectorFunction.h"
 #include "exec/expression/Utils.h"
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
+#include "log/Log.h"
 #include "query/PlanProto.h"
 #include "segcore/SegmentSealedImpl.h"
 #include "segcore/SegmentInterface.h"
@@ -111,13 +114,16 @@ class SegmentExpr : public Expr {
     SegmentExpr(const std::vector<ExprPtr>&& input,
                 const std::string& name,
                 const segcore::SegmentInternalInterface* segment,
-                const FieldId& field_id,
+                const FieldId field_id,
+                const std::vector<std::string> nested_path,
                 int64_t active_count,
                 int64_t batch_size,
                 int32_t consistency_level)
         : Expr(DataType::BOOL, std::move(input), name),
           segment_(segment),
           field_id_(field_id),
+          nested_path_(nested_path),
+
           active_count_(active_count),
           batch_size_(batch_size),
           consistency_level_(consistency_level) {
@@ -133,6 +139,7 @@ class SegmentExpr : public Expr {
     InitSegmentExpr() {
         auto& schema = segment_->get_schema();
         auto& field_meta = schema[field_id_];
+        field_type_ = field_meta.get_data_type();
 
         if (schema.get_primary_field_id().has_value() &&
             schema.get_primary_field_id().value() == field_id_ &&
@@ -141,9 +148,16 @@ class SegmentExpr : public Expr {
             pk_type_ = field_meta.get_data_type();
         }
 
-        is_index_mode_ = segment_->HasIndex(field_id_);
-        if (is_index_mode_) {
-            num_index_chunk_ = segment_->num_chunk_index(field_id_);
+        if (field_meta.get_data_type() == DataType::JSON) {
+            auto pointer = milvus::Json::pointer(nested_path_);
+            if (is_index_mode_ = segment_->HasIndex(field_id_, pointer)) {
+                num_index_chunk_ = 1;
+            }
+        } else {
+            is_index_mode_ = segment_->HasIndex(field_id_);
+            if (is_index_mode_) {
+                num_index_chunk_ = segment_->num_chunk_index(field_id_);
+            }
         }
         // if index not include raw data, also need load data
         if (segment_->HasFieldData(field_id_)) {
@@ -774,9 +788,21 @@ class SegmentExpr : public Expr {
             // It avoids indexing execute for every batch because indexing
             // executing costs quite much time.
             if (cached_index_chunk_id_ != i) {
-                const Index& index =
-                    segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-                auto* index_ptr = const_cast<Index*>(&index);
+                Index* index_ptr = nullptr;
+
+                if (field_type_ == DataType::JSON) {
+                    auto pointer = milvus::Json::pointer(nested_path_);
+
+                    const Index& index =
+                        segment_->chunk_scalar_index<IndexInnerType>(
+                            field_id_, pointer, i);
+                    index_ptr = const_cast<Index*>(&index);
+                } else {
+                    const Index& index =
+                        segment_->chunk_scalar_index<IndexInnerType>(field_id_,
+                                                                     i);
+                    index_ptr = const_cast<Index*>(&index);
+                }
                 cached_index_chunk_res_ = std::move(func(index_ptr, values...));
                 auto valid_result = index_ptr->IsNotNull();
                 cached_index_chunk_valid_res_ = std::move(valid_result);
@@ -1106,6 +1132,9 @@ class SegmentExpr : public Expr {
     bool is_pk_field_{false};
     DataType pk_type_;
     int64_t batch_size_;
+
+    std::vector<std::string> nested_path_;
+    DataType field_type_;
 
     bool is_index_mode_{false};
     bool is_data_mode_{false};

@@ -27,6 +27,8 @@ struct CreateIndexInfo {
     std::string field_name;
     int64_t dim;
     int32_t scalar_index_engine_version;
+    DataType json_cast_type;
+    std::string json_path;
 };
 
 }  // namespace milvus::index
