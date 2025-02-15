@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord"
 	grpcdatacoordclient2 "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
@@ -53,8 +54,10 @@ import (
 	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
 	grpcrootcoord "github.com/milvus-io/milvus/internal/distributed/rootcoord"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -65,6 +68,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
@@ -2018,22 +2022,6 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		rateCol.Register(internalpb.RateType_DMLInsert.String())
-	})
-
-	wg.Add(1)
-	t.Run("test import", func(t *testing.T) {
-		defer wg.Done()
-		req := &milvuspb.ImportRequest{
-			DbName:         dbName,
-			CollectionName: collectionName,
-			Files:          []string{"f1.json"},
-		}
-		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
-		resp, err := proxy.Import(context.TODO(), req)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		assert.NoError(t, err)
-		// Wait a bit for complete import to start.
-		time.Sleep(2 * time.Second)
 	})
 
 	wg.Add(1)
@@ -4669,6 +4657,13 @@ func TestProxy_Import(t *testing.T) {
 	cache := globalMetaCache
 	defer func() { globalMetaCache = cache }()
 
+	wal := mock_streaming.NewMockWALAccesser(t)
+	b := mock_streaming.NewMockBroadcast(t)
+	wal.EXPECT().Broadcast().Return(b).Maybe()
+	b.EXPECT().BlockUntilResourceKeyAckOnce(mock.Anything, mock.Anything).Return(nil).Maybe()
+	streaming.SetWALForTest(wal)
+	defer streaming.RecoverWALForTest()
+
 	t.Run("Import failed", func(t *testing.T) {
 		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -4680,6 +4675,7 @@ func TestProxy_Import(t *testing.T) {
 	})
 
 	t.Run("Import", func(t *testing.T) {
+		ctx := context.Background()
 		proxy := &Proxy{}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
@@ -4692,15 +4688,37 @@ func TestProxy_Import(t *testing.T) {
 		globalMetaCache = mc
 
 		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getVChannels(mock.Anything).Return(nil, nil)
+		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"foo"}, nil)
+		chMgr.EXPECT().getChannels(mock.Anything).Return([]string{"foo_v1"}, nil)
 		proxy.chMgr = chMgr
 
-		dataCoord := mocks.NewMockDataCoordClient(t)
-		dataCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
-			Status: merr.Success(),
-			JobID:  "100",
-		}, nil)
-		proxy.dataCoord = dataCoord
+		factory := dependency.NewDefaultFactory(true)
+		rc := mocks.NewMockRootCoordClient(t)
+		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+			ID:    rand.Int63(),
+			Count: 1,
+		}, nil).Once()
+		idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
+		assert.NoError(t, err)
+		err = idAllocator.Start()
+		assert.NoError(t, err)
+		proxy.rowIDAllocator = idAllocator
+		proxy.tsoAllocator = &timestampAllocator{
+			tso: newMockTimestampAllocatorInterface(),
+		}
+		scheduler, err := newTaskScheduler(ctx, proxy.tsoAllocator, factory)
+		assert.NoError(t, err)
+		proxy.sched = scheduler
+		err = proxy.sched.Start()
+		assert.NoError(t, err)
+
+		wal := mock_streaming.NewMockWALAccesser(t)
+		b := mock_streaming.NewMockBroadcast(t)
+		wal.EXPECT().Broadcast().Return(b)
+		b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil)
+		b.EXPECT().BlockUntilResourceKeyAckOnce(mock.Anything, mock.Anything).Return(nil).Maybe()
+		streaming.SetWALForTest(wal)
+		defer streaming.RecoverWALForTest()
 
 		req := &milvuspb.ImportRequest{
 			CollectionName: "dummy",
