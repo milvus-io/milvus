@@ -609,7 +609,6 @@ func TestCreateIndexJsonField(t *testing.T) {
 		errMsg string
 	}
 	inxError := []scalarIndexError{
-		{index.NewInvertedIndex(), "INVERTED are not supported on JSON field"},
 		{index.NewSortedIndex(), "STL_SORT are only supported on numeric field"},
 		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
 	}
@@ -911,7 +910,7 @@ func TestIndexNotExistName(t *testing.T) {
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	_, err1 := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, "aaa", idx))
-	common.CheckErr(t, err1, false, "cannot create index on non-exist field: aaa")
+	common.CheckErr(t, err1, false, "index HNSW only supports vector data type")
 
 	// describe index with not exist field name
 	_, errDesc := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, "aaa"))

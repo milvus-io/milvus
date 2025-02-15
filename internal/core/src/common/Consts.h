@@ -77,3 +77,6 @@ const int64_t DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND = 500;
 const int64_t DEFAULT_HYBRID_INDEX_BITMAP_CARDINALITY_LIMIT = 100;
 
 const size_t MARISA_NULL_KEY_ID = -1;
+
+const std::string JSON_CAST_TYPE = "json_cast_type";
+const std::string JSON_PATH = "json_path";
