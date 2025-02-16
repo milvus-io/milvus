@@ -321,6 +321,12 @@ class SingleChunkColumnBase : public ColumnBase {
                   "StringViews only supported for VariableColumn");
     }
 
+    virtual std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    ArrayViews() const {
+        PanicInfo(ErrorCode::Unsupported,
+                  "ArrayView only supported for ArrayColumn");
+    }
+
     virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
     ViewsByOffsets(const FixedVector<int32_t>& offsets) const {
         PanicInfo(ErrorCode::Unsupported,
@@ -952,6 +958,11 @@ class SingleChunkArrayColumn : public SingleChunkColumnBase {
         ConstructViews();
     }
 
+    std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    ArrayViews() const override {
+        return {Views(), valid_data_};
+    }
+
  protected:
     void
     ConstructViews() {
@@ -970,6 +981,7 @@ class SingleChunkArrayColumn : public SingleChunkColumnBase {
                             element_type_,
                             element_indices_[last].data());
         lens_.clear();
+        indices_.clear();
     }
 
  private:
