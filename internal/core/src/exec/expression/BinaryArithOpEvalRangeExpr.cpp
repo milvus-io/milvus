@@ -123,14 +123,21 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     valid_res.set();
 
+    if (!arg_inited_) {
+        value_arg_.SetValue<ValueType>(expr_->value_);
+        if (expr_->arith_op_type_ == proto::plan::ArithOpType::ArrayLength) {
+            right_operand_arg_.SetValue(ValueType());
+        } else {
+            right_operand_arg_.SetValue<ValueType>(expr_->right_operand_);
+        }
+        arg_inited_ = true;
+    }
+
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
-    auto value = GetValueFromProto<ValueType>(expr_->value_);
-    auto right_operand =
-        arith_type != proto::plan::ArithOpType::ArrayLength
-            ? GetValueFromProto<ValueType>(expr_->right_operand_)
-            : ValueType();
+    auto value = value_arg_.GetValue<ValueType>();
+    auto right_operand = right_operand_arg_.GetValue<ValueType>();
 
 #define BinaryArithRangeJSONCompare(cmp)                                \
     do {                                                                \
@@ -514,6 +521,17 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                                        ValueType>;
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
+
+    if (!arg_inited_) {
+        value_arg_.SetValue<ValueType>(expr_->value_);
+        if (expr_->arith_op_type_ == proto::plan::ArithOpType::ArrayLength) {
+            right_operand_arg_.SetValue(ValueType());
+        } else {
+            right_operand_arg_.SetValue<ValueType>(expr_->right_operand_);
+        }
+        arg_inited_ = true;
+    }
+
     if (real_batch_size == 0) {
         return nullptr;
     }
@@ -529,11 +547,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     }
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
-    auto value = GetValueFromProto<ValueType>(expr_->value_);
-    auto right_operand =
-        arith_type != proto::plan::ArithOpType::ArrayLength
-            ? GetValueFromProto<ValueType>(expr_->right_operand_)
-            : ValueType();
+    auto value = value_arg_.GetValue<ValueType>();
+    auto right_operand = right_operand_arg_.GetValue<ValueType>();
 
 #define BinaryArithRangeArrayCompare(cmp)                       \
     do {                                                        \
@@ -898,9 +913,14 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto value = GetValueFromProto<HighPrecisionType>(expr_->value_);
-    auto right_operand =
-        GetValueFromProto<HighPrecisionType>(expr_->right_operand_);
+    if (!arg_inited_) {
+        value_arg_.SetValue<HighPrecisionType>(expr_->value_);
+        right_operand_arg_.SetValue<HighPrecisionType>(expr_->right_operand_);
+        arg_inited_ = true;
+    }
+
+    auto value = value_arg_.GetValue<HighPrecisionType>();
+    auto right_operand = right_operand_arg_.GetValue<HighPrecisionType>();
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
     auto sub_batch_size = has_offset_input_ ? input->size() : size_per_chunk_;
@@ -1415,15 +1435,20 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
         return nullptr;
     }
 
-    auto value = GetValueFromProto<HighPrecisionType>(expr_->value_);
-    auto right_operand =
-        GetValueFromProto<HighPrecisionType>(expr_->right_operand_);
     auto res_vec = std::make_shared<ColumnVector>(
         TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     valid_res.set();
 
+    if (!arg_inited_) {
+        value_arg_.SetValue<HighPrecisionType>(expr_->value_);
+        right_operand_arg_.SetValue<HighPrecisionType>(expr_->right_operand_);
+        arg_inited_ = true;
+    }
+
+    auto value = value_arg_.GetValue<HighPrecisionType>();
+    auto right_operand = right_operand_arg_.GetValue<HighPrecisionType>();
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
 
