@@ -335,6 +335,13 @@ func (st *statsTask) SetJobInfo(meta *meta) error {
 					zap.Int64("segmentID", st.segmentID), zap.Error(err))
 				return err
 			}
+		case indexpb.StatsSubJob_JsonKeyIndexJob:
+			err := meta.UpdateSegment(st.taskInfo.GetSegmentID(), SetJsonKeyIndexLogs(st.taskInfo.GetJsonKeyStatsLogs()))
+			if err != nil {
+				log.Warn("save json key index stats result failed", zap.Int64("taskId", st.taskID),
+					zap.Int64("segmentID", st.segmentID), zap.Error(err))
+				return err
+			}
 		case indexpb.StatsSubJob_BM25Job:
 			// TODO: support bm25 job
 		}

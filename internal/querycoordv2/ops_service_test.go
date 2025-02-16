@@ -184,7 +184,7 @@ func (suite *OpsServiceSuite) TestActiveCheckers() {
 	resp, err = suite.server.ListCheckers(ctx, &querypb.ListCheckersRequest{})
 	suite.NoError(err)
 	suite.True(merr.Ok(resp.Status))
-	suite.Len(resp.GetCheckerInfos(), 5)
+	suite.Len(resp.GetCheckerInfos(), 6)
 
 	resp4, err := suite.server.DeactivateChecker(ctx, &querypb.DeactivateCheckerRequest{
 		CheckerID: int32(utils.ChannelChecker),

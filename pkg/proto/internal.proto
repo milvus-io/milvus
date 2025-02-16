@@ -193,6 +193,7 @@ message RetrieveRequest {
   string username = 15;
   bool reduce_stop_for_best = 16; //deprecated
   int32 reduce_type = 17;
+  common.ConsistencyLevel consistency_level = 18;
 }
 
 

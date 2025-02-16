@@ -79,8 +79,18 @@ DiskFileManagerImpl::GetRemoteTextLogPath(const std::string& file_name,
     return remote_prefix + "/" + file_name + "_" + std::to_string(slice_num);
 }
 
+std::string
+DiskFileManagerImpl::GetRemoteJsonKeyIndexPath(const std::string& file_name,
+                                               int64_t slice_num) {
+    auto remote_prefix = GetRemoteJsonKeyLogPrefix();
+    return remote_prefix + "/" + file_name + "_" + std::to_string(slice_num);
+}
+
 bool
-DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
+DiskFileManagerImpl::AddFileInternal(
+    const std::string& file,
+    const std::function<std::string(const std::string&, int)>&
+        get_remote_path) noexcept {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     FILEMANAGER_TRY
@@ -116,8 +126,7 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
         }
 
         auto batch_size = std::min(FILE_SLICE_SIZE, int64_t(fileSize) - offset);
-        batch_remote_files.emplace_back(
-            GetRemoteIndexPath(fileName, slice_num));
+        batch_remote_files.emplace_back(get_remote_path(fileName, slice_num));
         remote_file_sizes.emplace_back(batch_size);
         local_file_offsets.emplace_back(offset);
         offset += batch_size;
@@ -131,59 +140,30 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
 
     return true;
 }  // namespace knowhere
+
+bool
+DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
+    return AddFileInternal(file,
+                           [this](const std::string& file_name, int slice_num) {
+                               return GetRemoteIndexPath(file_name, slice_num);
+                           });
+}
+
+bool
+DiskFileManagerImpl::AddJsonKeyIndexLog(const std::string& file) noexcept {
+    return AddFileInternal(
+        file, [this](const std::string& file_name, int slice_num) {
+            return GetRemoteJsonKeyIndexPath(file_name, slice_num);
+        });
+}
 
 bool
 DiskFileManagerImpl::AddTextLog(const std::string& file) noexcept {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    FILEMANAGER_TRY
-    if (!local_chunk_manager->Exist(file)) {
-        LOG_ERROR("local file {} not exists", file);
-        return false;
-    }
-
-    // record local file path
-    local_paths_.emplace_back(file);
-
-    auto fileName = GetFileName(file);
-    auto fileSize = local_chunk_manager->Size(file);
-    added_total_file_size_ += fileSize;
-
-    std::vector<std::string> batch_remote_files;
-    std::vector<int64_t> remote_file_sizes;
-    std::vector<int64_t> local_file_offsets;
-
-    int slice_num = 0;
-    auto parallel_degree =
-        uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-    for (int64_t offset = 0; offset < fileSize; slice_num++) {
-        if (batch_remote_files.size() >= parallel_degree) {
-            AddBatchIndexFiles(file,
-                               local_file_offsets,
-                               batch_remote_files,
-
-                               remote_file_sizes);
-            batch_remote_files.clear();
-            remote_file_sizes.clear();
-            local_file_offsets.clear();
-        }
-
-        auto batch_size = std::min(FILE_SLICE_SIZE, int64_t(fileSize) - offset);
-        batch_remote_files.emplace_back(
-            GetRemoteTextLogPath(fileName, slice_num));
-        remote_file_sizes.emplace_back(batch_size);
-        local_file_offsets.emplace_back(offset);
-        offset += batch_size;
-    }
-    if (batch_remote_files.size() > 0) {
-        AddBatchIndexFiles(
-            file, local_file_offsets, batch_remote_files, remote_file_sizes);
-    }
-    FILEMANAGER_CATCH
-    FILEMANAGER_END
-
-    return true;
-}  // namespace knowhere
+    return AddFileInternal(
+        file, [this](const std::string& file_name, int slice_num) {
+            return GetRemoteTextLogPath(file_name, slice_num);
+        });
+}
 
 void
 DiskFileManagerImpl::AddBatchIndexFiles(
@@ -238,8 +218,9 @@ DiskFileManagerImpl::AddBatchIndexFiles(
 }
 
 void
-DiskFileManagerImpl::CacheIndexToDisk(
-    const std::vector<std::string>& remote_files) {
+DiskFileManagerImpl::CacheIndexToDiskInternal(
+    const std::vector<std::string>& remote_files,
+    const std::function<std::string()>& get_local_index_prefix) noexcept {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
 
@@ -265,7 +246,7 @@ DiskFileManagerImpl::CacheIndexToDisk(
     for (auto& slices : index_slices) {
         auto prefix = slices.first;
         auto local_index_file_name =
-            GetLocalIndexObjectPrefix() +
+            get_local_index_prefix() +
             prefix.substr(prefix.find_last_of('/') + 1);
         local_chunk_manager->CreateFile(local_index_file_name);
         auto file =
@@ -306,57 +287,24 @@ DiskFileManagerImpl::CacheIndexToDisk(
 }
 
 void
+DiskFileManagerImpl::CacheIndexToDisk(
+    const std::vector<std::string>& remote_files) {
+    return CacheIndexToDiskInternal(
+        remote_files, [this]() { return GetLocalIndexObjectPrefix(); });
+}
+
+void
 DiskFileManagerImpl::CacheTextLogToDisk(
     const std::vector<std::string>& remote_files) {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return CacheIndexToDiskInternal(
+        remote_files, [this]() { return GetLocalTextIndexPrefix(); });
+}
 
-    std::map<std::string, std::vector<int>> index_slices;
-    for (auto& file_path : remote_files) {
-        auto pos = file_path.find_last_of("_");
-        AssertInfo(pos > 0, "invalided index file path:{}", file_path);
-        try {
-            auto idx = std::stoi(file_path.substr(pos + 1));
-            index_slices[file_path.substr(0, pos)].emplace_back(idx);
-        } catch (const std::logic_error& e) {
-            auto err_message = fmt::format(
-                "invalided text log path:{}, error:{}", file_path, e.what());
-            LOG_ERROR(err_message);
-            throw std::logic_error(err_message);
-        }
-    }
-
-    for (auto& slices : index_slices) {
-        std::sort(slices.second.begin(), slices.second.end());
-    }
-
-    for (auto& slices : index_slices) {
-        auto prefix = slices.first;
-        auto local_index_file_name =
-            GetLocalTextIndexPrefix() + "/" +
-            prefix.substr(prefix.find_last_of('/') + 1);
-        local_chunk_manager->CreateFile(local_index_file_name);
-        auto file =
-            File::Open(local_index_file_name, O_CREAT | O_RDWR | O_TRUNC);
-
-        // Get the remote files
-        std::vector<std::string> batch_remote_files;
-        batch_remote_files.reserve(slices.second.size());
-        for (int& iter : slices.second) {
-            auto origin_file = prefix + "_" + std::to_string(iter);
-            batch_remote_files.push_back(origin_file);
-        }
-
-        auto index_chunks = GetObjectData(rcm_.get(), batch_remote_files);
-        for (auto& chunk : index_chunks) {
-            auto index_data = chunk.get()->GetFieldData();
-            auto index_size = index_data->Size();
-            auto chunk_data = reinterpret_cast<uint8_t*>(
-                const_cast<void*>(index_data->Data()));
-            file.Write(chunk_data, index_size);
-        }
-        local_paths_.emplace_back(local_index_file_name);
-    }
+void
+DiskFileManagerImpl::CacheJsonKeyIndexToDisk(
+    const std::vector<std::string>& remote_files) {
+    return CacheIndexToDiskInternal(
+        remote_files, [this]() { return GetLocalJsonKeyIndexPrefix(); });
 }
 
 template <typename DataType>
@@ -650,11 +598,25 @@ DiskFileManagerImpl::GetFileName(const std::string& localfile) {
 }
 
 std::string
+DiskFileManagerImpl::GetIndexIdentifier() {
+    return GenIndexPathIdentifier(index_meta_.build_id,
+                                  index_meta_.index_version);
+}
+
+std::string
 DiskFileManagerImpl::GetLocalIndexObjectPrefix() {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     return GenIndexPathPrefix(
         local_chunk_manager, index_meta_.build_id, index_meta_.index_version);
+}
+
+std::string
+DiskFileManagerImpl::GetTextIndexIdentifier() {
+    return std::to_string(index_meta_.build_id) + "/" +
+           std::to_string(index_meta_.index_version) + "/" +
+           std::to_string(field_meta_.segment_id) + "/" +
+           std::to_string(field_meta_.field_id);
 }
 
 std::string
@@ -669,17 +631,31 @@ DiskFileManagerImpl::GetLocalTextIndexPrefix() {
 }
 
 std::string
-DiskFileManagerImpl::GetIndexIdentifier() {
-    return GenIndexPathIdentifier(index_meta_.build_id,
-                                  index_meta_.index_version);
+DiskFileManagerImpl::GetJsonKeyIndexIdentifier() {
+    return GenJsonKeyIndexPathIdentifier(index_meta_.build_id,
+                                         index_meta_.index_version,
+                                         field_meta_.segment_id,
+                                         field_meta_.field_id);
 }
 
 std::string
-DiskFileManagerImpl::GetTextIndexIdentifier() {
-    return std::to_string(index_meta_.build_id) + "/" +
-           std::to_string(index_meta_.index_version) + "/" +
-           std::to_string(field_meta_.segment_id) +
-           std::to_string(field_meta_.field_id);
+DiskFileManagerImpl::GetLocalJsonKeyIndexPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenJsonKeyIndexPathPrefix(local_chunk_manager,
+                                     index_meta_.build_id,
+                                     index_meta_.index_version,
+                                     field_meta_.segment_id,
+                                     field_meta_.field_id);
+}
+
+std::string
+DiskFileManagerImpl::GetRemoteJsonKeyLogPrefix() {
+    return GenJsonKeyIndexPathPrefix(rcm_,
+                                     index_meta_.build_id,
+                                     index_meta_.index_version,
+                                     field_meta_.segment_id,
+                                     field_meta_.field_id);
 }
 
 std::string

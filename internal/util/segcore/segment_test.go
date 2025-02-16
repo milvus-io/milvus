@@ -106,7 +106,8 @@ func assertEqualCount(
 		collection,
 		expr,
 		typeutil.MaxTimestamp,
-		100)
+		100,
+		0)
 	defer retrievePlan.Delete()
 
 	assert.True(t, retrievePlan.ShouldIgnoreNonPk())

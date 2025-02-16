@@ -2586,6 +2586,10 @@ type queryNodeConfig struct {
 
 	// worker
 	WorkerPoolingSize ParamItem `refreshable:"false"`
+
+	// Json Key Index
+	JSONIndexMemoryBudgetInTantivy ParamItem `refreshable:"false"`
+	JSONIndexCommitInterval        ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -3278,6 +3282,24 @@ user-task-polling:
 	}
 	p.ExprEvalBatchSize.Init(base.mgr)
 
+	p.JSONIndexMemoryBudgetInTantivy = ParamItem{
+		Key:          "queryNode.segcore.jsonIndexMemoryBudgetInTantivy",
+		Version:      "2.5.0",
+		DefaultValue: "64",
+		Doc:          "the memory budget for the JSON index In Tantivy",
+		Export:       true,
+	}
+	p.JSONIndexMemoryBudgetInTantivy.Init(base.mgr)
+
+	p.JSONIndexCommitInterval = ParamItem{
+		Key:          "queryNode.segcore.jsonIndexCommitInterval",
+		Version:      "2.5.0",
+		DefaultValue: "200",
+		Doc:          "the commit interval for the JSON index to commit",
+		Export:       true,
+	}
+	p.JSONIndexCommitInterval.Init(base.mgr)
+
 	p.CleanExcludeSegInterval = ParamItem{
 		Key:          "queryCoord.cleanExcludeSegmentInterval",
 		Version:      "2.4.0",
@@ -3464,6 +3486,8 @@ type dataCoordConfig struct {
 
 	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 	BrokerTimeout                  ParamItem `refreshable:"false"`
+
+	EnabledJSONKeyStats ParamItem `refreshable:"true"`
 
 	// auto balance channel on datanode
 	AutoBalance                    ParamItem `refreshable:"true"`
@@ -4110,6 +4134,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.MinSegmentNumRowsToEnableIndex.Init(base.mgr)
+
+	p.EnabledJSONKeyStats = ParamItem{
+		Key:          "indexCoord.enabledJsonKeyStats",
+		Version:      "2.0.0",
+		DefaultValue: "true",
+		Doc:          "Indicates whether to enable JSON key stats",
+		Export:       true,
+	}
+	p.EnabledJSONKeyStats.Init(base.mgr)
 
 	p.BindIndexNodeMode = ParamItem{
 		Key:          "indexCoord.bindIndexNodeMode.enable",

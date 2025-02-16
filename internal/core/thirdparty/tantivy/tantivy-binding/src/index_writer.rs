@@ -53,6 +53,7 @@ impl IndexWriterWrapper {
         path: String,
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
+        in_ram: bool,
     ) -> Result<IndexWriterWrapper> {
         init_log();
         info!("create index writer, field_name: {}, data_type: {:?}", field_name, data_type);
@@ -61,7 +62,11 @@ impl IndexWriterWrapper {
         // We cannot build direct connection from rows in multi-segments to milvus row data. So we have this doc_id field.
         let id_field = schema_builder.add_i64_field("doc_id", FAST);
         let schema = schema_builder.build();
-        let index = Index::create_in_dir(path.clone(), schema)?;
+        let index = if in_ram {
+            Index::create_in_ram(schema)
+        } else {
+            Index::create_in_dir(path.clone(), schema)?
+        };
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
         Ok(IndexWriterWrapper {

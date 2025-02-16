@@ -82,6 +82,7 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 			jm.triggerSortStatsTask()
 			jm.triggerTextStatsTask()
 			jm.triggerBM25StatsTask()
+			jm.triggerJsonKeyIndexStatsTask()
 
 		case segID := <-getStatsTaskChSingleton():
 			log.Info("receive new segment to trigger stats task", zap.Int64("segmentID", segID))
@@ -128,11 +129,30 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 		return false
 	}
 
+	if segment.GetTextStatsLogs() == nil {
+		return true
+	}
+
 	for _, fieldID := range fieldIDs {
-		if segment.GetTextStatsLogs() == nil {
+		if segment.GetTextStatsLogs()[fieldID] == nil {
 			return true
 		}
-		if segment.GetTextStatsLogs()[fieldID] == nil {
+	}
+	return false
+}
+
+func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
+	if !(isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
+		segment.GetIsSorted()) {
+		return false
+	}
+
+	if segment.GetJsonKeyStats() == nil {
+		return true
+	}
+
+	for _, fieldID := range fieldIDs {
+		if segment.GetJsonKeyStats()[fieldID] == nil {
 			return true
 		}
 	}
@@ -163,6 +183,29 @@ func (jm *statsJobManager) triggerTextStatsTask() {
 		for _, segment := range segments {
 			if err := jm.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_TextIndexJob, true); err != nil {
 				log.Warn("create stats task with text index for segment failed, wait for retry",
+					zap.Int64("segmentID", segment.GetID()), zap.Error(err))
+				continue
+			}
+		}
+	}
+}
+
+func (jm *statsJobManager) triggerJsonKeyIndexStatsTask() {
+	collections := jm.mt.GetCollections()
+	for _, collection := range collections {
+		needTriggerFieldIDs := make([]UniqueID, 0)
+		for _, field := range collection.Schema.GetFields() {
+			h := typeutil.CreateFieldSchemaHelper(field)
+			if h.EnableJSONKeyIndex() && Params.DataCoordCfg.EnabledJSONKeyStats.GetAsBool() {
+				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
+			}
+		}
+		segments := jm.mt.SelectSegments(jm.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
+			return needDoJsonKeyIndex(seg, needTriggerFieldIDs)
+		}))
+		for _, segment := range segments {
+			if err := jm.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob, true); err != nil {
+				log.Warn("create stats task with json key index for segment failed, wait for retry:",
 					zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 				continue
 			}

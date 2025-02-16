@@ -226,6 +226,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
         int64_t count,
         const std::vector<std::string>& dynamic_field_names) const override;
 
+    virtual std::pair<std::string_view, bool>
+    GetJsonData(FieldId field_id, size_t offset) const override;
+
  public:
     friend std::unique_ptr<SegmentGrowing>
     CreateGrowingSegment(SchemaPtr schema,
@@ -252,6 +255,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         mcm->Register(mmap_descriptor_);
 
         this->CreateTextIndexes();
+        this->CreateJSONIndexes();
     }
 
     ~SegmentGrowingImpl() {
@@ -387,6 +391,19 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     CreateTextIndexes();
+
+    void
+    AddJSONDatas(FieldId field_id,
+                 const std::string* jsondatas,
+                 const bool* jsondatas_valid_data,
+                 size_t n,
+                 int64_t offset_begin);
+
+    void
+    CreateJSONIndexes();
+
+    void
+    CreateJSONIndex(FieldId field_id);
 
  private:
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;

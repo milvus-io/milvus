@@ -502,7 +502,7 @@ func TestQueryJsonDynamicExpr(t *testing.T) {
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
-
+	time.Sleep(400 * time.Millisecond)
 	// query with different expr and count
 	expr := fmt.Sprintf("%s['number'] < 10 || %s < 10", common.DefaultJSONFieldName, common.DefaultDynamicNumberField)
 
@@ -552,7 +552,7 @@ func TestQueryCountJsonDynamicExpr(t *testing.T) {
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
-
+	time.Sleep(400 * time.Millisecond)
 	// query with different expr and count
 	type exprCount struct {
 		expr  string
@@ -697,7 +697,7 @@ func TestQueryWithTemplateParam(t *testing.T) {
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
-
+	time.Sleep(400 * time.Millisecond)
 	// query
 	int64Values := make([]int64, 0, 1000)
 	for i := 10; i < 10+1000; i++ {
@@ -766,7 +766,7 @@ func TestQueryWithTemplateParamInvalid(t *testing.T) {
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
-
+	time.Sleep(400 * time.Millisecond)
 	// query with invalid template
 	// expr := "varchar like 'a%' "
 	_, err2 := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("varchar like {key1}").WithTemplateParam("key1", "'a%'"))
