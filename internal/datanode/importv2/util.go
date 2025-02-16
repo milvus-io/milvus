@@ -164,13 +164,12 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 	return nil
 }
 
-func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
+func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum int) error {
 	idRange := task.req.GetIDRange()
 	pkField, err := typeutil.GetPrimaryFieldSchema(task.GetSchema())
 	if err != nil {
 		return err
 	}
-	rowNum := GetInsertDataRowCount(data, task.GetSchema())
 	ids := make([]int64, rowNum)
 	for i := 0; i < rowNum; i++ {
 		ids[i] = idRange.GetBegin() + int64(i)
