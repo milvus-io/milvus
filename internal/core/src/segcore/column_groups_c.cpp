@@ -31,7 +31,8 @@ void AddCColumnGroup(CColumnGroups cgs, int* group, int group_size) {
     return;
 
   auto vv = static_cast<VecVecInt*>(cgs);
-  vv->emplace_back(group, group + group_size);
+  std::vector<int> new_group(group, group + group_size);
+  vv->emplace_back(std::move(new_group));
 }
 
 int CColumnGroupsSize(CColumnGroups cgs) {

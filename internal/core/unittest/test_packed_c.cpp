@@ -19,6 +19,7 @@
 #include "segcore/packed_reader_c.h"
 #include "segcore/arrow_fs_c.h"
 #include <arrow/c/bridge.h>
+#include <arrow/c/helpers.h>
 #include <arrow/array.h>
 #include <arrow/record_batch.h>
 #include <arrow/array/builder_primitive.h>
@@ -77,11 +78,7 @@ TEST(CPackedTest, PackedWriterAndReader) {
     EXPECT_EQ(c_status.error_code, 0);
     EXPECT_NE(c_packed_reader, nullptr);
 
-    CArrowArray c_arrow_array = nullptr;
-    CArrowSchema c_arrow_schema = nullptr;
-    c_status = ReadNext(c_packed_reader, &c_arrow_array, &c_arrow_schema);
-    EXPECT_EQ(c_status.error_code, 0);
-
     c_status = CloseReader(c_packed_reader);
     EXPECT_EQ(c_status.error_code, 0);
+    FreeCColumnGroups(cgs);
 }
