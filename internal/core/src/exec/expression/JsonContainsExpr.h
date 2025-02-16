@@ -22,6 +22,7 @@
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/Element.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus {
@@ -111,6 +112,8 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::JsonContainsExpr> expr_;
+    bool arg_inited_{false};
+    std::shared_ptr<MultiElement> arg_set_;
 };
 }  //namespace exec
 }  // namespace milvus
