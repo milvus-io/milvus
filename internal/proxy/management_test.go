@@ -228,7 +228,6 @@ func (s *ProxyManagementSuite) TestGetQueryNodeDistribution() {
 
 		s.querycoord.EXPECT().GetQueryNodeDistribution(mock.Anything, mock.Anything).Return(&querypb.GetQueryNodeDistributionResponse{
 			Status:           merr.Success(),
-			ID:               1,
 			ChannelNames:     []string{"channel-1"},
 			SealedSegmentIDs: []int64{1, 2, 3},
 		}, nil)
@@ -240,7 +239,7 @@ func (s *ProxyManagementSuite) TestGetQueryNodeDistribution() {
 		recorder := httptest.NewRecorder()
 		s.proxy.GetQueryNodeDistribution(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"ID":1,"channel_names":["channel-1"],"sealed_segmentIDs":[1,2,3]}`, recorder.Body.String())
+		s.Equal(`{"channel_names":["channel-1"],"sealed_segmentIDs":["1","2","3"]}`, recorder.Body.String())
 	})
 
 	s.Run("return_error", func() {
