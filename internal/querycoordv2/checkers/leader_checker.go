@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
@@ -92,7 +93,11 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 
 		replicas := c.meta.ReplicaManager.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
-			for _, node := range replica.GetRWNodes() {
+			nodes := replica.GetRWNodes()
+			if streamingutil.IsStreamingServiceEnabled() {
+				nodes = replica.GetRWSQNodes()
+			}
+			for _, node := range nodes {
 				leaderViews := c.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID2LeaderView(replica.GetCollectionID()), meta.WithNodeID2LeaderView(node))
 				for _, leaderView := range leaderViews {
 					dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(leaderView.Channel), meta.WithReplica(replica))
