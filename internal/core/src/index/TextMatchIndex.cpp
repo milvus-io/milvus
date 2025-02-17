@@ -48,7 +48,8 @@ TextMatchIndex::TextMatchIndex(const std::string& path,
 
 TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
                                const char* tokenizer_name,
-                               const char* analyzer_params)
+                               const char* analyzer_params,
+                               bool is_mmap)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     schema_ = ctx.fieldDataMeta.field_schema;
@@ -62,11 +63,12 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
     d_type_ = TantivyDataType::Text;
     std::string field_name =
         std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(field_name.c_str(),
-                                                     false,
-                                                     path_.c_str(),
-                                                     tokenizer_name,
-                                                     analyzer_params);
+    wrapper_ =
+        std::make_shared<TantivyIndexWrapper>(field_name.c_str(),
+                                              is_mmap,
+                                              is_mmap ? path_.c_str() : "",
+                                              tokenizer_name,
+                                              analyzer_params);
 }
 
 TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx)

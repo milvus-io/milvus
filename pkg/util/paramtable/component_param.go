@@ -2514,6 +2514,7 @@ type queryNodeConfig struct {
 	MmapScalarField                     ParamItem `refreshable:"false"`
 	MmapScalarIndex                     ParamItem `refreshable:"false"`
 	MmapChunkCache                      ParamItem `refreshable:"false"`
+	MmapScalarStats                     ParamItem `refreshable:"false"`
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
 	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
@@ -2885,6 +2886,21 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export: true,
 	}
 	p.MmapScalarIndex.Init(base.mgr)
+
+	p.MmapScalarStats = ParamItem{
+		Key:          "queryNode.mmap.scalarStats",
+		Version:      "2.5.4",
+		DefaultValue: "true",
+		Formatter: func(originValue string) string {
+			if p.MmapEnabled.GetAsBool() {
+				return "true"
+			}
+			return originValue
+		},
+		Doc:    "Enable mmap for loading scalar stats",
+		Export: true,
+	}
+	p.MmapScalarStats.Init(base.mgr)
 
 	p.MmapChunkCache = ParamItem{
 		Key:          "queryNode.mmap.chunkCache",

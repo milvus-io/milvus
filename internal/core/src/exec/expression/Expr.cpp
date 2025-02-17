@@ -152,8 +152,6 @@ CompileExpression(const expr::TypedExprPtr& expr,
                   const std::unordered_set<std::string>& flatten_candidates,
                   bool enable_constant_folding) {
     ExprPtr result;
-    std::cout << "CompileExpression context" << context->get_consistency_level()
-              << std::endl;
     auto compiled_inputs = CompileInputs(expr, context, flatten_candidates);
 
     auto GetTypes = [](const std::vector<ExprPtr>& exprs) {

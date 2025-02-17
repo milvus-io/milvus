@@ -2033,8 +2033,9 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
     std::unique_ptr<index::TextMatchIndex> index;
     std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
-    if (!cfg.GetScalarIndexEnableMmap()) {
+    if (!cfg.GetScalarStatsEnableMmap()) {
         // build text index in ram.
+        LOG_INFO("SegmentSealedImpl CreateTextIndex in ram");
         index = std::make_unique<index::TextMatchIndex>(
             std::numeric_limits<int64_t>::max(),
             unique_id.c_str(),
@@ -2042,6 +2043,7 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
             field_meta.get_analyzer_params().c_str());
     } else {
         // build text index using mmap.
+        LOG_INFO("SegmentSealedImpl CreateTextIndex in mmap");
         index = std::make_unique<index::TextMatchIndex>(
             cfg.GetMmapPath(),
             unique_id.c_str(),

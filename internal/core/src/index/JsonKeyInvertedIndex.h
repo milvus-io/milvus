@@ -22,7 +22,8 @@ using stdclock = std::chrono::high_resolution_clock;
 class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
  public:
     explicit JsonKeyInvertedIndex(const storage::FileManagerContext& ctx,
-                                  bool is_load);
+                                  bool is_load,
+                                  bool is_mmap = true);
 
     explicit JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
                                   const char* unique_id);

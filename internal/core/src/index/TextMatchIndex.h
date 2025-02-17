@@ -35,7 +35,8 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     // for building index.
     explicit TextMatchIndex(const storage::FileManagerContext& ctx,
                             const char* tokenizer_name,
-                            const char* analyzer_params);
+                            const char* analyzer_params,
+                            bool is_mmap = true);
     // for loading index
     explicit TextMatchIndex(const storage::FileManagerContext& ctx);
 
