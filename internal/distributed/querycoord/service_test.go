@@ -311,6 +311,14 @@ func Test_NewServer(t *testing.T) {
 			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 		})
 
+		t.Run("CheckBalanceStatus", func(t *testing.T) {
+			req := &querypb.CheckBalanceStatusRequest{}
+			mqc.EXPECT().CheckBalanceStatus(mock.Anything, req).Return(&querypb.CheckBalanceStatusResponse{Status: merr.Success()}, nil)
+			resp, err := server.CheckBalanceStatus(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		})
+
 		t.Run("SuspendNode", func(t *testing.T) {
 			req := &querypb.SuspendNodeRequest{}
 			mqc.EXPECT().SuspendNode(mock.Anything, req).Return(merr.Success(), nil)

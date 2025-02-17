@@ -162,6 +162,10 @@ func (m *GrpcQueryCoordClient) ResumeBalance(ctx context.Context, req *querypb.R
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcQueryCoordClient) CheckBalanceStatus(ctx context.Context, req *querypb.CheckBalanceStatusRequest, opts ...grpc.CallOption) (*querypb.CheckBalanceStatusResponse, error) {
+	return &querypb.CheckBalanceStatusResponse{}, m.Err
+}
+
 func (m *GrpcQueryCoordClient) SuspendNode(ctx context.Context, req *querypb.SuspendNodeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
