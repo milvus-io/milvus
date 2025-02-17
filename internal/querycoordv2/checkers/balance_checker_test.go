@@ -19,9 +19,11 @@ package checkers
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -138,12 +140,13 @@ func (suite *BalanceCheckerTestSuite) TestAutoBalanceConf() {
 	suite.targetMgr.UpdateCollectionNextTarget(int64(cid2))
 	suite.targetMgr.UpdateCollectionCurrentTarget(int64(cid2))
 
+	ctx := context.Background()
 	// test disable auto balance
 	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
 	suite.scheduler.EXPECT().GetSegmentTaskNum().Maybe().Return(func() int {
 		return 0
 	})
-	replicasToBalance := suite.checker.replicasToBalance()
+	replicasToBalance := suite.checker.getReplicaForNormalBalance(ctx)
 	suite.Empty(replicasToBalance)
 	segPlans, _ := suite.checker.balanceReplicas(replicasToBalance)
 	suite.Empty(segPlans)
@@ -151,14 +154,14 @@ func (suite *BalanceCheckerTestSuite) TestAutoBalanceConf() {
 	// test enable auto balance
 	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
 	idsToBalance := []int64{int64(replicaID1)}
-	replicasToBalance = suite.checker.replicasToBalance()
+	replicasToBalance = suite.checker.getReplicaForNormalBalance(ctx)
 	suite.ElementsMatch(idsToBalance, replicasToBalance)
 	// next round
 	idsToBalance = []int64{int64(replicaID2)}
-	replicasToBalance = suite.checker.replicasToBalance()
+	replicasToBalance = suite.checker.getReplicaForNormalBalance(ctx)
 	suite.ElementsMatch(idsToBalance, replicasToBalance)
 	// final round
-	replicasToBalance = suite.checker.replicasToBalance()
+	replicasToBalance = suite.checker.getReplicaForNormalBalance(ctx)
 	suite.Empty(replicasToBalance)
 }
 
@@ -214,12 +217,13 @@ func (suite *BalanceCheckerTestSuite) TestBusyScheduler() {
 	suite.targetMgr.UpdateCollectionNextTarget(int64(cid2))
 	suite.targetMgr.UpdateCollectionCurrentTarget(int64(cid2))
 
+	ctx := context.Background()
 	// test scheduler busy
 	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
 	suite.scheduler.EXPECT().GetSegmentTaskNum().Maybe().Return(func() int {
 		return 1
 	})
-	replicasToBalance := suite.checker.replicasToBalance()
+	replicasToBalance := suite.checker.getReplicaForNormalBalance(ctx)
 	suite.Len(replicasToBalance, 1)
 }
 
@@ -284,9 +288,11 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 	mr2.AddRONode(1)
 	suite.checker.meta.ReplicaManager.Put(mr2.IntoReplica())
 
+	ctx := context.Background()
+
 	// test stopping balance
 	idsToBalance := []int64{int64(replicaID1), int64(replicaID2)}
-	replicasToBalance := suite.checker.replicasToBalance()
+	replicasToBalance := suite.checker.getReplicaForStoppingBalance(ctx)
 	suite.ElementsMatch(idsToBalance, replicasToBalance)
 
 	// checker check
@@ -340,10 +346,11 @@ func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
 	suite.checker.meta.CollectionManager.PutCollection(collection2, partition2)
 	suite.checker.meta.ReplicaManager.Put(replica2)
 
+	ctx := context.Background()
 	// test normal balance when one collection has unready target
 	mockTarget.EXPECT().IsNextTargetExist(mock.Anything).Return(true)
 	mockTarget.EXPECT().IsCurrentTargetReady(mock.Anything).Return(false)
-	replicasToBalance := suite.checker.replicasToBalance()
+	replicasToBalance := suite.checker.getReplicaForNormalBalance(ctx)
 	suite.Len(replicasToBalance, 0)
 
 	// test stopping balance with target not ready
@@ -360,8 +367,78 @@ func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
 	suite.checker.meta.ReplicaManager.Put(mr2.IntoReplica())
 
 	idsToBalance := []int64{int64(replicaID1)}
-	replicasToBalance = suite.checker.replicasToBalance()
+	replicasToBalance = suite.checker.getReplicaForStoppingBalance(ctx)
 	suite.ElementsMatch(idsToBalance, replicasToBalance)
+}
+
+func (suite *BalanceCheckerTestSuite) TestAutoBalanceInterval() {
+	ctx := context.Background()
+	// set up nodes info
+	nodeID1, nodeID2 := 1, 2
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(nodeID1),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(nodeID2),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.checker.meta.ResourceManager.HandleNodeUp(int64(nodeID1))
+	suite.checker.meta.ResourceManager.HandleNodeUp(int64(nodeID2))
+
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            1,
+			PartitionID:   1,
+			InsertChannel: "test-insert-channel",
+		},
+		{
+			ID:            2,
+			PartitionID:   1,
+			InsertChannel: "test-insert-channel",
+		},
+	}
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(channels, segments, nil)
+
+	// set collections meta
+	cid1, replicaID1, partitionID1 := 1, 1, 1
+	collection1 := utils.CreateTestCollection(int64(cid1), int32(replicaID1))
+	collection1.Status = querypb.LoadStatus_Loaded
+	replica1 := utils.CreateTestReplica(int64(replicaID1), int64(cid1), []int64{int64(nodeID1), int64(nodeID2)})
+	partition1 := utils.CreateTestPartition(int64(cid1), int64(partitionID1))
+	suite.checker.meta.CollectionManager.PutCollection(collection1, partition1)
+	suite.checker.meta.ReplicaManager.Put(replica1)
+	suite.targetMgr.UpdateCollectionNextTarget(int64(cid1))
+	suite.targetMgr.UpdateCollectionCurrentTarget(int64(cid1))
+
+	funcCallCounter := atomic.NewInt64(0)
+	suite.balancer.EXPECT().BalanceReplica(mock.Anything).RunAndReturn(func(r *meta.Replica) ([]balance.SegmentAssignPlan, []balance.ChannelAssignPlan) {
+		funcCallCounter.Inc()
+		return nil, nil
+	})
+
+	// first auto balance should be triggered
+	suite.checker.Check(ctx)
+	suite.Equal(funcCallCounter.Load(), int64(1))
+
+	// second auto balance won't be triggered due to autoBalanceInterval == 3s
+	suite.checker.Check(ctx)
+	suite.Equal(funcCallCounter.Load(), int64(1))
+
+	// set autoBalanceInterval == 1, sleep 1s, auto balance should be triggered
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoBalanceInterval.Key, "1000")
+	paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoBalanceInterval.Key)
+	time.Sleep(1 * time.Second)
+	suite.checker.Check(ctx)
+	suite.Equal(funcCallCounter.Load(), int64(1))
 }
 
 func TestBalanceCheckerSuite(t *testing.T) {
