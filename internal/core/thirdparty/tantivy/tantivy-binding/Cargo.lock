@@ -1309,6 +1309,7 @@ dependencies = [
  "scopeguard",
  "serde_json",
  "tantivy",
+ "tempfile",
  "zstd-sys",
 ]
 

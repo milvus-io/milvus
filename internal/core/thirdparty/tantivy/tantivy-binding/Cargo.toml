@@ -19,6 +19,9 @@ jieba-rs = "0.6.8"
 regex = "1.11.1"
 either = "1.13.0"
 
+[dev-dependencies]
+tempfile = "3.0"
+
 [build-dependencies]
 cbindgen = "0.26.0"
 
