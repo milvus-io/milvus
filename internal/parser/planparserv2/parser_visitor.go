@@ -578,7 +578,7 @@ func operationSupportSample(expr *ExprWithType) bool {
 	return true
 }
 
-const EPSILON = 1e-7
+const EPSILON = 1e-10
 
 func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) interface{} {
 	if ctx.Expr() == nil {
@@ -596,7 +596,7 @@ func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) inter
 
 	sampleFactor := floatValueExpr.GetValue().GetFloatVal()
 	if sampleFactor <= 0+EPSILON || sampleFactor >= 1-EPSILON {
-		return fmt.Errorf("sample factor should be in range (0, 1) exclusive, but got %s", ctx.Expr().GetText())
+		return fmt.Errorf("the sample factor should be between 0 and 1 and not too close to 0 or 1(the difference should be larger than 1e-10), but got %s", ctx.Expr().GetText())
 	}
 	return &ExprWithType{
 		expr: &planpb.Expr{
