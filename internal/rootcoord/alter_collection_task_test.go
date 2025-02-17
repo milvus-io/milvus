@@ -409,7 +409,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
 			return nil
 		}
-		packChan := make(chan *msgstream.MsgPack, 10)
+		packChan := make(chan *msgstream.ConsumeMsgPack, 10)
 		ticker := newChanTimeTickSync(packChan)
 		ticker.addDmlChannels("by-dev-rootcoord-dml_1")
 		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker), withTtSynchronizer(ticker), withInvalidTsoAllocator())
