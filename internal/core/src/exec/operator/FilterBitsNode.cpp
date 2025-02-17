@@ -66,8 +66,9 @@ PhyFilterBitsNode::GetOutput() {
 
     EvalCtx eval_ctx(operator_context_->get_exec_context(), exprs_.get());
 
-    TargetBitmap bitset;
-    TargetBitmap valid_bitset;
+    TargetBitmap bitset(need_process_rows_);
+    TargetBitmap valid_bitset(need_process_rows_);
+
     while (num_processed_rows_ < need_process_rows_) {
         exprs_->Eval(0, 1, true, eval_ctx, results_);
 
@@ -80,10 +81,10 @@ PhyFilterBitsNode::GetOutput() {
             if (col_vec->IsBitmap()) {
                 auto col_vec_size = col_vec->size();
                 TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-                bitset.append(view);
+                bitset.append(view, num_processed_rows_);
                 TargetBitmapView valid_view(col_vec->GetValidRawData(),
                                             col_vec_size);
-                valid_bitset.append(valid_view);
+                valid_bitset.append(valid_view, num_processed_rows_);
                 num_processed_rows_ += col_vec_size;
             } else {
                 PanicInfo(ExprInvalid,

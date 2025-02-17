@@ -81,7 +81,7 @@ class PhyTermFilterExpr : public SegmentExpr {
     CanSkipSegment();
 
     VectorPtr
-    ExecPkTermImpl();
+    ExecPkTermImpl(VectorPtr result);
 
     template <typename T>
     VectorPtr
