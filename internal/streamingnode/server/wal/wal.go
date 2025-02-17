@@ -14,6 +14,9 @@ type AppendResult = types.AppendResult
 type WAL interface {
 	WALName() string
 
+	// GetLatestMVCCTimestamp get the latest mvcc timestamp of the wal at vchannel.
+	GetLatestMVCCTimestamp(ctx context.Context, vchannel string) (uint64, error)
+
 	// Channel returns the channel assignment info of the wal.
 	Channel() types.PChannelInfo
 
