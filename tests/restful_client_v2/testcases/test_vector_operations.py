@@ -6,7 +6,8 @@ import sys
 import json
 import time
 from utils import constant
-from utils.utils import gen_collection_name, get_sorted_distance, patch_faker_text, en_vocabularies_distribution, zh_vocabularies_distribution
+from utils.utils import gen_collection_name, get_sorted_distance, patch_faker_text, en_vocabularies_distribution, \
+    zh_vocabularies_distribution
 from utils.util_log import test_log as logger
 import pytest
 from base.testbase import TestBase
@@ -16,6 +17,7 @@ from pymilvus import (
     Collection, utility
 )
 from faker import Faker
+
 Faker.seed(19530)
 fake_en = Faker("en_US")
 fake_zh = Faker("zh_CN")
@@ -387,7 +389,7 @@ class TestInsertVector(TestBase):
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("pass_fp32_to_fp16_or_bf16", [True, False])
     def test_insert_entities_with_all_vector_datatype_1(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema,
+                                                        is_partition_key, enable_dynamic_schema,
                                                         pass_fp32_to_fp16_or_bf16):
         """
         Insert a vector with a simple payload
@@ -495,7 +497,7 @@ class TestInsertVector(TestBase):
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
     def test_insert_entities_with_all_vector_datatype_2(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                        is_partition_key, enable_dynamic_schema):
         """
         Insert a vector with a simple payload
         """
@@ -512,8 +514,10 @@ class TestInsertVector(TestBase):
                      "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "binary_vector_0", "dataType": "BinaryVector", "elementTypeParams": {"dim": f"{dim}"}},
-                    {"fieldName": "binary_vector_1", "dataType": "BinaryVector", "elementTypeParams": {"dim": f"{dim}"}},
+                    {"fieldName": "binary_vector_0", "dataType": "BinaryVector",
+                     "elementTypeParams": {"dim": f"{dim}"}},
+                    {"fieldName": "binary_vector_1", "dataType": "BinaryVector",
+                     "elementTypeParams": {"dim": f"{dim}"}},
                     {"fieldName": "sparse_float_vector_0", "dataType": "SparseFloatVector"},
                     {"fieldName": "sparse_float_vector_1", "dataType": "SparseFloatVector"},
                 ]
@@ -589,7 +593,7 @@ class TestInsertVector(TestBase):
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
     def test_insert_entities_with_all_json_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                    is_partition_key, enable_dynamic_schema):
         """
         Insert a vector with a simple payload
         """
@@ -647,7 +651,7 @@ class TestInsertVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "bool": random.choice([True, False]),
-                        "json": json_value[i%len(json_value)],
+                        "json": json_value[i % len(json_value)],
                         "int_array": [i],
                         "varchar_array": [f"varchar_{i}"],
                         "bool_array": [random.choice([True, False])],
@@ -663,7 +667,7 @@ class TestInsertVector(TestBase):
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "bool": random.choice([True, False]),
-                        "json": json_value[i%len(json_value)],
+                        "json": json_value[i % len(json_value)],
                         "int_array": [i],
                         "varchar_array": [f"varchar_{i}"],
                         "bool_array": [random.choice([True, False])],
@@ -738,7 +742,8 @@ class TestInsertVector(TestBase):
                         "book_describe": None,
                         "json": None,
                         "varchar_array": None,
-                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[0].tolist(),
+                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[
+                            0].tolist(),
                     }
                 else:
                     tmp = {
@@ -748,7 +753,8 @@ class TestInsertVector(TestBase):
                         "book_describe": None,
                         "json": None,
                         "varchar_array": None,
-                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[0].tolist(),
+                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[
+                            0].tolist(),
                     }
                 if enable_dynamic_schema:
                     tmp.update({f"dynamic_field_{i}": i})
@@ -767,6 +773,7 @@ class TestInsertVector(TestBase):
         assert rsp['data'][0]['book_describe'] == 'default'
         assert rsp['data'][0]['word_count'] is None
         assert rsp['data'][0]['json'] is None
+
 
 @pytest.mark.L0
 class TestInsertVectorNegative(TestBase):
@@ -847,8 +854,8 @@ class TestInsertVectorNegative(TestBase):
         nb = 1
         data = [
             {"id": i,
-                "vector": [np.float64(random.random()) for _ in range(dim + 1)],
-            } for i in range(nb)
+             "vector": [np.float64(random.random()) for _ in range(dim + 1)],
+             } for i in range(nb)
         ]
         payload = {
             "collectionName": name,
@@ -913,7 +920,8 @@ class TestUpsertVector(TestBase):
             "collectionName": name,
             "schema": {
                 "fields": [
-                    {"fieldName": "book_id", "dataType": f"{id_type}", "isPrimary": True, "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "book_id", "dataType": f"{id_type}", "isPrimary": True,
+                     "elementTypeParams": {"max_length": "256"}},
                     {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
@@ -995,7 +1003,8 @@ class TestUpsertVector(TestBase):
             "schema": {
                 "autoId": True,
                 "fields": [
-                    {"fieldName": "book_id", "dataType": f"{id_type}", "isPrimary": True, "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "book_id", "dataType": f"{id_type}", "isPrimary": True,
+                     "elementTypeParams": {"max_length": "256"}},
                     {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
@@ -1077,7 +1086,8 @@ class TestUpsertVector(TestBase):
             "collectionName": name,
             "schema": {
                 "fields": [
-                    {"fieldName": "book_id", "dataType": f"{id_type}", "isPrimary": True, "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "book_id", "dataType": f"{id_type}", "isPrimary": True,
+                     "elementTypeParams": {"max_length": "256"}},
                     {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}, "defaultValue": 123},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"},
@@ -1228,8 +1238,8 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("dim", [16])
     @pytest.mark.parametrize("pass_fp32_to_fp16_or_bf16", [True, False])
     def test_search_vector_with_all_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema,
-                                                      pass_fp32_to_fp16_or_bf16):
+                                                    is_partition_key, enable_dynamic_schema,
+                                                    pass_fp32_to_fp16_or_bf16):
         """
         Insert a vector with a simple payload
         """
@@ -1273,7 +1283,7 @@ class TestSearchVector(TestBase):
             for i in range(nb):
                 if auto_id:
                     tmp = {
-                        "user_id": i%10,
+                        "user_id": i % 10,
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
@@ -1292,7 +1302,7 @@ class TestSearchVector(TestBase):
                 else:
                     tmp = {
                         "book_id": i,
-                        "user_id": i%10,
+                        "user_id": i % 10,
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
@@ -1331,7 +1341,7 @@ class TestSearchVector(TestBase):
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
         # assert no dup user_id
-        user_ids = [r["user_id"]for r in rsp['data']]
+        user_ids = [r["user_id"] for r in rsp['data']]
         assert len(user_ids) == len(set(user_ids))
 
     @pytest.mark.parametrize("insert_round", [1])
@@ -1378,7 +1388,7 @@ class TestSearchVector(TestBase):
             for i in range(nb):
                 if auto_id:
                     tmp = {
-                        "user_id": i%100,
+                        "user_id": i % 100,
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
@@ -1386,7 +1396,7 @@ class TestSearchVector(TestBase):
                 else:
                     tmp = {
                         "book_id": i,
-                        "user_id": i%100,
+                        "user_id": i % 100,
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
@@ -1414,7 +1424,6 @@ class TestSearchVector(TestBase):
         assert rsp['code'] == 0
         assert len(rsp['data']) == 100 * nq
 
-
     @pytest.mark.parametrize("insert_round", [1, 10])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("is_partition_key", [True, False])
@@ -1424,7 +1433,8 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("groupingField", ['user_id', None])
     @pytest.mark.parametrize("sparse_format", ['dok', 'coo'])
     def test_search_vector_with_sparse_float_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema, groupingField, sparse_format):
+                                                             is_partition_key, enable_dynamic_schema, groupingField,
+                                                             sparse_format):
         """
         Insert a vector with a simple payload
         """
@@ -1461,18 +1471,20 @@ class TestSearchVector(TestBase):
                 idx = i * nb + j
                 if auto_id:
                     tmp = {
-                        "user_id": idx%100,
+                        "user_id": idx % 100,
                         "word_count": j,
                         "book_describe": f"book_{idx}",
-                        "sparse_float_vector": gen_vector(datatype="SparseFloatVector", dim=dim, sparse_format=sparse_format),
+                        "sparse_float_vector": gen_vector(datatype="SparseFloatVector", dim=dim,
+                                                          sparse_format=sparse_format),
                     }
                 else:
                     tmp = {
                         "book_id": idx,
-                        "user_id": idx%100,
+                        "user_id": idx % 100,
                         "word_count": j,
                         "book_describe": f"book_{idx}",
-                        "sparse_float_vector": gen_vector(datatype="SparseFloatVector", dim=dim, sparse_format=sparse_format),
+                        "sparse_float_vector": gen_vector(datatype="SparseFloatVector", dim=dim,
+                                                          sparse_format=sparse_format),
                     }
                 if enable_dynamic_schema:
                     tmp.update({f"dynamic_field_{i}": i})
@@ -1503,7 +1515,6 @@ class TestSearchVector(TestBase):
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
 
-
     @pytest.mark.parametrize("insert_round", [1])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("is_partition_key", [True, False])
@@ -1513,7 +1524,7 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("groupingField", ['user_id', None])
     @pytest.mark.parametrize("tokenizer", ['standard'])
     def test_search_vector_for_en_full_text_search(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema, groupingField, tokenizer):
+                                                   is_partition_key, enable_dynamic_schema, groupingField, tokenizer):
         """
         Insert a vector with a simple payload
         """
@@ -1573,7 +1584,7 @@ class TestSearchVector(TestBase):
                 idx = i * nb + j
                 if auto_id:
                     tmp = {
-                        "user_id": idx%100,
+                        "user_id": idx % 100,
                         "word_count": j,
                         "book_describe": f"book_{idx}",
                         "document_content": fake.text().lower(),
@@ -1581,7 +1592,7 @@ class TestSearchVector(TestBase):
                 else:
                     tmp = {
                         "book_id": idx,
-                        "user_id": idx%100,
+                        "user_id": idx % 100,
                         "word_count": j,
                         "book_describe": f"book_{idx}",
                         "document_content": fake.text().lower(),
@@ -1617,7 +1628,6 @@ class TestSearchVector(TestBase):
         assert rsp['code'] == 0
         assert len(rsp['data']) > 0
 
-
     @pytest.mark.parametrize("insert_round", [1])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("is_partition_key", [True, False])
@@ -1626,9 +1636,8 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("groupingField", ['user_id', None])
     @pytest.mark.parametrize("tokenizer", ['jieba'])
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/36751")
     def test_search_vector_for_zh_full_text_search(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema, groupingField, tokenizer):
+                                                   is_partition_key, enable_dynamic_schema, groupingField, tokenizer):
         """
         Insert a vector with a simple payload
         """
@@ -1688,7 +1697,7 @@ class TestSearchVector(TestBase):
                 idx = i * nb + j
                 if auto_id:
                     tmp = {
-                        "user_id": idx%100,
+                        "user_id": idx % 100,
                         "word_count": j,
                         "book_describe": f"book_{idx}",
                         "document_content": fake.text().lower(),
@@ -1696,7 +1705,7 @@ class TestSearchVector(TestBase):
                 else:
                     tmp = {
                         "book_id": idx,
-                        "user_id": idx%100,
+                        "user_id": idx % 100,
                         "word_count": j,
                         "book_describe": f"book_{idx}",
                         "document_content": fake.text().lower(),
@@ -1732,9 +1741,6 @@ class TestSearchVector(TestBase):
         assert rsp['code'] == 0
         assert len(rsp['data']) > 0
 
-
-
-
     @pytest.mark.parametrize("insert_round", [2])
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("is_partition_key", [True])
@@ -1743,7 +1749,7 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("metric_type", ['HAMMING'])
     def test_search_vector_with_binary_vector_datatype(self, metric_type, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                       is_partition_key, enable_dynamic_schema):
         """
         Insert a vector with a simple payload
         """
@@ -1779,7 +1785,7 @@ class TestSearchVector(TestBase):
             for i in range(nb):
                 if auto_id:
                     tmp = {
-                        "user_id": i%100,
+                        "user_id": i % 100,
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "binary_vector": gen_vector(datatype="BinaryVector", dim=dim),
@@ -1787,7 +1793,7 @@ class TestSearchVector(TestBase):
                 else:
                     tmp = {
                         "book_id": i,
-                        "user_id": i%100,
+                        "user_id": i % 100,
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "binary_vector": gen_vector(datatype="BinaryVector", dim=dim),
@@ -2093,7 +2099,8 @@ class TestSearchVector(TestBase):
         assert len(res) == limit
 
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "IP"])
-    def test_search_vector_with_range_search(self, metric_type):
+    @pytest.mark.parametrize("flatten", [True, False])
+    def test_search_vector_with_range_search(self, metric_type, flatten):
         """
         Search a vector with range search with different metric type
         """
@@ -2108,7 +2115,8 @@ class TestSearchVector(TestBase):
         vector_to_search = preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
         training_data = [item[vector_field] for item in data]
         distance_sorted = get_sorted_distance(training_data, [vector_to_search], metric_type)
-        r1, r2 = distance_sorted[0][nb//2], distance_sorted[0][nb//2+limit+int((0.5*limit))] # recall is not 100% so add 50% to make sure the range is more than limit
+        r1, r2 = distance_sorted[0][nb // 2], distance_sorted[0][nb // 2 + limit + int(
+            (0.5 * limit))]  # recall is not 100% so add 50% to make sure the range is more than limit
         if metric_type == "L2":
             r1, r2 = r2, r1
         output_fields = get_common_fields_by_data(data, exclude_fields=[vector_field])
@@ -2126,18 +2134,30 @@ class TestSearchVector(TestBase):
                 }
             }
         }
+        if flatten:
+            payload = {
+                "collectionName": name,
+                "data": [vector_to_search],
+                "outputFields": output_fields,
+                "limit": limit,
+                "offset": 0,
+                "searchParams": {
+                    "radius": r1,
+                    "range_filter": r2,
+                }
+            }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
         res = rsp['data']
         logger.info(f"res: {len(res)}")
-        assert len(res) >= limit*0.8
+        assert len(res) >= limit * 0.8
         # add buffer to the distance of comparison
         if metric_type == "L2":
-            r1 = r1 + 10**-6
-            r2 = r2 - 10**-6
+            r1 = r1 + 10 ** -6
+            r2 = r2 - 10 ** -6
         else:
-            r1 = r1 - 10**-6
-            r2 = r2 + 10**-6
+            r1 = r1 - 10 ** -6
+            r2 = r2 + 10 ** -6
         for item in res:
             distance = item.get("distance")
             if metric_type == "L2":
@@ -2162,7 +2182,8 @@ class TestSearchVector(TestBase):
         vector_to_search = preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
         training_data = [item[vector_field] for item in data]
         distance_sorted = get_sorted_distance(training_data, [vector_to_search], metric_type)
-        r1, r2 = distance_sorted[0][nb//2], distance_sorted[0][nb//2+limit+int((0.2*limit))] # recall is not 100% so add 20% to make sure the range is correct
+        r1, r2 = distance_sorted[0][nb // 2], distance_sorted[0][
+            nb // 2 + limit + int((0.2 * limit))]  # recall is not 100% so add 20% to make sure the range is correct
         if metric_type == "L2":
             r1, r2 = r2, r1
         output_fields = get_common_fields_by_data(data, exclude_fields=[vector_field])
@@ -2187,7 +2208,6 @@ class TestSearchVector(TestBase):
         else:
             assert len(res) == limit
 
-
     @pytest.mark.parametrize("tokenizer", ["jieba", "standard"])
     def test_search_vector_with_text_match_filter(self, tokenizer):
         """
@@ -2211,7 +2231,7 @@ class TestSearchVector(TestBase):
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 enable_analyzer=True,
-				enable_match=True,
+                enable_match=True,
                 is_partition_key=True,
                 analyzer_params=analyzer_params,
             ),
@@ -2220,7 +2240,7 @@ class TestSearchVector(TestBase):
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 enable_analyzer=True,
-				enable_match=True,
+                enable_match=True,
                 analyzer_params=analyzer_params,
             ),
             FieldSchema(
@@ -2228,7 +2248,7 @@ class TestSearchVector(TestBase):
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 enable_analyzer=True,
-				enable_match=True,
+                enable_match=True,
                 analyzer_params=analyzer_params,
             ),
             FieldSchema(
@@ -2236,14 +2256,14 @@ class TestSearchVector(TestBase):
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 enable_analyzer=True,
-				enable_match=True,
+                enable_match=True,
                 analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         collection = Collection(name=name, schema=schema
-        )
+                                )
         rsp = self.collection_client.collection_describe(name)
         logger.info(f"rsp: {rsp}")
         assert rsp['code'] == 0
@@ -2286,7 +2306,8 @@ class TestSearchVector(TestBase):
             token = wf_map[field].most_common()[0][0]
             expr = f"text_match({field}, '{token}')"
             logger.info(f"expr: {expr}")
-            rsp = self.vector_client.vector_search({"collectionName": name, "data":vector_to_search, "filter": f"{expr}", "outputFields": ["*"]})
+            rsp = self.vector_client.vector_search(
+                {"collectionName": name, "data": vector_to_search, "filter": f"{expr}", "outputFields": ["*"]})
             assert rsp['code'] == 0, rsp
             for d in rsp['data']:
                 assert token in d[field]
@@ -2374,6 +2395,7 @@ class TestSearchVector(TestBase):
         assert rsp['data'][0]['word_count'] is None
         assert len(rsp['data']) == 100 * nq
 
+
 @pytest.mark.L0
 class TestSearchVectorNegative(TestBase):
 
@@ -2415,7 +2437,6 @@ class TestSearchVectorNegative(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] != 0
-
 
     @pytest.mark.parametrize("limit", [0, 16385])
     def test_search_vector_with_invalid_limit(self, limit):
@@ -2501,7 +2522,7 @@ class TestAdvancedSearchVector(TestBase):
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [2])
     def test_advanced_search_vector_with_multi_float32_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                                       is_partition_key, enable_dynamic_schema):
         """
         Insert a vector with a simple payload
         """
@@ -2539,7 +2560,7 @@ class TestAdvancedSearchVector(TestBase):
             for i in range(nb):
                 if auto_id:
                     tmp = {
-                        "user_id": i%100,
+                        "user_id": i % 100,
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector_1": gen_vector(datatype="FloatVector", dim=dim),
@@ -2548,7 +2569,7 @@ class TestAdvancedSearchVector(TestBase):
                 else:
                     tmp = {
                         "book_id": i,
-                        "user_id": i%100,
+                        "user_id": i % 100,
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector_1": gen_vector(datatype="FloatVector", dim=dim),
@@ -2576,10 +2597,10 @@ class TestAdvancedSearchVector(TestBase):
                 "outputFields": ["*"]
             },
                 {
-                "data": [gen_vector(datatype="FloatVector", dim=dim)],
-                "annsField": "float_vector_2",
-                "limit": 10,
-                "outputFields": ["*"]
+                    "data": [gen_vector(datatype="FloatVector", dim=dim)],
+                    "annsField": "float_vector_2",
+                    "limit": 10,
+                    "outputFields": ["*"]
                 }
 
             ],
@@ -2611,7 +2632,7 @@ class TestHybridSearchVector(TestBase):
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [2])
     def test_hybrid_search_vector_with_multi_float32_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                                     is_partition_key, enable_dynamic_schema):
         """
         Insert a vector with a simple payload
         """
@@ -2649,7 +2670,7 @@ class TestHybridSearchVector(TestBase):
             for i in range(nb):
                 if auto_id:
                     tmp = {
-                        "user_id": i%100,
+                        "user_id": i % 100,
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector_1": gen_vector(datatype="FloatVector", dim=dim),
@@ -2658,7 +2679,7 @@ class TestHybridSearchVector(TestBase):
                 else:
                     tmp = {
                         "book_id": i,
-                        "user_id": i%100,
+                        "user_id": i % 100,
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector_1": gen_vector(datatype="FloatVector", dim=dim),
@@ -2686,10 +2707,10 @@ class TestHybridSearchVector(TestBase):
                 "outputFields": ["*"]
             },
                 {
-                "data": [gen_vector(datatype="FloatVector", dim=dim)],
-                "annsField": "float_vector_2",
-                "limit": 10,
-                "outputFields": ["*"]
+                    "data": [gen_vector(datatype="FloatVector", dim=dim)],
+                    "annsField": "float_vector_2",
+                    "limit": 10,
+                    "outputFields": ["*"]
                 }
 
             ],
@@ -2853,8 +2874,8 @@ class TestQueryVector(TestBase):
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("pass_fp32_to_fp16_or_bf16", [True, False])
     def test_query_entities_with_all_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema,
-                                                      pass_fp32_to_fp16_or_bf16):
+                                                     is_partition_key, enable_dynamic_schema,
+                                                     pass_fp32_to_fp16_or_bf16):
         """
         Insert a vector with a simple payload
         """
@@ -3016,7 +3037,6 @@ class TestQueryVector(TestBase):
         assert rsp['code'] == 0
         assert rsp['data'][0]['count(*)'] == 3000
 
-    @pytest.mark.xfail(reason="query by id is not supported")
     def test_query_vector_by_id(self):
         """
         Query a vector with a simple payload
@@ -3147,7 +3167,7 @@ class TestQueryVector(TestBase):
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 enable_analyzer=True,
-				enable_match=True,
+                enable_match=True,
                 is_partition_key=True,
                 analyzer_params=analyzer_params,
             ),
@@ -3156,7 +3176,7 @@ class TestQueryVector(TestBase):
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 enable_analyzer=True,
-				enable_match=True,
+                enable_match=True,
                 analyzer_params=analyzer_params,
             ),
             FieldSchema(
@@ -3164,7 +3184,7 @@ class TestQueryVector(TestBase):
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 enable_analyzer=True,
-				enable_match=True,
+                enable_match=True,
                 analyzer_params=analyzer_params,
             ),
             FieldSchema(
@@ -3172,14 +3192,14 @@ class TestQueryVector(TestBase):
                 dtype=DataType.VARCHAR,
                 max_length=65535,
                 enable_analyzer=True,
-				enable_match=True,
+                enable_match=True,
                 analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         collection = Collection(name=name, schema=schema
-        )
+                                )
         rsp = self.collection_client.collection_describe(name)
         logger.info(f"rsp: {rsp}")
         assert rsp['code'] == 0
@@ -3285,7 +3305,8 @@ class TestQueryVector(TestBase):
                         "int_array": None,
                         "varchar_array": None,
                         "bool_array": None,
-                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[0].tolist(),
+                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[
+                            0].tolist(),
                     }
                 else:
                     tmp = {
@@ -3298,7 +3319,8 @@ class TestQueryVector(TestBase):
                         "int_array": None,
                         "varchar_array": None,
                         "bool_array": None,
-                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[0].tolist(),
+                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[
+                            0].tolist(),
                     }
                 if enable_dynamic_schema:
                     tmp.update({f"dynamic_field_{i}": i})
@@ -3457,7 +3479,6 @@ class TestGetVector(TestBase):
 @pytest.mark.L0
 class TestDeleteVector(TestBase):
 
-    @pytest.mark.xfail(reason="delete by id is not supported")
     def test_delete_vector_by_id(self):
         """
         Query a vector with a simple payload
@@ -3689,7 +3710,6 @@ class TestDeleteVector(TestBase):
         logger.info(f"res: {res}")
         assert res[0]["count(*)"] == 0
 
-
     def test_delete_vector_with_non_primary_key(self):
         """
         Delete a vector with a non-primary key, expect no data were deleted
@@ -3791,6 +3811,7 @@ class TestDeleteVectorNegative(TestBase):
         assert rsp['code'] == 100
         assert "can't find collection" in rsp['message']
 
+
 @pytest.mark.L1
 class TestVectorWithAuth(TestBase):
     def test_upsert_vector_with_invalid_api_key(self):
@@ -3825,6 +3846,7 @@ class TestVectorWithAuth(TestBase):
         client.api_key = "invalid_api_key"
         rsp = client.vector_insert(payload)
         assert rsp['code'] == 1800
+
     def test_insert_vector_with_invalid_api_key(self):
         """
         Insert a vector with invalid api key
@@ -3857,6 +3879,7 @@ class TestVectorWithAuth(TestBase):
         client.api_key = "invalid_api_key"
         rsp = client.vector_insert(payload)
         assert rsp['code'] == 1800
+
     def test_delete_vector_with_invalid_api_key(self):
         """
         Delete a vector with an invalid api key
