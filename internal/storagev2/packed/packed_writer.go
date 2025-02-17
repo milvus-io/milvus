@@ -28,8 +28,8 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/cdata"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/cdata"
 	"github.com/cockroachdb/errors"
 )
 
