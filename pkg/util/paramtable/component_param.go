@@ -4219,7 +4219,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.MinSegmentNumRowsToEnableIndex = ParamItem{
 		Key:          "indexCoord.segment.minSegmentNumRowsToEnableIndex",
 		Version:      "2.0.0",
-		DefaultValue: "1",
+		DefaultValue: "1024",
 		Doc:          "It's a threshold. When the segment num rows is less than this value, the segment will not be indexed",
 		Export:       true,
 	}
