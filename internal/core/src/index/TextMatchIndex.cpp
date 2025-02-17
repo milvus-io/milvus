@@ -101,7 +101,7 @@ TextMatchIndex::Upload(const Config& config) {
     auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
 
     auto binary_set = Serialize(config);
-    mem_file_manager_->AddFile(binary_set);
+    mem_file_manager_->AddTextLog(binary_set);
     auto remote_mem_path_to_size =
         mem_file_manager_->GetRemotePathsToFileSize();
 
