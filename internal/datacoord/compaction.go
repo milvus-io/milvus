@@ -413,10 +413,11 @@ func (c *compactionPlanHandler) loadMeta() {
 }
 
 func (c *compactionPlanHandler) loopSchedule() {
-	log.Info("compactionPlanHandler start loop schedule")
+	interval := paramtable.Get().DataCoordCfg.CompactionScheduleInterval.GetAsDuration(time.Millisecond)
+	log.Info("compactionPlanHandler start loop schedule", zap.Duration("schedule interval", interval))
 	defer c.stopWg.Done()
 
-	scheduleTicker := time.NewTicker(3 * time.Second)
+	scheduleTicker := time.NewTicker(interval)
 	defer scheduleTicker.Stop()
 	for {
 		select {
