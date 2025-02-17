@@ -288,6 +288,8 @@ message VchannelInfo {
   repeated SegmentInfo indexed_segments = 11; // deprecated, keep it for compatibility
   repeated int64 level_zero_segment_ids = 12;
   map<int64, int64> partition_stats_versions = 13;
+  // delete record which ts is smaller than delete_checkpoint already be dispatch to sealed segments.
+  msg.MsgPosition delete_checkpoint = 14; 
 }
 
 message WatchDmChannelsRequest {

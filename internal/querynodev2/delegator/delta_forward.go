@@ -183,9 +183,7 @@ func (sd *shardDelegator) forwardL0RemoteLoad(ctx context.Context,
 }
 
 func (sd *shardDelegator) getLevel0Deltalogs(partitionID int64) []*datapb.FieldBinlog {
-	level0Segments := sd.segmentManager.GetBy(
-		segments.WithLevel(datapb.SegmentLevel_L0),
-		segments.WithChannel(sd.vchannelName))
+	level0Segments := sd.deleteBuffer.ListL0()
 
 	var deltalogs []*datapb.FieldBinlog
 
