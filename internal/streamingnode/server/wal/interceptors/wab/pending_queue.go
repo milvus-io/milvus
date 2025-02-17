@@ -65,9 +65,6 @@ func (q *pendingQueue) CurrentOffset() int {
 
 // push adds a message to the buffer.
 func (q *pendingQueue) pushOne(msg message.ImmutableMessage, now time.Time) {
-	if msg.Version().EQ(message.VersionOld) {
-		panic("old message version is not supported")
-	}
 	if (msg.MessageType() == message.MessageTypeTimeTick && msg.TimeTick() < q.lastTimeTick) ||
 		(msg.MessageType() != message.MessageTypeTimeTick && msg.TimeTick() <= q.lastTimeTick) {
 		// only timetick message can be repeated with the last time tick.

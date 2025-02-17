@@ -612,6 +612,13 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	// validate
 	nodeID := req.GetBase().GetSourceID()
 	if !s.channelManager.Match(nodeID, channel) {
+		if streamingutil.IsStreamingServiceEnabled() {
+			// If streaming service is enabled, the channel manager will always return true if channel exist.
+			// once the channel is not exist, the drop virtual channel has been done.
+			return &datapb.DropVirtualChannelResponse{
+				Status: merr.Success(),
+			}, nil
+		}
 		err := merr.WrapErrChannelNotFound(channel, fmt.Sprintf("for node %d", nodeID))
 		resp.Status = merr.Status(err)
 		log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
