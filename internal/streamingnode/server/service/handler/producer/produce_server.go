@@ -204,9 +204,6 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 // validateMessage validates the message.
 func (p *ProduceServer) validateMessage(msg message.MutableMessage) error {
 	// validate the msg.
-	if !msg.Version().GT(message.VersionOld) {
-		return status.NewInvaildArgument("unsupported message version")
-	}
 	if !msg.MessageType().Valid() {
 		return status.NewInvaildArgument("unsupported message type")
 	}
