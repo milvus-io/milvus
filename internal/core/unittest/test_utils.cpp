@@ -64,7 +64,12 @@ TEST(Util, GetDeleteBitmap) {
     auto N = 10;
     uint64_t seg_id = 101;
     InsertRecord insert_record(*schema, N);
-    DeletedRecord<false> delete_record(&insert_record);
+    DeletedRecord<false> delete_record(
+        &insert_record,
+        [&insert_record](const PkType& pk, Timestamp timestamp) {
+            return insert_record.search_pk(pk, timestamp);
+        },
+        0);
 
     // fill insert record, all insert records has same pk = 1, timestamps= {1 ... N}
     std::vector<int64_t> age_data(N);
