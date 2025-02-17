@@ -124,7 +124,7 @@ func (c *client) Deregister(vchannel string) {
 
 	if manager, ok := c.managers.Get(pchannel); ok {
 		manager.Remove(vchannel)
-		if manager.NumTarget() == 0 {
+		if manager.NumTarget() == 0 && manager.NumConsumer() == 0 {
 			manager.Close()
 			c.managers.Remove(pchannel)
 		}

@@ -88,9 +88,40 @@ func (c *dispatcherManager) Add(ctx context.Context, streamConfig *StreamConfig)
 }
 
 func (c *dispatcherManager) Remove(vchannel string) {
-	if _, ok := c.registeredTargets.GetAndRemove(vchannel); ok {
-		log.Info("target unregister done", zap.String("vchannel", vchannel))
+	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
+
+	t, ok := c.registeredTargets.GetAndRemove(vchannel)
+	if !ok {
+		log.Info("the target was not registered before", zap.String("vchannel", vchannel))
+		return
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.mainDispatcher != nil && c.mainDispatcher.HasTarget(vchannel) {
+		c.mainDispatcher.Handle(pause)
+		c.mainDispatcher.RemoveTarget(vchannel)
+		if c.mainDispatcher.TargetNum() == 0 && len(c.deputyDispatchers) == 0 {
+			c.mainDispatcher.Handle(terminate)
+			c.mainDispatcher = nil
+		} else {
+			c.mainDispatcher.Handle(resume)
+		}
+	}
+	for _, dispatcher := range c.deputyDispatchers {
+		if dispatcher.HasTarget(vchannel) {
+			dispatcher.Handle(pause)
+			dispatcher.RemoveTarget(vchannel)
+			if dispatcher.TargetNum() == 0 {
+				dispatcher.Handle(terminate)
+				delete(c.deputyDispatchers, dispatcher.ID())
+				log.Info("remove deputy dispatcher done", zap.Int64("id", dispatcher.ID()))
+			} else {
+				dispatcher.Handle(resume)
+			}
+		}
+	}
+	t.close()
 }
 
 func (c *dispatcherManager) NumTarget() int {
@@ -131,7 +162,6 @@ func (c *dispatcherManager) Run() {
 		case <-ticker1.C:
 			c.uploadMetric()
 		case <-ticker2.C:
-			c.closeRedundantDispatchers()
 			c.buildDispatcher()
 			c.tryMerge()
 		}
@@ -226,54 +256,6 @@ OUTER:
 	} else {
 		c.deputyDispatchers[d.ID()] = d
 		log.Info("add deputy dispatcher", zap.Int64("id", d.ID()))
-	}
-}
-
-func (c *dispatcherManager) closeRedundantDispatchers() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID))
-	redundantTargets := make(map[string]*target)
-	if c.mainDispatcher != nil {
-		for _, t := range c.mainDispatcher.GetTargets() {
-			if !c.registeredTargets.Contain(t.vchannel) {
-				redundantTargets[t.vchannel] = t
-			}
-		}
-		if len(redundantTargets) > 0 {
-			c.mainDispatcher.Handle(pause)
-			for vchannel := range redundantTargets {
-				c.mainDispatcher.CloseTarget(vchannel)
-			}
-			if c.mainDispatcher.TargetNum() == 0 && len(c.deputyDispatchers) == 0 {
-				c.mainDispatcher.Handle(terminate)
-				c.mainDispatcher = nil
-			} else {
-				c.mainDispatcher.Handle(resume)
-			}
-		}
-	}
-	for _, dispatcher := range c.deputyDispatchers {
-		redundantTargets = make(map[string]*target)
-		for _, t := range dispatcher.GetTargets() {
-			if !c.registeredTargets.Contain(t.vchannel) {
-				redundantTargets[t.vchannel] = t
-			}
-		}
-		if len(redundantTargets) > 0 {
-			dispatcher.Handle(pause)
-			for vchannel := range redundantTargets {
-				dispatcher.CloseTarget(vchannel)
-			}
-			if dispatcher.TargetNum() == 0 {
-				dispatcher.Handle(terminate)
-				delete(c.deputyDispatchers, dispatcher.ID())
-				log.Info("remove deputy dispatcher done", zap.Int64("id", dispatcher.ID()))
-			} else {
-				dispatcher.Handle(resume)
-			}
-		}
 	}
 }
 

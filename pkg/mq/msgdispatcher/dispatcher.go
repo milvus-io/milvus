@@ -183,11 +183,10 @@ func (d *Dispatcher) HasTarget(vchannel string) bool {
 	return d.targets.Contain(vchannel)
 }
 
-func (d *Dispatcher) CloseTarget(vchannel string) {
+func (d *Dispatcher) RemoveTarget(vchannel string) {
 	log := log.With(zap.String("vchannel", vchannel), zap.Int64("id", d.ID()), zap.Bool("isMain", d.isMain))
-	if t, ok := d.targets.GetAndRemove(vchannel); ok {
-		t.close()
-		log.Info("closed target")
+	if _, ok := d.targets.GetAndRemove(vchannel); ok {
+		log.Info("target removed")
 	} else {
 		log.Warn("target not exist")
 	}

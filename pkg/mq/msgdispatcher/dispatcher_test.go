@@ -19,7 +19,6 @@ package msgdispatcher
 import (
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -95,14 +94,7 @@ func TestDispatcher(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, cap(output), cap(target.ch))
 
-		d.CloseTarget("mock_vchannel_0")
-
-		select {
-		case <-time.After(1 * time.Second):
-			assert.Fail(t, "timeout, didn't receive close message")
-		case _, ok := <-target.ch:
-			assert.False(t, ok)
-		}
+		d.RemoveTarget("mock_vchannel_0")
 
 		num = d.TargetNum()
 		assert.Equal(t, 1, num)
