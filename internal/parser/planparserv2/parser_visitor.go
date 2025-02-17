@@ -1029,7 +1029,7 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 		return fmt.Errorf("random sample expression can only be the last expression in the logical and expression")
 	}
 
-	if !canBeExecuted(leftExpr) {
+	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
 		return fmt.Errorf("'and' can only be used between boolean expressions")
 	}
 

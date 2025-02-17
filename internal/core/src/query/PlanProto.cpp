@@ -235,19 +235,22 @@ ProtoParser::RetrievePlanNodeFromProto(
                 milvus::plan::GetNextPlanNodeId(), sources);
             node->plannodes_ = std::move(plannode);
         } else {
-            auto parse_expr_to_filter_node =
-                [&](const proto::plan::Expr& predicate_proto)
-                -> plan::PlanNodePtr {
-                auto expr = ParseExprs(predicate_proto);
-                return std::make_shared<plan::FilterBitsNode>(
-                    milvus::plan::GetNextPlanNodeId(), expr, sources);
-            };
-
             auto& query = plan_node_proto.query();
             if (query.has_predicates()) {
+                auto parse_expr_to_filter_node =
+                    [&](const proto::plan::Expr& predicate_proto)
+                    -> plan::PlanNodePtr {
+                    auto expr = ParseExprs(predicate_proto);
+                    return std::make_shared<plan::FilterBitsNode>(
+                        milvus::plan::GetNextPlanNodeId(), expr, sources);
+                };
+
                 auto* predicate_proto = &query.predicates();
                 if (predicate_proto->expr_case() ==
                     proto::plan::Expr::kRandomSampleExpr) {
+                    // Predicate exists in random_sample_expr means we encounter expression
+                    // like "`predicate expression` && random_sample(...)". Extract it to construct
+                    // FilterBitsNode and make it be executed before RandomSampleNode.
                     auto& sample_expr = predicate_proto->random_sample_expr();
                     if (sample_expr.has_predicate()) {
                         auto expr_parser =

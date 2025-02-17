@@ -1475,6 +1475,7 @@ func TestRandomSampleWithFilter(t *testing.T) {
 		`BoolField in [true, false] && random_sample(0.01)`,
 		`Int8Field < Int16Field && random_sample(0.01)`,
 		`Int8Field < Int16Field && Int16Field <= 1 && random_sample(0.01)`,
+		`(Int8Field < Int16Field || Int16Field <= 1) && random_sample(0.01)`,
 		`Int16Field <= 1 && random_sample(0.01)`,
 		`VarCharField like "prefix%" && random_sample(0.01)`,
 		`VarCharField is null && random_sample(0.01)`,
@@ -1507,6 +1508,7 @@ func TestRandomSampleWithFilter(t *testing.T) {
 		`random_sample(0.01, false)`,
 		`random_sample(0.01, text_match(VarCharField, "query"))`,
 		`random_sample(0.01, phrase_match(VarCharField, "query something"))`,
+		`Int8Field < Int16Field || Int16Field <= 1 && random_sample(0.01)`,
 	}
 	for _, exprStr := range exprStrsInvalid {
 		assertInvalidExpr(t, helper, exprStr)
