@@ -562,22 +562,6 @@ func randomSampleExpr(expr *ExprWithType) bool {
 	return expr.expr.GetRandomSampleExpr() != nil
 }
 
-// When using random sampling, we are not expected to use scalar index so
-// text_match and phrase_match are not supported in random sampling.
-func operationSupportSample(expr *ExprWithType) bool {
-	unaryExpr := expr.expr.GetUnaryRangeExpr()
-	if unaryExpr == nil {
-		return true
-	}
-
-	op := unaryExpr.Op
-	if op == planpb.OpType_TextMatch || op == planpb.OpType_PhraseMatch {
-		return false
-	}
-
-	return true
-}
-
 const EPSILON = 1e-10
 
 func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) interface{} {
