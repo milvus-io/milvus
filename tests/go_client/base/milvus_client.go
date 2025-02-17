@@ -322,3 +322,39 @@ func (mc *MilvusClient) HybridSearch(ctx context.Context, option client.HybridSe
 	resultSets, err := mc.mClient.HybridSearch(ctx, option, callOptions...)
 	return resultSets, err
 }
+
+// ListResourceGroups list all resource groups
+func (mc *MilvusClient) ListResourceGroups(ctx context.Context, option client.ListResourceGroupsOption, callOptions ...grpc.CallOption) ([]string, error) {
+	resourceGroups, err := mc.mClient.ListResourceGroups(ctx, option, callOptions...)
+	return resourceGroups, err
+}
+
+// CreateResourceGroup create resource group
+func (mc *MilvusClient) CreateResourceGroup(ctx context.Context, option client.CreateResourceGroupOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.CreateResourceGroup(ctx, option, callOptions...)
+	return err
+}
+
+// DropResourceGroup drop resource group
+func (mc *MilvusClient) DropResourceGroup(ctx context.Context, option client.DropResourceGroupOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.DropResourceGroup(ctx, option, callOptions...)
+	return err
+}
+
+// DescribeResourceGroup describe resource group
+func (mc *MilvusClient) DescribeResourceGroup(ctx context.Context, option client.DescribeResourceGroupOption, callOptions ...grpc.CallOption) (*entity.ResourceGroup, error) {
+	resourceGroup, err := mc.mClient.DescribeResourceGroup(ctx, option, callOptions...)
+	return resourceGroup, err
+}
+
+// UpdateResourceGroup update resource group
+func (mc *MilvusClient) UpdateResourceGroup(ctx context.Context, option client.UpdateResourceGroupOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.UpdateResourceGroup(ctx, option, callOptions...)
+	return err
+}
+
+// TransferReplica transfer replica
+func (mc *MilvusClient) TransferReplica(ctx context.Context, option client.TransferReplicaOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.TransferReplica(ctx, option, callOptions...)
+	return err
+}
