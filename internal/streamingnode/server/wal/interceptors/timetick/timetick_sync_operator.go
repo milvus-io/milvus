@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -57,6 +58,7 @@ type timeTickSyncOperator struct {
 	ackDetails            *ack.AckDetails                    // all acknowledged details, all acked messages but not sent to wal will be kept here.
 	sourceID              int64                              // the current node id.
 	writeAheadBuffer      *wab.WriteAheadBuffer              // write ahead buffer.
+	mvccManager           *mvcc.MVCCManager                  // cursor manager is used to record the maximum presisted timetick of vchannel.
 	metrics               *metricsutil.TimeTickMetrics
 }
 
@@ -68,9 +70,22 @@ func (impl *timeTickSyncOperator) WriteAheadBuffer(ctx context.Context) (wab.ROW
 	case <-impl.ready:
 	}
 	if impl.writeAheadBuffer == nil {
-		panic("unreachable write ahead buffer is not ready")
+		panic("unreachable: write ahead buffer is not ready")
 	}
 	return impl.writeAheadBuffer, nil
+}
+
+// MVCCManager returns the mvcc manager.
+func (impl *timeTickSyncOperator) MVCCManager(ctx context.Context) (*mvcc.MVCCManager, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-impl.ready:
+	}
+	if impl.mvccManager == nil {
+		panic("unreachable: mvcc manager is not ready")
+	}
+	return impl.mvccManager, nil
 }
 
 // Channel returns the pchannel info.
@@ -175,6 +190,7 @@ func (impl *timeTickSyncOperator) blockUntilSyncTimeTickReady() error {
 			keepalive,
 			msg.IntoImmutableMessage(msgID),
 		)
+		impl.mvccManager = mvcc.NewMVCCManager(ts)
 		break
 	}
 	// interceptor is ready now.

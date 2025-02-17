@@ -359,18 +359,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	log.Debug("Validate partition names.")
 
 	// fetch search_growing from query param
-	var ignoreGrowing bool
-	for i, kv := range t.request.GetQueryParams() {
-		if kv.GetKey() == IgnoreGrowingKey {
-			ignoreGrowing, err = strconv.ParseBool(kv.Value)
-			if err != nil {
-				return errors.New("parse search growing failed")
-			}
-			t.request.QueryParams = append(t.request.GetQueryParams()[:i], t.request.GetQueryParams()[i+1:]...)
-			break
-		}
+	if t.RetrieveRequest.IgnoreGrowing, err = isIgnoreGrowing(t.request.GetQueryParams()); err != nil {
+		return err
 	}
-	t.RetrieveRequest.IgnoreGrowing = ignoreGrowing
 
 	queryParams, err := parseQueryParams(t.request.GetQueryParams())
 	if err != nil {
@@ -463,6 +454,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	guaranteeTs := t.request.GetGuaranteeTimestamp()
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
+	t.RetrieveRequest.ConsistencyLevel = t.request.GetConsistencyLevel()
 	if useDefaultConsistency {
 		consistencyLevel = collectionInfo.consistencyLevel
 		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
@@ -482,6 +474,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
 		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
 	}
+	t.RetrieveRequest.IsIterator = queryParams.isIterator
 
 	deadline, ok := t.TraceCtx().Deadline()
 	if ok {
