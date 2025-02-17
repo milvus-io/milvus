@@ -558,7 +558,7 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 	}
 }
 
-func randomSampleExpr(expr *ExprWithType) bool {
+func isRandomSampleExpr(expr *ExprWithType) bool {
 	return expr.expr.GetRandomSampleExpr() != nil
 }
 
@@ -899,7 +899,7 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 	if childExpr == nil {
 		return fmt.Errorf("failed to parse unary expressions")
 	}
-	if randomSampleExpr(childExpr) {
+	if isRandomSampleExpr(childExpr) {
 		return fmt.Errorf("random sample expression cannot be used in unary expression")
 	}
 
@@ -957,7 +957,7 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 	var rightExpr *ExprWithType
 	leftExpr = getExpr(left)
 	rightExpr = getExpr(right)
-	if randomSampleExpr(leftExpr) || randomSampleExpr(rightExpr) {
+	if isRandomSampleExpr(leftExpr) || isRandomSampleExpr(rightExpr) {
 		return fmt.Errorf("random sample expression cannot be used in logical and expression")
 	}
 
@@ -1009,7 +1009,7 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 	var rightExpr *ExprWithType
 	leftExpr = getExpr(left)
 	rightExpr = getExpr(right)
-	if randomSampleExpr(leftExpr) {
+	if isRandomSampleExpr(leftExpr) {
 		return fmt.Errorf("random sample expression can only be the last expression in the logical and expression")
 	}
 
@@ -1018,7 +1018,7 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 	}
 
 	var expr *planpb.Expr
-	if randomSampleExpr(rightExpr) {
+	if isRandomSampleExpr(rightExpr) {
 		randomSampleExpr := rightExpr.expr.GetRandomSampleExpr()
 		randomSampleExpr.Predicate = leftExpr.expr
 		expr = &planpb.Expr{
