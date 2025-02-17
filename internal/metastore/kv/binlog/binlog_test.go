@@ -17,6 +17,7 @@
 package binlog
 
 import (
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -215,6 +216,7 @@ func TestBinlog_Compress(t *testing.T) {
 	DecompressBinLogs(unmarshaledSegmentInfoCompressed)
 
 	assert.Equal(t, len(unmarshaledSegmentInfo.GetBinlogs()), len(unmarshaledSegmentInfoCompressed.GetBinlogs()))
+	fmt.Println(unmarshaledSegmentInfoCompressed)
 	for i := 0; i < 10; i++ {
 		assert.Equal(t, unmarshaledSegmentInfo.GetBinlogs()[0].Binlogs[i].LogPath, unmarshaledSegmentInfoCompressed.GetBinlogs()[0].Binlogs[i].LogPath)
 	}

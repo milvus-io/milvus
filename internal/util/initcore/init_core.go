@@ -24,6 +24,7 @@ package initcore
 #include "common/init_c.h"
 #include "segcore/segcore_init_c.h"
 #include "storage/storage_c.h"
+#include "segcore/arrow_fs_c.h"
 */
 import "C"
 
@@ -124,6 +125,54 @@ func callWithTimeout(fn func(), timeoutHandler func(), timeout time.Duration) {
 	} else {
 		fn()
 	}
+}
+
+func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
+	if params.CommonCfg.StorageType.GetValue() == "local" {
+		return InitLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue())
+	}
+	return InitRemoteArrowFileSystem(params)
+}
+
+func InitLocalArrowFileSystem(path string) error {
+	CLocalRootPath := C.CString(path)
+	defer C.free(unsafe.Pointer(CLocalRootPath))
+	status := C.InitLocalArrowFileSystemSingleton(CLocalRootPath)
+	return HandleCStatus(&status, "InitLocalArrowFileSystemSingleton failed")
+}
+
+func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
+	// cAddress := C.CString("oss-cn-hangzhou.aliyuncs.com")
+	cAddress := C.CString(params.MinioCfg.Address.GetValue())
+	cBucketName := C.CString(params.MinioCfg.BucketName.GetValue())
+	cAccessKey := C.CString(params.MinioCfg.AccessKeyID.GetValue())
+	cAccessValue := C.CString(params.MinioCfg.SecretAccessKey.GetValue())
+	cRootPath := C.CString(params.MinioCfg.RootPath.GetValue())
+	cStorageType := C.CString(params.CommonCfg.StorageType.GetValue())
+	cCloudProvider := C.CString(params.MinioCfg.CloudProvider.GetValue())
+	cRegion := C.CString(params.MinioCfg.Region.GetValue())
+
+	defer C.free(unsafe.Pointer(cAddress))
+	defer C.free(unsafe.Pointer(cBucketName))
+	defer C.free(unsafe.Pointer(cAccessKey))
+	defer C.free(unsafe.Pointer(cAccessValue))
+	defer C.free(unsafe.Pointer(cRootPath))
+	defer C.free(unsafe.Pointer(cStorageType))
+	defer C.free(unsafe.Pointer(cRegion))
+	defer C.free(unsafe.Pointer(cCloudProvider))
+	storageConfig := C.CStorageConfig{
+		address:                cAddress,
+		bucket_name:            cBucketName,
+		access_key_id:          cAccessKey,
+		access_key_value:       cAccessValue,
+		storage_type:           cStorageType,
+		cloud_provider:         cCloudProvider,
+		region:                 cRegion,
+		use_custom_part_upload: true,
+	}
+
+	status := C.InitRemoteArrowFileSystemSingleton(storageConfig)
+	return HandleCStatus(&status, "InitRemoteArrowFileSystemSingleton failed")
 }
 
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
