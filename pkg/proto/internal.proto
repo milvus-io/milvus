@@ -98,6 +98,7 @@ message SubSearchRequest {
   int64 group_by_field_id = 10;
   int64 group_size = 11;
   int64 field_id = 12;
+  bool ignore_growing = 13;
 }
 
 message SearchRequest {
@@ -129,6 +130,7 @@ message SearchRequest {
   int64 field_id = 25;
   bool is_topk_reduce = 26;
   bool is_recall_evaluation = 27;
+  bool is_iterator = 28;
 }
 
 message SubSearchResults {
@@ -193,6 +195,8 @@ message RetrieveRequest {
   string username = 15;
   bool reduce_stop_for_best = 16; //deprecated
   int32 reduce_type = 17;
+  common.ConsistencyLevel consistency_level = 18;
+  bool is_iterator = 19;
 }
 
 

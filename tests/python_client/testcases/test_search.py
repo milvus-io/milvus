@@ -4894,7 +4894,9 @@ class TestCollectionSearch(TestcaseBase):
         binary_schema = cf.gen_default_binary_collection_schema(dim=dim)
         self.init_collection_wrap(c_name, schema=binary_schema,
                                   check_task=CheckTasks.err_res,
-                                  check_items={"err_code": 999, "err_msg": f"invalid dimension: {dim}."})
+                                  check_items={"err_code": 999,
+                                               "err_msg": f"invalid dimension: {dim} of field "
+                                                          f"{ct.default_binary_vec_field_name}. "})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="issue #37547")

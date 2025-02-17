@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
@@ -43,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -349,6 +351,14 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
 
+	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
+		ctx,
+		req.Req.GetConsistencyLevel(),
+		req.Req.GetGuaranteeTimestamp(),
+		req.Req.GetMvccTimestamp(),
+		req.Req.GetIsIterator(),
+	)
+
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
 	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
@@ -390,13 +400,14 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				Nq:                 subReq.GetNq(),
 				Topk:               subReq.GetTopk(),
 				MetricType:         subReq.GetMetricType(),
-				IgnoreGrowing:      req.GetReq().GetIgnoreGrowing(),
+				IgnoreGrowing:      subReq.GetIgnoreGrowing(),
 				Username:           req.GetReq().GetUsername(),
 				IsAdvanced:         false,
 				GroupByFieldId:     subReq.GetGroupByFieldId(),
 				GroupSize:          subReq.GetGroupSize(),
 				FieldId:            subReq.GetFieldId(),
 				IsTopkReduce:       req.GetReq().GetIsTopkReduce(),
+				IsIterator:         req.GetReq().GetIsIterator(),
 			}
 			future := conc.Go(func() (*internalpb.SearchResults, error) {
 				searchReq := &querypb.SearchRequest{
@@ -456,6 +467,14 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		)
 		return fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
+
+	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
+		ctx,
+		req.Req.GetConsistencyLevel(),
+		req.Req.GetGuaranteeTimestamp(),
+		req.Req.GetMvccTimestamp(),
+		req.Req.GetIsIterator(),
+	)
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
@@ -519,6 +538,14 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		)
 		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
+
+	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
+		ctx,
+		req.Req.GetConsistencyLevel(),
+		req.Req.GetGuaranteeTimestamp(),
+		req.Req.GetMvccTimestamp(),
+		req.Req.GetIsIterator(),
+	)
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
@@ -736,6 +763,28 @@ func executeSubTasks[T any, R interface {
 		results = append(results, result)
 	}
 	return results, nil
+}
+
+// speedupGuranteeTS returns the guarantee timestamp for strong consistency search.
+// TODO: we just make a speedup right now, but in the future, we will make the mvcc and guarantee timestamp same.
+func (sd *shardDelegator) speedupGuranteeTS(
+	ctx context.Context,
+	cl commonpb.ConsistencyLevel,
+	guaranteeTS uint64,
+	mvccTS uint64,
+	isIterator bool,
+) uint64 {
+	// when 1. streaming service is disable,
+	// 2. consistency level is not strong,
+	// 3. cannot speed iterator, because current client of milvus doesn't support shard level mvcc.
+	if !streamingutil.IsStreamingServiceEnabled() || isIterator || cl != commonpb.ConsistencyLevel_Strong || mvccTS != 0 {
+		return guaranteeTS
+	}
+	// use the mvcc timestamp of the wal as the guarantee timestamp to make fast strong consistency search.
+	if mvcc, err := streaming.WAL().GetLatestMVCCTimestampIfLocal(ctx, sd.vchannelName); err == nil && mvcc < guaranteeTS {
+		return mvcc
+	}
+	return guaranteeTS
 }
 
 // waitTSafe returns when tsafe listener notifies a timestamp which meet the guarantee ts.

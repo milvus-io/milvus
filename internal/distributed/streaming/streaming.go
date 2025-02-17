@@ -84,6 +84,10 @@ type WALAccesser interface {
 	// WALName returns the name of the wal.
 	WALName() string
 
+	// GetLatestMVCCTimestampIfLocal gets the latest mvcc timestamp of the vchannel.
+	// If the wal is located at remote, it will return 0, error.
+	GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error)
+
 	// Txn returns a transaction for writing records to one vchannel.
 	// It promises the atomicity written of the messages.
 	// Once the txn is returned, the Commit or Rollback operation must be called once, otherwise resource leak on wal.
