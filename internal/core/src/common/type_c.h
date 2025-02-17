@@ -106,6 +106,7 @@ typedef struct CMmapConfig {
     bool scalar_field_enable_mmap;
     bool vector_index_enable_mmap;
     bool vector_field_enable_mmap;
+    bool scalar_stats_enable_mmap;
 } CMmapConfig;
 
 typedef struct CTraceConfig {

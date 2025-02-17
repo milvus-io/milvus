@@ -35,7 +35,7 @@
 #include "storage/Util.h"
 #include "index/Meta.h"
 #include "index/JsonKeyInvertedIndex.h"
-
+#include "storage/MmapManager.h"
 using namespace milvus;
 CStatus
 CreateIndexV0(enum CDataType dtype,
@@ -269,8 +269,9 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
 
         auto field_schema =
             FieldMeta::ParseFrom(build_index_info->field_schema());
+        auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
         auto index = std::make_unique<index::JsonKeyInvertedIndex>(
-            fileManagerContext, false);
+            fileManagerContext, false, cfg.GetScalarStatsEnableMmap());
         index->Build(config);
         auto create_index_result = index->Upload(config);
         create_index_result->SerializeAt(
@@ -336,10 +337,12 @@ BuildTextIndex(ProtoLayoutInterface result,
 
         auto field_schema =
             FieldMeta::ParseFrom(build_index_info->field_schema());
+        auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
         auto index = std::make_unique<index::TextMatchIndex>(
             fileManagerContext,
             "milvus_tokenizer",
-            field_schema.get_analyzer_params().c_str());
+            field_schema.get_analyzer_params().c_str(),
+            cfg.GetScalarStatsEnableMmap());
         index->Build(config);
         auto create_index_result = index->Upload(config);
         create_index_result->SerializeAt(

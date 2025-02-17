@@ -133,6 +133,7 @@ struct MmapConfig {
     bool scalar_field_enable_mmap;
     bool vector_index_enable_mmap;
     bool vector_field_enable_mmap;
+    bool scalar_stats_enable_mmap;
     bool
     GetEnableGrowingMmap() const {
         return growing_enable_mmap;
@@ -174,6 +175,11 @@ struct MmapConfig {
         this->vector_field_enable_mmap = flag;
     }
 
+    bool
+    GetScalarStatsEnableMmap() const {
+        return scalar_stats_enable_mmap;
+    }
+
     std::string
     GetMmapPath() {
         return mmap_path;
@@ -188,6 +194,8 @@ struct MmapConfig {
            << ", growing_enable_mmap=" << std::boolalpha << growing_enable_mmap
            << ", scalar_index_enable_mmap=" << std::boolalpha
            << scalar_index_enable_mmap
+           << ", scalar_stats_enable_mmap=" << std::boolalpha
+           << scalar_stats_enable_mmap
            << ", scalar_field_enable_mmap=" << std::boolalpha
            << scalar_field_enable_mmap
            << ", vector_index_enable_mmap=" << std::boolalpha

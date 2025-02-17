@@ -875,7 +875,7 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id) {
     std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
     // todo: make this(200) configurable.
     auto index = std::make_unique<index::TextMatchIndex>(
-        200,
+        JSON_INDEX_COMMIT_INTERVAL,
         unique_id.c_str(),
         "milvus_tokenizer",
         field_meta.get_analyzer_params().c_str());

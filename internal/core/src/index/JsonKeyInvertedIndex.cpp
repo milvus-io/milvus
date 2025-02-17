@@ -132,7 +132,7 @@ JsonKeyInvertedIndex::AddJson(const char* json, int64_t offset) {
 }
 
 JsonKeyInvertedIndex::JsonKeyInvertedIndex(
-    const storage::FileManagerContext& ctx, bool is_load)
+    const storage::FileManagerContext& ctx, bool is_load, bool is_mmap)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     schema_ = ctx.fieldDataMeta.field_schema;
@@ -144,6 +144,7 @@ JsonKeyInvertedIndex::JsonKeyInvertedIndex(
         auto prefix = disk_file_manager_->GetLocalJsonKeyIndexPrefix();
         path_ = prefix;
     } else {
+        LOG_INFO("Create JsonKeyInvertedIndex is mmap: {}", is_mmap);
         auto prefix = disk_file_manager_->GetJsonKeyIndexIdentifier();
         path_ = std::string(TMP_JSON_INVERTED_LOG_PREFIX) + prefix;
 
@@ -154,9 +155,9 @@ JsonKeyInvertedIndex::JsonKeyInvertedIndex(
         wrapper_ =
             std::make_shared<TantivyIndexWrapper>(field_name.c_str(),
                                                   d_type_,
-                                                  path_.c_str(),
+                                                  is_mmap ? path_.c_str() : "",
                                                   false,
-                                                  false,
+                                                  is_mmap,
                                                   1,
                                                   JSON_INDEX_MEMORY_BUDGET);
     }
