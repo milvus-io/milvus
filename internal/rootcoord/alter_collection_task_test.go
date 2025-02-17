@@ -349,4 +349,45 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 		coll.Properties = DeleteProperties(coll.Properties, deleteKeys)
 		assert.Empty(t, coll.Properties)
 	})
+
+	t.Run("alter successfully3", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(&model.Collection{CollectionID: int64(1)}, nil)
+		meta.On("AlterCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+		meta.On("ListAliasesByID", mock.Anything).Return([]string{})
+
+		broker := newMockBroker()
+		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
+			return nil
+		}
+
+		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker), withInvalidTsoAllocator())
+
+		task := &alterCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
+				CollectionName: "cn",
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.ConsistencyLevel,
+						Value: "1",
+					},
+				},
+			},
+		}
+
+		err := task.Execute(context.Background())
+		assert.NoError(t, err)
+	})
 }
