@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
@@ -45,13 +44,11 @@ type HelloStreamingSuite struct {
 }
 
 func (s *HelloStreamingSuite) SetupSuite() {
-	streamingutil.SetStreamingServiceEnabled()
 	s.MiniClusterSuite.SetupSuite()
 }
 
 func (s *HelloStreamingSuite) TeardownSuite() {
 	s.MiniClusterSuite.TearDownSuite()
-	streamingutil.UnsetStreamingServiceEnabled()
 }
 
 func (s *HelloStreamingSuite) TestHelloStreaming() {
