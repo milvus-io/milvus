@@ -39,7 +39,8 @@ MemFileManagerImpl::AddFile(const std::string& filename /* unused */) noexcept {
 }
 
 bool
-MemFileManagerImpl::AddFile(const BinarySet& binary_set) {
+MemFileManagerImpl::AddBinarySet(const BinarySet& binary_set,
+                                 const std::string& prefix) {
     std::vector<const uint8_t*> data_slices;
     std::vector<int64_t> slice_sizes;
     std::vector<std::string> slice_names;
@@ -56,11 +57,8 @@ MemFileManagerImpl::AddFile(const BinarySet& binary_set) {
         }
     };
 
-    auto remotePrefix = GetRemoteIndexObjectPrefix();
     int64_t batch_size = 0;
-    for (auto iter = binary_set.binary_map_.begin();
-         iter != binary_set.binary_map_.end();
-         iter++) {
+    for (const auto& iter : binary_set.binary_map_) {
         if (batch_size >= DEFAULT_FIELD_MAX_MEMORY_LIMIT) {
             AddBatchIndexFiles();
             data_slices.clear();
@@ -69,11 +67,11 @@ MemFileManagerImpl::AddFile(const BinarySet& binary_set) {
             batch_size = 0;
         }
 
-        data_slices.emplace_back(iter->second->data.get());
-        slice_sizes.emplace_back(iter->second->size);
-        slice_names.emplace_back(remotePrefix + "/" + iter->first);
-        batch_size += iter->second->size;
-        added_total_mem_size_ += iter->second->size;
+        data_slices.emplace_back(iter.second->data.get());
+        slice_sizes.emplace_back(iter.second->size);
+        slice_names.emplace_back(prefix + "/" + iter.first);
+        batch_size += iter.second->size;
+        added_total_mem_size_ += iter.second->size;
     }
 
     if (data_slices.size() > 0) {
@@ -81,6 +79,16 @@ MemFileManagerImpl::AddFile(const BinarySet& binary_set) {
     }
 
     return true;
+}
+
+bool
+MemFileManagerImpl::AddFile(const BinarySet& binary_set) {
+    return AddBinarySet(binary_set, GetRemoteIndexObjectPrefix());
+}
+
+bool
+MemFileManagerImpl::AddTextLog(const BinarySet& binary_set) {
+    return AddBinarySet(binary_set, GetRemoteTextLogPrefix());
 }
 
 bool
