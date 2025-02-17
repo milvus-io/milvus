@@ -8,7 +8,7 @@ import copy
 import numpy as np
 import requests
 from sklearn import preprocessing
-from pymilvus import DataType
+from pymilvus import MilvusClient, DataType
 from utils.util_log import test_log as log
 from utils.util_k8s import init_k8s_client_config
 
@@ -115,9 +115,9 @@ def get_milvus(host, port, uri=None, handler=None, **kwargs):
         handler = "GRPC"
     try_connect = kwargs.get("try_connect", True)
     if uri is not None:
-        milvus = Milvus(uri=uri, handler=handler, try_connect=try_connect)
+        milvus = MilvusClient(uri=uri, handler=handler, try_connect=try_connect)
     else:
-        milvus = Milvus(host=host, port=port, handler=handler, try_connect=try_connect)
+        milvus = MilvusClient(uri=f"http://{host}:{port}", handler=handler, try_connect=try_connect)
     return milvus
 
 

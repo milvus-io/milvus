@@ -21,6 +21,7 @@ from common.common_params import (
 from utils.util_pymilvus import *
 from common.constants import *
 from pymilvus.exceptions import MilvusException
+from pymilvus import DataType
 
 prefix = "index"
 default_schema = cf.gen_default_collection_schema()
@@ -1288,14 +1289,11 @@ class TestIndexInvalid(TestcaseBase):
         """
         target: test create scalar index on json field
         method: 1.create collection, and create index
-        expected: Raise exception
+        expected: success
         """
         collection_w = self.init_collection_general(prefix, is_index=False, vector_data_type=vector_data_type)[0]
-        scalar_index_params = {"index_type": "INVERTED"}
-        collection_w.create_index(ct.default_json_field_name, index_params=scalar_index_params,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1100,
-                                               ct.err_msg: "INVERTED are not supported on JSON field"})
+        scalar_index_params = {"index_type": "INVERTED", "json_cast_type": DataType.INT32, "json_path": ct.default_json_field_name+"['a']"}
+        collection_w.create_index(ct.default_json_field_name, index_params=scalar_index_params)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_inverted_index_on_array_field(self):
@@ -1481,6 +1479,28 @@ class TestIndexInvalid(TestcaseBase):
         params = {"index_type": index, "metric_type": "IP", "params": {"drop_ratio_build": ratio}}
         error = {ct.err_code: 999,
                  ct.err_msg: f"Out of range in json: param 'drop_ratio_build' ({ratio*1.0}) should be in range [0.000000, 1.000000)"}
+        index, _ = self.index_wrap.init_index(collection_w.collection, ct.default_sparse_vec_field_name, params,
+                                              check_task=CheckTasks.err_res,
+                                              check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("inverted_index_algo", ["INVALID_ALGO"])
+    @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
+    def test_invalid_sparse_inverted_index_algo(self, inverted_index_algo, index):
+        """
+        target: index creation for unsupported ratio parameter
+        method: indexing of unsupported ratio parameters
+        expected: raise exception
+        """
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema()
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        data = cf.gen_default_list_sparse_data()
+        collection_w.insert(data=data)
+        params = {"index_type": index, "metric_type": "IP", "params": {"inverted_index_algo": inverted_index_algo}}
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"sparse inverted index algo {inverted_index_algo} not found or not supported, "
+                             f"supported: [TAAT_NAIVE DAAT_WAND DAAT_MAXSCORE]"}
         index, _ = self.index_wrap.init_index(collection_w.collection, ct.default_sparse_vec_field_name, params,
                                               check_task=CheckTasks.err_res,
                                               check_items=error)

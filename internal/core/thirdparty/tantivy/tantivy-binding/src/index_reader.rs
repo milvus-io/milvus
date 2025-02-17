@@ -73,7 +73,7 @@ impl IndexReaderWrapper {
             Some(_) => {
                 // newer version with doc_id.
                 searcher
-                    .search(q, &DocIdCollector {})
+                    .search(q, &DocIdCollector::<u32>::default())
                     .map_err(TantivyBindingError::TantivyError)
             }
             None => {
@@ -83,6 +83,16 @@ impl IndexReaderWrapper {
                     .map_err(TantivyBindingError::TantivyError)
             }
         }
+    }
+
+    // Generally, we should use [`crate::search`], except for some special senarios where the doc_id could beyound
+    // the score of u32.
+    pub(crate) fn search_i64(&self, q: &dyn Query) -> Result<Vec<i64>> {
+        assert!(self.id_field.is_some());
+        let searcher = self.reader.searcher();
+        searcher
+            .search(q, &DocIdCollector::<i64>::default())
+            .map_err(TantivyBindingError::TantivyError)
     }
 
     pub fn term_query_i64(&self, term: i64) -> Result<Vec<u32>> {
@@ -114,6 +124,28 @@ impl IndexReaderWrapper {
         self.search(&q)
     }
 
+    pub fn lower_bound_range_query_bool(
+        &self,
+        lower_bound: bool,
+        inclusive: bool,
+    ) -> Result<Vec<u32>> {
+        let lower_bound = make_bounds(Term::from_field_bool(self.field, lower_bound), inclusive);
+        let upper_bound = Bound::Unbounded;
+        let q = RangeQuery::new(lower_bound, upper_bound);
+        self.search(&q)
+    }
+
+    pub fn upper_bound_range_query_bool(
+        &self,
+        upper_bound: bool,
+        inclusive: bool,
+    ) -> Result<Vec<u32>> {
+        let lower_bound = Bound::Unbounded;
+        let upper_bound = make_bounds(Term::from_field_bool(self.field, upper_bound), inclusive);
+        let q = RangeQuery::new(lower_bound, upper_bound);
+        self.search(&q)
+    }
+
     pub fn range_query_i64(
         &self,
         lower_bound: i64,
@@ -132,6 +164,19 @@ impl IndexReaderWrapper {
             Term::from_field_f64(self.field, term),
             IndexRecordOption::Basic,
         );
+        self.search(&q)
+    }
+
+    pub fn range_query_bool(
+        &self,
+        lower_bound: bool,
+        upper_bound: bool,
+        lb_inclusive: bool,
+        ub_inclusive: bool,
+    ) -> Result<Vec<u32>> {
+        let lower_bound = make_bounds(Term::from_field_bool(self.field, lower_bound), lb_inclusive);
+        let upper_bound = make_bounds(Term::from_field_bool(self.field, upper_bound), ub_inclusive);
+        let q = RangeQuery::new(lower_bound, upper_bound);
         self.search(&q)
     }
 

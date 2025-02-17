@@ -196,6 +196,33 @@ func (s *Server) ResumeBalance(ctx context.Context, req *querypb.ResumeBalanceRe
 	return merr.Success(), nil
 }
 
+// CheckBalanceStatus checks whether balance is active or suspended
+func (s *Server) CheckBalanceStatus(ctx context.Context, req *querypb.CheckBalanceStatusRequest) (*querypb.CheckBalanceStatusResponse, error) {
+	log := log.Ctx(ctx)
+	log.Info("CheckBalanceStatus request received")
+
+	errMsg := "failed to check balance status"
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn(errMsg, zap.Error(err))
+		return &querypb.CheckBalanceStatusResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	isActive, err := s.checkerController.IsActive(utils.BalanceChecker)
+	if err != nil {
+		log.Warn(errMsg, zap.Error(err))
+		return &querypb.CheckBalanceStatusResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	return &querypb.CheckBalanceStatusResponse{
+		Status:   merr.Success(),
+		IsActive: isActive,
+	}, nil
+}
+
 // suspend node from resource operation, for given node, suspend load_segment/sub_channel operations
 func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)

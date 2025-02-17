@@ -35,6 +35,7 @@ enum MessageType {
     DropPartition    = 8;
     ManualFlush      = 9;
     CreateSegment    = 10;
+    Import           = 11;
     // begin transaction message is only used for transaction, once a begin
     // transaction message is received, all messages combined with the
     // transaction message cannot be consumed until a CommitTxn message
@@ -203,6 +204,8 @@ message RollbackTxnMessageHeader {}
 // TxnMessageHeader is the header of transaction message.
 // Just do nothing now.
 message TxnMessageHeader {}
+
+message ImportMessageHeader {}
 
 ///
 /// Message Extra Response

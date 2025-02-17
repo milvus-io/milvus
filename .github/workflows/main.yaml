@@ -129,7 +129,7 @@ jobs:
           remove-android: 'true'
           remove-haskell: 'true'
       - name: Download code
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.3
         with:
           name: code
       - run: |
@@ -181,7 +181,7 @@ jobs:
           remove-android: 'true'
           remove-haskell: 'true'
       - name: Download code
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.3
         with:
           name: code
       - run: |
@@ -221,7 +221,7 @@ jobs:
     name: Integration Test
     needs: Build
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
@@ -233,7 +233,7 @@ jobs:
           remove-android: 'true'
           remove-haskell: 'true'
       - name: Download code
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.3
         with:
           name: code
       - run: |
@@ -279,11 +279,11 @@ jobs:
         with:
           fetch-depth: 0
       - name: Download Go code coverage results
-        uses: actions/download-artifact@v4.1.0
+        uses: actions/download-artifact@v4.1.3
         with:
           name: go-result
       - name: Download Integration Test coverage results
-        uses: actions/download-artifact@v4.1.0
+        uses: actions/download-artifact@v4.1.3
         with:
           name: it-result
       - name: Display structure of code coverage results

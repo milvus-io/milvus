@@ -173,19 +173,12 @@ func (impl *flusherComponents) recover(ctx context.Context, recoverInfos map[str
 		futures[vchannel] = future
 	}
 	dataServices := make(map[string]*dataSyncServiceWrapper, len(futures))
-	var firstErr error
 	for vchannel, future := range futures {
 		ds, err := future.Await()
-		if err == nil {
-			dataServices[vchannel] = ds.(*dataSyncServiceWrapper)
-			continue
+		if err != nil {
+			return err
 		}
-		if firstErr == nil {
-			firstErr = err
-		}
-	}
-	if firstErr != nil {
-		return firstErr
+		dataServices[vchannel] = ds.(*dataSyncServiceWrapper)
 	}
 	impl.dataServices = dataServices
 	for vchannel, ds := range dataServices {

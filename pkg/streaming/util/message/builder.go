@@ -60,6 +60,7 @@ var (
 	NewDropCollectionMessageBuilderV1   = createNewMessageBuilderV1[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]()
 	NewCreatePartitionMessageBuilderV1  = createNewMessageBuilderV1[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]()
 	NewDropPartitionMessageBuilderV1    = createNewMessageBuilderV1[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]()
+	NewImportMessageBuilderV1           = createNewMessageBuilderV1[*ImportMessageHeader, *msgpb.ImportMsg]()
 	NewCreateSegmentMessageBuilderV2    = createNewMessageBuilderV2[*CreateSegmentMessageHeader, *CreateSegmentMessageBody]()
 	NewFlushMessageBuilderV2            = createNewMessageBuilderV2[*FlushMessageHeader, *FlushMessageBody]()
 	NewManualFlushMessageBuilderV2      = createNewMessageBuilderV2[*ManualFlushMessageHeader, *ManualFlushMessageBody]()
@@ -294,16 +295,16 @@ func newImmutableTxnMesasgeFromWAL(
 		return nil, err
 	}
 	// we don't need to modify the begin message's timetick, but set all the timetick of body messages.
-	for _, m := range body {
-		m.(*immutableMessageImpl).overwriteTimeTick(commit.TimeTick())
-		m.(*immutableMessageImpl).overwriteLastConfirmedMessageID(commit.LastConfirmedMessageID())
+	for idx, m := range body {
+		body[idx] = m.(*immutableMessageImpl).cloneForTxnBody(commit.TimeTick(), commit.LastConfirmedMessageID())
 	}
-	immutableMsg := msg.WithTimeTick(commit.TimeTick()).
+
+	immutableMessage := msg.WithTimeTick(commit.TimeTick()).
 		WithLastConfirmed(commit.LastConfirmedMessageID()).
 		WithTxnContext(*commit.TxnContext()).
 		IntoImmutableMessage(commit.MessageID())
 	return &immutableTxnMessageImpl{
-		immutableMessageImpl: *immutableMsg.(*immutableMessageImpl),
+		immutableMessageImpl: *immutableMessage.(*immutableMessageImpl),
 		begin:                begin,
 		messages:             body,
 		commit:               commit,

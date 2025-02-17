@@ -17,6 +17,9 @@
 #include "UnaryExpr.h"
 #include <optional>
 #include "common/Json.h"
+#include "common/Types.h"
+#include "common/type_c.h"
+#include "log/Log.h"
 
 namespace milvus {
 namespace exec {
@@ -191,26 +194,50 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             auto val_type = expr_->val_.val_case();
-            switch (val_type) {
-                case proto::plan::GenericValue::ValCase::kBoolVal:
-                    result = ExecRangeVisitorImplJson<bool>(input);
-                    break;
-                case proto::plan::GenericValue::ValCase::kInt64Val:
-                    result = ExecRangeVisitorImplJson<int64_t>(input);
-                    break;
-                case proto::plan::GenericValue::ValCase::kFloatVal:
-                    result = ExecRangeVisitorImplJson<double>(input);
-                    break;
-                case proto::plan::GenericValue::ValCase::kStringVal:
-                    result = ExecRangeVisitorImplJson<std::string>(input);
-                    break;
-                case proto::plan::GenericValue::ValCase::kArrayVal:
-                    result =
-                        ExecRangeVisitorImplJson<proto::plan::Array>(input);
-                    break;
-                default:
-                    PanicInfo(
-                        DataTypeInvalid, "unknown data type: {}", val_type);
+            if (CanUseIndexForJson() && !has_offset_input_) {
+                switch (val_type) {
+                    case proto::plan::GenericValue::ValCase::kBoolVal:
+                        result = ExecRangeVisitorImplForIndex<bool>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kInt64Val:
+                        result = ExecRangeVisitorImplForIndex<int64_t>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kFloatVal:
+                        result = ExecRangeVisitorImplForIndex<double>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kStringVal:
+                        result = ExecRangeVisitorImplForIndex<std::string>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kArrayVal:
+                        result =
+                            ExecRangeVisitorImplForIndex<proto::plan::Array>();
+                        break;
+                    default:
+                        PanicInfo(
+                            DataTypeInvalid, "unknown data type: {}", val_type);
+                }
+            } else {
+                switch (val_type) {
+                    case proto::plan::GenericValue::ValCase::kBoolVal:
+                        result = ExecRangeVisitorImplJson<bool>(input);
+                        break;
+                    case proto::plan::GenericValue::ValCase::kInt64Val:
+                        result = ExecRangeVisitorImplJson<int64_t>(input);
+                        break;
+                    case proto::plan::GenericValue::ValCase::kFloatVal:
+                        result = ExecRangeVisitorImplJson<double>(input);
+                        break;
+                    case proto::plan::GenericValue::ValCase::kStringVal:
+                        result = ExecRangeVisitorImplJson<std::string>(input);
+                        break;
+                    case proto::plan::GenericValue::ValCase::kArrayVal:
+                        result =
+                            ExecRangeVisitorImplJson<proto::plan::Array>(input);
+                        break;
+                    default:
+                        PanicInfo(
+                            DataTypeInvalid, "unknown data type: {}", val_type);
+                }
             }
             break;
         }
@@ -270,7 +297,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     valid_res.set();
 
-    ValueType val = GetValueFromProto<ValueType>(expr_->val_);
+    if (!arg_inited_) {
+        value_arg_.SetValue<ValueType>(expr_->val_);
+        arg_inited_ = true;
+    }
+    ValueType val = value_arg_.GetValue<ValueType>();
     auto op_type = expr_->op_type_;
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
@@ -479,7 +510,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(bool reverse) {
                 };
             } else {
                 auto size_per_chunk = segment_->size_per_chunk();
-                retrieve = [ size_per_chunk, this ](int64_t offset) -> auto {
+                retrieve = [ size_per_chunk, this ](int64_t offset) -> auto{
                     auto chunk_idx = offset / size_per_chunk;
                     auto chunk_offset = offset % size_per_chunk;
                     const auto& chunk =
@@ -559,7 +590,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
         return nullptr;
     }
 
-    ExprValueType val = GetValueFromProto<ExprValueType>(expr_->val_);
+    if (!arg_inited_) {
+        value_arg_.SetValue<ExprValueType>(expr_->val_);
+        arg_inited_ = true;
+    }
+
+    ExprValueType val = value_arg_.GetValue<ExprValueType>();
     auto res_vec = std::make_shared<ColumnVector>(
         TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
@@ -820,6 +856,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
+    if (!arg_inited_) {
+        value_arg_.SetValue<IndexInnerType>(expr_->val_);
+        arg_inited_ = true;
+    }
     if (auto res = PreCheckOverflow<T>()) {
         return res;
     }
@@ -880,7 +920,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         }
         return res;
     };
-    auto val = GetValueFromProto<IndexInnerType>(expr_->val_);
+    IndexInnerType val = value_arg_.GetValue<IndexInnerType>();
     auto res = ProcessIndexChunks<T>(execute_sub_batch, val);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -969,6 +1009,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(OffsetVector* input) {
         return nullptr;
     }
 
+    if (!arg_inited_) {
+        value_arg_.SetValue<IndexInnerType>(expr_->val_);
+        arg_inited_ = true;
+    }
     IndexInnerType val = GetValueFromProto<IndexInnerType>(expr_->val_);
     auto res_vec = std::make_shared<ColumnVector>(
         TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
@@ -1086,10 +1130,22 @@ PhyUnaryRangeFilterExpr::CanUseIndex() {
     return res;
 }
 
+bool
+PhyUnaryRangeFilterExpr::CanUseIndexForJson() {
+    use_index_ = segment_->HasIndex(
+        field_id_, milvus::Json::pointer(expr_->column_.nested_path_));
+    return use_index_;
+}
+
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecTextMatch() {
     using Index = index::TextMatchIndex;
-    auto query = GetValueFromProto<std::string>(expr_->val_);
+    if (!arg_inited_) {
+        value_arg_.SetValue<std::string>(expr_->val_);
+        arg_inited_ = true;
+    }
+    auto query = value_arg_.GetValue<std::string>();
+
     int64_t slop = 0;
     if (expr_->op_type_ == proto::plan::PhraseMatch) {
         // It should be larger than 0 in normal cases. Check it incase of receiving old version proto.

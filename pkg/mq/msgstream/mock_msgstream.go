@@ -168,19 +168,19 @@ func (_c *MockMsgStream_Broadcast_Call) RunAndReturn(run func(context.Context, *
 }
 
 // Chan provides a mock function with given fields:
-func (_m *MockMsgStream) Chan() <-chan *MsgPack {
+func (_m *MockMsgStream) Chan() <-chan *ConsumeMsgPack {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for Chan")
 	}
 
-	var r0 <-chan *MsgPack
-	if rf, ok := ret.Get(0).(func() <-chan *MsgPack); ok {
+	var r0 <-chan *ConsumeMsgPack
+	if rf, ok := ret.Get(0).(func() <-chan *ConsumeMsgPack); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(<-chan *MsgPack)
+			r0 = ret.Get(0).(<-chan *ConsumeMsgPack)
 		}
 	}
 
@@ -204,12 +204,12 @@ func (_c *MockMsgStream_Chan_Call) Run(run func()) *MockMsgStream_Chan_Call {
 	return _c
 }
 
-func (_c *MockMsgStream_Chan_Call) Return(_a0 <-chan *MsgPack) *MockMsgStream_Chan_Call {
+func (_c *MockMsgStream_Chan_Call) Return(_a0 <-chan *ConsumeMsgPack) *MockMsgStream_Chan_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockMsgStream_Chan_Call) RunAndReturn(run func() <-chan *MsgPack) *MockMsgStream_Chan_Call {
+func (_c *MockMsgStream_Chan_Call) RunAndReturn(run func() <-chan *ConsumeMsgPack) *MockMsgStream_Chan_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -426,6 +426,53 @@ func (_c *MockMsgStream_GetProduceChannels_Call) Return(_a0 []string) *MockMsgSt
 }
 
 func (_c *MockMsgStream_GetProduceChannels_Call) RunAndReturn(run func() []string) *MockMsgStream_GetProduceChannels_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetUnmarshalDispatcher provides a mock function with given fields:
+func (_m *MockMsgStream) GetUnmarshalDispatcher() UnmarshalDispatcher {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetUnmarshalDispatcher")
+	}
+
+	var r0 UnmarshalDispatcher
+	if rf, ok := ret.Get(0).(func() UnmarshalDispatcher); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(UnmarshalDispatcher)
+		}
+	}
+
+	return r0
+}
+
+// MockMsgStream_GetUnmarshalDispatcher_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetUnmarshalDispatcher'
+type MockMsgStream_GetUnmarshalDispatcher_Call struct {
+	*mock.Call
+}
+
+// GetUnmarshalDispatcher is a helper method to define mock.On call
+func (_e *MockMsgStream_Expecter) GetUnmarshalDispatcher() *MockMsgStream_GetUnmarshalDispatcher_Call {
+	return &MockMsgStream_GetUnmarshalDispatcher_Call{Call: _e.mock.On("GetUnmarshalDispatcher")}
+}
+
+func (_c *MockMsgStream_GetUnmarshalDispatcher_Call) Run(run func()) *MockMsgStream_GetUnmarshalDispatcher_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockMsgStream_GetUnmarshalDispatcher_Call) Return(_a0 UnmarshalDispatcher) *MockMsgStream_GetUnmarshalDispatcher_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMsgStream_GetUnmarshalDispatcher_Call) RunAndReturn(run func() UnmarshalDispatcher) *MockMsgStream_GetUnmarshalDispatcher_Call {
 	_c.Call.Return(run)
 	return _c
 }

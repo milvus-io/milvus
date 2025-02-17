@@ -28,8 +28,9 @@ func TestDetail(t *testing.T) {
 	OptError(errors.New("test"))(ackDetail)
 	assert.Error(t, ackDetail.Err)
 
-	OptMessageID(walimplstest.NewTestMessageID(1))(ackDetail)
-	assert.NotNil(t, ackDetail.MessageID)
+	msg := mock_message.NewMockImmutableMessage(t)
+	OptImmutableMessage(msg)(ackDetail)
+	assert.NotNil(t, ackDetail.Message)
 
 	OptTxnSession(&txn.TxnSession{})(ackDetail)
 	assert.NotNil(t, ackDetail.TxnSession)

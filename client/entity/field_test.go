@@ -29,7 +29,7 @@ func TestFieldSchema(t *testing.T) {
 		NewField().WithName("partition_key").WithDataType(FieldTypeInt32).WithIsPartitionKey(true),
 		NewField().WithName("array_field").WithDataType(FieldTypeArray).WithElementType(FieldTypeBool).WithMaxCapacity(128),
 		NewField().WithName("clustering_key").WithDataType(FieldTypeInt32).WithIsClusteringKey(true),
-		NewField().WithName("varchar_text").WithDataType(FieldTypeVarChar).WithMaxLength(65535).WithEnableAnalyzer(true).WithAnalyzerParams(map[string]any{}),
+		NewField().WithName("varchar_text").WithDataType(FieldTypeVarChar).WithMaxLength(65535).WithEnableAnalyzer(true).WithAnalyzerParams(map[string]any{}).WithEnableMatch(true),
 
 		NewField().WithName("default_value_bool").WithDataType(FieldTypeBool).WithDefaultValueBool(true),
 		NewField().WithName("default_value_int").WithDataType(FieldTypeInt32).WithDefaultValueInt(1),
