@@ -1270,7 +1270,6 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("batch_size", [10, 1000])
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/39752")
     def test_bitmap_index_search_iterator(self, batch_size):
         """
         target:
