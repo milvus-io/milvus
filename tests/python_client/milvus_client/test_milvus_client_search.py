@@ -247,39 +247,54 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        pk_name = 'pk_varchar'
+        schema.add_field(pk_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
         self.describe_collection(client, collection_name,
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
+                                              "dim": default_dim, "primary_field": pk_name,
                                               "consistency_level": 0})
         old_name = collection_name
         new_name = collection_name + "new"
         self.rename_collection(client, old_name, new_name)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [{pk_name: str(i),
+                 default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_string_field_name: str(i),
+                 default_float_field_name: i*1.0
+                 } for i in range(default_nb)]
         self.insert(client, new_name, rows)
         self.flush(client, new_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_index(client, new_name, index_params=index_params)
+        self.load_collection(client, new_name)
         # assert self.num_entities(client, collection_name)[0] == default_nb
         # 3. search
         vectors_to_search = rng.random((1, default_dim))
-        insert_ids = [i for i in range(default_nb)]
+        insert_ids = [str(i) for i in range(default_nb)]
         self.search(client, new_name, vectors_to_search,
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
+                                 "ids": insert_ids, "primary_field": pk_name,
                                  "limit": default_limit})
         # 4. query
-        self.query(client, new_name, filter=default_search_exp,
+        filter = f"{default_float_field_name} >= 0"
+        self.query(client, new_name, filter=filter,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "primary_field": pk_name})
         self.release_collection(client, new_name)
         self.drop_collection(client, new_name)
 

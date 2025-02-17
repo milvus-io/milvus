@@ -281,6 +281,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                                   "params": {"ef": "96"}},
                                                                    check_task=CheckTasks.check_search_results,
                                                                    check_items={"enable_milvus_client_api": True,
+                                                                                "primary_field": ct.default_string_field_name,
                                                                                 "nq": ct.default_nq,
                                                                                 "limit": ct.default_limit})
         tasks.append(default_search_task)
@@ -307,6 +308,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                                 check_task=CheckTasks.check_search_results,
                                                                                 check_items={
                                                                                     "enable_milvus_client_api": True,
+                                                                                    "primary_field": ct.default_string_field_name,
                                                                                     "nq": ct.default_nq,
                                                                                     "limit": 5})
         tasks.append(filter_params_search_task)
