@@ -151,7 +151,6 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 				return isFlush(info) && (!Params.DataCoordCfg.EnableStatsTask.GetAsBool() || info.GetIsSorted())
 			}))
 
-			log.Info("create index for segments", zap.Int64("collectionID", collectionID), zap.Int("num", len(segments)))
 			for _, segment := range segments {
 				if err := s.createIndexesForSegment(ctx, segment); err != nil {
 					log.Warn("create index for segment fail, wait for retry", zap.Int64("segmentID", segment.ID))
