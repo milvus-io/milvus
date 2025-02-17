@@ -17,7 +17,7 @@ package manifest
 import (
 	"fmt"
 
-	"github.com/apache/arrow/go/v12/arrow"
+	"github.com/apache/arrow/go/v17/arrow"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/storagev2/common/log"

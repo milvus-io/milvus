@@ -17,10 +17,10 @@ package arrowutil
 import (
 	"context"
 
-	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/arrow/memory"
-	"github.com/apache/arrow/go/v12/parquet/file"
-	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/parquet/file"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 
 	"github.com/milvus-io/milvus/internal/storagev2/common/constant"
 	"github.com/milvus-io/milvus/internal/storagev2/io/fs"

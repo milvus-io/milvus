@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/apache/arrow/go/v12/parquet/file"
+	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"

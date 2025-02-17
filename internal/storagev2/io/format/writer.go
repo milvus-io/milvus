@@ -14,7 +14,7 @@
 
 package format
 
-import "github.com/apache/arrow/go/v12/arrow"
+import "github.com/apache/arrow/go/v17/arrow"
 
 type Writer interface {
 	Write(record arrow.Record) error

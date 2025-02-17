@@ -15,8 +15,8 @@
 package filter
 
 import (
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/parquet/metadata"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/parquet/metadata"
 	"github.com/bits-and-blooms/bitset"
 )
 

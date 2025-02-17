@@ -15,8 +15,8 @@
 package commonreader
 
 import (
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
 
 	"github.com/milvus-io/milvus/internal/storagev2/common/utils"
 	"github.com/milvus-io/milvus/internal/storagev2/storage/options"

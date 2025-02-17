@@ -18,8 +18,8 @@ import (
 	"io"
 	"sync/atomic"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storagev2/common/log"

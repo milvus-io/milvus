@@ -20,8 +20,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/endian"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/endian"
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 

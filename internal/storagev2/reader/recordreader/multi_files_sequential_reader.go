@@ -17,9 +17,9 @@ package recordreader
 import (
 	"sync/atomic"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 
 	"github.com/milvus-io/milvus/internal/storagev2/common/arrowutil"
 	"github.com/milvus-io/milvus/internal/storagev2/file/fragment"

@@ -17,12 +17,12 @@ package parquet
 import (
 	"context"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/arrow/memory"
-	"github.com/apache/arrow/go/v12/parquet/file"
-	"github.com/apache/arrow/go/v12/parquet/metadata"
-	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/parquet/file"
+	"github.com/apache/arrow/go/v17/parquet/metadata"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/bits-and-blooms/bitset"
 
 	"github.com/milvus-io/milvus/internal/storagev2/common/constant"
