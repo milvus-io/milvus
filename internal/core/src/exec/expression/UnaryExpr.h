@@ -24,6 +24,7 @@
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/Element.h"
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
 #include "segcore/SegmentInterface.h"
@@ -393,6 +394,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;
     int64_t overflow_check_pos_{0};
+    bool arg_inited_{false};
+    SingleElement value_arg_;
 };
 }  // namespace exec
 }  // namespace milvus
