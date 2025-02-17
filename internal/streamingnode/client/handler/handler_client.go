@@ -28,8 +28,9 @@ import (
 )
 
 var (
-	_               HandlerClient = (*handlerClientImpl)(nil)
-	ErrClientClosed               = errors.New("handler client is closed")
+	_                           HandlerClient = (*handlerClientImpl)(nil)
+	ErrClientClosed                           = errors.New("handler client is closed")
+	ErrClientAssignmentNotReady               = errors.New("handler client assignment not ready")
 )
 
 type (
@@ -65,6 +66,10 @@ type ConsumerOptions struct {
 // HandlerClient wraps the PChannel Assignment Service Discovery.
 // Provides the ability to create pchannel-level producer and consumer.
 type HandlerClient interface {
+	// GetLatestMVCCTimestampIfLocal gets the latest mvcc timestamp of the vchannel.
+	// If the wal is located at remote, it will return 0, error.
+	GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error)
+
 	// CreateProducer creates a producer.
 	// Producer is a stream client without keep alive promise.
 	// It will be available until context canceled, active close, streaming error or remote server wal closing.
