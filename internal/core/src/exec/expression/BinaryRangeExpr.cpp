@@ -143,9 +143,14 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
                                            OffsetVector* input) {
     lower_inclusive = expr_->lower_inclusive_;
     upper_inclusive = expr_->upper_inclusive_;
-    val1 = GetValueFromProto<HighPrecisionType>(expr_->lower_val_);
-    val2 = GetValueFromProto<HighPrecisionType>(expr_->upper_val_);
 
+    if (!arg_inited_) {
+        lower_arg_.SetValue<HighPrecisionType>(expr_->lower_val_);
+        upper_arg_.SetValue<HighPrecisionType>(expr_->upper_val_);
+        arg_inited_ = true;
+    }
+    val1 = lower_arg_.GetValue<HighPrecisionType>();
+    val2 = upper_arg_.GetValue<HighPrecisionType>();
     auto get_next_overflow_batch =
         [this](OffsetVector* input) -> ColumnVectorPtr {
         int64_t batch_size;
@@ -358,8 +363,13 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(OffsetVector* input) {
 
     bool lower_inclusive = expr_->lower_inclusive_;
     bool upper_inclusive = expr_->upper_inclusive_;
-    ValueType val1 = GetValueFromProto<ValueType>(expr_->lower_val_);
-    ValueType val2 = GetValueFromProto<ValueType>(expr_->upper_val_);
+    if (!arg_inited_) {
+        lower_arg_.SetValue<ValueType>(expr_->lower_val_);
+        upper_arg_.SetValue<ValueType>(expr_->upper_val_);
+        arg_inited_ = true;
+    }
+    ValueType val1 = lower_arg_.GetValue<ValueType>();
+    ValueType val2 = upper_arg_.GetValue<ValueType>();
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
     auto execute_sub_batch =
@@ -464,8 +474,15 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(OffsetVector* input) {
 
     bool lower_inclusive = expr_->lower_inclusive_;
     bool upper_inclusive = expr_->upper_inclusive_;
-    ValueType val1 = GetValueFromProto<ValueType>(expr_->lower_val_);
-    ValueType val2 = GetValueFromProto<ValueType>(expr_->upper_val_);
+
+    if (!arg_inited_) {
+        lower_arg_.SetValue<ValueType>(expr_->lower_val_);
+        upper_arg_.SetValue<ValueType>(expr_->upper_val_);
+        arg_inited_ = true;
+    }
+    ValueType val1 = lower_arg_.GetValue<ValueType>();
+    ValueType val2 = upper_arg_.GetValue<ValueType>();
+
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
         index = std::stoi(expr_->column_.nested_path_[0]);

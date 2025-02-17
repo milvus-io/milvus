@@ -24,6 +24,7 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -131,7 +132,7 @@ func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
 	outputStream := getKafkaOutputStream(ctx, kafkaAddress, consumerChannels, consumerSubName, common.SubscriptionPositionEarliest)
 	for i := 0; i < 10; i++ {
 		result := consumer(ctx, outputStream)
-		assert.Equal(t, result.Msgs[0].ID(), int64(i))
+		assert.Equal(t, result.Msgs[0].GetID(), int64(i))
 		if i == 5 {
 			seekPosition = result.EndPositions[0]
 			break
@@ -162,11 +163,11 @@ func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
 
 			assert.Equal(t, 1, len(msgPack.Msgs))
 			for _, tsMsg := range msgPack.Msgs {
-				assert.Equal(t, value, tsMsg.ID())
+				assert.Equal(t, value, tsMsg.GetID())
 				value++
 				cnt++
 
-				ret, err := lastMsgID.LessOrEqualThan(tsMsg.Position().MsgID)
+				ret, err := lastMsgID.LessOrEqualThan(tsMsg.GetPosition().MsgID)
 				assert.NoError(t, err)
 				if ret {
 					hasMore = false
@@ -272,20 +273,26 @@ func TestStream_KafkaTtMsgStream_Seek(t *testing.T) {
 	assert.Equal(t, len(seekMsg.Msgs), 3)
 	result := []uint64{14, 12, 13}
 	for i, msg := range seekMsg.Msgs {
-		assert.Equal(t, msg.BeginTs(), result[i])
+		tsMsg, err := msg.Unmarshal(outputStream.GetUnmarshalDispatcher())
+		require.NoError(t, err)
+		assert.Equal(t, tsMsg.BeginTs(), result[i])
 	}
 
 	seekMsg2 := consumer(ctx, outputStream)
 	assert.Equal(t, len(seekMsg2.Msgs), 1)
 	for _, msg := range seekMsg2.Msgs {
-		assert.Equal(t, msg.BeginTs(), uint64(19))
+		tsMsg, err := msg.Unmarshal(outputStream.GetUnmarshalDispatcher())
+		require.NoError(t, err)
+		assert.Equal(t, tsMsg.BeginTs(), uint64(19))
 	}
 
 	outputStream2 := getKafkaTtOutputStreamAndSeek(ctx, kafkaAddress, receivedMsg3.EndPositions)
 	seekMsg = consumer(ctx, outputStream2)
 	assert.Equal(t, len(seekMsg.Msgs), 1)
 	for _, msg := range seekMsg.Msgs {
-		assert.Equal(t, msg.BeginTs(), uint64(19))
+		tsMsg, err := msg.Unmarshal(outputStream.GetUnmarshalDispatcher())
+		require.NoError(t, err)
+		assert.Equal(t, tsMsg.BeginTs(), uint64(19))
 	}
 
 	inputStream.Close()
@@ -320,9 +327,11 @@ func TestStream_KafkaTtMsgStream_1(t *testing.T) {
 			rcvMsg += len(msgPack.Msgs)
 			if len(msgPack.Msgs) > 0 {
 				for _, msg := range msgPack.Msgs {
-					log.Println("msg type: ", msg.Type(), ", msg value: ", msg)
-					assert.Greater(t, msg.BeginTs(), msgPack.BeginTs)
-					assert.LessOrEqual(t, msg.BeginTs(), msgPack.EndTs)
+					tsMsg, err := msg.Unmarshal(outputStream.GetUnmarshalDispatcher())
+					require.NoError(t, err)
+					log.Println("msg type: ", tsMsg.Type(), ", msg value: ", msg)
+					assert.Greater(t, tsMsg.BeginTs(), msgPack.BeginTs)
+					assert.LessOrEqual(t, tsMsg.BeginTs(), msgPack.EndTs)
 				}
 			}
 		}
@@ -361,7 +370,7 @@ func TestStream_KafkaTtMsgStream_2(t *testing.T) {
 
 	// consume msg
 	log.Println("=============receive msg===================")
-	rcvMsgPacks := make([]*MsgPack, 0)
+	rcvMsgPacks := make([]*ConsumeMsgPack, 0)
 
 	resumeMsgPack := func(t *testing.T) int {
 		var outputStream MsgStream
@@ -376,9 +385,11 @@ func TestStream_KafkaTtMsgStream_2(t *testing.T) {
 		rcvMsgPacks = append(rcvMsgPacks, msgPack)
 		if len(msgPack.Msgs) > 0 {
 			for _, msg := range msgPack.Msgs {
-				log.Println("TestStream_KafkaTtMsgStream_2 msg type: ", msg.Type(), ", msg value: ", msg)
-				assert.Greater(t, msg.BeginTs(), msgPack.BeginTs)
-				assert.LessOrEqual(t, msg.BeginTs(), msgPack.EndTs)
+				tsMsg, err := msg.Unmarshal(outputStream.GetUnmarshalDispatcher())
+				require.NoError(t, err)
+				log.Println("TestStream_KafkaTtMsgStream_2 msg type: ", tsMsg.Type(), ", msg value: ", msg)
+				assert.Greater(t, tsMsg.BeginTs(), msgPack.BeginTs)
+				assert.LessOrEqual(t, tsMsg.BeginTs(), msgPack.EndTs)
 			}
 			log.Println("================")
 		}

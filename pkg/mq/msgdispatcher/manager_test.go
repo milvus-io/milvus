@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -372,7 +373,7 @@ func (suite *SimulationSuite) TestMerge() {
 			vchannel, positions[rand.Intn(len(positions))],
 			common.SubscriptionPositionUnknown,
 		)) // seek from random position
-		assert.NoError(suite.T(), err)
+		require.NoError(suite.T(), err)
 		suite.vchannels[vchannel] = &vchannelHelper{output: output}
 	}
 	wg := &sync.WaitGroup{}

@@ -21,13 +21,11 @@ func (h ChanMessageHandler) Handle(param message.HandleParam) message.HandleResu
 		return message.HandleResult{Error: param.Ctx.Err()}
 	case msg, ok := <-param.Upstream:
 		if !ok {
-			return message.HandleResult{Error: message.ErrUpstreamClosed}
+			panic("unreachable code: upstream should never closed")
 		}
 		return message.HandleResult{Incoming: msg}
 	case sendingCh <- param.Message:
 		return message.HandleResult{MessageHandled: true}
-	case <-param.TimeTickChan:
-		return message.HandleResult{TimeTickUpdated: true}
 	}
 }
 
@@ -74,12 +72,9 @@ func (m *MsgPackAdaptorHandler) Handle(param message.HandleParam) message.Handle
 				MessageHandled: messageHandled,
 				Error:          param.Ctx.Err(),
 			}
-		case msg, notClose := <-param.Upstream:
-			if !notClose {
-				return message.HandleResult{
-					MessageHandled: messageHandled,
-					Error:          message.ErrUpstreamClosed,
-				}
+		case msg, ok := <-param.Upstream:
+			if !ok {
+				panic("unreachable code: upstream should never closed")
 			}
 			return message.HandleResult{
 				Incoming:       msg,
@@ -91,11 +86,6 @@ func (m *MsgPackAdaptorHandler) Handle(param message.HandleParam) message.Handle
 				continue
 			}
 			return message.HandleResult{MessageHandled: messageHandled}
-		case <-param.TimeTickChan:
-			return message.HandleResult{
-				MessageHandled:  messageHandled,
-				TimeTickUpdated: true,
-			}
 		}
 	}
 }

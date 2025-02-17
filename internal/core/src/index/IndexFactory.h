@@ -21,6 +21,7 @@
 #include <mutex>
 #include <shared_mutex>
 
+#include "common/Types.h"
 #include "common/type_c.h"
 #include "index/Index.h"
 #include "index/ScalarIndex.h"
@@ -102,6 +103,13 @@ class IndexFactory {
         IndexType index_type,
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
+
+    IndexBasePtr
+    CreateJsonIndex(IndexType index_type,
+                    DataType cast_dtype,
+                    const std::string& nested_path,
+                    const storage::FileManagerContext& file_manager_context =
+                        storage::FileManagerContext());
 
     IndexBasePtr
     CreateScalarIndex(const CreateIndexInfo& create_index_info,

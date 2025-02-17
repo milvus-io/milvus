@@ -15,11 +15,15 @@
 // limitations under the License.
 
 #include "index/IndexFactory.h"
+#include <cstdlib>
+#include <memory>
 #include "common/EasyAssert.h"
+#include "common/FieldDataInterface.h"
 #include "common/Types.h"
 #include "index/VectorMemIndex.h"
 #include "index/Utils.h"
 #include "index/Meta.h"
+#include "index/JsonInvertedIndex.h"
 #include "knowhere/utils.h"
 
 #include "index/VectorDiskIndex.h"
@@ -29,6 +33,8 @@
 #include "index/InvertedIndexTantivy.h"
 #include "index/HybridScalarIndex.h"
 #include "knowhere/comp/knowhere_check.h"
+#include "log/Log.h"
+#include "pb/schema.pb.h"
 
 namespace milvus::index {
 
@@ -376,6 +382,45 @@ IndexFactory::CreateComplexScalarIndex(
 }
 
 IndexBasePtr
+IndexFactory::CreateJsonIndex(
+    IndexType index_type,
+    DataType cast_dtype,
+    const std::string& nested_path,
+    const storage::FileManagerContext& file_manager_context) {
+    AssertInfo(index_type == INVERTED_INDEX_TYPE,
+               "Invalid index type for json index");
+    switch (cast_dtype) {
+        case DataType::BOOL:
+            return std::make_unique<index::JsonInvertedIndex<bool>>(
+                proto::schema::DataType::Bool,
+                nested_path,
+                file_manager_context);
+        case milvus::DataType::INT8:
+        case milvus::DataType::INT16:
+        case milvus::DataType::INT32:
+        case DataType::INT64:
+            return std::make_unique<index::JsonInvertedIndex<int64_t>>(
+                proto::schema::DataType::Int64,
+                nested_path,
+                file_manager_context);
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+            return std::make_unique<index::JsonInvertedIndex<double>>(
+                proto::schema::DataType::Double,
+                nested_path,
+                file_manager_context);
+        case DataType::STRING:
+        case DataType::VARCHAR:
+            return std::make_unique<index::JsonInvertedIndex<std::string>>(
+                proto::schema::DataType::String,
+                nested_path,
+                file_manager_context);
+        default:
+            PanicInfo(DataTypeInvalid, "Invalid data type:{}", cast_dtype);
+    }
+}
+
+IndexBasePtr
 IndexFactory::CreateScalarIndex(
     const CreateIndexInfo& create_index_info,
     const storage::FileManagerContext& file_manager_context) {
@@ -397,8 +442,10 @@ IndexFactory::CreateScalarIndex(
                                               file_manager_context);
         }
         case DataType::JSON: {
-            return CreateComplexScalarIndex(create_index_info.index_type,
-                                            file_manager_context);
+            return CreateJsonIndex(create_index_info.index_type,
+                                   create_index_info.json_cast_type,
+                                   create_index_info.json_path,
+                                   file_manager_context);
         }
         default:
             PanicInfo(DataTypeInvalid, "Invalid data type:{}", data_type);

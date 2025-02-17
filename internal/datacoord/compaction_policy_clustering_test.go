@@ -99,7 +99,7 @@ func (s *ClusteringCompactionPolicySuite) TestEnable() {
 
 func (s *ClusteringCompactionPolicySuite) TestTriggerWithNoCollecitons() {
 	// trigger with no collections
-	events, err := s.clusteringCompactionPolicy.Trigger()
+	events, err := s.clusteringCompactionPolicy.Trigger(context.Background())
 	s.NoError(err)
 	gotViews, ok := events[TriggerTypeClustering]
 	s.True(ok)
@@ -132,7 +132,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerWithCollections() {
 	})
 
 	// trigger
-	events, err := s.clusteringCompactionPolicy.Trigger()
+	events, err := s.clusteringCompactionPolicy.Trigger(context.Background())
 	s.NoError(err)
 	gotViews, ok := events[TriggerTypeClustering]
 	s.True(ok)

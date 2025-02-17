@@ -621,8 +621,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		blobs := lo.Map(allValues, func(v []byte, i int) *storage.Blob {
 			return &storage.Blob{Key: paths[i], Value: v}
 		})
-
-		pkIter, err := storage.NewBinlogDeserializeReader(blobs, t.primaryKeyField.GetFieldID())
+		pkIter, err := storage.NewBinlogDeserializeReader(t.plan.Schema, storage.MakeBlobsReader(blobs))
 		if err != nil {
 			log.Warn("new insert binlogs Itr wrong", zap.Strings("paths", paths), zap.Error(err))
 			return err
@@ -1196,7 +1195,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 			return &storage.Blob{Key: paths[i], Value: v}
 		})
 
-		pkIter, err := storage.NewBinlogDeserializeReader(blobs, t.primaryKeyField.GetFieldID())
+		pkIter, err := storage.NewBinlogDeserializeReader(t.plan.Schema, storage.MakeBlobsReader(blobs))
 		if err != nil {
 			log.Warn("new insert binlogs Itr wrong", zap.Strings("path", paths), zap.Error(err))
 			return nil, err

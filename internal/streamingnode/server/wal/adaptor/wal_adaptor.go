@@ -85,6 +85,26 @@ func (w *walAdaptorImpl) Channel() types.PChannelInfo {
 	return w.inner.Channel()
 }
 
+// GetLatestMVCCTimestamp get the latest mvcc timestamp of the wal at vchannel.
+func (w *walAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel string) (uint64, error) {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return 0, status.NewOnShutdownError("wal is on shutdown")
+	}
+	defer w.lifetime.Done()
+	operator := resource.Resource().TimeTickInspector().MustGetOperator(w.inner.Channel())
+	mvccManager, err := operator.MVCCManager(ctx)
+	if err != nil {
+		// Unreachable code forever.
+		return 0, err
+	}
+	currentMVCC := mvccManager.GetMVCCOfVChannel(vchannel)
+	if !currentMVCC.Confirmed {
+		// if the mvcc is not confirmed, trigger a sync operation to make it confirmed as soon as possible.
+		resource.Resource().TimeTickInspector().TriggerSync(w.inner.Channel())
+	}
+	return currentMVCC.Timetick, nil
+}
+
 // Append writes a record to the log.
 func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage) (*wal.AppendResult, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -111,7 +131,6 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 			if notPersistHint := utility.GetNotPersisted(ctx); notPersistHint != nil {
 				// do not persist the message if the hint is set.
-				// only used by time tick sync operator.
 				return notPersistHint.MessageID, nil
 			}
 			metricsGuard.StartWALImplAppend()

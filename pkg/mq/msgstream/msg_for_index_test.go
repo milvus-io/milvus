@@ -50,7 +50,7 @@ func TestCreateIndex(t *testing.T) {
 	msgBytes, err := msg.Marshal(msg)
 	assert.NoError(t, err)
 
-	var newMsg TsMsg = &ReleaseCollectionMsg{}
+	var newMsg TsMsg = &CreateIndexMsg{}
 	_, err = newMsg.Unmarshal("1")
 	assert.Error(t, err)
 

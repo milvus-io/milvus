@@ -161,7 +161,7 @@ CreateIndex(CIndex* res_index,
             std::make_unique<milvus::proto::indexcgo::BuildIndexInfo>();
         auto res =
             build_index_info->ParseFromArray(serialized_build_index_info, len);
-        AssertInfo(res, "Unmarshall build index info failed");
+        AssertInfo(res, "Unmarshal build index info failed");
 
         auto field_type =
             static_cast<DataType>(build_index_info->field_schema().data_type());
@@ -233,7 +233,7 @@ BuildTextIndex(ProtoLayoutInterface result,
             std::make_unique<milvus::proto::indexcgo::BuildIndexInfo>();
         auto res =
             build_index_info->ParseFromArray(serialized_build_index_info, len);
-        AssertInfo(res, "Unmarshall build index info failed");
+        AssertInfo(res, "Unmarshal build index info failed");
 
         auto field_type =
             static_cast<DataType>(build_index_info->field_schema().data_type());
@@ -606,7 +606,7 @@ AppendBuildIndexParam(CBuildIndexInfo c_build_index_info,
         auto index_params =
             std::make_unique<milvus::proto::indexcgo::IndexParams>();
         auto res = index_params->ParseFromArray(serialized_index_params, len);
-        AssertInfo(res, "Unmarshall index params failed");
+        AssertInfo(res, "Unmarshal index params failed");
         for (auto i = 0; i < index_params->params_size(); ++i) {
             const auto& param = index_params->params(i);
             build_index_info->config[param.key()] = param.value();
@@ -633,7 +633,7 @@ AppendBuildTypeParam(CBuildIndexInfo c_build_index_info,
         auto type_params =
             std::make_unique<milvus::proto::indexcgo::TypeParams>();
         auto res = type_params->ParseFromArray(serialized_type_params, len);
-        AssertInfo(res, "Unmarshall index build type params failed");
+        AssertInfo(res, "Unmarshal index build type params failed");
         for (auto i = 0; i < type_params->params_size(); ++i) {
             const auto& param = type_params->params(i);
             build_index_info->config[param.key()] = param.value();

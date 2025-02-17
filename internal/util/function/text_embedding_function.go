@@ -39,6 +39,7 @@ const (
 	bedrockProvider      string = "bedrock"
 	vertexAIProvider     string = "vertexai"
 	voyageAIProvider     string = "voyageai"
+	cohereProvider       string = "cohere"
 )
 
 // Text embedding for retrieval task
@@ -85,64 +86,34 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 	if err != nil {
 		return nil, err
 	}
+	var embP textEmbeddingProvider
+	var newProviderErr error
 	switch provider {
 	case openAIProvider:
-		embP, err := NewOpenAIEmbeddingProvider(base.outputFields[0], functionSchema)
-		if err != nil {
-			return nil, err
-		}
-		return &TextEmbeddingFunction{
-			FunctionBase: *base,
-			embProvider:  embP,
-		}, nil
+		embP, newProviderErr = NewOpenAIEmbeddingProvider(base.outputFields[0], functionSchema)
 	case azureOpenAIProvider:
-		embP, err := NewAzureOpenAIEmbeddingProvider(base.outputFields[0], functionSchema)
-		if err != nil {
-			return nil, err
-		}
-		return &TextEmbeddingFunction{
-			FunctionBase: *base,
-			embProvider:  embP,
-		}, nil
+		embP, newProviderErr = NewAzureOpenAIEmbeddingProvider(base.outputFields[0], functionSchema)
 	case bedrockProvider:
-		embP, err := NewBedrockEmbeddingProvider(base.outputFields[0], functionSchema, nil)
-		if err != nil {
-			return nil, err
-		}
-		return &TextEmbeddingFunction{
-			FunctionBase: *base,
-			embProvider:  embP,
-		}, nil
+		embP, newProviderErr = NewBedrockEmbeddingProvider(base.outputFields[0], functionSchema, nil)
 	case aliDashScopeProvider:
-		embP, err := NewAliDashScopeEmbeddingProvider(base.outputFields[0], functionSchema)
-		if err != nil {
-			return nil, err
-		}
-		return &TextEmbeddingFunction{
-			FunctionBase: *base,
-			embProvider:  embP,
-		}, nil
+		embP, newProviderErr = NewAliDashScopeEmbeddingProvider(base.outputFields[0], functionSchema)
 	case vertexAIProvider:
-		embP, err := NewVertexAIEmbeddingProvider(base.outputFields[0], functionSchema, nil)
-		if err != nil {
-			return nil, err
-		}
-		return &TextEmbeddingFunction{
-			FunctionBase: *base,
-			embProvider:  embP,
-		}, nil
+		embP, newProviderErr = NewVertexAIEmbeddingProvider(base.outputFields[0], functionSchema, nil)
 	case voyageAIProvider:
-		embP, err := NewVoyageAIEmbeddingProvider(base.outputFields[0], functionSchema)
-		if err != nil {
-			return nil, err
-		}
-		return &TextEmbeddingFunction{
-			FunctionBase: *base,
-			embProvider:  embP,
-		}, nil
+		embP, newProviderErr = NewVoyageAIEmbeddingProvider(base.outputFields[0], functionSchema)
+	case cohereProvider:
+		embP, newProviderErr = NewCohereEmbeddingProvider(base.outputFields[0], functionSchema)
 	default:
-		return nil, fmt.Errorf("Unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s]", provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider)
+		return nil, fmt.Errorf("Unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s]", provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider)
 	}
+
+	if newProviderErr != nil {
+		return nil, newProviderErr
+	}
+	return &TextEmbeddingFunction{
+		FunctionBase: *base,
+		embProvider:  embP,
+	}, nil
 }
 
 func (runner *TextEmbeddingFunction) MaxBatch() int {

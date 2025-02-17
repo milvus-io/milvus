@@ -7,8 +7,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+var ErrTimeTickVoilation = errors.New("time tick violation")
+
 // ReOrderByTimeTickBuffer is a buffer that stores messages and pops them in order of time tick.
 type ReOrderByTimeTickBuffer struct {
+	messageIDs typeutil.Set[string] // After enabling write ahead buffer, we has two stream to consume,
+	// write ahead buffer works with the timetick order, but the walscannerimpl works with the message order.
+	// so repeated message may generate when the swithing between the two stream.
+	// The deduplicate is used to avoid the repeated message.
 	messageHeap     typeutil.Heap[message.ImmutableMessage]
 	lastPopTimeTick uint64
 	bytes           int
@@ -17,6 +23,7 @@ type ReOrderByTimeTickBuffer struct {
 // NewReOrderBuffer creates a new ReOrderBuffer.
 func NewReOrderBuffer() *ReOrderByTimeTickBuffer {
 	return &ReOrderByTimeTickBuffer{
+		messageIDs:  typeutil.NewSet[string](),
 		messageHeap: typeutil.NewHeap[message.ImmutableMessage](&immutableMessageHeap{}),
 	}
 }
@@ -26,9 +33,14 @@ func (r *ReOrderByTimeTickBuffer) Push(msg message.ImmutableMessage) error {
 	// !!! Drop the unexpected broken timetick rule message.
 	// It will be enabled until the first timetick coming.
 	if msg.TimeTick() < r.lastPopTimeTick {
-		return errors.Errorf("message time tick is less than last pop time tick: %d", r.lastPopTimeTick)
+		return errors.Wrapf(ErrTimeTickVoilation, "message time tick is less than last pop time tick: %d", r.lastPopTimeTick)
+	}
+	msgID := msg.MessageID().Marshal()
+	if r.messageIDs.Contain(msgID) {
+		return errors.Errorf("message is duplicated: %s", msgID)
 	}
 	r.messageHeap.Push(msg)
+	r.messageIDs.Insert(msgID)
 	r.bytes += msg.EstimateSize()
 	return nil
 }
@@ -39,6 +51,7 @@ func (r *ReOrderByTimeTickBuffer) PopUtilTimeTick(timetick uint64) []message.Imm
 	var res []message.ImmutableMessage
 	for r.messageHeap.Len() > 0 && r.messageHeap.Peek().TimeTick() <= timetick {
 		r.bytes -= r.messageHeap.Peek().EstimateSize()
+		r.messageIDs.Remove(r.messageHeap.Peek().MessageID().Marshal())
 		res = append(res, r.messageHeap.Pop())
 	}
 	r.lastPopTimeTick = timetick

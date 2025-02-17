@@ -110,7 +110,7 @@ func (c *catalog) GetConsumeCheckpoint(ctx context.Context, pchannelName string)
 		return nil, err
 	}
 	val := &streamingpb.WALCheckpoint{}
-	if err = proto.Unmarshal([]byte(value), &streamingpb.WALCheckpoint{}); err != nil {
+	if err = proto.Unmarshal([]byte(value), val); err != nil {
 		return nil, err
 	}
 	return val, nil

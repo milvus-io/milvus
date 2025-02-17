@@ -124,7 +124,7 @@ type Segment struct {
 	Node               int64                             // Node the segment is in
 	Version            int64                             // Version is the timestamp of loading segment
 	LastDeltaTimestamp uint64                            // The timestamp of the last delta record
-	IndexInfo          map[int64]*querypb.FieldIndexInfo // index info of loaded segment
+	IndexInfo          map[int64]*querypb.FieldIndexInfo // index info of loaded segment, indexID -> FieldIndexInfo
 }
 
 func SegmentFromInfo(info *datapb.SegmentInfo) *Segment {

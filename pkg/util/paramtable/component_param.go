@@ -240,10 +240,11 @@ type commonConfig struct {
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
 
-	AuthorizationEnabled ParamItem `refreshable:"false"`
-	SuperUsers           ParamItem `refreshable:"true"`
-	DefaultRootPassword  ParamItem `refreshable:"false"`
-	RootShouldBindRole   ParamItem `refreshable:"true"`
+	AuthorizationEnabled  ParamItem `refreshable:"false"`
+	SuperUsers            ParamItem `refreshable:"true"`
+	DefaultRootPassword   ParamItem `refreshable:"false"`
+	RootShouldBindRole    ParamItem `refreshable:"true"`
+	EnablePublicPrivilege ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -683,6 +684,22 @@ like the old password verification when updating the credential`,
 	}
 	p.RootShouldBindRole.Init(base.mgr)
 
+	p.EnablePublicPrivilege = ParamItem{
+		Key: "common.security.enablePublicPrivilege",
+		Formatter: func(originValue string) string { // compatible with old version
+			fallbackValue := base.Get("proxy.enablePublicPrivilege")
+			if fallbackValue == "false" {
+				return "false"
+			}
+			return originValue
+		},
+		Version:      "2.5.4",
+		Doc:          "Whether to enable public privilege",
+		DefaultValue: "true",
+		Export:       true,
+	}
+	p.EnablePublicPrivilege.Init(base.mgr)
+
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
 		Version:      "2.0.0",
@@ -859,7 +876,7 @@ This helps Milvus-CDC synchronize incremental data`,
 	p.BloomFilterApplyBatchSize = ParamItem{
 		Key:          "common.bloomFilterApplyBatchSize",
 		Version:      "2.4.5",
-		DefaultValue: "1000",
+		DefaultValue: "10000",
 		Doc:          "batch size when to apply pk to bloom filter",
 		Export:       true,
 	}
@@ -1339,7 +1356,6 @@ type proxyConfig struct {
 	MustUsePartitionKey          ParamItem `refreshable:"true"`
 	SkipAutoIDCheck              ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck        ParamItem `refreshable:"true"`
-	EnablePublicPrivilege        ParamItem `refreshable:"false"`
 	MaxVarCharLength             ParamItem `refreshable:"false"`
 
 	AccessLog AccessLogConfig
@@ -1745,14 +1761,6 @@ please adjust in embedded Milvus: false`,
 	}
 	p.SkipPartitionKeyCheck.Init(base.mgr)
 
-	p.EnablePublicPrivilege = ParamItem{
-		Key:          "proxy.enablePublicPrivilege",
-		Version:      "2.4.1",
-		DefaultValue: "true",
-		Doc:          "switch for whether proxy shall enable public privilege",
-	}
-	p.EnablePublicPrivilege.Init(base.mgr)
-
 	p.MaxVarCharLength = ParamItem{
 		Key:          "proxy.maxVarCharLength",
 		Version:      "2.4.19",            // hotfix
@@ -1856,6 +1864,7 @@ type queryCoordConfig struct {
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval       ParamItem `refreshable:"true"`
 	BalanceCheckInterval       ParamItem `refreshable:"true"`
+	AutoBalanceInterval        ParamItem `refreshable:"true"`
 	IndexCheckInterval         ParamItem `refreshable:"true"`
 	ChannelTaskTimeout         ParamItem `refreshable:"true"`
 	SegmentTaskTimeout         ParamItem `refreshable:"true"`
@@ -2471,6 +2480,16 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.ClusterLevelLoadResourceGroups.Init(base.mgr)
+
+	p.AutoBalanceInterval = ParamItem{
+		Key:          "queryCoord.autoBalanceInterval",
+		Version:      "2.5.3",
+		DefaultValue: "3000",
+		Doc:          "the interval for triggerauto balance",
+		PanicIfEmpty: true,
+		Export:       true,
+	}
+	p.AutoBalanceInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2708,7 +2727,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MultipleChunkedEnable = ParamItem{
 		Key:          "queryNode.segcore.multipleChunkedEnable",
 		Version:      "2.0.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "Enable multiple chunked search",
 		Export:       true,
 	}
@@ -3307,8 +3326,8 @@ user-task-polling:
 		Key:          "queryNode.bloomFilterApplyParallelFactor",
 		FallbackKeys: []string{"queryNode.bloomFilterApplyBatchSize"},
 		Version:      "2.4.5",
-		DefaultValue: "4",
-		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
+		DefaultValue: "2",
+		Doc:          "parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM",
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
@@ -4792,8 +4811,8 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.bloomFilterApplyParallelFactor",
 		FallbackKeys: []string{"datanode.bloomFilterApplyBatchSize"},
 		Version:      "2.4.5",
-		DefaultValue: "4",
-		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
+		DefaultValue: "2",
+		Doc:          "parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM",
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
@@ -4895,6 +4914,10 @@ type streamingConfig struct {
 
 	// txn
 	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
+
+	// write ahead buffer
+	WALWriteAheadBufferCapacity  ParamItem `refreshable:"true"`
+	WALWriteAheadBufferKeepalive ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -4944,6 +4967,23 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 		Export:       true,
 	}
 	p.TxnDefaultKeepaliveTimeout.Init(base.mgr)
+
+	p.WALWriteAheadBufferCapacity = ParamItem{
+		Key:          "streaming.walWriteAheadBuffer.capacity",
+		Version:      "2.6.0",
+		Doc:          "The capacity of write ahead buffer of each wal, 64M by default",
+		DefaultValue: "64m",
+		Export:       true,
+	}
+	p.WALWriteAheadBufferCapacity.Init(base.mgr)
+	p.WALWriteAheadBufferKeepalive = ParamItem{
+		Key:          "streaming.walWriteAheadBuffer.keepalive",
+		Version:      "2.6.0",
+		Doc:          "The keepalive duration for entries in write ahead buffer of each wal, 30s by default",
+		DefaultValue: "30s",
+		Export:       true,
+	}
+	p.WALWriteAheadBufferKeepalive.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.
