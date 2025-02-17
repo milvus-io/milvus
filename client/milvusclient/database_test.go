@@ -153,7 +153,7 @@ func (s *DatabaseSuite) TestAlterDatabaseProperties() {
 			return merr.Success(), nil
 		}).Once()
 
-		err := s.client.AlterDatabaseProperies(ctx, NewAlterDatabasePropertiesOption(dbName).WithProperty(key, value))
+		err := s.client.AlterDatabaseProperties(ctx, NewAlterDatabasePropertiesOption(dbName).WithProperty(key, value))
 		s.NoError(err)
 	})
 
@@ -161,7 +161,7 @@ func (s *DatabaseSuite) TestAlterDatabaseProperties() {
 		dbName := fmt.Sprintf("dt_%s", s.randString(6))
 		s.mock.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
 
-		err := s.client.AlterDatabaseProperies(ctx, NewAlterDatabasePropertiesOption(dbName).WithProperty("key", "value"))
+		err := s.client.AlterDatabaseProperties(ctx, NewAlterDatabasePropertiesOption(dbName).WithProperty("key", "value"))
 		s.Error(err)
 	})
 }

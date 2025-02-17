@@ -1,6 +1,7 @@
 package testcases
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -604,10 +605,61 @@ func TestQueryCountJsonDynamicExpr(t *testing.T) {
 		{expr: fmt.Sprintf("%s == [1503, 1504]", common.DefaultJSONFieldName), count: 1},   // json == [1,2]
 		{expr: fmt.Sprintf("%s[0] > 1", common.DefaultJSONFieldName), count: 1500 / 4},     // json[0] > 1
 		{expr: fmt.Sprintf("%s[0][0] > 1", common.DefaultJSONFieldName), count: 0},         // json == [1,2]
+
+		// Key and value types do not match
+		{expr: fmt.Sprintf("%s['float'] <= 3000", common.DefaultJSONFieldName), count: common.DefaultNb / 4},
+		{expr: fmt.Sprintf("%s['float'] <= 3000.0", common.DefaultJSONFieldName), count: common.DefaultNb / 4},
+		{expr: fmt.Sprintf("%s['string'] > 0", common.DefaultJSONFieldName), count: 0},
+		{expr: fmt.Sprintf("%s['floatArray'][0] < 1000.0", common.DefaultJSONFieldName), count: 500},
+		{expr: fmt.Sprintf("%s['stringArray'][0] == '00100'", common.DefaultJSONFieldName), count: 1},
 	}
 
 	for _, _exprCount := range exprCounts {
 		log.Debug("TestQueryCountJsonDynamicExpr", zap.String("expr", _exprCount.expr))
+		countRes, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(_exprCount.expr).WithOutputFields(common.QueryCountFieldName))
+		count, _ := countRes.Fields[0].GetAsInt64(0)
+		require.Equal(t, _exprCount.count, count)
+	}
+}
+
+func TestQueryNestedJsonExpr(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption())
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	pkColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeInt64, *hp.TNewDataOption())
+	vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
+	jsonValues := make([][]byte, 0, common.DefaultNb)
+	nestedDepth := 100
+	for i := 0; i < common.DefaultNb; i++ {
+		var m map[string]interface{}
+		if i%2 == 0 {
+			m = make(map[string]interface{})
+		} else {
+			m = hp.GenNestedJSON(nestedDepth, i)
+		}
+		bs, _ := json.Marshal(&m)
+		jsonValues = append(jsonValues, bs)
+	}
+	jsonColumn := column.NewColumnJSONBytes(common.DefaultJSONFieldName, jsonValues)
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, vecColumn, jsonColumn))
+	common.CheckErr(t, err, true)
+
+	type exprCount struct {
+		expr  string
+		count int64
+	}
+	exprKey := hp.GenNestedJSONExprKey(nestedDepth, common.DefaultJSONFieldName)
+	nestedExpr := exprKey + " < 1000 "
+	t.Log("https://github.com/milvus-io/milvus/issues/39822")
+	exprCounts := []exprCount{
+		//{expr: fmt.Sprintf("json_length(%s) == 0", common.DefaultJSONFieldName), count: common.DefaultNb / 2},
+		{expr: nestedExpr, count: 500},
+	}
+	for _, _exprCount := range exprCounts {
+		log.Info("TestQueryCountJsonDynamicExpr", zap.String("expr", _exprCount.expr))
 		countRes, _ := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithFilter(_exprCount.expr).WithOutputFields(common.QueryCountFieldName))
 		count, _ := countRes.Fields[0].GetAsInt64(0)
 		require.Equal(t, _exprCount.count, count)

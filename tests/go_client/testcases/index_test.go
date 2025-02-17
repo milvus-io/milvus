@@ -17,7 +17,6 @@ import (
 )
 
 func TestIndexVectorDefault(t *testing.T) {
-	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 
@@ -50,7 +49,6 @@ func TestIndexVectorDefault(t *testing.T) {
 }
 
 func TestIndexVectorIP(t *testing.T) {
-	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 
@@ -84,7 +82,6 @@ func TestIndexVectorIP(t *testing.T) {
 }
 
 func TestIndexVectorCosine(t *testing.T) {
-	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 
@@ -118,7 +115,6 @@ func TestIndexVectorCosine(t *testing.T) {
 }
 
 func TestIndexAutoFloatVector(t *testing.T) {
-	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
 
@@ -155,7 +151,6 @@ func TestIndexAutoFloatVector(t *testing.T) {
 }
 
 func TestIndexAutoBinaryVector(t *testing.T) {
-	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
 
@@ -196,7 +191,6 @@ func TestIndexAutoBinaryVector(t *testing.T) {
 }
 
 func TestIndexAutoSparseVector(t *testing.T) {
-	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := createDefaultMilvusClient(ctx, t)
 
@@ -758,7 +752,6 @@ func TestCreateIndexDup(t *testing.T) {
 }
 
 func TestCreateIndexSparseVectorGeneric(t *testing.T) {
-	t.Parallel()
 	idxInverted := index.NewGenericIndex(common.DefaultSparseVecFieldName, map[string]string{"drop_ratio_build": "0.2", index.MetricTypeKey: "IP", index.IndexTypeKey: "SPARSE_INVERTED_INDEX"})
 	idxWand := index.NewGenericIndex(common.DefaultSparseVecFieldName, map[string]string{"drop_ratio_build": "0.3", index.MetricTypeKey: "IP", index.IndexTypeKey: "SPARSE_WAND"})
 
@@ -787,7 +780,6 @@ func TestCreateIndexSparseVectorGeneric(t *testing.T) {
 }
 
 func TestCreateIndexSparseVector(t *testing.T) {
-	t.Parallel()
 	idxInverted1 := index.NewSparseInvertedIndex(entity.IP, 0.2)
 	idxWand1 := index.NewSparseWANDIndex(entity.IP, 0.3)
 	for _, idx := range []index.Index{idxInverted1, idxWand1} {

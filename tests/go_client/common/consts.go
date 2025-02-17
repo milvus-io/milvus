@@ -4,33 +4,38 @@ import "github.com/milvus-io/milvus/client/v2/index"
 
 // cost default field name
 const (
-	DefaultInt8FieldName        = "int8"
-	DefaultInt16FieldName       = "int16"
-	DefaultInt32FieldName       = "int32"
-	DefaultInt64FieldName       = "int64"
-	DefaultBoolFieldName        = "bool"
-	DefaultFloatFieldName       = "float"
-	DefaultDoubleFieldName      = "double"
-	DefaultVarcharFieldName     = "varchar"
-	DefaultJSONFieldName        = "json"
-	DefaultArrayFieldName       = "array"
-	DefaultFloatVecFieldName    = "floatVec"
-	DefaultBinaryVecFieldName   = "binaryVec"
-	DefaultFloat16VecFieldName  = "fp16Vec"
-	DefaultBFloat16VecFieldName = "bf16Vec"
-	DefaultSparseVecFieldName   = "sparseVec"
-	DefaultDynamicNumberField   = "dynamicNumber"
-	DefaultDynamicStringField   = "dynamicString"
-	DefaultDynamicBoolField     = "dynamicBool"
-	DefaultDynamicListField     = "dynamicList"
-	DefaultBoolArrayField       = "boolArray"
-	DefaultInt8ArrayField       = "int8Array"
-	DefaultInt16ArrayField      = "int16Array"
-	DefaultInt32ArrayField      = "int32Array"
-	DefaultInt64ArrayField      = "int64Array"
-	DefaultFloatArrayField      = "floatArray"
-	DefaultDoubleArrayField     = "doubleArray"
-	DefaultVarcharArrayField    = "varcharArray"
+	DefaultInt8FieldName          = "int8"
+	DefaultInt16FieldName         = "int16"
+	DefaultInt32FieldName         = "int32"
+	DefaultInt64FieldName         = "int64"
+	DefaultBoolFieldName          = "bool"
+	DefaultFloatFieldName         = "float"
+	DefaultDoubleFieldName        = "double"
+	DefaultTextFieldName          = "text"
+	DefaultVarcharFieldName       = "varchar"
+	DefaultJSONFieldName          = "json"
+	DefaultArrayFieldName         = "array"
+	DefaultFloatVecFieldName      = "floatVec"
+	DefaultBinaryVecFieldName     = "binaryVec"
+	DefaultFloat16VecFieldName    = "fp16Vec"
+	DefaultBFloat16VecFieldName   = "bf16Vec"
+	DefaultTextSparseVecFieldName = "textSparseVec"
+	DefaultSparseVecFieldName     = "sparseVec"
+	DefaultDynamicNumberField     = "dynamicNumber"
+	DefaultDynamicStringField     = "dynamicString"
+	DefaultDynamicBoolField       = "dynamicBool"
+	DefaultDynamicListField       = "dynamicList"
+	DefaultBoolArrayField         = "boolArray"
+	DefaultInt8ArrayField         = "int8Array"
+	DefaultInt16ArrayField        = "int16Array"
+	DefaultInt32ArrayField        = "int32Array"
+	DefaultInt64ArrayField        = "int64Array"
+	DefaultFloatArrayField        = "floatArray"
+	DefaultDoubleArrayField       = "doubleArray"
+	DefaultVarcharArrayField      = "varcharArray"
+
+	DefaultFastPk     = "id"
+	DefaultFastVector = "vector"
 )
 
 // cost for test cases
@@ -75,4 +80,21 @@ const (
 	IndexStateFinished       index.IndexState = 3
 	IndexStateFailed         index.IndexState = 4
 	IndexStateRetry          index.IndexState = 5
+)
+
+// properties
+const (
+	CollectionTTLSeconds     = "collection.ttl.seconds"
+	MmapEnabled              = "mmap.enabled"
+	DatabaseMaxCollections   = "database.max.collections"
+	DatabaseResourceGroups   = "database.resource_groups"
+	DatabaseReplicaNumber    = "database.replica.number"
+	DatabaseForceDenyWriting = "database.force.deny.writing"
+	DatabaseForceDenyReading = "database.force.deny.reading"
+	DatabaseDiskQuotaMb      = "database.diskQuota.mb"
+)
+
+// const for full text search
+const (
+	DefaultTextLang = "en"
 )
