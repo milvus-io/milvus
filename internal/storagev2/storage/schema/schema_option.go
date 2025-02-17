@@ -15,7 +15,7 @@
 package schema
 
 import (
-	"github.com/apache/arrow/go/v12/arrow"
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/proto/storagev2pb"

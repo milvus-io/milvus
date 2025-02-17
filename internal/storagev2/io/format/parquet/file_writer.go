@@ -15,9 +15,9 @@
 package parquet
 
 import (
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/parquet"
-	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/parquet"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 
 	"github.com/milvus-io/milvus/internal/storagev2/io/format"
 	"github.com/milvus-io/milvus/internal/storagev2/io/fs"

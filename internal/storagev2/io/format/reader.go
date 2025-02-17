@@ -15,7 +15,7 @@
 package format
 
 import (
-	"github.com/apache/arrow/go/v12/arrow"
+	"github.com/apache/arrow/go/v17/arrow"
 )
 
 type Reader interface {

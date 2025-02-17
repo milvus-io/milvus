@@ -15,7 +15,7 @@
 package schema
 
 import (
-	"github.com/apache/arrow/go/v12/arrow"
+	"github.com/apache/arrow/go/v17/arrow"
 
 	"github.com/milvus-io/milvus/internal/storagev2/common/constant"
 	"github.com/milvus-io/milvus/internal/storagev2/common/utils"

@@ -15,7 +15,7 @@
 package recordreader
 
 import (
-	"github.com/apache/arrow/go/v12/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/array"
 
 	"github.com/milvus-io/milvus/internal/storagev2/file/fragment"
 	"github.com/milvus-io/milvus/internal/storagev2/filter"
