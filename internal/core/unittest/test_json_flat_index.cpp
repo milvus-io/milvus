@@ -31,13 +31,13 @@ using namespace milvus;
 
 namespace milvus::test {
 auto
-gen_field_meta(int64_t collection_id = 1,
-               int64_t partition_id = 2,
-               int64_t segment_id = 3,
-               int64_t field_id = 101,
-               DataType data_type = DataType::NONE,
-               DataType element_type = DataType::NONE,
-               bool nullable = false) -> storage::FieldDataMeta {
+generate_field_meta(int64_t collection_id = 1,
+                    int64_t partition_id = 2,
+                    int64_t segment_id = 3,
+                    int64_t field_id = 101,
+                    DataType data_type = DataType::NONE,
+                    DataType element_type = DataType::NONE,
+                    bool nullable = false) -> storage::FieldDataMeta {
     auto meta = storage::FieldDataMeta{
         .collection_id = collection_id,
         .partition_id = partition_id,
@@ -53,10 +53,10 @@ gen_field_meta(int64_t collection_id = 1,
 }
 
 auto
-gen_index_meta(int64_t segment_id = 3,
-               int64_t field_id = 101,
-               int64_t index_build_id = 1000,
-               int64_t index_version = 10000) -> storage::IndexMeta {
+generate_index_meta(int64_t segment_id = 3,
+                    int64_t field_id = 101,
+                    int64_t index_build_id = 1000,
+                    int64_t index_version = 10000) -> storage::IndexMeta {
     return storage::IndexMeta{
         .segment_id = segment_id,
         .field_id = field_id,
@@ -66,7 +66,7 @@ gen_index_meta(int64_t segment_id = 3,
 }
 
 auto
-gen_local_storage_config(const std::string& root_path)
+generate_local_storage_config(const std::string& root_path)
     -> storage::StorageConfig {
     auto ret = storage::StorageConfig{};
     ret.storage_type = "local";
@@ -95,7 +95,6 @@ struct ChunkManagerWrapper {
     const storage::ChunkManagerPtr cm_;
     std::unordered_set<std::string> written_;
 };
-}  // namespace milvus::test
 
 class JsonFlatIndexTest : public ::testing::Test {
  protected:
@@ -108,13 +107,13 @@ class JsonFlatIndexTest : public ::testing::Test {
         int64_t index_build_id = 4000;
         int64_t index_version = 4000;
 
-        field_meta_ = test::gen_field_meta(
+        field_meta_ = test::generate_field_meta(
             collection_id, partition_id, segment_id, field_id, DataType::JSON);
-        index_meta_ = test::gen_index_meta(
+        index_meta_ = test::generate_index_meta(
             segment_id, field_id, index_build_id, index_version);
 
         std::string root_path = "/tmp/test-json-flat-index/";
-        auto storage_config = test::gen_local_storage_config(root_path);
+        auto storage_config = test::generate_local_storage_config(root_path);
         cm_ = storage::CreateChunkManager(storage_config);
 
         json_data_ = {
@@ -503,3 +502,5 @@ TEST_F(JsonFlatIndexTest, TestArrayNumberRangeQuery) {
     ASSERT_TRUE(range_result[1]);  // Bob has score 90
     ASSERT_TRUE(range_result[2]);  // Charlie has score 91
 }
+
+}  // namespace milvus::test
