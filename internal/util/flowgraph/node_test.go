@@ -89,7 +89,8 @@ func TestNodeManager_Start(t *testing.T) {
 	produceStream.Produce(context.TODO(), &msgPack)
 
 	nodeName := "input_node"
-	inputNode := NewInputNode(msgStream.Chan(), nodeName, 100, 100, "", 0, 0, "")
+	dispatcher := msgstream.NewSimpleMsgDispatcher(msgStream, func(pm msgstream.ConsumeMsg) bool { return true })
+	inputNode := NewInputNode(dispatcher.Chan(), nodeName, 100, 100, "", 0, 0, "")
 
 	ddNode := BaseNode{}
 

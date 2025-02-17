@@ -47,7 +47,7 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 	)
 
 	c := s.Cluster
-	ctx, cancel := context.WithTimeout(c.GetContext(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(c.GetContext(), 240*time.Second)
 	defer cancel()
 
 	collectionName := "TestBulkInsert_B_" + funcutil.GenRandomStr()

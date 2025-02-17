@@ -379,6 +379,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Len(t, Params.ClusterLevelLoadResourceGroups.GetAsStrings(), 0)
 
 		assert.Equal(t, 10, Params.CollectionChannelCountFactor.GetAsInt())
+		assert.Equal(t, 3000, Params.AutoBalanceInterval.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -479,7 +480,7 @@ func TestComponentParam(t *testing.T) {
 		params.Save("queryNode.lazyload.requestResourceRetryInterval", "3000")
 		assert.Equal(t, 3*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
 
-		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
+		assert.Equal(t, 2, Params.BloomFilterApplyParallelFactor.GetAsInt())
 		assert.Equal(t, true, Params.SkipGrowingSegmentBF.GetAsBool())
 
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
@@ -600,7 +601,7 @@ func TestComponentParam(t *testing.T) {
 		params.Save("datanode.clusteringCompaction.workPoolSize", "2")
 		assert.Equal(t, int64(2), Params.ClusteringCompactionWorkerPoolSize.GetAsInt64())
 
-		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
+		assert.Equal(t, 2, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {

@@ -24,6 +24,7 @@
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "segcore/SegmentInterface.h"
+#include "exec/expression/Element.h"
 
 namespace milvus {
 namespace exec {
@@ -122,7 +123,8 @@ struct ArithOpElementFunc {
                         res[i] = (src[offset] / right_operand) == val;
                     } else if constexpr (arith_op ==
                                          proto::plan::ArithOpType::Mod) {
-                        res[i] = (long(src[offset]) % long(right_operand)) == val;
+                        res[i] =
+                            (long(src[offset]) % long(right_operand)) == val;
                     } else {
                         PanicInfo(OpTypeInvalid,
                                   fmt::format("unsupported arith type:{} for "
@@ -143,7 +145,8 @@ struct ArithOpElementFunc {
                         res[i] = (src[offset] / right_operand) != val;
                     } else if constexpr (arith_op ==
                                          proto::plan::ArithOpType::Mod) {
-                        res[i] = (long(src[offset]) % long(right_operand)) != val;
+                        res[i] =
+                            (long(src[offset]) % long(right_operand)) != val;
                     } else {
                         PanicInfo(OpTypeInvalid,
                                   fmt::format("unsupported arith type:{} for "
@@ -165,7 +168,8 @@ struct ArithOpElementFunc {
                         res[i] = (src[offset] / right_operand) > val;
                     } else if constexpr (arith_op ==
                                          proto::plan::ArithOpType::Mod) {
-                        res[i] = (long(src[offset]) % long(right_operand)) > val;
+                        res[i] =
+                            (long(src[offset]) % long(right_operand)) > val;
                     } else {
                         PanicInfo(OpTypeInvalid,
                                   fmt::format("unsupported arith type:{} for "
@@ -187,7 +191,8 @@ struct ArithOpElementFunc {
                         res[i] = (src[offset] / right_operand) >= val;
                     } else if constexpr (arith_op ==
                                          proto::plan::ArithOpType::Mod) {
-                        res[i] = (long(src[offset]) % long(right_operand)) >= val;
+                        res[i] =
+                            (long(src[offset]) % long(right_operand)) >= val;
                     } else {
                         PanicInfo(OpTypeInvalid,
                                   fmt::format("unsupported arith type:{} for "
@@ -208,7 +213,8 @@ struct ArithOpElementFunc {
                         res[i] = (src[offset] / right_operand) < val;
                     } else if constexpr (arith_op ==
                                          proto::plan::ArithOpType::Mod) {
-                        res[i] = (long(src[offset]) % long(right_operand)) < val;
+                        res[i] =
+                            (long(src[offset]) % long(right_operand)) < val;
                     } else {
                         PanicInfo(OpTypeInvalid,
                                   fmt::format("unsupported arith type:{} for "
@@ -229,7 +235,8 @@ struct ArithOpElementFunc {
                         res[i] = (src[offset] / right_operand) <= val;
                     } else if constexpr (arith_op ==
                                          proto::plan::ArithOpType::Mod) {
-                        res[i] = (long(src[offset]) % long(right_operand)) <= val;
+                        res[i] =
+                            (long(src[offset]) % long(right_operand)) <= val;
                     } else {
                         PanicInfo(OpTypeInvalid,
                                   fmt::format("unsupported arith type:{} for "
@@ -447,6 +454,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
                       name,
                       segment,
                       expr->column_.field_id_,
+                      expr->column_.nested_path_,
                       active_count,
                       batch_size),
           expr_(expr) {
@@ -478,6 +486,10 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr> expr_;
+    SingleElement right_operand_arg_;
+    SingleElement value_arg_;
+    bool arg_inited_{false};
 };
+
 }  //namespace exec
 }  // namespace milvus

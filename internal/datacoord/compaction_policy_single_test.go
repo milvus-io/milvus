@@ -65,7 +65,7 @@ func (s *SingleCompactionPolicySuite) SetupTest() {
 }
 
 func (s *SingleCompactionPolicySuite) TestTrigger() {
-	events, err := s.singlePolicy.Trigger()
+	events, err := s.singlePolicy.Trigger(context.Background())
 	s.NoError(err)
 	gotViews, ok := events[TriggerTypeSingle]
 	s.True(ok)

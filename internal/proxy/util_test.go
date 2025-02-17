@@ -3388,3 +3388,108 @@ func TestComputeRecall(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestCheckVarcharFormat(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_VarChar,
+				FieldID:  100,
+				TypeParams: []*commonpb.KeyValuePair{{
+					Key:   common.EnableAnalyzerKey,
+					Value: "true",
+				}},
+			},
+			// skip field
+			{
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+
+	data := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			FieldsData: []*schemapb.FieldData{{
+				FieldId: 100,
+				Type:    schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: []string{"valid string"},
+							},
+						},
+					},
+				},
+			}},
+		},
+	}
+
+	err := checkVarcharFormat(schema, data)
+	assert.NoError(t, err)
+
+	// invalid data
+	invalidUTF8 := []byte{0xC0, 0xAF}
+	data = &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			FieldsData: []*schemapb.FieldData{{
+				FieldId: 100,
+				Type:    schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: []string{string(invalidUTF8)},
+							},
+						},
+					},
+				},
+			}},
+		},
+	}
+	err = checkVarcharFormat(schema, data)
+	assert.Error(t, err)
+}
+
+func BenchmarkCheckVarcharFormat(b *testing.B) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_VarChar,
+				FieldID:  100,
+				TypeParams: []*commonpb.KeyValuePair{{
+					Key:   common.EnableAnalyzerKey,
+					Value: "true",
+				}},
+			},
+			// skip field
+			{
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+
+	data := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			FieldsData: []*schemapb.FieldData{{
+				FieldId: 100,
+				Type:    schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: []string{strings.Repeat("a", 1024*1024)},
+							},
+						},
+					},
+				},
+			}},
+		},
+	}
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		checkVarcharFormat(schema, data)
+	}
+}

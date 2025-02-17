@@ -159,7 +159,7 @@ func TestGroupMessage(t *testing.T) {
 	}))
 	{
 		// no replicate msg
-		packs := d.groupingMsgs(&MsgPack{
+		packs := d.groupAndParseMsgs(msgstream.BuildConsumeMsgPack(&MsgPack{
 			BeginTs: 1,
 			EndTs:   10,
 			StartPositions: []*msgstream.MsgPosition{
@@ -191,13 +191,13 @@ func TestGroupMessage(t *testing.T) {
 					},
 				},
 			},
-		})
+		}), nil)
 		assert.Len(t, packs, 1)
 	}
 
 	{
 		// equal to replicateID
-		packs := d.groupingMsgs(&MsgPack{
+		packs := d.groupAndParseMsgs(msgstream.BuildConsumeMsgPack(&MsgPack{
 			BeginTs: 1,
 			EndTs:   10,
 			StartPositions: []*msgstream.MsgPosition{
@@ -231,7 +231,7 @@ func TestGroupMessage(t *testing.T) {
 					},
 				},
 			},
-		})
+		}), nil)
 		assert.Len(t, packs, 2)
 		{
 			replicatePack := packs["mock_pchannel_0_2v0"]
@@ -253,7 +253,7 @@ func TestGroupMessage(t *testing.T) {
 
 	{
 		// not equal to replicateID
-		packs := d.groupingMsgs(&MsgPack{
+		packs := d.groupAndParseMsgs(msgstream.BuildConsumeMsgPack(&MsgPack{
 			BeginTs: 1,
 			EndTs:   10,
 			StartPositions: []*msgstream.MsgPosition{
@@ -287,7 +287,7 @@ func TestGroupMessage(t *testing.T) {
 					},
 				},
 			},
-		})
+		}), nil)
 		assert.Len(t, packs, 1)
 		replicatePack := packs["mock_pchannel_0_2v0"]
 		assert.Nil(t, replicatePack)
@@ -298,7 +298,7 @@ func TestGroupMessage(t *testing.T) {
 		replicateTarget, ok := d.targets.Get("mock_pchannel_0_2v0")
 		assert.True(t, ok)
 		assert.NotNil(t, replicateTarget.replicateConfig)
-		packs := d.groupingMsgs(&MsgPack{
+		packs := d.groupAndParseMsgs(msgstream.BuildConsumeMsgPack(&MsgPack{
 			BeginTs: 1,
 			EndTs:   10,
 			StartPositions: []*msgstream.MsgPosition{
@@ -334,7 +334,7 @@ func TestGroupMessage(t *testing.T) {
 					},
 				},
 			},
-		})
+		}), nil)
 		assert.Len(t, packs, 2)
 		replicatePack := packs["mock_pchannel_0_2v0"]
 		assert.EqualValues(t, 100, replicatePack.BeginTs)

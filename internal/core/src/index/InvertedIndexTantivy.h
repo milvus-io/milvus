@@ -24,6 +24,36 @@
 
 namespace milvus::index {
 
+inline TantivyDataType
+get_tantivy_data_type(proto::schema::DataType data_type) {
+    switch (data_type) {
+        case proto::schema::DataType::Bool: {
+            return TantivyDataType::Bool;
+        }
+
+        case proto::schema::DataType::Int8:
+        case proto::schema::DataType::Int16:
+        case proto::schema::DataType::Int32:
+        case proto::schema::DataType::Int64: {
+            return TantivyDataType::I64;
+        }
+
+        case proto::schema::DataType::Float:
+        case proto::schema::DataType::Double: {
+            return TantivyDataType::F64;
+        }
+
+        case proto::schema::DataType::String:
+        case proto::schema::DataType::VarChar: {
+            return TantivyDataType::Keyword;
+        }
+
+        default:
+            PanicInfo(ErrorCode::NotImplemented,
+                      fmt::format("not implemented data type: {}", data_type));
+    }
+}
+
 using TantivyIndexWrapper = milvus::tantivy::TantivyIndexWrapper;
 using RustArrayWrapper = milvus::tantivy::RustArrayWrapper;
 
@@ -176,16 +206,23 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     const TargetBitmap
     RegexQuery(const std::string& regex_pattern) override;
 
- protected:
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
+ protected:
     void
     finish();
 
     void
     build_index_for_array(
         const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
+
+    virtual void
+    build_index_for_json(
+        const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+        PanicInfo(ErrorCode::NotImplemented,
+                  "build_index_for_json not implemented");
+    };
 
  protected:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;
