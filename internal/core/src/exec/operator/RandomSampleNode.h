@@ -73,7 +73,7 @@ class PhyRandomSampleNode : public Operator {
     StandardSample(const uint32_t N, const uint32_t M, std::mt19937& gen);
 
     // Samples M elements from 0 to N - 1 where every element has equal probability to be selected.
-    // It decides which kinds of sample method we use for sampling. It is based on some experiments.
+    // It selects which kinds of sample method we use for sampling which is based on some experiments.
     // Basically, the performance of HashsetSample is highly related to N * factor while StandardSample is highly
     // related to N.
     static FixedVector<uint32_t>
