@@ -365,7 +365,6 @@ class TestCreateIndex(TestBase):
 class TestIndexProperties(TestBase):
     """Test index properties operations"""
 
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/38967")
     def test_alter_index_properties(self):
         """
         target: test alter index properties
@@ -411,10 +410,18 @@ class TestIndexProperties(TestBase):
         response = index_client.alter_index_properties(name, "my_vector", properties)
         assert response["code"] == 0
 
+        # describe index
+        rsp = index_client.index_describe(name, "my_vector")
+        assert rsp['code'] == 0
+
         # Drop index properties
         delete_keys = ["mmap.enabled"]
         response = index_client.drop_index_properties(name, "my_vector", delete_keys)
         assert response["code"] == 0
+
+        # describe index
+        rsp = index_client.index_describe(name, "my_vector")
+        assert rsp['code'] == 0
 
     @pytest.mark.parametrize("invalid_property", [
         {"invalid_key": True},
