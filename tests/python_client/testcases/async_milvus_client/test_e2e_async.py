@@ -257,9 +257,9 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
 
         # create index -> load
         index_params, _ = self.prepare_index_params(milvus_client,
-                                                                        field_name=ct.default_float_vec_field_name,
-                                                                        index_type="HNSW", metric_type="COSINE", M=30,
-                                                                        efConstruction=200)
+                                                    field_name=ct.default_float_vec_field_name,
+                                                    index_type="HNSW", metric_type="COSINE", M=30,
+                                                    efConstruction=200)
         index_params.add_index(field_name=default_vector_name, index_type="IVF_SQ8",
                                metric_type="L2", nlist=32)
         await self.async_milvus_client_wrap.create_index(c_name, index_params)
@@ -311,11 +311,13 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                                     "primary_field": ct.default_string_field_name,
                                                                                     "nq": ct.default_nq,
                                                                                     "limit": 5})
+
         tasks.append(filter_params_search_task)
 
         # get with ids
-        get_task = self.async_milvus_client_wrap.get(c_name, ids=['0', '1'], output_fields=[ct.default_int64_field_name,
-                                                                                            ct.default_string_field_name])
+        get_task = self.async_milvus_client_wrap.get(c_name, ids=['0', '1'],
+                                                     output_fields=[ct.default_int64_field_name,
+                                                                    ct.default_string_field_name])
         tasks.append(get_task)
         await asyncio.gather(*tasks)
 

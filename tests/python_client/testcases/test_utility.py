@@ -145,6 +145,8 @@ class TestUtilityParams(TestcaseBase):
         p_name = get_invalid_value_collection_name
         if p_name == "12name":
             pytest.skip("partition name 12name is legal")
+        if p_name == "n-ame":
+            pytest.skip("https://github.com/milvus-io/milvus/issues/39432")
         error = {ct.err_code: 999, ct.err_msg: f"Invalid partition name: {p_name}"}
         if p_name in [None]:
             error = {ct.err_code: 999, ct.err_msg: f"`partition_name` value {p_name} is illegal"}
@@ -288,6 +290,8 @@ class TestUtilityParams(TestcaseBase):
         method: input invalid partition names
         expected: raise an exception
         """
+        if partition_name == "":
+            pytest.skip("https://github.com/milvus-io/milvus/issues/38223")
         collection_w = self.init_collection_general(prefix, nb=10)[0]
         partition_names = [partition_name]
         collection_w.load()

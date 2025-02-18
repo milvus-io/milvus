@@ -208,6 +208,8 @@ class TestPartitionParams(TestcaseBase):
         """
         if partition_name == "12name":
             pytest.skip(reason="won't fix issue #32998")
+        if partition_name == "n-ame":
+            pytest.skip(reason="https://github.com/milvus-io/milvus/issues/39432")
         # create collection
         collection_w = self.init_collection_wrap()
 
