@@ -218,7 +218,8 @@ JsonKeyInvertedIndex::Upload(const Config& config) {
     index_files.reserve(remote_paths_to_size.size() +
                         remote_mem_path_to_size.size());
     for (auto& file : remote_paths_to_size) {
-        index_files.emplace_back(file.first, file.second);
+        index_files.emplace_back(disk_file_manager_->GetFileName(file.first),
+                                 file.second);
     }
     for (auto& file : remote_mem_path_to_size) {
         index_files.emplace_back(file.first, file.second);
@@ -235,6 +236,15 @@ JsonKeyInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load json key index");
+
+    for (auto& index_file : index_files.value()) {
+        boost::filesystem::path p(index_file);
+        if (!p.has_parent_path()) {
+            auto remote_prefix =
+                disk_file_manager_->GetRemoteJsonKeyLogPrefix();
+            index_file = remote_prefix + "/" + index_file;
+        }
+    }
 
     disk_file_manager_->CacheJsonKeyIndexToDisk(index_files.value());
     AssertInfo(

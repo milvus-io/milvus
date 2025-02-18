@@ -83,8 +83,6 @@ ExecPlanNodeVisitor::ExecuteTask(
               plan.plan_node_->ToString(),
               query_context->get_active_count(),
               query_context->get_query_timestamp());
-    std::cout << "ExecuteTask query_context"
-              << query_context->get_consistency_level() << std::endl;
     auto task =
         milvus::exec::Task::Create(DEFAULT_TASK_ID, plan, 0, query_context);
     int64_t processed_num = 0;

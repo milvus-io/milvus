@@ -133,14 +133,14 @@ class DiskFileManagerImpl : public FileManagerImpl {
         return added_total_file_size_;
     }
 
+    std::string
+    GetFileName(const std::string& localfile);
+
  private:
     int64_t
     GetIndexBuildId() {
         return index_meta_.build_id;
     }
-
-    std::string
-    GetFileName(const std::string& localfile);
 
     std::string
     GetRemoteIndexPath(const std::string& file_name, int64_t slice_num) const;
