@@ -1825,6 +1825,17 @@ def get_text_field_name(schema=None):
             return field.name
     return None
 
+def get_text_match_field_name(schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype == DataType.VARCHAR and field.params.get("enable_match", False):
+            return field.name
+    return None
+
+
+
 def get_float_field_name(schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
