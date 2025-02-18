@@ -9,7 +9,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
-var unmashalerDispatcher = (&msgstream.ProtoUDFactory{}).NewUnmarshalDispatcher()
+var UnmashalerDispatcher = (&msgstream.ProtoUDFactory{}).NewUnmarshalDispatcher()
 
 // FromMessageToMsgPack converts message to msgpack.
 // Same TimeTick must be sent with same msgpack.
@@ -97,8 +97,6 @@ func parseTxnMsg(msg message.ImmutableMessage) ([]msgstream.TsMsg, error) {
 // parseSingleMsg converts message to ts message.
 func parseSingleMsg(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
 	switch msg.Version() {
-	case message.VersionOld:
-		return fromMessageToTsMsgVOld(msg)
 	case message.VersionV1:
 		return fromMessageToTsMsgV1(msg)
 	case message.VersionV2:
@@ -108,13 +106,9 @@ func parseSingleMsg(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
 	}
 }
 
-func fromMessageToTsMsgVOld(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
-	panic("Not implemented")
-}
-
 // fromMessageToTsMsgV1 converts message to ts message.
 func fromMessageToTsMsgV1(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
-	tsMsg, err := unmashalerDispatcher.Unmarshal(msg.Payload(), MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()))
+	tsMsg, err := UnmashalerDispatcher.Unmarshal(msg.Payload(), MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()))
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to unmarshal message")
 	}
@@ -227,7 +221,7 @@ func recoverDeleteMsgFromHeader(deleteMsg *msgstream.DeleteMsg, header *message.
 	return deleteMsg, nil
 }
 
-func recoverImportMsgFromHeader(importMsg *msgstream.ImportMsg, header *message.ImportMessageHeader, timetick uint64) (msgstream.TsMsg, error) {
+func recoverImportMsgFromHeader(importMsg *msgstream.ImportMsg, _ *message.ImportMessageHeader, timetick uint64) (msgstream.TsMsg, error) {
 	importMsg.Base.Timestamp = timetick
 	return importMsg, nil
 }
