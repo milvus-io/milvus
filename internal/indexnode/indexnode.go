@@ -208,6 +208,8 @@ func (i *IndexNode) initSegcore() {
 	cJSONIndexEnabled := C.bool(Params.DataCoordCfg.EnabledJSONKeyStats.GetAsBool())
 	C.InitDefaultJSONKeyIndexEnable(cJSONIndexEnabled)
 
+	initcore.InitRemoteChunkManager(paramtable.Get())
+
 	initcore.InitMmapManager(paramtable.Get())
 }
 
