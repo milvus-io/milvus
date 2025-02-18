@@ -1770,7 +1770,7 @@ class TestQueryParams(TestcaseBase):
         collection_w.insert(data)
 
         # 3. query with param ignore_growing invalid
-        error = {ct.err_code: 999, ct.err_msg: "parse search growing failed"}
+        error = {ct.err_code: 999, ct.err_msg: "parse ignore growing field failed"}
         collection_w.query('int64 >= 0', ignore_growing=ignore_growing,
                            check_task=CheckTasks.err_res, check_items=error)
 

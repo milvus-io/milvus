@@ -1037,13 +1037,12 @@ class TestCollectionSearchInvalid(TestcaseBase):
 
         # 3. search with param ignore_growing=True
         search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "ignore_growing": ignore_growing}
-        vector = [[random.random() for _ in range(default_dim)]
-                  for _ in range(nq)]
+        vector = [[random.random() for _ in range(default_dim)] for _ in range(nq)]
         collection_w.search(vector[:default_nq], default_search_field, search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 999,
-                                         "err_msg": "parse search growing failed"})
+                                         "err_msg": "parse ignore growing field failed"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_guarantee_timestamp(self, get_invalid_guarantee_timestamp):
