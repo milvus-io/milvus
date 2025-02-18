@@ -319,6 +319,11 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		}
 	}
 
+	if len(insertLogs) == 0 {
+		log.Ctx(ctx).Info("there is no insertBinlogs, skip creating text index")
+		return nil
+	}
+
 	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort || st.req.GetSubJobType() == indexpb.StatsSubJob_TextIndexJob {
 		err = st.createTextIndex(ctx,
 			st.req.GetStorageConfig(),
