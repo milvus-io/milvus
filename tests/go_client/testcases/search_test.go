@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -570,32 +571,44 @@ func TestSearchInvalidScannReorderK(t *testing.T) {
 // test search with scann index params: with_raw_data and metrics_type [L2, IP, COSINE]
 func TestSearchScannAllMetricsWithRawData(t *testing.T) {
 	t.Parallel()
+	ch := make(chan struct{}, 3)
+	wg := sync.WaitGroup{}
+	testFunc := func(withRawData bool, metricType entity.MetricType) {
+		defer func() {
+			wg.Done()
+			<-ch
+		}()
+		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+		mc := createDefaultMilvusClient(ctx, t)
+
+		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON),
+			hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
+		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+		prepare.FlushData(ctx, t, mc, schema.CollectionName)
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{
+			common.DefaultFloatVecFieldName: index.NewSCANNIndex(metricType, 16, withRawData),
+		}))
+		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+		// search and output all fields
+		vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+		resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).
+			WithConsistencyLevel(entity.ClStrong).WithOutputFields("*"))
+		common.CheckErr(t, errSearch, true)
+		common.CheckOutputFields(t, []string{
+			common.DefaultInt64FieldName, common.DefaultJSONFieldName,
+			common.DefaultFloatVecFieldName, common.DefaultDynamicFieldName,
+		}, resSearch[0].Fields)
+		common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
+	}
 	for _, withRawData := range []bool{true, false} {
 		for _, metricType := range []entity.MetricType{entity.L2, entity.IP, entity.COSINE} {
-			ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-			mc := createDefaultMilvusClient(ctx, t)
-
-			prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON),
-				hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
-			prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
-			prepare.FlushData(ctx, t, mc, schema.CollectionName)
-			prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{
-				common.DefaultFloatVecFieldName: index.NewSCANNIndex(metricType, 16, withRawData),
-			}))
-			prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
-
-			// search and output all fields
-			vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-			resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).
-				WithConsistencyLevel(entity.ClStrong).WithOutputFields("*"))
-			common.CheckErr(t, errSearch, true)
-			common.CheckOutputFields(t, []string{
-				common.DefaultInt64FieldName, common.DefaultJSONFieldName,
-				common.DefaultFloatVecFieldName, common.DefaultDynamicFieldName,
-			}, resSearch[0].Fields)
-			common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
+			ch <- struct{}{}
+			wg.Add(1)
+			go testFunc(withRawData, metricType)
 		}
 	}
+	wg.Wait()
 }
 
 // test search with valid expression
@@ -1090,7 +1103,6 @@ func TestSearchSparseVectorNotSupported(t *testing.T) {
 }
 
 func TestRangeSearchSparseVector(t *testing.T) {
-	t.Skipf("https://github.com/milvus-io/milvus/issues/38846")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := createDefaultMilvusClient(ctx, t)
 
@@ -1111,10 +1123,12 @@ func TestRangeSearchSparseVector(t *testing.T) {
 		log.Info("default search", zap.Any("score", res.Scores))
 	}
 
-	radius := 10
-	rangeFilter := 30
+	annParams := index.NewSparseAnnParam()
+	annParams.WithRadius(10)
+	annParams.WithRangeFilter(30)
+	annParams.WithDropRatio(0.2)
 	resRange, errSearch = mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).
-		WithSearchParam("drop_ratio_search", "0.2").WithSearchParam("radius", strconv.Itoa(radius)).WithSearchParam("range_filter", strconv.Itoa(rangeFilter)))
+		WithAnnParam(annParams))
 	common.CheckErr(t, errSearch, true)
 	common.CheckErr(t, errSearch, true)
 	require.Len(t, resRange, common.DefaultNq)

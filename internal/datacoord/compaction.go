@@ -61,6 +61,7 @@ type compactionPlanContext interface {
 	removeTasksByChannel(channel string)
 	setTaskScheduler(scheduler *taskScheduler)
 	checkAndSetSegmentStating(channel string, segmentID int64) bool
+	getCompactionTasksNum(filters ...compactionTaskFilter) int
 }
 
 var (
@@ -146,7 +147,7 @@ func (sna *SlotBasedNodeAssigner) pickAnyNode(task CompactionTask) (nodeID int64
 }
 
 type compactionPlanHandler struct {
-	queueTasks CompactionQueue
+	queueTasks *CompactionQueue
 
 	executingGuard lock.RWMutex
 	executingTasks map[int64]CompactionTask // planID -> task
@@ -271,7 +272,7 @@ func newCompactionPlanHandler(cluster Cluster, sessions session.DataNodeManager,
 	// TODO[GOOSE]: Higher capacity makes tasks waiting longer, which need to be get rid of.
 	capacity := paramtable.Get().DataCoordCfg.CompactionTaskQueueCapacity.GetAsInt()
 	return &compactionPlanHandler{
-		queueTasks:     *NewCompactionQueue(capacity, getPrioritizer()),
+		queueTasks:     NewCompactionQueue(capacity, getPrioritizer()),
 		meta:           meta,
 		sessions:       sessions,
 		allocator:      allocator,
@@ -387,6 +388,8 @@ func (c *compactionPlanHandler) schedule(assigner NodeAssigner) []CompactionTask
 		// Do not move this check logic outside the lock; it needs to remain mutually exclusive with the stats task.
 		if t.GetTaskProto().GetType() == datapb.CompactionType_Level0DeleteCompaction {
 			if !t.PreparePlan() {
+				selected = selected[:len(selected)-1]
+				excluded = append(excluded, t)
 				c.executingGuard.Unlock()
 				continue
 			}
@@ -801,6 +804,45 @@ func (c *compactionPlanHandler) checkDelay(t CompactionTask) {
 			zap.Int64("nodeID", t.GetTaskProto().GetNodeID()),
 			zap.Time("startTime", startTime),
 			zap.Duration("execDuration", execDuration))
+	}
+}
+
+func (c *compactionPlanHandler) getCompactionTasksNum(filters ...compactionTaskFilter) int {
+	cnt := 0
+	isMatch := func(task CompactionTask) bool {
+		for _, f := range filters {
+			if !f(task) {
+				return false
+			}
+		}
+		return true
+	}
+	c.queueTasks.ForEach(func(task CompactionTask) {
+		if isMatch(task) {
+			cnt += 1
+		}
+	})
+	c.executingGuard.RLock()
+	for _, t := range c.executingTasks {
+		if isMatch(t) {
+			cnt += 1
+		}
+	}
+	c.executingGuard.RUnlock()
+	return cnt
+}
+
+type compactionTaskFilter func(task CompactionTask) bool
+
+func CollectionIDCompactionTaskFilter(collectionID int64) compactionTaskFilter {
+	return func(task CompactionTask) bool {
+		return task.GetTaskProto().GetCollectionID() == collectionID
+	}
+}
+
+func L0CompactionCompactionTaskFilter() compactionTaskFilter {
+	return func(task CompactionTask) bool {
+		return task.GetTaskProto().GetType() == datapb.CompactionType_Level0DeleteCompaction
 	}
 }
 

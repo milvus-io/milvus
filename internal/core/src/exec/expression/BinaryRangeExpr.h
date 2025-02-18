@@ -22,6 +22,7 @@
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/Element.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus {
@@ -229,6 +230,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
                       name,
                       segment,
                       expr->column_.field_id_,
+                      expr->column_.nested_path_,
                       active_count,
                       batch_size),
           expr_(expr) {
@@ -277,6 +279,9 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
  private:
     std::shared_ptr<const milvus::expr::BinaryRangeFilterExpr> expr_;
     int64_t overflow_check_pos_{0};
+    SingleElement lower_arg_;
+    SingleElement upper_arg_;
+    bool arg_inited_{false};
 };
 }  //namespace exec
 }  // namespace milvus

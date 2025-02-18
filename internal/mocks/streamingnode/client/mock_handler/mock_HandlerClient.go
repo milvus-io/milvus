@@ -177,6 +177,63 @@ func (_c *MockHandlerClient_CreateProducer_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// GetLatestMVCCTimestampIfLocal provides a mock function with given fields: ctx, vchannel
+func (_m *MockHandlerClient) GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error) {
+	ret := _m.Called(ctx, vchannel)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLatestMVCCTimestampIfLocal")
+	}
+
+	var r0 uint64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (uint64, error)); ok {
+		return rf(ctx, vchannel)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) uint64); ok {
+		r0 = rf(ctx, vchannel)
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, vchannel)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockHandlerClient_GetLatestMVCCTimestampIfLocal_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLatestMVCCTimestampIfLocal'
+type MockHandlerClient_GetLatestMVCCTimestampIfLocal_Call struct {
+	*mock.Call
+}
+
+// GetLatestMVCCTimestampIfLocal is a helper method to define mock.On call
+//   - ctx context.Context
+//   - vchannel string
+func (_e *MockHandlerClient_Expecter) GetLatestMVCCTimestampIfLocal(ctx interface{}, vchannel interface{}) *MockHandlerClient_GetLatestMVCCTimestampIfLocal_Call {
+	return &MockHandlerClient_GetLatestMVCCTimestampIfLocal_Call{Call: _e.mock.On("GetLatestMVCCTimestampIfLocal", ctx, vchannel)}
+}
+
+func (_c *MockHandlerClient_GetLatestMVCCTimestampIfLocal_Call) Run(run func(ctx context.Context, vchannel string)) *MockHandlerClient_GetLatestMVCCTimestampIfLocal_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockHandlerClient_GetLatestMVCCTimestampIfLocal_Call) Return(_a0 uint64, _a1 error) *MockHandlerClient_GetLatestMVCCTimestampIfLocal_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockHandlerClient_GetLatestMVCCTimestampIfLocal_Call) RunAndReturn(run func(context.Context, string) (uint64, error)) *MockHandlerClient_GetLatestMVCCTimestampIfLocal_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockHandlerClient creates a new instance of MockHandlerClient. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockHandlerClient(t interface {

@@ -549,3 +549,8 @@ message SegmentAssignmentStat {
     uint64 binlog_counter                     = 6;
     uint64 create_segment_time_tick           = 7; // The timetick of create segment message in wal.
 }
+
+// The WALCheckpoint that is used to recovery the wal scanner.
+message WALCheckpoint {
+    messages.MessageID messageID = 1;
+}

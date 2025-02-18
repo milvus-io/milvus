@@ -164,6 +164,65 @@ func (_c *MockCompactionPlanContext_getCompactionInfo_Call) RunAndReturn(run fun
 	return _c
 }
 
+// getCompactionTasksNum provides a mock function with given fields: filters
+func (_m *MockCompactionPlanContext) getCompactionTasksNum(filters ...compactionTaskFilter) int {
+	_va := make([]interface{}, len(filters))
+	for _i := range filters {
+		_va[_i] = filters[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for getCompactionTasksNum")
+	}
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func(...compactionTaskFilter) int); ok {
+		r0 = rf(filters...)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// MockCompactionPlanContext_getCompactionTasksNum_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'getCompactionTasksNum'
+type MockCompactionPlanContext_getCompactionTasksNum_Call struct {
+	*mock.Call
+}
+
+// getCompactionTasksNum is a helper method to define mock.On call
+//   - filters ...compactionTaskFilter
+func (_e *MockCompactionPlanContext_Expecter) getCompactionTasksNum(filters ...interface{}) *MockCompactionPlanContext_getCompactionTasksNum_Call {
+	return &MockCompactionPlanContext_getCompactionTasksNum_Call{Call: _e.mock.On("getCompactionTasksNum",
+		append([]interface{}{}, filters...)...)}
+}
+
+func (_c *MockCompactionPlanContext_getCompactionTasksNum_Call) Run(run func(filters ...compactionTaskFilter)) *MockCompactionPlanContext_getCompactionTasksNum_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]compactionTaskFilter, len(args)-0)
+		for i, a := range args[0:] {
+			if a != nil {
+				variadicArgs[i] = a.(compactionTaskFilter)
+			}
+		}
+		run(variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockCompactionPlanContext_getCompactionTasksNum_Call) Return(_a0 int) *MockCompactionPlanContext_getCompactionTasksNum_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionPlanContext_getCompactionTasksNum_Call) RunAndReturn(run func(...compactionTaskFilter) int) *MockCompactionPlanContext_getCompactionTasksNum_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // getCompactionTasksNumBySignalID provides a mock function with given fields: signalID
 func (_m *MockCompactionPlanContext) getCompactionTasksNumBySignalID(signalID int64) int {
 	ret := _m.Called(signalID)

@@ -9,6 +9,7 @@ packages:
     interfaces:
       WALAccesser:
       Utility:
+      Broadcast:
   github.com/milvus-io/milvus/internal/streamingcoord/server/balancer:
     interfaces:
       Balancer:
@@ -38,10 +39,6 @@ packages:
   github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer:
     interfaces:
       Consumer:
-  github.com/milvus-io/milvus/internal/streamingnode/server/flusher:
-    interfaces:
-      Flusher:
-      FlushMsgHandler:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal:
     interfaces:
       OpenerBuilder:
@@ -59,6 +56,9 @@ packages:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector:
     interfaces:
       TimeTickSyncOperator:
+  github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab:
+    interfaces:
+      ROWriteAheadBuffer:
   google.golang.org/grpc:
     interfaces:
       ClientStream:
@@ -72,6 +72,9 @@ packages:
   github.com/milvus-io/milvus/internal/util/segcore:
     interfaces:
       CSegment:
+  github.com/milvus-io/milvus/internal/storage:
+    interfaces:
+      ChunkManager:
   github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer:
     interfaces:
       Discoverer:
@@ -86,6 +89,9 @@ packages:
   github.com/milvus-io/milvus/internal/util/searchutil/optimizers:
     interfaces:
       QueryHook:
+#  github.com/milvus-io/milvus/internal/flushcommon/util:
+#    interfaces:
+#      MsgHandler:
   google.golang.org/grpc/resolver:
     interfaces:
       ClientConn:

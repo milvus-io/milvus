@@ -67,7 +67,8 @@ func (r *resumingWatcher) Close() {
 
 func (r *resumingWatcher) execute(backoffConfig *typeutil.BackoffTimerConfig) {
 	backoff := typeutil.NewBackoffTimer(backoffConfig)
-	nextTimer := time.After(0)
+	var nextTimer <-chan time.Time
+	var initialized bool
 	var watcher Watcher
 	defer func() {
 		if watcher != nil {
@@ -92,6 +93,12 @@ func (r *resumingWatcher) execute(backoffConfig *typeutil.BackoffTimerConfig) {
 					watcher = nil
 				}
 			}
+			if !initialized {
+				// try to initialize watcher in next loop.
+				// avoid to make a grpc stream channel if the watch operation is not used.
+				nextTimer = time.After(0)
+				initialized = true
+			}
 		case ev, ok := <-eventChan:
 			if !ok {
 				watcher.Close()
@@ -101,15 +108,15 @@ func (r *resumingWatcher) execute(backoffConfig *typeutil.BackoffTimerConfig) {
 			r.evs.Notify(ev)
 		case <-nextTimer:
 			var err error
+			nextTimer = nil
 			if watcher, err = r.createNewWatcher(); err != nil {
 				r.Logger().Warn("create new watcher failed", zap.Error(err))
 				break
 			}
 			r.Logger().Info("create new watcher successful")
 			backoff.DisableBackoff()
-			nextTimer = nil
 		}
-		if watcher == nil {
+		if watcher == nil && nextTimer == nil {
 			backoff.EnableBackoff()
 			var interval time.Duration
 			nextTimer, interval = backoff.NextTimer()

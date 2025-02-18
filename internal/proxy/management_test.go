@@ -371,6 +371,68 @@ func (s *ProxyManagementSuite) TestResumeQueryCoordBalance() {
 	})
 }
 
+func (s *ProxyManagementSuite) TestCheckBalanceStatus() {
+	s.Run("normal", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.querycoord.EXPECT().CheckBalanceStatus(mock.Anything, mock.Anything).Return(&querypb.CheckBalanceStatusResponse{
+			Status:   merr.Success(),
+			IsActive: true,
+		}, nil).Times(1)
+
+		req, err := http.NewRequest(http.MethodPost, management.RouteQueryCoordBalanceStatus, nil)
+		s.Require().NoError(err)
+
+		recorder := httptest.NewRecorder()
+		s.proxy.CheckQueryCoordBalanceStatus(recorder, req)
+		s.Equal(http.StatusOK, recorder.Code)
+		s.Equal(`{"msg": "OK", "status": "active"}`, recorder.Body.String())
+
+		s.querycoord.EXPECT().CheckBalanceStatus(mock.Anything, mock.Anything).Return(&querypb.CheckBalanceStatusResponse{
+			Status:   merr.Success(),
+			IsActive: false,
+		}, nil).Times(1)
+
+		req, err = http.NewRequest(http.MethodPost, management.RouteQueryCoordBalanceStatus, nil)
+		s.Require().NoError(err)
+		recorder = httptest.NewRecorder()
+		s.proxy.CheckQueryCoordBalanceStatus(recorder, req)
+		s.Equal(http.StatusOK, recorder.Code)
+		s.Equal(`{"msg": "OK", "status": "suspended"}`, recorder.Body.String())
+	})
+
+	s.Run("return_error", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.querycoord.EXPECT().CheckBalanceStatus(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
+
+		req, err := http.NewRequest(http.MethodPost, management.RouteQueryCoordBalanceStatus, nil)
+		s.Require().NoError(err)
+
+		recorder := httptest.NewRecorder()
+		s.proxy.CheckQueryCoordBalanceStatus(recorder, req)
+		s.Equal(http.StatusInternalServerError, recorder.Code)
+	})
+
+	s.Run("return_failure", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		req, err := http.NewRequest(http.MethodPost, management.RouteQueryCoordBalanceStatus, nil)
+		s.Require().NoError(err)
+
+		s.querycoord.EXPECT().CheckBalanceStatus(mock.Anything, mock.Anything).Return(&querypb.CheckBalanceStatusResponse{
+			Status: merr.Status(merr.ErrServiceNotReady),
+		}, nil)
+
+		recorder := httptest.NewRecorder()
+		s.proxy.CheckQueryCoordBalanceStatus(recorder, req)
+		s.Equal(http.StatusInternalServerError, recorder.Code)
+	})
+}
+
 func (s *ProxyManagementSuite) TestSuspendQueryNode() {
 	s.Run("normal", func() {
 		s.SetupTest()

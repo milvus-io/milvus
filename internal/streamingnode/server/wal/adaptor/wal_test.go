@@ -17,9 +17,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
-	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_flusher"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
@@ -29,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
@@ -42,7 +45,13 @@ type walTestFramework struct {
 
 func TestWAL(t *testing.T) {
 	initResourceForTest(t)
-	b := registry.MustGetBuilder(walimplstest.WALName)
+	b := registry.MustGetBuilder(walimplstest.WALName,
+		redo.NewInterceptorBuilder(),
+		// TODO: current flusher interceptor cannot work well with the walimplstest.
+		// flusher.NewInterceptorBuilder(),
+		timetick.NewInterceptorBuilder(),
+		segment.NewInterceptorBuilder(),
+	)
 	f := &walTestFramework{
 		b:            b,
 		t:            t,
@@ -52,6 +61,11 @@ func TestWAL(t *testing.T) {
 }
 
 func initResourceForTest(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.StreamingCfg.WALWriteAheadBufferKeepalive.Key, "500ms")
+	params.Save(params.StreamingCfg.WALWriteAheadBufferCapacity.Key, "10k")
+
 	rc := idalloc.NewMockRootCoordClient(t)
 	rc.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{}, nil)
 
@@ -68,17 +82,10 @@ func initResourceForTest(t *testing.T) {
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
-	flusher := mock_flusher.NewMockFlusher(t)
-	flusher.EXPECT().RegisterPChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
-	flusher.EXPECT().UnregisterPChannel(mock.Anything).Return().Maybe()
-	flusher.EXPECT().RegisterVChannel(mock.Anything, mock.Anything).Return().Maybe()
-	flusher.EXPECT().UnregisterVChannel(mock.Anything).Return().Maybe()
-
 	resource.InitForTest(
 		t,
 		resource.OptRootCoordClient(fRootCoordClient),
 		resource.OptDataCoordClient(fDataCoordClient),
-		resource.OptFlusher(flusher),
 		resource.OptStreamingNodeCatalog(catalog),
 	)
 }
@@ -152,8 +159,12 @@ func (f *testOneWALFramework) testReadAndWrite(ctx context.Context, w wal.WAL) {
 
 	var newWritten []message.ImmutableMessage
 	var read1, read2 []message.ImmutableMessage
+	appendDone := make(chan struct{})
 	go func() {
-		defer wg.Done()
+		defer func() {
+			close(appendDone)
+			wg.Done()
+		}()
 		var err error
 		newWritten, err = f.testAppend(ctx, w)
 		assert.NoError(f.t, err)
@@ -171,6 +182,7 @@ func (f *testOneWALFramework) testReadAndWrite(ctx context.Context, w wal.WAL) {
 		assert.NoError(f.t, err)
 	}()
 	wg.Wait()
+
 	// read result should be sorted by timetick.
 	f.assertSortByTimeTickMessageList(read1)
 	f.assertSortByTimeTickMessageList(read2)
@@ -344,8 +356,14 @@ func (f *testOneWALFramework) testRead(ctx context.Context, w wal.WAL) ([]messag
 
 	expectedCnt := f.messageCount + len(f.written)
 	msgs := make([]message.ImmutableMessage, 0, expectedCnt)
+	cnt := 5
 	for {
 		msg, ok := <-s.Chan()
+		// make a random slow down to trigger cache expire.
+		if rand.Int31n(10) == 0 && cnt > 0 {
+			cnt--
+			time.Sleep(time.Duration(rand.Int31n(500)+100) * time.Millisecond)
+		}
 		if msg.MessageType() != message.MessageTypeInsert && msg.MessageType() != message.MessageTypeTxn {
 			continue
 		}

@@ -380,9 +380,9 @@ func TestStream_RmqTtMsgStream_DuplicatedIDs(t *testing.T) {
 	outputStream.Seek(ctx, receivedMsg.StartPositions, false)
 	seekMsg := consumer(ctx, outputStream)
 	assert.Equal(t, len(seekMsg.Msgs), 1+2)
-	assert.EqualValues(t, seekMsg.Msgs[0].BeginTs(), 1)
-	assert.Equal(t, commonpb.MsgType_CreateCollection, seekMsg.Msgs[1].Type())
-	assert.Equal(t, commonpb.MsgType_CreateCollection, seekMsg.Msgs[2].Type())
+	assert.EqualValues(t, seekMsg.Msgs[0].GetTimestamp(), 1)
+	assert.Equal(t, commonpb.MsgType_CreateCollection, seekMsg.Msgs[1].GetType())
+	assert.Equal(t, commonpb.MsgType_CreateCollection, seekMsg.Msgs[2].GetType())
 
 	inputStream.Close()
 	outputStream.Close()
@@ -485,13 +485,17 @@ func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
 	assert.Equal(t, len(seekMsg.Msgs), 3)
 	result := []uint64{14, 12, 13}
 	for i, msg := range seekMsg.Msgs {
-		assert.Equal(t, msg.BeginTs(), result[i])
+		tsMsg, err := msg.Unmarshal(outputStream.GetUnmarshalDispatcher())
+		require.NoError(t, err)
+		assert.Equal(t, tsMsg.BeginTs(), result[i])
 	}
 
 	seekMsg2 := consumer(ctx, outputStream)
 	assert.Equal(t, len(seekMsg2.Msgs), 1)
 	for _, msg := range seekMsg2.Msgs {
-		assert.Equal(t, msg.BeginTs(), uint64(19))
+		tsMsg, err := msg.Unmarshal(outputStream.GetUnmarshalDispatcher())
+		require.NoError(t, err)
+		assert.Equal(t, tsMsg.BeginTs(), uint64(19))
 	}
 
 	inputStream.Close()
@@ -517,7 +521,7 @@ func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 	var seekPosition *msgpb.MsgPosition
 	for i := 0; i < 10; i++ {
 		result := consumer(ctx, outputStream)
-		assert.Equal(t, result.Msgs[0].ID(), int64(i))
+		assert.Equal(t, result.Msgs[0].GetID(), int64(i))
 		seekPosition = result.EndPositions[0]
 	}
 	outputStream.Close()
@@ -550,7 +554,7 @@ func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 	assert.NoError(t, err)
 
 	result := consumer(ctx, outputStream2)
-	assert.Equal(t, result.Msgs[0].ID(), int64(1))
+	assert.Equal(t, result.Msgs[0].GetID(), int64(1))
 
 	inputStream.Close()
 	outputStream2.Close()
@@ -585,7 +589,7 @@ func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
 	pack := <-outputStream.Chan()
 	assert.NotNil(t, pack)
 	assert.Equal(t, 1, len(pack.Msgs))
-	assert.EqualValues(t, 1000, pack.Msgs[0].BeginTs())
+	assert.EqualValues(t, 1000, pack.Msgs[0].GetTimestamp())
 
 	inputStream.Close()
 	outputStream.Close()

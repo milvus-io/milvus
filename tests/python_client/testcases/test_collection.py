@@ -720,7 +720,7 @@ class TestCollectionParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         float_vec_field = cf.gen_float_vec_field(dim=dim)
         schema = cf.gen_collection_schema(fields=[cf.gen_int64_field(is_primary=True), float_vec_field])
-        error = {ct.err_code: 65535, ct.err_msg: "invalid dimension: {}.".format(dim)}
+        error = {ct.err_code: 65535, ct.err_msg: f"should be in range 2 ~ {ct.max_dim}"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1157,7 +1157,8 @@ class TestCollectionOperation(TestcaseBase):
             if v and v != DataType.UNKNOWN and v != DataType.STRING \
                     and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR \
                     and v != DataType.BINARY_VECTOR and v != DataType.ARRAY \
-                    and v != DataType.FLOAT16_VECTOR and v != DataType.BFLOAT16_VECTOR:
+                    and v != DataType.FLOAT16_VECTOR and v != DataType.BFLOAT16_VECTOR \
+                    and v != DataType.INT8_VECTOR:
                 field, _ = self.field_schema_wrap.init_field_schema(name=k.lower(), dtype=v)
                 fields.append(field)
         fields.append(cf.gen_float_vec_field())
@@ -2834,19 +2835,20 @@ class TestLoadCollection(TestcaseBase):
         assert loading_progress == {'loading_progress': '100%'}
 
         # verify load different replicas thrown an exception
-        error = {ct.err_code: 1100, ct.err_msg: "call query coordinator LoadCollection: can't change the replica number"
-                                                " for loaded collection: invalid parameter[expected=1][actual=2]"}
-        collection_w.load(replica_number=2)
+        error = {ct.err_code: 1100, ct.err_msg: "call query coordinator LoadCollection: when load "
+                                                "2 replica count: service resource insufficient"
+                                                "[currentStreamingNode=1][expectedStreamingNode=2]"}
+        collection_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
         one_replica, _ = collection_w.get_replicas()
-        assert len(one_replica.groups) == 2
+        assert len(one_replica.groups) == 1
 
         collection_w.release()
-        collection_w.load(replica_number=2)
+        collection_w.load(replica_number=1)
         # replicas is not yet reflected in loading progress
         loading_progress, _ = self.utility_wrap.loading_progress(collection_w.name)
         assert loading_progress == {'loading_progress': '100%'}
         two_replicas, _ = collection_w.get_replicas()
-        assert len(two_replicas.groups) == 2
+        assert len(two_replicas.groups) == 1
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", check_task=CheckTasks.check_query_results,
                            check_items={'exp_res': [{'int64': 0}]})
 
@@ -2854,7 +2856,7 @@ class TestLoadCollection(TestcaseBase):
         seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
         num_entities = 0
         for seg in seg_info:
-            assert len(seg.nodeIds) == 2
+            assert len(seg.nodeIds) == 1
             num_entities += seg.num_rows
         assert num_entities == ct.default_nb
 
@@ -2871,7 +2873,7 @@ class TestLoadCollection(TestcaseBase):
         # create, insert
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=1)
         tmp_nb = 1000
-        replica_number = 2
+        replica_number = 1  # only 1 streaming node
         for i in range(replica_number):
             df = cf.gen_default_dataframe_data(nb=tmp_nb, start=i * tmp_nb)
             insert_res, _ = collection_w.insert(df)
@@ -2910,9 +2912,9 @@ class TestLoadCollection(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb * 2
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
-        collection_w.load([partition_w.name], replica_number=2)
+        collection_w.load([partition_w.name], replica_number=1)  # only 1 StreamingNode
         for seg in self.utility_wrap.get_query_segment_info(collection_w.name)[0]:
-            assert len(seg.nodeIds) == 2
+            assert len(seg.nodeIds) == 1
         # default tag query 0 empty
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", partition_names=[ct.default_tag],
                            check_tasks=CheckTasks.check_query_empty)
@@ -4096,8 +4098,8 @@ class TestCollectionARRAY(TestcaseBase):
         array_schema = cf.gen_collection_schema([int_field, vec_field, array_field])
         self.init_collection_wrap(schema=array_schema, check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 65535,
-                                               ct.err_msg: "type param(max_length) should be specified for "
-                                                           "varChar field of collection"})
+                                               ct.err_msg: "type param(max_length) should be specified for varChar "
+                                                           "field(int_array)"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("https://github.com/milvus-io/pymilvus/issues/2041")

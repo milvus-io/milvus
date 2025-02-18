@@ -22,6 +22,7 @@
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/Element.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus {
@@ -61,6 +62,7 @@ class PhyTermFilterExpr : public SegmentExpr {
                       name,
                       segment,
                       expr->column_.field_id_,
+                      expr->column_.nested_path_,
                       active_count,
                       batch_size),
           expr_(expr),
@@ -122,6 +124,9 @@ class PhyTermFilterExpr : public SegmentExpr {
     milvus::Timestamp query_timestamp_;
     bool cached_bits_inited_{false};
     TargetBitmap cached_bits_;
+    bool arg_inited_{false};
+    std::shared_ptr<MultiElement> arg_set_;
+    SingleElement arg_val_;
 };
 }  //namespace exec
 }  // namespace milvus

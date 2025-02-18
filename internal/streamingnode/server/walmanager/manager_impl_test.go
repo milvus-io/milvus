@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_flusher"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -33,12 +32,8 @@ func TestManager(t *testing.T) {
 	fDatacoord := syncutil.NewFuture[internaltypes.DataCoordClient]()
 	fDatacoord.Set(datacoord)
 
-	flusher := mock_flusher.NewMockFlusher(t)
-	flusher.EXPECT().RegisterPChannel(mock.Anything, mock.Anything).Return(nil)
-
 	resource.InitForTest(
 		t,
-		resource.OptFlusher(flusher),
 		resource.OptRootCoordClient(fRootcoord),
 		resource.OptDataCoordClient(fDatacoord),
 	)

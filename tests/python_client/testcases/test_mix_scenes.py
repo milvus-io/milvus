@@ -1280,7 +1280,8 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         expected:
             1. search iterator with BITMAP index
         """
-        search_params, vector_field = {"metric_type": "L2", "ef": 32}, DataType.FLOAT16_VECTOR.name
+        ef = 32 if batch_size <= 32 else batch_size  # ef must be larger than or equal to batch size
+        search_params, vector_field = {"metric_type": "L2", "ef": ef}, DataType.FLOAT16_VECTOR.name
         self.collection_wrap.search_iterator(
             cf.gen_vectors(nb=1, dim=3, vector_data_type=vector_field), vector_field, search_params, batch_size,
             expr='INT16 > 15', check_task=CheckTasks.check_search_iterator, check_items={"batch_size": batch_size})

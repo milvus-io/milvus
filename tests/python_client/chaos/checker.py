@@ -227,6 +227,7 @@ class Op(Enum):
     hybrid_search = 'hybrid_search'
     query = 'query'
     text_match = 'text_match'
+    phrase_match = 'phrase_match'
     delete = 'delete'
     delete_freshness = 'delete_freshness'
     compact = 'compact'
@@ -1411,6 +1412,45 @@ class TextMatchChecker(Checker):
             self.run_task()
             sleep(constants.WAIT_PER_OP / 10)
 
+
+class PhraseMatchChecker(Checker):
+    """check phrase match query operations in a dependent thread"""
+
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("PhraseMatchChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        res, result = self.c_wrap.create_index(self.float_vector_field_name,
+                                               constants.DEFAULT_INDEX_PARAM,
+                                               timeout=timeout,
+                                               enable_traceback=enable_traceback,
+                                               check_task=CheckTasks.check_nothing)
+        self.c_wrap.load(replica_number=replica_number)  # do load before query
+        self.insert_data()
+        key_word_1 = self.word_freq.most_common(2)[0][0]
+        key_word_2 = self.word_freq.most_common(2)[1][0]
+        slop=5
+        self.term_expr = f"PHRASE_MATCH({self.text_field_name}, '{key_word_1} {key_word_2}', {slop})"
+
+    @trace()
+    def query(self):
+        res, result = self.c_wrap.query(self.term_expr, timeout=query_timeout,
+                                        check_task=CheckTasks.check_query_not_empty)
+        return res, result
+
+    @exception_handler()
+    def run_task(self):
+        key_word_1 = self.word_freq.most_common(2)[0][0]
+        key_word_2 = self.word_freq.most_common(2)[1][0]
+        slop=5
+        self.term_expr = f"PHRASE_MATCH({self.text_field_name}, '{key_word_1} {key_word_2}', {slop})"
+        res, result = self.query()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP / 10)
 
 
 class DeleteChecker(Checker):

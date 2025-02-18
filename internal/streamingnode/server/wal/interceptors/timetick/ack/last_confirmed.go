@@ -33,7 +33,7 @@ func (m *lastConfirmedManager) AddConfirmedDetails(details sortedDetails, ts uin
 		}
 		m.notDoneTxnMessage.Push(&uncommittedTxnInfo{
 			session:   detail.TxnSession,
-			messageID: detail.MessageID,
+			messageID: detail.Message.MessageID(),
 		})
 	}
 	m.updateLastConfirmedMessageID(ts)

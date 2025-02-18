@@ -148,7 +148,8 @@ struct ArithCompareOperator {
         } else if constexpr (AOp == ArithOpType::Div) {
             return CompareOperator<CmpOp>::compare(left / right, value);
         } else if constexpr (AOp == ArithOpType::Mod) {
-            return CompareOperator<CmpOp>::compare(fmod(left, right), value);
+            return CompareOperator<CmpOp>::compare(long(left) % long(right),
+                                                   value);
         } else {
             // unimplemented
             static_assert(always_false_v<T>, "unimplemented");

@@ -413,7 +413,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 			return &storage.Blob{Key: paths[i], Value: v}
 		})
 
-		rr, err := storage.NewCompositeBinlogRecordReader(blobs)
+		rr, err := storage.NewCompositeBinlogRecordReader(st.req.Schema, storage.MakeBlobsReader(blobs))
 		if err != nil {
 			log.Warn("downloadData wrong, failed to new insert binlogs reader", zap.Error(err))
 			return nil, err
@@ -426,7 +426,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		zap.Duration("download binlogs elapse", downloadTimeCost),
 	)
 
-	numValidRows, err := storage.Sort(rrs, writer.GetPkID(), srw, isValueValid)
+	numValidRows, err := storage.Sort(st.req.Schema, rrs, writer.GetPkID(), srw, isValueValid)
 	if err != nil {
 		log.Warn("sort failed", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 		return nil, err

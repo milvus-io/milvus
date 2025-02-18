@@ -1065,6 +1065,12 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 				CollectionName: collectionName,
 				Schema:         marshaledSchema,
 				ShardsNum:      int32(shardNum),
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.ConsistencyLevel,
+						Value: "1",
+					},
+				},
 			},
 			channels: collectionChannels{physicalChannels: pchans},
 			schema:   schema,

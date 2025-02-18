@@ -1157,3 +1157,7 @@ func (s *Server) InvalidateShardLeaderCache(ctx context.Context, req *proxypb.In
 func (s *Server) DescribeDatabase(ctx context.Context, req *milvuspb.DescribeDatabaseRequest) (*milvuspb.DescribeDatabaseResponse, error) {
 	return s.proxy.DescribeDatabase(ctx, req)
 }
+
+func (s *Server) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequset) (*milvuspb.RunAnalyzerResponse, error) {
+	return s.proxy.RunAnalyzer(ctx, req)
+}

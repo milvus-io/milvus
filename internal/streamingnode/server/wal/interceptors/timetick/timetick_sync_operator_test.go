@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/mocks/streaming/mock_walimpls"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
@@ -66,40 +65,23 @@ func TestTimeTickSyncOperator(t *testing.T) {
 	ctx := context.Background()
 	ts, err := resource.Resource().TSOAllocator().Allocate(ctx)
 	assert.NoError(t, err)
-	ch := operator.TimeTickNotifier().WatchAtMessageID(msgID, ts)
-	shouldBlock(ch)
+	wb, err := operator.WriteAheadBuffer(ctx)
+	assert.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancel()
+	r, err := wb.ReadFromExclusiveTimeTick(ctx, ts)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Nil(t, r)
 	// should not trigger any wal operation, but only update the timetick.
 	operator.Sync(ctx)
-	// should not block because timetick updates.
-	<-ch
-
-	// Test alloc a real message but not ack.
-	// because the timetick message id is updated, so the old watcher should be invalidated.
-	ch = operator.TimeTickNotifier().WatchAtMessageID(msgID, operator.TimeTickNotifier().Get().TimeTick)
-	shouldBlock(ch)
-	acker, err := operator.AckManager().Allocate(ctx)
+	r, err = wb.ReadFromExclusiveTimeTick(context.Background(), ts)
 	assert.NoError(t, err)
-	// should block timetick notifier.
-	ts, _ = resource.Resource().TSOAllocator().Allocate(ctx)
-	ch = operator.TimeTickNotifier().WatchAtMessageID(walimplstest.NewTestMessageID(2), ts)
-	shouldBlock(ch)
-	// sync operation just do nothing, so there's no wal operation triggered.
-	operator.Sync(ctx)
-
-	// After ack, a wal operation will be trigger.
-	acker.Ack(ack.OptMessageID(msgID), ack.OptTxnSession(nil))
-	l.EXPECT().Append(mock.Anything, mock.Anything).Unset()
-	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
-		ts, _ := resource.Resource().TSOAllocator().Allocate(ctx)
-		return &types.AppendResult{
-			MessageID: walimplstest.NewTestMessageID(2),
-			TimeTick:  ts,
-		}, nil
-	})
-	// should trigger a wal operation.
-	operator.Sync(ctx)
-	// ch should still be blocked, because the timetick message id is updated, old message id watch is not notified.
-	shouldBlock(ch)
+	// should not block because timetick updates.
+	msg, err := r.Next(context.Background())
+	assert.NoError(t, err)
+	assert.NotNil(t, msg)
+	assert.Greater(t, msg.TimeTick(), ts)
 }
 
 func shouldBlock(ch <-chan struct{}) {

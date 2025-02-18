@@ -3,14 +3,20 @@ package inspector
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/pkg/streaming/util/types"
 )
 
 type TimeTickSyncOperator interface {
-	TimeTickNotifier() *TimeTickNotifier
-
 	// Channel returns the pchannel info.
 	Channel() types.PChannelInfo
+
+	// MVCCManager returns the related mvcc timestamp manager of current wal.
+	MVCCManager(ctx context.Context) (*mvcc.MVCCManager, error)
+
+	// WriteAheadBuffer get the related WriteAhead buffer.
+	WriteAheadBuffer(ctx context.Context) (wab.ROWriteAheadBuffer, error)
 
 	// Sync trigger a sync operation, try to send the timetick message into wal.
 	// Sync operation is a blocking operation, and not thread-safe, will only call in one goroutine.

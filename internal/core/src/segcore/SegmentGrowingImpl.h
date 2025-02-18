@@ -250,7 +250,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
               *schema_, segcore_config.get_chunk_rows(), mmap_descriptor_),
           indexing_record_(*schema_, index_meta_, segcore_config_),
           id_(segment_id),
-          deleted_record_(&insert_record_, this) {
+          deleted_record_(
+              &insert_record_,
+              [this](const PkType& pk, Timestamp timestamp) {
+                  return this->search_pk(pk, timestamp);
+              },
+              segment_id) {
         if (mmap_descriptor_ != nullptr) {
             LOG_INFO("growing segment {} use mmap to hold raw data",
                      this->get_segment_id());
@@ -303,6 +308,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
         return false;
     }
+
+    bool
+    HasIndex(FieldId field_id, const std::string& nested_path) const override {
+        return false;
+    };
 
     bool
     HasFieldData(FieldId field_id) const override {

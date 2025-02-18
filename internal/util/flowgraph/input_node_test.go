@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/common"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -45,8 +46,9 @@ func TestInputNode(t *testing.T) {
 	produceStream.AsProducer(context.TODO(), channels)
 	produceStream.Produce(context.TODO(), &msgPack)
 
+	dispatcher := msgstream.NewSimpleMsgDispatcher(msgStream, func(pm msgstream.ConsumeMsg) bool { return true })
 	nodeName := "input_node"
-	inputNode := NewInputNode(msgStream.Chan(), nodeName, 100, 100, "", 0, 0, "")
+	inputNode := NewInputNode(dispatcher.Chan(), nodeName, 100, 100, "", 0, 0, "")
 	defer inputNode.Close()
 
 	isInputNode := inputNode.IsInputNode()
@@ -89,7 +91,8 @@ func Test_InputNodeSkipMode(t *testing.T) {
 	outputCh := make(chan bool)
 
 	nodeName := "input_node"
-	inputNode := NewInputNode(msgStream.Chan(), nodeName, 100, 100, typeutil.DataNodeRole, 0, 0, "")
+	dispatcher := msgstream.NewSimpleMsgDispatcher(msgStream, func(pm msgstream.ConsumeMsg) bool { return true })
+	inputNode := NewInputNode(dispatcher.Chan(), nodeName, 100, 100, typeutil.DataNodeRole, 0, 0, "")
 	defer inputNode.Close()
 
 	outputCount := 0

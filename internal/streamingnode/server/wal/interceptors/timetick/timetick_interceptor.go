@@ -16,7 +16,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 )
 
-var _ interceptors.InterceptorWithReady = (*timeTickAppendInterceptor)(nil)
+var (
+	_ interceptors.InterceptorWithReady         = (*timeTickAppendInterceptor)(nil)
+	_ interceptors.InterceptorWithGracefulClose = (*timeTickAppendInterceptor)(nil)
+)
 
 // timeTickAppendInterceptor is a append interceptor.
 type timeTickAppendInterceptor struct {
@@ -31,16 +34,26 @@ func (impl *timeTickAppendInterceptor) Ready() <-chan struct{} {
 
 // Do implements AppendInterceptor.
 func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (msgID message.MessageID, err error) {
+	// the cursor manager should beready since the timetick interceptor is ready.
+	cm, _ := impl.operator.MVCCManager(ctx)
+	defer func() {
+		if err == nil {
+			cm.UpdateMVCC(msg)
+		}
+	}()
+
+	ackManager := impl.operator.AckManager()
+
 	var txnSession *txn.TxnSession
 	if msg.MessageType() != message.MessageTypeTimeTick {
 		// Allocate new timestamp acker for message.
 		var acker *ack.Acker
 		if msg.BarrierTimeTick() == 0 {
-			if acker, err = impl.operator.AckManager().Allocate(ctx); err != nil {
+			if acker, err = ackManager.Allocate(ctx); err != nil {
 				return nil, errors.Wrap(err, "allocate timestamp failed")
 			}
 		} else {
-			if acker, err = impl.operator.AckManager().AllocateWithBarrier(ctx, msg.BarrierTimeTick()); err != nil {
+			if acker, err = ackManager.AllocateWithBarrier(ctx, msg.BarrierTimeTick()); err != nil {
 				return nil, errors.Wrap(err, "allocate timestamp with barrier failed")
 			}
 		}
@@ -56,7 +69,7 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 				return
 			}
 			acker.Ack(
-				ack.OptMessageID(msgID),
+				ack.OptImmutableMessage(msg.IntoImmutableMessage(msgID)),
 				ack.OptTxnSession(txnSession),
 			)
 		}()
@@ -201,7 +214,6 @@ func (impl *timeTickAppendInterceptor) appendMsg(
 	if err != nil {
 		return nil, err
 	}
-
 	utility.ReplaceAppendResultTimeTick(ctx, msg.TimeTick())
 	utility.ReplaceAppendResultTxnContext(ctx, msg.TxnContext())
 	return msgID, nil
