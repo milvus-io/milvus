@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
@@ -867,4 +868,24 @@ func TestQueryWithTemplateParamInvalid(t *testing.T) {
 	// invalid expr
 	_, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("{_123} > 10").WithTemplateParam("_123", common.DefaultInt64FieldName))
 	common.CheckErr(t, err, false, "cannot parse expression")
+}
+
+func TestRunAnalyzer(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := createDefaultMilvusClient(ctx, t)
+
+	// run analyzer with default analyzer
+	tokens, err := mc.RunAnalyzer(ctx, client.NewRunAnaluzerOption([]string{"test doc"}))
+	require.NoError(t, err)
+	assert.Equal(t, tokens[0], []string{"test", "doc"})
+
+	// run analyzer with invalid params
+	_, err = mc.RunAnalyzer(ctx, client.NewRunAnaluzerOption([]string{"text doc"}).WithAnalyzerParams("invalid params}"))
+	common.CheckErr(t, err, false, "JsonError")
+
+	// run analyzer with custom analyzer
+	tokens, err = mc.RunAnalyzer(ctx, client.NewRunAnaluzerOption([]string{"test doc"}).
+		WithAnalyzerParams(`{"type": "standard", "stop_words": ["test"]}`))
+	require.NoError(t, err)
+	assert.Equal(t, tokens[0], []string{"doc"})
 }

@@ -322,3 +322,9 @@ func (mc *MilvusClient) HybridSearch(ctx context.Context, option client.HybridSe
 	resultSets, err := mc.mClient.HybridSearch(ctx, option, callOptions...)
 	return resultSets, err
 }
+
+// RunAnalyzer run analyzer with params
+func (mc *MilvusClient) RunAnalyzer(ctx context.Context, option client.RunAnalyzerOption, callOptions ...grpc.CallOption) ([][]string, error) {
+	tokenSets, err := mc.mClient.RunAnalyzer(ctx, option, callOptions...)
+	return tokenSets, err
+}

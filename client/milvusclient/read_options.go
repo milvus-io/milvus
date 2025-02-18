@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -490,8 +491,7 @@ func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, e
 
 func NewHybridSearchOption(collectionName string, limit int, annRequests ...*annRequest) *hybridSearchOption {
 	return &hybridSearchOption{
-		collectionName: collectionName,
-
+		collectionName:        collectionName,
 		reqs:                  annRequests,
 		useDefaultConsistency: true,
 		limit:                 limit,
@@ -606,5 +606,32 @@ func NewQueryOption(collectionName string) *queryOption {
 		useDefaultConsistencyLevel: true,
 		consistencyLevel:           entity.ClBounded,
 		templateParams:             make(map[string]any),
+	}
+}
+
+type RunAnalyzerOption interface {
+	Request() (*milvuspb.RunAnalyzerRequset, error)
+}
+
+type runAnalyzerOption struct {
+	text            []string
+	analyzer_params string
+}
+
+func (opt *runAnalyzerOption) Request() (*milvuspb.RunAnalyzerRequset, error) {
+	return &milvuspb.RunAnalyzerRequset{
+		Placeholder:    lo.Map(opt.text, func(str string, _ int) []byte { return []byte(str) }),
+		AnalyzerParams: opt.analyzer_params,
+	}, nil
+}
+
+func (opt *runAnalyzerOption) WithAnalyzerParams(params string) *runAnalyzerOption {
+	opt.analyzer_params = params
+	return opt
+}
+
+func NewRunAnaluzerOption(text []string) *runAnalyzerOption {
+	return &runAnalyzerOption{
+		text: text,
 	}
 }
