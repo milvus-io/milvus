@@ -17,6 +17,7 @@
 package balance
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sort"
@@ -179,11 +180,12 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(br *balanceReport, replica *m
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
-	log.Info("node workload status",
-		zap.Int64("collectionID", replica.GetCollectionID()),
-		zap.Int64("replicaID", replica.GetID()),
-		zap.String("channelName", channelName),
-		zap.Stringers("nodes", lo.Values(nodeItemsMap)))
+
+	log.Ctx(context.TODO()).WithRateGroup(fmt.Sprintf("genSegmentPlan-%d-%d", replica.GetCollectionID(), replica.GetID()), 1, 60).
+		RatedInfo(30, "node segment workload status",
+			zap.Int64("collectionID", replica.GetCollectionID()),
+			zap.Int64("replicaID", replica.GetID()),
+			zap.Stringers("nodes", lo.Values(nodeItemsMap)))
 
 	// list all segment which could be balanced, and calculate node's score
 	for _, node := range onlineNodes {
