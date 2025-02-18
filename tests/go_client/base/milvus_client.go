@@ -88,14 +88,14 @@ func (mc *MilvusClient) Close(ctx context.Context) error {
 
 // -- database --
 
-// UsingDatabase list all database in milvus cluster.
-func (mc *MilvusClient) UsingDatabase(ctx context.Context, option client.UseDatabaseOption) error {
+// UseDatabase list all database in milvus cluster.
+func (mc *MilvusClient) UseDatabase(ctx context.Context, option client.UseDatabaseOption) error {
 	err := mc.mClient.UseDatabase(ctx, option)
 	return err
 }
 
-// ListDatabases list all database in milvus cluster.
-func (mc *MilvusClient) ListDatabases(ctx context.Context, option client.ListDatabaseOption, callOptions ...grpc.CallOption) ([]string, error) {
+// ListDatabase list all database in milvus cluster.
+func (mc *MilvusClient) ListDatabase(ctx context.Context, option client.ListDatabaseOption, callOptions ...grpc.CallOption) ([]string, error) {
 	databaseNames, err := mc.mClient.ListDatabase(ctx, option, callOptions...)
 	return databaseNames, err
 }
@@ -109,6 +109,24 @@ func (mc *MilvusClient) CreateDatabase(ctx context.Context, option client.Create
 // DropDatabase drop database with the given db name.
 func (mc *MilvusClient) DropDatabase(ctx context.Context, option client.DropDatabaseOption, callOptions ...grpc.CallOption) error {
 	err := mc.mClient.DropDatabase(ctx, option, callOptions...)
+	return err
+}
+
+// DescribeDatabase describe database with the given db name.
+func (mc *MilvusClient) DescribeDatabase(ctx context.Context, option client.DescribeDatabaseOption, callOptions ...grpc.CallOption) (*entity.Database, error) {
+	database, err := mc.mClient.DescribeDatabase(ctx, option, callOptions...)
+	return database, err
+}
+
+// AlterDatabaseProperties alter database properties
+func (mc *MilvusClient) AlterDatabaseProperties(ctx context.Context, option client.AlterDatabasePropertiesOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.AlterDatabaseProperties(ctx, option, callOptions...)
+	return err
+}
+
+// DropDatabaseProperties drop database properties
+func (mc *MilvusClient) DropDatabaseProperties(ctx context.Context, option client.DropDatabasePropertiesOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.AlterDatabaseProperties(ctx, option, callOptions...)
 	return err
 }
 
@@ -142,6 +160,36 @@ func (mc *MilvusClient) HasCollection(ctx context.Context, option client.HasColl
 func (mc *MilvusClient) DropCollection(ctx context.Context, option client.DropCollectionOption, callOptions ...grpc.CallOption) error {
 	err := mc.mClient.DropCollection(ctx, option, callOptions...)
 	return err
+}
+
+// RenameCollection Rename Collection
+func (mc *MilvusClient) RenameCollection(ctx context.Context, option client.RenameCollectionOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.RenameCollection(ctx, option, callOptions...)
+	return err
+}
+
+// AlterCollectionProperties Alter collection properties
+func (mc *MilvusClient) AlterCollectionProperties(ctx context.Context, option client.AlterCollectionPropertiesOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.AlterCollectionProperties(ctx, option, callOptions...)
+	return err
+}
+
+// DropCollectionProperties Drop collection properties
+func (mc *MilvusClient) DropCollectionProperties(ctx context.Context, option client.DropCollectionPropertiesOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.DropCollectionProperties(ctx, option, callOptions...)
+	return err
+}
+
+// AlterCollectionField Alter collection field
+func (mc *MilvusClient) AlterCollectionField(ctx context.Context, option client.AlterCollectionFieldPropertiesOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.AlterCollectionFieldProperty(ctx, option, callOptions...)
+	return err
+}
+
+// GetCollectionStats Get collection stats
+func (mc *MilvusClient) GetCollectionStats(ctx context.Context, option client.GetCollectionOption) (map[string]string, error) {
+	stats, err := mc.mClient.GetCollectionStats(ctx, option)
+	return stats, err
 }
 
 // -- partition --
@@ -267,4 +315,10 @@ func (mc *MilvusClient) Query(ctx context.Context, option client.QueryOption, ca
 func (mc *MilvusClient) Get(ctx context.Context, option client.QueryOption, callOptions ...grpc.CallOption) (client.ResultSet, error) {
 	resultSet, err := mc.mClient.Get(ctx, option, callOptions...)
 	return resultSet, err
+}
+
+// HybridSearch hybrid search from collection
+func (mc *MilvusClient) HybridSearch(ctx context.Context, option client.HybridSearchOption, callOptions ...grpc.CallOption) ([]client.ResultSet, error) {
+	resultSets, err := mc.mClient.HybridSearch(ctx, option, callOptions...)
+	return resultSets, err
 }

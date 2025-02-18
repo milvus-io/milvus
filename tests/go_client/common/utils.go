@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"reflect"
 	"strings"
 	"time"
 
@@ -152,4 +153,64 @@ var InvalidExpressions = []InvalidExprStruct{
 	{Expr: fmt.Sprintf("json_contains_aby (%s['list'], 2)", DefaultJSONFieldName), ErrNil: false, ErrMsg: "function json_contains_aby(json, int64_t) not found."},
 	{Expr: fmt.Sprintf("%s[-1] > %d", DefaultInt8ArrayField, TestCapacity), ErrNil: false, ErrMsg: "cannot parse expression"}, //  array[-1] >
 	{Expr: fmt.Sprintf("%s[-1] > 1", DefaultJSONFieldName), ErrNil: false, ErrMsg: "invalid expression"},                      //  json[-1] >
+}
+
+// Language constants for text generation
+const (
+	English = "en"
+	Chinese = "zh"
+)
+
+func GenText(lang string) string {
+	englishTopics := []string{
+		"information retrieval", "data mining", "machine learning",
+		"natural language processing", "text analysis", "search engines",
+		"document indexing", "query processing", "relevance ranking",
+		"semantic search",
+	}
+	englishVerbs := []string{
+		"is", "focuses on", "deals with", "involves", "combines",
+		"utilizes", "improves", "enables", "enhances", "supports",
+	}
+	englishObjects := []string{
+		"large datasets", "text documents", "user queries", "search results",
+		"information needs", "relevance scores", "ranking algorithms",
+		"index structures", "query expansion", "document collections",
+	}
+
+	chineseTopics := []string{
+		"信息检索", "数据挖掘", "机器学习",
+		"自然语言处理", "文本分析", "搜索引擎",
+		"文档索引", "查询处理", "相关性排序",
+		"语义搜索",
+	}
+	chineseVerbs := []string{
+		"是", "专注于", "处理", "涉及", "结合",
+		"利用", "改进", "实现", "提升", "支持",
+	}
+	chineseObjects := []string{
+		"大规模数据集", "文本文档", "用户查询", "搜索结果",
+		"信息需求", "相关性分数", "排序算法",
+		"索引结构", "查询扩展", "文档集合",
+	}
+
+	var topic, verb, object string
+	switch lang {
+	case English:
+		topic = englishTopics[rand.Intn(len(englishTopics))]
+		verb = englishVerbs[rand.Intn(len(englishVerbs))]
+		object = englishObjects[rand.Intn(len(englishObjects))]
+		return fmt.Sprintf("%s %s %s", topic, verb, object)
+	case Chinese:
+		topic = chineseTopics[rand.Intn(len(chineseTopics))]
+		verb = chineseVerbs[rand.Intn(len(chineseVerbs))]
+		object = chineseObjects[rand.Intn(len(chineseObjects))]
+		return fmt.Sprintf("%s%s%s", topic, verb, object)
+	default:
+		return "Unsupported language"
+	}
+}
+
+func IsZeroValue(value interface{}) bool {
+	return reflect.DeepEqual(value, reflect.Zero(reflect.TypeOf(value)).Interface())
 }
