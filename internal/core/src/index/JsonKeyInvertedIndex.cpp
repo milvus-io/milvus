@@ -155,9 +155,9 @@ JsonKeyInvertedIndex::JsonKeyInvertedIndex(
         wrapper_ =
             std::make_shared<TantivyIndexWrapper>(field_name.c_str(),
                                                   d_type_,
-                                                  is_mmap ? path_.c_str() : "",
+                                                  !is_mmap ? "" : path_.c_str(),
                                                   false,
-                                                  is_mmap,
+                                                  !is_mmap,
                                                   1,
                                                   JSON_INDEX_MEMORY_BUDGET);
     }

@@ -436,8 +436,8 @@ queryNode:
     vectorIndex: false # Enable mmap for loading vector index
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
-    scalarStats: true # Enable mmap for scalarStats json or text index
     chunkCache: true # Enable mmap for chunk cache (raw vector retrieving).
+    scalarStats: true # Enable mmap for loading scalar stats
     # Enable memory mapping (mmap) to optimize the handling of growing raw data. 
     # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
     # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.

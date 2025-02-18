@@ -65,8 +65,8 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
         std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
     wrapper_ =
         std::make_shared<TantivyIndexWrapper>(field_name.c_str(),
-                                              is_mmap,
-                                              is_mmap ? path_.c_str() : "",
+                                              !is_mmap,
+                                              !is_mmap ? "" : path_.c_str(),
                                               tokenizer_name,
                                               analyzer_params);
 }
