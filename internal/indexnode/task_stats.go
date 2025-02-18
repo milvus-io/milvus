@@ -285,7 +285,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
-		int64(len(values)), insertLogs, statsLogs, bm25StatsLogs)
+		writer.GetRowNum(), insertLogs, statsLogs, bm25StatsLogs)
 
 	log.Ctx(ctx).Info("sort segment end",
 		zap.String("clusterID", st.req.GetClusterID()),
