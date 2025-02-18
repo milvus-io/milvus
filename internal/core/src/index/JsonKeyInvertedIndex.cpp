@@ -49,6 +49,10 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
     jsmntok current = tokens[0];
     Assert(current.type != JSMN_UNDEFINED);
     if (current.type == JSMN_OBJECT) {
+        if (!path.empty()) {
+            AddInvertedRecord(
+                path, offset, current.start, current.end - current.start);
+        }
         int j = 1;
         for (int i = 0; i < current.size; i++) {
             Assert(tokens[j].type == JSMN_STRING && tokens[j].size != 0);
