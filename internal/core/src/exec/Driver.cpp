@@ -27,6 +27,7 @@
 #include "exec/operator/MvccNode.h"
 #include "exec/operator/Operator.h"
 #include "exec/operator/VectorSearchNode.h"
+#include "exec/operator/RandomSampleNode.h"
 #include "exec/operator/GroupByNode.h"
 #include "exec/Task.h"
 
@@ -83,6 +84,11 @@ DriverFactory::CreateDriver(std::unique_ptr<DriverContext> ctx,
                            plannode)) {
             operators.push_back(
                 std::make_unique<PhyGroupByNode>(id, ctx.get(), groupbynode));
+        } else if (auto samplenode =
+                       std::dynamic_pointer_cast<const plan::RandomSampleNode>(
+                           plannode)) {
+            operators.push_back(std::make_unique<PhyRandomSampleNode>(
+                id, ctx.get(), samplenode));
         }
         // TODO: add more operators
     }
