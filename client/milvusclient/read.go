@@ -229,6 +229,38 @@ func (c *Client) HybridSearch(ctx context.Context, option HybridSearchOption, ca
 	return resultSets, err
 }
 
+func (c *Client) RunAnalyzer(ctx context.Context, option RunAnalyzerOption, callOptions ...grpc.CallOption) ([][]*Token, error) {
+	req, err := option.Request()
+	if err != nil {
+		return nil, err
+	}
+
+	var result [][]*Token
+	err = c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.RunAnalyzer(ctx, req, callOptions...)
+		err = merr.CheckRPCCall(resp, err)
+		if err != nil {
+			return err
+		}
+
+		result = lo.Map(resp.Results, func(result *milvuspb.AnalyzerResult, _ int) []*Token {
+			return lo.Map(result.Tokens, func(token *milvuspb.AnalyzerToken, _ int) *Token {
+				return &Token{
+					Text:           token.GetToken(),
+					StartOffset:    token.GetStartOffset(),
+					EndOffset:      token.GetEndOffset(),
+					Position:       token.GetPosition(),
+					PositionLength: token.GetPositionLength(),
+					Hash:           token.GetHash(),
+				}
+			})
+		})
+		return err
+	})
+
+	return result, err
+}
+
 func expandWildcard(schema *entity.Schema, outputFields []string) ([]string, bool) {
 	wildcard := false
 	for _, outputField := range outputFields {
