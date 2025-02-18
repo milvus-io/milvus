@@ -638,17 +638,17 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		deleteData := &storage.DeleteData{}
 		// start position is dml position for segment
 		// if this position is before deleteBuffer's safe ts, it means some delete shall be read from msgstream
-		if info.GetStartPosition().GetTimestamp() < sd.deleteBuffer.SafeTs() {
-			log.Info("load delete from stream...")
-			streamDeleteData, err := sd.readDeleteFromMsgstream(ctx, info.GetStartPosition(), sd.deleteBuffer.SafeTs(), candidate)
-			if err != nil {
-				log.Warn("failed to read delete data from msgstream", zap.Error(err))
-				return err
-			}
+		// if info.GetStartPosition().GetTimestamp() < sd.deleteBuffer.SafeTs() {
+		// 	log.Info("load delete from stream...")
+		// 	streamDeleteData, err := sd.readDeleteFromMsgstream(ctx, info.GetStartPosition(), sd.deleteBuffer.SafeTs(), candidate)
+		// 	if err != nil {
+		// 		log.Warn("failed to read delete data from msgstream", zap.Error(err))
+		// 		return err
+		// 	}
 
-			deleteData.Merge(streamDeleteData)
-			log.Info("load delete from stream done")
-		}
+		// 	deleteData.Merge(streamDeleteData)
+		// 	log.Info("load delete from stream done")
+		// }
 		// list buffered delete
 		deleteRecords := sd.deleteBuffer.ListAfter(info.GetStartPosition().GetTimestamp())
 		for _, entry := range deleteRecords {
