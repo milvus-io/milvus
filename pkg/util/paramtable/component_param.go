@@ -3378,7 +3378,7 @@ user-task-polling:
 	p.JSONIndexMemoryBudgetInTantivy = ParamItem{
 		Key:          "queryNode.segcore.jsonIndexMemoryBudgetInTantivy",
 		Version:      "2.5.0",
-		DefaultValue: "64",
+		DefaultValue: "16",
 		Doc:          "the memory budget for the JSON index In Tantivy",
 		Export:       true,
 	}
