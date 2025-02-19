@@ -33,24 +33,20 @@ type packedRecordReader struct {
 
 	bufferSize int64
 	schema     *schemapb.CollectionSchema
-	r          *simpleArrowRecord
 	field2Col  map[FieldID]int
 }
 
-func (pr *packedRecordReader) Next() error {
+var _ RecordReader = (*packedRecordReader)(nil)
+
+func (pr *packedRecordReader) Next() (Record, error) {
 	if pr.reader == nil {
-		return io.EOF
+		return nil, io.EOF
 	}
 	rec, err := pr.reader.ReadNext()
 	if err != nil || rec == nil {
-		return io.EOF
+		return nil, io.EOF
 	}
-	pr.r = NewSimpleArrowRecord(rec, pr.field2Col)
-	return nil
-}
-
-func (pr *packedRecordReader) Record() Record {
-	return pr.r
+	return NewSimpleArrowRecord(rec, pr.field2Col), nil
 }
 
 func (pr *packedRecordReader) Close() error {
@@ -60,7 +56,7 @@ func (pr *packedRecordReader) Close() error {
 	return nil
 }
 
-func NewPackedRecordReader(paths []string, schema *schemapb.CollectionSchema, bufferSize int64,
+func newPackedRecordReader(paths []string, schema *schemapb.CollectionSchema, bufferSize int64,
 ) (*packedRecordReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
 	if err != nil {
@@ -85,7 +81,7 @@ func NewPackedRecordReader(paths []string, schema *schemapb.CollectionSchema, bu
 func NewPackedDeserializeReader(paths []string, schema *schemapb.CollectionSchema,
 	bufferSize int64, pkFieldID FieldID,
 ) (*DeserializeReader[*Value], error) {
-	reader, err := NewPackedRecordReader(paths, schema, bufferSize)
+	reader, err := newPackedRecordReader(paths, schema, bufferSize)
 	if err != nil {
 		return nil, err
 	}

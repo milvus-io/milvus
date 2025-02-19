@@ -43,8 +43,7 @@ type Record interface {
 }
 
 type RecordReader interface {
-	Next() error
-	Record() Record
+	Next() (Record, error)
 	Close() error
 }
 
@@ -529,11 +528,12 @@ type DeserializeReader[T any] struct {
 // Iterate to next value, return error or EOF if no more value.
 func (deser *DeserializeReader[T]) Next() error {
 	if deser.rec == nil || deser.pos >= deser.rec.Len()-1 {
-		if err := deser.rr.Next(); err != nil {
+		r, err := deser.rr.Next()
+		if err != nil {
 			return err
 		}
 		deser.pos = 0
-		deser.rec = deser.rr.Record()
+		deser.rec = r
 
 		deser.values = make([]T, deser.rec.Len())
 

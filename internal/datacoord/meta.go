@@ -1666,7 +1666,7 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 				CompactionFrom:      compactFromSegIDs,
 				LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
 				Level:               datapb.SegmentLevel_L1,
-
+				StorageVersion:      compactToSegment.GetStorageVersion(),
 				StartPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 					return info.GetStartPosition()
 				})),

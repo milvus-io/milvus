@@ -95,7 +95,6 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			return result, nil
 		})
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-		s.mockBinlogIO.EXPECT().AsyncUpload(mock.Anything, mock.Anything).Return(nil)
 
 		ctx, cancel := context.WithCancel(context.Background())
 
@@ -111,7 +110,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			Schema:          s.schema,
 			NumRows:         1,
 			StartLogID:      0,
-			EndLogID:        5,
+			EndLogID:        7,
 			BinlogMaxSize:   64 * 1024 * 1024,
 		}, node, s.mockBinlogIO)
 		err = task.PreExecute(ctx)
@@ -142,7 +141,6 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			return result, nil
 		})
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
-		s.mockBinlogIO.EXPECT().AsyncUpload(mock.Anything, mock.Anything).Return(nil)
 
 		ctx, cancel := context.WithCancel(context.Background())
 
@@ -158,7 +156,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			Schema:          s.schema,
 			NumRows:         1,
 			StartLogID:      0,
-			EndLogID:        5,
+			EndLogID:        7,
 			BinlogMaxSize:   64 * 1024 * 1024,
 		}, node, s.mockBinlogIO)
 		err = task.PreExecute(ctx)

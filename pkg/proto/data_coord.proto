@@ -594,6 +594,7 @@ message CompactionSegmentBinlogs {
   int64 collectionID = 7;
   int64 partitionID = 8;
   bool is_sorted = 9;
+  int64 storage_version = 10;
 }
 
 message CompactionPlan {
@@ -631,6 +632,7 @@ message CompactionSegment {
   string channel = 7;
   bool is_sorted = 8;
   repeated FieldBinlog bm25logs = 9;
+  int64 storage_version = 10;
 }
 
 message CompactionPlanResult {
