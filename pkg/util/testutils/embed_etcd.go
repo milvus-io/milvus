@@ -21,7 +21,7 @@ import (
 
 	"go.etcd.io/etcd/server/v3/embed"
 
-	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 )
 
 type EmbedEtcdUtil struct {

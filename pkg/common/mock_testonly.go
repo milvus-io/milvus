@@ -24,7 +24,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 type MockTestingT struct {

@@ -24,7 +24,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc/grpclog"
 
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 const (

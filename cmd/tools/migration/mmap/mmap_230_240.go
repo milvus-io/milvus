@@ -10,7 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 // In Milvus 2.3.x, querynode.MmapDirPath is used to enable mmap and save mmap files.

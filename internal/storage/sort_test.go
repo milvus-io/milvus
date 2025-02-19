@@ -22,7 +22,7 @@ import (
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 func TestSort(t *testing.T) {

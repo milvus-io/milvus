@@ -3,8 +3,8 @@ package paramtable
 import (
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/config"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/config"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 const hookYamlFile = "hook.yaml"

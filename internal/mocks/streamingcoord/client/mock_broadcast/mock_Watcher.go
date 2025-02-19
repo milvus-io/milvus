@@ -5,7 +5,7 @@ package mock_broadcast
 import (
 	context "context"
 
-	messagespb "github.com/milvus-io/milvus/pkg/proto/messagespb"
+	messagespb "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	mock "github.com/stretchr/testify/mock"
 )
 

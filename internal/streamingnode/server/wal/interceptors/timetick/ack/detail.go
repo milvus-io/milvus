@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 // newAckDetail creates a new default acker detail.

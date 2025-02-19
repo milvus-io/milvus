@@ -7,10 +7,10 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 var _ walimpls.OpenerImpls = (*openerImpl)(nil)

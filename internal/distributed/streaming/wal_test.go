@@ -14,11 +14,11 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/mock_client"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/mock_handler"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
-	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (

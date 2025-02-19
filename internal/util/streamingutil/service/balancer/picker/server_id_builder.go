@@ -8,7 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
 	bbalancer "github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 const (

@@ -20,7 +20,7 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func CheckValidData(validData []bool, schema *schemapb.FieldSchema, numRows int) error {

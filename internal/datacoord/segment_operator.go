@@ -16,7 +16,7 @@
 
 package datacoord
 
-import "github.com/milvus-io/milvus/pkg/proto/datapb"
+import "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 
 // SegmentOperator is function type to update segment info.
 type SegmentOperator func(segment *SegmentInfo) bool

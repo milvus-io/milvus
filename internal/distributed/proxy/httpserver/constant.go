@@ -19,7 +19,7 @@ package httpserver
 import (
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 )
 
 // v2
