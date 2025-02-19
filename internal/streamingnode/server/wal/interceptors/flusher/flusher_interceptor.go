@@ -8,6 +8,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
+const (
+	interceptorName = "flusher"
+)
+
 var (
 	_ interceptors.Interceptor                  = (*flusherAppendInterceptor)(nil)
 	_ interceptors.InterceptorWithGracefulClose = (*flusherAppendInterceptor)(nil)
