@@ -185,11 +185,14 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
         vector_field_name = 'embeddings'
         str_field_name = 'title'
         json_field_name = 'json_field'
+        array_field_name = 'tags'
         max_length = 16
         schema.add_field(pk_field_name, DataType.VARCHAR, max_length=max_length, is_primary=True, auto_id=False)
         schema.add_field(vector_field_name, DataType.FLOAT_VECTOR, dim=dim, mmap_enabled=True)
         schema.add_field(str_field_name, DataType.VARCHAR, max_length=max_length, mmap_enabled=True)
         schema.add_field(json_field_name, DataType.JSON, mmap_enabled=False)
+        schema.add_field(field_name=array_field_name, datatype=DataType.ARRAY, element_type=DataType.VARCHAR,
+                         max_capacity=10, max_length=max_length)
 
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=vector_field_name, metric_type="COSINE",
@@ -206,7 +209,8 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
             pk_field_name: f'id_{i}',
             vector_field_name: list(rng.random((1, dim))[0]),
             str_field_name: cf.gen_str_by_length(max_length),
-            json_field_name: {"number": i}
+            json_field_name: {"number": i},
+            array_field_name: [cf.gen_str_by_length(max_length) for _ in range(10)]
         } for i in range(ct.default_nb)]
         self.insert(client, collection_name, rows)
 
@@ -222,23 +226,39 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
                                     field_params={"mmap.enabled": True})
         self.alter_collection_field(client, collection_name, field_name=vector_field_name,
                                     field_params={"mmap.enabled": False})
+        self.alter_collection_field(client, collection_name, field_name=array_field_name,
+                                    field_params={"max_length": new_max_length})
         error = {ct.err_code: 999, ct.err_msg: f"can not modify the maxlength for non-string types"}
         self.alter_collection_field(client, collection_name, field_name=vector_field_name,
                                     field_params={"max_length": new_max_length},
                                     check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 999, ct.err_msg: "max_capacity does not allow update in collection field param"}
+        self.alter_collection_field(client, collection_name, field_name=array_field_name,
+                                    field_params={"max_capacity": 20},
+                                    check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 999, ct.err_msg: "element_type does not allow update in collection field param"}
+        self.alter_collection_field(client, collection_name, field_name=array_field_name,
+                                    field_params={"element_type": DataType.INT64},
+                                    check_task=CheckTasks.err_res, check_items=error)
         self.describe_collection(client, collection_name, check_task=CheckTasks.check_collection_fields_properties,
                                  check_items={str_field_name: {"max_length": new_max_length, "mmap_enabled": False},
                                               vector_field_name: {"mmap_enabled": False},
-                                              json_field_name: {"mmap_enabled": True}})
+                                              json_field_name: {"mmap_enabled": True},
+                                              array_field_name: {"max_length": new_max_length, "max_capacity": 10}})
 
         # verify that cannot insert data with the old max_length
-        for alter_field in [pk_field_name, str_field_name]:
+        for alter_field in [pk_field_name, str_field_name, array_field_name]:
             error = {ct.err_code: 999, ct.err_msg: f"length of varchar field {alter_field} exceeds max length"}
+            if alter_field == array_field_name:
+                error = {ct.err_code: 999,
+                         ct.err_msg: f'length of Array array field "{array_field_name}" exceeds max length'}
             rows = [{
                 pk_field_name: cf.gen_str_by_length(max_length) if alter_field == pk_field_name else f'id_{i}',
                 vector_field_name: list(rng.random((1, dim))[0]),
-                str_field_name: cf.gen_str_by_length(max_length) if alter_field == str_field_name else f'title_{i}',
-                json_field_name: {"number": i}
+                str_field_name: cf.gen_str_by_length(max_length) if alter_field == str_field_name else f'ti_{i}',
+                json_field_name: {"number": i},
+                array_field_name: [cf.gen_str_by_length(max_length) for _ in
+                                   range(10)] if alter_field == array_field_name else [f"tags_{j}" for j in range(10)]
             } for i in range(ct.default_nb, ct.default_nb + 10)]
             self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
 
@@ -247,7 +267,8 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
             pk_field_name: f"new_{cf.gen_str_by_length(new_max_length - 4)}",
             vector_field_name: list(rng.random((1, dim))[0]),
             str_field_name: cf.gen_str_by_length(new_max_length),
-            json_field_name: {"number": i}
+            json_field_name: {"number": i},
+            array_field_name: [cf.gen_str_by_length(new_max_length) for _ in range(10)]
         } for i in range(ct.default_nb, ct.default_nb + 10)]
         self.insert(client, collection_name, rows)
 
@@ -274,7 +295,6 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
 
 class TestMilvusClientAlterDatabase(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L0)
-    # @pytest.mark.skip("reason: need to fix #38469")
     def test_milvus_client_alter_database_default(self):
         """
         target: test alter database
