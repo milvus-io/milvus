@@ -22,6 +22,7 @@
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/Element.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus {
@@ -129,6 +130,9 @@ class PhyTermFilterExpr : public SegmentExpr {
     bool cached_bits_inited_{false};
     TargetBitmap cached_bits_;
     int32_t consistency_level_ = 0;
+    bool arg_inited_{false};
+    std::shared_ptr<MultiElement> arg_set_;
+    SingleElement arg_val_;
 };
 }  //namespace exec
 }  // namespace milvus

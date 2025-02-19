@@ -270,7 +270,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     valid_res.set();
 
-    ValueType val = GetValueFromProto<ValueType>(expr_->val_);
+    if (!arg_inited_) {
+        value_arg_.SetValue<ValueType>(expr_->val_);
+        arg_inited_ = true;
+    }
+    ValueType val = value_arg_.GetValue<ValueType>();
     auto op_type = expr_->op_type_;
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
@@ -565,7 +569,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
         return nullptr;
     }
 
-    ExprValueType val = GetValueFromProto<ExprValueType>(expr_->val_);
+    if (!arg_inited_) {
+        value_arg_.SetValue<ExprValueType>(expr_->val_);
+        arg_inited_ = true;
+    }
+
+    ExprValueType val = value_arg_.GetValue<ExprValueType>();
     auto res_vec = std::make_shared<ColumnVector>(
         TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
@@ -1079,6 +1088,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
+    if (!arg_inited_) {
+        value_arg_.SetValue<IndexInnerType>(expr_->val_);
+        arg_inited_ = true;
+    }
     if (auto res = PreCheckOverflow<T>()) {
         return res;
     }
@@ -1139,7 +1152,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         }
         return res;
     };
-    auto val = GetValueFromProto<IndexInnerType>(expr_->val_);
+    IndexInnerType val = value_arg_.GetValue<IndexInnerType>();
     auto res = ProcessIndexChunks<T>(execute_sub_batch, val);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -1228,6 +1241,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(OffsetVector* input) {
         return nullptr;
     }
 
+    if (!arg_inited_) {
+        value_arg_.SetValue<IndexInnerType>(expr_->val_);
+        arg_inited_ = true;
+    }
     IndexInnerType val = GetValueFromProto<IndexInnerType>(expr_->val_);
     auto res_vec = std::make_shared<ColumnVector>(
         TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
