@@ -259,7 +259,10 @@ func flushPolicyL1(segment *SegmentInfo, t Timestamp) bool {
 		segment.Level != datapb.SegmentLevel_L0 &&
 		time.Since(segment.lastFlushTime) >= paramtable.Get().DataCoordCfg.SegmentFlushInterval.GetAsDuration(time.Second) &&
 		segment.GetLastExpireTime() <= t &&
-		segment.currRows != 0 &&
+		// A corner case when there's only 1 row in the segment, and the segment is synced
+		// before report currRows to DC. When DN recovered at this moment,
+		// it'll never report this segment's numRows again, leaving segment.currRows == 0 forever.
+		(segment.currRows != 0 || segment.GetNumOfRows() != 0) &&
 		// Decoupling the importing segment from the flush process,
 		// This check avoids notifying the datanode to flush the
 		// importing segment which may not exist.
