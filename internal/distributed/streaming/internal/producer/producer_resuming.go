@@ -12,14 +12,16 @@ import (
 )
 
 // newProducerWithResumingError creates a new producer with resuming error.
-func newProducerWithResumingError() producerWithResumingError {
+func newProducerWithResumingError(pchannel string) producerWithResumingError {
 	return producerWithResumingError{
-		cond: syncutil.NewContextCond(&sync.Mutex{}),
+		pchannel: pchannel,
+		cond:     syncutil.NewContextCond(&sync.Mutex{}),
 	}
 }
 
 // producerWithResumingError is a producer that can be resumed.
 type producerWithResumingError struct {
+	pchannel string
 	cond     *syncutil.ContextCond
 	producer handler.Producer
 	err      error
@@ -47,7 +49,7 @@ func (p *producerWithResumingError) GetProducerAfterAvailable(ctx context.Contex
 func (p *producerWithResumingError) SwapProducer(producer handler.Producer, err error) {
 	p.cond.LockAndBroadcast()
 	oldProducer := p.producer
-	p.producer = producer
+	p.producer = newProducerWithMetrics(p.pchannel, producer)
 	p.err = err
 	p.cond.L.Unlock()
 

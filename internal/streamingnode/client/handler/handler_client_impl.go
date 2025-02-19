@@ -69,11 +69,12 @@ func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerO
 	}
 	defer hc.lifetime.Done()
 
-	p, err := hc.createHandlerAfterStreamingNodeReady(ctx, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (*handlerCreateResult, error) {
+	logger := log.With(zap.String("pchannel", opts.PChannel), zap.String("handler", "producer"))
+	p, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		// Check if the localWAL is assigned at local
 		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
-			return localResult(localWAL), nil
+			return localWAL, nil
 		}
 		if !shouldUseRemoteWAL(err) {
 			return nil, err
@@ -89,7 +90,7 @@ func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerO
 		if err != nil {
 			return nil, err
 		}
-		return remoteResult(remoteWAL), nil
+		return remoteWAL, nil
 	})
 	if err != nil {
 		return nil, err
@@ -104,7 +105,8 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 	}
 	defer hc.lifetime.Done()
 
-	c, err := hc.createHandlerAfterStreamingNodeReady(ctx, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (*handlerCreateResult, error) {
+	logger := log.With(zap.String("pchannel", opts.PChannel), zap.String("vchannel", opts.VChannel), zap.String("handler", "consumer"))
+	c, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		// Check if the localWAL is assigned at local
 		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
@@ -117,7 +119,7 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 			if err != nil {
 				return nil, err
 			}
-			return localResult(localScanner), nil
+			return localScanner, nil
 		}
 		if !shouldUseRemoteWAL(err) {
 			return nil, err
@@ -138,7 +140,7 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 		if err != nil {
 			return nil, err
 		}
-		return remoteResult(remoteScanner), nil
+		return remoteScanner, nil
 	})
 	if err != nil {
 		return nil, err
@@ -146,25 +148,11 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 	return c.(Consumer), nil
 }
 
-func localResult(result any) *handlerCreateResult {
-	return &handlerCreateResult{result: result, isLocal: true}
-}
-
-func remoteResult(result any) *handlerCreateResult {
-	return &handlerCreateResult{result: result, isLocal: false}
-}
-
-type handlerCreateResult struct {
-	result  any
-	isLocal bool
-}
-
-type handlerCreateFunc func(ctx context.Context, assign *types.PChannelInfoAssigned) (*handlerCreateResult, error)
+type handlerCreateFunc func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error)
 
 // createHandlerAfterStreamingNodeReady creates a handler until streaming node ready.
 // If streaming node is not ready, it will block until new assignment term is coming or context timeout.
-func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Context, pchannel string, create handlerCreateFunc) (any, error) {
-	logger := log.With(zap.String("pchannel", pchannel))
+func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Context, logger *log.MLogger, pchannel string, create handlerCreateFunc) (any, error) {
 	// TODO: backoff should be configurable.
 	backoff := backoff.NewExponentialBackOff()
 	for {
@@ -173,8 +161,8 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 			// Find assignment, try to create producer on this assignment.
 			createResult, err := create(ctx, assign)
 			if err == nil {
-				logger.Info("create handler success", zap.Any("assignment", assign), zap.Bool("isLocal", createResult.isLocal))
-				return createResult.result, nil
+				logger.Info("create handler success", zap.Any("assignment", assign), zap.Bool("isLocal", registry.IsLocal(createResult)))
+				return createResult, nil
 			}
 			logger.Warn("create handler failed", zap.Any("assignment", assign), zap.Error(err))
 

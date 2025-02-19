@@ -185,6 +185,7 @@ func (impl *timeTickSyncOperator) blockUntilSyncTimeTickReady() error {
 		capacity := int(paramtable.Get().StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
 		keepalive := paramtable.Get().StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse()
 		impl.writeAheadBuffer = wab.NewWirteAheadBuffer(
+			impl.Channel().Name,
 			impl.logger,
 			capacity,
 			keepalive,
@@ -222,6 +223,7 @@ func (impl *timeTickSyncOperator) AckManager() *ack.AckManager {
 func (impl *timeTickSyncOperator) Close() {
 	impl.cancel()
 	impl.metrics.Close()
+	impl.writeAheadBuffer.Close()
 }
 
 // sendTsMsg sends first timestamp message to wal.

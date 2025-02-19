@@ -124,7 +124,6 @@ func (cm *ChannelManager) AssignPChannelsDone(ctx context.Context, pChannels []s
 	defer cm.cond.L.Unlock()
 
 	// modified channels.
-	histories := make([]types.PChannelInfoAssigned, 0, len(pChannels))
 	pChannelMetas := make([]*streamingpb.PChannelMeta, 0, len(pChannels))
 	for _, channelName := range pChannels {
 		pchannel, ok := cm.channels[channelName]
@@ -132,7 +131,7 @@ func (cm *ChannelManager) AssignPChannelsDone(ctx context.Context, pChannels []s
 			return ErrChannelNotExist
 		}
 		mutablePChannel := pchannel.CopyForWrite()
-		histories = append(histories, mutablePChannel.AssignToServerDone()...)
+		mutablePChannel.AssignToServerDone()
 		pChannelMetas = append(pChannelMetas, mutablePChannel.IntoRawMeta())
 	}
 
@@ -141,9 +140,6 @@ func (cm *ChannelManager) AssignPChannelsDone(ctx context.Context, pChannels []s
 	}
 
 	// Update metrics.
-	for _, history := range histories {
-		cm.metrics.RemovePChannelStatus(history)
-	}
 	for _, pchannel := range pChannelMetas {
 		cm.metrics.AssignPChannelStatus(pchannel)
 	}

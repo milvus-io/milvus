@@ -182,6 +182,11 @@ func (p *producerImpl) IsAvailable() bool {
 	}
 }
 
+// IsLocal returns if the producer is local.
+func (p *producerImpl) IsLocal() bool {
+	return false
+}
+
 // Available returns a channel that will be closed when the producer is unavailable.
 func (p *producerImpl) Available() <-chan struct{} {
 	return p.sendExitCh
