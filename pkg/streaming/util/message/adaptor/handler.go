@@ -116,6 +116,8 @@ func (m *BaseMsgPackAdaptorHandler) GenerateMsgPack(msg message.ImmutableMessage
 	switch msg.Version() {
 	case message.VersionOld:
 		if len(m.Pendings) != 0 {
+			// multiple message from old version may share the same time tick.
+			// should be packed into one msgPack.
 			if msg.TimeTick() > m.Pendings[0].TimeTick() {
 				m.addMsgPackIntoPending(m.Pendings...)
 				m.Pendings = nil

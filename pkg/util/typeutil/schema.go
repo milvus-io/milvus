@@ -57,7 +57,7 @@ func getVarFieldLength(fieldSchema *schemapb.FieldSchema, policy getVariableFiel
 	}
 
 	switch fieldSchema.DataType {
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		maxLengthPerRowValue, ok := paramsMap[common.MaxLengthKey]
 		if !ok {
 			return 0, fmt.Errorf("the max_length was not specified, field type is %s", fieldSchema.DataType.String())
@@ -114,7 +114,7 @@ func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLe
 			res += 4
 		case schemapb.DataType_Int64, schemapb.DataType_Double:
 			res += 8
-		case schemapb.DataType_VarChar, schemapb.DataType_Array, schemapb.DataType_JSON:
+		case schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_Array, schemapb.DataType_JSON:
 			maxLengthPerRow, err := getVarFieldLength(fs, policy)
 			if err != nil {
 				return 0, err
@@ -192,7 +192,7 @@ func CalcColumnSize(column *schemapb.FieldData) int {
 		res += len(column.GetScalars().GetFloatData().GetData()) * 4
 	case schemapb.DataType_Double:
 		res += len(column.GetScalars().GetDoubleData().GetData()) * 8
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		for _, str := range column.GetScalars().GetStringData().GetData() {
 			res += len(str)
 		}
@@ -225,7 +225,7 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, e
 			res += 4
 		case schemapb.DataType_Int64, schemapb.DataType_Double:
 			res += 8
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_VarChar, schemapb.DataType_Text:
 			if rowOffset >= len(fs.GetScalars().GetStringData().GetData()) {
 				return 0, fmt.Errorf("offset out range of field datas")
 			}
@@ -580,7 +580,7 @@ func IsBoolType(dataType schemapb.DataType) bool {
 // IsStringType returns true if input is a varChar type, otherwise false
 func IsStringType(dataType schemapb.DataType) bool {
 	switch dataType {
-	case schemapb.DataType_String, schemapb.DataType_VarChar:
+	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return true
 	default:
 		return false
@@ -1478,7 +1478,7 @@ func GetData(field *schemapb.FieldData, idx int) interface{} {
 		return field.GetScalars().GetFloatData().GetData()[idx]
 	case schemapb.DataType_Double:
 		return field.GetScalars().GetDoubleData().GetData()[idx]
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return field.GetScalars().GetStringData().GetData()[idx]
 	case schemapb.DataType_FloatVector:
 		dim := int(field.GetVectors().GetDim())

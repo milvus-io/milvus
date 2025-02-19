@@ -51,6 +51,7 @@ PaddingSize(const DataType& type) {
             return simdjson::SIMDJSON_PADDING;
         case DataType::VARCHAR:
         case DataType::STRING:
+        case DataType::TEXT:
             return FILE_STRING_PADDING;
             break;
         case DataType::ARRAY:
@@ -92,7 +93,8 @@ WriteFieldData(File& file,
         BufferedWriter bw = BufferedWriter(file, 1048576);
         switch (data_type) {
             case DataType::VARCHAR:
-            case DataType::STRING: {
+            case DataType::STRING:
+            case DataType::TEXT: {
                 // write as: |size|data|size|data......
                 for (auto i = 0; i < data->get_num_rows(); ++i) {
                     indices.push_back(total_written);

@@ -12,7 +12,7 @@ func NewMsgPackFromMutableMessageV1(msg message.MutableMessage) (msgstream.TsMsg
 		return nil, errors.New("Invalid message version")
 	}
 
-	tsMsg, err := unmashalerDispatcher.Unmarshal(msg.Payload(), MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()))
+	tsMsg, err := UnmashalerDispatcher.Unmarshal(msg.Payload(), MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()))
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to unmarshal message")
 	}

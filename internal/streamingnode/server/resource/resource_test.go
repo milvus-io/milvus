@@ -1,6 +1,7 @@
 package resource
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,9 +14,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
-func TestApply(t *testing.T) {
+func TestMain(m *testing.M) {
 	paramtable.Init()
+	os.Exit(m.Run())
+}
 
+func TestApply(t *testing.T) {
 	Apply()
 	Apply(OptETCD(&clientv3.Client{}))
 	Apply(OptRootCoordClient(syncutil.NewFuture[types.RootCoordClient]()))

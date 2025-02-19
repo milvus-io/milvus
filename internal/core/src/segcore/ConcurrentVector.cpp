@@ -85,7 +85,8 @@ VectorBase::set_data_raw(ssize_t element_offset,
             return set_data_raw(
                 element_offset, FIELD_DATA(data, double).data(), element_count);
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             auto& field_data = FIELD_DATA(data, string);
             std::vector<std::string> data_raw(field_data.begin(),
                                               field_data.end());

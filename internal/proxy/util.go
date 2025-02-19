@@ -365,15 +365,21 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 			return err
 		}
 
-		defaultMaxVarCharLength := Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
-		if maxLengthPerRow > defaultMaxVarCharLength || maxLengthPerRow <= 0 {
-			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar field(%s) should be in (0, %d], but got %d instead", field.GetName(), defaultMaxVarCharLength, maxLengthPerRow)
+		var defaultMaxLength int64
+		if field.DataType == schemapb.DataType_Text {
+			defaultMaxLength = Params.ProxyCfg.MaxTextLength.GetAsInt64()
+		} else {
+			defaultMaxLength = Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
+		}
+
+		if maxLengthPerRow > defaultMaxLength || maxLengthPerRow <= 0 {
+			return merr.WrapErrParameterInvalidMsg("the maximum length specified for the field(%s) should be in (0, %d], but got %d instead", field.GetName(), defaultMaxLength, maxLengthPerRow)
 		}
 		exist = true
 	}
 	// if not exist type params max_length, return error
 	if !exist {
-		return fmt.Errorf("type param(max_length) should be specified for varChar field(%s) of collection %s", field.GetName(), collectionName)
+		return fmt.Errorf("type param(max_length) should be specified for the field(%s) of collection %s", field.GetName(), collectionName)
 	}
 
 	return nil
@@ -746,8 +752,8 @@ func wasBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.
 func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25:
-		if len(fields) != 1 || fields[0].DataType != schemapb.DataType_VarChar {
-			return fmt.Errorf("BM25 function input field must be a VARCHAR field, got %d field with type %s",
+		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
+			return fmt.Errorf("BM25 function input field must be a VARCHAR/TEXT field, got %d field with type %s",
 				len(fields), fields[0].DataType.String())
 		}
 		h := typeutil.CreateFieldSchemaHelper(fields[0])
@@ -755,8 +761,8 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 			return fmt.Errorf("BM25 function input field must set enable_analyzer to true")
 		}
 	case schemapb.FunctionType_TextEmbedding:
-		if len(fields) != 1 || fields[0].DataType != schemapb.DataType_VarChar {
-			return fmt.Errorf("TextEmbedding function input field must be a VARCHAR field")
+		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
+			return fmt.Errorf("TextEmbedding function input field must be a VARCHAR/TEXT field")
 		}
 	default:
 		return fmt.Errorf("check input field with unknown function type")
@@ -1613,9 +1619,9 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 // for some varchar with analzyer
 // we need check char format before insert it to message queue
 // now only support utf-8
-func checkVarcharFormat(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+func checkInputUtf8Compatiable(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
 	checkeFields := lo.FilterMap(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) (int64, bool) {
-		if field.DataType != schemapb.DataType_VarChar {
+		if field.DataType != schemapb.DataType_VarChar && field.DataType != schemapb.DataType_Text {
 			return 0, false
 		}
 
@@ -1639,7 +1645,7 @@ func checkVarcharFormat(schema *schemapb.CollectionSchema, insertMsg *msgstream.
 		for row, data := range fieldData.GetScalars().GetStringData().GetData() {
 			ok := utf8.ValidString(data)
 			if !ok {
-				return merr.WrapErrAsInputError(fmt.Errorf("varchar with analyzer should be utf-8 format, but row: %d not utf-8 varchar. data: %s", row, data))
+				return merr.WrapErrAsInputError(fmt.Errorf("input with analyzer should be utf-8 format, but row: %d not utf-8 format. data: %s", row, data))
 			}
 		}
 	}

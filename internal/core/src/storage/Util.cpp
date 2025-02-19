@@ -272,7 +272,8 @@ CreateArrowBuilder(DataType data_type) {
             return std::make_shared<arrow::DoubleBuilder>();
         }
         case DataType::VARCHAR:
-        case DataType::STRING: {
+        case DataType::STRING:
+        case DataType::TEXT: {
             return std::make_shared<arrow::StringBuilder>();
         }
         case DataType::ARRAY:
@@ -357,7 +358,8 @@ CreateArrowSchema(DataType data_type, bool nullable) {
                 {arrow::field("val", arrow::float64(), nullable)});
         }
         case DataType::VARCHAR:
-        case DataType::STRING: {
+        case DataType::STRING:
+        case DataType::TEXT: {
             return arrow::schema(
                 {arrow::field("val", arrow::utf8(), nullable)});
         }
@@ -812,6 +814,7 @@ CreateFieldData(const DataType& type,
                 type, nullable, total_num_rows);
         case DataType::STRING:
         case DataType::VARCHAR:
+        case DataType::TEXT:
             return std::make_shared<FieldData<std::string>>(
                 type, nullable, total_num_rows);
         case DataType::JSON:
