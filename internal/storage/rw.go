@@ -127,7 +127,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 		}
 		return newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
 			blobsWriter, allocator, chunkSize, maxRowNum,
-		), nil
+		)
 	case StorageV2:
 		// TODO: integrate v2
 	}

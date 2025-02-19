@@ -466,14 +466,14 @@ type CompositeBinlogRecordWriter struct {
 	chunkSize    uint64
 	rootPath     string
 	maxRowNum    int64
+	pkstats      *PrimaryKeyStats
+	bm25Stats    map[int64]*BM25Stats
 
 	// writers and stats generated at runtime
 	fieldWriters map[FieldID]*BinlogStreamWriter
 	rw           RecordWriter
 	tsFrom       typeutil.Timestamp
 	tsTo         typeutil.Timestamp
-	pkstats      *PrimaryKeyStats
-	bm25Stats    map[int64]*BM25Stats
 	rowNum       int64
 
 	// results
@@ -551,27 +551,6 @@ func (c *CompositeBinlogRecordWriter) initWriters() error {
 			rws[fid] = rw
 		}
 		c.rw = NewCompositeRecordWriter(rws)
-
-		pkField, err := typeutil.GetPrimaryFieldSchema(c.schema)
-		if err != nil {
-			log.Warn("failed to get pk field from schema")
-			return err
-		}
-		stats, err := NewPrimaryKeyStats(pkField.GetFieldID(), int64(pkField.GetDataType()), c.maxRowNum)
-		if err != nil {
-			return err
-		}
-		c.pkstats = stats
-		bm25FieldIDs := lo.FilterMap(c.schema.GetFunctions(), func(function *schemapb.FunctionSchema, _ int) (int64, bool) {
-			if function.GetType() == schemapb.FunctionType_BM25 {
-				return function.GetOutputFieldIds()[0], true
-			}
-			return 0, false
-		})
-		c.bm25Stats = make(map[int64]*BM25Stats, len(bm25FieldIDs))
-		for _, fid := range bm25FieldIDs {
-			c.bm25Stats[fid] = NewBM25Stats()
-		}
 	}
 	return nil
 }
@@ -581,8 +560,6 @@ func (c *CompositeBinlogRecordWriter) resetWriters() {
 	c.rw = nil
 	c.tsFrom = math.MaxUint64
 	c.tsTo = 0
-	c.pkstats = nil
-	c.bm25Stats = nil
 }
 
 func (c *CompositeBinlogRecordWriter) Close() error {
@@ -757,7 +734,27 @@ func (c *CompositeBinlogRecordWriter) GetRowNum() int64 {
 
 func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, maxRowNum int64,
-) *CompositeBinlogRecordWriter {
+) (*CompositeBinlogRecordWriter, error) {
+	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		log.Warn("failed to get pk field from schema")
+		return nil, err
+	}
+	stats, err := NewPrimaryKeyStats(pkField.GetFieldID(), int64(pkField.GetDataType()), maxRowNum)
+	if err != nil {
+		return nil, err
+	}
+	bm25FieldIDs := lo.FilterMap(schema.GetFunctions(), func(function *schemapb.FunctionSchema, _ int) (int64, bool) {
+		if function.GetType() == schemapb.FunctionType_BM25 {
+			return function.GetOutputFieldIds()[0], true
+		}
+		return 0, false
+	})
+	bm25Stats := make(map[int64]*BM25Stats, len(bm25FieldIDs))
+	for _, fid := range bm25FieldIDs {
+		bm25Stats[fid] = NewBM25Stats()
+	}
+
 	return &CompositeBinlogRecordWriter{
 		collectionID: collectionID,
 		partitionID:  partitionID,
@@ -767,16 +764,21 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 		allocator:    allocator,
 		chunkSize:    chunkSize,
 		maxRowNum:    maxRowNum,
-	}
+		pkstats:      stats,
+		bm25Stats:    bm25Stats,
+	}, nil
 }
 
 func NewChunkedBinlogSerializeWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, maxRowNum int64, batchSize int,
-) *SerializeWriter[*Value] {
-	rw := newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID, schema, blobsWriter, allocator, chunkSize, maxRowNum)
+) (*SerializeWriter[*Value], error) {
+	rw, err := newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID, schema, blobsWriter, allocator, chunkSize, maxRowNum)
+	if err != nil {
+		return nil, err
+	}
 	return NewSerializeRecordWriter[*Value](rw, func(v []*Value) (Record, error) {
 		return ValueSerializer(v, schema.Fields)
-	}, batchSize)
+	}, batchSize), nil
 }
 
 func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, segmentID UniqueID,
