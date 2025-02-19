@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -45,6 +46,24 @@ func (a *alterCollectionTask) Prepare(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func getConsistencyLevel(props ...*commonpb.KeyValuePair) (bool, commonpb.ConsistencyLevel) {
+	for _, p := range props {
+		if p.GetKey() == common.ConsistencyLevel {
+			value := p.GetValue()
+			if level, err := strconv.ParseInt(value, 10, 32); err == nil {
+				if _, ok := commonpb.ConsistencyLevel_name[int32(level)]; ok {
+					return true, commonpb.ConsistencyLevel(level)
+				}
+			} else {
+				if level, ok := commonpb.ConsistencyLevel_value[value]; ok {
+					return true, commonpb.ConsistencyLevel(level)
+				}
+			}
+		}
+	}
+	return false, commonpb.ConsistencyLevel(0)
 }
 
 func (a *alterCollectionTask) Execute(ctx context.Context) error {
@@ -81,7 +100,9 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	if err == nil {
 		newColl.UpdateTimestamp = tso
 	}
-
+	if ok, level := getConsistencyLevel(a.Req.GetProperties()...); ok {
+		newColl.ConsistencyLevel = level
+	}
 	redoTask := newBaseRedoTask(a.core.stepExecutor)
 	redoTask.AddSyncStep(&AlterCollectionStep{
 		baseStep: baseStep{core: a.core},
