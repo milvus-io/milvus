@@ -1,5 +1,6 @@
 import time
 import pytest
+from faker import Faker
 from pymilvus import Collection
 from base.client_base import TestcaseBase
 from common import common_func as cf
@@ -8,6 +9,7 @@ from common.common_type import CaseLabel
 from utils.util_log import test_log as log
 from utils.util_common import get_collections
 
+fake = Faker()
 
 class TestAllCollection(TestcaseBase):
     """ Test case of end to end"""
@@ -40,6 +42,9 @@ class TestAllCollection(TestcaseBase):
         int64_field_name = cf.get_int64_field_name(schema=schema)
         float_vector_field_name = cf.get_float_vec_field_name(schema=schema)
         float_vector_field_name_list = cf.get_float_vec_field_name_list(schema=schema)
+        text_match_field = cf.get_text_match_field_name(schema=schema)
+        bm25_vec_field_name_list = cf.get_bm25_vec_field_name_list(schema=schema)
+
         # compact collection before getting num_entities
         collection_w.flush(timeout=180)
         collection_w.compact()
@@ -98,6 +103,19 @@ class TestAllCollection(TestcaseBase):
         tt = time.time() - t0
         log.info(f"assert search: {tt}")
         assert len(res_1) == 1
+
+        # full text search
+        if len(bm25_vec_field_name_list) > 0:
+            queries = [fake.text() for _ in range(1)]
+            search_params = {"metric_type": "BM25", "params": {}}
+            t0 = time.time()
+            res_2, _ = collection_w.search(data=queries,
+                                           anns_field=bm25_vec_field_name_list[0],
+                                            param=search_params, limit=1)
+            tt = time.time() - t0
+            log.info(f"assert full text search: {tt}")
+            assert len(res_2) == 1
+
         # query
         term_expr = f'{int64_field_name} in {[i for i in range(offset, 0)]}'
         t0 = time.time()
@@ -106,6 +124,16 @@ class TestAllCollection(TestcaseBase):
         log.info(f"assert query result {len(res)}: {tt}")
         assert len(res) >= len(data[0])
         collection_w.release()
+
+        # text match
+        if text_match_field is not None:
+            queries = [fake.text() for _ in range(1)]
+            expr = f"text_match({text_match_field}, '{queries[0]}')"
+            t0 = time.time()
+            res, _ = collection_w.query(expr)
+            tt = time.time() - t0
+            log.info(f"assert text match: {tt}")
+            assert len(res) >= 0
 
         # insert data
         d = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
