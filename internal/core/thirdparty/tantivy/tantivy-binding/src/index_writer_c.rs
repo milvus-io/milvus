@@ -338,22 +338,51 @@ pub extern "C" fn tantivy_index_add_bools_by_single_segment_writer(
 #[no_mangle]
 pub extern "C" fn tantivy_index_add_string(
     ptr: *mut c_void,
-    s: *const c_char,
+    array: *const *const c_char,
+    len: usize,
     offset: i64,
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
-    let s = cstr_to_str!(s);
-    unsafe { (*real).add_string(s, offset).into() }
+    let arr = unsafe { slice::from_raw_parts(array, len) };
+    let mut arr_str = Vec::with_capacity(len);
+    for i in 0..len {
+        let s = cstr_to_str!(arr[i]);
+        arr_str.push(s);
+    }
+
+    unsafe {
+        execute(
+            &arr_str,
+            offset,
+            IndexWriterWrapper::add_string,
+            &mut (*real),
+        )
+        .into()
+    }
 }
 
 #[no_mangle]
 pub extern "C" fn tantivy_index_add_string_by_single_segment_writer(
     ptr: *mut c_void,
-    s: *const c_char,
+    array: *const *const c_char,
+    len: usize,
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
-    let s = cstr_to_str!(s);
-    unsafe { (*real).add_string_by_single_segment_writer(s).into() }
+    let arr = unsafe { slice::from_raw_parts(array, len) };
+    let mut arr_str = Vec::with_capacity(len);
+    for i in 0..len {
+        let s = cstr_to_str!(arr[i]);
+        arr_str.push(s);
+    }
+
+    unsafe {
+        execute_by_single_segment_writer(
+            &arr_str,
+            IndexWriterWrapper::add_string_by_single_segment_writer,
+            &mut (*real),
+        )
+        .into()
+    }
 }
 
 // --------------------------------------------- array ------------------------------------------
