@@ -301,6 +301,45 @@ class MvccNode : public PlanNode {
     const std::vector<PlanNodePtr> sources_;
 };
 
+class RandomSampleNode : public PlanNode {
+ public:
+    RandomSampleNode(
+        const PlanNodeId& id,
+        float factor,
+        std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
+        : PlanNode(id), factor_(factor), sources_(std::move(sources)) {
+    }
+
+    DataType
+    output_type() const override {
+        return DataType::BOOL;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    std::string_view
+    name() const override {
+        return "RandomSampleNode";
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format("RandomSampleNode:\n\t[factor:{}]", factor_);
+    }
+
+    float
+    factor() const {
+        return factor_;
+    }
+
+ private:
+    float factor_;
+    const std::vector<PlanNodePtr> sources_;
+};
+
 class VectorSearchNode : public PlanNode {
  public:
     VectorSearchNode(

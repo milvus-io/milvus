@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchantempstore"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/streaming/util/options"
@@ -73,8 +74,9 @@ func (s *switchableScannerImpl) HandleMessage(ctx context.Context, msg message.I
 // catchupScanner is a scanner that make a read at underlying wal, and try to catchup the writeahead buffer then switch to tailing mode.
 type catchupScanner struct {
 	switchableScannerImpl
-	deliverPolicy          options.DeliverPolicy
-	exclusiveStartTimeTick uint64 // scanner should filter out the message that less than or equal to this time tick.
+	deliverPolicy                       options.DeliverPolicy
+	exclusiveStartTimeTick              uint64 // scanner should filter out the message that less than or equal to this time tick.
+	lastConfirmedMessageIDForOldVersion message.MessageID
 }
 
 func (s *catchupScanner) Mode() string {
@@ -110,6 +112,36 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 			if !ok {
 				return nil, scanner.Error()
 			}
+
+			if msg.Version() == message.VersionOld {
+				if s.lastConfirmedMessageIDForOldVersion == nil {
+					s.logger.Info(
+						"scanner find a old version message, set it as the last confirmed message id for all old version message",
+						zap.Stringer("messageID", msg.MessageID()),
+					)
+					s.lastConfirmedMessageIDForOldVersion = msg.MessageID()
+				}
+				// We always use first consumed message as the last confirmed message id for old version message.
+				// After upgrading from old milvus:
+				// The wal will be read at consuming side as following:
+				// msgv0, msgv0 ..., msgv0, msgv1, msgv1, msgv1, ...
+				// the msgv1 will be read after all msgv0 is consumed as soon as possible.
+				// so the last confirm is set to the first msgv0 message for all old version message is ok.
+				var err error
+				msg, err = newOldVersionImmutableMessage(ctx, s.innerWAL.Channel().Name, s.lastConfirmedMessageIDForOldVersion, msg)
+				if errors.Is(err, vchantempstore.ErrNotFound) {
+					// Skip the message's vchannel is not found in the vchannel temp store.
+					s.logger.Info("skip the old version message because vchannel not found", zap.Stringer("messageID", msg.MessageID()))
+					continue
+				}
+				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
+					return nil, err
+				}
+				if err != nil {
+					panic("unrechable: unexpected error found: " + err.Error())
+				}
+			}
+
 			if msg.TimeTick() <= s.exclusiveStartTimeTick {
 				// we should filter out the message that less than or equal to this time tick to remove duplicate message
 				// when we switch from tailing mode to catchup mode.
