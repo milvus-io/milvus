@@ -510,7 +510,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(bool reverse) {
                 };
             } else {
                 auto size_per_chunk = segment_->size_per_chunk();
-                retrieve = [ size_per_chunk, this ](int64_t offset) -> auto{
+                retrieve = [ size_per_chunk, this ](int64_t offset) -> auto {
                     auto chunk_idx = offset / size_per_chunk;
                     auto chunk_offset = offset % size_per_chunk;
                     const auto& chunk =

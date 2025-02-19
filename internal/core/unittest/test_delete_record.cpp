@@ -45,7 +45,12 @@ TEST(DeleteMVCC, common_case) {
     SealedLoadFieldData(dataset, *segment);
     ASSERT_EQ(c, segment->get_real_count());
     auto& insert_record = segment->get_insert_record();
-    DeletedRecord<true> delete_record(&insert_record);
+    DeletedRecord<true> delete_record(
+        &insert_record,
+        [&insert_record](const PkType& pk, Timestamp timestamp) {
+            return insert_record.search_pk(pk, timestamp);
+        },
+        0);
     delete_record.set_sealed_row_count(c);
 
     // delete pk(1) at ts(10);
@@ -156,7 +161,12 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
     auto N = 10;
     uint64_t seg_id = 101;
     InsertRecord insert_record(*schema, N);
-    DeletedRecord<false> delete_record(&insert_record);
+    DeletedRecord<false> delete_record(
+        &insert_record,
+        [&insert_record](const PkType& pk, Timestamp timestamp) {
+            return insert_record.search_pk(pk, timestamp);
+        },
+        0);
 
     // insert pk: (0, 1, 1, 2, 2, 3, 4, 3, 2, 5)
     // at ts:     (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
@@ -266,7 +276,12 @@ TEST(DeleteMVCC, snapshot) {
     auto N = 500000;
     uint64_t seg_id = 101;
     InsertRecord insert_record(*schema, N);
-    DeletedRecord<false> delete_record(&insert_record);
+    DeletedRecord<false> delete_record(
+        &insert_record,
+        [&insert_record](const PkType& pk, Timestamp timestamp) {
+            return insert_record.search_pk(pk, timestamp);
+        },
+        0);
 
     std::vector<int64_t> age_data(N);
     std::vector<Timestamp> tss(N);
@@ -309,7 +324,12 @@ TEST(DeleteMVCC, insert_after_snapshot) {
     auto N = 110000;
     uint64_t seg_id = 101;
     InsertRecord insert_record(*schema, N);
-    DeletedRecord<false> delete_record(&insert_record);
+    DeletedRecord<false> delete_record(
+        &insert_record,
+        [&insert_record](const PkType& pk, Timestamp timestamp) {
+            return insert_record.search_pk(pk, timestamp);
+        },
+        0);
 
     // insert (0, 0), (1, 1) .... (N - 1, N - 1)
     std::vector<int64_t> age_data(N);
@@ -399,7 +419,12 @@ TEST(DeleteMVCC, perform) {
     auto N = 1000000;
     uint64_t seg_id = 101;
     InsertRecord insert_record(*schema, N);
-    DeletedRecord<false> delete_record(&insert_record);
+    DeletedRecord<false> delete_record(
+        &insert_record,
+        [&insert_record](const PkType& pk, Timestamp timestamp) {
+            return insert_record.search_pk(pk, timestamp);
+        },
+        0);
 
     std::vector<int64_t> age_data(N);
     std::vector<Timestamp> tss(N);

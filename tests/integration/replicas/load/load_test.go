@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -988,8 +989,11 @@ func (s *LoadTestSuite) TestLoadWithCompact() {
 	s.releaseCollection(dbName, collName)
 
 	stopInsertCh := make(chan struct{}, 1)
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
 	// Start a goroutine to continuously insert data and trigger compaction
 	go func() {
+		defer wg.Done()
 		for {
 			select {
 			case <-stopInsertCh:
@@ -1023,6 +1027,7 @@ func (s *LoadTestSuite) TestLoadWithCompact() {
 
 	// Clean up
 	close(stopInsertCh)
+	wg.Wait()
 	s.releaseCollection(dbName, collName)
 }
 
