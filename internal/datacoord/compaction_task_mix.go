@@ -60,8 +60,8 @@ func (t *mixCompactionTask) processPipelining() bool {
 		if err != nil {
 			log.Warn("mixCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
 		}
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetType().String(), metrics.Executing).Dec()
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Pending).Inc()
 		return false
 	}
 	log.Info("mixCompactionTask notify compaction tasks to DataNode")

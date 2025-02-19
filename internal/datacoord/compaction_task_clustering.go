@@ -527,18 +527,18 @@ func (t *clusteringCompactionTask) doCompact() error {
 	}
 	err = t.sessions.Compaction(context.Background(), t.GetNodeID(), t.GetPlan())
 	if err != nil {
-		originNodeID := t.GetTaskProto().GetNodeID()
+		originNodeID := t.GetNodeID()
 		log.Warn("Failed to notify compaction tasks to DataNode",
-			zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+			zap.Int64("planID", t.GetPlanID()),
 			zap.Int64("nodeID", originNodeID),
 			zap.Error(err))
 		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		if err != nil {
-			log.Warn("updateAndSaveTaskMeta fail", zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.Error(err))
+			log.Warn("updateAndSaveTaskMeta fail", zap.Int64("planID", t.GetPlanID()), zap.Error(err))
 			return err
 		}
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetType().String(), metrics.Executing).Dec()
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetType().String(), metrics.Pending).Inc()
 	}
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
 }
