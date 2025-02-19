@@ -141,10 +141,6 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 		return false
 	}
 
-	if segment.GetTextStatsLogs() == nil {
-		return true
-	}
-
 	for _, fieldID := range fieldIDs {
 		if segment.GetTextStatsLogs()[fieldID] == nil {
 			return true
@@ -157,10 +153,6 @@ func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	if !(isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
 		segment.GetIsSorted()) {
 		return false
-	}
-
-	if segment.GetJsonKeyStats() == nil {
-		return true
 	}
 
 	for _, fieldID := range fieldIDs {
