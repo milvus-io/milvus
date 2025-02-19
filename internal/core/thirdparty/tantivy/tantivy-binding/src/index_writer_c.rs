@@ -333,8 +333,6 @@ pub extern "C" fn tantivy_index_add_bools_by_single_segment_writer(
     }
 }
 
-// TODO: this is not a very efficient way, since we must call this function many times, which
-// will bring a lot of overhead caused by the rust binding.
 #[no_mangle]
 pub extern "C" fn tantivy_index_add_string(
     ptr: *mut c_void,
