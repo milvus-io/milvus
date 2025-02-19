@@ -29,9 +29,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-var (
-	STORAGE_VERSION_V1 int64 = 0
-	STORAGE_VERSION_V2 int64 = 2
+const (
+	StorageV1 int64 = 0
+	StorageV2 int64 = 2
 )
 
 type rwOptions struct {
@@ -79,7 +79,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		opt(rwOptions)
 	}
 	switch rwOptions.version {
-	case STORAGE_VERSION_V1:
+	case StorageV1:
 		itr := 0
 		return newCompositeBinlogRecordReader(schema, func() ([]*Blob, error) {
 			if len(binlogs) <= 0 {
@@ -102,7 +102,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			})
 			return blobs, nil
 		})
-	case STORAGE_VERSION_V2:
+	case StorageV2:
 		// TODO: integrate v2
 	}
 	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
@@ -117,7 +117,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 		opt(rwOptions)
 	}
 	switch rwOptions.version {
-	case STORAGE_VERSION_V1:
+	case StorageV1:
 		blobsWriter := func(blobs []*Blob) error {
 			kvs := make(map[string][]byte, len(blobs))
 			for _, blob := range blobs {
@@ -128,7 +128,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 		return newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
 			blobsWriter, allocator, chunkSize, maxRowNum,
 		), nil
-	case STORAGE_VERSION_V2:
+	case StorageV2:
 		// TODO: integrate v2
 	}
 	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
