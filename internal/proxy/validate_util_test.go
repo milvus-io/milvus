@@ -191,6 +191,124 @@ func Test_validateUtil_checkVarCharFieldData(t *testing.T) {
 	})
 }
 
+func Test_validateUtil_checkTextFieldData(t *testing.T) {
+	t.Run("type mismatch", func(t *testing.T) {
+		f := &schemapb.FieldData{}
+		v := newValidateUtil()
+		assert.Error(t, v.checkTextFieldData(f, nil))
+	})
+
+	t.Run("max length not found", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"111", "222"},
+						},
+					},
+				},
+			},
+		}
+
+		fs := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Text,
+		}
+
+		v := newValidateUtil(withMaxLenCheck())
+
+		err := v.checkTextFieldData(f, fs)
+		assert.Error(t, err)
+	})
+
+	t.Run("length exceeds", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"111", "222"},
+						},
+					},
+				},
+			},
+		}
+
+		fs := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Text,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxLengthKey,
+					Value: "2",
+				},
+			},
+		}
+
+		v := newValidateUtil(withMaxLenCheck())
+
+		err := v.checkTextFieldData(f, fs)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"111", "222"},
+						},
+					},
+				},
+			},
+		}
+
+		fs := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Text,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxLengthKey,
+					Value: "4",
+				},
+			},
+		}
+
+		v := newValidateUtil(withMaxLenCheck())
+
+		err := v.checkTextFieldData(f, fs)
+		assert.NoError(t, err)
+	})
+
+	t.Run("no check", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"111", "222"},
+						},
+					},
+				},
+			},
+		}
+
+		fs := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Text,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxLengthKey,
+					Value: "2",
+				},
+			},
+		}
+
+		v := newValidateUtil()
+
+		err := v.checkTextFieldData(f, fs)
+		assert.NoError(t, err)
+	})
+}
+
 func Test_validateUtil_checkBinaryVectorFieldData(t *testing.T) {
 	v := newValidateUtil()
 	assert.Error(t, v.checkBinaryVectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{}}, nil))

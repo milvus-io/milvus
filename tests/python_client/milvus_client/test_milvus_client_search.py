@@ -77,8 +77,8 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for varChar "
-                                                 f"field(id) of collection {collection_name}"}
+        error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for the "
+                                                 f"field({default_primary_key_field_name}) of collection {collection_name}"}
         self.create_collection(client, collection_name, default_dim, id_type="string", auto_id=True,
                                check_task=CheckTasks.err_res, check_items=error)
 

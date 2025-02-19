@@ -3880,7 +3880,7 @@ class TestCollectionString(TestcaseBase):
         max_length = 65535 + 1
         string_field = cf.gen_string_field(max_length=max_length)
         schema = cf.gen_collection_schema([int_field, string_field, vec_field])
-        error = {ct.err_code: 65535, ct.err_msg: f"the maximum length specified for a VarChar field({ct.default_string_field_name}) should be in (0, 65535]"}
+        error = {ct.err_code: 65535, ct.err_msg: f"the maximum length specified for the field({ct.default_string_field_name}) should be in (0, 65535]"}
         self.collection_wrap.init_collection(name=c_name, schema=schema,
                                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -4098,7 +4098,7 @@ class TestCollectionARRAY(TestcaseBase):
         array_schema = cf.gen_collection_schema([int_field, vec_field, array_field])
         self.init_collection_wrap(schema=array_schema, check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 65535,
-                                               ct.err_msg: "type param(max_length) should be specified for varChar "
+                                               ct.err_msg: "type param(max_length) should be specified for the "
                                                            "field(int_array)"})
 
     @pytest.mark.tags(CaseLabel.L2)
