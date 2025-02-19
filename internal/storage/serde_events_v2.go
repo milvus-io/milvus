@@ -46,7 +46,7 @@ func (pr *packedRecordReader) Next() error {
 	if err != nil || rec == nil {
 		return io.EOF
 	}
-	pr.r = newSimpleArrowRecord(rec, pr.field2Col)
+	pr.r = NewSimpleArrowRecord(rec, pr.field2Col)
 	return nil
 }
 

@@ -113,7 +113,7 @@ func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
 			field2Col[fid] = c
 		}
 
-		rec := newSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, rowNum), field2Col)
+		rec := NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, rowNum), field2Col)
 		defer rec.Release()
 		return rw.Write(rec)
 	}
@@ -121,7 +121,8 @@ func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
 	for i, idx := range indices {
 		for c, builder := range builders {
 			fid := schema.Fields[c].FieldID
-			if err := appendValueAt(builder, records[idx.ri].Column(fid), idx.i); err != nil {
+			defaultValue := schema.Fields[c].GetDefaultValue()
+			if err := AppendValueAt(builder, records[idx.ri].Column(fid), idx.i, defaultValue); err != nil {
 				return 0, err
 			}
 		}
@@ -255,7 +256,12 @@ func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
 	batchSize := 100000
 	builders := make([]array.Builder, len(schema.Fields))
 	for i, f := range schema.Fields {
-		b := array.NewBuilder(memory.DefaultAllocator, recs[0].Column(f.FieldID).DataType())
+		var b array.Builder
+		if recs[0].Column(f.FieldID) == nil {
+			b = array.NewBuilder(memory.DefaultAllocator, MilvusDataTypeToArrowType(f.GetDataType(), 1))
+		} else {
+			b = array.NewBuilder(memory.DefaultAllocator, recs[0].Column(f.FieldID).DataType())
+		}
 		b.Reserve(batchSize)
 		builders[i] = b
 	}
@@ -276,7 +282,7 @@ func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
 			field2Col[fid] = c
 		}
 
-		rec := newSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, rowNum), field2Col)
+		rec := NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, rowNum), field2Col)
 		rw.Write(rec)
 		rec.Release()
 	}
@@ -287,7 +293,8 @@ func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
 
 		for c, builder := range builders {
 			fid := schema.Fields[c].FieldID
-			appendValueAt(builder, rr[idx.ri].Record().Column(fid), idx.i)
+			defaultValue := schema.Fields[c].GetDefaultValue()
+			AppendValueAt(builder, rr[idx.ri].Record().Column(fid), idx.i, defaultValue)
 		}
 		if (rc+1)%batchSize == 0 {
 			writeRecord(int64(batchSize))

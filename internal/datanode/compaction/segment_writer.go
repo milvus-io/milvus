@@ -20,8 +20,11 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
 
+	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
+	"github.com/apache/arrow/go/v12/arrow/memory"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -430,7 +433,44 @@ func (w *SegmentWriter) WriteRecord(r storage.Record) error {
 
 		w.rowCount.Inc()
 	}
-	return w.writer.WriteRecord(r)
+
+	builders := make([]array.Builder, len(w.sch.Fields))
+	for i, f := range w.sch.Fields {
+		var b array.Builder
+		if r.Column(f.FieldID) == nil {
+			b = array.NewBuilder(memory.DefaultAllocator, storage.MilvusDataTypeToArrowType(f.GetDataType(), 1))
+		} else {
+			b = array.NewBuilder(memory.DefaultAllocator, r.Column(f.FieldID).DataType())
+		}
+		builders[i] = b
+	}
+	for c, builder := range builders {
+		fid := w.sch.Fields[c].FieldID
+		defaultValue := w.sch.Fields[c].GetDefaultValue()
+		for i := 0; i < rows; i++ {
+			if err := storage.AppendValueAt(builder, r.Column(fid), i, defaultValue); err != nil {
+				return err
+			}
+		}
+	}
+	arrays := make([]arrow.Array, len(builders))
+	fields := make([]arrow.Field, len(builders))
+	field2Col := make(map[typeutil.UniqueID]int, len(builders))
+
+	for c, builder := range builders {
+		arrays[c] = builder.NewArray()
+		fid := w.sch.Fields[c].FieldID
+		fields[c] = arrow.Field{
+			Name:     strconv.Itoa(int(fid)),
+			Type:     arrays[c].DataType(),
+			Nullable: true, // No nullable check here.
+		}
+		field2Col[fid] = c
+	}
+
+	rec := storage.NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(rows)), field2Col)
+	defer rec.Release()
+	return w.writer.WriteRecord(rec)
 }
 
 func (w *SegmentWriter) Write(v *storage.Value) error {
