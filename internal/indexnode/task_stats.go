@@ -285,7 +285,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
-		int64(len(values)), insertLogs, statsLogs, bm25StatsLogs)
+		writer.GetRowNum(), insertLogs, statsLogs, bm25StatsLogs)
 
 	log.Ctx(ctx).Info("sort segment end",
 		zap.String("clusterID", st.req.GetClusterID()),
@@ -317,6 +317,11 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	if len(insertLogs) == 0 {
+		log.Ctx(ctx).Info("there is no insertBinlogs, skip creating text index")
+		return nil
 	}
 
 	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort || st.req.GetSubJobType() == indexpb.StatsSubJob_TextIndexJob {
