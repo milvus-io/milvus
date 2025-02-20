@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -112,6 +113,9 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StartLogID:      0,
 			EndLogID:        7,
 			BinlogMaxSize:   64 * 1024 * 1024,
+			StorageConfig: &indexpb.StorageConfig{
+				RootPath: "root_path",
+			},
 		}, node, s.mockBinlogIO)
 		err = task.PreExecute(ctx)
 		s.Require().NoError(err)
@@ -158,6 +162,9 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StartLogID:      0,
 			EndLogID:        7,
 			BinlogMaxSize:   64 * 1024 * 1024,
+			StorageConfig: &indexpb.StorageConfig{
+				RootPath: "root_path",
+			},
 		}, node, s.mockBinlogIO)
 		err = task.PreExecute(ctx)
 		s.Require().NoError(err)
