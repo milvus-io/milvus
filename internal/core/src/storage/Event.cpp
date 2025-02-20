@@ -242,7 +242,8 @@ BaseEventData::Serialize() {
     }
     switch (data_type) {
         case DataType::VARCHAR:
-        case DataType::STRING: {
+        case DataType::STRING:
+        case DataType::TEXT: {
             for (size_t offset = 0; offset < field_data->get_num_rows();
                  ++offset) {
                 auto str = static_cast<const std::string*>(

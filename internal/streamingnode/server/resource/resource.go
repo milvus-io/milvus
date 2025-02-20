@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchantempstore"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -43,6 +44,7 @@ func OptRootCoordClient(rootCoordClient *syncutil.Future[types.RootCoordClient])
 		r.rootCoordClient = rootCoordClient
 		r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
 		r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
+		r.vchannelTempStorage = vchantempstore.NewVChannelTempStorage(r.rootCoordClient)
 	}
 }
 
@@ -99,6 +101,7 @@ type resourceImpl struct {
 	streamingNodeCatalog      metastore.StreamingNodeCataLog
 	segmentAssignStatsManager *stats.StatsManager
 	timeTickInspector         tinspector.TimeTickSyncInspector
+	vchannelTempStorage       *vchantempstore.VChannelTempStorage
 }
 
 // TSOAllocator returns the timestamp allocator to allocate timestamp.
@@ -143,6 +146,11 @@ func (r *resourceImpl) SegmentAssignStatsManager() *stats.StatsManager {
 
 func (r *resourceImpl) TimeTickInspector() tinspector.TimeTickSyncInspector {
 	return r.timeTickInspector
+}
+
+// VChannelTempStorage returns the vchannel temp storage.
+func (r *resourceImpl) VChannelTempStorage() *vchantempstore.VChannelTempStorage {
+	return r.vchannelTempStorage
 }
 
 func (r *resourceImpl) Logger() *log.MLogger {

@@ -36,6 +36,8 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 		return FillExpressionValue(e.BinaryArithExpr.GetRight(), templateValues)
 	case *planpb.Expr_JsonContainsExpr:
 		return FillJSONContainsExpressionValue(e.JsonContainsExpr, templateValues)
+	case *planpb.Expr_RandomSampleExpr:
+		return FillExpressionValue(expr.GetExpr().(*planpb.Expr_RandomSampleExpr).RandomSampleExpr.GetPredicate(), templateValues)
 	default:
 		return fmt.Errorf("this expression no need to fill placeholder with expr type: %T", e)
 	}

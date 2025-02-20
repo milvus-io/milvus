@@ -3278,7 +3278,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
             search_data = cf.gen_vectors(nb=nq, dim=1000, vector_data_type="FLOAT_VECTOR")
         log.info(f"search data: {search_data}")
         error = {ct.err_code: 65535,
-                 ct.err_msg: "please provide varchar for BM25 Function based search"}
+                 ct.err_msg: "please provide varchar/text for BM25 Function based search"}
         collection_w.search(
             data=search_data,
             anns_field="text_sparse_emb",

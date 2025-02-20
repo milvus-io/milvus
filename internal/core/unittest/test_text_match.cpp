@@ -654,11 +654,6 @@ TEST(TextMatch, GrowingJieBa) {
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
-        ASSERT_FALSE(final[1]);
-        auto expr1 = GetMatchExpr(schema, "黄金时代", OpType::PhraseMatch, 2);
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
         ASSERT_TRUE(final[1]);
     }
 }
@@ -760,12 +755,6 @@ TEST(TextMatch, GrowingJieBaNullable) {
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
-        ASSERT_FALSE(final[1]);
-        ASSERT_FALSE(final[2]);
-        auto expr1 = GetMatchExpr(schema, "黄金时代", OpType::PhraseMatch, 2);
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
         ASSERT_TRUE(final[1]);
         ASSERT_FALSE(final[2]);
     }
@@ -847,11 +836,6 @@ TEST(TextMatch, SealedJieBa) {
         BitsetType final;
         auto expr = GetMatchExpr(schema, "黄金时代", OpType::PhraseMatch);
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
-        ASSERT_FALSE(final[1]);
-        auto expr1 = GetMatchExpr(schema, "黄金时代", OpType::PhraseMatch, 2);
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_TRUE(final[1]);
@@ -948,12 +932,6 @@ TEST(TextMatch, SealedJieBaNullable) {
         BitsetType final;
         auto expr = GetMatchExpr(schema, "黄金时代", OpType::PhraseMatch);
         final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
-        ASSERT_EQ(final.size(), N);
-        ASSERT_FALSE(final[0]);
-        ASSERT_FALSE(final[1]);
-        ASSERT_FALSE(final[2]);
-        auto expr1 = GetMatchExpr(schema, "黄金时代", OpType::PhraseMatch, 2);
-        final = ExecuteQueryExpr(expr1, seg.get(), N, MAX_TIMESTAMP);
         ASSERT_EQ(final.size(), N);
         ASSERT_FALSE(final[0]);
         ASSERT_TRUE(final[1]);

@@ -401,6 +401,8 @@ func vector2Placeholder(vectors []entity.Vector) (*commonpb.PlaceholderValue, er
 		placeHolderType = commonpb.PlaceholderType_Float16Vector
 	case entity.SparseEmbedding:
 		placeHolderType = commonpb.PlaceholderType_SparseFloatVector
+	case entity.Int8Vector:
+		placeHolderType = commonpb.PlaceholderType_Int8Vector
 	case entity.Text:
 		placeHolderType = commonpb.PlaceholderType_VarChar
 	default:
