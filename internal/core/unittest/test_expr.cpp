@@ -43,6 +43,7 @@
 #include "segcore/segment_c.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
+#include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "index/IndexFactory.h"
@@ -52,6 +53,7 @@
 #include "expr/ITypeExpr.h"
 #include "index/BitmapIndex.h"
 #include "index/InvertedIndexTantivy.h"
+#include "mmap/Types.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -16342,7 +16344,10 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
     load_index_info.index_params = {{JSON_PATH, this->json_path}};
     seg->LoadIndex(load_index_info);
 
-    auto json_field_data_info = FieldDataInfo(json_fid.get(), N, {json_field});
+    auto json_field_data_info = FieldDataInfo(
+        json_fid.get(),
+        N,
+        {storage::ConvertFieldDataToArrowDataWrapper(json_field)});
     seg->LoadFieldData(json_fid, json_field_data_info);
 
     auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
