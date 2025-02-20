@@ -150,13 +150,15 @@ const (
 	HTTPReturnFunctionOutputFieldNames = "outputFieldNames"
 	HTTPReturnFunctionParams           = "params"
 
-	HTTPReturnIndexMetricType  = "metricType"
-	HTTPReturnIndexType        = "indexType"
-	HTTPReturnIndexTotalRows   = "totalRows"
-	HTTPReturnIndexPendingRows = "pendingRows"
-	HTTPReturnIndexIndexedRows = "indexedRows"
-	HTTPReturnIndexState       = "indexState"
-	HTTPReturnIndexFailReason  = "failReason"
+	HTTPReturnIndexMetricType      = "metricType"
+	HTTPReturnIndexType            = "indexType"
+	HTTPIndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
+	HTTPMmapEnabledKey             = "mmap.enabled"
+	HTTPReturnIndexTotalRows       = "totalRows"
+	HTTPReturnIndexPendingRows     = "pendingRows"
+	HTTPReturnIndexIndexedRows     = "indexedRows"
+	HTTPReturnIndexState           = "indexState"
+	HTTPReturnIndexFailReason      = "failReason"
 
 	HTTPReturnDistance = "distance"
 
