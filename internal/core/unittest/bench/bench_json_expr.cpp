@@ -27,32 +27,47 @@
 
 using json = nlohmann::json;
 
-static const auto kTestDataSize = 1000000;
-static const auto kTestData = milvus::segcore::DataGen(
-    []() {
-        auto schema = std::make_shared<milvus::Schema>();
-        schema->AddField(milvus::FieldName("json_field"),
-                         milvus::FieldId(100),
-                         milvus::DataType::JSON,
-                         false);
-        return schema;
-    }(),
-    kTestDataSize);
+class JsonExprBenchmark : public benchmark::Fixture {
+ public:
+    size_t kTestDataSize;
+    milvus::segcore::GeneratedData kTestData;
+    std::shared_ptr<milvus::expr::UnaryRangeFilterExpr> kTestExpr;
 
-static const auto kTestExpr = []() {
-    auto field_id = kTestData.raw_->fields_data().at(0).field_id();
-    auto value = milvus::proto::plan::GenericValue();
-    value.set_int64_val(1);
-    return std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
-        milvus::expr::ColumnInfo(
-            milvus::FieldId(field_id), milvus::DataType::JSON, {"int"}, false),
-        milvus::proto::plan::OpType::Equal,
-        value,
-        std::vector<milvus::proto::plan::GenericValue>());
-}();
+    void
+    SetUp(const ::benchmark::State& state) override {
+        kTestDataSize = state.range(0);
+        kTestData = milvus::segcore::DataGen(
+            []() {
+                auto schema = std::make_shared<milvus::Schema>();
+                schema->AddField(milvus::FieldName("json_field"),
+                                 milvus::FieldId(100),
+                                 milvus::DataType::JSON,
+                                 false);
+                return schema;
+            }(),
+            kTestDataSize);
+        kTestExpr = CreateTestExpr();
+    }
 
-static void
-BM_JsonBruteForce(benchmark::State& state) {
+ private:
+    std::shared_ptr<milvus::expr::UnaryRangeFilterExpr>
+    CreateTestExpr() const {
+        auto field_id = kTestData.raw_->fields_data().at(0).field_id();
+        auto value = milvus::proto::plan::GenericValue();
+        value.set_int64_val(1);
+        return std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+            milvus::expr::ColumnInfo(milvus::FieldId(field_id),
+                                     milvus::DataType::JSON,
+                                     {"int"},
+                                     false),
+            milvus::proto::plan::OpType::Equal,
+            value,
+            std::vector<milvus::proto::plan::GenericValue>());
+    }
+};
+
+BENCHMARK_DEFINE_F(JsonExprBenchmark, BM_JsonBruteForce)
+(benchmark::State& state) {
     auto schema = kTestData.schema_;
     auto segment = milvus::segcore::CreateSealedSegment(schema);
 
@@ -75,10 +90,8 @@ BM_JsonBruteForce(benchmark::State& state) {
     }
 }
 
-BENCHMARK(BM_JsonBruteForce);
-
-static void
-BM_JsonValueIndex(benchmark::State& state) {
+BENCHMARK_DEFINE_F(JsonExprBenchmark, BM_JsonValueIndex)
+(benchmark::State& state) {
     auto schema = kTestData.schema_;
     auto segment = milvus::segcore::CreateSealedSegment(schema);
 
@@ -121,4 +134,10 @@ BM_JsonValueIndex(benchmark::State& state) {
     }
 }
 
-BENCHMARK(BM_JsonValueIndex);
+BENCHMARK_REGISTER_F(JsonExprBenchmark, BM_JsonBruteForce)
+    ->Arg(1000)
+    ->Arg(1000000);
+
+BENCHMARK_REGISTER_F(JsonExprBenchmark, BM_JsonValueIndex)
+    ->Arg(1000)
+    ->Arg(1000000);
