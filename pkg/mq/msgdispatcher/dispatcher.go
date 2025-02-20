@@ -254,14 +254,26 @@ func (d *Dispatcher) work() {
 				t, _ := d.targets.Get(vchannel)
 				// The dispatcher seeks from the oldest target,
 				// so for each target, msg before the target position must be filtered out.
-				if p.BeginTs < t.pos.GetTimestamp() {
+				if p.EndTs < t.pos.GetTimestamp() {
 					log.Info("skip msg",
 						zap.String("vchannel", vchannel),
 						zap.Int("msgCount", len(p.Msgs)),
-						zap.Uint64("msgBeginTs", p.BeginTs),
-						zap.Uint64("msgEndTs", p.EndTs),
+						zap.Uint64("packBeginTs", p.BeginTs),
+						zap.Uint64("packEndTs", p.EndTs),
 						zap.Uint64("posTs", t.pos.GetTimestamp()),
 					)
+					for _, msg := range p.Msgs {
+						log.Debug("skip msg info",
+							zap.String("vchannel", vchannel),
+							zap.String("msgType", msg.Type().String()),
+							zap.Int64("msgID", msg.ID()),
+							zap.Uint64("msgBeginTs", msg.BeginTs()),
+							zap.Uint64("msgEndTs", msg.EndTs()),
+							zap.Uint64("packBeginTs", p.BeginTs),
+							zap.Uint64("packEndTs", p.EndTs),
+							zap.Uint64("posTs", t.pos.GetTimestamp()),
+						)
+					}
 					continue
 				}
 				if d.targets.Len() > 1 {

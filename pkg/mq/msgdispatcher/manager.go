@@ -195,22 +195,33 @@ OUTER:
 	if len(lackTargets) == 0 {
 		return
 	}
-	vchannels := lo.Map(lackTargets, func(t *target, _ int) string {
-		return t.vchannel
-	})
-
-	log.Info("start to build dispatchers", zap.Int("numTargets", len(vchannels)),
-		zap.Strings("vchannels", vchannels))
 
 	sort.Slice(lackTargets, func(i, j int) bool {
 		return lackTargets[i].pos.GetTimestamp() < lackTargets[j].pos.GetTimestamp()
 	})
 
+	// To prevent the position gap between targets from becoming too large and causing excessive pull-back time,
+	// limit the position difference between targets to no more than 60 minutes.
+	earliestTarget := lackTargets[0]
+	candidateTargets := make([]*target, 0, len(lackTargets))
+	for _, t := range lackTargets {
+		if tsoutil.PhysicalTime(t.pos.GetTimestamp()).Sub(
+			tsoutil.PhysicalTime(earliestTarget.pos.GetTimestamp())) <=
+			paramtable.Get().MQCfg.MaxPositionTsGap.GetAsDuration(time.Minute) {
+			candidateTargets = append(candidateTargets, t)
+		}
+	}
+
+	vchannels := lo.Map(candidateTargets, func(t *target, _ int) string {
+		return t.vchannel
+	})
+	log.Info("start to build dispatchers", zap.Int("numTargets", len(vchannels)),
+		zap.Strings("vchannels", vchannels))
+
 	var (
-		// pullback from the earliest position
+		// dispatcher will pull back from the earliest position
 		// to the latest position in lack targets
-		earliestTarget = lackTargets[0]
-		latestTarget   = lackTargets[len(lackTargets)-1]
+		latestTarget = candidateTargets[len(candidateTargets)-1]
 	)
 
 	isMain := c.mainDispatcher == nil
@@ -220,14 +231,14 @@ OUTER:
 	if err != nil {
 		panic(err)
 	}
-	for _, t := range lackTargets {
+	for _, t := range candidateTargets {
 		d.AddTarget(t)
 	}
 	d.Handle(start)
 	buildDur := tr.RecordSpan()
 
 	// block util pullback to the latest target position
-	if len(lackTargets) > 1 {
+	if len(candidateTargets) > 1 {
 		d.BlockUtilPullbackDone()
 	}
 

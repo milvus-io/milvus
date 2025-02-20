@@ -535,6 +535,7 @@ type MQConfig struct {
 	MaxDispatcherNumPerPchannel ParamItem `refreshable:"true"`
 	RetrySleep                  ParamItem `refreshable:"true"`
 	RetryTimeout                ParamItem `refreshable:"true"`
+	MaxPositionTsGap            ParamItem `refreshable:"true"`
 }
 
 // Init initializes the MQConfig object with a BaseTable.
@@ -602,6 +603,15 @@ Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 		Export:       true,
 	}
 	p.MergeCheckInterval.Init(base.mgr)
+
+	p.MaxPositionTsGap = ParamItem{
+		Key:          "mq.dispatcher.maxPositionGapInMinutes",
+		Version:      "2.5",
+		DefaultValue: "60",
+		Doc:          `The max position timestamp gap in minutes.`,
+		Export:       true,
+	}
+	p.MaxPositionTsGap.Init(base.mgr)
 
 	p.EnablePursuitMode = ParamItem{
 		Key:          "mq.enablePursuitMode",
