@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -41,7 +42,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -1658,15 +1661,28 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	files := in.GetFiles()
 	isBackup := importutilv2.IsBackup(in.GetOptions())
 	if isBackup {
-		files = make([]*internalpb.ImportFile, 0)
+		pool := conc.NewPool[struct{}](hardware.GetCPUNum() * 2)
+		futures := make([]*conc.Future[struct{}], 0, len(in.GetFiles()))
+		mu := &sync.Mutex{}
 		for _, importFile := range in.GetFiles() {
-			segmentPrefixes, err := ListBinlogsAndGroupBySegment(ctx, s.meta.chunkManager, importFile)
-			if err != nil {
-				resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("list binlogs failed, err=%s", err)))
-				return resp, nil
-			}
-			files = append(files, segmentPrefixes...)
+			importFile := importFile
+			futures = append(futures, pool.Submit(func() (struct{}, error) {
+				segmentPrefixes, err := ListBinlogsAndGroupBySegment(ctx, s.meta.chunkManager, importFile)
+				if err != nil {
+					return struct{}{}, err
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				files = append(files, segmentPrefixes...)
+				return struct{}{}, nil
+			}))
 		}
+		err = conc.AwaitAll(futures...)
+		if err != nil {
+			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("list binlogs failed, err=%s", err)))
+			return resp, nil
+		}
+
 		files = lo.Filter(files, func(file *internalpb.ImportFile, _ int) bool {
 			return len(file.GetPaths()) > 0
 		})
