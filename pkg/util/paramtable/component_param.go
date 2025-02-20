@@ -2599,8 +2599,7 @@ type queryNodeConfig struct {
 	WorkerPoolingSize ParamItem `refreshable:"false"`
 
 	// Json Key Index
-	JSONIndexMemoryBudgetInTantivy ParamItem `refreshable:"false"`
-	JSONIndexCommitInterval        ParamItem `refreshable:"false"`
+	JSONIndexCommitInterval ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -3293,15 +3292,6 @@ user-task-polling:
 	}
 	p.ExprEvalBatchSize.Init(base.mgr)
 
-	p.JSONIndexMemoryBudgetInTantivy = ParamItem{
-		Key:          "queryNode.segcore.jsonIndexMemoryBudgetInTantivy",
-		Version:      "2.5.0",
-		DefaultValue: "16",
-		Doc:          "the memory budget for the JSON index In Tantivy",
-		Export:       true,
-	}
-	p.JSONIndexMemoryBudgetInTantivy.Init(base.mgr)
-
 	p.JSONIndexCommitInterval = ParamItem{
 		Key:          "queryNode.segcore.jsonIndexCommitInterval",
 		Version:      "2.5.0",
@@ -3524,7 +3514,8 @@ type dataCoordConfig struct {
 	TaskCheckInterval     ParamItem `refreshable:"true"`
 	StatsTaskTriggerCount ParamItem `refreshable:"true"`
 
-	RequestTimeoutSeconds ParamItem `refreshable:"true"`
+	RequestTimeoutSeconds             ParamItem `refreshable:"true"`
+	JSONKeyStatsMemoryBudgetInTantivy ParamItem `refreshable:"false"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -4427,6 +4418,14 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.RequestTimeoutSeconds.Init(base.mgr)
+	p.JSONKeyStatsMemoryBudgetInTantivy = ParamItem{
+		Key:          "dataCoord.segcore.jsonKeyStatsMemoryBudgetInTantivy",
+		Version:      "2.5.5",
+		DefaultValue: "16777216",
+		Doc:          "the memory budget for the JSON index In Tantivy, the unit is bytes",
+		Export:       true,
+	}
+	p.JSONKeyStatsMemoryBudgetInTantivy.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

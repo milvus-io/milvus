@@ -21,8 +21,10 @@ namespace milvus::index {
 using stdclock = std::chrono::high_resolution_clock;
 class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
  public:
-    explicit JsonKeyInvertedIndex(const storage::FileManagerContext& ctx,
-                                  bool is_load);
+    explicit JsonKeyInvertedIndex(
+        const storage::FileManagerContext& ctx,
+        bool is_load,
+        int64_t json_stats_tantivy_memory_budget = 16777216);
 
     explicit JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
                                   const char* unique_id);

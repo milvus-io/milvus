@@ -40,7 +40,7 @@ FieldMeta::enable_match() const {
 
 bool
 FieldMeta::enable_jsonIndex() const {
-    return IsJsonDataType(type_) && JSON_INDEX_ENABLED;
+    return IsJsonDataType(type_) && JSON_KEY_STATS_ENABLED;
 }
 
 bool
