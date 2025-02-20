@@ -1003,31 +1003,34 @@ TEST(TextMatch, GrowingLoadData) {
 TEST(TextMatch, TestPerf) {
     auto schema = GenTestSchema();
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
-    std::string str = "football";
     int64_t N = 10000000;
     uint64_t seed = 19190504;
-    auto raw_data = DataGen(schema, N, seed);
-    auto str_col = raw_data.raw_->mutable_fields_data()
-                       ->at(1)
-                       .mutable_scalars()
-                       ->mutable_string_data()
-                       ->mutable_data();
-    for (int64_t i = 0; i < N; i++) {
-        str_col->at(i) = str;
-    }
 
-    auto start = std::chrono::high_resolution_clock::now();
     seg->PreInsert(N);
-    seg->Insert(0,
-                N,
-                raw_data.row_ids_.data(),
-                raw_data.timestamps_.data(),
-                raw_data.raw_);
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
-            .count();
+    auto start = std::chrono::high_resolution_clock::now();
 
-    std::cout << "Execution time: " << duration_ms << " ms"
-              << std::endl;
+    int64_t chunk = 4000;
+    double total_ms = 0;
+    for (int64_t offset = 0; offset < N; offset += chunk) {
+        auto raw_data = DataGen(schema, chunk, seed, offset);
+        auto start = std::chrono::high_resolution_clock::now();
+        seg->Insert(offset,
+                    chunk,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+                .count();
+        total_ms += duration_ms;
+    }
+    std::cout << "Execution time: " << total_ms << " ms" << std::endl;
+    ASSERT_EQ(seg->get_real_count(), N);
+
+    auto expr = std::make_shared<milvus::expr::AlwaysTrueExpr>();
+    BitsetType final;
+    auto plan = milvus::test::CreateRetrievePlanByExpr(expr);
+    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(final.size(), N);
 }
