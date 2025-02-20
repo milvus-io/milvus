@@ -5,9 +5,10 @@ use either::Either;
 use futures::executor::block_on;
 use libc::c_char;
 use log::info;
+use tantivy::indexer::UserOperation;
 use tantivy::schema::{
     Field, IndexRecordOption, OwnedValue, Schema, SchemaBuilder, TextFieldIndexing, TextOptions,
-    FAST, INDEXED,
+    Value, FAST, INDEXED,
 };
 use tantivy::{
     doc, tokenizer, Document, Index, IndexWriter, SingleSegmentIndexWriter, TantivyDocument,
@@ -18,6 +19,21 @@ use crate::data_type::TantivyDataType;
 use crate::error::Result;
 use crate::index_reader::IndexReaderWrapper;
 use crate::log::init_log;
+
+#[macro_export]
+macro_rules! generate_add_ops {
+    ($data:expr, $field:expr, $id_field:expr, $offset:ident) => {{
+        let mut ops = Vec::with_capacity($data.len());
+        for &i in $data.into_iter() {
+            ops.push(UserOperation::Add(doc!(
+                $field => i,
+                $id_field.unwrap() => $offset,
+            )));
+            $offset += 1;
+        }
+        ops
+    }};
+}
 
 pub(crate) struct IndexWriterWrapper {
     pub(crate) field: Field,
@@ -105,6 +121,21 @@ impl IndexWriterWrapper {
         IndexReaderWrapper::from_index(self.index.clone())
     }
 
+    fn index_writer_add_batch_documents(
+        &self,
+        ops: Vec<UserOperation<TantivyDocument>>,
+    ) -> Result<()> {
+        match self.index_writer {
+            Either::Left(ref writer) => {
+                let _ = writer.run(ops)?;
+            }
+            Either::Right(_) => {
+                panic!("unexpected writer");
+            }
+        }
+        Ok(())
+    }
+
     fn index_writer_add_document(&self, document: TantivyDocument) -> Result<()> {
         match self.index_writer {
             Either::Left(ref writer) => {
@@ -132,48 +163,44 @@ impl IndexWriterWrapper {
         Ok(())
     }
 
-    pub fn add_i8(&mut self, data: i8, offset: i64) -> Result<()> {
-        self.add_i64(data.into(), offset)
+    pub fn add_i8s(&mut self, data: &[i8], offset: i64) -> Result<()> {
+        let data = data.iter().map(|&i| i as i64).collect::<Vec<_>>();
+        self.add_i64s(&data, offset)
     }
 
-    pub fn add_i16(&mut self, data: i16, offset: i64) -> Result<()> {
-        self.add_i64(data.into(), offset)
+    pub fn add_i16s(&mut self, data: &[i16], offset: i64) -> Result<()> {
+        let data = data.iter().map(|&i| i as i64).collect::<Vec<_>>();
+        self.add_i64s(&data, offset)
     }
 
-    pub fn add_i32(&mut self, data: i32, offset: i64) -> Result<()> {
-        self.add_i64(data.into(), offset)
+    pub fn add_i32s(&mut self, data: &[i32], offset: i64) -> Result<()> {
+        let data = data.iter().map(|&i| i as i64).collect::<Vec<_>>();
+        self.add_i64s(&data, offset)
     }
 
-    pub fn add_i64(&mut self, data: i64, offset: i64) -> Result<()> {
-        self.index_writer_add_document(doc!(
-            self.field => data,
-            self.id_field.unwrap() => offset,
-        ))
+    pub fn add_i64s(&mut self, data: &[i64], mut offset: i64) -> Result<()> {
+        let ops = generate_add_ops!(data, self.field, self.id_field, offset);
+        self.index_writer_add_batch_documents(ops)
     }
 
-    pub fn add_f32(&mut self, data: f32, offset: i64) -> Result<()> {
-        self.add_f64(data.into(), offset)
+    pub fn add_f32s(&mut self, data: &[f32], offset: i64) -> Result<()> {
+        let data = data.iter().map(|&i| i as f64).collect::<Vec<_>>();
+        self.add_f64s(&data, offset)
     }
 
-    pub fn add_f64(&mut self, data: f64, offset: i64) -> Result<()> {
-        self.index_writer_add_document(doc!(
-            self.field => data,
-            self.id_field.unwrap() => offset,
-        ))
+    pub fn add_f64s(&mut self, data: &[f64], mut offset: i64) -> Result<()> {
+        let ops = generate_add_ops!(data, self.field, self.id_field, offset);
+        self.index_writer_add_batch_documents(ops)
     }
 
-    pub fn add_bool(&mut self, data: bool, offset: i64) -> Result<()> {
-        self.index_writer_add_document(doc!(
-            self.field => data,
-            self.id_field.unwrap() => offset,
-        ))
+    pub fn add_bools(&mut self, data: &[bool], mut offset: i64) -> Result<()> {
+        let ops = generate_add_ops!(data, self.field, self.id_field, offset);
+        self.index_writer_add_batch_documents(ops)
     }
 
-    pub fn add_string(&mut self, data: &str, offset: i64) -> Result<()> {
-        self.index_writer_add_document(doc!(
-            self.field => data,
-            self.id_field.unwrap() => offset,
-        ))
+    pub fn add_strings(&mut self, data: &[&str], mut offset: i64) -> Result<()> {
+        let ops = generate_add_ops!(data, self.field, self.id_field, offset);
+        self.index_writer_add_batch_documents(ops)
     }
 
     pub fn add_array_i8s(&mut self, datas: &[i8], offset: i64) -> Result<()> {

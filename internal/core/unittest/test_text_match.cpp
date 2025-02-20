@@ -999,3 +999,35 @@ TEST(TextMatch, GrowingLoadData) {
     ASSERT_TRUE(final[5]);
     ASSERT_FALSE(final[6]);
 }
+
+TEST(TextMatch, TestPerf) {
+    auto schema = GenTestSchema();
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    std::string str = "football";
+    int64_t N = 10000000;
+    uint64_t seed = 19190504;
+    auto raw_data = DataGen(schema, N, seed);
+    auto str_col = raw_data.raw_->mutable_fields_data()
+                       ->at(1)
+                       .mutable_scalars()
+                       ->mutable_string_data()
+                       ->mutable_data();
+    for (int64_t i = 0; i < N; i++) {
+        str_col->at(i) = str;
+    }
+
+    auto start = std::chrono::high_resolution_clock::now();
+    seg->PreInsert(N);
+    seg->Insert(0,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+            .count();
+
+    std::cout << "Execution time: " << duration_ms << " ms"
+              << std::endl;
+}
