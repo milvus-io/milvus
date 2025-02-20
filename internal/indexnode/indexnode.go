@@ -205,7 +205,7 @@ func (i *IndexNode) initSegcore() {
 	cJSONIndexCommitInterval := C.int64_t(paramtable.Get().QueryNodeCfg.JSONIndexCommitInterval.GetAsInt64())
 	C.InitDefaultJSONKeyIndexCommitInterval(cJSONIndexCommitInterval)
 
-	cJSONIndexEnabled := C.bool(Params.DataCoordCfg.EnabledJSONKeyStats.GetAsBool())
+	cJSONIndexEnabled := C.bool(Params.CommonCfg.EnabledJSONKeyStats.GetAsBool())
 	C.InitDefaultJSONKeyIndexEnable(cJSONIndexEnabled)
 }
 
