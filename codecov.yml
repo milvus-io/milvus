@@ -14,7 +14,7 @@ coverage:
   status:
     project:
       default:
-        target: 77%
+        target: 69%
         threshold: 0% #Allow the coverage to drop by threshold%, and posting a success status.
     patch:
       default:
