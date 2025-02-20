@@ -143,6 +143,7 @@ message CreateStatsRequest {
   uint64 current_ts = 17;
   int64 task_version = 18;
   uint64 binlogMaxSize = 19;
+  bool enable_json_key_stats = 20;
 }
 
 message CreateJobV2Request {

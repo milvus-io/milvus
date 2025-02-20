@@ -337,7 +337,11 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			log.Ctx(ctx).Warn("stats wrong, failed to create text index", zap.Error(err))
 			return err
 		}
-	} else if st.req.GetSubJobType() == indexpb.StatsSubJob_JsonKeyIndexJob {
+	}
+	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort || st.req.GetSubJobType() == indexpb.StatsSubJob_JsonKeyIndexJob {
+		if !st.req.GetEnableJsonKeyStats() {
+			return nil
+		}
 		err = st.createJSONKeyIndex(ctx,
 			st.req.GetStorageConfig(),
 			st.req.GetCollectionID(),
