@@ -251,7 +251,7 @@ struct TantivyIndexWrapper {
                 views.push_back(
                     static_cast<const std::string*>(array)[i].c_str());
             }
-            auto res = RustResultWrapper(tantivy_index_add_string(
+            auto res = RustResultWrapper(tantivy_index_add_strings(
                 writer_, views.data(), len, offset_begin));
             AssertInfo(res.result_->success,
                        "failed to add string: {}",
@@ -432,7 +432,7 @@ struct TantivyIndexWrapper {
                     static_cast<const std::string*>(array)[i].c_str());
             }
             auto res = RustResultWrapper(
-                tantivy_index_add_string_by_single_segment_writer(
+                tantivy_index_add_strings_by_single_segment_writer(
                     writer_, views.data(), len));
             AssertInfo(res.result_->success,
                        "failed to add string: {}",

@@ -334,7 +334,7 @@ pub extern "C" fn tantivy_index_add_bools_by_single_segment_writer(
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_index_add_string(
+pub extern "C" fn tantivy_index_add_strings(
     ptr: *mut c_void,
     array: *const *const c_char,
     len: usize,
@@ -360,7 +360,7 @@ pub extern "C" fn tantivy_index_add_string(
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_index_add_string_by_single_segment_writer(
+pub extern "C" fn tantivy_index_add_strings_by_single_segment_writer(
     ptr: *mut c_void,
     array: *const *const c_char,
     len: usize,
