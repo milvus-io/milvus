@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -148,9 +149,10 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 
 	ctx := context.TODO()
 	chunkSize := paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64()
+	rootPath := binlog.GetRootPath()
 
 	writer, err := storage.NewBinlogRecordWriter(ctx, w.collectionID, w.partitionID, newSegmentID,
-		w.schema, w.allocator.logIDAlloc, chunkSize, w.maxRows,
+		w.schema, w.allocator.logIDAlloc, chunkSize, rootPath, w.maxRows,
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return w.binlogIO.Upload(ctx, kvs)
 		}))

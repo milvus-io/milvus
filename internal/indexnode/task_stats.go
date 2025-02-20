@@ -155,8 +155,14 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 
 	alloc := allocator.NewLocalAllocator(st.req.StartLogID, st.req.EndLogID)
 	srw, err := storage.NewBinlogRecordWriter(ctx,
-		st.req.GetCollectionID(), st.req.GetPartitionID(), st.req.GetTargetSegmentID(),
-		st.req.GetSchema(), alloc, st.req.GetBinlogMaxSize(), numRows,
+		st.req.GetCollectionID(),
+		st.req.GetPartitionID(),
+		st.req.GetTargetSegmentID(),
+		st.req.GetSchema(),
+		alloc,
+		st.req.GetBinlogMaxSize(),
+		st.req.GetStorageConfig().RootPath,
+		numRows,
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return st.binlogIO.Upload(ctx, kvs)
 		}))

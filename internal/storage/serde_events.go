@@ -733,7 +733,7 @@ func (c *CompositeBinlogRecordWriter) GetRowNum() int64 {
 }
 
 func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
-	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, maxRowNum int64,
+	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, rootPath string, maxRowNum int64,
 ) (*CompositeBinlogRecordWriter, error) {
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
@@ -763,6 +763,7 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 		BlobsWriter:  blobsWriter,
 		allocator:    allocator,
 		chunkSize:    chunkSize,
+		rootPath:     rootPath,
 		maxRowNum:    maxRowNum,
 		pkstats:      stats,
 		bm25Stats:    bm25Stats,
@@ -770,9 +771,9 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 }
 
 func NewChunkedBinlogSerializeWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
-	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, maxRowNum int64, batchSize int,
+	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, rootPath string, maxRowNum int64, batchSize int,
 ) (*SerializeWriter[*Value], error) {
-	rw, err := newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID, schema, blobsWriter, allocator, chunkSize, maxRowNum)
+	rw, err := newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID, schema, blobsWriter, allocator, chunkSize, rootPath, maxRowNum)
 	if err != nil {
 		return nil, err
 	}

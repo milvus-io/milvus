@@ -109,7 +109,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 }
 
 func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segmentID UniqueID,
-	schema *schemapb.CollectionSchema, allocator allocator.Interface, chunkSize uint64, maxRowNum int64,
+	schema *schemapb.CollectionSchema, allocator allocator.Interface, chunkSize uint64, rootPath string, maxRowNum int64,
 	option ...RwOption,
 ) (BinlogRecordWriter, error) {
 	rwOptions := defaultRwOptions()
@@ -126,7 +126,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			return rwOptions.uploader(ctx, kvs)
 		}
 		return newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
-			blobsWriter, allocator, chunkSize, maxRowNum,
+			blobsWriter, allocator, chunkSize, rootPath, maxRowNum,
 		)
 	case StorageV2:
 		// TODO: integrate v2
