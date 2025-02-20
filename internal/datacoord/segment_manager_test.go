@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sync"
 	"testing"
@@ -530,9 +531,18 @@ func TestGetFlushableSegments(t *testing.T) {
 	})
 }
 
+func alwaysSealPolicy() segmentSealPolicyFunc {
+	return func(segment *SegmentInfo, ts Timestamp) (bool, string) {
+		return true, ""
+	}
+}
+
 func TestTryToSealSegment(t *testing.T) {
-	t.Run("normal seal with segment policies", func(t *testing.T) {
-		paramtable.Init()
+	paramtable.Init()
+	pt := paramtable.Get()
+	t.Run("normal_seal with_segment_policies", func(t *testing.T) {
+		pt.Save(pt.DataCoordCfg.SegmentMaxLifetime.Key, fmt.Sprintf("%d", math.MinInt64))
+		defer pt.Reset(pt.DataCoordCfg.SegmentMaxLifetime.Key)
 		mockAllocator := newMockAllocator(t)
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
@@ -541,7 +551,7 @@ func TestTryToSealSegment(t *testing.T) {
 		collID, err := mockAllocator.AllocID(context.Background())
 		assert.NoError(t, err)
 		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-		segmentManager, _ := newSegmentManager(meta, mockAllocator, withSegmentSealPolices(sealL1SegmentByLifetime(math.MinInt64))) // always seal
+		segmentManager, _ := newSegmentManager(meta, mockAllocator, withSegmentSealPolices(sealL1SegmentByLifetime())) // always seal
 		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
@@ -552,11 +562,13 @@ func TestTryToSealSegment(t *testing.T) {
 		assert.NoError(t, err)
 
 		for _, seg := range segmentManager.meta.segments.segments {
-			assert.Equal(t, commonpb.SegmentState_Sealed, seg.GetState())
+			if seg.GetStartPosition() != nil {
+				assert.Equal(t, commonpb.SegmentState_Sealed, seg.GetState())
+			}
 		}
 	})
 
-	t.Run("normal seal with channel seal policies", func(t *testing.T) {
+	t.Run("normal_seal_with_channel_seal_policies", func(t *testing.T) {
 		paramtable.Init()
 		mockAllocator := newMockAllocator(t)
 		meta, err := newMemoryMeta(t)
@@ -592,7 +604,7 @@ func TestTryToSealSegment(t *testing.T) {
 		assert.NoError(t, err)
 		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 		segmentManager, _ := newSegmentManager(meta, mockAllocator,
-			withSegmentSealPolices(sealL1SegmentByLifetime(math.MinInt64)),
+			withSegmentSealPolices(sealL1SegmentByLifetime()),
 			withChannelSealPolices(getChannelOpenSegCapacityPolicy(-1))) // always seal
 		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2)
 		assert.NoError(t, err)
@@ -639,7 +651,7 @@ func TestTryToSealSegment(t *testing.T) {
 
 		// Not trigger seal
 		{
-			segmentManager.segmentSealPolicies = []SegmentSealPolicy{sealL1SegmentByLifetime(2)}
+			segmentManager.segmentSealPolicies = []SegmentSealPolicy{sealL1SegmentByLifetime()}
 			segments := segmentManager.meta.segments.segments
 			assert.Equal(t, 1, len(segments))
 			for _, seg := range segments {
@@ -691,7 +703,6 @@ func TestTryToSealSegment(t *testing.T) {
 	})
 
 	t.Run("seal with segment policy with kv fails", func(t *testing.T) {
-		paramtable.Init()
 		mockAllocator := newMockAllocator(t)
 		memoryKV := NewMetaMemoryKV()
 		catalog := datacoord.NewCatalog(memoryKV, "", "")
@@ -704,7 +715,7 @@ func TestTryToSealSegment(t *testing.T) {
 		collID, err := mockAllocator.AllocID(context.Background())
 		assert.NoError(t, err)
 		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-		segmentManager, _ := newSegmentManager(meta, mockAllocator, withSegmentSealPolices(sealL1SegmentByLifetime(math.MinInt64))) // always seal
+		segmentManager, _ := newSegmentManager(meta, mockAllocator, withSegmentSealPolices(alwaysSealPolicy())) // always seal
 		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
