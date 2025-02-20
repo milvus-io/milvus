@@ -136,9 +136,13 @@ JsonKeyInvertedIndex::AddJson(const char* json, int64_t offset) {
 }
 
 JsonKeyInvertedIndex::JsonKeyInvertedIndex(
-    const storage::FileManagerContext& ctx, bool is_load)
+    const storage::FileManagerContext& ctx,
+    bool is_load,
+    int64_t json_stats_tantivy_memory_budget)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
+    LOG_INFO("JsonKeyInvertedIndex json_stats_tantivy_memory_budget:{}",
+             json_stats_tantivy_memory_budget);
     schema_ = ctx.fieldDataMeta.field_schema;
     field_id_ = ctx.fieldDataMeta.field_id;
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
@@ -150,19 +154,18 @@ JsonKeyInvertedIndex::JsonKeyInvertedIndex(
     } else {
         auto prefix = disk_file_manager_->GetJsonKeyIndexIdentifier();
         path_ = std::string(TMP_JSON_INVERTED_LOG_PREFIX) + prefix;
-
         boost::filesystem::create_directories(path_);
         std::string field_name =
             std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
         d_type_ = TantivyDataType::Keyword;
-        wrapper_ =
-            std::make_shared<TantivyIndexWrapper>(field_name.c_str(),
-                                                  d_type_,
-                                                  path_.c_str(),
-                                                  false,
-                                                  false,
-                                                  1,
-                                                  JSON_INDEX_MEMORY_BUDGET);
+        wrapper_ = std::make_shared<TantivyIndexWrapper>(
+            field_name.c_str(),
+            d_type_,
+            path_.c_str(),
+            false,
+            false,
+            1,
+            json_stats_tantivy_memory_budget);
     }
 }
 
@@ -240,7 +243,6 @@ JsonKeyInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load json key index");
-
     for (auto& index_file : index_files.value()) {
         boost::filesystem::path p(index_file);
         if (!p.has_parent_path()) {
@@ -249,7 +251,6 @@ JsonKeyInvertedIndex::Load(milvus::tracer::TraceContext ctx,
             index_file = remote_prefix + "/" + index_file;
         }
     }
-
     disk_file_manager_->CacheJsonKeyIndexToDisk(index_files.value());
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
