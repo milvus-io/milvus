@@ -1171,7 +1171,6 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	sealedSegments := node.manager.Segment.GetBy(segments.WithType(commonpb.SegmentState_Sealed))
 	segmentVersionInfos := make([]*querypb.SegmentVersionInfo, 0, len(sealedSegments))
 	for _, s := range sealedSegments {
-		log.Info("GetDataDistribution", zap.Any("JsonKeyStatsLogs", s.LoadInfo().GetJsonKeyStatsLogs()), zap.Any("Indexes", s.Indexes()))
 		segmentVersionInfos = append(segmentVersionInfos, &querypb.SegmentVersionInfo{
 			ID:                 s.ID(),
 			Collection:         s.Collection(),
