@@ -878,24 +878,38 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
         return (cmp);                                         \
     } while (false)
 
-#define UnaryRangeJSONIndexCompareWithArrayIndex(cmp)         \
-    do {                                                      \
-        auto array = json.array_at(offset, size);             \
-        if (array.error()) {                                  \
-            return false;                                     \
-        }                                                     \
-        auto value = array.at_pointer(arrayIndex);            \
-        if (value.error()) {                                  \
-            return false;                                     \
-        }                                                     \
-        auto x = value.get<GetType>();                        \
-        if (x.error()) {                                      \
-            if constexpr (std::is_same_v<GetType, int64_t>) { \
-                auto x = value.get<double>();                 \
-                return !x.error() && (cmp);                   \
-            }                                                 \
-        }                                                     \
-        return (cmp);                                         \
+#define UnaryRangeJSONIndexCompareWithArrayIndex(cmp)                     \
+    do {                                                                  \
+        auto array = json.array_at(offset, size);                         \
+        if (array.error()) {                                              \
+            return false;                                                 \
+        }                                                                 \
+        auto value = array.at_pointer(arrayIndex);                        \
+        if (value.error()) {                                              \
+            return false;                                                 \
+        }                                                                 \
+        if constexpr (std::is_same_v<GetType, int64_t> ||                 \
+                      std::is_same_v<GetType, double>) {                  \
+            if (!value.is_number()) {                                     \
+                return false;                                             \
+            }                                                             \
+        } else if constexpr (std::is_same_v<GetType, std::string_view>) { \
+            if (!value.is_string()) {                                     \
+                return false;                                             \
+            }                                                             \
+        } else if constexpr (std::is_same_v<GetType, bool>) {             \
+            if (!value.is_bool()) {                                       \
+                return false;                                             \
+            }                                                             \
+        }                                                                 \
+        auto x = value.get<GetType>();                                    \
+        if (x.error()) {                                                  \
+            if constexpr (std::is_same_v<GetType, int64_t>) {             \
+                auto x = value.get<double>();                             \
+                return !x.error() && (cmp);                               \
+            }                                                             \
+        }                                                                 \
+        return (cmp);                                                     \
     } while (false)
 
 #define UnaryRangeJSONIndexCompareNotEqual(cmp)               \
@@ -910,24 +924,38 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
         }                                                     \
         return (cmp);                                         \
     } while (false)
-#define UnaryRangeJSONIndexCompareNotEqualWithArrayIndex(cmp) \
-    do {                                                      \
-        auto array = json.array_at(offset, size);             \
-        if (array.error()) {                                  \
-            return false;                                     \
-        }                                                     \
-        auto value = array.at_pointer(arrayIndex);            \
-        if (value.error()) {                                  \
-            return false;                                     \
-        }                                                     \
-        auto x = value.get<GetType>();                        \
-        if (x.error()) {                                      \
-            if constexpr (std::is_same_v<GetType, int64_t>) { \
-                auto x = value.get<double>();                 \
-                return x.error() || (cmp);                    \
-            }                                                 \
-        }                                                     \
-        return (cmp);                                         \
+#define UnaryRangeJSONIndexCompareNotEqualWithArrayIndex(cmp)             \
+    do {                                                                  \
+        auto array = json.array_at(offset, size);                         \
+        if (array.error()) {                                              \
+            return false;                                                 \
+        }                                                                 \
+        auto value = array.at_pointer(arrayIndex);                        \
+        if (value.error()) {                                              \
+            return false;                                                 \
+        }                                                                 \
+        if constexpr (std::is_same_v<GetType, int64_t> ||                 \
+                      std::is_same_v<GetType, double>) {                  \
+            if (!value.is_number()) {                                     \
+                return false;                                             \
+            }                                                             \
+        } else if constexpr (std::is_same_v<GetType, std::string_view>) { \
+            if (!value.is_string()) {                                     \
+                return false;                                             \
+            }                                                             \
+        } else if constexpr (std::is_same_v<GetType, bool>) {             \
+            if (!value.is_bool()) {                                       \
+                return false;                                             \
+            }                                                             \
+        }                                                                 \
+        auto x = value.get<GetType>();                                    \
+        if (x.error()) {                                                  \
+            if constexpr (std::is_same_v<GetType, int64_t>) {             \
+                auto x = value.get<double>();                             \
+                return x.error() || (cmp);                                \
+            }                                                             \
+        }                                                                 \
+        return (cmp);                                                     \
     } while (false)
 
     ExprValueType val = GetValueFromProto<ExprValueType>(expr_->val_);

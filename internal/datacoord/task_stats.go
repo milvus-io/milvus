@@ -215,7 +215,11 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		NumRows:         segment.GetNumOfRows(),
 		CollectionTtl:   collTtl.Nanoseconds(),
 		CurrentTs:       tsoutil.GetCurrentTime(),
-		BinlogMaxSize:   Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		// update version after check
+		TaskVersion:               statsMeta.GetVersion() + 1,
+		BinlogMaxSize:             Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		EnableJsonKeyStats:        Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
+		JsonKeyStatsTantivyMemory: Params.DataCoordCfg.JSONKeyStatsMemoryBudgetInTantivy.GetAsInt64(),
 	}
 
 	return true

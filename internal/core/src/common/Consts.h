@@ -83,4 +83,4 @@ const std::string JSON_CAST_TYPE = "json_cast_type";
 const std::string JSON_PATH = "json_path";
 const int64_t DEFAULT_JSON_INDEX_MEMORY_BUDGET = 16777216;  // bytes, 16MB
 const int64_t DEFAULT_JSON_INDEX_COMMIT_INTERVAL = 200;
-const bool DEFAULT_JSON_INDEX_ENABLED = true;
+const bool DEFAULT_JSON_KEY_STATS_ENABLED = false;
