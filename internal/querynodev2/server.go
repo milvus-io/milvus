@@ -233,15 +233,11 @@ func (node *QueryNode) InitSegcore() error {
 	cExprBatchSize := C.int64_t(paramtable.Get().QueryNodeCfg.ExprEvalBatchSize.GetAsInt64())
 	C.InitDefaultExprEvalBatchSize(cExprBatchSize)
 
-	cJSONIndexMemoryBudgetInTantivy := C.int64_t(paramtable.Get().QueryNodeCfg.JSONIndexMemoryBudgetInTantivy.GetAsInt64() * 1024 * 1024)
-	C.InitDefaultJSONKeyIndexMemoryBudget(cJSONIndexMemoryBudgetInTantivy)
-
 	cJSONIndexCommitInterval := C.int64_t(paramtable.Get().QueryNodeCfg.JSONIndexCommitInterval.GetAsInt64())
 	C.InitDefaultJSONKeyIndexCommitInterval(cJSONIndexCommitInterval)
 
-	cJSONIndexEnabled := C.bool(paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool())
-	C.InitDefaultJSONKeyIndexEnable(cJSONIndexEnabled)
-
+	cJSONKeyStatsEnabled := C.bool(paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool())
+	C.InitDefaultJSONKeyStatsEnable(cJSONKeyStatsEnabled)
 	cGpuMemoryPoolInitSize := C.uint32_t(paramtable.Get().GpuConfig.InitSize.GetAsUint32())
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
