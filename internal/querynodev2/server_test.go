@@ -28,7 +28,6 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -39,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -51,7 +49,6 @@ type QueryNodeSuite struct {
 	// dependency
 	params              *paramtable.ComponentParam
 	node                *QueryNode
-	etcd                *clientv3.Client
 	chunkManagerFactory *storage.ChunkManagerFactory
 
 	// mock
@@ -63,7 +60,6 @@ func (suite *QueryNodeSuite) SetupSuite() {
 }
 
 func (suite *QueryNodeSuite) SetupTest() {
-	var err error
 	paramtable.Init()
 	suite.params = paramtable.Get()
 	suite.params.Save(suite.params.CommonCfg.GCEnabled.Key, "false")
@@ -73,20 +69,9 @@ func (suite *QueryNodeSuite) SetupTest() {
 	suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus_test"))
 	// new node
 	suite.node = NewQueryNode(context.Background(), suite.factory)
-	// init etcd
-	suite.etcd, err = etcd.GetEtcdClient(
-		suite.params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		suite.params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		suite.params.EtcdCfg.Endpoints.GetAsStrings(),
-		suite.params.EtcdCfg.EtcdTLSCert.GetValue(),
-		suite.params.EtcdCfg.EtcdTLSKey.GetValue(),
-		suite.params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		suite.params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	suite.NoError(err)
 }
 
 func (suite *QueryNodeSuite) TearDownTest() {
-	suite.etcd.Close()
 	os.RemoveAll("/tmp/milvus-test")
 }
 
@@ -96,7 +81,6 @@ func (suite *QueryNodeSuite) TestBasic() {
 	suite.factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(suite.chunkManagerFactory.NewPersistentStorageChunkManager(context.Background()))
 
 	var err error
-	suite.node.SetEtcdClient(suite.etcd)
 	err = suite.node.Init()
 	suite.NoError(err)
 
@@ -130,7 +114,6 @@ func (suite *QueryNodeSuite) TestBasic() {
 
 func (suite *QueryNodeSuite) TestInit_RemoteChunkManagerFailed() {
 	var err error
-	suite.node.SetEtcdClient(suite.etcd)
 
 	// init remote chunk manager failed
 	suite.factory.EXPECT().Init(mock.Anything).Return()
@@ -141,7 +124,6 @@ func (suite *QueryNodeSuite) TestInit_RemoteChunkManagerFailed() {
 
 func (suite *QueryNodeSuite) TestInit_VactorChunkManagerFailed() {
 	var err error
-	suite.node.SetEtcdClient(suite.etcd)
 
 	// init vactor chunk manager failed
 	suite.factory.EXPECT().Init(mock.Anything).Return()
@@ -155,9 +137,7 @@ func (suite *QueryNodeSuite) TestInit_QueryHook() {
 	suite.factory.EXPECT().Init(mock.Anything).Return()
 	suite.factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(suite.chunkManagerFactory.NewPersistentStorageChunkManager(context.Background()))
 
-	var err error
-	suite.node.SetEtcdClient(suite.etcd)
-	err = suite.node.Init()
+	err := suite.node.Init()
 	suite.NoError(err)
 
 	mockHook := mock_optimizers.NewMockQueryHook(suite.T())

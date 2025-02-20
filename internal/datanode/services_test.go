@@ -24,7 +24,6 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -45,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -54,11 +52,10 @@ import (
 type DataNodeServicesSuite struct {
 	suite.Suite
 
-	broker  *broker.MockBroker
-	node    *DataNode
-	etcdCli *clientv3.Client
-	ctx     context.Context
-	cancel  context.CancelFunc
+	broker *broker.MockBroker
+	node   *DataNode
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func TestDataNodeServicesSuite(t *testing.T) {
@@ -67,21 +64,10 @@ func TestDataNodeServicesSuite(t *testing.T) {
 
 func (s *DataNodeServicesSuite) SetupSuite() {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	s.Require().NoError(err)
-	s.etcdCli = etcdCli
 }
 
 func (s *DataNodeServicesSuite) SetupTest() {
 	s.node = NewIDLEDataNodeMock(s.ctx, schemapb.DataType_Int64)
-	s.node.SetEtcdClient(s.etcdCli)
 
 	err := s.node.Init()
 	s.Require().NoError(err)
@@ -127,8 +113,6 @@ func (s *DataNodeServicesSuite) TearDownTest() {
 
 func (s *DataNodeServicesSuite) TearDownSuite() {
 	s.cancel()
-	err := s.etcdCli.Close()
-	s.Require().NoError(err)
 }
 
 func (s *DataNodeServicesSuite) TestNotInUseAPIs() {

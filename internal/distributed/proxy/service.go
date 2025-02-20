@@ -32,7 +32,6 @@ import (
 	"github.com/gin-gonic/gin"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/soheilhy/cmux"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -67,7 +66,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -105,7 +103,6 @@ type Server struct {
 
 	serverID atomic.Int64
 
-	etcdCli          *clientv3.Client
 	rootCoordClient  types.RootCoordClient
 	dataCoordClient  types.DataCoordClient
 	queryCoordClient types.QueryCoordClient
@@ -424,7 +421,6 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) init() error {
-	etcdConfig := &paramtable.Get().EtcdCfg
 	Params := &paramtable.Get().ProxyGrpcServerCfg
 	log := log.Ctx(s.ctx)
 	log.Info("Proxy init service's parameter table done")
@@ -435,23 +431,6 @@ func (s *Server) init() error {
 	serviceName := fmt.Sprintf("Proxy ip: %s, port: %d", Params.IP, Params.Port.GetAsInt())
 	log.Info("init Proxy's tracer done", zap.String("service name", serviceName))
 
-	etcdCli, err := etcd.CreateEtcdClient(
-		etcdConfig.UseEmbedEtcd.GetAsBool(),
-		etcdConfig.EtcdEnableAuth.GetAsBool(),
-		etcdConfig.EtcdAuthUserName.GetValue(),
-		etcdConfig.EtcdAuthPassword.GetValue(),
-		etcdConfig.EtcdUseSSL.GetAsBool(),
-		etcdConfig.Endpoints.GetAsStrings(),
-		etcdConfig.EtcdTLSCert.GetValue(),
-		etcdConfig.EtcdTLSKey.GetValue(),
-		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue())
-	if err != nil {
-		log.Debug("Proxy connect to etcd failed", zap.Error(err))
-		return err
-	}
-	s.etcdCli = etcdCli
-	s.proxy.SetEtcdClient(s.etcdCli)
 	s.proxy.SetAddress(s.listenerManager.internalGrpcListener.Address())
 
 	errChan := make(chan error, 1)
@@ -597,10 +576,6 @@ func (s *Server) Stop() (err error) {
 	defer func() {
 		logger.Info("Proxy stopped", zap.Error(err))
 	}()
-
-	if s.etcdCli != nil {
-		defer s.etcdCli.Close()
-	}
 
 	gracefulWg := sync.WaitGroup{}
 

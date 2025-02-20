@@ -798,12 +798,6 @@ type MockIndexNode_SetEtcdClient_Call struct {
 	*mock.Call
 }
 
-// SetEtcdClient is a helper method to define mock.On call
-//   - etcdClient *clientv3.Client
-func (_e *MockIndexNode_Expecter) SetEtcdClient(etcdClient interface{}) *MockIndexNode_SetEtcdClient_Call {
-	return &MockIndexNode_SetEtcdClient_Call{Call: _e.mock.On("SetEtcdClient", etcdClient)}
-}
-
 func (_c *MockIndexNode_SetEtcdClient_Call) Run(run func(etcdClient *clientv3.Client)) *MockIndexNode_SetEtcdClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(*clientv3.Client))

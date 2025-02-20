@@ -47,7 +47,6 @@ func TestComponentState(t *testing.T) {
 	)
 	paramtable.Init()
 	in := NewIndexNode(ctx, factory)
-	in.SetEtcdClient(getEtcdClient())
 	state, err := in.GetComponentStates(ctx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, state.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)

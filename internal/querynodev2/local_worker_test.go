@@ -23,7 +23,6 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
-	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -33,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -50,9 +48,8 @@ type LocalWorkerTestSuite struct {
 	indexMeta      *segcorepb.CollectionIndexMeta
 
 	// dependency
-	node       *QueryNode
-	worker     *LocalWorker
-	etcdClient *clientv3.Client
+	node   *QueryNode
+	worker *LocalWorker
 	// context
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -78,17 +75,6 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 	// init node
 	factory := dependency.MockDefaultFactory(true, paramtable.Get())
 	suite.node = NewQueryNode(suite.ctx, factory)
-	//	init etcd
-	suite.etcdClient, err = etcd.GetEtcdClient(
-		suite.params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		suite.params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		suite.params.EtcdCfg.Endpoints.GetAsStrings(),
-		suite.params.EtcdCfg.EtcdTLSCert.GetValue(),
-		suite.params.EtcdCfg.EtcdTLSKey.GetValue(),
-		suite.params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		suite.params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	suite.NoError(err)
-	suite.node.SetEtcdClient(suite.etcdClient)
 	err = suite.node.Init()
 	suite.NoError(err)
 	err = suite.node.Start()
@@ -110,7 +96,6 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 
 func (suite *LocalWorkerTestSuite) AfterTest(suiteName, testName string) {
 	suite.node.Stop()
-	suite.etcdClient.Close()
 	suite.cancel()
 }
 

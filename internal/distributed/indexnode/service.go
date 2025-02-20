@@ -23,7 +23,6 @@ import (
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -40,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/tracer"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -61,8 +59,6 @@ type Server struct {
 	loopCtx    context.Context
 	loopCancel func()
 	grpcWG     sync.WaitGroup
-
-	etcdCli *clientv3.Client
 }
 
 func (s *Server) Prepare() error {
@@ -153,7 +149,6 @@ func (s *Server) startGrpcLoop() {
 
 // init initializes IndexNode's grpc service.
 func (s *Server) init() error {
-	etcdConfig := &paramtable.Get().EtcdCfg
 	var err error
 	log := log.Ctx(s.loopCtx)
 
@@ -175,24 +170,6 @@ func (s *Server) init() error {
 		return err
 	}
 
-	var etcdCli *clientv3.Client
-	etcdCli, err = etcd.CreateEtcdClient(
-		etcdConfig.UseEmbedEtcd.GetAsBool(),
-		etcdConfig.EtcdEnableAuth.GetAsBool(),
-		etcdConfig.EtcdAuthUserName.GetValue(),
-		etcdConfig.EtcdAuthPassword.GetValue(),
-		etcdConfig.EtcdUseSSL.GetAsBool(),
-		etcdConfig.Endpoints.GetAsStrings(),
-		etcdConfig.EtcdTLSCert.GetValue(),
-		etcdConfig.EtcdTLSKey.GetValue(),
-		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue())
-	if err != nil {
-		log.Debug("IndexNode connect to etcd failed", zap.Error(err))
-		return err
-	}
-	s.etcdCli = etcdCli
-	s.indexnode.SetEtcdClient(etcdCli)
 	s.indexnode.SetAddress(s.listener.Address())
 	err = s.indexnode.Init()
 	if err != nil {
@@ -237,9 +214,6 @@ func (s *Server) Stop() (err error) {
 			return err
 		}
 	}
-	if s.etcdCli != nil {
-		defer s.etcdCli.Close()
-	}
 	if s.grpcServer != nil {
 		utils.GracefulStopGRPCServer(s.grpcServer)
 	}
@@ -256,11 +230,6 @@ func (s *Server) Stop() (err error) {
 func (s *Server) setServer(indexNode types.IndexNodeComponent) error {
 	s.indexnode = indexNode
 	return nil
-}
-
-// SetEtcdClient sets the etcd client for QueryNode component.
-func (s *Server) SetEtcdClient(etcdCli *clientv3.Client) {
-	s.indexnode.SetEtcdClient(etcdCli)
 }
 
 // GetComponentStates gets the component states of IndexNode.

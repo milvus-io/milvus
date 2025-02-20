@@ -31,7 +31,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/tidwall/gjson"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -47,13 +46,11 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/kv"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
@@ -107,7 +104,6 @@ type DataNode struct {
 	timeTickSender           *util2.TimeTickSender
 	channelCheckpointUpdater *util2.ChannelCheckpointUpdater
 
-	etcdCli   *clientv3.Client
 	address   string
 	rootCoord types.RootCoordClient
 	dataCoord types.DataCoordClient
@@ -119,7 +115,6 @@ type DataNode struct {
 	stopOnce     sync.Once
 	sessionMu    sync.Mutex // to fix data race
 	session      *sessionutil.Session
-	watchKv      kv.WatchKV
 	chunkManager storage.ChunkManager
 	allocator    allocator.Allocator
 
@@ -162,11 +157,6 @@ func (node *DataNode) SetAddress(address string) {
 
 func (node *DataNode) GetAddress() string {
 	return node.address
-}
-
-// SetEtcdClient sets etcd client for DataNode
-func (node *DataNode) SetEtcdClient(etcdCli *clientv3.Client) {
-	node.etcdCli = etcdCli
 }
 
 // SetRootCoordClient sets RootCoord's grpc client, error is returned if repeatedly set.
@@ -330,18 +320,6 @@ func (node *DataNode) Start() error {
 			return
 		}
 		log.Info("start id allocator done", zap.String("role", typeutil.DataNodeRole))
-
-		connectEtcdFn := func() error {
-			etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
-				etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
-			node.watchKv = etcdKV
-			return nil
-		}
-		err := retry.Do(node.ctx, connectEtcdFn, retry.Attempts(ConnectEtcdMaxRetryTime))
-		if err != nil {
-			startErr = errors.New("DataNode fail to connect etcd")
-			return
-		}
 
 		if !streamingutil.IsStreamingServiceEnabled() {
 			node.writeBufferManager.Start()

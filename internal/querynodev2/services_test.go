@@ -29,7 +29,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -52,7 +51,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -83,7 +81,6 @@ type ServiceSuite struct {
 
 	// Dependency
 	node                *QueryNode
-	etcdClient          *clientv3.Client
 	rootPath            string
 	chunkManagerFactory *storage.ChunkManagerFactory
 
@@ -135,17 +132,6 @@ func (suite *ServiceSuite) SetupTest() {
 
 	var err error
 	suite.node = NewQueryNode(ctx, suite.factory)
-	// init etcd
-	suite.etcdClient, err = etcd.GetEtcdClient(
-		paramtable.Get().EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		paramtable.Get().EtcdCfg.EtcdUseSSL.GetAsBool(),
-		paramtable.Get().EtcdCfg.Endpoints.GetAsStrings(),
-		paramtable.Get().EtcdCfg.EtcdTLSCert.GetValue(),
-		paramtable.Get().EtcdCfg.EtcdTLSKey.GetValue(),
-		paramtable.Get().EtcdCfg.EtcdTLSCACert.GetValue(),
-		paramtable.Get().EtcdCfg.EtcdTLSMinVersion.GetValue())
-	suite.NoError(err)
-	suite.node.SetEtcdClient(suite.etcdClient)
 	// init node
 	err = suite.node.Init()
 	suite.NoError(err)
@@ -174,7 +160,6 @@ func (suite *ServiceSuite) TearDownTest() {
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
 	suite.node.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().LocalStorageCfg.Path.GetValue())
 	suite.node.Stop()
-	suite.etcdClient.Close()
 	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
 }
 

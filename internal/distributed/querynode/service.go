@@ -23,7 +23,6 @@ import (
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -40,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/tracer"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -64,8 +62,6 @@ type Server struct {
 
 	grpcServer *grpc.Server
 	listener   *netutil.NetListener
-
-	etcdCli *clientv3.Client
 }
 
 func (s *Server) GetStatistics(ctx context.Context, request *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
@@ -108,33 +104,15 @@ func (s *Server) Prepare() error {
 
 // init initializes QueryNode's grpc service.
 func (s *Server) init() error {
-	etcdConfig := &paramtable.Get().EtcdCfg
 	log := log.Ctx(s.ctx)
 	log.Debug("QueryNode", zap.Int("port", s.listener.Port()))
 
-	etcdCli, err := etcd.CreateEtcdClient(
-		etcdConfig.UseEmbedEtcd.GetAsBool(),
-		etcdConfig.EtcdEnableAuth.GetAsBool(),
-		etcdConfig.EtcdAuthUserName.GetValue(),
-		etcdConfig.EtcdAuthPassword.GetValue(),
-		etcdConfig.EtcdUseSSL.GetAsBool(),
-		etcdConfig.Endpoints.GetAsStrings(),
-		etcdConfig.EtcdTLSCert.GetValue(),
-		etcdConfig.EtcdTLSKey.GetValue(),
-		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue())
-	if err != nil {
-		log.Debug("QueryNode connect to etcd failed", zap.Error(err))
-		return err
-	}
-	s.etcdCli = etcdCli
-	s.SetEtcdClient(etcdCli)
 	s.querynode.SetAddress(s.listener.Address())
 	log.Debug("QueryNode connect to etcd successfully")
 	s.grpcWG.Add(1)
 	go s.startGrpcLoop()
 	// wait for grpc server loop start
-	err = <-s.grpcErrChan
+	err := <-s.grpcErrChan
 	if err != nil {
 		return err
 	}
@@ -253,9 +231,6 @@ func (s *Server) Stop() (err error) {
 		logger.Error("failed to close querynode", zap.Error(err))
 		return err
 	}
-	if s.etcdCli != nil {
-		defer s.etcdCli.Close()
-	}
 
 	if s.grpcServer != nil {
 		utils.GracefulStopGRPCServer(s.grpcServer)
@@ -267,11 +242,6 @@ func (s *Server) Stop() (err error) {
 		s.listener.Close()
 	}
 	return nil
-}
-
-// SetEtcdClient sets the etcd client for QueryNode component.
-func (s *Server) SetEtcdClient(etcdCli *clientv3.Client) {
-	s.querynode.SetEtcdClient(etcdCli)
 }
 
 // GetTimeTickChannel gets the time tick channel of QueryNode.

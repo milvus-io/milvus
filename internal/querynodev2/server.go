@@ -42,7 +42,6 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -115,8 +114,6 @@ type QueryNode struct {
 	// Search/Query
 	scheduler scheduler.Scheduler
 
-	// etcd client
-	etcdCli *clientv3.Client
 	address string
 
 	dispClient msgdispatcher.Client
@@ -523,11 +520,6 @@ func (node *QueryNode) Stop() error {
 // UpdateStateCode updata the state of query node, which can be initializing, healthy, and abnormal
 func (node *QueryNode) UpdateStateCode(code commonpb.StateCode) {
 	node.lifetime.SetState(code)
-}
-
-// SetEtcdClient assigns parameter client to its member etcdCli
-func (node *QueryNode) SetEtcdClient(client *clientv3.Client) {
-	node.etcdCli = client
 }
 
 func (node *QueryNode) GetAddress() string {
