@@ -380,7 +380,11 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 
 func (m *CompactionTriggerManager) addL0ImportTaskForImport(ctx context.Context, collection *collectionInfo, view CompactionView) error {
 	// add l0 import task for the collection if the collection is importing
-	importJobs := m.imeta.GetJobBy(ctx, WithCollectionID(collection.ID), WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
+	importJobs := m.imeta.GetJobBy(ctx,
+		WithCollectionID(collection.ID),
+		WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed),
+		WithoutL0Job(),
+	)
 	if len(importJobs) > 0 {
 		partitionID := view.GetGroupLabel().PartitionID
 		var (
@@ -403,6 +407,9 @@ func (m *CompactionTriggerManager) addL0ImportTaskForImport(ctx context.Context,
 					importPaths = append(importPaths, binlog.GetLogPath())
 				}
 			}
+		}
+		if len(importPaths) == 0 {
+			return nil
 		}
 
 		for i, job := range importJobs {
