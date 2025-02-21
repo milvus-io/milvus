@@ -368,8 +368,8 @@ func WrapErrServiceMemoryLimitExceeded(predict, limit float32, msg ...string) er
 	return err
 }
 
-func WrapErrServiceRequestLimitExceeded(limit int32, msg ...string) error {
-	err := wrapFields(ErrServiceRequestLimitExceeded,
+func WrapErrTooManyRequests(limit int32, msg ...string) error {
+	err := wrapFields(ErrServiceTooManyRequests,
 		value("limit", limit),
 	)
 	if len(msg) > 0 {
