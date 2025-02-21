@@ -369,6 +369,9 @@ func (c *SegmentChecker) filterExistedOnLeader(replica *meta.Replica, segments [
 		}
 
 		view := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, s.GetInsertChannel())
+		if view == nil {
+			continue
+		}
 		seg, ok := view.Segments[s.GetID()]
 		if ok && seg.NodeID == s.Node {
 			// if this segment is serving on leader, do not remove it for search available
@@ -388,6 +391,9 @@ func (c *SegmentChecker) filterSegmentInUse(ctx context.Context, replica *meta.R
 		}
 
 		view := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, s.GetInsertChannel())
+		if view == nil {
+			continue
+		}
 		currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, s.CollectionID, meta.CurrentTarget)
 		partition := c.meta.CollectionManager.GetPartition(ctx, s.PartitionID)
 
