@@ -17,6 +17,7 @@ from pymilvus import (
     Collection, utility
 )
 from faker import Faker
+import re
 
 Faker.seed(19530)
 fake_en = Faker("en_US")
@@ -3492,6 +3493,7 @@ class TestQueryVector(TestBase):
             rsp = self.vector_client.vector_query({"collectionName": name, "filter": f"{expr}", "outputFields": ["*"]})
             assert rsp['code'] == 0, rsp
             for d in rsp['data']:
+                d[field] = re.sub(r'[^\w\s]','', d[field])
                 assert phrase in d[field]
             assert len(rsp['data']) >= target_data_len
 
