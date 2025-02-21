@@ -140,6 +140,7 @@ type task interface {
 	CanSkipAllocTimestamp() bool
 	SetOnEnqueueTime()
 	GetDurationInQueue() time.Duration
+	IsSubTask() bool
 }
 
 type baseTask struct {
@@ -156,6 +157,10 @@ func (bt *baseTask) SetOnEnqueueTime() {
 
 func (bt *baseTask) GetDurationInQueue() time.Duration {
 	return time.Since(bt.onEnqueueTime)
+}
+
+func (bt *baseTask) IsSubTask() bool {
+	return false
 }
 
 type dmlTask interface {
