@@ -246,10 +246,10 @@ func Test_sealLongTimeIdlePolicy(t *testing.T) {
 	seg1 := &SegmentInfo{lastWrittenTime: time.Now().Add(idleTimeTolerance * 5)}
 	shouldSeal, _ := policy.ShouldSeal(seg1, 100)
 	assert.False(t, shouldSeal)
-	seg2 := &SegmentInfo{lastWrittenTime: getZeroTime(), currRows: 1, SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000}}
+	seg2 := &SegmentInfo{lastWrittenTime: getZeroTime(), SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000, NumOfRows: 1}}
 	shouldSeal, _ = policy.ShouldSeal(seg2, 100)
 	assert.False(t, shouldSeal)
-	seg3 := &SegmentInfo{lastWrittenTime: getZeroTime(), currRows: 1000, SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000}}
+	seg3 := &SegmentInfo{lastWrittenTime: getZeroTime(), SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000, NumOfRows: 1000}}
 	shouldSeal, _ = policy.ShouldSeal(seg3, 100)
 	assert.True(t, shouldSeal)
 }
