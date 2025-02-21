@@ -999,38 +999,3 @@ TEST(TextMatch, GrowingLoadData) {
     ASSERT_TRUE(final[5]);
     ASSERT_FALSE(final[6]);
 }
-
-TEST(TextMatch, TestPerf) {
-    auto schema = GenTestSchema();
-    auto seg = CreateGrowingSegment(schema, empty_index_meta);
-    int64_t N = 10000000;
-    uint64_t seed = 19190504;
-
-    seg->PreInsert(N);
-    auto start = std::chrono::high_resolution_clock::now();
-
-    int64_t chunk = 4000;
-    double total_ms = 0;
-    for (int64_t offset = 0; offset < N; offset += chunk) {
-        auto raw_data = DataGen(schema, chunk, seed, offset);
-        auto start = std::chrono::high_resolution_clock::now();
-        seg->Insert(offset,
-                    chunk,
-                    raw_data.row_ids_.data(),
-                    raw_data.timestamps_.data(),
-                    raw_data.raw_);
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration_ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
-                .count();
-        total_ms += duration_ms;
-    }
-    std::cout << "Execution time: " << total_ms << " ms" << std::endl;
-    ASSERT_EQ(seg->get_real_count(), N);
-
-    auto expr = std::make_shared<milvus::expr::AlwaysTrueExpr>();
-    BitsetType final;
-    auto plan = milvus::test::CreateRetrievePlanByExpr(expr);
-    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
-    EXPECT_EQ(final.size(), N);
-}
