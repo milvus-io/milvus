@@ -287,3 +287,19 @@ func Test_sealByTotalGrowingSegmentsSize(t *testing.T) {
 	assert.Equal(t, 1, len(res))
 	assert.Equal(t, seg2.GetID(), res[0].GetID())
 }
+
+func TestFlushPolicyWithZeroCurRows(t *testing.T) {
+	seg := &SegmentInfo{
+		currRows: 0,
+		// lastFlushTime unset because its a sealed segment
+		SegmentInfo: &datapb.SegmentInfo{
+			NumOfRows:      1,
+			State:          commonpb.SegmentState_Sealed,
+			Level:          datapb.SegmentLevel_L1,
+			LastExpireTime: 456094911979061251,
+		},
+	}
+
+	flushed := flushPolicyL1(seg, tsoutil.GetCurrentTime())
+	assert.True(t, flushed)
+}
