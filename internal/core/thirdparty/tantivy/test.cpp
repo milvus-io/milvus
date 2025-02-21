@@ -235,7 +235,7 @@ test_array_int() {
 
     int64_t offset = 0;
     for (const auto& arr : vec_of_array) {
-        w.add_multi_data(arr.data(), arr.size(), offset++);
+        w.add_array_data(arr.data(), arr.size(), offset++);
     }
     w.finish();
 
@@ -266,7 +266,7 @@ test_array_string() {
 
     int64_t offset = 0;
     for (const auto& arr : vec_of_array) {
-        w.add_multi_data(arr.data(), arr.size(), offset++);
+        w.add_array_data(arr.data(), arr.size(), offset++);
     }
     w.finish();
 

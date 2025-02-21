@@ -180,7 +180,7 @@ TextMatchIndex::AddNull(int64_t offset) {
     null_offset.push_back(offset);
     // still need to add null to make offset is correct
     std::string empty = "";
-    wrapper_->add_multi_data(&empty, 0, offset);
+    wrapper_->add_array_data(&empty, 0, offset);
 }
 
 void
