@@ -1691,7 +1691,8 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	log := log.Ctx(ctx).With(zap.Int64("collection", in.GetCollectionID()),
 		zap.Int64s("partitions", in.GetPartitionIDs()),
 		zap.Strings("channels", in.GetChannelNames()))
-	log.Info("receive import request", zap.Any("files", in.GetFiles()), zap.Any("options", in.GetOptions()))
+	log.Info("receive import request", zap.Int("fileNum", len(in.GetFiles())),
+		zap.Any("files", in.GetFiles()), zap.Any("options", in.GetOptions()))
 
 	timeoutTs, err := importutilv2.GetTimeoutTs(in.GetOptions())
 	if err != nil {
@@ -1702,6 +1703,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	files := in.GetFiles()
 	isBackup := importutilv2.IsBackup(in.GetOptions())
 	if isBackup {
+		files = make([]*internalpb.ImportFile, 0)
 		pool := conc.NewPool[struct{}](hardware.GetCPUNum() * 2)
 		futures := make([]*conc.Future[struct{}], 0, len(in.GetFiles()))
 		mu := &sync.Mutex{}
@@ -1736,7 +1738,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 				paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(files))))
 			return resp, nil
 		}
-		log.Info("list binlogs prefixes for import", zap.Any("binlog_prefixes", files))
+		log.Info("list binlogs prefixes for import", zap.Int("num", len(files)), zap.Any("binlog_prefixes", files))
 	}
 
 	// Check if the number of jobs exceeds the limit.
@@ -1786,7 +1788,11 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	}
 
 	resp.JobID = fmt.Sprint(job.GetJobID())
-	log.Info("add import job done", zap.Int64("jobID", job.GetJobID()), zap.Any("files", files))
+	log.Info("add import job done",
+		zap.Int64("jobID", job.GetJobID()),
+		zap.Int("fileNum", len(files)),
+		zap.Any("files", files),
+	)
 	return resp, nil
 }
 
