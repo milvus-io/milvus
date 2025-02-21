@@ -1494,10 +1494,9 @@ func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDat
 
 func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeTtMsg) error {
 	var (
-		channel      = ttMsg.GetChannelName()
-		ts           = ttMsg.GetTimestamp()
-		sourceID     = ttMsg.GetBase().GetSourceID()
-		segmentStats = ttMsg.GetSegmentsStats()
+		channel  = ttMsg.GetChannelName()
+		ts       = ttMsg.GetTimestamp()
+		sourceID = ttMsg.GetBase().GetSourceID()
 	)
 
 	physical, _ := tsoutil.ParseTS(ts)
