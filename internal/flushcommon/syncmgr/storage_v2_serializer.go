@@ -25,7 +25,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
-	iTypeutil "github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -44,7 +45,7 @@ func NewStorageV2Serializer(
 	if err != nil {
 		return nil, err
 	}
-	arrowSchema, err := iTypeutil.ConvertToArrowSchema(v1Serializer.schema.Fields)
+	arrowSchema, err := storage.ConvertToArrowSchema(v1Serializer.schema.Fields)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg("convert to arrow schema error: %s", err.Error())
 	}
@@ -63,7 +64,7 @@ func (s *storageV2Serializer) serializeBinlog(ctx context.Context, pack *SyncPac
 	defer builder.Release()
 
 	for _, chunk := range pack.insertData {
-		if err := iTypeutil.BuildRecord(builder, chunk, s.schema.GetFields()); err != nil {
+		if err := typeutil.BuildRecord(builder, chunk, s.schema.GetFields()); err != nil {
 			return nil, err
 		}
 	}
@@ -89,7 +90,7 @@ func (s *storageV2Serializer) serializeDeltalog(ctx context.Context, pack *SyncP
 	}
 	fields = append(fields, s.pkField, tsField)
 
-	deltaArrowSchema, err := iTypeutil.ConvertToArrowSchema(fields)
+	deltaArrowSchema, err := storage.ConvertToArrowSchema(fields)
 	if err != nil {
 		return nil, err
 	}
