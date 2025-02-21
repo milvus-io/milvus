@@ -46,7 +46,7 @@ struct Comparator {
 using SortedDeleteList =
     folly::ConcurrentSkipList<std::pair<Timestamp, Offset>, Comparator>;
 
-static int32_t DUMP_BATCH_SIZE = 100000;
+static int32_t DUMP_BATCH_SIZE = 10000;
 static int32_t DELETE_PAIR_SIZE = sizeof(std::pair<Timestamp, Offset>);
 
 template <bool is_sealed = false>
