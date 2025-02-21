@@ -2297,7 +2297,7 @@ func TestDataCoord_SegmentStatistics(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		assert.Equal(t, svr.meta.GetHealthySegment(context.TODO(), 100).currRows, int64(1))
+		assert.EqualValues(t, svr.meta.GetHealthySegment(context.TODO(), 100).NumOfRows, 1)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 		closeTestServer(t, svr)
 	})
@@ -2324,7 +2324,7 @@ func TestDataCoord_SegmentStatistics(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		assert.Equal(t, svr.meta.GetHealthySegment(context.TODO(), 100).currRows, int64(0))
+		assert.Equal(t, svr.meta.GetHealthySegment(context.TODO(), 100).GetNumOfRows(), 0)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 		closeTestServer(t, svr)
 	})

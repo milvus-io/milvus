@@ -657,7 +657,7 @@ func (m *meta) GetSegmentsTotalCurrentRows(segmentIDs []UniqueID) int64 {
 			log.Ctx(context.TODO()).Warn("cannot find segment", zap.Int64("segmentID", segmentID))
 			continue
 		}
-		sum += segment.currRows
+		sum += segment.GetNumOfRows()
 	}
 	return sum
 }
@@ -1037,6 +1037,9 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint)
 			return false
 		}
 
+		var cpNumRows int64
+
+		// Set segment dml position
 		for _, cp := range checkpoints {
 			if cp.SegmentID != segmentID {
 				// Don't think this is gonna to happen, ignore for now.
@@ -1050,18 +1053,22 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint)
 				continue
 			}
 
-			segment.NumOfRows = cp.NumOfRows
+			cpNumRows = cp.NumOfRows
 			segment.DmlPosition = cp.GetPosition()
 		}
 
+		// update segments num rows
 		count := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
-		if count != segment.currRows && count > 0 {
-			log.Ctx(context.TODO()).Info("check point reported inconsistent with bin log row count",
-				zap.Int64("segmentID", segmentID),
-				zap.Int64("current rows (wrong)", segment.currRows),
-				zap.Int64("segment bin log row count (correct)", count))
+		if count > 0 {
+			if cpNumRows != count {
+				log.Ctx(context.TODO()).Info("check point reported row count inconsistent with binlog row count",
+					zap.Int64("segmentID", segmentID),
+					zap.Int64("binlog reported (wrong)", cpNumRows),
+					zap.Int64("segment binlog row count (correct)", count))
+			}
 			segment.NumOfRows = count
 		}
+
 		return true
 	}
 }
@@ -1074,7 +1081,6 @@ func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
 				zap.Int64("segmentID", segmentID))
 			return false
 		}
-		segment.currRows = rows
 		segment.NumOfRows = rows
 		segment.MaxRowNum = rows
 		return true
@@ -1261,8 +1267,7 @@ func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) (*SegmentInfo, *segMetric
 	if seg2Drop.GetDmlPosition() != nil {
 		clonedSegment.DmlPosition = seg2Drop.GetDmlPosition()
 	}
-	clonedSegment.currRows = seg2Drop.currRows
-	clonedSegment.NumOfRows = seg2Drop.currRows
+	clonedSegment.NumOfRows = seg2Drop.GetNumOfRows()
 	return clonedSegment, metricMutation
 }
 
@@ -1425,14 +1430,6 @@ func (m *meta) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
 	m.segments.SetAllocations(segmentID, allocations)
 }
 
-// SetCurrentRows set current row count for segment with provided `segmentID`
-// Note that currRows is not persisted in KV store
-func (m *meta) SetCurrentRows(segmentID UniqueID, rows int64) {
-	m.Lock()
-	defer m.Unlock()
-	m.segments.SetCurrentRows(segmentID, rows)
-}
-
 // SetLastExpire set lastExpire time for segment
 // Note that last is not necessary to store in KV meta
 func (m *meta) SetLastExpire(segmentID UniqueID, lastExpire uint64) {
@@ -1449,6 +1446,14 @@ func (m *meta) SetLastFlushTime(segmentID UniqueID, t time.Time) {
 	m.Lock()
 	defer m.Unlock()
 	m.segments.SetFlushTime(segmentID, t)
+}
+
+// SetLastWrittenTime set LastWrittenTime for segment with provided `segmentID`
+// Note that lastWrittenTime is not persisted in KV store
+func (m *meta) SetLastWrittenTime(segmentID UniqueID) {
+	m.Lock()
+	defer m.Unlock()
+	m.segments.SetLastWrittenTime(segmentID)
 }
 
 func (m *meta) CheckSegmentsStating(ctx context.Context, segmentIDs []UniqueID) (exist bool, hasStating bool) {

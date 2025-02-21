@@ -581,7 +581,7 @@ func (s *SegmentManager) CleanZeroSealedSegmentsOfChannel(ctx context.Context, c
 			return true
 		}
 		// Check if segment is empty
-		if segment.GetLastExpireTime() > 0 && segment.GetLastExpireTime() < cpTs && segment.currRows == 0 && segment.GetNumOfRows() == 0 {
+		if segment.GetLastExpireTime() > 0 && segment.GetLastExpireTime() < cpTs && segment.GetNumOfRows() == 0 {
 			log.Info("try remove empty sealed segment after channel cp updated",
 				zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id),
 				zap.String("channel", channel), zap.Any("cpTs", cpTs))

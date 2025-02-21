@@ -948,7 +948,6 @@ func TestSegmentManager_CleanZeroSealedSegmentsOfChannel(t *testing.T) {
 			NumOfRows:      1,
 			LastExpireTime: 100,
 		},
-		currRows: 1,
 	}
 	seg2 := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
@@ -959,7 +958,6 @@ func TestSegmentManager_CleanZeroSealedSegmentsOfChannel(t *testing.T) {
 			NumOfRows:      0,
 			LastExpireTime: 100,
 		},
-		currRows: 0,
 	}
 	seg3 := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
@@ -979,7 +977,6 @@ func TestSegmentManager_CleanZeroSealedSegmentsOfChannel(t *testing.T) {
 			NumOfRows:      1,
 			LastExpireTime: 100,
 		},
-		currRows: 1,
 	}
 	newMetaFunc := func() *meta {
 		return &meta{

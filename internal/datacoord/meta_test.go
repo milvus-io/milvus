@@ -1202,9 +1202,9 @@ func TestMeta_HasSegments(t *testing.T) {
 			segments: map[UniqueID]*SegmentInfo{
 				1: {
 					SegmentInfo: &datapb.SegmentInfo{
-						ID: 1,
+						ID:        1,
+						NumOfRows: 100,
 					},
-					currRows: 100,
 				},
 			},
 		},
