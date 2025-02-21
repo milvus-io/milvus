@@ -288,7 +288,7 @@ proxy:
   # please adjust in embedded Milvus: false
   ginLogging: true
   ginLogSkipPaths: / # skip url path for gin log
-  maxTaskNum: 1024 # The maximum number of tasks in the task queue of the proxy.
+  maxTaskNum: 10000 # The maximum number of tasks in the task queue of the proxy.
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
