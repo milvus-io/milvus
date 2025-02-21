@@ -282,7 +282,7 @@ proxy:
   # please adjust in embedded Milvus: false
   ginLogging: true
   ginLogSkipPaths: / # skip url path for gin log
-  maxTaskNum: 10000 # The maximum number of tasks in the task queue of the proxy.
+  maxTaskNum: 1024 # The maximum number of tasks in the task queue of the proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   accessLog:
     enable: false # Whether to enable the access log feature.
