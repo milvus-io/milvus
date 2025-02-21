@@ -13,7 +13,6 @@
 #include <gtest/gtest.h>
 
 #include "pb/plan.pb.h"
-#include "segcore/SegmentSealedImpl.h"
 #include "index/InvertedIndexTantivy.h"
 #include "test_utils/DataGen.h"
 #include "common/Schema.h"
@@ -183,7 +182,8 @@ TYPED_TEST_P(BuildInvertedIndexWithSingleSegmentTest,
         auto typed_expr = parser.ParseExprs(*expr);
         auto parsed = std::make_shared<plan::FilterBitsNode>(
             DEFAULT_PLANNODE_ID, typed_expr);
-        auto segpromote = dynamic_cast<SegmentSealedImpl*>(this->seg_.get());
+        auto segpromote =
+            dynamic_cast<ChunkedSegmentSealedImpl*>(this->seg_.get());
         BitsetType final;
         final = ExecuteQueryExpr(parsed, segpromote, this->N_, MAX_TIMESTAMP);
         auto ref = [this, random_idx](size_t offset) -> bool {
