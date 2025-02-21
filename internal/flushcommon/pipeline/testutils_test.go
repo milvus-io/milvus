@@ -171,10 +171,6 @@ func (ds *DataCoordFactory) DropVirtualChannel(ctx context.Context, req *datapb.
 	}, nil
 }
 
-func (ds *DataCoordFactory) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Success(), nil
-}
-
 func (ds *DataCoordFactory) UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return merr.Success(), nil
 }
