@@ -10,6 +10,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#JSONIdentifier.
 	VisitJSONIdentifier(ctx *JSONIdentifierContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#RandomSample.
+	VisitRandomSample(ctx *RandomSampleContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Parens.
 	VisitParens(ctx *ParensContext) interface{}
 

@@ -14,6 +14,7 @@ expr:
 	| expr LIKE StringLiteral                                                    # Like
 	| TEXTMATCH'('Identifier',' StringLiteral')'                                 # TextMatch
 	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			 # PhraseMatch
+	| RANDOMSAMPLE'(' expr ')'						     						 # RandomSample
 	| expr POW expr											                     # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                     # Unary
 //	| '(' typeName ')' expr									                     # Cast
@@ -62,6 +63,7 @@ LIKE: 'like' | 'LIKE';
 EXISTS: 'exists' | 'EXISTS';
 TEXTMATCH: 'text_match'|'TEXT_MATCH';
 PHRASEMATCH: 'phrase_match'|'PHRASE_MATCH';
+RANDOMSAMPLE: 'random_sample' | 'RANDOM_SAMPLE';
 
 ADD: '+';
 SUB: '-';

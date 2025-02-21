@@ -83,9 +83,14 @@ const (
 	ReplicateIDTypeKey  = "replicate_id"
 )
 
+// GetMsgType gets the message type from message.
 func GetMsgType(msg Message) (commonpb.MsgType, error) {
+	return GetMsgTypeFromRaw(msg.Payload(), msg.Properties())
+}
+
+// GetMsgTypeFromRaw gets the message type from payload and properties.
+func GetMsgTypeFromRaw(payload []byte, properties map[string]string) (commonpb.MsgType, error) {
 	msgType := commonpb.MsgType_Undefined
-	properties := msg.Properties()
 	if properties != nil {
 		if val, ok := properties[MsgTypeKey]; ok {
 			msgType = commonpb.MsgType(commonpb.MsgType_value[val])
@@ -93,10 +98,10 @@ func GetMsgType(msg Message) (commonpb.MsgType, error) {
 	}
 	if msgType == commonpb.MsgType_Undefined {
 		header := commonpb.MsgHeader{}
-		if msg.Payload() == nil {
+		if payload == nil {
 			return msgType, fmt.Errorf("failed to unmarshal message header, payload is empty")
 		}
-		err := proto.Unmarshal(msg.Payload(), &header)
+		err := proto.Unmarshal(payload, &header)
 		if err != nil {
 			return msgType, fmt.Errorf("failed to unmarshal message header, err %s", err.Error())
 		}

@@ -3425,7 +3425,7 @@ func TestCheckVarcharFormat(t *testing.T) {
 		},
 	}
 
-	err := checkVarcharFormat(schema, data)
+	err := checkInputUtf8Compatiable(schema, data)
 	assert.NoError(t, err)
 
 	// invalid data
@@ -3447,7 +3447,7 @@ func TestCheckVarcharFormat(t *testing.T) {
 			}},
 		},
 	}
-	err = checkVarcharFormat(schema, data)
+	err = checkInputUtf8Compatiable(schema, data)
 	assert.Error(t, err)
 }
 
@@ -3490,6 +3490,6 @@ func BenchmarkCheckVarcharFormat(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		checkVarcharFormat(schema, data)
+		checkInputUtf8Compatiable(schema, data)
 	}
 }

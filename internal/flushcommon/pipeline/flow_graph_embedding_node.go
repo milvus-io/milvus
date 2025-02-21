@@ -86,7 +86,7 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, inputF
 
 	embeddingData, ok := data.Data[inputFieldId].GetDataRows().([]string)
 	if !ok {
-		return fmt.Errorf("BM25 embedding failed: input field data not varchar")
+		return fmt.Errorf("BM25 embedding failed: input field data not varchar/text")
 	}
 
 	output, err := runner.BatchRun(embeddingData)
