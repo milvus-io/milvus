@@ -35,7 +35,6 @@ class TestCreateIndex(TestBase):
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "IP"])
     @pytest.mark.parametrize("index_type", ["AUTOINDEX", "IVF_SQ8", "HNSW"])
     @pytest.mark.parametrize("dim", [128])
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/36365")
     def test_index_default(self, dim, metric_type, index_type):
         """
         target: test create collection
@@ -259,7 +258,6 @@ class TestCreateIndex(TestBase):
     @pytest.mark.parametrize("index_type", ['SPARSE_INVERTED_INDEX', 'SPARSE_WAND'])
     @pytest.mark.parametrize("bm25_k1", [1.2, 1.5])
     @pytest.mark.parametrize("bm25_b", [0.7, 0.5])
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/36365")
     def test_create_index_for_full_text_search(self, nb, dim, insert_round, auto_id, is_partition_key,
                                                enable_dynamic_schema, tokenizer, index_type, bm25_k1, bm25_b):
         """
@@ -361,6 +359,156 @@ class TestCreateIndex(TestBase):
             assert info['index_param']["params"]['bm25_k1'] == bm25_k1
             assert info['index_param']["params"]['bm25_b'] == bm25_b
             assert info['index_param']['index_type'] == index_type
+
+
+@pytest.mark.L0
+class TestIndexProperties(TestBase):
+    """Test index properties operations"""
+
+    def test_alter_index_properties(self):
+        """
+        target: test alter index properties
+        method: create collection with index, alter index properties
+        expected: alter index properties successfully
+        """
+        # Create collection
+        name = gen_collection_name()
+        collection_client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "my_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": 128}}
+                ]
+            }
+        }
+        collection_client.collection_create(payload)
+
+        # Create index
+        index_client = self.index_client
+        index_payload = {
+            "collectionName": name,
+            "indexParams": [
+                {
+                    "fieldName": "my_vector",
+                    "indexName": "my_vector",
+                    "indexType": "IVF_SQ8",
+                    "metricType": "L2",
+                    "params": {"nlist": 128}
+                }
+
+            ],
+        }
+        index_client.index_create(index_payload)
+        # list index
+        rsp = index_client.index_list(name)
+        assert rsp['code'] == 0
+
+        # Alter index properties
+        properties = {"mmap.enabled": True}
+        response = index_client.alter_index_properties(name, "my_vector", properties)
+        assert response["code"] == 0
+
+        # describe index
+        rsp = index_client.index_describe(name, "my_vector")
+        assert rsp['code'] == 0
+
+        # Drop index properties
+        delete_keys = ["mmap.enabled"]
+        response = index_client.drop_index_properties(name, "my_vector", delete_keys)
+        assert response["code"] == 0
+
+        # describe index
+        rsp = index_client.index_describe(name, "my_vector")
+        assert rsp['code'] == 0
+
+    @pytest.mark.parametrize("invalid_property", [
+        {"invalid_key": True},
+        {"mmap.enabled": "invalid_value"}
+    ])
+    def test_alter_index_properties_with_invalid_properties(self, invalid_property):
+        """
+        target: test alter index properties with invalid properties
+        method: create collection with index, alter index properties with invalid properties
+        expected: alter index properties failed with error
+        """
+        # Create collection
+        name = gen_collection_name()
+        collection_client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "my_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": 128}}
+                ]
+            }
+        }
+        collection_client.collection_create(payload)
+
+        # Create index
+        index_client = self.index_client
+        index_payload = {
+            "collectionName": name,
+            "indexParams": [
+                {
+                    "fieldName": "my_vector",
+                    "indexName": "my_vector",
+                    "indexType": "IVF_SQ8",
+                    "metricType": "L2",
+                    "params": {"nlist": 128}
+                }
+
+            ],
+        }
+        index_client.index_create(index_payload)
+
+        # Alter index properties with invalid property
+        rsp = index_client.alter_index_properties(name, "my_vector", invalid_property)
+        assert rsp['code'] == 1100
+
+    def test_drop_index_properties_with_nonexistent_key(self):
+        """
+        target: test drop index properties with nonexistent key
+        method: create collection with index, drop index properties with nonexistent key
+        expected: drop index properties failed with error
+        """
+        # Create collection
+        name = gen_collection_name()
+        collection_client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "my_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": 128}}
+                ]
+            }
+        }
+        collection_client.collection_create(payload)
+
+        # Create index
+        index_client = self.index_client
+        index_payload = {
+            "collectionName": name,
+            "indexParams": [
+                {
+                    "fieldName": "my_vector",
+                    "indexName": "my_vector",
+                    "indexType": "IVF_SQ8",
+                    "metricType": "L2",
+                    "params": {"nlist": 128}
+                }
+
+            ],
+        }
+        index_client.index_create(index_payload)
+
+        # Drop index properties with nonexistent key
+        delete_keys = ["nonexistent.key"]
+        rsp = index_client.drop_index_properties(name, "my_vector", delete_keys)
+        assert rsp['code'] == 1100
 
 
 @pytest.mark.L1
