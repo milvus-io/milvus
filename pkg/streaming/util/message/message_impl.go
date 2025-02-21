@@ -234,6 +234,18 @@ func (m *messageImpl) SplitIntoMutableMessage() []MutableMessage {
 	return msgs
 }
 
+// CloneMutableMessage clones the current mutable message.
+func CloneMutableMessage(msg MutableMessage) MutableMessage {
+	if msg == nil {
+		return nil
+	}
+	inner := msg.(*messageImpl)
+	return &messageImpl{
+		payload:    inner.payload,
+		properties: inner.properties.Clone(),
+	}
+}
+
 type immutableMessageImpl struct {
 	messageImpl
 	id MessageID

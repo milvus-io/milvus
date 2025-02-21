@@ -281,8 +281,6 @@ Currently, the objects injected by expr include: <code>param</code>, <code>proxy
     function isBalanced(input) {
         const stack = [];
         const pairs = {
-            "'": "'",
-            '"': '"',
             '(': ')',
             '[': ']',
             '{': '}',
@@ -298,8 +296,18 @@ Currently, the objects injected by expr include: <code>param</code>, <code>proxy
                 }
             }
         }
+        let countDouble = 0;
+        let countSingle = 0;
 
-        return stack.length === 0;
+        for (let char of input) {
+            if (char === '"') {
+                countDouble += 1;
+            } else if (char === "'") {
+                countSingle += 1;
+            }
+        }
+
+        return stack.length === 0 && countDouble % 2 === 0 && countSingle % 2 === 0;
     }
 </script>
 </body>

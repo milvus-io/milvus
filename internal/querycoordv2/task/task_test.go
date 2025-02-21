@@ -1908,6 +1908,26 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID2, coll2))
 }
 
+func (suite *TaskSuite) TestTaskDeltaCache() {
+	etd := NewExecutingTaskDelta()
+
+	taskDelta := []int{1, 2, 3, 4, 5, -6, -7, -8, -9, -10}
+
+	nodeID := int64(1)
+	collectionID := int64(100)
+
+	taskDelta = lo.Shuffle(taskDelta)
+	for i := 0; i < len(taskDelta); i++ {
+		etd.Add(nodeID, collectionID, int64(i), taskDelta[i])
+	}
+
+	taskDelta = lo.Shuffle(taskDelta)
+	for i := 0; i < len(taskDelta); i++ {
+		etd.Sub(nodeID, collectionID, int64(i), taskDelta[i])
+	}
+	suite.Equal(0, etd.Get(nodeID, collectionID))
+}
+
 func (suite *TaskSuite) TestRemoveTaskWithError() {
 	ctx := context.Background()
 	scheduler := suite.newScheduler()

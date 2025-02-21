@@ -473,7 +473,7 @@ class ResponseChecker:
         while True:
             try:
                 res = search_iterator.next()
-                if len(res) == 0:
+                if not res:
                     log.info("search iteration finished, close")
                     search_iterator.close()
                     break
@@ -495,6 +495,9 @@ class ResponseChecker:
             except Exception as e:
                 assert check_items["err_msg"] in str(e)
                 return False
+        expected_batch_size = check_items.get("batch_size", None)
+        if expected_batch_size is not None and expected_batch_size == 0:    # expected batch size =0 if external filter all
+            assert len(pk_list) == 0
         assert len(pk_list) == len(set(pk_list))
         log.info("check: total %d results" % len(pk_list))
 
