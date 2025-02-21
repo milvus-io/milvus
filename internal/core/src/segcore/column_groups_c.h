@@ -1,4 +1,4 @@
-// Copyright 2023 Zilliz
+// Copyright 2025 Zilliz
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,32 +14,21 @@
 
 #pragma once
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include "common/type_c.h"
-#include <arrow/c/abi.h>
-#include "segcore/column_groups_c.h"
+typedef void* CColumnGroups;
 
-typedef void* CPackedWriter;
+CColumnGroups NewCColumnGroups();
 
-CStatus
-NewPackedWriter(struct ArrowSchema* schema,
-                const int64_t buffer_size,
-                char** paths,
-                int64_t num_paths,
-                int64_t part_upload_size,
-                CColumnGroups column_groups,
-                CPackedWriter* c_packed_writer);
+void AddCColumnGroup(CColumnGroups cgs, int* group, int group_size);
 
-CStatus
-WriteRecordBatch(CPackedWriter c_packed_writer,
-                 struct ArrowArray* array,
-                 struct ArrowSchema* schema);
+int CColumnGroupsSize(CColumnGroups cgs);
 
-CStatus
-CloseWriter(CPackedWriter c_packed_writer);
+void FreeCColumnGroups(CColumnGroups cgs);
 
 #ifdef __cplusplus
 }

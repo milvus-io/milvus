@@ -424,7 +424,6 @@ func ValueSerializer(v []*Value, fieldSchema []*schemapb.FieldSchema) (Record, e
 		fields[i] = arrow.Field{
 			Name:     field.Name,
 			Type:     arrays[i].DataType(),
-			Nullable: true, // No nullable check here.
 			Metadata: arrow.NewMetadata([]string{"FieldID"}, []string{strconv.Itoa(int(field.FieldID))}),
 		}
 		field2Col[field.FieldID] = i
