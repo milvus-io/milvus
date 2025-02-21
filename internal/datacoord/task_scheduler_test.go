@@ -19,8 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
 	"sync"
 	"testing"
@@ -38,7 +36,9 @@ import (
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/proto/workerpb"
@@ -844,13 +844,9 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 	workerManager := session.NewMockWorkerManager(s.T())
-	workerManager.EXPECT().QuerySlots().RunAndReturn(func() []session.WorkerSlots {
-		return []session.WorkerSlots{
-			{
-				NodeID:         1,
-				TotalSlots:     16,
-				AvailableSlots: 16,
-			},
+	workerManager.EXPECT().QuerySlots().RunAndReturn(func() map[int64]int64 {
+		return map[int64]int64{
+			1: 1,
 		}
 	})
 	workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true)
@@ -988,13 +984,9 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		workerManager := session.NewMockWorkerManager(s.T())
-		workerManager.EXPECT().QuerySlots().RunAndReturn(func() []session.WorkerSlots {
-			return []session.WorkerSlots{
-				{
-					NodeID:         1,
-					TotalSlots:     16,
-					AvailableSlots: 16,
-				},
+		workerManager.EXPECT().QuerySlots().RunAndReturn(func() map[int64]int64 {
+			return map[int64]int64{
+				1: 1,
 			}
 		})
 
@@ -1059,13 +1051,9 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		in := mocks.NewMockIndexNodeClient(s.T())
 
 		workerManager := session.NewMockWorkerManager(s.T())
-		workerManager.EXPECT().QuerySlots().RunAndReturn(func() []session.WorkerSlots {
-			return []session.WorkerSlots{
-				{
-					NodeID:         1,
-					TotalSlots:     16,
-					AvailableSlots: 16,
-				},
+		workerManager.EXPECT().QuerySlots().RunAndReturn(func() map[int64]int64 {
+			return map[int64]int64{
+				1: 1,
 			}
 		})
 
@@ -1312,13 +1300,9 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		in := mocks.NewMockIndexNodeClient(s.T())
 		workerManager := session.NewMockWorkerManager(s.T())
-		workerManager.EXPECT().QuerySlots().RunAndReturn(func() []session.WorkerSlots {
-			return []session.WorkerSlots{
-				{
-					NodeID:         1,
-					TotalSlots:     16,
-					AvailableSlots: 16,
-				},
+		workerManager.EXPECT().QuerySlots().RunAndReturn(func() map[int64]int64 {
+			return map[int64]int64{
+				1: 1,
 			}
 		})
 
@@ -1551,13 +1535,9 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	in := mocks.NewMockIndexNodeClient(s.T())
 
 	workerManager := session.NewMockWorkerManager(s.T())
-	workerManager.EXPECT().QuerySlots().RunAndReturn(func() []session.WorkerSlots {
-		return []session.WorkerSlots{
-			{
-				NodeID:         1,
-				TotalSlots:     16,
-				AvailableSlots: 16,
-			},
+	workerManager.EXPECT().QuerySlots().RunAndReturn(func() map[int64]int64 {
+		return map[int64]int64{
+			1: 1,
 		}
 	})
 	workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true)

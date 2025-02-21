@@ -110,7 +110,7 @@ func (jm *statsJobManager) triggerSortStatsTask() {
 	}))
 
 	for _, segment := range visibleSegments {
-		if jm.scheduler.GetTaskCount() > Params.DataCoordCfg.StatsTaskTriggerCount.GetAsInt() {
+		if jm.scheduler.pendingTasks.TaskCount() > Params.DataCoordCfg.StatsTaskTriggerCount.GetAsInt() {
 			break
 		}
 		jm.createSortStatsTaskForSegment(segment)

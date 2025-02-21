@@ -267,12 +267,6 @@ func (s *taskScheduler) enqueue(task Task) {
 	}
 }
 
-func (s *taskScheduler) GetTaskCount() int {
-	s.RLock()
-	defer s.RUnlock()
-	return len(s.tasks)
-}
-
 func (s *taskScheduler) AbortTask(taskID int64) {
 	log.Ctx(s.ctx).Info("task scheduler receive abort task request", zap.Int64("taskID", taskID))
 
@@ -345,15 +339,25 @@ func (s *taskScheduler) checkProcessingTasks() {
 
 	log.Ctx(s.ctx).Info("check running tasks", zap.Int("runningTask num", len(runningTaskIDs)))
 
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 100)
 	for _, taskID := range runningTaskIDs {
-		task := s.getRunningTask(taskID)
-		s.taskLock.Lock(taskID)
-		suc := s.checkProcessingTask(task)
-		s.taskLock.Unlock(taskID)
-		if suc {
-			s.removeRunningTask(taskID)
-		}
+		wg.Add(1)
+		sem <- struct{}{}
+		taskID := taskID
+		go func(taskID int64) {
+			defer wg.Done()
+			task := s.getRunningTask(taskID)
+			s.taskLock.Lock(taskID)
+			suc := s.checkProcessingTask(task)
+			s.taskLock.Unlock(taskID)
+			if suc {
+				s.removeRunningTask(taskID)
+			}
+			<-sem
+		}(taskID)
 	}
+	wg.Wait()
 }
 
 func (s *taskScheduler) checkProcessingTask(task Task) bool {
@@ -380,41 +384,46 @@ func (s *taskScheduler) run() {
 	// 1. pick an indexNode client
 	nodeSlots := s.nodeManager.QuerySlots()
 	log.Ctx(s.ctx).Info("task scheduler", zap.Int("task num", pendingTaskNum), zap.Any("nodeSlots", nodeSlots))
-
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 100)
 	for {
+		nodeID := pickNode(nodeSlots)
+		if nodeID == -1 {
+			log.Ctx(s.ctx).Debug("pick node failed")
+			break
+		}
+
 		task := s.pendingTasks.Pop()
 		if task == nil {
 			break
 		}
 
-		nodeID, nodeOffset := pickNode(nodeSlots, nodeSlots)
-		if nodeID == -1 {
-			log.Ctx(s.ctx).Debug("pick node failed", zap.Int64("taskID", task.GetTaskID()))
-			return false
-		}
-		s.taskLock.Lock(task.GetTaskID())
-		ok := s.process(task, nodeSlots)
-		s.taskLock.Unlock(task.GetTaskID())
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(task Task, nodeID int64) {
+			defer wg.Done()
 
-		switch task.GetState() {
-		case indexpb.JobState_JobStateNone:
-			return
-		case indexpb.JobState_JobStateInit:
-			s.pendingTasks.Push(task)
-		default:
-			s.runningQueueLock.Lock()
-			s.runningTasks[task.GetTaskID()] = task
-			s.runningQueueLock.Unlock()
-		}
+			s.taskLock.Lock(task.GetTaskID())
+			s.process(task, nodeID)
+			s.taskLock.Unlock(task.GetTaskID())
 
-		if !ok {
-			log.Ctx(s.ctx).Info("there is no idle indexing node, waiting for retry...")
-			break
-		}
+			switch task.GetState() {
+			case indexpb.JobState_JobStateNone:
+				return
+			case indexpb.JobState_JobStateInit:
+				s.pendingTasks.Push(task)
+			default:
+				s.runningQueueLock.Lock()
+				s.runningTasks[task.GetTaskID()] = task
+				s.runningQueueLock.Unlock()
+			}
+			<-sem
+		}(task, nodeID)
 	}
+	wg.Wait()
 }
 
-func (s *taskScheduler) process(task Task, nodeSlots []session.WorkerSlots) bool {
+func (s *taskScheduler) process(task Task, nodeID int64) bool {
 	if !task.CheckTaskHealthy(s.meta) {
 		task.SetState(indexpb.JobState_JobStateNone, "task not healthy")
 		return true
@@ -426,7 +435,7 @@ func (s *taskScheduler) process(task Task, nodeSlots []session.WorkerSlots) bool
 	case indexpb.JobState_JobStateNone:
 		return true
 	case indexpb.JobState_JobStateInit:
-		return s.processInit(task, nodeSlots)
+		return s.processInit(task, nodeID)
 	default:
 		log.Ctx(s.ctx).Error("invalid task state in pending queue", zap.Int64("taskID", task.GetTaskID()), zap.String("state", task.GetState().String()))
 	}
@@ -515,11 +524,11 @@ func (s *taskScheduler) collectTaskMetrics() {
 	}
 }
 
-func (s *taskScheduler) processInit(task Task, nodeSlots []session.WorkerSlots) bool {
+func (s *taskScheduler) processInit(task Task, nodeID int64) bool {
 	// 0. pre check task
 	// Determine whether the task can be performed or if it is truly necessary.
 	// for example: flat index doesn't need to actually build. checkPass is false.
-	checkPass, taskSLot := task.PreCheck(s.ctx, s)
+	checkPass := task.PreCheck(s.ctx, s)
 	if !checkPass {
 		return true
 	}
@@ -565,7 +574,6 @@ func (s *taskScheduler) processInit(task Task, nodeSlots []session.WorkerSlots) 
 		WithLabelValues(task.GetTaskType(), metrics.Pending).Observe(float64(queueingTime.Milliseconds()))
 	log.Ctx(s.ctx).Info("update task meta state to InProgress success", zap.Int64("taskID", task.GetTaskID()),
 		zap.Int64("nodeID", nodeID))
-	nodeSlots[nodeOffset].AvailableSlots = nodeSlots[nodeOffset].AvailableSlots - taskSLot
 	return true
 }
 
@@ -627,12 +635,12 @@ func (s *taskScheduler) processInProgress(task Task) bool {
 	return false
 }
 
-func pickNode(nodeSlots []session.WorkerSlots, taskSlot int64) (int64, int) {
-	for w, slots := range workerSlots {
+func pickNode(nodeSlots map[int64]int64) int64 {
+	for w, slots := range nodeSlots {
 		if slots >= 1 {
-			workerSlots[w] = slots - 1
+			nodeSlots[w] = slots - 1
 			return w
 		}
 	}
-	return ""
+	return -1
 }
