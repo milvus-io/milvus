@@ -228,6 +228,18 @@ type ddTaskQueue struct {
 	lock sync.Mutex
 }
 
+func (queue *ddTaskQueue) updateMetrics() {
+	queue.utLock.RLock()
+	unissuedTasksNum := queue.unissuedTasks.Len()
+	queue.utLock.RUnlock()
+	queue.atLock.RLock()
+	activateTaskNum := len(queue.activeTasks)
+	queue.atLock.RUnlock()
+
+	metrics.ProxyQueueTaskNum.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "ddl", metrics.UnissuedIndexTaskLabel).Set(float64(unissuedTasksNum))
+	metrics.ProxyQueueTaskNum.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "ddl", metrics.InProgressIndexTaskLabel).Set(float64(activateTaskNum))
+}
+
 type pChanStatInfo struct {
 	pChanStatistics
 	tsSet map[Timestamp]struct{}
@@ -239,6 +251,18 @@ type dmTaskQueue struct {
 
 	statsLock            sync.RWMutex
 	pChanStatisticsInfos map[pChan]*pChanStatInfo
+}
+
+func (queue *dmTaskQueue) updateMetrics() {
+	queue.utLock.RLock()
+	unissuedTasksNum := queue.unissuedTasks.Len()
+	queue.utLock.RUnlock()
+	queue.atLock.RLock()
+	activateTaskNum := len(queue.activeTasks)
+	queue.atLock.RUnlock()
+
+	metrics.ProxyQueueTaskNum.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "dml", metrics.UnissuedIndexTaskLabel).Set(float64(unissuedTasksNum))
+	metrics.ProxyQueueTaskNum.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "dml", metrics.InProgressIndexTaskLabel).Set(float64(activateTaskNum))
 }
 
 func (queue *dmTaskQueue) Enqueue(t task) error {
@@ -359,6 +383,18 @@ func (queue *dmTaskQueue) getPChanStatsInfo() (map[pChan]*pChanStatistics, error
 // dqTaskQueue represents queue for DQL task such as search/query
 type dqTaskQueue struct {
 	*baseTaskQueue
+}
+
+func (queue *dqTaskQueue) updateMetrics() {
+	queue.utLock.RLock()
+	unissuedTasksNum := queue.unissuedTasks.Len()
+	queue.utLock.RUnlock()
+	queue.atLock.RLock()
+	activateTaskNum := len(queue.activeTasks)
+	queue.atLock.RUnlock()
+
+	metrics.ProxyQueueTaskNum.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "dql", metrics.UnissuedIndexTaskLabel).Set(float64(unissuedTasksNum))
+	metrics.ProxyQueueTaskNum.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "dql", metrics.InProgressIndexTaskLabel).Set(float64(activateTaskNum))
 }
 
 func (queue *ddTaskQueue) Enqueue(t task) error {
@@ -507,6 +543,7 @@ func (sched *taskScheduler) definitionLoop() {
 					return struct{}{}, nil
 				})
 			}
+			sched.ddQueue.updateMetrics()
 		}
 	}
 }
@@ -528,6 +565,7 @@ func (sched *taskScheduler) controlLoop() {
 					return struct{}{}, nil
 				})
 			}
+			sched.dcQueue.updateMetrics()
 		}
 	}
 }
@@ -547,6 +585,7 @@ func (sched *taskScheduler) manipulationLoop() {
 					return struct{}{}, nil
 				})
 			}
+			sched.dmQueue.updateMetrics()
 		}
 	}
 }
@@ -569,6 +608,7 @@ func (sched *taskScheduler) queryLoop() {
 			} else {
 				log.Ctx(context.TODO()).Debug("query queue is empty ...")
 			}
+			sched.dqQueue.updateMetrics()
 		}
 	}
 }
