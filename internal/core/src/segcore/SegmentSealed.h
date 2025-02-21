@@ -83,11 +83,8 @@ class SegmentSealed : public SegmentInternalInterface {
         key.field_id = field_id;
         key.nested_path = path;
         auto index = json_indexings_.find(key);
-        if (index == json_indexings_.end()) {
-            return false;
-        }
-
-        return data_type == index->second->JsonCastType();
+        return index != json_indexings_.end() &&
+               data_type == index->second->JsonCastType();
     }
 
  protected:
