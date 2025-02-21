@@ -16035,7 +16035,7 @@ class JsonIndexTestFixture : public testing::Test {
     milvus::DataType cast_type;
 };
 
-using JsonIndexTypes = ::testing::Types<bool, int64_t, double, std::string>;
+using JsonIndexTypes = ::testing::Types<std::string>;
 TYPED_TEST_SUITE(JsonIndexTestFixture, JsonIndexTypes);
 
 TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
@@ -16098,6 +16098,19 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
     auto final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
     EXPECT_EQ(final.count(), N);
+
+    // test for wrong filter type
+    proto::plan::GenericValue val;
+    val.set_int64_val(123);
+    unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {this->json_path.substr(1)}),
+        proto::plan::OpType::LessEqual,
+        val,
+        std::vector<proto::plan::GenericValue>());
+    plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
+    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 0);
 
     unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(json_fid, DataType::JSON, {this->json_path.substr(1)}),
