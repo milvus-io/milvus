@@ -609,7 +609,6 @@ Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 		Version:      "2.5",
 		DefaultValue: "60",
 		Doc:          `The max position timestamp gap in minutes.`,
-		Export:       true,
 	}
 	p.MaxPositionTsGap.Init(base.mgr)
 

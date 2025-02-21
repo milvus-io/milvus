@@ -218,11 +218,9 @@ OUTER:
 	log.Info("start to build dispatchers", zap.Int("numTargets", len(vchannels)),
 		zap.Strings("vchannels", vchannels))
 
-	var (
-		// dispatcher will pull back from the earliest position
-		// to the latest position in lack targets
-		latestTarget = candidateTargets[len(candidateTargets)-1]
-	)
+	// dispatcher will pull back from the earliest position
+	// to the latest position in lack targets.
+	latestTarget := candidateTargets[len(candidateTargets)-1]
 
 	isMain := c.mainDispatcher == nil
 
