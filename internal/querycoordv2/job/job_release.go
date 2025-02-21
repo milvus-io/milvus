@@ -103,6 +103,11 @@ func (job *ReleaseCollectionJob) Execute() error {
 		},
 		proxyutil.SetMsgType(commonpb.MsgType_ReleaseCollection))
 
+	// try best clean shard leader cache
+	job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
+		CollectionIDs: []int64{req.GetCollectionID()},
+	})
+
 	waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
@@ -190,6 +195,10 @@ func (job *ReleasePartitionJob) Execute() error {
 				CollectionID: req.GetCollectionID(),
 			},
 			proxyutil.SetMsgType(commonpb.MsgType_ReleaseCollection))
+		// try best clean shard leader cache
+		job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
+			CollectionIDs: []int64{req.GetCollectionID()},
+		})
 
 		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
 	} else {
