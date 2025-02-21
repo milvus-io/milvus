@@ -943,7 +943,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
 		if task.Status() == TaskStatusFailed &&
 			task.Err() != nil &&
-			!errors.IsAny(task.Err(), merr.ErrChannelNotFound, merr.ErrServiceRequestLimitExceeded) {
+			!errors.IsAny(task.Err(), merr.ErrChannelNotFound, merr.ErrServiceTooManyRequests) {
 			scheduler.recordSegmentTaskError(task)
 		}
 
