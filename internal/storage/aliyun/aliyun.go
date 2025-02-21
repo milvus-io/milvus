@@ -62,6 +62,9 @@ func NewCredentialProvider() (minioCred.Provider, error) {
 }
 
 // Retrieve returns nil if it successfully retrieved the value.
+func (c *CredentialProvider) RetrieveWithCredContext(*minioCred.CredContext) (minioCred.Value, error) {
+	return c.Retrieve()
+}
 // Error is returned if the value were not obtainable, or empty.
 // according to the caller minioCred.Credentials.Get(),
 // it already has a lock, so we don't need to worry about concurrency
