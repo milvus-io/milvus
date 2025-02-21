@@ -2240,23 +2240,32 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 		for _, indexDescription := range resp.(*milvuspb.DescribeIndexResponse).IndexDescriptions {
 			metricType := ""
 			indexType := ""
+			mmapEnabled := ""
+			indexOffsetCacheEnabled := ""
 			for _, pair := range indexDescription.Params {
-				if pair.Key == common.MetricTypeKey {
+				switch pair.Key {
+				case common.MetricTypeKey:
 					metricType = pair.Value
-				} else if pair.Key == common.IndexTypeKey {
+				case common.IndexTypeKey:
 					indexType = pair.Value
+				case common.MmapEnabledKey:
+					mmapEnabled = pair.Value
+				case common.IndexOffsetCacheEnabledKey:
+					indexOffsetCacheEnabled = pair.Value
 				}
 			}
 			indexInfo := map[string]any{
-				HTTPIndexName:              indexDescription.IndexName,
-				HTTPIndexField:             indexDescription.FieldName,
-				HTTPReturnIndexType:        indexType,
-				HTTPReturnIndexMetricType:  metricType,
-				HTTPReturnIndexTotalRows:   indexDescription.TotalRows,
-				HTTPReturnIndexPendingRows: indexDescription.PendingIndexRows,
-				HTTPReturnIndexIndexedRows: indexDescription.IndexedRows,
-				HTTPReturnIndexState:       indexDescription.State.String(),
-				HTTPReturnIndexFailReason:  indexDescription.IndexStateFailReason,
+				HTTPIndexName:                  indexDescription.IndexName,
+				HTTPIndexField:                 indexDescription.FieldName,
+				HTTPReturnIndexType:            indexType,
+				HTTPReturnIndexMetricType:      metricType,
+				HTTPMmapEnabledKey:             mmapEnabled,
+				HTTPIndexOffsetCacheEnabledKey: indexOffsetCacheEnabled,
+				HTTPReturnIndexTotalRows:       indexDescription.TotalRows,
+				HTTPReturnIndexPendingRows:     indexDescription.PendingIndexRows,
+				HTTPReturnIndexIndexedRows:     indexDescription.IndexedRows,
+				HTTPReturnIndexState:           indexDescription.State.String(),
+				HTTPReturnIndexFailReason:      indexDescription.IndexStateFailReason,
 			}
 			indexInfos = append(indexInfos, indexInfo)
 		}
