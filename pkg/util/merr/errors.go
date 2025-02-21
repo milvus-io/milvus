@@ -51,7 +51,7 @@ var (
 	ErrServiceNotReady             = newMilvusError("service not ready", 1, true) // This indicates the service is still in init
 	ErrServiceUnavailable          = newMilvusError("service unavailable", 2, true)
 	ErrServiceMemoryLimitExceeded  = newMilvusError("memory limit exceeded", 3, false)
-	ErrServiceRequestLimitExceeded = newMilvusError("request limit exceeded", 4, true)
+	ErrServiceTooManyRequests      = newMilvusError("too many concurrent requests, queue is full", 4, true)
 	ErrServiceInternal             = newMilvusError("service internal error", 5, false) // Never return this error out of Milvus
 	ErrServiceCrossClusterRouting  = newMilvusError("cross cluster routing", 6, false)
 	ErrServiceDiskLimitExceeded    = newMilvusError("disk limit exceeded", 7, false)
