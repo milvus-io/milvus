@@ -11,7 +11,7 @@
 
 package client
 
-import "github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/server"
+import "github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
 
 // RocksMQ is the type server.RocksMQ
 type RocksMQ = server.RocksMQ

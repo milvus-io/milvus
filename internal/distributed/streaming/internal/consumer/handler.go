@@ -3,7 +3,7 @@ package consumer
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 type handleFunc func(ctx context.Context, msg message.ImmutableMessage) (bool, error)

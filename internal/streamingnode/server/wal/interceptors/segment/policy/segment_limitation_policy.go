@@ -3,7 +3,7 @@ package policy
 import (
 	"math/rand"
 
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // GetSegmentLimitationPolicy returns the segment limitation policy.

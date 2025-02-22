@@ -25,8 +25,8 @@ import (
 	"github.com/shirou/gopsutil/v4/process"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 )
 
 // theadWatcher is the utility to update milvus process thread number metrics.

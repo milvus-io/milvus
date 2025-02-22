@@ -10,13 +10,13 @@ import (
 
 	federpb "github.com/milvus-io/milvus-proto/go-api/v2/federpb"
 
-	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 
-	proxypb "github.com/milvus-io/milvus/pkg/proto/proxypb"
+	proxypb "github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 
 	types "github.com/milvus-io/milvus/internal/types"
 )

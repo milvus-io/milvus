@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func GetBinarySetKeys(cBinarySet C.CBinarySet) ([]string, error) {

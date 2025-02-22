@@ -1,8 +1,8 @@
 package indexparamcheck
 
 import (
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 )
 
 const (
