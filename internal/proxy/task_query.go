@@ -564,6 +564,10 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+func (t *queryTask) IsSubTask() bool {
+	return t.reQuery
+}
+
 func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
 	needOverrideMvcc := false
 	mvccTs := t.MvccTimestamp
