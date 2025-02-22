@@ -32,6 +32,7 @@ func RecoverWALFlusher(param interceptors.InterceptorBuildParam) *WALFlusherImpl
 		logger: resource.Resource().Logger().With(
 			log.FieldComponent("flusher"),
 			zap.String("pchannel", param.WALImpls.Channel().Name)),
+		metrics: newFlusherMetrics(param.WALImpls.Channel()),
 	}
 	go flusher.Execute()
 	return flusher
@@ -42,6 +43,7 @@ type WALFlusherImpl struct {
 	wal               *syncutil.Future[wal.WAL]
 	flusherComponents *flusherComponents
 	logger            *log.MLogger
+	metrics           *flusherMetrics
 }
 
 // Execute starts the wal flusher.
@@ -79,6 +81,9 @@ func (impl *WALFlusherImpl) Execute() (err error) {
 	defer scanner.Close()
 
 	impl.logger.Info("wal flusher start to work")
+	impl.metrics.IntoState(flusherStateInWorking)
+	defer impl.metrics.IntoState(flusherStateOnClosing)
+
 	for {
 		select {
 		case <-impl.notifier.Context().Done():
@@ -88,6 +93,7 @@ func (impl *WALFlusherImpl) Execute() (err error) {
 				impl.logger.Warn("wal flusher is closing for closed scanner channel, which is unexpected at graceful way")
 				return nil
 			}
+			impl.metrics.ObserveMetrics(msg.TimeTick())
 			if err := impl.dispatch(msg); err != nil {
 				// The error is always context canceled.
 				return nil
@@ -100,6 +106,7 @@ func (impl *WALFlusherImpl) Execute() (err error) {
 func (impl *WALFlusherImpl) Close() {
 	impl.notifier.Cancel()
 	impl.notifier.BlockUntilFinish()
+	impl.metrics.Close()
 }
 
 // buildFlusherComponents builds the components of the flusher.

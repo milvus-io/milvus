@@ -49,6 +49,7 @@ packages:
     interfaces:
       Interceptor:
       InterceptorWithReady:
+      InterceptorWithMetrics:
       InterceptorBuilder:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector:
     interfaces:

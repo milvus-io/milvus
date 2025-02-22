@@ -10,7 +10,10 @@ import (
 )
 
 // ErrEvicted is returned when the expected message has been evicted.
-var ErrEvicted = errors.New("message has been evicted")
+var (
+	ErrEvicted = errors.New("message has been evicted")
+	ErrClosed  = errors.New("write ahead buffer is closed")
+)
 
 // messageWithOffset is a message with an offset as a unique continuous identifier.
 type messageWithOffset struct {
@@ -42,6 +45,24 @@ type pendingQueue struct {
 	size         int
 	capacity     int
 	keepAlive    time.Duration
+}
+
+// Len returns the length of the buffer.
+func (q *pendingQueue) Len() int {
+	return len(q.buf)
+}
+
+// Size returns the size of the buffer.
+func (q *pendingQueue) Size() int {
+	return q.size
+}
+
+// EarliestTimeTick returns the earliest time tick of the buffer.
+func (q *pendingQueue) EarliestTimeTick() uint64 {
+	if len(q.buf) == 0 {
+		return q.lastTimeTick
+	}
+	return q.buf[0].Message.TimeTick()
 }
 
 // Push adds messages to the buffer.

@@ -19,9 +19,11 @@ import (
 // newBroadcastTaskManager creates a new broadcast task manager with recovery info.
 func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) (*broadcastTaskManager, []*pendingBroadcastTask) {
 	logger := resource.Resource().Logger().With(log.FieldComponent("broadcaster"))
+	metrics := newBroadcasterMetrics()
+
 	recoveryTasks := make([]*broadcastTask, 0, len(protos))
 	for _, proto := range protos {
-		t := newBroadcastTaskFromProto(proto)
+		t := newBroadcastTaskFromProto(proto, metrics)
 		t.SetLogger(logger.With(zap.Uint64("broadcastID", t.header.BroadcastID)))
 		recoveryTasks = append(recoveryTasks, t)
 	}
@@ -34,6 +36,7 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) (*broadcastTas
 				panic(fmt.Sprintf("unreachable: dirty recovery info in metastore, broadcast ids: [%d, %d]", oldTaskID, task.header.BroadcastID))
 			}
 			rks[rk] = task.header.BroadcastID
+			metrics.IncomingResourceKey(rk.Domain)
 		}
 		tasks[task.header.BroadcastID] = task
 		if task.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING {
@@ -47,6 +50,7 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) (*broadcastTas
 		tasks:        tasks,
 		resourceKeys: rks,
 		version:      1,
+		metrics:      metrics,
 	}
 	m.SetLogger(logger)
 	return m, pendingTasks
@@ -59,6 +63,7 @@ type broadcastTaskManager struct {
 	tasks        map[uint64]*broadcastTask      // map the broadcastID to the broadcastTaskState
 	resourceKeys map[message.ResourceKey]uint64 // map the resource key to the broadcastID
 	version      int                            // version is used to make sure that there's no update lost for watcher.
+	metrics      *broadcasterMetrics
 }
 
 // AddTask adds a new broadcast task into the manager.
@@ -152,7 +157,7 @@ func (bm *broadcastTaskManager) GetBroadcastTaskByResourceKey(resourceKey messag
 
 // addBroadcastTask adds the broadcast task into the manager.
 func (bm *broadcastTaskManager) addBroadcastTask(msg message.BroadcastMutableMessage) (*broadcastTask, error) {
-	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg)
+	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg, bm.metrics)
 	header := newIncomingTask.Header()
 	newIncomingTask.SetLogger(bm.Logger().With(zap.Uint64("broadcastID", header.BroadcastID)))
 
@@ -167,6 +172,7 @@ func (bm *broadcastTaskManager) addBroadcastTask(msg message.BroadcastMutableMes
 	// setup the resource keys to make resource exclusive held.
 	for key := range header.ResourceKeys {
 		bm.resourceKeys[key] = header.BroadcastID
+		bm.metrics.IncomingResourceKey(key.Domain)
 	}
 	bm.tasks[header.BroadcastID] = newIncomingTask
 	return newIncomingTask, nil
@@ -193,6 +199,7 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 	// remove the related resource keys
 	for key := range task.header.ResourceKeys {
 		delete(bm.resourceKeys, key)
+		bm.metrics.GoneResourceKey(key.Domain)
 	}
 	delete(bm.tasks, broadcastID)
 }
