@@ -40,7 +40,6 @@ const (
 	IndexChecker
 	LeaderChecker
 	ManualBalance
-	StatsChecker
 )
 
 var checkerNames = map[CheckerType]string{
@@ -50,7 +49,6 @@ var checkerNames = map[CheckerType]string{
 	IndexChecker:   IndexCheckerName,
 	LeaderChecker:  LeaderCheckerName,
 	ManualBalance:  ManualBalanceName,
-	StatsChecker:   StatsCheckerName,
 }
 
 func (s CheckerType) String() string {

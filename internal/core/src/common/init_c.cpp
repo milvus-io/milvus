@@ -79,14 +79,6 @@ InitDefaultExprEvalBatchSize(int64_t val) {
 }
 
 void
-InitDefaultJSONKeyIndexMemoryBudget(int64_t val) {
-    std::call_once(
-        flag7,
-        [](int val) { milvus::SetDefaultJSONKeyIndexMemoryBudget(val); },
-        val);
-}
-
-void
 InitDefaultJSONKeyIndexCommitInterval(int64_t val) {
     std::call_once(
         flag8,
@@ -95,10 +87,10 @@ InitDefaultJSONKeyIndexCommitInterval(int64_t val) {
 }
 
 void
-InitDefaultJSONKeyIndexEnable(bool val) {
+InitDefaultJSONKeyStatsEnable(bool val) {
     std::call_once(
         flag9,
-        [](bool val) { milvus::SetDefaultJSONKeyIndexEnable(val); },
+        [](bool val) { milvus::SetDefaultJSONKeyStatsEnable(val); },
         val);
 }
 

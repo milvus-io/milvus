@@ -119,6 +119,7 @@ func (s *statsTaskSuite) SetupSuite() {
 					SegmentID:     s.segID,
 					InsertChannel: "ch1",
 					TaskID:        s.taskID,
+					SubJobType:    indexpb.StatsSubJob_Sort,
 					Version:       0,
 					NodeID:        0,
 					State:         indexpb.JobState_JobStateInit,

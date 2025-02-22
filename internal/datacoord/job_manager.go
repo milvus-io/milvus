@@ -181,7 +181,7 @@ func (jm *statsJobManager) triggerTextStatsTask() {
 			needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 		}
 		segments := jm.mt.SelectSegments(jm.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return needDoTextIndex(seg, needTriggerFieldIDs)
+			return seg.GetIsSorted() && needDoTextIndex(seg, needTriggerFieldIDs)
 		}))
 
 		for _, segment := range segments {
@@ -205,7 +205,7 @@ func (jm *statsJobManager) triggerJsonKeyIndexStatsTask() {
 			}
 		}
 		segments := jm.mt.SelectSegments(jm.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return needDoJsonKeyIndex(seg, needTriggerFieldIDs)
+			return seg.GetIsSorted() && needDoJsonKeyIndex(seg, needTriggerFieldIDs)
 		}))
 		for _, segment := range segments {
 			if err := jm.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob, true); err != nil {
@@ -228,7 +228,7 @@ func (jm *statsJobManager) triggerBM25StatsTask() {
 			}
 		}
 		segments := jm.mt.SelectSegments(jm.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return needDoBM25(seg, needTriggerFieldIDs)
+			return seg.GetIsSorted() && needDoBM25(seg, needTriggerFieldIDs)
 		}))
 
 		for _, segment := range segments {
