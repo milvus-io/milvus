@@ -700,12 +700,18 @@ func (t *clusteringCompactionTask) doCompact() error {
 	}
 	err = t.sessions.Compaction(context.Background(), t.GetTaskProto().GetNodeID(), t.GetPlan())
 	if err != nil {
-		if errors.Is(err, merr.ErrDataNodeSlotExhausted) {
-			log.Warn("fail to notify compaction tasks to DataNode because the node slots exhausted")
-			return t.updateAndSaveTaskMeta(setNodeID(NullNodeID))
+		originNodeID := t.GetTaskProto().GetNodeID()
+		log.Warn("Failed to notify compaction tasks to DataNode",
+			zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+			zap.Int64("nodeID", originNodeID),
+			zap.Error(err))
+		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
+		if err != nil {
+			log.Warn("updateAndSaveTaskMeta fail", zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.Error(err))
+			return err
 		}
-		log.Warn("Failed to notify compaction tasks to DataNode", zap.Error(err))
-		return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
 	}
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
 }
