@@ -5,7 +5,7 @@ package coordclient
 
 import (
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 // ResetRegistration resets the global local client to initial state.

@@ -3,7 +3,7 @@
 package mock_walimpls
 
 import (
-	walimpls "github.com/milvus-io/milvus/pkg/streaming/walimpls"
+	walimpls "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	mock "github.com/stretchr/testify/mock"
 )
 

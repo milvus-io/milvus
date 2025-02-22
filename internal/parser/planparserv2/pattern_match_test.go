@@ -3,7 +3,7 @@ package planparserv2
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 )
 
 func Test_hasWildcards(t *testing.T) {

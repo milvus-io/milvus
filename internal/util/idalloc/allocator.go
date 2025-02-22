@@ -24,7 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 // batchAllocateSize is the size of batch allocate from remote allocator.

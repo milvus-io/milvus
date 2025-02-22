@@ -5,10 +5,10 @@ package cluster
 import (
 	context "context"
 
-	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	mock "github.com/stretchr/testify/mock"
 
-	querypb "github.com/milvus-io/milvus/pkg/proto/querypb"
+	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 
 	streamrpc "github.com/milvus-io/milvus/internal/util/streamrpc"
 )

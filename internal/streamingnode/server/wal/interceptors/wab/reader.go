@@ -3,7 +3,7 @@ package wab
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 // WriteAheadBufferReader is used to read messages from WriteAheadBuffer.

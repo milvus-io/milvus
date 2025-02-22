@@ -24,7 +24,7 @@ import (
 	"golang.org/x/exp/rand"
 
 	"github.com/milvus-io/milvus/internal/util/initcore"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestPackedReadAndWrite(t *testing.T) {

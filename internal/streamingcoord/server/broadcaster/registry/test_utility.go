@@ -3,7 +3,7 @@
 
 package registry
 
-import "github.com/milvus-io/milvus/pkg/util/syncutil"
+import "github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 
 func ResetRegistration() {
 	localRegistry = make(map[AppendOperatorType]*syncutil.Future[AppendOperator])

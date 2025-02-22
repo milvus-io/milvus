@@ -24,7 +24,7 @@ import (
 	"github.com/casbin/casbin/v2/model"
 	jsonadapter "github.com/casbin/json-adapter/v2"
 
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // MetaCacheCasbinAdapter is the implementation of `persist.Adapter` with Cache
