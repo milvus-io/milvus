@@ -495,6 +495,25 @@ func (b *BroadcastAlteredCollectionStep) Desc() string {
 	return fmt.Sprintf("broadcast altered collection, collectionID: %d", b.req.CollectionID)
 }
 
+type AddCollectionFieldStep struct {
+	baseStep
+	oldColl  *model.Collection
+	newField *model.Field
+	ts       Timestamp
+}
+
+func (a *AddCollectionFieldStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	newColl := a.oldColl.Clone()
+	newColl.Fields = append(newColl.Fields, a.newField)
+	err := a.core.meta.AlterCollection(ctx, a.oldColl, newColl, a.ts)
+	log.Ctx(ctx).Info("add field done", zap.Int64("collectionID", a.oldColl.CollectionID), zap.Any("new field", a.newField))
+	return nil, err
+}
+
+func (a *AddCollectionFieldStep) Desc() string {
+	return fmt.Sprintf("add field, collectionID: %d, fieldID: %d, ts: %d", a.oldColl.CollectionID, a.newField.FieldID, a.ts)
+}
+
 type AlterDatabaseStep struct {
 	baseStep
 	oldDB *model.Database
