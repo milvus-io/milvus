@@ -298,6 +298,8 @@ type commonConfig struct {
 	LocalRPCEnabled ParamItem `refreshable:"false"`
 
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
+
+	EnabledJSONKeyStats ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1000,6 +1002,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.SyncTaskPoolReleaseTimeoutSeconds.Init(base.mgr)
+
+	p.EnabledJSONKeyStats = ParamItem{
+		Key:          "common.enabledJsonKeyStats",
+		Version:      "2.5.5",
+		DefaultValue: "false",
+		Doc:          "Indicates whether to enable JSON key stats",
+		Export:       true,
+	}
+	p.EnabledJSONKeyStats.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -3571,8 +3582,6 @@ type dataCoordConfig struct {
 	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 	BrokerTimeout                  ParamItem `refreshable:"false"`
 
-	EnabledJSONKeyStats ParamItem `refreshable:"true"`
-
 	// auto balance channel on datanode
 	AutoBalance                    ParamItem `refreshable:"true"`
 	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
@@ -4238,15 +4247,6 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.MinSegmentNumRowsToEnableIndex.Init(base.mgr)
-
-	p.EnabledJSONKeyStats = ParamItem{
-		Key:          "indexCoord.enabledJsonKeyStats",
-		Version:      "2.0.0",
-		DefaultValue: "true",
-		Doc:          "Indicates whether to enable JSON key stats",
-		Export:       true,
-	}
-	p.EnabledJSONKeyStats.Init(base.mgr)
 
 	p.BindIndexNodeMode = ParamItem{
 		Key:          "indexCoord.bindIndexNodeMode.enable",
