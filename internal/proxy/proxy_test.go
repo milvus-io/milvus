@@ -72,7 +72,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
@@ -243,18 +242,6 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 		if err != nil {
 			panic(err)
 		}
-		etcd, err := etcd.GetEtcdClient(
-			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-			Params.EtcdCfg.Endpoints.GetAsStrings(),
-			Params.EtcdCfg.EtcdTLSCert.GetValue(),
-			Params.EtcdCfg.EtcdTLSKey.GetValue(),
-			Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-			Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-		if err != nil {
-			panic(err)
-		}
-		in.SetEtcdClient(etcd)
 		if err = in.Prepare(); err != nil {
 			panic(err)
 		}
@@ -417,18 +404,6 @@ func TestProxy(t *testing.T) {
 	proxy, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
 	assert.NotNil(t, proxy)
-
-	etcdcli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	defer etcdcli.Close()
-	assert.NoError(t, err)
-	proxy.SetEtcdClient(etcdcli)
 
 	testServer := newProxyTestServer(proxy)
 	wg.Add(1)

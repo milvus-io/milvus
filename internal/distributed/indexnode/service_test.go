@@ -43,7 +43,6 @@ func TestIndexNodeServer(t *testing.T) {
 	assert.NotNil(t, server)
 
 	inm := mocks.NewMockIndexNode(t)
-	inm.EXPECT().SetEtcdClient(mock.Anything).Return()
 	inm.EXPECT().SetAddress(mock.Anything).Return()
 	inm.EXPECT().Start().Return(nil)
 	inm.EXPECT().Init().Return(nil)

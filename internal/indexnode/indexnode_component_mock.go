@@ -21,9 +21,6 @@ func NewMockIndexNodeComponent(ctx context.Context) (types.IndexNodeComponent, e
 
 	node := NewIndexNode(ctx, factory)
 
-	startEmbedEtcd()
-	etcdCli := getEtcdClient()
-	node.SetEtcdClient(etcdCli)
 	node.storageFactory = &mockStorageFactory{}
 	if err := node.Init(); err != nil {
 		return nil, err

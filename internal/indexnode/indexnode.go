@@ -39,7 +39,6 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -111,7 +110,6 @@ type IndexNode struct {
 	storageFactory StorageFactory
 	session        *sessionutil.Session
 
-	etcdCli *clientv3.Client
 	address string
 
 	binlogIO io.BinlogIO
@@ -306,11 +304,6 @@ func (i *IndexNode) Stop() error {
 // UpdateStateCode updates the component state of IndexNode.
 func (i *IndexNode) UpdateStateCode(code commonpb.StateCode) {
 	i.lifetime.SetState(code)
-}
-
-// SetEtcdClient assigns parameter client to its member etcdCli
-func (i *IndexNode) SetEtcdClient(client *clientv3.Client) {
-	i.etcdCli = client
 }
 
 // GetComponentStates gets the component states of IndexNode.

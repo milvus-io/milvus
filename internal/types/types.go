@@ -80,9 +80,6 @@ type DataNodeComponent interface {
 	GetAddress() string
 	GetNodeID() int64
 
-	// SetEtcdClient set etcd client for DataNode
-	SetEtcdClient(etcdClient *clientv3.Client)
-
 	// SetRootCoordClient set SetRootCoordClient for DataNode
 	// `rootCoord` is a client of root coordinator.
 	//
@@ -156,8 +153,6 @@ type IndexNodeComponent interface {
 
 	SetAddress(address string)
 	GetAddress() string
-	// SetEtcdClient set etcd client for IndexNodeComponent
-	SetEtcdClient(etcdClient *clientv3.Client)
 
 	// UpdateStateCode updates state code for IndexNodeComponent
 	//  `stateCode` is current statement of this QueryCoord, indicating whether it's healthy.
@@ -242,9 +237,6 @@ type ProxyComponent interface {
 
 	SetAddress(address string)
 	GetAddress() string
-	// SetEtcdClient set EtcdClient for Proxy
-	// `etcdClient` is a client of etcd
-	SetEtcdClient(etcdClient *clientv3.Client)
 
 	// SetRootCoordClient set RootCoord for Proxy
 	// `rootCoord` is a client of root coordinator.
@@ -297,9 +289,6 @@ type QueryNodeComponent interface {
 	SetAddress(address string)
 	GetAddress() string
 	GetNodeID() int64
-
-	// SetEtcdClient set etcd client for QueryNode
-	SetEtcdClient(etcdClient *clientv3.Client)
 }
 
 // QueryCoordClient is the client interface for querycoord server

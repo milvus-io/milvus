@@ -23,7 +23,6 @@ import (
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -43,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/tracer"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -60,7 +58,6 @@ type Server struct {
 	listener    *netutil.NetListener
 	ctx         context.Context
 	cancel      context.CancelFunc
-	etcdCli     *clientv3.Client
 	factory     dependency.Factory
 
 	serverID atomic.Int64
@@ -171,10 +168,6 @@ func (s *Server) startGrpcLoop() {
 	}
 }
 
-func (s *Server) SetEtcdClient(client *clientv3.Client) {
-	s.datanode.SetEtcdClient(client)
-}
-
 func (s *Server) SetRootCoordInterface(ms types.RootCoordClient) error {
 	return s.datanode.SetRootCoordClient(ms)
 }
@@ -209,9 +202,6 @@ func (s *Server) Stop() (err error) {
 		logger.Info("datanode stopped", zap.Error(err))
 	}()
 
-	if s.etcdCli != nil {
-		defer s.etcdCli.Close()
-	}
 	if s.grpcServer != nil {
 		utils.GracefulStopGRPCServer(s.grpcServer)
 	}
@@ -233,30 +223,12 @@ func (s *Server) Stop() (err error) {
 
 // init initializes Datanode's grpc service.
 func (s *Server) init() error {
-	etcdConfig := &paramtable.Get().EtcdCfg
 	log := log.Ctx(s.ctx)
 
-	etcdCli, err := etcd.CreateEtcdClient(
-		etcdConfig.UseEmbedEtcd.GetAsBool(),
-		etcdConfig.EtcdEnableAuth.GetAsBool(),
-		etcdConfig.EtcdAuthUserName.GetValue(),
-		etcdConfig.EtcdAuthPassword.GetValue(),
-		etcdConfig.EtcdUseSSL.GetAsBool(),
-		etcdConfig.Endpoints.GetAsStrings(),
-		etcdConfig.EtcdTLSCert.GetValue(),
-		etcdConfig.EtcdTLSKey.GetValue(),
-		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue())
-	if err != nil {
-		log.Error("failed to connect to etcd", zap.Error(err))
-		return err
-	}
-	s.etcdCli = etcdCli
-	s.SetEtcdClient(s.etcdCli)
 	s.datanode.SetAddress(s.listener.Address())
 	log.Info("DataNode address", zap.String("address", s.listener.Address()))
 
-	err = s.startGrpc()
+	err := s.startGrpc()
 	if err != nil {
 		return err
 	}

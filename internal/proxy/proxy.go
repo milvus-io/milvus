@@ -28,7 +28,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/hashicorp/golang-lru/v2/expirable"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -87,7 +86,6 @@ type Proxy struct {
 
 	stateCode atomic.Int32
 
-	etcdCli    *clientv3.Client
 	address    string
 	rootCoord  types.RootCoordClient
 	dataCoord  types.DataCoordClient
@@ -533,11 +531,6 @@ func (node *Proxy) SetAddress(address string) {
 
 func (node *Proxy) GetAddress() string {
 	return node.address
-}
-
-// SetEtcdClient sets etcd client for proxy.
-func (node *Proxy) SetEtcdClient(client *clientv3.Client) {
-	node.etcdCli = client
 }
 
 // SetRootCoordClient sets RootCoord client for proxy.
