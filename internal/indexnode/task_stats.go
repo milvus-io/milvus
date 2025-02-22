@@ -111,17 +111,22 @@ func (st *statsTask) GetState() indexpb.JobState {
 	return st.node.getStatsTaskState(st.req.GetClusterID(), st.req.GetTaskID())
 }
 
+func (st *statsTask) GetSlot() int64 {
+	return st.req.GetTaskSlot()
+}
+
 func (st *statsTask) PreExecute(ctx context.Context) error {
 	ctx, span := otel.Tracer(typeutil.IndexNodeRole).Start(ctx, fmt.Sprintf("Stats-PreExecute-%s-%d", st.req.GetClusterID(), st.req.GetTaskID()))
 	defer span.End()
 
 	st.queueDur = st.tr.RecordSpan()
-	log.Ctx(ctx).Info("Begin to prepare stats task",
+	log.Ctx(ctx).Info("Begin to PreExecute stats task",
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),
 		zap.Int64("collectionID", st.req.GetCollectionID()),
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()),
+		zap.Int64("queue duration(ms)", st.queueDur.Milliseconds()),
 	)
 
 	if err := binlog.DecompressBinLogWithRootPath(st.req.GetStorageConfig().GetRootPath(), storage.InsertBinlog, st.req.GetCollectionID(), st.req.GetPartitionID(),
@@ -142,6 +147,16 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	preExecuteRecordSpan := st.tr.RecordSpan()
+
+	log.Ctx(ctx).Info("successfully PreExecute stats task",
+		zap.String("clusterID", st.req.GetClusterID()),
+		zap.Int64("taskID", st.req.GetTaskID()),
+		zap.Int64("collectionID", st.req.GetCollectionID()),
+		zap.Int64("partitionID", st.req.GetPartitionID()),
+		zap.Int64("segmentID", st.req.GetSegmentID()),
+		zap.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
+	)
 	return nil
 }
 
@@ -249,6 +264,8 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		st.req.GetInsertChannel(),
 		int64(numValidRows), insertLogs, statsLogs, bm25StatsLogs)
 
+	totalElapse := st.tr.ElapseSpan()
+
 	log.Info("sort segment end",
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),
@@ -258,7 +275,8 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		zap.String("subTaskType", st.req.GetSubJobType().String()),
 		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
 		zap.Int64("old rows", numRows),
-		zap.Int("valid rows", numValidRows))
+		zap.Int("valid rows", numValidRows),
+		zap.Duration("total elapse", totalElapse))
 	return insertLogs, nil
 }
 

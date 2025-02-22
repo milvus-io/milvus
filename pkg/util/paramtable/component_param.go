@@ -3481,6 +3481,9 @@ type dataCoordConfig struct {
 	ClusteringCompactionSlotUsage ParamItem `refreshable:"true"`
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
+	IndexTaskSlotUsage            ParamItem `refreshable:"true"`
+	StatsTaskSlotUsage            ParamItem `refreshable:"true"`
+	AnalyzeTaskSlotUsage          ParamItem `refreshable:"true"`
 
 	EnableStatsTask   ParamItem `refreshable:"true"`
 	TaskCheckInterval ParamItem `refreshable:"true"`
@@ -4348,6 +4351,36 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.L0DeleteCompactionSlotUsage.Init(base.mgr)
 
+	p.IndexTaskSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.indexTaskSlotUsage",
+		Version:      "2.5.3",
+		Doc:          "slot usage of index task",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.IndexTaskSlotUsage.Init(base.mgr)
+
+	p.StatsTaskSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.statsTaskSlotUsage",
+		Version:      "2.5.3",
+		Doc:          "slot usage of stats task",
+		DefaultValue: "4",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.StatsTaskSlotUsage.Init(base.mgr)
+
+	p.AnalyzeTaskSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.analyzeTaskSlotUsage",
+		Version:      "2.5.3",
+		Doc:          "slot usage of analyze task",
+		DefaultValue: "65535",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.AnalyzeTaskSlotUsage.Init(base.mgr)
+
 	p.EnableStatsTask = ParamItem{
 		Key:          "dataCoord.statsTask.enable",
 		Version:      "2.5.0",
@@ -4852,7 +4885,7 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 	p.BuildParallel = ParamItem{
 		Key:          "indexNode.scheduler.buildParallel",
 		Version:      "2.0.0",
-		DefaultValue: "1",
+		DefaultValue: "4",
 		Export:       true,
 	}
 	p.BuildParallel.Init(base.mgr)
