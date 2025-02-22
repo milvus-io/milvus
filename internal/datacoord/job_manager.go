@@ -200,7 +200,7 @@ func (jm *statsJobManager) triggerJsonKeyIndexStatsTask() {
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
 			h := typeutil.CreateFieldSchemaHelper(field)
-			if h.EnableJSONKeyIndex() && Params.DataCoordCfg.EnabledJSONKeyStats.GetAsBool() {
+			if h.EnableJSONKeyIndex() && Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() {
 				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 			}
 		}

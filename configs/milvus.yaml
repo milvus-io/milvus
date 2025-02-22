@@ -506,7 +506,6 @@ indexCoord:
     nodeID: 0
   segment:
     minSegmentNumRowsToEnableIndex: 1024 # It's a threshold. When the segment num rows is less than this value, the segment will not be indexed
-  enabledJsonKeyStats: true # Indicates whether to enable JSON key stats
 
 indexNode:
   scheduler:
@@ -894,6 +893,7 @@ common:
   localRPCEnabled: false # enable local rpc for internal communication when mix or standalone mode.
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
+  enabledJsonKeyStats: false # Indicates whether to enable JSON key stats
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
