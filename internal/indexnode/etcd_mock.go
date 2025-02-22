@@ -38,13 +38,13 @@ func startEmbedEtcd() {
 		if err != nil {
 			panic(err)
 		}
-		config.LCUrls = []url.URL{*u}
+		config.ListenClientUrls = []url.URL{*u}
 
 		u, err = url.Parse(fmt.Sprintf("http://localhost:%d", etcdPeerPort))
 		if err != nil {
 			panic(err)
 		}
-		config.LPUrls = []url.URL{*u}
+		config.ListenPeerUrls = []url.URL{*u}
 		etcdSvr, err = embed.StartEtcd(config)
 		if err != nil {
 			panic(err)
