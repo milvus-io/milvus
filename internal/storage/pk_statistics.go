@@ -18,6 +18,7 @@ package storage
 
 import (
 	"fmt"
+	"unsafe"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -119,7 +120,7 @@ func Locations(pk PrimaryKey, k uint, bfType bloomfilter.BFType) []uint64 {
 		return bloomfilter.Locations(buf, k, bfType)
 	case schemapb.DataType_VarChar:
 		varCharPk := pk.(*VarCharPrimaryKey)
-		return bloomfilter.Locations([]byte(varCharPk.Value), k, bfType)
+		return bloomfilter.Locations(unsafe.Slice(unsafe.StringData(varCharPk.Value), len(varCharPk.Value)), k, bfType)
 	default:
 		// TODO::
 	}
