@@ -27,10 +27,11 @@ import (
 	"github.com/apache/arrow/go/v12/arrow/memory"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
-	pkField FieldID, rw RecordWriter, predicate func(r Record, ri, i int) bool,
+	rw RecordWriter, predicate func(r Record, ri, i int) bool,
 ) (int, error) {
 	records := make([]Record, 0)
 
@@ -48,9 +49,8 @@ func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
 
 	for _, r := range rr {
 		for {
-			err := r.Next()
+			rec, err := r.Next()
 			if err == nil {
-				rec := r.Record()
 				rec.Retain()
 				ri := len(records)
 				records = append(records, rec)
@@ -71,17 +71,23 @@ func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
 		return 0, nil
 	}
 
-	switch records[0].Column(pkField).(type) {
+	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return 0, err
+	}
+	pkFieldId := pkField.FieldID
+
+	switch records[0].Column(pkFieldId).(type) {
 	case *array.Int64:
 		sort.Slice(indices, func(i, j int) bool {
-			pki := records[indices[i].ri].Column(pkField).(*array.Int64).Value(indices[i].i)
-			pkj := records[indices[j].ri].Column(pkField).(*array.Int64).Value(indices[j].i)
+			pki := records[indices[i].ri].Column(pkFieldId).(*array.Int64).Value(indices[i].i)
+			pkj := records[indices[j].ri].Column(pkFieldId).(*array.Int64).Value(indices[j].i)
 			return pki < pkj
 		})
 	case *array.String:
 		sort.Slice(indices, func(i, j int) bool {
-			pki := records[indices[i].ri].Column(pkField).(*array.String).Value(indices[i].i)
-			pkj := records[indices[j].ri].Column(pkField).(*array.String).Value(indices[j].i)
+			pki := records[indices[i].ri].Column(pkFieldId).(*array.String).Value(indices[i].i)
+			pkj := records[indices[j].ri].Column(pkFieldId).(*array.String).Value(indices[j].i)
 			return pki < pkj
 		})
 	}
@@ -192,47 +198,53 @@ func NewPriorityQueue[T any](less func(x, y *T) bool) *PriorityQueue[T] {
 }
 
 func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
-	pkField FieldID, rw RecordWriter, predicate func(r Record, ri, i int) bool,
+	rw RecordWriter, predicate func(r Record, ri, i int) bool,
 ) (numRows int, err error) {
 	type index struct {
 		ri int
 		i  int
 	}
 
-	advanceRecord := func(r RecordReader) (Record, error) {
-		err := r.Next()
+	recs := make([]Record, len(rr))
+	advanceRecord := func(i int) error {
+		rec, err := rr[i].Next()
+		recs[i] = rec // assign nil if err
 		if err != nil {
-			return nil, err
+			return err
 		}
-		return r.Record(), nil
+		return nil
 	}
 
-	recs := make([]Record, len(rr))
-	for i, r := range rr {
-		rec, err := advanceRecord(r)
+	for i := range rr {
+		err := advanceRecord(i)
 		if err == io.EOF {
-			recs[i] = nil
 			continue
 		}
 		if err != nil {
 			return 0, err
 		}
-		recs[i] = rec
 	}
 
+	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return 0, err
+	}
+	pkFieldId := pkField.FieldID
+
 	var pq *PriorityQueue[index]
-	switch recs[0].Column(pkField).(type) {
+	switch recs[0].Column(pkFieldId).(type) {
 	case *array.Int64:
 		pq = NewPriorityQueue[index](func(x, y *index) bool {
-			return rr[x.ri].Record().Column(pkField).(*array.Int64).Value(x.i) < rr[y.ri].Record().Column(pkField).(*array.Int64).Value(y.i)
+			return recs[x.ri].Column(pkFieldId).(*array.Int64).Value(x.i) < recs[y.ri].Column(pkFieldId).(*array.Int64).Value(y.i)
 		})
 	case *array.String:
 		pq = NewPriorityQueue[index](func(x, y *index) bool {
-			return rr[x.ri].Record().Column(pkField).(*array.String).Value(x.i) < rr[y.ri].Record().Column(pkField).(*array.String).Value(y.i)
+			return recs[x.ri].Column(pkFieldId).(*array.String).Value(x.i) < recs[y.ri].Column(pkFieldId).(*array.String).Value(y.i)
 		})
 	}
 
-	enqueueAll := func(ri int, r Record) {
+	enqueueAll := func(ri int) {
+		r := recs[ri]
 		for j := 0; j < r.Len(); j++ {
 			if predicate(r, ri, j) {
 				pq.Enqueue(&index{
@@ -246,7 +258,7 @@ func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
 
 	for i, v := range recs {
 		if v != nil {
-			enqueueAll(i, v)
+			enqueueAll(i)
 		}
 	}
 
@@ -294,7 +306,7 @@ func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
 		for c, builder := range builders {
 			fid := schema.Fields[c].FieldID
 			defaultValue := schema.Fields[c].GetDefaultValue()
-			AppendValueAt(builder, rr[idx.ri].Record().Column(fid), idx.i, defaultValue)
+			AppendValueAt(builder, recs[idx.ri].Column(fid), idx.i, defaultValue)
 		}
 		if (rc+1)%batchSize == 0 {
 			writeRecord(int64(batchSize))
@@ -304,15 +316,15 @@ func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
 		}
 
 		// If poped idx reaches end of segment, invalidate cache and advance to next segment
-		if idx.i == rr[idx.ri].Record().Len()-1 {
-			rec, err := advanceRecord(rr[idx.ri])
+		if idx.i == recs[idx.ri].Len()-1 {
+			err := advanceRecord(idx.ri)
 			if err == io.EOF {
 				continue
 			}
 			if err != nil {
 				return 0, err
 			}
-			enqueueAll(idx.ri, rec)
+			enqueueAll(idx.ri)
 		}
 	}
 

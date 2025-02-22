@@ -336,6 +336,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 			Field2StatslogPaths: segInfo.GetStatslogs(),
 			Deltalogs:           segInfo.GetDeltalogs(),
 			IsSorted:            segInfo.GetIsSorted(),
+			StorageVersion:      segInfo.GetStorageVersion(),
 		})
 		segIDMap[segID] = segInfo.GetDeltalogs()
 	}

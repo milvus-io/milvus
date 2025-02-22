@@ -161,15 +161,14 @@ func (t *mixCompactionTask) mergeSplit(
 		deletedRowCount += del
 		expiredRowCount += exp
 	}
-	res, err := mWriter.Finish()
-	if err != nil {
+	if err := mWriter.Close(); err != nil {
 		log.Warn("compact wrong, failed to finish writer", zap.Error(err))
 		return nil, err
 	}
+	res := mWriter.GetCompactionSegments()
 
 	totalElapse := t.tr.RecordSpan()
 	log.Info("compact mergeSplit end",
-		zap.Int64s("mergeSplit to segments", lo.Keys(mWriter.cachedMeta)),
 		zap.Int64("deleted row count", deletedRowCount),
 		zap.Int64("expired entities", expiredRowCount),
 		zap.Duration("total elapse", totalElapse))
@@ -194,30 +193,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	entityFilter := newEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
-	itr := 0
-	binlogs := seg.GetFieldBinlogs()
-	reader, err := storage.NewCompositeBinlogRecordReader(t.plan.GetSchema(), func() ([]*storage.Blob, error) {
-		if len(binlogs) <= 0 {
-			return nil, sio.EOF
-		}
-		paths := make([]string, len(binlogs))
-		for i, fieldBinlog := range binlogs {
-			if itr >= len(fieldBinlog.GetBinlogs()) {
-				return nil, sio.EOF
-			}
-			paths[i] = fieldBinlog.GetBinlogs()[itr].GetLogPath()
-		}
-		itr++
-		values, err := t.binlogIO.Download(ctx, paths)
-		if err != nil {
-			log.Warn("compact wrong, fail to download insertLogs", zap.Error(err))
-			return nil, err
-		}
-		blobs := lo.Map(values, func(v []byte, i int) *storage.Blob {
-			return &storage.Blob{Key: paths[i], Value: v}
-		})
-		return blobs, nil
-	})
+	reader, err := storage.NewBinlogRecordReader(ctx, seg.GetFieldBinlogs(), t.plan.GetSchema(), storage.WithDownloader(t.binlogIO.Download))
 	if err != nil {
 		log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
 		return
@@ -227,7 +203,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	writeSlice := func(r storage.Record, start, end int) error {
 		sliced := r.Slice(start, end)
 		defer sliced.Release()
-		err = mWriter.WriteRecord(sliced)
+		err = mWriter.Write(sliced)
 		if err != nil {
 			log.Warn("compact wrong, failed to writer row", zap.Error(err))
 			return err
@@ -235,7 +211,8 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		return nil
 	}
 	for {
-		err = reader.Next()
+		var r storage.Record
+		r, err = reader.Next()
 		if err != nil {
 			if err == sio.EOF {
 				err = nil
@@ -245,7 +222,6 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				return
 			}
 		}
-		r := reader.Record()
 		pkArray := r.Column(pkField.FieldID)
 		tsArray := r.Column(common.TimeStampField).(*array.Int64)
 

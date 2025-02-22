@@ -29,6 +29,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
@@ -41,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/conc"
 	_ "github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -64,7 +64,6 @@ type statsTask struct {
 	node     *IndexNode
 	binlogIO io.BinlogIO
 
-	insertLogs  [][]string
 	deltaLogs   []string
 	logIDOffset int64
 }
@@ -137,16 +136,6 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	st.insertLogs = make([][]string, 0)
-	binlogNum := len(st.req.GetInsertLogs()[0].GetBinlogs())
-	for idx := 0; idx < binlogNum; idx++ {
-		var batchPaths []string
-		for _, f := range st.req.GetInsertLogs() {
-			batchPaths = append(batchPaths, f.GetBinlogs()[idx].GetLogPath())
-		}
-		st.insertLogs = append(st.insertLogs, batchPaths)
-	}
-
 	for _, d := range st.req.GetDeltaLogs() {
 		for _, l := range d.GetBinlogs() {
 			st.deltaLogs = append(st.deltaLogs, l.GetLogPath())
@@ -156,204 +145,31 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-// segmentRecordWriter is a wrapper of SegmentWriter to implement RecordWriter interface
-type segmentRecordWriter struct {
-	sw            *compaction.SegmentWriter
-	binlogMaxSize uint64
-	rootPath      string
-	logID         int64
-	maxLogID      int64
-	binlogIO      io.BinlogIO
-	ctx           context.Context
-	numRows       int64
-	bm25FieldIds  []int64
-
-	lastUploads  []*conc.Future[any]
-	binlogs      map[typeutil.UniqueID]*datapb.FieldBinlog
-	statslog     *datapb.FieldBinlog
-	bm25statslog []*datapb.FieldBinlog
-}
-
-var _ storage.RecordWriter = (*segmentRecordWriter)(nil)
-
-func (srw *segmentRecordWriter) Close() error {
-	if !srw.sw.FlushAndIsEmpty() {
-		if err := srw.upload(); err != nil {
-			return err
-		}
-		if err := srw.waitLastUpload(); err != nil {
-			return err
-		}
-	}
-
-	statslog, err := srw.statSerializeWrite()
-	if err != nil {
-		log.Ctx(srw.ctx).Warn("stats wrong, failed to serialize write segment stats",
-			zap.Int64("remaining row count", srw.numRows), zap.Error(err))
-		return err
-	}
-	srw.statslog = statslog
-	srw.logID++
-
-	if len(srw.bm25FieldIds) > 0 {
-		binlogNums, bm25StatsLogs, err := srw.bm25SerializeWrite()
-		if err != nil {
-			log.Ctx(srw.ctx).Warn("compact wrong, failed to serialize write segment bm25 stats", zap.Error(err))
-			return err
-		}
-		srw.logID += binlogNums
-		srw.bm25statslog = bm25StatsLogs
-	}
-
-	return nil
-}
-
-func (srw *segmentRecordWriter) GetWrittenUncompressed() uint64 {
-	return srw.sw.WrittenMemorySize()
-}
-
-func (srw *segmentRecordWriter) Write(r storage.Record) error {
-	err := srw.sw.WriteRecord(r)
-	if err != nil {
-		return err
-	}
-
-	if srw.sw.IsFullWithBinlogMaxSize(srw.binlogMaxSize) {
-		return srw.upload()
-	}
-	return nil
-}
-
-func (srw *segmentRecordWriter) upload() error {
-	if err := srw.waitLastUpload(); err != nil {
-		return err
-	}
-	binlogNum, kvs, partialBinlogs, err := serializeWrite(srw.ctx, srw.rootPath, srw.logID, srw.sw)
-	if err != nil {
-		return err
-	}
-
-	srw.lastUploads = srw.binlogIO.AsyncUpload(srw.ctx, kvs)
-	if srw.binlogs == nil {
-		srw.binlogs = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
-	}
-	mergeFieldBinlogs(srw.binlogs, partialBinlogs)
-
-	srw.logID += binlogNum
-	if srw.logID > srw.maxLogID {
-		return fmt.Errorf("log id exausted")
-	}
-	return nil
-}
-
-func (srw *segmentRecordWriter) waitLastUpload() error {
-	if len(srw.lastUploads) > 0 {
-		for _, future := range srw.lastUploads {
-			if _, err := future.Await(); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (srw *segmentRecordWriter) statSerializeWrite() (*datapb.FieldBinlog, error) {
-	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(srw.ctx, "statslog serializeWrite")
-	defer span.End()
-	sblob, err := srw.sw.Finish()
-	if err != nil {
-		return nil, err
-	}
-
-	key, _ := binlog.BuildLogPathWithRootPath(srw.rootPath, storage.StatsBinlog,
-		srw.sw.GetCollectionID(), srw.sw.GetPartitionID(), srw.sw.GetSegmentID(), srw.sw.GetPkID(), srw.logID)
-	kvs := map[string][]byte{key: sblob.GetValue()}
-	statFieldLog := &datapb.FieldBinlog{
-		FieldID: srw.sw.GetPkID(),
-		Binlogs: []*datapb.Binlog{
-			{
-				LogSize:    int64(len(sblob.GetValue())),
-				MemorySize: int64(len(sblob.GetValue())),
-				LogPath:    key,
-				EntriesNum: srw.numRows,
-			},
-		},
-	}
-	if err := srw.binlogIO.Upload(ctx, kvs); err != nil {
-		log.Ctx(ctx).Warn("failed to upload insert log", zap.Error(err))
-		return nil, err
-	}
-
-	return statFieldLog, nil
-}
-
-func (srw *segmentRecordWriter) bm25SerializeWrite() (int64, []*datapb.FieldBinlog, error) {
-	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(srw.ctx, "bm25log serializeWrite")
-	defer span.End()
-	writer := srw.sw
-	stats, err := writer.GetBm25StatsBlob()
-	if err != nil {
-		return 0, nil, err
-	}
-
-	kvs := make(map[string][]byte)
-	binlogs := []*datapb.FieldBinlog{}
-	cnt := int64(0)
-	for fieldID, blob := range stats {
-		key, _ := binlog.BuildLogPathWithRootPath(srw.rootPath, storage.BM25Binlog,
-			writer.GetCollectionID(), writer.GetPartitionID(), writer.GetSegmentID(), fieldID, srw.logID)
-		kvs[key] = blob.GetValue()
-		fieldLog := &datapb.FieldBinlog{
-			FieldID: fieldID,
-			Binlogs: []*datapb.Binlog{
-				{
-					LogSize:    int64(len(blob.GetValue())),
-					MemorySize: int64(len(blob.GetValue())),
-					LogPath:    key,
-					EntriesNum: srw.numRows,
-				},
-			},
-		}
-
-		binlogs = append(binlogs, fieldLog)
-		srw.logID++
-		cnt++
-	}
-
-	if err := srw.binlogIO.Upload(ctx, kvs); err != nil {
-		log.Ctx(ctx).Warn("failed to upload bm25 log", zap.Error(err))
-		return 0, nil, err
-	}
-
-	return cnt, binlogs, nil
-}
-
 func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 	numRows := st.req.GetNumRows()
-
-	bm25FieldIds := compaction.GetBM25FieldIDs(st.req.GetSchema())
 	pkField, err := typeutil.GetPrimaryFieldSchema(st.req.GetSchema())
 	if err != nil {
 		return nil, err
 	}
 	pkFieldID := pkField.FieldID
-	writer, err := compaction.NewSegmentWriter(st.req.GetSchema(), numRows, statsBatchSize,
-		st.req.GetTargetSegmentID(), st.req.GetPartitionID(), st.req.GetCollectionID(), bm25FieldIds)
+
+	alloc := allocator.NewLocalAllocator(st.req.StartLogID, st.req.EndLogID)
+	srw, err := storage.NewBinlogRecordWriter(ctx,
+		st.req.GetCollectionID(),
+		st.req.GetPartitionID(),
+		st.req.GetTargetSegmentID(),
+		st.req.GetSchema(),
+		alloc,
+		st.req.GetBinlogMaxSize(),
+		st.req.GetStorageConfig().RootPath,
+		numRows,
+		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
+			return st.binlogIO.Upload(ctx, kvs)
+		}))
 	if err != nil {
 		log.Ctx(ctx).Warn("sort segment wrong, unable to init segment writer",
 			zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 		return nil, err
-	}
-	srw := &segmentRecordWriter{
-		sw:            writer,
-		binlogMaxSize: st.req.GetBinlogMaxSize(),
-		rootPath:      st.req.GetStorageConfig().GetRootPath(),
-		logID:         st.req.StartLogID,
-		maxLogID:      st.req.EndLogID,
-		binlogIO:      st.binlogIO,
-		ctx:           ctx,
-		numRows:       st.req.NumRows,
-		bm25FieldIds:  bm25FieldIds,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -362,7 +178,6 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		zap.Int64("collectionID", st.req.GetCollectionID()),
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()),
-		zap.Int64s("bm25Fields", bm25FieldIds),
 	)
 
 	deletePKs, err := st.loadDeltalogs(ctx, st.deltaLogs)
@@ -395,38 +210,13 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		}
 	}
 
-	downloadTimeCost := time.Duration(0)
-
-	rrs := make([]storage.RecordReader, len(st.insertLogs))
-
-	for i, paths := range st.insertLogs {
-		log := log.With(zap.Strings("paths", paths))
-		downloadStart := time.Now()
-		allValues, err := st.binlogIO.Download(ctx, paths)
-		if err != nil {
-			log.Warn("download wrong, fail to download insertLogs", zap.Error(err))
-			return nil, err
-		}
-		downloadTimeCost += time.Since(downloadStart)
-
-		blobs := lo.Map(allValues, func(v []byte, i int) *storage.Blob {
-			return &storage.Blob{Key: paths[i], Value: v}
-		})
-
-		rr, err := storage.NewCompositeBinlogRecordReader(st.req.Schema, storage.MakeBlobsReader(blobs))
-		if err != nil {
-			log.Warn("downloadData wrong, failed to new insert binlogs reader", zap.Error(err))
-			return nil, err
-		}
-		rrs[i] = rr
+	rr, err := storage.NewBinlogRecordReader(ctx, st.req.InsertLogs, st.req.Schema, storage.WithDownloader(st.binlogIO.Download))
+	if err != nil {
+		log.Warn("error creating insert binlog reader", zap.Error(err))
+		return nil, err
 	}
-
-	log.Info("download data success",
-		zap.Int64("numRows", numRows),
-		zap.Duration("download binlogs elapse", downloadTimeCost),
-	)
-
-	numValidRows, err := storage.Sort(st.req.Schema, rrs, writer.GetPkID(), srw, isValueValid)
+	rrs := []storage.RecordReader{rr}
+	numValidRows, err := storage.Sort(st.req.Schema, rrs, srw, isValueValid)
 	if err != nil {
 		log.Warn("sort failed", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 		return nil, err
@@ -435,17 +225,18 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		return nil, err
 	}
 
-	insertLogs := lo.Values(srw.binlogs)
+	binlogs, stats, bm25stats := srw.GetLogs()
+	insertLogs := lo.Values(binlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
 		return nil, err
 	}
 
-	statsLogs := []*datapb.FieldBinlog{srw.statslog}
+	statsLogs := []*datapb.FieldBinlog{stats}
 	if err := binlog.CompressFieldBinlogs(statsLogs); err != nil {
 		return nil, err
 	}
 
-	bm25StatsLogs := srw.bm25statslog
+	bm25StatsLogs := lo.Values(bm25stats)
 	if err := binlog.CompressFieldBinlogs(bm25StatsLogs); err != nil {
 		return nil, err
 	}
