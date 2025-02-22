@@ -326,4 +326,5 @@ enum StatsSubJob {
     Sort = 1;
     TextIndexJob = 2;
     BM25Job=3;
+    JsonKeyIndexJob = 4;
 }
