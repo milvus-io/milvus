@@ -24,11 +24,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 type statsTask struct {
@@ -142,7 +142,7 @@ func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta
 		log.Warn("segment is contains by l0 compaction, skip stats", zap.Int64("taskID", st.taskID),
 			zap.Int64("segmentID", st.segmentID))
 		st.SetState(indexpb.JobState_JobStateFailed, "segment is contains by l0 compaction")
-		//reset compacting
+		// reset compacting
 		meta.SetSegmentsCompacting(ctx, []UniqueID{st.segmentID}, false)
 		st.SetStartTime(time.Now())
 		return fmt.Errorf("segment is contains by l0 compaction")

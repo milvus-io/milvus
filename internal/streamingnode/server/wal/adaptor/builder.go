@@ -7,7 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 )
 
 var _ wal.OpenerBuilder = (*builderAdaptorImpl)(nil)

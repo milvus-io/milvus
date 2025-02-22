@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package milvus.proto.index;
 
-option go_package = "github.com/milvus-io/milvus/pkg/proto/workerpb";
+option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/workerpb";
 
 import "common.proto";
 import "internal.proto";

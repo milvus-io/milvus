@@ -30,7 +30,7 @@ import (
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	"golang.org/x/exp/maps"
 
-	"github.com/milvus-io/milvus/pkg/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v2/kv/predicates"
 )
 
 func TestTiKVLoad(te *testing.T) {

@@ -21,7 +21,7 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
 
 var (

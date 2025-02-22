@@ -19,7 +19,7 @@ package collector
 import (
 	"sync"
 
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type averageData struct {

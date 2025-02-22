@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/mocks/streaming/mock_walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/mock_walimpls"
 )
 
 func TestRegister(t *testing.T) {

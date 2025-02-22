@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
-	"github.com/milvus-io/milvus/pkg/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
 )
 
 var _ balancer.Picker = &serverIDPicker{}

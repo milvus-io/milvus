@@ -3,7 +3,7 @@ package walimpls
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
 // OpenOption is the option for allocating wal impls instance.

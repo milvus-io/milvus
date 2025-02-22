@@ -28,7 +28,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	mhttp "github.com/milvus-io/milvus/internal/http"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func defaultResponse(c *gin.Context) {

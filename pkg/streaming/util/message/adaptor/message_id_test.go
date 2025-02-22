@@ -6,8 +6,8 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/stretchr/testify/assert"
 
-	msgpulsar "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/pulsar"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/rmq"
+	msgpulsar "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 )
 
 func TestIDConvension(t *testing.T) {

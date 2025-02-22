@@ -5,12 +5,12 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 
-	"github.com/milvus-io/milvus/pkg/mq/common"
-	"github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/server"
-	mqpulsar "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/pulsar"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	msgpulsar "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/pulsar"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
+	mqpulsar "github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/pulsar"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	msgpulsar "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 )
 
 // MustGetMQWrapperIDFromMessage converts message.MessageID to common.MessageID

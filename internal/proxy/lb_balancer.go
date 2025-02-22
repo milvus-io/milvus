@@ -19,7 +19,7 @@ package proxy
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 )
 
 type LBBalancer interface {

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package milvus.proto.streaming;
 
-option go_package = "github.com/milvus-io/milvus/pkg/proto/streamingpb";
+option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb";
 
 import "messages.proto";
 import "milvus.proto";

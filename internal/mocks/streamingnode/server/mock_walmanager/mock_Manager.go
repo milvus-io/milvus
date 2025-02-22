@@ -5,7 +5,7 @@ package mock_walmanager
 import (
 	context "context"
 
-	types "github.com/milvus-io/milvus/pkg/streaming/util/types"
+	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	mock "github.com/stretchr/testify/mock"
 
 	wal "github.com/milvus-io/milvus/internal/streamingnode/server/wal"

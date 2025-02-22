@@ -27,10 +27,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/common"
-	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/rmq"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	mqcommon "github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
 func Test_NewMqMsgStream(t *testing.T) {
