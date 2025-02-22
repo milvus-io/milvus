@@ -109,7 +109,7 @@ func (jm *statsJobManager) triggerSortStatsTask() {
 	}))
 
 	for _, segment := range visibleSegments {
-		if jm.scheduler.GetTaskCount() > Params.DataCoordCfg.StatsTaskTriggerCount.GetAsInt() {
+		if jm.scheduler.pendingTasks.TaskCount() > Params.DataCoordCfg.StatsTaskTriggerCount.GetAsInt() {
 			break
 		}
 		jm.createSortStatsTaskForSegment(segment)
@@ -226,7 +226,7 @@ func (jm *statsJobManager) cleanupStatsTasksLoop() {
 			taskIDs := jm.mt.statsTaskMeta.CanCleanedTasks()
 			for _, taskID := range taskIDs {
 				// waiting for queue processing tasks to complete
-				if jm.scheduler.getTask(taskID) == nil {
+				if !jm.scheduler.exist(taskID) {
 					if err := jm.mt.statsTaskMeta.DropStatsTask(taskID); err != nil {
 						// ignore err, if remove failed, wait next GC
 						log.Warn("clean up stats task failed", zap.Int64("taskID", taskID), zap.Error(err))
