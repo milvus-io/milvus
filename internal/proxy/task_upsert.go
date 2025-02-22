@@ -436,6 +436,8 @@ func (it *upsertTask) insertExecute(ctx context.Context, msgPack *msgstream.MsgP
 		return err
 	}
 	it.upsertMsg.InsertMsg.CollectionID = collID
+	it.upsertMsg.InsertMsg.BeginTimestamp = it.BeginTs()
+	it.upsertMsg.InsertMsg.EndTimestamp = it.EndTs()
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collID))
 	getCacheDur := tr.RecordSpan()

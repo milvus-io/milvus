@@ -287,6 +287,8 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		return err
 	}
 	it.insertMsg.CollectionID = collID
+	it.insertMsg.BeginTimestamp = it.BeginTs()
+	it.insertMsg.EndTimestamp = it.EndTs()
 
 	getCacheDur := tr.RecordSpan()
 	stream, err := it.chMgr.getOrCreateDmlStream(ctx, collID)
