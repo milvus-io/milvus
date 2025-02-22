@@ -100,7 +100,7 @@ func NewPayloadWriter(colType schemapb.DataType, options ...PayloadWriterOptions
 	} else {
 		w.dim = NewNullableInt(1)
 	}
-	w.arrowType = milvusDataTypeToArrowType(colType, *w.dim.Value)
+	w.arrowType = MilvusDataTypeToArrowType(colType, *w.dim.Value)
 	w.builder = array.NewBuilder(memory.DefaultAllocator, w.arrowType)
 	return w, nil
 }
@@ -763,7 +763,7 @@ func (w *NativePayloadWriter) Close() {
 	w.ReleasePayloadWriter()
 }
 
-func milvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataType {
+func MilvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataType {
 	switch dataType {
 	case schemapb.DataType_Bool:
 		return &arrow.BooleanType{}

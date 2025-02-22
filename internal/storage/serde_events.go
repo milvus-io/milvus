@@ -232,6 +232,14 @@ func ValueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema
 		for _, f := range fieldSchema {
 			j := f.FieldID
 			dt := f.DataType
+			if r.Column(j) == nil {
+				if f.GetDefaultValue() != nil {
+					m[j] = getDefaultValue(f)
+				} else {
+					m[j] = nil
+				}
+				continue
+			}
 			if r.Column(j).IsNull(i) {
 				m[j] = nil
 			} else {
@@ -428,7 +436,7 @@ func ValueSerializer(v []*Value, fieldSchema []*schemapb.FieldSchema) (Record, e
 		}
 		field2Col[field.FieldID] = i
 	}
-	return newSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(len(v))), field2Col), nil
+	return NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(len(v))), field2Col), nil
 }
 
 func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, segmentID UniqueID,
@@ -566,7 +574,7 @@ func newDeltalogSerializeWriter(eventWriter *DeltalogStreamWriter, batchSize int
 		field2Col := map[FieldID]int{
 			0: 0,
 		}
-		return newSimpleArrowRecord(array.NewRecord(arrow.NewSchema(field, nil), arr, int64(len(v))), field2Col), nil
+		return NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(field, nil), arr, int64(len(v))), field2Col), nil
 	}, batchSize), nil
 }
 
@@ -815,7 +823,7 @@ func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, ba
 			common.RowIDField:     0,
 			common.TimeStampField: 1,
 		}
-		return newSimpleArrowRecord(array.NewRecord(arrowSchema, arr, int64(len(v))), field2Col), nil
+		return NewSimpleArrowRecord(array.NewRecord(arrowSchema, arr, int64(len(v))), field2Col), nil
 	}, batchSize), nil
 }
 

@@ -71,6 +71,26 @@ func TestBinlogDeserializeReader(t *testing.T) {
 		err = reader.Next()
 		assert.Equal(t, io.EOF, err)
 	})
+
+	t.Run("test deserialize with added field", func(t *testing.T) {
+		size := 3
+		blobs, err := generateTestData(size)
+		assert.NoError(t, err)
+		reader, err := NewBinlogDeserializeReader(generateTestAddedFieldSchema(), MakeBlobsReader(blobs))
+		assert.NoError(t, err)
+		defer reader.Close()
+
+		for i := 1; i <= size; i++ {
+			err = reader.Next()
+			assert.NoError(t, err)
+
+			value := reader.Value()
+			assertTestAddedFieldData(t, i, value)
+		}
+
+		err = reader.Next()
+		assert.Equal(t, io.EOF, err)
+	})
 }
 
 func TestBinlogStreamWriter(t *testing.T) {
@@ -94,7 +114,7 @@ func TestBinlogStreamWriter(t *testing.T) {
 			[]arrow.Array{arr},
 			int64(size),
 		)
-		r := newSimpleArrowRecord(ar, map[FieldID]int{1: 0})
+		r := NewSimpleArrowRecord(ar, map[FieldID]int{1: 0})
 		defer r.Release()
 		err = rw.Write(r)
 		assert.NoError(t, err)

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -334,6 +335,82 @@ func (s *MixCompactionTaskSuite) TestCompactSortedSegment() {
 	s.Empty(segment.Deltalogs)
 }
 
+func (s *MixCompactionTaskSuite) TestCompactSortedSegmentLackBinlog() {
+	paramtable.Get().Save("dataNode.compaction.useMergeSort", "true")
+	defer paramtable.Get().Reset("dataNode.compaction.useMergeSort")
+	segments := []int64{1001, 1002, 1003}
+	alloc := allocator.NewLocalAllocator(100, math.MaxInt64)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
+	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10*time.Second), 0)
+	addedFieldSet := typeutil.NewSet[int64]()
+	for _, f := range s.meta.GetSchema().GetFields() {
+		if f.FieldID == common.RowIDField || f.FieldID == common.TimeStampField || f.IsPrimaryKey || typeutil.IsVectorType(f.DataType) {
+			continue
+		}
+		addedFieldSet.Insert(f.FieldID)
+	}
+
+	for _, segID := range segments {
+		s.initMultiRowsSegBuffer(segID, 100, 3)
+		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+		s.Require().NoError(err)
+
+		for fid, binlog := range fBinlogs {
+			if addedFieldSet.Contain(fid) {
+				if rand.Intn(2) == 0 {
+					continue
+				}
+				for _, k := range binlog.GetBinlogs() {
+					delete(kvs, k.LogPath)
+				}
+				delete(fBinlogs, fid)
+			}
+		}
+
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+			left, right := lo.Difference(keys, lo.Keys(kvs))
+			return len(left) == 0 && len(right) == 0
+		})).Return(lo.Values(kvs), nil).Once()
+
+		blob, err := getInt64DeltaBlobs(
+			segID,
+			[]int64{segID, segID + 3, segID + 6},
+			[]uint64{deleteTs, deleteTs, deleteTs},
+		)
+		s.Require().NoError(err)
+		deltaPath := fmt.Sprintf("deltalog/%d", segID)
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{deltaPath}).
+			Return([][]byte{blob.GetValue()}, nil).Once()
+
+		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+			SegmentID:    segID,
+			FieldBinlogs: lo.Values(fBinlogs),
+			IsSorted:     true,
+			Deltalogs: []*datapb.FieldBinlog{
+				{Binlogs: []*datapb.Binlog{{LogPath: deltaPath}}},
+			},
+		})
+
+	}
+
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.NotNil(result)
+
+	s.Equal(s.task.plan.GetPlanID(), result.GetPlanID())
+	s.Equal(1, len(result.GetSegments()))
+	s.True(result.GetSegments()[0].GetIsSorted())
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(19531, segment.GetSegmentID())
+	s.EqualValues(291, segment.GetNumOfRows())
+	s.NotEmpty(segment.InsertLogs)
+
+	s.NotEmpty(segment.Field2StatslogPaths)
+	s.Empty(segment.Deltalogs)
+}
+
 func (s *MixCompactionTaskSuite) TestSplitMergeEntityExpired() {
 	s.initSegBuffer(1, 3)
 	collTTL := 864000 // 10 days
@@ -373,6 +450,104 @@ func (s *MixCompactionTaskSuite) TestSplitMergeEntityExpired() {
 	s.Empty(compactionSegments[0].GetDeltalogs())
 	s.Empty(compactionSegments[0].GetInsertLogs())
 	s.Empty(compactionSegments[0].GetField2StatslogPaths())
+}
+
+func (s *MixCompactionTaskSuite) TestMergeNoExpirationLackBinlog() {
+	s.initSegBuffer(1, 4)
+	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10*time.Second), 0)
+	tests := []struct {
+		description string
+		deletions   map[int64]uint64
+		expectedRes int
+		leftNumRows int
+	}{
+		{"no deletion", nil, 1, 1},
+		{"mismatch deletion", map[int64]uint64{int64(1): deleteTs}, 1, 1},
+		{"deleted pk=4", map[int64]uint64{int64(4): deleteTs}, 1, 0},
+	}
+
+	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
+	addedFieldSet := typeutil.NewSet[int64]()
+	for _, f := range s.meta.GetSchema().GetFields() {
+		if f.FieldID == common.RowIDField || f.FieldID == common.TimeStampField || f.IsPrimaryKey || typeutil.IsVectorType(f.DataType) {
+			continue
+		}
+		addedFieldSet.Insert(f.FieldID)
+	}
+
+	kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+	for fid, binlog := range fBinlogs {
+		if addedFieldSet.Contain(fid) {
+			if rand.Intn(2) == 0 {
+				continue
+			}
+			for _, k := range binlog.GetBinlogs() {
+				delete(kvs, k.LogPath)
+			}
+			delete(fBinlogs, fid)
+		}
+	}
+	s.Require().NoError(err)
+
+	for _, test := range tests {
+		s.Run(test.description, func() {
+			if len(test.deletions) > 0 {
+				blob, err := getInt64DeltaBlobs(
+					s.segWriter.segmentID,
+					lo.Keys(test.deletions),
+					lo.Values(test.deletions),
+				)
+				s.Require().NoError(err)
+				s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{"foo"}).
+					Return([][]byte{blob.GetValue()}, nil).Once()
+				s.task.plan.SegmentBinlogs[0].Deltalogs = []*datapb.FieldBinlog{
+					{
+						Binlogs: []*datapb.Binlog{
+							{
+								LogPath: "foo",
+							},
+						},
+					},
+				}
+			}
+
+			insertPaths := lo.Keys(kvs)
+			insertBytes := func() [][]byte {
+				res := make([][]byte, 0, len(insertPaths))
+				for _, path := range insertPaths {
+					res = append(res, kvs[path])
+				}
+				return res
+			}()
+			s.mockBinlogIO.EXPECT().Download(mock.Anything, insertPaths).RunAndReturn(
+				func(ctx context.Context, paths []string) ([][]byte, error) {
+					s.Require().Equal(len(paths), len(kvs))
+					return insertBytes, nil
+				})
+			fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(insertPaths))
+			for _, k := range insertPaths {
+				fieldBinlogs = append(fieldBinlogs, &datapb.FieldBinlog{
+					Binlogs: []*datapb.Binlog{
+						{
+							LogPath: k,
+						},
+					},
+				})
+			}
+			s.task.plan.SegmentBinlogs[0].FieldBinlogs = fieldBinlogs
+
+			s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+			s.task.collectionID = CollectionID
+			s.task.partitionID = PartitionID
+			s.task.maxRows = 1000
+
+			res, err := s.task.mergeSplit(s.task.ctx)
+			s.NoError(err)
+			s.EqualValues(test.expectedRes, len(res))
+			s.EqualValues(test.leftNumRows, res[0].GetNumOfRows())
+		})
+	}
 }
 
 func (s *MixCompactionTaskSuite) TestMergeNoExpiration() {
@@ -643,7 +818,16 @@ func getRow(magic int64) map[int64]interface{} {
 				IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
 			},
 		},
-		JSONField: []byte(`{"batch":ok}`),
+		JSONField:                    []byte(`{"batch":ok}`),
+		BoolFieldWithDefaultValue:    nil,
+		Int8FieldWithDefaultValue:    nil,
+		Int16FieldWithDefaultValue:   nil,
+		Int32FieldWithDefaultValue:   nil,
+		Int64FieldWithDefaultValue:   nil,
+		FloatFieldWithDefaultValue:   nil,
+		DoubleFieldWithDefaultValue:  nil,
+		StringFieldWithDefaultValue:  nil,
+		VarCharFieldWithDefaultValue: nil,
 	}
 }
 
@@ -701,25 +885,34 @@ func (s *MixCompactionTaskSuite) initSegBuffer(size int, seed int64) {
 }
 
 const (
-	CollectionID           = 1
-	PartitionID            = 1
-	SegmentID              = 1
-	BoolField              = 100
-	Int8Field              = 101
-	Int16Field             = 102
-	Int32Field             = 103
-	Int64Field             = 104
-	FloatField             = 105
-	DoubleField            = 106
-	StringField            = 107
-	BinaryVectorField      = 108
-	FloatVectorField       = 109
-	ArrayField             = 110
-	JSONField              = 111
-	Float16VectorField     = 112
-	BFloat16VectorField    = 113
-	SparseFloatVectorField = 114
-	VarCharField           = 115
+	CollectionID                 = 1
+	PartitionID                  = 1
+	SegmentID                    = 1
+	BoolField                    = 100
+	Int8Field                    = 101
+	Int16Field                   = 102
+	Int32Field                   = 103
+	Int64Field                   = 104
+	FloatField                   = 105
+	DoubleField                  = 106
+	StringField                  = 107
+	BinaryVectorField            = 108
+	FloatVectorField             = 109
+	ArrayField                   = 110
+	JSONField                    = 111
+	Float16VectorField           = 112
+	BFloat16VectorField          = 113
+	SparseFloatVectorField       = 114
+	VarCharField                 = 115
+	BoolFieldWithDefaultValue    = 116
+	Int8FieldWithDefaultValue    = 117
+	Int16FieldWithDefaultValue   = 118
+	Int32FieldWithDefaultValue   = 119
+	Int64FieldWithDefaultValue   = 120
+	FloatFieldWithDefaultValue   = 121
+	DoubleFieldWithDefaultValue  = 122
+	StringFieldWithDefaultValue  = 123
+	VarCharFieldWithDefaultValue = 124
 )
 
 func getInt64DeltaBlobs(segID int64, pks []int64, tss []uint64) (*storage.Blob, error) {
@@ -825,6 +1018,103 @@ func genTestCollectionMeta() *etcdpb.CollectionMeta {
 					Name:        "field_json",
 					Description: "json",
 					DataType:    schemapb.DataType_JSON,
+				},
+				{
+					FieldID:  BoolFieldWithDefaultValue,
+					Name:     "field_bool_with_default_value",
+					DataType: schemapb.DataType_Bool,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_BoolData{
+							BoolData: true,
+						},
+					},
+				},
+				{
+					FieldID:  Int8FieldWithDefaultValue,
+					Name:     "field_int8_with_default_value",
+					DataType: schemapb.DataType_Int8,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_IntData{
+							IntData: 10,
+						},
+					},
+				},
+				{
+					FieldID:  Int16FieldWithDefaultValue,
+					Name:     "field_int16_with_default_value",
+					DataType: schemapb.DataType_Int16,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_IntData{
+							IntData: 10,
+						},
+					},
+				},
+				{
+					FieldID:  Int32FieldWithDefaultValue,
+					Name:     "field_int32_with_default_value",
+					DataType: schemapb.DataType_Int32,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_IntData{
+							IntData: 10,
+						},
+					},
+				},
+				{
+					FieldID:      Int64FieldWithDefaultValue,
+					Name:         "field_int64_with_default_value",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_LongData{
+							LongData: 10,
+						},
+					},
+				},
+				{
+					FieldID:  FloatFieldWithDefaultValue,
+					Name:     "field_float_with_default_value",
+					DataType: schemapb.DataType_Float,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_FloatData{
+							FloatData: 10,
+						},
+					},
+				},
+				{
+					FieldID:  DoubleFieldWithDefaultValue,
+					Name:     "field_double_with_default_value",
+					DataType: schemapb.DataType_Double,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_DoubleData{
+							DoubleData: 10,
+						},
+					},
+				},
+				{
+					FieldID:  StringFieldWithDefaultValue,
+					Name:     "field_string_with_default_value",
+					DataType: schemapb.DataType_String,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_StringData{
+							StringData: "a",
+						},
+					},
+				},
+				{
+					FieldID:  VarCharFieldWithDefaultValue,
+					Name:     "field_varchar_with_default_value",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxLengthKey,
+							Value: "128",
+						},
+					},
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_StringData{
+							StringData: "a",
+						},
+					},
 				},
 				{
 					FieldID:     BinaryVectorField,

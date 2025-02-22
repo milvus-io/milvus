@@ -1424,3 +1424,27 @@ func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb
 	}
 	return false
 }
+
+func getDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
+	switch fieldSchema.DataType {
+	case schemapb.DataType_Bool:
+		return fieldSchema.GetDefaultValue().GetBoolData()
+	case schemapb.DataType_Int8:
+		return int8(fieldSchema.GetDefaultValue().GetIntData())
+	case schemapb.DataType_Int16:
+		return int16(fieldSchema.GetDefaultValue().GetIntData())
+	case schemapb.DataType_Int32:
+		return fieldSchema.GetDefaultValue().GetIntData()
+	case schemapb.DataType_Int64:
+		return fieldSchema.GetDefaultValue().GetLongData()
+	case schemapb.DataType_Float:
+		return fieldSchema.GetDefaultValue().GetFloatData()
+	case schemapb.DataType_Double:
+		return fieldSchema.GetDefaultValue().GetDoubleData()
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		return fieldSchema.GetDefaultValue().GetStringData()
+	default:
+		// won't happen
+		panic(fmt.Sprintf("undefined data type:%s", fieldSchema.DataType.String()))
+	}
+}
