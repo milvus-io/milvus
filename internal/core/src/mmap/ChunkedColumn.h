@@ -150,9 +150,17 @@ class ChunkedColumnBase : public ColumnBase {
     }
 
     virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    StringViews(int64_t chunk_id) const {
+    StringViews(int64_t chunk_id,
+                std::optional<std::pair<int64_t, int64_t>> offset_len) const {
         PanicInfo(ErrorCode::Unsupported,
                   "StringViews only supported for VariableColumn");
+    }
+
+    virtual std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    ArrayViews(int64_t chunk_id,
+               std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+        PanicInfo(ErrorCode::Unsupported,
+                  "ArrayViews only supported for ArrayChunkedColumn");
     }
 
     virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
@@ -324,9 +332,11 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
     }
 
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    StringViews(int64_t chunk_id) const override {
+    StringViews(int64_t chunk_id,
+                std::optional<std::pair<int64_t, int64_t>> offset_len =
+                    std::nullopt) const override {
         return std::dynamic_pointer_cast<StringChunk>(chunks_[chunk_id])
-            ->StringViews();
+            ->StringViews(offset_len);
     }
 
     std::shared_ptr<Chunk>
@@ -397,7 +407,8 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
 
     SpanBase
     Span(int64_t chunk_id) const override {
-        return std::dynamic_pointer_cast<ArrayChunk>(chunks_[chunk_id])->Span();
+        PanicInfo(ErrorCode::NotImplemented,
+                  "span() interface is not implemented for arr chunk column");
     }
 
     ArrayView
@@ -413,6 +424,14 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
         return std::dynamic_pointer_cast<ArrayChunk>(chunks_[chunk_id])
             ->View(offset_in_chunk)
             .output_data();
+    }
+
+    std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    ArrayViews(int64_t chunk_id,
+               std::optional<std::pair<int64_t, int64_t>> offset_len =
+                   std::nullopt) const override {
+        return std::dynamic_pointer_cast<ArrayChunk>(chunks_[chunk_id])
+            ->Views(offset_len);
     }
 };
 }  // namespace milvus
