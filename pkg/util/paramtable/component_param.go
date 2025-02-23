@@ -3524,7 +3524,7 @@ type dataCoordConfig struct {
 	TaskCheckInterval     ParamItem `refreshable:"true"`
 	StatsTaskTriggerCount ParamItem `refreshable:"true"`
 
-	RequestTimeoutInterval ParamItem `refreshable:"true"`
+	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -4418,15 +4418,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.StatsTaskTriggerCount.Init(base.mgr)
 
-	p.RequestTimeoutInterval = ParamItem{
-		Key:          "dataCoord.requestTimeoutInterval",
+	p.RequestTimeoutSeconds = ParamItem{
+		Key:          "dataCoord.requestTimeoutSeconds",
 		Version:      "2.5.5",
 		Doc:          "request timeout interval",
 		DefaultValue: "600",
 		PanicIfEmpty: false,
 		Export:       false,
 	}
-	p.RequestTimeoutInterval.Init(base.mgr)
+	p.RequestTimeoutSeconds.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
