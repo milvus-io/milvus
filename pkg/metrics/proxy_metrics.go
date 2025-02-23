@@ -427,6 +427,15 @@ var (
 			Help:      "the number of non-zeros in each sparse search task",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, collectionName})
+
+	// ProxyQueueTaskNum records task number of queue in Proxy.
+	ProxyQueueTaskNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "queue_task_num",
+			Help:      "",
+		}, []string{nodeIDLabelName, queueTypeLabelName, taskStateLabel})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -490,6 +499,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyRecallSearchCount)
 
 	registry.MustRegister(ProxySearchSparseNumNonZeros)
+	registry.MustRegister(ProxyQueueTaskNum)
 
 	RegisterStreamingServiceClient(registry)
 }
