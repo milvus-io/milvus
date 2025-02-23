@@ -234,7 +234,7 @@ func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClien
 	st.req.InsertLogs = segment.GetBinlogs()
 	st.req.DeltaLogs = segment.GetDeltalogs()
 
-	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutInterval.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
 		ClusterID: st.req.GetClusterID(),
@@ -257,7 +257,7 @@ func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClien
 }
 
 func (st *statsTask) QueryResult(ctx context.Context, client types.IndexNodeClient) {
-	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutInterval.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
 		ClusterID: st.req.GetClusterID(),
@@ -293,7 +293,7 @@ func (st *statsTask) QueryResult(ctx context.Context, client types.IndexNodeClie
 }
 
 func (st *statsTask) DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool {
-	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutInterval.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
 		ClusterID: st.req.GetClusterID(),

@@ -3482,8 +3482,16 @@ type dataCoordConfig struct {
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
 
+<<<<<<< HEAD
 	EnableStatsTask   ParamItem `refreshable:"true"`
 	TaskCheckInterval ParamItem `refreshable:"true"`
+=======
+	EnableStatsTask       ParamItem `refreshable:"true"`
+	TaskCheckInterval     ParamItem `refreshable:"true"`
+	StatsTaskTriggerCount ParamItem `refreshable:"true"`
+
+	RequestTimeoutInterval ParamItem `refreshable:"true"`
+>>>>>>> 693c659cdd (Export request timeout interval in config)
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -4367,6 +4375,26 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.TaskCheckInterval.Init(base.mgr)
+
+	p.StatsTaskTriggerCount = ParamItem{
+		Key:          "dataCoord.statsTaskTriggerCount",
+		Version:      "2.5.5",
+		Doc:          "stats task count per trigger",
+		DefaultValue: "100",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.StatsTaskTriggerCount.Init(base.mgr)
+
+	p.RequestTimeoutInterval = ParamItem{
+		Key:          "dataCoord.requestTimeoutInterval",
+		Version:      "2.5.5",
+		Doc:          "request timeout interval",
+		DefaultValue: "600",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.RequestTimeoutInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
