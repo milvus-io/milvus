@@ -23,7 +23,7 @@ func teardownTest(t *testing.T) func(t *testing.T) {
 		log.Info("teardown func drop all non-default db")
 		// drop all db
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-		mc := createDefaultMilvusClient(ctx, t)
+		mc := hp.CreateDefaultMilvusClient(ctx, t)
 		dbs, _ := mc.ListDatabase(ctx, client.NewListDatabaseOption())
 		for _, db := range dbs {
 			if db != common.DefaultDb {
@@ -43,7 +43,7 @@ func TestDatabase(t *testing.T) {
 	defer teardownSuite(t)
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	clientDefault := createMilvusClient(ctx, t, &defaultCfg)
+	clientDefault := hp.CreateMilvusClient(ctx, t, hp.GetDefaultClientConfig())
 
 	// create db1
 	dbName1 := common.GenRandomString("db1", 4)
@@ -56,7 +56,7 @@ func TestDatabase(t *testing.T) {
 	require.Containsf(t, dbs, dbName1, fmt.Sprintf("%s db not in dbs: %v", dbName1, dbs))
 
 	// new client with db1
-	clientDB1 := createMilvusClient(ctx, t, &client.ClientConfig{Address: *addr, DBName: dbName1})
+	clientDB1 := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), DBName: dbName1})
 
 	// create collections -> verify collections contains
 	_, db1Col1 := hp.CollPrepare.CreateCollection(ctx, t, clientDB1, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -122,7 +122,7 @@ func TestCreateDb(t *testing.T) {
 
 	// create db
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	dbName := common.GenRandomString("db", 4)
 	err := mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName))
 	common.CheckErr(t, err, true)
@@ -147,7 +147,7 @@ func TestDropDb(t *testing.T) {
 	// create collection in default db
 	listCollOpt := client.NewListCollectionOption()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	_, defCol := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	collections, _ := mc.ListCollections(ctx, listCollOpt)
 	require.Contains(t, collections, defCol.CollectionName)
@@ -194,7 +194,7 @@ func TestUsingDb(t *testing.T) {
 	// create collection in default db
 	listCollOpt := client.NewListCollectionOption()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	_, col := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	// collName := createDefaultCollection(ctx, t, mc, true, common.DefaultShards)
@@ -227,12 +227,12 @@ func TestClientWithDb(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 
 	// connect with not existed db
-	_, err := base.NewMilvusClient(ctx, &client.ClientConfig{Address: *addr, DBName: "dbName"})
+	_, err := base.NewMilvusClient(ctx, &client.ClientConfig{Address: hp.GetAddr(), DBName: "dbName"})
 	common.CheckErr(t, err, false, "database not found")
 
 	// connect default db -> create a collection in default db
 	mcDefault, errDefault := base.NewMilvusClient(ctx, &client.ClientConfig{
-		Address: *addr,
+		Address: hp.GetAddr(),
 		// DBName:  common.DefaultDb,
 	})
 	common.CheckErr(t, errDefault, true)
@@ -248,7 +248,7 @@ func TestClientWithDb(t *testing.T) {
 
 	// and connect with db
 	mcDb, err := base.NewMilvusClient(ctx, &client.ClientConfig{
-		Address: *addr,
+		Address: hp.GetAddr(),
 		DBName:  dbName,
 	})
 	common.CheckErr(t, err, true)
@@ -265,7 +265,7 @@ func TestClientWithDb(t *testing.T) {
 
 	// connect empty db (actually default db)
 	mcEmpty, err := base.NewMilvusClient(ctx, &client.ClientConfig{
-		Address: *addr,
+		Address: hp.GetAddr(),
 		DBName:  "",
 	})
 	common.CheckErr(t, err, true)
@@ -280,7 +280,7 @@ func TestDatabasePropertiesCollectionsNum(t *testing.T) {
 
 	// create db
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	dbName := common.GenRandomString("db", 4)
 	err := mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName))
 	common.CheckErr(t, err, true)
@@ -338,7 +338,7 @@ func TestDatabasePropertiesRgReplicas(t *testing.T) {
 
 	// create db
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	dbName := common.GenRandomString("db", 4)
 	err := mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName))
 	common.CheckErr(t, err, true)
@@ -373,7 +373,7 @@ func TestDatabasePropertyDeny(t *testing.T) {
 
 	// create db and use db
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	dbName := common.GenRandomString("db", 4)
 	err := mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName))
 	common.CheckErr(t, err, true)
@@ -411,7 +411,7 @@ func TestDatabaseFakeProperties(t *testing.T) {
 
 	// create db
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	dbName := common.GenRandomString("db", 4)
 	err := mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName))
 	common.CheckErr(t, err, true)
