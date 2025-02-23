@@ -322,6 +322,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       segment,
                       expr->column_.field_id_,
                       expr->column_.nested_path_,
+                      FromValCase(expr->val_.val_case()),
                       active_count,
                       batch_size),
           expr_(expr) {
@@ -382,7 +383,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     CanUseIndexForArray();
 
     bool
-    CanUseIndexForJson();
+    CanUseIndexForJson(DataType val_type);
 
     VectorPtr
     ExecTextMatch();

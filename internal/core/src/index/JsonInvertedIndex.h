@@ -12,6 +12,7 @@
 #pragma once
 #include "common/FieldDataInterface.h"
 #include "index/InvertedIndexTantivy.h"
+#include "index/ScalarIndex.h"
 #include "storage/FileManager.h"
 #include "boost/filesystem.hpp"
 #include "tantivy-binding.h"
@@ -24,7 +25,7 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     JsonInvertedIndex(const proto::schema::DataType cast_type,
                       const std::string& nested_path,
                       const storage::FileManagerContext& ctx)
-        : nested_path_(nested_path) {
+        : nested_path_(nested_path), cast_type_(cast_type) {
         this->schema_ = ctx.fieldDataMeta.field_schema;
         this->mem_file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(ctx);
@@ -61,7 +62,14 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         this->wrapper_->create_reader();
     }
 
+    enum DataType
+    JsonCastType() const override {
+        return static_cast<enum DataType>(cast_type_);
+    }
+
  private:
     std::string nested_path_;
+    proto::schema::DataType cast_type_;
 };
+
 }  // namespace milvus::index
