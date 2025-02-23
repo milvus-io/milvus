@@ -224,6 +224,12 @@ func (s *taskScheduler) enqueue(task Task) {
 	}
 }
 
+func (s *taskScheduler) GetTaskCount() int {
+	s.RLock()
+	defer s.RUnlock()
+	return len(s.tasks)
+}
+
 func (s *taskScheduler) AbortTask(taskID int64) {
 	log.Info("task scheduler receive abort task request", zap.Int64("taskID", taskID))
 	s.RLock()
