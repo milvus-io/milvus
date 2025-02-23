@@ -228,7 +228,7 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 }
 
 func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeClient, meta *meta) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
 		ClusterID: at.req.GetClusterID(),
@@ -257,7 +257,7 @@ func (at *analyzeTask) setResult(result *workerpb.AnalyzeResult) {
 }
 
 func (at *analyzeTask) QueryResult(ctx context.Context, client types.IndexNodeClient) {
-	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
@@ -297,7 +297,7 @@ func (at *analyzeTask) QueryResult(ctx context.Context, client types.IndexNodeCl
 }
 
 func (at *analyzeTask) DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
