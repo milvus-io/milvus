@@ -379,6 +379,14 @@ func (f *Field) WithMaxCapacity(maxCap int64) *Field {
 	return f
 }
 
+func (f *Field) WithEnableMatch(enable bool) *Field {
+	if f.TypeParams == nil {
+		f.TypeParams = make(map[string]string)
+	}
+	f.TypeParams["enable_match"] = strconv.FormatBool(enable)
+	return f
+}
+
 func (f *Field) WithEnableAnalyzer(enable bool) *Field {
 	if f.TypeParams == nil {
 		f.TypeParams = make(map[string]string)
