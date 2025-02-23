@@ -343,6 +343,9 @@ func (s *taskScheduler) checkProcessingTasks() {
 		taskID := taskID
 		go func(taskID int64) {
 			defer wg.Done()
+			defer func() {
+				<-sem
+			}()
 			task := s.getRunningTask(taskID)
 			s.taskLock.Lock(taskID)
 			suc := s.checkProcessingTask(task)
@@ -350,7 +353,6 @@ func (s *taskScheduler) checkProcessingTasks() {
 			if suc {
 				s.removeRunningTask(taskID)
 			}
-			<-sem
 		}(taskID)
 	}
 	wg.Wait()
@@ -398,6 +400,9 @@ func (s *taskScheduler) run() {
 		sem <- struct{}{}
 		go func(task Task, nodeID int64) {
 			defer wg.Done()
+			defer func() {
+				<-sem
+			}()
 
 			s.taskLock.Lock(task.GetTaskID())
 			s.process(task, nodeID)
@@ -413,7 +418,6 @@ func (s *taskScheduler) run() {
 				s.runningTasks[task.GetTaskID()] = task
 				s.runningQueueLock.Unlock()
 			}
-			<-sem
 		}(task, nodeID)
 	}
 	wg.Wait()
