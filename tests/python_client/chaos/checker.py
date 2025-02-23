@@ -1394,7 +1394,7 @@ class TextMatchChecker(Checker):
         self.term_expr = f"TEXT_MATCH({self.text_field_name}, '{key_word}')"
 
     @trace()
-    def query(self):
+    def text_match(self):
         res, result = self.c_wrap.query(self.term_expr, timeout=query_timeout,
                                         check_task=CheckTasks.check_query_not_empty)
         return res, result
@@ -1403,7 +1403,7 @@ class TextMatchChecker(Checker):
     def run_task(self):
         key_word = self.word_freq.most_common(1)[0][0]
         self.term_expr = f"TEXT_MATCH({self.text_field_name}, '{key_word}')"
-        res, result = self.query()
+        res, result = self.text_match()
         return res, result
 
     def keep_running(self):
