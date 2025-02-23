@@ -3,7 +3,7 @@ package wal
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
 // OpenerBuilder is the interface for build wal opener.

@@ -23,10 +23,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/common"
-	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
-	server2 "github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/server"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	mqcommon "github.com/milvus-io/milvus/pkg/v2/mq/common"
+	server2 "github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 var rmqPath = "/tmp/rocksmq_client"

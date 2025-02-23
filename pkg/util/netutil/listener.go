@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
 // NewListener creates a new listener that listens on the specified network and IP address.

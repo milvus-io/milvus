@@ -3,7 +3,7 @@ package message
 import (
 	"strconv"
 
-	"github.com/milvus-io/milvus/pkg/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 )
 
 type MessageType messagespb.MessageType

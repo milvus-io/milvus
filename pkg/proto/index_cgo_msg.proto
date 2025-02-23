@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 package milvus.proto.indexcgo;
-option go_package="github.com/milvus-io/milvus/pkg/proto/indexcgopb";
+option go_package="github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb";
 
 import "common.proto";
 import "schema.proto";

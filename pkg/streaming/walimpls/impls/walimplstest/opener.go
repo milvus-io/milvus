@@ -6,8 +6,8 @@ package walimplstest
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
 )
 
 var _ walimpls.OpenerImpls = &opener{}

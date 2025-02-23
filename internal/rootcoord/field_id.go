@@ -16,7 +16,7 @@
 
 package rootcoord
 
-import "github.com/milvus-io/milvus/pkg/common"
+import "github.com/milvus-io/milvus/pkg/v2/common"
 
 // system field id:
 // 0: unique row id

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
@@ -15,31 +14,13 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
-
-type segmentWriterWrapper struct {
-	*MultiSegmentWriter
-}
-
-var _ storage.RecordWriter = (*segmentWriterWrapper)(nil)
-
-func (w *segmentWriterWrapper) GetWrittenUncompressed() uint64 {
-	return 0
-}
-
-func (w *segmentWriterWrapper) Write(record storage.Record) error {
-	return w.MultiSegmentWriter.WriteRecord(record)
-}
-
-func (w *segmentWriterWrapper) Close() error {
-	return nil
-}
 
 func mergeSortMultipleSegments(ctx context.Context,
 	plan *datapb.CompactionPlan,
@@ -61,8 +42,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegmentIDs().GetBegin(), plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter := NewMultiSegmentWriter(binlogIO, compAlloc, plan, maxRows, partitionID, collectionID, bm25FieldIds)
-	writer := &segmentWriterWrapper{MultiSegmentWriter: mWriter}
+	writer := NewMultiSegmentWriter(binlogIO, compAlloc, plan, maxRows, partitionID, collectionID, bm25FieldIds)
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
 	if err != nil {
@@ -126,16 +106,16 @@ func mergeSortMultipleSegments(ctx context.Context,
 		log.Warn("compaction only support int64 and varchar pk field")
 	}
 
-	if _, err = storage.MergeSort(plan.GetSchema(), segmentReaders, pkField.FieldID, writer, predicate); err != nil {
+	if _, err = storage.MergeSort(plan.GetSchema(), segmentReaders, writer, predicate); err != nil {
 		return nil, err
 	}
 
-	res, err := mWriter.Finish()
-	if err != nil {
+	if err := writer.Close(); err != nil {
 		log.Warn("compact wrong, failed to finish writer", zap.Error(err))
 		return nil, err
 	}
 
+	res := writer.GetCompactionSegments()
 	for _, seg := range res {
 		seg.IsSorted = true
 	}
@@ -156,7 +136,6 @@ func mergeSortMultipleSegments(ctx context.Context,
 
 	totalElapse := tr.RecordSpan()
 	log.Info("compact mergeSortMultipleSegments end",
-		zap.Int64s("mergeSplit to segments", lo.Keys(mWriter.cachedMeta)),
 		zap.Int("deleted row count", deletedRowCount),
 		zap.Int("expired entities", expiredRowCount),
 		zap.Int("missing deletes", missingDeleteCount),

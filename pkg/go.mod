@@ -1,4 +1,4 @@
-module github.com/milvus-io/milvus/pkg
+module github.com/milvus-io/milvus/pkg/v2
 
 go 1.23.0
 

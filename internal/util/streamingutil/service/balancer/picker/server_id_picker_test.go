@@ -15,8 +15,8 @@ import (
 	bbalancer "github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/util/interceptor"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestServerIDPickerBuilder(t *testing.T) {
