@@ -166,3 +166,20 @@ func generateTestData(collID, partID, segID int64, num int) ([]*Blob, error) {
 	blobs, err := insertCodec.Serialize(partID, segID, data)
 	return blobs, err
 }
+
+func generateDeleteData(collID, partID, segID int64, num int) ([]*Blob, error) {
+	pks := make([]storage.PrimaryKey, 0, num)
+	tss := make([]storage.Timestamp, 0, num)
+	for i := 1; i <= num; i++ {
+		pks = append(pks, storage.NewInt64PrimaryKey(int64(i)))
+		tss = append(tss, storage.Timestamp(i+1))
+	}
+
+	deleteCodec := storage.NewDeleteCodec()
+	blob, err := deleteCodec.Serialize(collID, partID, segID, &storage.DeleteData{
+		Pks:      pks,
+		Tss:      tss,
+		RowCount: int64(num),
+	})
+	return []*Blob{blob}, err
+}
