@@ -126,6 +126,15 @@ func (c *dispatcherManager) Remove(vchannel string) {
 		zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if _, ok := c.soloDispatchers[vchannel]; ok {
+		c.soloDispatchers[vchannel].Handle(terminate)
+		c.soloDispatchers[vchannel].CloseTarget(vchannel)
+		delete(c.soloDispatchers, vchannel)
+		c.deleteMetric(vchannel)
+		log.Info("remove soloDispatcher done")
+	}
+	c.lagTargets.GetAndRemove(vchannel)
+
 	if c.mainDispatcher != nil {
 		c.mainDispatcher.Handle(pause)
 		c.mainDispatcher.CloseTarget(vchannel)
@@ -136,14 +145,6 @@ func (c *dispatcherManager) Remove(vchannel string) {
 			c.mainDispatcher.Handle(resume)
 		}
 	}
-	if _, ok := c.soloDispatchers[vchannel]; ok {
-		c.soloDispatchers[vchannel].Handle(terminate)
-		c.soloDispatchers[vchannel].CloseTarget(vchannel)
-		delete(c.soloDispatchers, vchannel)
-		c.deleteMetric(vchannel)
-		log.Info("remove soloDispatcher done")
-	}
-	c.lagTargets.GetAndRemove(vchannel)
 }
 
 func (c *dispatcherManager) NumTarget() int {
