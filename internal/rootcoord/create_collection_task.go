@@ -621,6 +621,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		log.Ctx(ctx).Warn("add duplicate collection", zap.String("collection", t.Req.GetCollectionName()), zap.Uint64("ts", ts))
 		return nil
 	}
+	log.Ctx(ctx).Info("check collection existence", zap.String("collection", t.Req.GetCollectionName()), zap.Error(err))
 
 	// TODO: The create collection is not idempotent for other component, such as wal.
 	// we need to make the create collection operation must success after some persistent operation, refactor it in future.
