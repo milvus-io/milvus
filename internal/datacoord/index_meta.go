@@ -209,32 +209,41 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 	m.RLock()
 	defer m.RUnlock()
 
-	taskMetrics := make(map[UniqueID]map[commonpb.IndexState]int)
+	taskMetrics := make(map[UniqueID]map[indexpb.JobState]int)
 	for _, segIdx := range m.segmentBuildInfo.List() {
 		if segIdx.IsDeleted || !m.isIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 			continue
 		}
 		if _, ok := taskMetrics[segIdx.CollectionID]; !ok {
-			taskMetrics[segIdx.CollectionID] = make(map[commonpb.IndexState]int)
-			taskMetrics[segIdx.CollectionID][commonpb.IndexState_Unissued] = 0
-			taskMetrics[segIdx.CollectionID][commonpb.IndexState_InProgress] = 0
-			taskMetrics[segIdx.CollectionID][commonpb.IndexState_Finished] = 0
-			taskMetrics[segIdx.CollectionID][commonpb.IndexState_Failed] = 0
+			taskMetrics[segIdx.CollectionID] = make(map[indexpb.JobState]int)
+			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateNone] = 0
+			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateInit] = 0
+			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateInProgress] = 0
+			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateFinished] = 0
+			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateFailed] = 0
+			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateRetry] = 0
 		}
-		taskMetrics[segIdx.CollectionID][segIdx.IndexState]++
+		switch segIdx.IndexState {
+		case commonpb.IndexState_IndexStateNone:
+			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateNone]++
+		case commonpb.IndexState_Unissued:
+			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateInit]++
+		case commonpb.IndexState_InProgress:
+			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateInProgress]++
+		case commonpb.IndexState_Finished:
+			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateFinished]++
+		case commonpb.IndexState_Failed:
+			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateFailed]++
+		case commonpb.IndexState_Retry:
+			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateRetry]++
+		}
 	}
+
+	jobType := indexpb.JobType_JobTypeIndexJob.String()
+	metrics.TaskNum.DeletePartialMatch(prometheus.Labels{metrics.TaskTypeLabel: jobType})
 	for collID, m := range taskMetrics {
 		for k, v := range m {
-			switch k {
-			case commonpb.IndexState_Unissued:
-				metrics.IndexTaskNum.WithLabelValues(strconv.FormatInt(collID, 10), metrics.UnissuedIndexTaskLabel).Set(float64(v))
-			case commonpb.IndexState_InProgress:
-				metrics.IndexTaskNum.WithLabelValues(strconv.FormatInt(collID, 10), metrics.InProgressIndexTaskLabel).Set(float64(v))
-			case commonpb.IndexState_Finished:
-				metrics.IndexTaskNum.WithLabelValues(strconv.FormatInt(collID, 10), metrics.FinishedIndexTaskLabel).Set(float64(v))
-			case commonpb.IndexState_Failed:
-				metrics.IndexTaskNum.WithLabelValues(strconv.FormatInt(collID, 10), metrics.FailedIndexTaskLabel).Set(float64(v))
-			}
+			metrics.TaskNum.WithLabelValues(strconv.FormatInt(collID, 10), jobType, k.String()).Set(float64(v))
 		}
 	}
 	log.Ctx(m.ctx).Info("update index metric", zap.Int("collectionNum", len(taskMetrics)))
@@ -904,10 +913,7 @@ func (m *indexMeta) SetStoredIndexFileSizeMetric(collections map[UniqueID]*colle
 	return total
 }
 
-func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, collID, partID, segID, indexID, buildID UniqueID) error {
-	m.Lock()
-	defer m.Unlock()
-
+func (m *indexMeta) removeSegmentIndex(ctx context.Context, collID, partID, segID, indexID, buildID UniqueID) error {
 	err := m.catalog.DropSegmentIndex(ctx, collID, partID, segID, buildID)
 	if err != nil {
 		return err
@@ -923,6 +929,25 @@ func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, collID, partID, segI
 
 	m.segmentBuildInfo.Remove(buildID)
 	return nil
+}
+
+func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, collID, partID, segID, indexID, buildID UniqueID) error {
+	m.Lock()
+	defer m.Unlock()
+
+	return m.removeSegmentIndex(ctx, collID, partID, segID, indexID, buildID)
+}
+
+func (m *indexMeta) RemoveSegmentIndexByID(ctx context.Context, buildID UniqueID) error {
+	m.Lock()
+	defer m.Unlock()
+
+	segIdx, ok := m.segmentBuildInfo.Get(buildID)
+	if !ok {
+		return nil
+	}
+
+	return m.removeSegmentIndex(ctx, segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexID, buildID)
 }
 
 func (m *indexMeta) GetDeletedIndexes() []*model.Index {

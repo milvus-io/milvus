@@ -310,6 +310,7 @@ var (
 		}, []string{statusLabelName})
 
 	// IndexTaskNum records the number of index tasks of each type.
+	// Deprecated: please ues TaskNum after v2.5.5.
 	IndexTaskNum = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -343,7 +344,7 @@ var (
 			Help:      "latency of task execute operation",
 			Buckets:   longTaskBuckets,
 		}, []string{
-			taskTypeLabel,
+			TaskTypeLabel,
 			statusLabelName,
 		})
 
@@ -354,7 +355,7 @@ var (
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "task_count",
 			Help:      "number of index tasks of each type",
-		}, []string{collectionIDLabelName, taskTypeLabel, taskStateLabel})
+		}, []string{collectionIDLabelName, TaskTypeLabel, TaskStateLabel})
 )
 
 // RegisterDataCoord registers DataCoord metrics

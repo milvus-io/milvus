@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
 	"strconv"
 	"sync"
 
@@ -91,6 +92,7 @@ func (stm *statsTaskMeta) updateMetrics() {
 	}
 
 	jobType := indexpb.JobType_JobTypeStatsJob.String()
+	metrics.TaskNum.DeletePartialMatch(prometheus.Labels{metrics.TaskTypeLabel: jobType})
 	for collID, m := range taskMetrics {
 		for k, v := range m {
 			metrics.TaskNum.WithLabelValues(strconv.FormatInt(collID, 10), jobType, k.String()).Set(float64(v))

@@ -410,7 +410,9 @@ func (s *taskScheduler) run() {
 
 			switch task.GetState() {
 			case indexpb.JobState_JobStateNone:
-				return
+				if !s.processNone(task) {
+					s.pendingTasks.Push(task)
+				}
 			case indexpb.JobState_JobStateInit:
 				s.pendingTasks.Push(task)
 			default:
@@ -433,7 +435,7 @@ func (s *taskScheduler) process(task Task, nodeID int64) bool {
 
 	switch task.GetState() {
 	case indexpb.JobState_JobStateNone:
-		return true
+		return s.processNone(task)
 	case indexpb.JobState_JobStateInit:
 		return s.processInit(task, nodeID)
 	default:
@@ -574,6 +576,14 @@ func (s *taskScheduler) processInit(task Task, nodeID int64) bool {
 		WithLabelValues(task.GetTaskType(), metrics.Pending).Observe(float64(queueingTime.Milliseconds()))
 	log.Ctx(s.ctx).Info("update task meta state to InProgress success", zap.Int64("taskID", task.GetTaskID()),
 		zap.Int64("nodeID", nodeID))
+	return true
+}
+
+func (s *taskScheduler) processNone(task Task) bool {
+	if err := task.DropTaskMeta(s.ctx, s.meta); err != nil {
+		log.Ctx(s.ctx).Warn("set job info failed", zap.Error(err))
+		return false
+	}
 	return true
 }
 

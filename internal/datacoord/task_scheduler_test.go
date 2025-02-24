@@ -783,6 +783,9 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 		})
 		return nil
 	})
+	catalog.EXPECT().DropSegmentIndex(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().DropAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 	// catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 
@@ -951,10 +954,9 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	indexJob, exist = mt.indexMeta.GetIndexJob(buildID + 8)
 	s.True(exist)
 	s.Equal(commonpb.IndexState_Finished, indexJob.IndexState)
-	indexJob, exist = mt.indexMeta.GetIndexJob(buildID + 9)
-	s.True(exist)
-	// segment not healthy, wait for GC
-	s.Equal(commonpb.IndexState_Unissued, indexJob.IndexState)
+	_, exist = mt.indexMeta.GetIndexJob(buildID + 9)
+	s.False(exist)
+	// segment not healthy, remove task
 	indexJob, exist = mt.indexMeta.GetIndexJob(buildID + 10)
 	s.True(exist)
 	s.Equal(commonpb.IndexState_Finished, indexJob.IndexState)
