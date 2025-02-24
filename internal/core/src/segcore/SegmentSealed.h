@@ -16,6 +16,7 @@
 #include <tuple>
 
 #include "common/LoadInfo.h"
+#include "index/JsonInvertedIndex.h"
 #include "pb/segcore.pb.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Types.h"
@@ -85,11 +86,15 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual bool
     HasIndex(FieldId field_id) const override = 0;
     bool
-    HasIndex(FieldId field_id, const std::string& path) const override {
+    HasIndex(FieldId field_id,
+             const std::string& path,
+             DataType data_type) const override {
         JSONIndexKey key;
         key.field_id = field_id;
         key.nested_path = path;
-        return json_indexings_.find(key) != json_indexings_.end();
+        auto index = json_indexings_.find(key);
+        return index != json_indexings_.end() &&
+               data_type == index->second->JsonCastType();
     }
 
  protected:
