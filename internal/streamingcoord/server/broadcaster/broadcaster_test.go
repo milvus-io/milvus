@@ -3,7 +3,6 @@ package broadcaster
 import (
 	"context"
 	"math/rand"
-	"sync"
 	"testing"
 	"time"
 
@@ -11,7 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
@@ -19,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -37,8 +34,8 @@ func TestBroadcaster(t *testing.T) {
 	meta.EXPECT().ListBroadcastTask(mock.Anything).
 		RunAndReturn(func(ctx context.Context) ([]*streamingpb.BroadcastTask, error) {
 			return []*streamingpb.BroadcastTask{
-				createNewBroadcastTask(1, []string{"v1"}, message.NewCollectionNameResourceKey("c1")),
-				createNewBroadcastTask(2, []string{"v1", "v2"}, message.NewCollectionNameResourceKey("c2")),
+				createNewBroadcastTask(8, []string{"v1"}, message.NewCollectionNameResourceKey("c1")),
+				createNewBroadcastTask(9, []string{"v1", "v2"}, message.NewCollectionNameResourceKey("c2")),
 				createNewBroadcastTask(3, []string{"v1", "v2", "v3"}),
 				createNewWaitAckBroadcastTaskFromMessage(
 					createNewBroadcastMsg([]string{"v1", "v2", "v3"}).WithBroadcastID(4),
@@ -76,136 +73,55 @@ func TestBroadcaster(t *testing.T) {
 	f.Set(rc)
 	resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptRootCoordClient(f))
 
-	operator, appended := createOpeartor(t)
+	fbc := syncutil.NewFuture[Broadcaster]()
+	operator, appended := createOpeartor(t, fbc)
 	bc, err := RecoverBroadcaster(context.Background(), operator)
+	fbc.Set(bc)
 	assert.NoError(t, err)
 	assert.NotNil(t, bc)
 	assert.Eventually(t, func() bool {
-		return appended.Load() == 9 && len(done.Collect()) == 1 // only one task is done,
+		return appended.Load() == 9 && len(done.Collect()) == 6 // only one task is done,
 	}, 30*time.Second, 10*time.Millisecond)
 
-	// Test ack here
-	wg := &sync.WaitGroup{}
-	asyncAck(wg, bc, 1, "v1")
-	asyncAck(wg, bc, 2, "v2")
-	asyncAck(wg, bc, 3, "v3")
-	asyncAck(wg, bc, 3, "v2")
-	// repeatoperation should be ok.
-	asyncAck(wg, bc, 1, "v1")
-	asyncAck(wg, bc, 2, "v2")
-	asyncAck(wg, bc, 3, "v3")
-	asyncAck(wg, bc, 3, "v2")
-	wg.Wait()
-
+	// only task 7 is not done.
+	ack(bc, 7, "v1")
+	assert.Equal(t, len(done.Collect()), 6)
+	ack(bc, 7, "v2")
+	assert.Equal(t, len(done.Collect()), 6)
+	ack(bc, 7, "v3")
 	assert.Eventually(t, func() bool {
-		return len(done.Collect()) == 2
+		return appended.Load() == 9 && len(done.Collect()) == 7
 	}, 30*time.Second, 10*time.Millisecond)
 
 	// Test broadcast here.
-	var result *types.BroadcastAppendResult
-	for {
-		var err error
-		result, err = bc.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1", "v2", "v3"}, message.NewCollectionNameResourceKey("c7")))
-		if err == nil {
-			break
+	broadcastWithSameRK := func() {
+		var result *types.BroadcastAppendResult
+		for {
+			var err error
+			result, err = bc.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1", "v2", "v3"}, message.NewCollectionNameResourceKey("c7")))
+			if err == nil {
+				break
+			}
 		}
+		assert.Equal(t, len(result.AppendResults), 3)
 	}
-	assert.Equal(t, int(appended.Load()), 12)
-	assert.Equal(t, len(result.AppendResults), 3)
+	go broadcastWithSameRK()
+	go broadcastWithSameRK()
+
 	assert.Eventually(t, func() bool {
-		return len(done.Collect()) == 2
+		return appended.Load() == 15 && len(done.Collect()) == 9
 	}, 30*time.Second, 10*time.Millisecond)
 
-	// Test broadcast with a already exist resource key.
-	for {
-		var err error
-		_, err = bc.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1", "v2", "v3"}, message.NewCollectionNameResourceKey("c7")))
-		if err != nil {
-			assert.True(t, status.AsStreamingError(err).IsResourceAcquired())
-			break
-		}
-	}
-
-	// Test watch here.
-	w, err := bc.NewWatcher()
-	assert.NoError(t, err)
-	// Test a resource key that not exist.
-	assertResourceEventOK(t, w, message.NewResourceKeyAckOneBroadcastEvent(message.NewCollectionNameResourceKey("c5")))
-	assertResourceEventOK(t, w, message.NewResourceKeyAckAllBroadcastEvent(message.NewCollectionNameResourceKey("c5")))
-	// Test a resource key that already ack all.
-	assertResourceEventOK(t, w, message.NewResourceKeyAckOneBroadcastEvent(message.NewCollectionNameResourceKey("c1")))
-	assertResourceEventOK(t, w, message.NewResourceKeyAckAllBroadcastEvent(message.NewCollectionNameResourceKey("c1")))
-	// Test a resource key that partially ack.
-	assertResourceEventOK(t, w, message.NewResourceKeyAckOneBroadcastEvent(message.NewCollectionNameResourceKey("c2")))
-	assertResourceEventNotReady(t, w, message.NewResourceKeyAckAllBroadcastEvent(message.NewCollectionNameResourceKey("c2")))
-	// Test a resource key that not ack.
-	readyCh := assertResourceEventUntilReady(t, w, message.NewResourceKeyAckAllBroadcastEvent(message.NewCollectionNameResourceKey("c2")))
-	ack(bc, 2, "v1")
-	<-readyCh
-	// Test a resource key that not ack.
-	assertResourceEventNotReady(t, w, message.NewResourceKeyAckOneBroadcastEvent(message.NewCollectionNameResourceKey("c3")))
-	assertResourceEventNotReady(t, w, message.NewResourceKeyAckAllBroadcastEvent(message.NewCollectionNameResourceKey("c3")))
-	readyCh1 := assertResourceEventUntilReady(t, w, message.NewResourceKeyAckOneBroadcastEvent(message.NewCollectionNameResourceKey("c3")))
-	readyCh2 := assertResourceEventUntilReady(t, w, message.NewResourceKeyAckAllBroadcastEvent(message.NewCollectionNameResourceKey("c3")))
-	ack(bc, 7, "v1")
-	<-readyCh1
-	select {
-	case <-readyCh2:
-		assert.Fail(t, "should not ready")
-	case <-time.After(20 * time.Millisecond):
-	}
-	ack(bc, 7, "v2")
-	ack(bc, 7, "v3")
-	<-readyCh2
-
-	w2, _ := bc.NewWatcher()
-	w2.Close() // Close by watcher itself.
-	_, ok := <-w2.EventChan()
-	assert.False(t, ok)
-
 	bc.Close()
-	w.Close() // Close by broadcaster.
-
-	result, err = bc.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1", "v2", "v3"}))
+	_, err = bc.Broadcast(context.Background(), nil)
 	assert.Error(t, err)
-	assert.Nil(t, result)
-	err = bc.Ack(context.Background(), types.BroadcastAckRequest{BroadcastID: 3, VChannel: "v1"})
+	err = bc.Ack(context.Background(), types.BroadcastAckRequest{})
 	assert.Error(t, err)
-	ww, err := bc.NewWatcher()
-	assert.Error(t, err)
-	assert.Nil(t, ww)
 }
 
-func assertResourceEventOK(t *testing.T, w Watcher, ev1 *message.BroadcastEvent) {
-	w.ObserveResourceKeyEvent(context.Background(), ev1)
-	ev2 := <-w.EventChan()
-	assert.True(t, proto.Equal(ev1, ev2))
-}
-
-func assertResourceEventNotReady(t *testing.T, w Watcher, ev1 *message.BroadcastEvent) {
-	w.ObserveResourceKeyEvent(context.Background(), ev1)
-	select {
-	case ev2 := <-w.EventChan():
-		t.Errorf("should not receive event, %+v", ev2)
-	case <-time.After(10 * time.Millisecond):
-		return
-	}
-}
-
-func assertResourceEventUntilReady(t *testing.T, w Watcher, ev1 *message.BroadcastEvent) <-chan struct{} {
-	w.ObserveResourceKeyEvent(context.Background(), ev1)
-	done := make(chan struct{})
-	go func() {
-		ev2 := <-w.EventChan()
-		assert.True(t, proto.Equal(ev1, ev2))
-		close(done)
-	}()
-	return done
-}
-
-func ack(bc Broadcaster, broadcastID uint64, vchannel string) {
+func ack(broadcaster Broadcaster, broadcastID uint64, vchannel string) {
 	for {
-		if err := bc.Ack(context.Background(), types.BroadcastAckRequest{
+		if err := broadcaster.Ack(context.Background(), types.BroadcastAckRequest{
 			BroadcastID: broadcastID,
 			VChannel:    vchannel,
 		}); err == nil {
@@ -214,15 +130,7 @@ func ack(bc Broadcaster, broadcastID uint64, vchannel string) {
 	}
 }
 
-func asyncAck(wg *sync.WaitGroup, bc Broadcaster, broadcastID uint64, vchannel string) {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ack(bc, broadcastID, vchannel)
-	}()
-}
-
-func createOpeartor(t *testing.T) (*syncutil.Future[AppendOperator], *atomic.Int64) {
+func createOpeartor(t *testing.T, broadcaster *syncutil.Future[Broadcaster]) (*syncutil.Future[AppendOperator], *atomic.Int64) {
 	id := atomic.NewInt64(1)
 	appended := atomic.NewInt64(0)
 	operator := mock_broadcaster.NewMockAppendOperator(t)
@@ -230,7 +138,7 @@ func createOpeartor(t *testing.T) (*syncutil.Future[AppendOperator], *atomic.Int
 		resps := types.AppendResponses{
 			Responses: make([]types.AppendResponse, len(msgs)),
 		}
-		for idx := range msgs {
+		for idx, msg := range msgs {
 			newID := walimplstest.NewTestMessageID(id.Inc())
 			if rand.Int31n(10) < 3 {
 				resps.Responses[idx] = types.AppendResponse{
@@ -246,6 +154,13 @@ func createOpeartor(t *testing.T) (*syncutil.Future[AppendOperator], *atomic.Int
 				Error: nil,
 			}
 			appended.Inc()
+
+			broadcastID := msg.BroadcastHeader().BroadcastID
+			vchannel := msg.VChannel()
+			go func() {
+				time.Sleep(time.Duration(rand.Int31n(100)) * time.Millisecond)
+				ack(broadcaster.Get(), broadcastID, vchannel)
+			}()
 		}
 		return resps
 	}

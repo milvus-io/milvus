@@ -2,35 +2,19 @@ package broadcast
 
 import (
 	"context"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
-
-var logger = log.With(log.FieldComponent("broadcast-client"))
 
 // NewGRPCBroadcastService creates a new broadcast service with grpc.
 func NewGRPCBroadcastService(walName string, service lazygrpc.Service[streamingpb.StreamingCoordBroadcastServiceClient]) *GRPCBroadcastServiceImpl {
-	rw := newResumingWatcher(&grpcWatcherBuilder{
-		broadcastService: service,
-	}, &typeutil.BackoffTimerConfig{
-		Default: 5 * time.Second,
-		Backoff: typeutil.BackoffConfig{
-			InitialInterval: 50 * time.Millisecond,
-			Multiplier:      2.0,
-			MaxInterval:     5 * time.Second,
-		},
-	})
 	return &GRPCBroadcastServiceImpl{
 		walName: walName,
 		service: service,
-		w:       rw,
 	}
 }
 
@@ -39,7 +23,6 @@ func NewGRPCBroadcastService(walName string, service lazygrpc.Service[streamingp
 type GRPCBroadcastServiceImpl struct {
 	walName string
 	service lazygrpc.Service[streamingpb.StreamingCoordBroadcastServiceClient]
-	w       *resumingWatcher
 }
 
 func (c *GRPCBroadcastServiceImpl) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
@@ -87,10 +70,5 @@ func (c *GRPCBroadcastServiceImpl) Ack(ctx context.Context, req types.BroadcastA
 	return err
 }
 
-func (c *GRPCBroadcastServiceImpl) BlockUntilEvent(ctx context.Context, ev *message.BroadcastEvent) error {
-	return c.w.ObserveResourceKeyEvent(ctx, ev)
-}
-
 func (c *GRPCBroadcastServiceImpl) Close() {
-	c.w.Close()
 }
