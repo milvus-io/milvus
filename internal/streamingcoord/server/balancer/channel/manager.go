@@ -7,11 +7,11 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var ErrChannelNotExist = errors.New("channel not exist")

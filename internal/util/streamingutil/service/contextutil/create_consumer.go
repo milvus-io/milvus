@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
 
 const (

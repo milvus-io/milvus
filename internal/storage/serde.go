@@ -31,7 +31,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 type Record interface {
@@ -43,8 +43,7 @@ type Record interface {
 }
 
 type RecordReader interface {
-	Next() error
-	Record() Record
+	Next() (Record, error)
 	Close() error
 }
 
@@ -68,6 +67,9 @@ type compositeRecord struct {
 var _ Record = (*compositeRecord)(nil)
 
 func (r *compositeRecord) Column(i FieldID) arrow.Array {
+	if _, ok := r.index[i]; !ok {
+		return nil
+	}
 	return r.recs[r.index[i]]
 }
 
@@ -91,7 +93,7 @@ func (r *compositeRecord) Retain() {
 }
 
 func (r *compositeRecord) Slice(start, end int) Record {
-	slices := make([]arrow.Array, len(r.index))
+	slices := make([]arrow.Array, len(r.recs))
 	for i, rec := range r.recs {
 		d := array.NewSliceData(rec.Data(), int64(start), int64(end))
 		slices[i] = array.MakeFromData(d)
@@ -526,11 +528,12 @@ type DeserializeReader[T any] struct {
 // Iterate to next value, return error or EOF if no more value.
 func (deser *DeserializeReader[T]) Next() error {
 	if deser.rec == nil || deser.pos >= deser.rec.Len()-1 {
-		if err := deser.rr.Next(); err != nil {
+		r, err := deser.rr.Next()
+		if err != nil {
 			return err
 		}
 		deser.pos = 0
-		deser.rec = deser.rr.Record()
+		deser.rec = r
 
 		deser.values = make([]T, deser.rec.Len())
 
@@ -667,7 +670,6 @@ func (crw *CompositeRecordWriter) GetWrittenUncompressed() uint64 {
 
 func (crw *CompositeRecordWriter) Write(r Record) error {
 	for fieldId, w := range crw.writers {
-		// TODO: if field is not exist, write
 		sr := newSelectiveRecord(r, fieldId)
 		if err := w.Write(sr); err != nil {
 			return err
@@ -912,10 +914,10 @@ func (sr *simpleArrowRecord) ArrowSchema() *arrow.Schema {
 
 func (sr *simpleArrowRecord) Slice(start, end int) Record {
 	s := sr.r.NewSlice(int64(start), int64(end))
-	return newSimpleArrowRecord(s, sr.field2Col)
+	return NewSimpleArrowRecord(s, sr.field2Col)
 }
 
-func newSimpleArrowRecord(r arrow.Record, field2Col map[FieldID]int) *simpleArrowRecord {
+func NewSimpleArrowRecord(r arrow.Record, field2Col map[FieldID]int) *simpleArrowRecord {
 	return &simpleArrowRecord{
 		r:         r,
 		field2Col: field2Col,

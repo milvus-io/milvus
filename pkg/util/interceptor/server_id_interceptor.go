@@ -24,7 +24,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const ServerIDKey = "ServerID"

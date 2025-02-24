@@ -3,7 +3,7 @@ package message
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 )
 
 type messageImpl struct {
@@ -232,6 +232,18 @@ func (m *messageImpl) SplitIntoMutableMessage() []MutableMessage {
 		vchannelExist[vchannel] = struct{}{}
 	}
 	return msgs
+}
+
+// CloneMutableMessage clones the current mutable message.
+func CloneMutableMessage(msg MutableMessage) MutableMessage {
+	if msg == nil {
+		return nil
+	}
+	inner := msg.(*messageImpl)
+	return &messageImpl{
+		payload:    inner.payload,
+		properties: inner.properties.Clone(),
+	}
 }
 
 type immutableMessageImpl struct {

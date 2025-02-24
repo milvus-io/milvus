@@ -3,7 +3,7 @@ package metautil
 import (
 	"path"
 
-	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 func BuildSegmentIndexFilePath(rootPath string, buildID, indexVersion, partID, segID int64, fileKey string) string {

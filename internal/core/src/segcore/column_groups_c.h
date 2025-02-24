@@ -1,4 +1,4 @@
-// Copyright 2023 Zilliz
+// Copyright 2025 Zilliz
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package format
+#pragma once
 
-import "github.com/apache/arrow/go/v12/arrow"
+#include <stdint.h>
 
-type Writer interface {
-	Write(record arrow.Record) error
-	Count() int64
-	Close() error
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef void* CColumnGroups;
+
+CColumnGroups NewCColumnGroups();
+
+void AddCColumnGroup(CColumnGroups cgs, int* group, int group_size);
+
+int CColumnGroupsSize(CColumnGroups cgs);
+
+void FreeCColumnGroups(CColumnGroups cgs);
+
+#ifdef __cplusplus
 }
+#endif

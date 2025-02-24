@@ -24,11 +24,12 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 func TestUpperLimitCalBySchema(t *testing.T) {
@@ -209,19 +210,23 @@ func TestSortSegmentsByLastExpires(t *testing.T) {
 }
 
 func TestSealSegmentPolicy(t *testing.T) {
+	paramtable.Init()
 	t.Run("test seal segment by lifetime", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().DataCoordCfg.SegmentMaxLifetime.Key, "2")
+		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SegmentMaxLifetime.Key)
+
 		lifetime := 2 * time.Second
 		now := time.Now()
 		curTS := now.UnixNano() / int64(time.Millisecond)
 		nosealTs := (now.Add(lifetime / 2)).UnixNano() / int64(time.Millisecond)
 		sealTs := (now.Add(lifetime)).UnixNano() / int64(time.Millisecond)
 
-		p := sealL1SegmentByLifetime(lifetime)
+		p := sealL1SegmentByLifetime()
 
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:             1,
-				LastExpireTime: tsoutil.ComposeTS(curTS, 0),
+				ID:            1,
+				StartPosition: &msgpb.MsgPosition{Timestamp: tsoutil.ComposeTS(curTS, 0)},
 			},
 		}
 
@@ -281,4 +286,20 @@ func Test_sealByTotalGrowingSegmentsSize(t *testing.T) {
 	res, _ = fn("ch-0", []*SegmentInfo{seg0, seg1, seg2, seg3}, 0)
 	assert.Equal(t, 1, len(res))
 	assert.Equal(t, seg2.GetID(), res[0].GetID())
+}
+
+func TestFlushPolicyWithZeroCurRows(t *testing.T) {
+	seg := &SegmentInfo{
+		currRows: 0,
+		// lastFlushTime unset because its a sealed segment
+		SegmentInfo: &datapb.SegmentInfo{
+			NumOfRows:      1,
+			State:          commonpb.SegmentState_Sealed,
+			Level:          datapb.SegmentLevel_L1,
+			LastExpireTime: 456094911979061251,
+		},
+	}
+
+	flushed := flushPolicyL1(seg, tsoutil.GetCurrentTime())
+	assert.True(t, flushed)
 }

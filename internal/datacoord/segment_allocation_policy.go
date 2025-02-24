@@ -27,10 +27,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type calUpperLimitPolicy func(schema *schemapb.CollectionSchema) (int, error)
@@ -157,10 +157,15 @@ func sealL1SegmentByCapacity(sizeFactor float64) segmentSealPolicyFunc {
 }
 
 // sealL1SegmentByLifetimePolicy get segmentSealPolicy with lifetime limit compares ts - segment.lastExpireTime
-func sealL1SegmentByLifetime(lifetime time.Duration) segmentSealPolicyFunc {
+func sealL1SegmentByLifetime() segmentSealPolicyFunc {
 	return func(segment *SegmentInfo, ts Timestamp) (bool, string) {
+		if segment.GetStartPosition() == nil {
+			return false, ""
+		}
+		lifetime := Params.DataCoordCfg.SegmentMaxLifetime.GetAsDuration(time.Second)
 		pts, _ := tsoutil.ParseTS(ts)
-		epts, _ := tsoutil.ParseTS(segment.GetLastExpireTime())
+		epts, _ := tsoutil.ParseTS(segment.GetStartPosition().GetTimestamp())
+		// epts, _ := tsoutil.ParseTS(segment.GetLastExpireTime())
 		d := pts.Sub(epts)
 		return d >= lifetime,
 			fmt.Sprintf("Segment Lifetime expired, segment last expire: %v, now:%v, max lifetime %v",
@@ -259,7 +264,10 @@ func flushPolicyL1(segment *SegmentInfo, t Timestamp) bool {
 		segment.Level != datapb.SegmentLevel_L0 &&
 		time.Since(segment.lastFlushTime) >= paramtable.Get().DataCoordCfg.SegmentFlushInterval.GetAsDuration(time.Second) &&
 		segment.GetLastExpireTime() <= t &&
-		segment.currRows != 0 &&
+		// A corner case when there's only 1 row in the segment, and the segment is synced
+		// before report currRows to DC. When DN recovered at this moment,
+		// it'll never report this segment's numRows again, leaving segment.currRows == 0 forever.
+		(segment.currRows != 0 || segment.GetNumOfRows() != 0) &&
 		// Decoupling the importing segment from the flush process,
 		// This check avoids notifying the datanode to flush the
 		// importing segment which may not exist.

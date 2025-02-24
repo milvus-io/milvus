@@ -23,7 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
-	"github.com/milvus-io/milvus/pkg/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 )
 
 func Test_expireCacheConfig_apply(t *testing.T) {

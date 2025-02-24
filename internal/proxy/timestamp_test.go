@@ -23,7 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
+	"github.com/milvus-io/milvus/pkg/v2/util/uniquegenerator"
 )
 
 func TestNewTimestampAllocator(t *testing.T) {

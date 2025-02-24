@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
 
 var streamingErrorToGRPCStatus = map[streamingpb.StreamingCode]codes.Code{

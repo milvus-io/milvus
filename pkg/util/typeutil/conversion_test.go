@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 func TestConversion(t *testing.T) {

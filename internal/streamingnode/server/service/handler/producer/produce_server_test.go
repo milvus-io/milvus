@@ -19,14 +19,14 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mocks/proto/mock_streamingpb"
-	"github.com/milvus-io/milvus/pkg/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/proto/mock_streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestMain(m *testing.M) {

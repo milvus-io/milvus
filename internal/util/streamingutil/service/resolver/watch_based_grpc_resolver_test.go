@@ -9,8 +9,8 @@ import (
 	"google.golang.org/grpc/resolver"
 
 	"github.com/milvus-io/milvus/internal/mocks/google.golang.org/grpc/mock_resolver"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestMain(m *testing.M) {

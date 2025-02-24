@@ -10,8 +10,8 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/common"
-	mqcommon "github.com/milvus-io/milvus/pkg/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	mqcommon "github.com/milvus-io/milvus/pkg/v2/mq/common"
 )
 
 func TestKafkaConsumer_Subscription(t *testing.T) {

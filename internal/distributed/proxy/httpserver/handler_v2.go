@@ -44,15 +44,15 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/requestutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type HandlersV2 struct {
@@ -1410,6 +1410,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				},
 			},
 			EnableDynamicField: enableDynamic,
+			Description:        httpReq.Description,
 		})
 	} else {
 		collSchema := schemapb.CollectionSchema{
@@ -1418,6 +1419,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			Fields:             []*schemapb.FieldSchema{},
 			Functions:          []*schemapb.FunctionSchema{},
 			EnableDynamicField: httpReq.Schema.EnableDynamicField,
+			Description:        httpReq.Description,
 		}
 
 		allOutputFields := []string{}
@@ -1495,7 +1497,6 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				fieldSchema.AutoID = httpReq.Schema.AutoId
 			}
 			if field.IsPartitionKey {
-				partitionsNum = int64(64)
 				if partitionsNumStr, ok := httpReq.Params["partitionsNum"]; ok {
 					if partitions, err := strconv.ParseInt(fmt.Sprintf("%v", partitionsNumStr), 10, 64); err == nil {
 						partitionsNum = partitions
@@ -2238,23 +2239,32 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 		for _, indexDescription := range resp.(*milvuspb.DescribeIndexResponse).IndexDescriptions {
 			metricType := ""
 			indexType := ""
+			mmapEnabled := ""
+			indexOffsetCacheEnabled := ""
 			for _, pair := range indexDescription.Params {
-				if pair.Key == common.MetricTypeKey {
+				switch pair.Key {
+				case common.MetricTypeKey:
 					metricType = pair.Value
-				} else if pair.Key == common.IndexTypeKey {
+				case common.IndexTypeKey:
 					indexType = pair.Value
+				case common.MmapEnabledKey:
+					mmapEnabled = pair.Value
+				case common.IndexOffsetCacheEnabledKey:
+					indexOffsetCacheEnabled = pair.Value
 				}
 			}
 			indexInfo := map[string]any{
-				HTTPIndexName:              indexDescription.IndexName,
-				HTTPIndexField:             indexDescription.FieldName,
-				HTTPReturnIndexType:        indexType,
-				HTTPReturnIndexMetricType:  metricType,
-				HTTPReturnIndexTotalRows:   indexDescription.TotalRows,
-				HTTPReturnIndexPendingRows: indexDescription.PendingIndexRows,
-				HTTPReturnIndexIndexedRows: indexDescription.IndexedRows,
-				HTTPReturnIndexState:       indexDescription.State.String(),
-				HTTPReturnIndexFailReason:  indexDescription.IndexStateFailReason,
+				HTTPIndexName:                  indexDescription.IndexName,
+				HTTPIndexField:                 indexDescription.FieldName,
+				HTTPReturnIndexType:            indexType,
+				HTTPReturnIndexMetricType:      metricType,
+				HTTPMmapEnabledKey:             mmapEnabled,
+				HTTPIndexOffsetCacheEnabledKey: indexOffsetCacheEnabled,
+				HTTPReturnIndexTotalRows:       indexDescription.TotalRows,
+				HTTPReturnIndexPendingRows:     indexDescription.PendingIndexRows,
+				HTTPReturnIndexIndexedRows:     indexDescription.IndexedRows,
+				HTTPReturnIndexState:           indexDescription.State.String(),
+				HTTPReturnIndexFailReason:      indexDescription.IndexStateFailReason,
 			}
 			indexInfos = append(indexInfos, indexInfo)
 		}

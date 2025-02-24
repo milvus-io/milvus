@@ -5,7 +5,7 @@ package msgdispatcher
 import (
 	context "context"
 
-	msgstream "github.com/milvus-io/milvus/pkg/mq/msgstream"
+	msgstream "github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	mock "github.com/stretchr/testify/mock"
 )
 

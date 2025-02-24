@@ -26,11 +26,11 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/tracer"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/generic"
-	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/tracer"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/generic"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
 type GRPCClientBase[T any] struct {

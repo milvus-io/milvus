@@ -7,7 +7,7 @@ import (
 	pool "github.com/jolestar/go-commons-pool/v2"
 
 	antlrparser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
-	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 )
 
 var (

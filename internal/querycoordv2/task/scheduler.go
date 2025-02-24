@@ -32,16 +32,16 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/hardware"
-	"github.com/milvus-io/milvus/pkg/util/lock"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	. "github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	. "github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -149,18 +149,26 @@ func (queue *taskQueue) Range(fn func(task Task) bool) {
 type ExecutingTaskDelta struct {
 	data map[int64]map[int64]int // nodeID -> collectionID -> taskDelta
 	mu   sync.RWMutex            // Mutex to protect the map
+
+	taskIDRecords UniqueSet
 }
 
 func NewExecutingTaskDelta() *ExecutingTaskDelta {
 	return &ExecutingTaskDelta{
-		data: make(map[int64]map[int64]int),
+		data:          make(map[int64]map[int64]int),
+		taskIDRecords: NewUniqueSet(),
 	}
 }
 
 // Add updates the taskDelta for the given nodeID and collectionID
-func (etd *ExecutingTaskDelta) Add(nodeID int64, collectionID int64, delta int) {
+func (etd *ExecutingTaskDelta) Add(nodeID int64, collectionID int64, taskID int64, delta int) {
 	etd.mu.Lock()
 	defer etd.mu.Unlock()
+
+	if etd.taskIDRecords.Contain(taskID) {
+		log.Warn("task already exists in delta cache", zap.Int64("taskID", taskID))
+	}
+	etd.taskIDRecords.Insert(taskID)
 
 	if _, exists := etd.data[nodeID]; !exists {
 		etd.data[nodeID] = make(map[int64]int)
@@ -169,13 +177,18 @@ func (etd *ExecutingTaskDelta) Add(nodeID int64, collectionID int64, delta int) 
 }
 
 // Sub updates the taskDelta for the given nodeID and collectionID by subtracting delta
-func (etd *ExecutingTaskDelta) Sub(nodeID int64, collectionID int64, delta int) {
+func (etd *ExecutingTaskDelta) Sub(nodeID int64, collectionID int64, taskID int64, delta int) {
 	etd.mu.Lock()
 	defer etd.mu.Unlock()
 
+	if !etd.taskIDRecords.Contain(taskID) {
+		log.Warn("task doesn't exists in delta cache", zap.Int64("taskID", taskID))
+	}
+	etd.taskIDRecords.Remove(taskID)
+
 	if _, exists := etd.data[nodeID]; exists {
 		etd.data[nodeID][collectionID] -= delta
-		if etd.data[nodeID][collectionID] <= 0 {
+		if etd.data[nodeID][collectionID] == 0 {
 			delete(etd.data[nodeID], collectionID)
 		}
 		if len(etd.data[nodeID]) == 0 {
@@ -207,6 +220,15 @@ func (etd *ExecutingTaskDelta) Get(nodeID, collectionID int64) int {
 	}
 
 	return sum
+}
+
+func (etd *ExecutingTaskDelta) printDetailInfos() {
+	etd.mu.RLock()
+	defer etd.mu.RUnlock()
+
+	if etd.taskIDRecords.Len() > 0 {
+		log.Info("task delta cache info", zap.Any("taskIDRecords", etd.taskIDRecords.Collect()), zap.Any("data", etd.data))
+	}
 }
 
 type Scheduler interface {
@@ -599,9 +621,9 @@ func (scheduler *taskScheduler) incExecutingTaskDelta(task Task) {
 		delta := action.WorkLoadEffect()
 		switch action.(type) {
 		case *SegmentAction:
-			scheduler.segmentTaskDelta.Add(action.Node(), task.CollectionID(), delta)
+			scheduler.segmentTaskDelta.Add(action.Node(), task.CollectionID(), task.ID(), delta)
 		case *ChannelAction:
-			scheduler.channelTaskDelta.Add(action.Node(), task.CollectionID(), delta)
+			scheduler.channelTaskDelta.Add(action.Node(), task.CollectionID(), task.ID(), delta)
 		}
 	}
 }
@@ -611,9 +633,9 @@ func (scheduler *taskScheduler) decExecutingTaskDelta(task Task) {
 		delta := action.WorkLoadEffect()
 		switch action.(type) {
 		case *SegmentAction:
-			scheduler.segmentTaskDelta.Sub(action.Node(), task.CollectionID(), delta)
+			scheduler.segmentTaskDelta.Sub(action.Node(), task.CollectionID(), task.ID(), delta)
 		case *ChannelAction:
-			scheduler.channelTaskDelta.Sub(action.Node(), task.CollectionID(), delta)
+			scheduler.channelTaskDelta.Sub(action.Node(), task.CollectionID(), task.ID(), delta)
 		}
 	}
 }
@@ -934,6 +956,11 @@ func (scheduler *taskScheduler) remove(task Task) {
 		scheduler.decExecutingTaskDelta(task)
 	}
 
+	if scheduler.tasks.Len() == 0 {
+		scheduler.segmentTaskDelta.printDetailInfos()
+		scheduler.channelTaskDelta.printDetailInfos()
+	}
+
 	switch task := task.(type) {
 	case *SegmentTask:
 		index := NewReplicaSegmentIndex(task)
@@ -941,7 +968,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
 		if task.Status() == TaskStatusFailed &&
 			task.Err() != nil &&
-			!errors.IsAny(task.Err(), merr.ErrChannelNotFound, merr.ErrServiceRequestLimitExceeded) {
+			!errors.IsAny(task.Err(), merr.ErrChannelNotFound, merr.ErrServiceTooManyRequests) {
 			scheduler.recordSegmentTaskError(task)
 		}
 

@@ -22,7 +22,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 var (

@@ -1,7 +1,7 @@
 package ack
 
 import (
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 // details that sorted by timestamp.

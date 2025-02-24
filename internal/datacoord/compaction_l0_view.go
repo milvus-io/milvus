@@ -6,7 +6,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // The LevelZeroSegments keeps the min group

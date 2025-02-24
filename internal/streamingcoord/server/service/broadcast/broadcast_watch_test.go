@@ -9,10 +9,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
-	"github.com/milvus-io/milvus/pkg/mocks/proto/mock_streamingpb"
-	"github.com/milvus-io/milvus/pkg/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/proto/mock_streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 func TestBroadcastWatch(t *testing.T) {

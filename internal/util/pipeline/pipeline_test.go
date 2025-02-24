@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 )
 
 type testNode struct {

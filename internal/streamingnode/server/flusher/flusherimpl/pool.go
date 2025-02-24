@@ -19,7 +19,7 @@ package flusherimpl
 import (
 	"sync"
 
-	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 )
 
 var (

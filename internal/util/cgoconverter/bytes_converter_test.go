@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 )
 
 func TestBytesConverter(t *testing.T) {

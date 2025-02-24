@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 )
 
 type mockRootCoordServer struct {

@@ -23,9 +23,9 @@ import (
 
 	"github.com/google/btree"
 
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // implementation assertion

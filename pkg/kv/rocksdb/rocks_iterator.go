@@ -5,7 +5,7 @@ import (
 
 	"github.com/tecbot/gorocksdb"
 
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 /**

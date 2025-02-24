@@ -17,11 +17,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var (
@@ -55,7 +55,7 @@ func (hc *handlerClientImpl) GetLatestMVCCTimestampIfLocal(ctx context.Context, 
 	}
 
 	// Get the wal at local registry.
-	w, err := registry.GetAvailableWAL(assign.Channel)
+	w, err := registry.GetLocalAvailableWAL(assign.Channel)
 	if err != nil {
 		return 0, err
 	}
@@ -71,7 +71,7 @@ func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerO
 
 	p, err := hc.createHandlerAfterStreamingNodeReady(ctx, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (*handlerCreateResult, error) {
 		// Check if the localWAL is assigned at local
-		localWAL, err := registry.GetAvailableWAL(assign.Channel)
+		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
 			return localResult(localWAL), nil
 		}
@@ -106,7 +106,7 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 
 	c, err := hc.createHandlerAfterStreamingNodeReady(ctx, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (*handlerCreateResult, error) {
 		// Check if the localWAL is assigned at local
-		localWAL, err := registry.GetAvailableWAL(assign.Channel)
+		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
 			localScanner, err := localWAL.Read(ctx, wal.ReadOption{
 				VChannel:       opts.VChannel,
