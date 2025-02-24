@@ -771,16 +771,14 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 	}, nil
 }
 
+// BinlogValueWriter is a BinlogRecordWriter with SerializeWriter[*Value] mixin.
 type BinlogValueWriter struct {
 	BinlogRecordWriter
 	SerializeWriter[*Value]
 }
 
 func (b *BinlogValueWriter) Close() error {
-	if err := b.SerializeWriter.Flush(); err != nil {
-		return err
-	}
-	return b.BinlogRecordWriter.Close()
+	return b.SerializeWriter.Close()
 }
 
 func NewBinlogValueWriter(rw BinlogRecordWriter, batchSize int,
@@ -793,9 +791,19 @@ func NewBinlogValueWriter(rw BinlogRecordWriter, batchSize int,
 	}
 }
 
+// deprecated, use NewBinlogValueWriter instead
+type BinlogSerializeWriter struct {
+	RecordWriter
+	SerializeWriter[*Value]
+}
+
+func (b *BinlogSerializeWriter) Close() error {
+	return b.SerializeWriter.Close()
+}
+
 func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, segmentID UniqueID,
 	eventWriters map[FieldID]*BinlogStreamWriter, batchSize int,
-) (*SerializeWriterImpl[*Value], error) {
+) (*BinlogSerializeWriter, error) {
 	rws := make(map[FieldID]RecordWriter, len(eventWriters))
 	for fid := range eventWriters {
 		w := eventWriters[fid]
@@ -806,9 +814,12 @@ func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, se
 		rws[fid] = rw
 	}
 	compositeRecordWriter := NewCompositeRecordWriter(rws)
-	return NewSerializeRecordWriter[*Value](compositeRecordWriter, func(v []*Value) (Record, error) {
-		return ValueSerializer(v, schema.Fields)
-	}, batchSize), nil
+	return &BinlogSerializeWriter{
+		RecordWriter: compositeRecordWriter,
+		SerializeWriter: NewSerializeRecordWriter[*Value](compositeRecordWriter, func(v []*Value) (Record, error) {
+			return ValueSerializer(v, schema.Fields)
+		}, batchSize),
+	}, nil
 }
 
 type DeltalogStreamWriter struct {

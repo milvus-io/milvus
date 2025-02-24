@@ -520,10 +520,11 @@ func getFieldWriterProps(field *schemapb.FieldSchema) *parquet.WriterProperties 
 
 type DeserializeReader[T any] interface {
 	NextValue() (*T, error)
+	Close() error
 }
 
 type DeserializeReaderImpl[T any] struct {
-	RecordReader
+	rr           RecordReader
 	deserializer Deserializer[T]
 	rec          Record
 	values       []T
@@ -533,7 +534,7 @@ type DeserializeReaderImpl[T any] struct {
 // Iterate to next value, return error or EOF if no more value.
 func (deser *DeserializeReaderImpl[T]) NextValue() (*T, error) {
 	if deser.rec == nil || deser.pos >= deser.rec.Len()-1 {
-		r, err := deser.RecordReader.Next()
+		r, err := deser.rr.Next()
 		if err != nil {
 			return nil, err
 		}
@@ -552,16 +553,13 @@ func (deser *DeserializeReaderImpl[T]) NextValue() (*T, error) {
 	return &deser.values[deser.pos], nil
 }
 
-func (deser *DeserializeReaderImpl[T]) Next() (Record, error) {
-	if deser.rec != nil && deser.pos < deser.rec.Len()-1 {
-		return nil, errors.New("call NextValue first")
-	}
-	return deser.RecordReader.Next()
+func (deser *DeserializeReaderImpl[T]) Close() error {
+	return deser.rr.Close()
 }
 
 func NewDeserializeReader[T any](rr RecordReader, deserializer Deserializer[T]) *DeserializeReaderImpl[T] {
 	return &DeserializeReaderImpl[T]{
-		RecordReader: rr,
+		rr:           rr,
 		deserializer: deserializer,
 	}
 }
@@ -825,10 +823,11 @@ func newMultiFieldRecordWriter(fieldIds []FieldID, fields []arrow.Field, writer 
 type SerializeWriter[T any] interface {
 	WriteValue(value T) error
 	Flush() error
+	Close() error
 }
 
 type SerializeWriterImpl[T any] struct {
-	RecordWriter
+	rw         RecordWriter
 	serializer Serializer[T]
 	batchSize  int
 
@@ -846,20 +845,11 @@ func (sw *SerializeWriterImpl[T]) Flush() error {
 		return err
 	}
 	defer r.Release()
-	if err := sw.RecordWriter.Write(r); err != nil {
+	if err := sw.rw.Write(r); err != nil {
 		return err
 	}
 	sw.pos = 0
 	return nil
-}
-
-func (sw *SerializeWriterImpl[T]) Write(r Record) error {
-	if sw.pos > 0 {
-		if err := sw.Flush(); err != nil {
-			return err
-		}
-	}
-	return sw.RecordWriter.Write(r)
 }
 
 func (sw *SerializeWriterImpl[T]) WriteValue(value T) error {
@@ -880,14 +870,14 @@ func (sw *SerializeWriterImpl[T]) Close() error {
 	if err := sw.Flush(); err != nil {
 		return err
 	}
-	return sw.RecordWriter.Close()
+	return sw.rw.Close()
 }
 
 func NewSerializeRecordWriter[T any](rw RecordWriter, serializer Serializer[T], batchSize int) *SerializeWriterImpl[T] {
 	return &SerializeWriterImpl[T]{
-		RecordWriter: rw,
-		serializer:   serializer,
-		batchSize:    batchSize,
+		rw:         rw,
+		serializer: serializer,
+		batchSize:  batchSize,
 	}
 }
 

@@ -290,7 +290,7 @@ func (w *SegmentDeltaWriter) Finish() (*storage.Blob, *writebuffer.TimeRange, er
 }
 
 type SegmentWriter struct {
-	writer  *storage.SerializeWriterImpl[*storage.Value]
+	writer  *storage.BinlogSerializeWriter
 	closers []func() (*storage.Blob, error)
 	tsFrom  typeutil.Timestamp
 	tsTo    typeutil.Timestamp
@@ -570,7 +570,7 @@ func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, batchSize 
 }
 
 func newBinlogWriter(collID, partID, segID int64, schema *schemapb.CollectionSchema, batchSize int,
-) (writer *storage.SerializeWriterImpl[*storage.Value], closers []func() (*storage.Blob, error), err error) {
+) (writer *storage.BinlogSerializeWriter, closers []func() (*storage.Blob, error), err error) {
 	fieldWriters := storage.NewBinlogStreamWriters(collID, partID, segID, schema.Fields)
 	closers = make([]func() (*storage.Blob, error), 0, len(fieldWriters))
 	for _, w := range fieldWriters {
