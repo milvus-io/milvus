@@ -7,15 +7,12 @@ from pymilvus import DataType
 from base.client_v2_base import TestMilvusClientV2Base
 
 prefix = "milvus_client_api_search_iterator"
-epsilon = ct.epsilon
-user_pre = "user"
-role_pre = "role"
 default_nb = ct.default_nb
 default_nb_medium = ct.default_nb_medium
-default_nq = ct.default_nq
 default_dim = ct.default_dim
 default_limit = ct.default_limit
 default_batch_size = ct.default_batch_size
+default_metric_type = "COSINE"
 default_search_exp = "id >= 0"
 exp_res = "exp_res"
 default_search_string_exp = "varchar >= \"0\""
@@ -177,14 +174,14 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         # 3. search iterator
         vectors_to_search = rng.random((1, default_dim))
-        insert_ids = [i for i in range(default_nb)]
+        check_items = {"batch_size": batch_size, "limit": default_nb, "metric_type": default_metric_type}
+        if "radius" in search_params:
+            check_items["radius"] = search_params["radius"]
+        if "range_filter" in search_params:
+            check_items["range_filter"] = search_params["range_filter"]
         search_params = {"params": search_params}
         self.search_iterator(client, collection_name, vectors_to_search, batch_size, search_params=search_params,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"enable_milvus_client_api": True,
-                                          "nq": len(vectors_to_search),
-                                          "ids": insert_ids,
-                                          "limit": default_limit})
+                             check_task=CheckTasks.check_search_iterator, check_items=check_items)
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -210,7 +207,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=12,
                          max_length=64, nullable=True)
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        index_params.add_index(default_vector_field_name, metric_type=default_metric_type)
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
@@ -221,15 +218,15 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         # 3. search iterator
         vectors_to_search = rng.random((1, default_dim))
-        insert_ids = [i for i in range(default_nb)]
+        check_items = {"batch_size": batch_size, "limit": default_nb, "metric_type": default_metric_type}
+        if "radius" in search_params:
+            check_items["radius"] = search_params["radius"]
+        if "range_filter" in search_params:
+            check_items["range_filter"] = search_params["range_filter"]
         search_params = {"params": search_params}
         self.search_iterator(client, collection_name, vectors_to_search, batch_size, filter="nullable_field>=10",
-                             search_params=search_params,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"enable_milvus_client_api": True,
-                                          "nq": len(vectors_to_search),
-                                          "ids": insert_ids,
-                                          "limit": default_limit})
+                             search_params=search_params, check_task=CheckTasks.check_search_iterator,
+                             check_items=check_items)
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
 
@@ -264,14 +261,14 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         # assert self.num_entities(client, collection_name)[0] == default_nb
         # 3. search_iterator
         vectors_to_search = rng.random((1, default_dim))
-        insert_ids = [i for i in range(default_nb)]
+        check_items = {"batch_size": batch_size, "limit": default_nb, "metric_type": default_metric_type}
+        if "radius" in search_params:
+            check_items["radius"] = search_params["radius"]
+        if "range_filter" in search_params:
+            check_items["range_filter"] = search_params["range_filter"]
         search_params = {"params": search_params}
         self.search_iterator(client, new_name, vectors_to_search, batch_size, search_params=search_params,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"enable_milvus_client_api": True,
-                                          "nq": len(vectors_to_search),
-                                          "ids": insert_ids,
-                                          "limit": default_limit})
+                             check_task=CheckTasks.check_search_iterator, check_items=check_items)
         self.release_collection(client, new_name)
         self.drop_collection(client, new_name)
 
@@ -301,14 +298,14 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         # 3. search iterator
         vectors_to_search = rng.random((1, default_dim))
-        insert_ids = [i for i in range(default_nb)]
+        check_items = {"batch_size": batch_size, "limit": default_nb, "metric_type": default_metric_type}
+        if "radius" in search_params:
+            check_items["radius"] = search_params["radius"]
+        if "range_filter" in search_params:
+            check_items["range_filter"] = search_params["range_filter"]
         search_params = {"params": search_params}
         self.search_iterator(client, collection_name, vectors_to_search, batch_size, search_params=search_params,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"enable_milvus_client_api": True,
-                                          "nq": len(vectors_to_search),
-                                          "ids": insert_ids,
-                                          "limit": default_limit})
+                             check_task=CheckTasks.check_search_iterator, check_items=check_items)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_search_iterator_string(self, search_params):
@@ -331,12 +328,14 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         # 3. search_iterator
         vectors_to_search = rng.random((1, default_dim))
+        check_items = {"batch_size": batch_size, "limit": default_nb, "metric_type": default_metric_type}
+        if "radius" in search_params:
+            check_items["radius"] = search_params["radius"]
+        if "range_filter" in search_params:
+            check_items["range_filter"] = search_params["range_filter"]
         search_params = {"params": search_params}
         self.search_iterator(client, collection_name, vectors_to_search, batch_size, search_params=search_params,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"enable_milvus_client_api": True,
-                                          "nq": len(vectors_to_search),
-                                          "limit": default_limit})
+                             check_task=CheckTasks.check_search_iterator, check_items=check_items)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -362,14 +361,18 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         # 3. search_iterator
         vectors_to_search = rng.random((1, default_dim))
+        limit = default_limit if default_limit < default_batch_size else default_batch_size
+        check_items = {"batch_size": default_batch_size, "limit": limit, "metric_type": metric_type}
+        if "radius" in search_params:
+            check_items["radius"] = search_params["radius"]
+        if "range_filter" in search_params:
+            check_items["range_filter"] = search_params["range_filter"]
         search_params = {"params": search_params}
         self.search_iterator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
                              limit=default_limit, search_params=search_params,
                              output_fields=[default_primary_key_field_name],
                              check_task=CheckTasks.check_search_iterator,
-                             check_items={"enable_milvus_client_api": True,
-                                          "nq": len(vectors_to_search),
-                                          "limit": default_limit})
+                             check_items=check_items)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -395,15 +398,19 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         # 3. search_iterator
         vectors_to_search = rng.random((1, default_dim))
+        limit = default_limit if default_limit < default_batch_size else default_batch_size
+        check_items = {"batch_size": default_batch_size, "limit": limit, "metric_type": metric_type}
+        if "radius" in search_params:
+            check_items["radius"] = search_params["radius"]
+        if "range_filter" in search_params:
+            check_items["range_filter"] = search_params["range_filter"]
         search_params = {"params": search_params}
         search_params.update({"metric_type": metric_type})
         self.search_iterator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
                              limit=default_limit, search_params=search_params,
                              output_fields=[default_primary_key_field_name],
                              check_task=CheckTasks.check_search_iterator,
-                             check_items={"enable_milvus_client_api": True,
-                                          "nq": len(vectors_to_search),
-                                          "limit": default_limit})
+                             check_items=check_items)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -433,14 +440,16 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
             if insert_id in insert_ids:
                 insert_ids.remove(insert_id)
         limit = default_nb - delete_num
+        check_items = {"batch_size": default_batch_size, "limit": limit, "metric_type": default_metric_type}
+        if "radius" in search_params:
+            check_items["radius"] = search_params["radius"]
+        if "range_filter" in search_params:
+            check_items["range_filter"] = search_params["range_filter"]
         search_params = {"params": search_params}
         self.search_iterator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
                              search_params=search_params, limit=default_nb,
                              check_task=CheckTasks.check_search_iterator,
-                             check_items={"enable_milvus_client_api": True,
-                                          "nq": len(vectors_to_search),
-                                          "ids": insert_ids,
-                                          "limit": limit})
+                             check_items=check_items)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -470,14 +479,16 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
             if insert_id in insert_ids:
                 insert_ids.remove(insert_id)
         limit = default_nb - delete_num
+        check_items = {"batch_size": default_batch_size, "limit": limit, "metric_type": default_metric_type}
+        if "radius" in search_params:
+            check_items["radius"] = search_params["radius"]
+        if "range_filter" in search_params:
+            check_items["range_filter"] = search_params["range_filter"]
         search_params = {"params": search_params}
         self.search_iterator(client, collection_name, vectors_to_search, batch_size=default_batch_size,
                              search_params=search_params, limit=default_nb,
                              check_task=CheckTasks.check_search_iterator,
-                             check_items={"enable_milvus_client_api": True,
-                                          "nq": len(vectors_to_search),
-                                          "ids": insert_ids,
-                                          "limit": limit})
+                             check_items=check_items)
         # 5. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
@@ -485,3 +496,4 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
                                 "with_vec": True,
                                 "primary_field": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
+

@@ -193,7 +193,7 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @trace()
-    def search_iterator(self, data, anns_field, param, batch_size, limit=-1, expr=None,
+    def search_iterator(self, data, anns_field, param, batch_size=1000, limit=-1, expr=None,
                         partition_names=None, output_fields=None, timeout=None, round_decimal=-1,
                         check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout

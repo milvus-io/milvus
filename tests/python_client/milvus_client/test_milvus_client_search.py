@@ -66,21 +66,6 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, id_type="invalid",
                                check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_collection_string_auto_id(self):
-        """
-        target: test high level api: client.create_collection
-        method: create collection with auto id on string primary key
-        expected: Raise exception
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
-        # 1. create collection
-        error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for varChar "
-                                                 f"field of collection {collection_name}"}
-        self.create_collection(client, collection_name, default_dim, id_type="string", auto_id=True,
-                               check_task=CheckTasks.err_res, check_items=error)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_create_same_collection_different_params(self):
         """

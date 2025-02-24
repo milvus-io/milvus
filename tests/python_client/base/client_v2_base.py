@@ -154,7 +154,7 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
-    def search_iterator(self, client, collection_name, data, batch_size, limit=-1, filter=None, output_fields=None,
+    def search_iterator(self, client, collection_name, data, batch_size=1000, limit=-1, filter=None, output_fields=None,
                         search_params=None, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
