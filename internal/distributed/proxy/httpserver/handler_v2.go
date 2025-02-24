@@ -1399,6 +1399,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				},
 			},
 			EnableDynamicField: enableDynamic,
+			Description:        httpReq.Description,
 		})
 	} else {
 		collSchema := schemapb.CollectionSchema{
@@ -1407,6 +1408,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			Fields:             []*schemapb.FieldSchema{},
 			Functions:          []*schemapb.FunctionSchema{},
 			EnableDynamicField: httpReq.Schema.EnableDynamicField,
+			Description:        httpReq.Description,
 		}
 
 		allOutputFields := []string{}
