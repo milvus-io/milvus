@@ -20,7 +20,6 @@ func newBroadcasterMetrics() *broadcasterMetrics {
 		taskTotal:         metrics.StreamingCoordBroadcasterTaskTotal.MustCurryWith(constLabel),
 		resourceKeyTotal:  metrics.StreamingCoordResourceKeyTotal.MustCurryWith(constLabel),
 		broadcastDuration: metrics.StreamingCoordBroadcastDurationSeconds.With(constLabel),
-		ackAnyOneDuration: metrics.StreamingCoordBroadcasterAckAnyOneDurationSeconds.With(constLabel),
 		ackAllDuration:    metrics.StreamingCoordBroadcasterAckAllDurationSeconds.With(constLabel),
 	}
 }
@@ -30,7 +29,6 @@ type broadcasterMetrics struct {
 	taskTotal         *prometheus.GaugeVec
 	resourceKeyTotal  *prometheus.GaugeVec
 	broadcastDuration prometheus.Observer
-	ackAnyOneDuration prometheus.Observer
 	ackAllDuration    prometheus.Observer
 }
 
@@ -78,11 +76,6 @@ func (g *taskMetricsGuard) ToState(state streamingpb.BroadcastTaskState) {
 // ObserveBroadcastDone observes the broadcast done.
 func (g *taskMetricsGuard) ObserveBroadcastDone() {
 	g.broadcastDuration.Observe(time.Since(g.start).Seconds())
-}
-
-// ObserverAckOne observes the ack any one.
-func (g *taskMetricsGuard) ObserveAckAnyOne() {
-	g.ackAnyOneDuration.Observe(time.Since(g.start).Seconds())
 }
 
 // ObserverAckOne observes the ack all.
