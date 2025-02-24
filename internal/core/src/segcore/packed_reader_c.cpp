@@ -25,7 +25,6 @@
 #include "common/EasyAssert.h"
 #include "common/type_c.h"
 
-
 CStatus
 NewPackedReader(char** paths,
                 int64_t num_paths,
@@ -34,9 +33,11 @@ NewPackedReader(char** paths,
                 CPackedReader* c_packed_reader) {
     try {
         auto truePaths = std::vector<std::string>(paths, paths + num_paths);
-        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance().GetArrowFileSystem();
+        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                          .GetArrowFileSystem();
         if (!trueFs) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed, "Failed to get filesystem");
+            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
+                                          "Failed to get filesystem");
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
         std::set<int> needed_columns;
@@ -63,7 +64,8 @@ ReadNext(CPackedReader c_packed_reader,
         std::shared_ptr<arrow::RecordBatch> record_batch;
         auto status = packed_reader->ReadNext(&record_batch);
         if (!status.ok()) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed, status.ToString());
+            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
+                                          status.ToString());
         }
         if (record_batch == nullptr) {
             // end of file
@@ -75,7 +77,8 @@ ReadNext(CPackedReader c_packed_reader,
             auto status = arrow::ExportRecordBatch(
                 *record_batch, arr.get(), schema.get());
             if (!status.ok()) {
-                return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed, status.ToString());
+                return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
+                                              status.ToString());
             }
             *out_array = arr.release();
             *out_schema = schema.release();
