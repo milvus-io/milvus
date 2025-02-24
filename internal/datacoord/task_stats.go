@@ -161,6 +161,14 @@ func (st *statsTask) UpdateMetaBuildingState(meta *meta) error {
 
 func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bool {
 	log := log.Ctx(ctx).With(zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID))
+
+	statsMeta := dependency.meta.statsTaskMeta.GetStatsTaskBySegmentID(st.segmentID, st.subJobType)
+	if statsMeta == nil {
+		log.Warn("stats task meta is null, skip it")
+		st.SetState(indexpb.JobState_JobStateNone, "stats task meta is null")
+		return false
+	}
+	// set segment compacting
 	segment := dependency.meta.GetHealthySegment(ctx, st.segmentID)
 	if segment == nil {
 		log.Warn("segment is node healthy, skip stats")
@@ -214,7 +222,9 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		NumRows:         segment.GetNumOfRows(),
 		CollectionTtl:   collTtl.Nanoseconds(),
 		CurrentTs:       tsoutil.GetCurrentTime(),
-		BinlogMaxSize:   Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		// update version after check
+		TaskVersion:   statsMeta.GetVersion() + 1,
+		BinlogMaxSize: Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 	}
 
 	return true
