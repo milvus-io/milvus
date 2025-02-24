@@ -194,7 +194,6 @@ class TestAliasOperation(TestcaseBase):
 
         assert res is True
 
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/40030, TODO: need to fix")
     @pytest.mark.tags(CaseLabel.L2)
     def test_alias_called_by_utility_drop_collection(self):
         """
@@ -223,6 +222,7 @@ class TestAliasOperation(TestcaseBase):
         self.utility_wrap.drop_collection(alias_name,
                                           check_task=CheckTasks.err_res,
                                           check_items=error)
+        self.utility_wrap.drop_alias(alias_name)
         self.utility_wrap.drop_collection(c_name)
         assert not self.utility_wrap.has_collection(c_name)[0]
 
@@ -427,7 +427,6 @@ class TestAliasOperationInvalid(TestcaseBase):
                  ct.err_msg: f"cannot drop the collection via alias = {alias_name}"}
         collection_alias.drop(check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/40030, TODO: need to fix")
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(reason="issue #36963")
     def test_alias_reuse_alias_name_from_dropped_collection(self):
@@ -452,6 +451,7 @@ class TestAliasOperationInvalid(TestcaseBase):
         assert len(res) == 1
 
         # dropping collection that has an alias shall drop the alias as well
+        self.utility_wrap.drop_alias(alias_name)
         collection_w.drop()
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
                                                  check_task=CheckTasks.check_collection_property,
@@ -463,7 +463,6 @@ class TestAliasOperationInvalid(TestcaseBase):
         res2 = self.utility_wrap.list_aliases(c_name)[0]
         assert len(res2) == 1
 
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/40030, TODO: need to fix")
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(reason="issue #36963")
     def test_alias_rename_collection_to_alias_name(self):
@@ -473,6 +472,7 @@ class TestAliasOperationInvalid(TestcaseBase):
                 1.create a collection
                 2.create an alias for the collection
                 3.rename the collection to the alias name
+        expected: in step 3, rename collection to alias name failed
         """
         self._connect()
         c_name = cf.gen_unique_str("collection")
@@ -485,13 +485,3 @@ class TestAliasOperationInvalid(TestcaseBase):
                  ct.err_msg: f"duplicated new collection name default:{alias_name} with other collection name or alias"}
         self.utility_wrap.rename_collection(collection_w.name, alias_name,
                                             check_task=CheckTasks.err_res, check_items=error)
-
-        collection_w.drop()
-        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
-                                                 check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: c_name, exp_schema: default_schema})
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"this is not expected, any collection name or alias name shall be unique"}
-        self.utility_wrap.rename_collection(collection_w.name, alias_name,
-                                            check_task=CheckTasks.err_res, check_items=error)
-
