@@ -5,8 +5,8 @@ package broker
 import (
 	context "context"
 
-	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
-	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
+	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 
 	mock "github.com/stretchr/testify/mock"
 

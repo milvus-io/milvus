@@ -22,7 +22,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 )
 
 // Check nmqMessage implements ConsumerMessage

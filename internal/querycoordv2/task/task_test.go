@@ -39,18 +39,18 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/testutils"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type distribution struct {
@@ -1906,6 +1906,26 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID, coll))
 	suite.Equal(0, scheduler.GetSegmentTaskDelta(nodeID2, coll2))
 	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID2, coll2))
+}
+
+func (suite *TaskSuite) TestTaskDeltaCache() {
+	etd := NewExecutingTaskDelta()
+
+	taskDelta := []int{1, 2, 3, 4, 5, -6, -7, -8, -9, -10}
+
+	nodeID := int64(1)
+	collectionID := int64(100)
+
+	taskDelta = lo.Shuffle(taskDelta)
+	for i := 0; i < len(taskDelta); i++ {
+		etd.Add(nodeID, collectionID, int64(i), taskDelta[i])
+	}
+
+	taskDelta = lo.Shuffle(taskDelta)
+	for i := 0; i < len(taskDelta); i++ {
+		etd.Sub(nodeID, collectionID, int64(i), taskDelta[i])
+	}
+	suite.Equal(0, etd.Get(nodeID, collectionID))
 }
 
 func (suite *TaskSuite) TestRemoveTaskWithError() {

@@ -1,6 +1,6 @@
 package consumer
 
-import "github.com/milvus-io/milvus/pkg/proto/streamingpb"
+import "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 
 // consumeGrpcServerHelper is a wrapped consumer server of log messages.
 type consumeGrpcServerHelper struct {

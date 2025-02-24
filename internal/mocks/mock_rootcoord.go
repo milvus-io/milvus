@@ -10,15 +10,15 @@ import (
 
 	grpc "google.golang.org/grpc"
 
-	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 
-	proxypb "github.com/milvus-io/milvus/pkg/proto/proxypb"
+	proxypb "github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 
-	rootcoordpb "github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
+	rootcoordpb "github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 
 	txnkv "github.com/tikv/client-go/v2/txnkv"
 
@@ -1922,6 +1922,38 @@ func (_c *RootCoord_GetTimeTickChannel_Call) Return(_a0 *milvuspb.StringResponse
 }
 
 func (_c *RootCoord_GetTimeTickChannel_Call) RunAndReturn(run func(context.Context, *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error)) *RootCoord_GetTimeTickChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GracefulStop provides a mock function with given fields:
+func (_m *RootCoord) GracefulStop() {
+	_m.Called()
+}
+
+// RootCoord_GracefulStop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GracefulStop'
+type RootCoord_GracefulStop_Call struct {
+	*mock.Call
+}
+
+// GracefulStop is a helper method to define mock.On call
+func (_e *RootCoord_Expecter) GracefulStop() *RootCoord_GracefulStop_Call {
+	return &RootCoord_GracefulStop_Call{Call: _e.mock.On("GracefulStop")}
+}
+
+func (_c *RootCoord_GracefulStop_Call) Run(run func()) *RootCoord_GracefulStop_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *RootCoord_GracefulStop_Call) Return() *RootCoord_GracefulStop_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *RootCoord_GracefulStop_Call) RunAndReturn(run func()) *RootCoord_GracefulStop_Call {
 	_c.Call.Return(run)
 	return _c
 }

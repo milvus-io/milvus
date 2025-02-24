@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
 // appendToWAL appends the message to the wal.

@@ -402,7 +402,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
             // only used in ut.
             auto arr = static_cast<const boost::container::vector<T>*>(values);
             for (size_t i = 0; i < n; i++) {
-                wrapper_->template add_multi_data(
+                wrapper_->template add_array_data(
                     arr[i].data(), arr[i].size(), i);
             }
         } else {
@@ -413,7 +413,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
             // only used in ut.
             auto arr = static_cast<const boost::container::vector<T>*>(values);
             for (size_t i = 0; i < n; i++) {
-                wrapper_->template add_multi_data_by_single_segment_writer(
+                wrapper_->template add_array_data_by_single_segment_writer(
                     arr[i].data(), arr[i].size());
             }
         } else {
@@ -458,7 +458,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                             if (!data->is_valid(i)) {
                                 null_offset.push_back(i);
                             }
-                            wrapper_->add_multi_data<T>(
+                            wrapper_->add_array_data<T>(
                                 static_cast<const T*>(data->RawValue(i)),
                                 data->is_valid(i),
                                 offset++);
@@ -481,7 +481,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                                 null_offset.push_back(i);
                             }
                             wrapper_
-                                ->add_multi_data_by_single_segment_writer<T>(
+                                ->add_array_data_by_single_segment_writer<T>(
                                     static_cast<const T*>(data->RawValue(i)),
                                     data->is_valid(i));
                         }
@@ -525,12 +525,12 @@ InvertedIndexTantivy<T>::build_index_for_array(
             }
             auto length = data->is_valid(i) ? array_column[i].length() : 0;
             if (!inverted_index_single_segment_) {
-                wrapper_->template add_multi_data(
+                wrapper_->template add_array_data(
                     reinterpret_cast<const T*>(array_column[i].data()),
                     length,
                     offset++);
             } else {
-                wrapper_->template add_multi_data_by_single_segment_writer(
+                wrapper_->template add_array_data_by_single_segment_writer(
                     reinterpret_cast<const T*>(array_column[i].data()), length);
             }
         }
@@ -559,10 +559,10 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
             }
             auto length = data->is_valid(i) ? output.size() : 0;
             if (!inverted_index_single_segment_) {
-                wrapper_->template add_multi_data(
+                wrapper_->template add_array_data(
                     output.data(), length, offset++);
             } else {
-                wrapper_->template add_multi_data_by_single_segment_writer(
+                wrapper_->template add_array_data_by_single_segment_writer(
                     output.data(), length);
             }
         }

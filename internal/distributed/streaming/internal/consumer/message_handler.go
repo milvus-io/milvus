@@ -1,7 +1,7 @@
 package consumer
 
 import (
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 // timeTickOrderMessageHandler is a message handler that will record the last sent message id.

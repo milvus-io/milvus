@@ -24,7 +24,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/milvus-io/milvus/pkg/util/requestutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
 )
 
 const (
