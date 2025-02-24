@@ -345,6 +345,9 @@ func (s *taskScheduler) checkProcessingTasks() {
 	}
 	s.runningQueueLock.RUnlock()
 
+	if len(runningTaskIDs) <= 0 {
+		return
+	}
 	log.Ctx(s.ctx).Info("check running tasks", zap.Int("runningTask num", len(runningTaskIDs)))
 
 	var wg sync.WaitGroup
