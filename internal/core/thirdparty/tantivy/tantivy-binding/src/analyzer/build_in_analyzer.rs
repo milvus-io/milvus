@@ -16,7 +16,7 @@ pub(crate) fn standard_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
 }
 
 pub fn chinese_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
-    let builder = jieba_builder().filter(CnAlphaNumOnlyFilter);
+    let builder = jieba_builder(None).unwrap().filter(CnAlphaNumOnlyFilter);
     if stop_words.len() > 0 {
         return builder.filter(StopWordFilter::remove(stop_words)).build();
     }

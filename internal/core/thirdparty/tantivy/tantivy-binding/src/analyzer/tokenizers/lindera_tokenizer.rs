@@ -1,10 +1,9 @@
 
 use core::result::Result::Err;
-
 use lindera::mode::Mode;
 use lindera::segmenter::Segmenter;
 use lindera::token::Token as LToken;
-use lindera::tokenizer::{Tokenizer as LTokenizer, TokenizerBuilder};
+use lindera::tokenizer::Tokenizer as LTokenizer;
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
 use tantivy::tokenizer::{Token, Tokenizer, TokenStream};
 
@@ -48,7 +47,7 @@ pub struct LinderaTokenizer {
 
 impl LinderaTokenizer {
     /// Create a new `LinderaTokenizer`.
-    /// This function will create a new `LinderaTokenizer` with settings from the YAML file specified in the `LINDERA_CONFIG_PATH` environment variable.
+    /// This function will create a new `LinderaTokenizer` by json params.
     pub fn from_json(params: &json::Map<String, json::Value>) -> Result<LinderaTokenizer> {
         let kind = fetch_lindera_kind(params)?;
         let dictionary = load_dictionary_from_kind(kind);
