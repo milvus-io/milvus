@@ -409,7 +409,7 @@ class ResponseChecker:
                     log.info("search_results_check: Checked the distances for one nq: OK")
                 else:
                     pass  # just check nq and topk, not specific ids need check
-            vector_id +=  1
+            vector_id += 1
         log.info("search_results_check: limit (topK) and "
                  "ids searched for %d queries are correct" % len(search_res))
 
@@ -432,7 +432,7 @@ class ResponseChecker:
         while True:
             try:
                 res = search_iterator.next()
-                if len(res) == 0:
+                if res is None or len(res) == 0:
                     log.info("search iteration finished, close")
                     search_iterator.close()
                     break
@@ -454,6 +454,10 @@ class ResponseChecker:
             except Exception as e:
                 assert check_items["err_msg"] in str(e)
                 return False
+
+        if check_items.get("limit"):
+            if "range_filter" not in check_items and "radius" not in check_items:
+                assert len(pk_list) / check_items["limit"] >= 0.9
         assert len(pk_list) == len(set(pk_list))
         log.info("check: total %d results" % len(pk_list))
 
