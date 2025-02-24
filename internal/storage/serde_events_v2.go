@@ -24,34 +24,29 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type packedRecordReader struct {
 	reader *packed.PackedReader
 
-	bufferSize int
-	path       string
+	bufferSize int64
 	schema     *schemapb.CollectionSchema
-	r          *simpleArrowRecord
 	field2Col  map[FieldID]int
 }
 
-func (pr *packedRecordReader) Next() error {
+var _ RecordReader = (*packedRecordReader)(nil)
+
+func (pr *packedRecordReader) Next() (Record, error) {
 	if pr.reader == nil {
-		return io.EOF
+		return nil, io.EOF
 	}
 	rec, err := pr.reader.ReadNext()
 	if err != nil || rec == nil {
-		return io.EOF
+		return nil, io.EOF
 	}
-	pr.r = newSimpleArrowRecord(rec, pr.field2Col)
-	return nil
-}
-
-func (pr *packedRecordReader) Record() Record {
-	return pr.r
+	return NewSimpleArrowRecord(rec, pr.field2Col), nil
 }
 
 func (pr *packedRecordReader) Close() error {
@@ -61,13 +56,13 @@ func (pr *packedRecordReader) Close() error {
 	return nil
 }
 
-func NewPackedRecordReader(path string, schema *schemapb.CollectionSchema, bufferSize int,
+func newPackedRecordReader(paths []string, schema *schemapb.CollectionSchema, bufferSize int64,
 ) (*packedRecordReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
 	}
-	reader, err := packed.NewPackedReader(path, arrowSchema, bufferSize)
+	reader, err := packed.NewPackedReader(paths, arrowSchema, bufferSize)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("New binlog record packed reader error: %s", err.Error())
 	}
@@ -79,15 +74,14 @@ func NewPackedRecordReader(path string, schema *schemapb.CollectionSchema, buffe
 		reader:     reader,
 		schema:     schema,
 		bufferSize: bufferSize,
-		path:       path,
 		field2Col:  field2Col,
 	}, nil
 }
 
-func NewPackedDeserializeReader(path string, schema *schemapb.CollectionSchema,
-	bufferSize int, pkFieldID FieldID,
+func NewPackedDeserializeReader(paths []string, schema *schemapb.CollectionSchema,
+	bufferSize int64, pkFieldID FieldID,
 ) (*DeserializeReader[*Value], error) {
-	reader, err := NewPackedRecordReader(path, schema, bufferSize)
+	reader, err := newPackedRecordReader(paths, schema, bufferSize)
 	if err != nil {
 		return nil, err
 	}
@@ -149,9 +143,11 @@ var _ RecordWriter = (*packedRecordWriter)(nil)
 type packedRecordWriter struct {
 	writer *packed.PackedWriter
 
-	bufferSize int
-	path       string
-	schema     *arrow.Schema
+	bufferSize          int64
+	multiPartUploadSize int64
+	columnGroups        [][]int
+	paths               []string
+	schema              *arrow.Schema
 
 	numRows             int
 	writtenUncompressed uint64
@@ -181,8 +177,8 @@ func (pw *packedRecordWriter) Close() error {
 	return nil
 }
 
-func NewPackedRecordWriter(path string, schema *arrow.Schema, bufferSize int) (*packedRecordWriter, error) {
-	writer, err := packed.NewPackedWriter(path, schema, bufferSize)
+func NewPackedRecordWriter(paths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups [][]int) (*packedRecordWriter, error) {
+	writer, err := packed.NewPackedWriter(paths, schema, bufferSize, multiPartUploadSize, columnGroups)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not new packed record writer %s", err.Error()))
@@ -191,19 +187,17 @@ func NewPackedRecordWriter(path string, schema *arrow.Schema, bufferSize int) (*
 		writer:     writer,
 		schema:     schema,
 		bufferSize: bufferSize,
-		path:       path,
+		paths:      paths,
 	}, nil
 }
 
-func NewPackedSerializeWriter(schema *schemapb.CollectionSchema, partitionID, segmentID UniqueID,
-	batchSize int, path string, bufferSize int,
-) (*SerializeWriter[*Value], error) {
+func NewPackedSerializeWriter(paths []string, schema *schemapb.CollectionSchema, bufferSize int64, multiPartUploadSize int64, columnGroups [][]int, batchSize int) (*SerializeWriter[*Value], error) {
 	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
 	}
-	packedRecordWriter, err := NewPackedRecordWriter(path, arrowSchema, bufferSize)
+	packedRecordWriter, err := NewPackedRecordWriter(paths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not new packed record writer %s", err.Error()))

@@ -5,10 +5,10 @@ package mock_wal
 import (
 	context "context"
 
-	message "github.com/milvus-io/milvus/pkg/streaming/util/message"
+	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	mock "github.com/stretchr/testify/mock"
 
-	types "github.com/milvus-io/milvus/pkg/streaming/util/types"
+	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 
 	wal "github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 )

@@ -3,7 +3,7 @@ package meta
 import (
 	"sort"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // collectionAssignmentHelper is a helper to manage the replica assignment in same collection.

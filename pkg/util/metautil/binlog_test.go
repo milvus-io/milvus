@@ -20,7 +20,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestParseInsertLogPath(t *testing.T) {

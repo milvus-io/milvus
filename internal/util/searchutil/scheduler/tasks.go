@@ -1,6 +1,6 @@
 package scheduler
 
-import "github.com/milvus-io/milvus/pkg/proto/internalpb"
+import "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 
 const (
 	schedulePolicyNameFIFO            = "fifo"

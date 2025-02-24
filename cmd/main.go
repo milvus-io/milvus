@@ -28,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus/cmd/asan"
 	"github.com/milvus-io/milvus/cmd/milvus"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func main() {

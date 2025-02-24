@@ -27,8 +27,8 @@ import (
 	"github.com/nats-io/nats-server/v2/server"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // Nmq is global natsmq instance that will be initialized only once

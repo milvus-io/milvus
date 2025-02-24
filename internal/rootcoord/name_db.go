@@ -21,8 +21,8 @@ import (
 
 	"golang.org/x/exp/maps"
 
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type nameDb struct {

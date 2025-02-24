@@ -22,7 +22,7 @@ import (
 	"github.com/panjf2000/ants/v2"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 type poolOption struct {

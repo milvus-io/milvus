@@ -5,7 +5,7 @@ package proxy
 import (
 	context "context"
 
-	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	mock "github.com/stretchr/testify/mock"
 )
 

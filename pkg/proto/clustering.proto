@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.clustering;
 
-option go_package = "github.com/milvus-io/milvus/pkg/proto/clusteringpb";
+option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/clusteringpb";
 import "schema.proto";
 
 // Synchronously modify StorageConfig in index_coord.proto/index_cgo_msg.proto file

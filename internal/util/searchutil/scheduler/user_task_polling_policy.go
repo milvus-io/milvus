@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 var _ schedulePolicy = &userTaskPollingPolicy{}
@@ -47,7 +47,7 @@ func (p *userTaskPollingPolicy) Push(task Task) (int, error) {
 	if taskGroupLen > 0 {
 		limit := pt.QueryNodeCfg.SchedulePolicyMaxPendingTaskPerUser.GetAsInt()
 		if limit > 0 && taskGroupLen >= limit {
-			return 0, merr.WrapErrServiceRequestLimitExceeded(
+			return 0, merr.WrapErrTooManyRequests(
 				int32(limit),
 				fmt.Sprintf("limit by %s", pt.QueryNodeCfg.SchedulePolicyMaxPendingTaskPerUser.Key),
 			)

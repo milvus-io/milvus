@@ -31,11 +31,12 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestTaskStatsSuite(t *testing.T) {
@@ -95,7 +96,6 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			return result, nil
 		})
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-		s.mockBinlogIO.EXPECT().AsyncUpload(mock.Anything, mock.Anything).Return(nil)
 
 		ctx, cancel := context.WithCancel(context.Background())
 
@@ -111,8 +111,11 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			Schema:          s.schema,
 			NumRows:         1,
 			StartLogID:      0,
-			EndLogID:        5,
+			EndLogID:        7,
 			BinlogMaxSize:   64 * 1024 * 1024,
+			StorageConfig: &indexpb.StorageConfig{
+				RootPath: "root_path",
+			},
 		}, node, s.mockBinlogIO)
 		err = task.PreExecute(ctx)
 		s.Require().NoError(err)
@@ -142,7 +145,6 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			return result, nil
 		})
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
-		s.mockBinlogIO.EXPECT().AsyncUpload(mock.Anything, mock.Anything).Return(nil)
 
 		ctx, cancel := context.WithCancel(context.Background())
 
@@ -158,8 +160,11 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			Schema:          s.schema,
 			NumRows:         1,
 			StartLogID:      0,
-			EndLogID:        5,
+			EndLogID:        7,
 			BinlogMaxSize:   64 * 1024 * 1024,
+			StorageConfig: &indexpb.StorageConfig{
+				RootPath: "root_path",
+			},
 		}, node, s.mockBinlogIO)
 		err = task.PreExecute(ctx)
 		s.Require().NoError(err)

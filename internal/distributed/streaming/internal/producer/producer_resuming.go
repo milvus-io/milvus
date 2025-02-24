@@ -8,7 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/errs"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 // newProducerWithResumingError creates a new producer with resuming error.

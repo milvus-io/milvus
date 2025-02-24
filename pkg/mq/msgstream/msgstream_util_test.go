@@ -26,7 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 )
 
 func TestPulsarMsgUtil(t *testing.T) {

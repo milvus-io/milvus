@@ -1,8 +1,8 @@
 package consumer
 
 import (
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 )
 
 var _ ResumableConsumer = (*resumableConsumerImpl)(nil)

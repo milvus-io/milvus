@@ -23,7 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 )
 
 var errDisposed = errors.New("client is disposed")

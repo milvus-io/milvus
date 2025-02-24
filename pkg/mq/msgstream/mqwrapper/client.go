@@ -19,7 +19,7 @@ package mqwrapper
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 )
 
 // Client is the interface that provides operations of message queues

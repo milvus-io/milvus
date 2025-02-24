@@ -3,9 +3,9 @@ package rmq
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/client"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/client"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
 )
 
 var _ walimpls.OpenerImpls = (*openerImpl)(nil)

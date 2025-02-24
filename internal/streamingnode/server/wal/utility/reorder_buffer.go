@@ -3,8 +3,8 @@ package utility
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var ErrTimeTickVoilation = errors.New("time tick violation")

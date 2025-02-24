@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/config"
+	"github.com/milvus-io/milvus/pkg/v2/config"
 )
 
 func TestRoleConfig_Init(t *testing.T) {

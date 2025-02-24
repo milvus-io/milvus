@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/pkg/proto/cgopb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/cgopb"
 )
 
 func TestConsumeCStatusIntoError(t *testing.T) {

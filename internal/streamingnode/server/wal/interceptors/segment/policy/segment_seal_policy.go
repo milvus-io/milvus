@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type PolicyName string

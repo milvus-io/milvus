@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "segcore/column_groups_c.h"
 #include "segcore/packed_writer_c.h"
 #include "milvus-storage/packed/writer.h"
 #include "milvus-storage/common/log.h"
@@ -20,30 +21,44 @@
 
 #include <arrow/c/bridge.h>
 #include <arrow/filesystem/filesystem.h>
+#include "common/EasyAssert.h"
+#include "common/type_c.h"
 
-int
-NewPackedWriter(const char* path,
-                struct ArrowSchema* schema,
+CStatus
+NewPackedWriter(struct ArrowSchema* schema,
                 const int64_t buffer_size,
+                char** paths,
+                int64_t num_paths,
+                int64_t part_upload_size,
+                CColumnGroups column_groups,
                 CPackedWriter* c_packed_writer) {
     try {
-        auto truePath = std::string(path);
-        auto factory = std::make_shared<milvus_storage::FileSystemFactory>();
+        auto truePaths = std::vector<std::string>(paths, paths + num_paths);
+
         auto conf = milvus_storage::StorageConfig();
-        conf.uri = "file:///tmp/";
-        auto trueFs = factory->BuildFileSystem(conf, &truePath).value();
+        conf.part_size = part_upload_size;
+
+        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                .GetArrowFileSystem();
+        if (!trueFs) {
+            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed, "Failed to get filesystem");
+        }
+
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
+
+        auto columnGroups = *static_cast<std::vector<std::vector<int>>*>(column_groups);
+
         auto writer = std::make_unique<milvus_storage::PackedRecordBatchWriter>(
-            buffer_size, trueSchema, trueFs, truePath, conf);
+            trueFs, truePaths, trueSchema, conf, columnGroups, buffer_size);
 
         *c_packed_writer = writer.release();
-        return 0;
+        return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return -1;
+        return milvus::FailureCStatus(&e);
     }
 }
 
-int
+CStatus
 WriteRecordBatch(CPackedWriter c_packed_writer,
                  struct ArrowArray* array,
                  struct ArrowSchema* schema) {
@@ -55,15 +70,15 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
             arrow::ImportRecordBatch(array, schema).ValueOrDie();
         auto status = packed_writer->Write(record_batch);
         if (!status.ok()) {
-            return -1;
+            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed, status.ToString());
         }
-        return 0;
+        return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return -1;
+        return milvus::FailureCStatus(&e);
     }
 }
 
-int
+CStatus
 CloseWriter(CPackedWriter c_packed_writer) {
     try {
         auto packed_writer =
@@ -72,10 +87,10 @@ CloseWriter(CPackedWriter c_packed_writer) {
         auto status = packed_writer->Close();
         delete packed_writer;
         if (!status.ok()) {
-            return -1;
+            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed, status.ToString());
         }
-        return 0;
+        return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        return -1;
+        return milvus::FailureCStatus(&e);
     }
 }
