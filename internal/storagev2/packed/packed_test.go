@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/exp/rand"
 
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -77,7 +78,7 @@ func (suite *PackedTestSuite) TestPackedOneFile() {
 	batches := 100
 
 	paths := []string{"/tmp/100"}
-	columnGroups := [][]int{{0, 1, 2}}
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}}}
 	bufferSize := int64(10 * 1024 * 1024) // 10MB
 	multiPartUploadSize := int64(0)
 	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, columnGroups)
@@ -129,7 +130,7 @@ func (suite *PackedTestSuite) TestPackedMultiFiles() {
 	rec := b.NewRecord()
 	defer rec.Release()
 	paths := []string{"/tmp/100", "/tmp/101"}
-	columnGroups := [][]int{{2}, {0, 1}}
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{2}}, {Columns: []int{0, 1}}}
 	bufferSize := int64(10 * 1024 * 1024) // 10MB
 	multiPartUploadSize := int64(0)
 	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, columnGroups)

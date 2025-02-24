@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -35,10 +36,11 @@ const (
 )
 
 type rwOptions struct {
-	version    int64
-	bufferSize uint64
-	downloader func(ctx context.Context, paths []string) ([][]byte, error)
-	uploader   func(ctx context.Context, kvs map[string][]byte) error
+	version             int64
+	bufferSize          int64
+	downloader          func(ctx context.Context, paths []string) ([][]byte, error)
+	uploader            func(ctx context.Context, kvs map[string][]byte) error
+	multiPartUploadSize int64
 }
 
 type RwOption func(*rwOptions)
@@ -55,9 +57,15 @@ func WithVersion(version int64) RwOption {
 	}
 }
 
-func WithBufferSize(bufferSize uint64) RwOption {
+func WithBufferSize(bufferSize int64) RwOption {
 	return func(options *rwOptions) {
 		options.bufferSize = bufferSize
+	}
+}
+
+func WithMultiPartUploadSize(multiPartUploadSize int64) RwOption {
+	return func(options *rwOptions) {
+		options.multiPartUploadSize = multiPartUploadSize
 	}
 }
 
@@ -103,7 +111,21 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			return blobs, nil
 		})
 	case StorageV2:
-		// TODO: integrate v2
+		itr := 0
+		return newPackedRecordReader(func() ([]string, error) {
+			if len(binlogs) <= 0 {
+				return nil, sio.EOF
+			}
+			paths := make([]string, len(binlogs))
+			for i, fieldBinlog := range binlogs {
+				if itr >= len(fieldBinlog.GetBinlogs()) {
+					return nil, sio.EOF
+				}
+				paths[i] = fieldBinlog.GetBinlogs()[itr].GetLogPath()
+			}
+			itr++
+			return paths, nil
+		}, schema, rwOptions.bufferSize)
 	}
 	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
 }
@@ -116,20 +138,26 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	for _, opt := range option {
 		opt(rwOptions)
 	}
+	blobsWriter := func(blobs []*Blob) error {
+		kvs := make(map[string][]byte, len(blobs))
+		for _, blob := range blobs {
+			kvs[blob.Key] = blob.Value
+		}
+		return rwOptions.uploader(ctx, kvs)
+	}
 	switch rwOptions.version {
 	case StorageV1:
-		blobsWriter := func(blobs []*Blob) error {
-			kvs := make(map[string][]byte, len(blobs))
-			for _, blob := range blobs {
-				kvs[blob.Key] = blob.Value
-			}
-			return rwOptions.uploader(ctx, kvs)
-		}
 		return newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
 			blobsWriter, allocator, chunkSize, rootPath, maxRowNum,
 		)
 	case StorageV2:
-		// TODO: integrate v2
+		// TODO: support column groups generator to split columns by stats
+		splitter := storagecommon.NewColumnGroupSplitter(schema)
+		columnGroups := splitter.SplitByFieldType()
+		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
+			blobsWriter, allocator, chunkSize, rootPath, maxRowNum,
+			rwOptions.bufferSize, rwOptions.multiPartUploadSize, columnGroups,
+		)
 	}
 	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
 }

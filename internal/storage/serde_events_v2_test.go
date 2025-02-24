@@ -17,12 +17,13 @@
 package storage
 
 import (
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/util/initcore"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 func TestPackedSerde(t *testing.T) {
@@ -30,47 +31,55 @@ func TestPackedSerde(t *testing.T) {
 		initcore.InitLocalArrowFileSystem("/tmp")
 		size := 10
 
-		blobs, err := generateTestData(size)
-		assert.NoError(t, err)
-
-		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
-		assert.NoError(t, err)
-		defer reader.Close()
-
-		paths := []string{"/tmp/0"}
+		paths := [][]string{{"/tmp/0"}, {"/tmp/1"}}
 		bufferSize := int64(10 * 1024 * 1024) // 10MB
 		schema := generateTestSchema()
-		group := []int{}
-		for i := 0; i < len(schema.Fields); i++ {
-			group = append(group, i)
-		}
-		columnGroups := [][]int{group}
-		multiPartUploadSize := int64(0)
-		batchSize := 7
-		writer, err := NewPackedSerializeWriter(paths, schema, bufferSize, multiPartUploadSize, columnGroups, batchSize)
-		assert.NoError(t, err)
 
-		for i := 1; i <= size; i++ {
-			err = reader.Next()
+		prepareChunkData := func(chunkPaths []string, size int) {
+			blobs, err := generateTestData(size)
 			assert.NoError(t, err)
 
-			value := reader.Value()
-			assertTestData(t, i, value)
-			err := writer.Write(value)
+			reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
+			assert.NoError(t, err)
+			defer reader.Close()
+
+			group := storagecommon.ColumnGroup{}
+			for i := 0; i < len(schema.Fields); i++ {
+				group.Columns = append(group.Columns, i)
+			}
+			multiPartUploadSize := int64(0)
+			batchSize := 7
+			writer, err := NewPackedSerializeWriter(chunkPaths, schema, bufferSize, multiPartUploadSize, []storagecommon.ColumnGroup{group}, batchSize)
+			assert.NoError(t, err)
+
+			for i := 1; i <= size; i++ {
+				err = reader.Next()
+				assert.NoError(t, err)
+
+				value := reader.Value()
+				assertTestData(t, i, value)
+				err := writer.Write(value)
+				assert.NoError(t, err)
+			}
+			err = writer.Close()
 			assert.NoError(t, err)
 		}
-		err = writer.Close()
-		assert.NoError(t, err)
 
-		reader, err = NewPackedDeserializeReader(paths, schema, bufferSize, common.RowIDField)
+		for _, chunkPaths := range paths {
+			prepareChunkData(chunkPaths, size)
+		}
+
+		reader, err := NewPackedDeserializeReader(MakeChunkedPathsReader(paths), schema, bufferSize)
 		assert.NoError(t, err)
 		defer reader.Close()
 
-		for i := 1; i <= size; i++ {
+		for i := 0; i < size*len(paths); i++ {
 			err = reader.Next()
 			assert.NoError(t, err)
 			value := reader.Value()
-			assertTestData(t, i, value)
+			assertTestData(t, i%10+1, value)
 		}
+		err = reader.Next()
+		assert.Equal(t, err, io.EOF)
 	})
 }
