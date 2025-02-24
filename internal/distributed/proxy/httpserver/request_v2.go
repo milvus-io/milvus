@@ -370,6 +370,7 @@ type CollectionReq struct {
 	Schema           CollectionSchema       `json:"schema"`
 	IndexParams      []IndexParam           `json:"indexParams"`
 	Params           map[string]interface{} `json:"params"`
+	Description      string                 `json:"description"`
 }
 
 func (req *CollectionReq) GetDbName() string { return req.DbName }

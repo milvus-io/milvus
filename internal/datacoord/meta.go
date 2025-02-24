@@ -1009,6 +1009,7 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint)
 		count := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
 		if count != segment.currRows && count > 0 {
 			log.Info("check point reported inconsistent with bin log row count",
+				zap.Int64("segmentID", segmentID),
 				zap.Int64("current rows (wrong)", segment.currRows),
 				zap.Int64("segment bin log row count (correct)", count))
 			segment.NumOfRows = count

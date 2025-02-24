@@ -1197,6 +1197,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				},
 			},
 			EnableDynamicField: enableDynamic,
+			Description:        httpReq.Description,
 		})
 	} else {
 		collSchema := schemapb.CollectionSchema{
@@ -1204,6 +1205,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			AutoID:             httpReq.Schema.AutoId,
 			Fields:             []*schemapb.FieldSchema{},
 			EnableDynamicField: httpReq.Schema.EnableDynamicField,
+			Description:        httpReq.Description,
 		}
 		for _, field := range httpReq.Schema.Fields {
 			fieldDataType, ok := schemapb.DataType_value[field.DataType]

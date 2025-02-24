@@ -89,7 +89,7 @@ func (queue *baseTaskQueue) addUnissuedTask(t task) error {
 	defer queue.utLock.Unlock()
 
 	if queue.utFull() {
-		return merr.WrapErrServiceRequestLimitExceeded(int32(queue.getMaxTaskNum()))
+		return merr.WrapErrTooManyRequests(int32(queue.getMaxTaskNum()))
 	}
 	queue.unissuedTasks.PushBack(t)
 	queue.utBufChan <- 1
@@ -541,7 +541,10 @@ func (sched *taskScheduler) manipulationLoop() {
 func (sched *taskScheduler) queryLoop() {
 	defer sched.wg.Done()
 
-	pool := conc.NewPool[struct{}](paramtable.Get().ProxyCfg.MaxTaskNum.GetAsInt(), conc.WithExpiryDuration(time.Minute))
+	poolSize := paramtable.Get().ProxyCfg.MaxTaskNum.GetAsInt()
+	pool := conc.NewPool[struct{}](poolSize, conc.WithExpiryDuration(time.Minute))
+	subTaskPool := conc.NewPool[struct{}](poolSize, conc.WithExpiryDuration(time.Minute))
+
 	for {
 		select {
 		case <-sched.ctx.Done():
@@ -549,7 +552,12 @@ func (sched *taskScheduler) queryLoop() {
 		case <-sched.dqQueue.utChan():
 			if !sched.dqQueue.utEmpty() {
 				t := sched.scheduleDqTask()
-				pool.Submit(func() (struct{}, error) {
+				p := pool
+				// if task is sub task spawned by another, use sub task pool in case of deadlock
+				if t.IsSubTask() {
+					p = subTaskPool
+				}
+				p.Submit(func() (struct{}, error) {
 					sched.processTask(t, sched.dqQueue)
 					return struct{}{}, nil
 				})
