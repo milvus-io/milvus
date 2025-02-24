@@ -46,6 +46,19 @@ def external_filter_nothing(hits):
     return hits
 
 
+def external_filter_invalid_arguments(hits, iaminvalid):
+    pass
+
+
+def external_filter_with_outputs(hits):
+    results = []
+    for hit in hits:
+        # equals filter nothing if there are output_fields
+        if hit.distance < 1.0 and len(hit.fields) > 0:
+            results.append(hit)
+    return results
+
+
 class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
     """ Test case of search iterator interface """
 
@@ -309,7 +322,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [-10])
     @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/39066")
     def test_milvus_client_search_iterator_with_invalid_limit(self, limit):
@@ -349,7 +362,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("output_fields", ["id"])
     @pytest.mark.skip("A field that does not currently exist will simply have no effect, "
                       "but it would be better if an error were reported.")
@@ -436,7 +449,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("partition_name", ["client_partition_85Jv3Pf3"])
     def test_milvus_client_search_iterator_with_invalid_partition_name(self, partition_name):
         """
@@ -479,7 +492,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("partition_name", ["nonexistent"])
     def test_milvus_client_search_iterator_with_nonexistent_partition_name(self, partition_name):
         """
@@ -520,7 +533,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("anns_field", ["nonexistent", ])
     def test_milvus_client_search_iterator_with_nonexistent_anns_field(self, anns_field):
         """
@@ -562,7 +575,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("round_decimal", ["tt"])
     def test_milvus_client_search_iterator_with_invalid_round_decimal(self, round_decimal):
         """
@@ -602,6 +615,46 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
                              check_items=error)
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_search_iterator_with_invalid_external_func(self):
+        """
+        target: test search iterator (high level api) normal case
+        method: create connection, collection, insert and search iterator
+        expected: search iterator successfully
+        """
+        batch_size = 20
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        self.using_database(client, "default")
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.describe_collection(client, collection_name,
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "dim": default_dim})
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. search iterator
+        vectors_to_search = rng.random((1, default_dim))
+        search_params = {}
+        with pytest.raises(TypeError, match="missing 1 required positional argument: 'hits'"):
+            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
+                                 search_params=search_params, limit=100,
+                                 external_filter_func=external_filter_invalid_arguments(metric_type="L2"),
+                                 check_task=CheckTasks.check_nothing)
+        it = self.search_iterator(client, collection_name, vectors_to_search, batch_size,
+                                  search_params=search_params, limit=100,
+                                  external_filter_func=external_filter_invalid_arguments,
+                                  check_task=CheckTasks.check_nothing)[0]
+        with pytest.raises(TypeError, match="missing 1 required positional argument: 'metric_type'"):
+            it.next()
 
 
 class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
@@ -656,29 +709,36 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         search_params = {"params": search_params}
         for limit in [batch_size - 3, batch_size, batch_size * 2, -1]:
             log.debug(f"search iterator with limit={limit}")
+            expected_batch_size = batch_size if limit == -1 else min(batch_size, limit)
             # external filter not set
             self.search_iterator(client, collection_name, vectors_to_search, batch_size,
                                  search_params=search_params, limit=limit,
                                  check_task=CheckTasks.check_search_iterator,
-                                 check_items={"batch_size": batch_size if limit == -1 else min(batch_size, limit)})
+                                 check_items={"batch_size": expected_batch_size})
             # external filter half
             self.search_iterator(client, collection_name, vectors_to_search, batch_size,
                                  search_params=search_params, limit=limit,
                                  external_filter_func=external_filter_half,
                                  check_task=CheckTasks.check_search_iterator,
-                                 check_items={"batch_size": batch_size if limit == -1 else min(batch_size, limit)})
+                                 check_items={"batch_size": expected_batch_size})
             # external filter nothing
             self.search_iterator(client, collection_name, vectors_to_search, batch_size,
                                  search_params=search_params, limit=limit,
                                  external_filter_func=external_filter_nothing,
                                  check_task=CheckTasks.check_search_iterator,
-                                 check_items={"batch_size": batch_size if limit == -1 else min(batch_size, limit)})
+                                 check_items={"batch_size": expected_batch_size})
+            # external filter with outputs
+            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
+                                 search_params=search_params, limit=limit, output_fields=["*"],
+                                 external_filter_func=external_filter_with_outputs,
+                                 check_task=CheckTasks.check_search_iterator,
+                                 check_items={"batch_size": expected_batch_size})
             # external filter all
             self.search_iterator(client, collection_name, vectors_to_search, batch_size,
                                  search_params=search_params, limit=limit,
                                  external_filter_func=external_filter_all,
                                  check_task=CheckTasks.check_search_iterator,
-                                 check_items={"batch_size": 0})
+                                 check_items={"batch_size": 0, "iterate_times": 1})
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
