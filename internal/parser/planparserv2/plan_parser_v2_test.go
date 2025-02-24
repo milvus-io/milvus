@@ -192,25 +192,44 @@ func TestExpr_Like(t *testing.T) {
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
-	exprStrs := []string{
-		`VarCharField like "prefix%"`,
-		`VarCharField like "equal"`,
-		`JSONField["A"] like "name*"`,
-		`$meta["A"] like "name*"`,
-	}
-	for _, exprStr := range exprStrs {
-		assertValidExpr(t, helper, exprStr)
-	}
+	expr := `A like "8\\_0%"`
+	plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	fmt.Println(plan)
+	assert.Equal(t, planpb.OpType_PrefixMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "8_0", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
 
-	// TODO: enable these after regex-match is supported.
-	//unsupported := []string{
-	//	`VarCharField like "not_%_supported"`,
-	//	`JSONField["A"] like "not_%_supported"`,
-	//	`$meta["A"] like "not_%_supported"`,
-	//}
-	//for _, exprStr := range unsupported {
-	//	assertInvalidExpr(t, helper, exprStr)
-	//}
+	expr = `A like "8_\\_0%"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	fmt.Println(plan)
+	assert.Equal(t, planpb.OpType_Match, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, `8_\_0%`, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	expr = `A like "8\\%-0%"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	fmt.Println(plan)
+	assert.Equal(t, planpb.OpType_PrefixMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, `8%-0`, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
 }
 
 func TestExpr_TextMatch(t *testing.T) {
