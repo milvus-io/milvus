@@ -51,12 +51,11 @@ func TestPackedSerde(t *testing.T) {
 		assert.NoError(t, err)
 
 		for i := 1; i <= size; i++ {
-			err = reader.Next()
+			value, err := reader.NextValue()
 			assert.NoError(t, err)
 
-			value := reader.Value()
-			assertTestData(t, i, value)
-			err := writer.Write(value)
+			assertTestData(t, i, *value)
+			err = writer.WriteValue(*value)
 			assert.NoError(t, err)
 		}
 		err = writer.Close()
@@ -67,10 +66,9 @@ func TestPackedSerde(t *testing.T) {
 		defer reader.Close()
 
 		for i := 1; i <= size; i++ {
-			err = reader.Next()
+			value, err := reader.NextValue()
 			assert.NoError(t, err)
-			value := reader.Value()
-			assertTestData(t, i, value)
+			assertTestData(t, i, *value)
 		}
 	})
 }
