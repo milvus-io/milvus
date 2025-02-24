@@ -26,16 +26,16 @@ const OPERATION_BATCH_SIZE: usize = 1000;
 #[macro_export]
 macro_rules! add_batch_documents {
     ($index_writer:expr, $data:expr, $field:expr, $id_field:expr, $offset:ident) => {{
-        let mut ops = Vec::with_capacity(1000);
+        let mut ops = Vec::with_capacity(OPERATION_BATCH_SIZE);
         for d in $data {
             ops.push(UserOperation::Add(doc!(
                 $id_field.unwrap() => $offset,
                 $field => d,
             )));
             $offset += 1;
-            if ops.len() == 1000 {
+            if ops.len() == OPERATION_BATCH_SIZE {
                 $index_writer.index_writer_add_batch_documents(ops)?;
-                ops = Vec::with_capacity(1000);
+                ops = Vec::with_capacity(OPERATION_BATCH_SIZE);
             }
         }
         $index_writer.index_writer_add_batch_documents(ops)
