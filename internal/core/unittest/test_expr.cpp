@@ -17,6 +17,7 @@
 #include <memory>
 #include <regex>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 #include <chrono>
@@ -16125,4 +16126,42 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
     final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
     EXPECT_EQ(final.count(), N);
+
+    auto term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {this->json_path.substr(1)}),
+        std::vector<proto::plan::GenericValue>(),
+        false);
+    plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 0);
+
+    std::vector<proto::plan::GenericValue> vals;
+    for (int i = 0; i < 10; ++i) {
+        using DT = std::conditional_t<
+            std::is_same_v<typename TestFixture::DataType, std::string>,
+            std::string_view,
+            typename TestFixture::DataType>;
+        proto::plan::GenericValue val;
+
+        auto v = jsons[i].at<DT>(this->json_path).value();
+        if constexpr (std::is_same_v<DT, bool>) {
+            val.set_bool_val(v);
+        } else if constexpr (std::is_same_v<DT, int64_t>) {
+            val.set_int64_val(v);
+        } else if constexpr (std::is_same_v<DT, double>) {
+            val.set_float_val(v);
+        } else if constexpr (std::is_same_v<DT, std::string_view>) {
+            val.set_string_val(std::string(v));
+        }
+        vals.push_back(val);
+    }
+    term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {this->json_path.substr(1)}),
+        vals,
+        false);
+    plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 10);
 }
