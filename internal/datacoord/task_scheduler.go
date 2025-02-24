@@ -125,6 +125,10 @@ func (s *taskScheduler) reloadFromMeta() {
 					State:      segIndex.IndexState,
 					FailReason: segIndex.FailReason,
 				},
+				req: &workerpb.CreateJobRequest{
+					ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
+					BuildID:   segIndex.BuildID,
+				},
 				queueTime: time.Now(),
 				startTime: time.Now(),
 				endTime:   time.Now(),
@@ -149,6 +153,10 @@ func (s *taskScheduler) reloadFromMeta() {
 				TaskID:     taskID,
 				State:      t.State,
 				FailReason: t.FailReason,
+			},
+			req: &workerpb.AnalyzeRequest{
+				ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
+				TaskID:    taskID,
 			},
 			queueTime: time.Now(),
 			startTime: time.Now(),
@@ -175,6 +183,10 @@ func (s *taskScheduler) reloadFromMeta() {
 				TaskID:     taskID,
 				State:      t.GetState(),
 				FailReason: t.GetFailReason(),
+			},
+			req: &workerpb.CreateStatsRequest{
+				ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
+				TaskID:    taskID,
 			},
 			queueTime:  time.Now(),
 			startTime:  time.Now(),

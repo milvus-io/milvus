@@ -209,42 +209,31 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 	m.RLock()
 	defer m.RUnlock()
 
-	taskMetrics := make(map[UniqueID]map[indexpb.JobState]int)
+	taskMetrics := make(map[indexpb.JobState]int)
 	for _, segIdx := range m.segmentBuildInfo.List() {
 		if segIdx.IsDeleted || !m.isIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 			continue
 		}
-		if _, ok := taskMetrics[segIdx.CollectionID]; !ok {
-			taskMetrics[segIdx.CollectionID] = make(map[indexpb.JobState]int)
-			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateNone] = 0
-			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateInit] = 0
-			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateInProgress] = 0
-			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateFinished] = 0
-			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateFailed] = 0
-			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateRetry] = 0
-		}
+
 		switch segIdx.IndexState {
 		case commonpb.IndexState_IndexStateNone:
-			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateNone]++
+			taskMetrics[indexpb.JobState_JobStateNone]++
 		case commonpb.IndexState_Unissued:
-			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateInit]++
+			taskMetrics[indexpb.JobState_JobStateInit]++
 		case commonpb.IndexState_InProgress:
-			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateInProgress]++
+			taskMetrics[indexpb.JobState_JobStateInProgress]++
 		case commonpb.IndexState_Finished:
-			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateFinished]++
+			taskMetrics[indexpb.JobState_JobStateFinished]++
 		case commonpb.IndexState_Failed:
-			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateFailed]++
+			taskMetrics[indexpb.JobState_JobStateFailed]++
 		case commonpb.IndexState_Retry:
-			taskMetrics[segIdx.CollectionID][indexpb.JobState_JobStateRetry]++
+			taskMetrics[indexpb.JobState_JobStateRetry]++
 		}
 	}
 
 	jobType := indexpb.JobType_JobTypeIndexJob.String()
-	metrics.TaskNum.DeletePartialMatch(prometheus.Labels{metrics.TaskTypeLabel: jobType})
-	for collID, m := range taskMetrics {
-		for k, v := range m {
-			metrics.TaskNum.WithLabelValues(strconv.FormatInt(collID, 10), jobType, k.String()).Set(float64(v))
-		}
+	for k, v := range taskMetrics {
+		metrics.TaskNum.WithLabelValues(jobType, k.String()).Set(float64(v))
 	}
 	log.Ctx(m.ctx).Info("update index metric", zap.Int("collectionNum", len(taskMetrics)))
 }

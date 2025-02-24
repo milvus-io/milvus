@@ -355,7 +355,7 @@ var (
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "task_count",
 			Help:      "number of index tasks of each type",
-		}, []string{collectionIDLabelName, TaskTypeLabel, TaskStateLabel})
+		}, []string{TaskTypeLabel, TaskStateLabel})
 )
 
 // RegisterDataCoord registers DataCoord metrics
