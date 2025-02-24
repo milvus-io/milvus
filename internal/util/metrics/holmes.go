@@ -35,6 +35,7 @@ var (
 
 func InitHolmes() {
 	once.Do(func() {
+		paramtable.Init()
 		pt := paramtable.Get()
 		if !pt.HolmesCfg.Enable.GetAsBool() {
 			return
