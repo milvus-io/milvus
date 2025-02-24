@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -903,6 +904,8 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(coll, nil)
+		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return("", merr.WrapErrAliasNotFound("", ""))
 
 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
 
@@ -950,6 +953,8 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(coll, nil)
+		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return("", merr.WrapErrAliasNotFound("", ""))
 
 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
 
@@ -996,6 +1001,40 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("collection name duplicates an alias", func(t *testing.T) {
+		defer cleanTestEnv()
+
+		collectionName := funcutil.GenRandomStr()
+		ticker := newRocksMqTtSynchronizer()
+		field1 := funcutil.GenRandomStr()
+		schema := &schemapb.CollectionSchema{Name: collectionName, Fields: []*schemapb.FieldSchema{{Name: field1}}}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		// mock collection name duplicates an alias
+		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(collectionName, nil)
+
+		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
+		task := &createCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				DbName:         "mock-db",
+				CollectionName: collectionName,
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.ConsistencyLevel,
+						Value: "1",
+					},
+				},
+			},
+			schema: schema,
+		}
+		err := task.Execute(context.Background())
+		assert.Error(t, err)
+		assert.True(t, strings.Contains(err.Error(), "conflicts with an existing alias"))
+	})
+
 	t.Run("normal case", func(t *testing.T) {
 		defer cleanTestEnv()
 
@@ -1023,6 +1062,8 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
+		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return("", merr.WrapErrAliasNotFound("", ""))
 
 		dc := newMockDataCoord()
 		dc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
@@ -1107,6 +1148,8 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(errors.New("error mock ChangeCollectionState"))
+		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return("", merr.WrapErrAliasNotFound("", ""))
 
 		removeCollectionCalled := false
 		removeCollectionChan := make(chan struct{}, 1)

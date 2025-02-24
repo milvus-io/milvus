@@ -598,6 +598,14 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		UpdateTimestamp:      ts,
 	}
 
+	// Check if the collection name duplicates an alias.
+	_, err = t.core.meta.DescribeAlias(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
+	if err == nil {
+		err2 := fmt.Errorf("collection name [%s] conflicts with an existing alias, please choose a unique name", t.Req.GetCollectionName())
+		log.Ctx(ctx).Warn("create collection failed", zap.String("database", t.Req.GetDbName()), zap.Error(err2))
+		return err2
+	}
+
 	// We cannot check the idempotency inside meta table when adding collection, since we'll execute duplicate steps
 	// if add collection successfully due to idempotency check. Some steps may be risky to be duplicate executed if they
 	// are not promised idempotent.
