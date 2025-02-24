@@ -45,10 +45,11 @@ import (
 
 // Not concurrent safe.
 type MultiSegmentWriter struct {
+	ctx       context.Context
 	binlogIO  io.BinlogIO
 	allocator *compactionAlloactor
 
-	writer           storage.BinlogRecordWriter
+	writer           *storage.BinlogValueWriter
 	currentSegmentID typeutil.UniqueID
 
 	maxRows     int64
@@ -61,13 +62,11 @@ type MultiSegmentWriter struct {
 	partitionID  int64
 	collectionID int64
 	channel      string
+	batchSize    int
 
 	res []*datapb.CompactionSegment
 	// DONOT leave it empty of all segments are deleted, just return a segment with zero meta for datacoord
-	bm25Fields []int64
 }
-
-var _ storage.RecordWriter = &MultiSegmentWriter{}
 
 type compactionAlloactor struct {
 	segmentAlloc allocator.Interface
@@ -85,27 +84,22 @@ func (alloc *compactionAlloactor) allocSegmentID() (typeutil.UniqueID, error) {
 	return alloc.segmentAlloc.AllocOne()
 }
 
-func (alloc *compactionAlloactor) getLogIDAllocator() allocator.Interface {
-	return alloc.logIDAlloc
-}
-
-func NewMultiSegmentWriter(binlogIO io.BinlogIO, allocator *compactionAlloactor, plan *datapb.CompactionPlan,
-	maxRows int64, partitionID, collectionID int64, bm25Fields []int64,
+func NewMultiSegmentWriter(ctx context.Context, binlogIO io.BinlogIO, allocator *compactionAlloactor, segmentSize int64,
+	schema *schemapb.CollectionSchema,
+	maxRows int64, partitionID, collectionID int64, channel string, batchSize int,
 ) *MultiSegmentWriter {
 	return &MultiSegmentWriter{
-		binlogIO:  binlogIO,
-		allocator: allocator,
-
-		maxRows:     maxRows, // For bloomfilter only
-		segmentSize: plan.GetMaxSize(),
-
-		schema:       plan.GetSchema(),
+		ctx:          ctx,
+		binlogIO:     binlogIO,
+		allocator:    allocator,
+		maxRows:      maxRows, // For bloomfilter only
+		segmentSize:  segmentSize,
+		schema:       schema,
 		partitionID:  partitionID,
 		collectionID: collectionID,
-		channel:      plan.GetChannel(),
-
-		res:        make([]*datapb.CompactionSegment, 0),
-		bm25Fields: bm25Fields,
+		channel:      channel,
+		batchSize:    batchSize,
+		res:          make([]*datapb.CompactionSegment, 0),
 	}
 }
 
@@ -128,7 +122,7 @@ func (w *MultiSegmentWriter) closeWriter() error {
 
 		w.res = append(w.res, result)
 
-		log.Info("Segment writer flushed a segment",
+		log.Info("created new segment",
 			zap.Int64("segmentID", w.currentSegmentID),
 			zap.String("channel", w.channel),
 			zap.Int64("totalRows", w.writer.GetRowNum()))
@@ -147,11 +141,10 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 	}
 	w.currentSegmentID = newSegmentID
 
-	ctx := context.TODO()
 	chunkSize := paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64()
 	rootPath := binlog.GetRootPath()
 
-	writer, err := storage.NewBinlogRecordWriter(ctx, w.collectionID, w.partitionID, newSegmentID,
+	rw, err := storage.NewBinlogRecordWriter(w.ctx, w.collectionID, w.partitionID, newSegmentID,
 		w.schema, w.allocator.logIDAlloc, chunkSize, rootPath, w.maxRows,
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return w.binlogIO.Upload(ctx, kvs)
@@ -159,7 +152,8 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 	if err != nil {
 		return err
 	}
-	w.writer = writer
+
+	w.writer = storage.NewBinlogValueWriter(rw, w.batchSize)
 	return nil
 }
 
@@ -182,6 +176,26 @@ func (w *MultiSegmentWriter) Write(r storage.Record) error {
 	}
 
 	return w.writer.Write(r)
+}
+
+func (w *MultiSegmentWriter) WriteValue(v *storage.Value) error {
+	if w.writer == nil || w.writer.GetWrittenUncompressed() >= uint64(w.segmentSize) {
+		if err := w.rotateWriter(); err != nil {
+			return err
+		}
+	}
+
+	return w.writer.WriteValue(v)
+}
+
+func (w *MultiSegmentWriter) FlushChunk() error {
+	if w.writer == nil {
+		return nil
+	}
+	if err := w.writer.Flush(); err != nil {
+		return err
+	}
+	return w.writer.FlushChunk()
 }
 
 // DONOT return an empty list if every insert of the segment is deleted,
@@ -276,7 +290,7 @@ func (w *SegmentDeltaWriter) Finish() (*storage.Blob, *writebuffer.TimeRange, er
 }
 
 type SegmentWriter struct {
-	writer  *storage.SerializeWriter[*storage.Value]
+	writer  *storage.SerializeWriterImpl[*storage.Value]
 	closers []func() (*storage.Blob, error)
 	tsFrom  typeutil.Timestamp
 	tsTo    typeutil.Timestamp
@@ -316,7 +330,7 @@ func (w *SegmentWriter) GetPkID() int64 {
 }
 
 func (w *SegmentWriter) WrittenMemorySize() uint64 {
-	return w.writer.WrittenMemorySize()
+	return w.writer.GetWrittenUncompressed()
 }
 
 func (w *SegmentWriter) WriteRecord(r storage.Record) error {
@@ -395,7 +409,7 @@ func (w *SegmentWriter) WriteRecord(r storage.Record) error {
 
 	rec := storage.NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(rows)), field2Col)
 	defer rec.Release()
-	return w.writer.WriteRecord(rec)
+	return w.writer.Write(rec)
 }
 
 func (w *SegmentWriter) Write(v *storage.Value) error {
@@ -422,7 +436,7 @@ func (w *SegmentWriter) Write(v *storage.Value) error {
 	}
 
 	w.rowCount.Inc()
-	return w.writer.Write(v)
+	return w.writer.WriteValue(v)
 }
 
 func (w *SegmentWriter) Finish() (*storage.Blob, error) {
@@ -454,25 +468,25 @@ func (w *SegmentWriter) GetBm25StatsBlob() (map[int64]*storage.Blob, error) {
 }
 
 func (w *SegmentWriter) IsFull() bool {
-	return w.writer.WrittenMemorySize() > w.maxBinlogSize
+	return w.writer.GetWrittenUncompressed() > w.maxBinlogSize
 }
 
 func (w *SegmentWriter) FlushAndIsFull() bool {
 	w.writer.Flush()
-	return w.writer.WrittenMemorySize() > w.maxBinlogSize
+	return w.writer.GetWrittenUncompressed() > w.maxBinlogSize
 }
 
 func (w *SegmentWriter) IsFullWithBinlogMaxSize(binLogMaxSize uint64) bool {
-	return w.writer.WrittenMemorySize() > binLogMaxSize
+	return w.writer.GetWrittenUncompressed() > binLogMaxSize
 }
 
 func (w *SegmentWriter) IsEmpty() bool {
-	return w.writer.WrittenMemorySize() == 0
+	return w.writer.GetWrittenUncompressed() == 0
 }
 
 func (w *SegmentWriter) FlushAndIsEmpty() bool {
 	w.writer.Flush()
-	return w.writer.WrittenMemorySize() == 0
+	return w.writer.GetWrittenUncompressed() == 0
 }
 
 func (w *SegmentWriter) GetTimeRange() *writebuffer.TimeRange {
@@ -499,11 +513,11 @@ func (w *SegmentWriter) SerializeYield() ([]*storage.Blob, *writebuffer.TimeRang
 }
 
 func (w *SegmentWriter) GetTotalSize() int64 {
-	return w.syncedSize.Load() + int64(w.writer.WrittenMemorySize())
+	return w.syncedSize.Load() + int64(w.writer.GetWrittenUncompressed())
 }
 
 func (w *SegmentWriter) clear() {
-	w.syncedSize.Add(int64(w.writer.WrittenMemorySize()))
+	w.syncedSize.Add(int64(w.writer.GetWrittenUncompressed()))
 
 	writer, closers, _ := newBinlogWriter(w.collectionID, w.partitionID, w.segmentID, w.sch, w.batchSize)
 	w.writer = writer
@@ -512,6 +526,7 @@ func (w *SegmentWriter) clear() {
 	w.tsTo = 0
 }
 
+// deprecated: use NewMultiSegmentWriter instead
 func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, batchSize int, segID, partID, collID int64, Bm25Fields []int64) (*SegmentWriter, error) {
 	writer, closers, err := newBinlogWriter(collID, partID, segID, sch, batchSize)
 	if err != nil {
@@ -555,7 +570,7 @@ func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, batchSize 
 }
 
 func newBinlogWriter(collID, partID, segID int64, schema *schemapb.CollectionSchema, batchSize int,
-) (writer *storage.SerializeWriter[*storage.Value], closers []func() (*storage.Blob, error), err error) {
+) (writer *storage.SerializeWriterImpl[*storage.Value], closers []func() (*storage.Blob, error), err error) {
 	fieldWriters := storage.NewBinlogStreamWriters(collID, partID, segID, schema.Fields)
 	closers = make([]func() (*storage.Blob, error), 0, len(fieldWriters))
 	for _, w := range fieldWriters {

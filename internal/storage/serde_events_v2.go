@@ -117,7 +117,7 @@ func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, 
 
 func NewPackedDeserializeReader(paths [][]string, schema *schemapb.CollectionSchema,
 	bufferSize int64,
-) (*DeserializeReader[*Value], error) {
+) (*DeserializeReaderImpl[*Value], error) {
 	reader, err := newPackedRecordReader(paths, schema, bufferSize)
 	if err != nil {
 		return nil, err
@@ -260,7 +260,9 @@ func NewPackedRecordWriter(paths []string, schema *arrow.Schema, bufferSize int6
 	}, nil
 }
 
-func NewPackedSerializeWriter(paths []string, schema *schemapb.CollectionSchema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, batchSize int) (*SerializeWriter[*Value], error) {
+func NewPackedSerializeWriter(paths []string, schema *schemapb.CollectionSchema, bufferSize int64,
+	multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, batchSize int,
+) (*SerializeWriterImpl[*Value], error) {
 	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
@@ -521,6 +523,14 @@ func (pw *PackedBinlogRecordWriter) GetLogs() (
 
 func (pw *PackedBinlogRecordWriter) GetRowNum() int64 {
 	return pw.rowNum
+}
+
+func (pw *PackedBinlogRecordWriter) FlushChunk() error {
+	return nil // do nothing
+}
+
+func (pw *PackedBinlogRecordWriter) Schema() *schemapb.CollectionSchema {
+	return pw.schema
 }
 
 func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,

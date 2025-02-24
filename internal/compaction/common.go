@@ -57,7 +57,7 @@ func ComposeDeleteFromDeltalogs(ctx context.Context, io io.BinlogIO, paths []str
 	defer reader.Close()
 
 	for {
-		err := reader.Next()
+		dl, err := reader.NextValue()
 		if err != nil {
 			if err == sio.EOF {
 				break
@@ -66,11 +66,10 @@ func ComposeDeleteFromDeltalogs(ctx context.Context, io io.BinlogIO, paths []str
 			return nil, err
 		}
 
-		dl := reader.Value()
-		if ts, ok := pk2Ts[dl.Pk.GetValue()]; ok && ts > dl.Ts {
+		if ts, ok := pk2Ts[(*dl).Pk.GetValue()]; ok && ts > (*dl).Ts {
 			continue
 		}
-		pk2Ts[dl.Pk.GetValue()] = dl.Ts
+		pk2Ts[(*dl).Pk.GetValue()] = (*dl).Ts
 	}
 
 	log.Info("compose delete end", zap.Int("delete entries counts", len(pk2Ts)))
