@@ -103,7 +103,7 @@ func (s *ControllerBaseTestSuite) TestActivation() {
 
 func (s *ControllerBaseTestSuite) TestListCheckers() {
 	checkers := s.controller.Checkers()
-	s.Equal(6, len(checkers))
+	s.Equal(5, len(checkers))
 }
 
 func TestControllerBaseTestSuite(t *testing.T) {
