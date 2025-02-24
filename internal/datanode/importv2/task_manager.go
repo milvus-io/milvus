@@ -19,7 +19,7 @@ package importv2
 import (
 	"sync"
 
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 type TaskManager interface {

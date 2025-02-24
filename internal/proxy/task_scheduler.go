@@ -26,14 +26,14 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type taskQueue interface {
@@ -89,7 +89,7 @@ func (queue *baseTaskQueue) addUnissuedTask(t task) error {
 	defer queue.utLock.Unlock()
 
 	if queue.utFull() {
-		return merr.WrapErrServiceRequestLimitExceeded(int32(queue.getMaxTaskNum()))
+		return merr.WrapErrTooManyRequests(int32(queue.getMaxTaskNum()))
 	}
 	queue.unissuedTasks.PushBack(t)
 	queue.utBufChan <- 1
@@ -554,7 +554,10 @@ func (sched *taskScheduler) manipulationLoop() {
 func (sched *taskScheduler) queryLoop() {
 	defer sched.wg.Done()
 
-	pool := conc.NewPool[struct{}](paramtable.Get().ProxyCfg.MaxTaskNum.GetAsInt(), conc.WithExpiryDuration(time.Minute))
+	poolSize := paramtable.Get().ProxyCfg.MaxTaskNum.GetAsInt()
+	pool := conc.NewPool[struct{}](poolSize, conc.WithExpiryDuration(time.Minute))
+	subTaskPool := conc.NewPool[struct{}](poolSize, conc.WithExpiryDuration(time.Minute))
+
 	for {
 		select {
 		case <-sched.ctx.Done():
@@ -562,7 +565,12 @@ func (sched *taskScheduler) queryLoop() {
 		case <-sched.dqQueue.utChan():
 			if !sched.dqQueue.utEmpty() {
 				t := sched.scheduleDqTask()
-				pool.Submit(func() (struct{}, error) {
+				p := pool
+				// if task is sub task spawned by another, use sub task pool in case of deadlock
+				if t.IsSubTask() {
+					p = subTaskPool
+				}
+				p.Submit(func() (struct{}, error) {
 					sched.processTask(t, sched.dqQueue)
 					return struct{}{}, nil
 				})

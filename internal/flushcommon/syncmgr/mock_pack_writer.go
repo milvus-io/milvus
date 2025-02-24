@@ -5,7 +5,7 @@ package syncmgr
 import (
 	context "context"
 
-	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 )
 

@@ -17,7 +17,7 @@
 package metricsinfo
 
 import (
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // RateMetricLabel defines the metric label collected from nodes.

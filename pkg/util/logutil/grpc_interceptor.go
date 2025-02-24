@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 const (

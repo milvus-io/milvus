@@ -22,11 +22,11 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func CompressSaveBinlogPaths(req *datapb.SaveBinlogPathsRequest) error {
@@ -185,12 +185,16 @@ func DecompressBinLogWithRootPath(rootPath string, binlogType storage.BinlogType
 	return nil
 }
 
+func GetRootPath() string {
+	if paramtable.Get().CommonCfg.StorageType.GetValue() == "local" {
+		return paramtable.Get().LocalStorageCfg.Path.GetValue()
+	}
+	return paramtable.Get().MinioCfg.RootPath.GetValue()
+}
+
 // build a binlog path on the storage by metadata
 func BuildLogPath(binlogType storage.BinlogType, collectionID, partitionID, segmentID, fieldID, logID typeutil.UniqueID) (string, error) {
-	chunkManagerRootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
-	if paramtable.Get().CommonCfg.StorageType.GetValue() == "local" {
-		chunkManagerRootPath = paramtable.Get().LocalStorageCfg.Path.GetValue()
-	}
+	chunkManagerRootPath := GetRootPath()
 	return BuildLogPathWithRootPath(chunkManagerRootPath, binlogType, collectionID, partitionID, segmentID, fieldID, logID)
 }
 

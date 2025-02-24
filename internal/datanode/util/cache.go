@@ -17,7 +17,7 @@
 package util
 
 import (
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // Cache stores flushing segments' ids to prevent flushing the same segment again and again.

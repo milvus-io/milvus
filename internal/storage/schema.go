@@ -4,7 +4,7 @@ import (
 	"github.com/apache/arrow/go/v12/arrow"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func ConvertToArrowSchema(fields []*schemapb.FieldSchema) (*arrow.Schema, error) {

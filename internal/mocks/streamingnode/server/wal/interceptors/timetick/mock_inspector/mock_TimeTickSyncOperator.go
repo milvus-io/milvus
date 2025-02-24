@@ -9,7 +9,7 @@ import (
 
 	mvcc "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 
-	types "github.com/milvus-io/milvus/pkg/streaming/util/types"
+	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 
 	wab "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 )

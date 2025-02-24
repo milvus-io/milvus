@@ -7,8 +7,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 )
 
 type doOnSegmentFunc func(ctx context.Context, segment Segment) error

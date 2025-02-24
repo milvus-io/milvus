@@ -9,7 +9,7 @@ package segcore
 import "C"
 
 import (
-	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 )
 
 type SearchResult struct {

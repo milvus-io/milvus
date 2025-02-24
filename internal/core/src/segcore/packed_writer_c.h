@@ -18,22 +18,27 @@
 extern "C" {
 #endif
 
+#include "common/type_c.h"
 #include <arrow/c/abi.h>
+#include "segcore/column_groups_c.h"
 
 typedef void* CPackedWriter;
 
-int
-NewPackedWriter(const char* path,
-                struct ArrowSchema* schema,
+CStatus
+NewPackedWriter(struct ArrowSchema* schema,
                 const int64_t buffer_size,
+                char** paths,
+                int64_t num_paths,
+                int64_t part_upload_size,
+                CColumnGroups column_groups,
                 CPackedWriter* c_packed_writer);
 
-int
+CStatus
 WriteRecordBatch(CPackedWriter c_packed_writer,
                  struct ArrowArray* array,
                  struct ArrowSchema* schema);
 
-int
+CStatus
 CloseWriter(CPackedWriter c_packed_writer);
 
 #ifdef __cplusplus

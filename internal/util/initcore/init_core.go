@@ -24,6 +24,7 @@ package initcore
 #include "common/init_c.h"
 #include "segcore/segcore_init_c.h"
 #include "storage/storage_c.h"
+#include "segcore/arrow_fs_c.h"
 */
 import "C"
 
@@ -36,8 +37,8 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func InitLocalChunkManager(path string) {
@@ -124,6 +125,69 @@ func callWithTimeout(fn func(), timeoutHandler func(), timeout time.Duration) {
 	} else {
 		fn()
 	}
+}
+
+func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
+	if params.CommonCfg.StorageType.GetValue() == "local" {
+		return InitLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue())
+	}
+	return InitRemoteArrowFileSystem(params)
+}
+
+func InitLocalArrowFileSystem(path string) error {
+	CLocalRootPath := C.CString(path)
+	defer C.free(unsafe.Pointer(CLocalRootPath))
+	status := C.InitLocalArrowFileSystemSingleton(CLocalRootPath)
+	return HandleCStatus(&status, "InitLocalArrowFileSystemSingleton failed")
+}
+
+func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
+	cAddress := C.CString(params.MinioCfg.Address.GetValue())
+	cBucketName := C.CString(params.MinioCfg.BucketName.GetValue())
+	cAccessKey := C.CString(params.MinioCfg.AccessKeyID.GetValue())
+	cAccessValue := C.CString(params.MinioCfg.SecretAccessKey.GetValue())
+	cRootPath := C.CString(params.MinioCfg.RootPath.GetValue())
+	cStorageType := C.CString(params.CommonCfg.StorageType.GetValue())
+	cIamEndPoint := C.CString(params.MinioCfg.IAMEndpoint.GetValue())
+	cCloudProvider := C.CString(params.MinioCfg.CloudProvider.GetValue())
+	cLogLevel := C.CString(params.MinioCfg.LogLevel.GetValue())
+	cRegion := C.CString(params.MinioCfg.Region.GetValue())
+	cSslCACert := C.CString(params.MinioCfg.SslCACert.GetValue())
+	cGcpCredentialJSON := C.CString(params.MinioCfg.GcpCredentialJSON.GetValue())
+	defer C.free(unsafe.Pointer(cAddress))
+	defer C.free(unsafe.Pointer(cBucketName))
+	defer C.free(unsafe.Pointer(cAccessKey))
+	defer C.free(unsafe.Pointer(cAccessValue))
+	defer C.free(unsafe.Pointer(cRootPath))
+	defer C.free(unsafe.Pointer(cStorageType))
+	defer C.free(unsafe.Pointer(cIamEndPoint))
+	defer C.free(unsafe.Pointer(cLogLevel))
+	defer C.free(unsafe.Pointer(cRegion))
+	defer C.free(unsafe.Pointer(cCloudProvider))
+	defer C.free(unsafe.Pointer(cSslCACert))
+	defer C.free(unsafe.Pointer(cGcpCredentialJSON))
+	storageConfig := C.CStorageConfig{
+		address:                cAddress,
+		bucket_name:            cBucketName,
+		access_key_id:          cAccessKey,
+		access_key_value:       cAccessValue,
+		root_path:              cRootPath,
+		storage_type:           cStorageType,
+		iam_endpoint:           cIamEndPoint,
+		cloud_provider:         cCloudProvider,
+		useSSL:                 C.bool(params.MinioCfg.UseSSL.GetAsBool()),
+		sslCACert:              cSslCACert,
+		useIAM:                 C.bool(params.MinioCfg.UseIAM.GetAsBool()),
+		log_level:              cLogLevel,
+		region:                 cRegion,
+		useVirtualHost:         C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
+		requestTimeoutMs:       C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
+		gcp_credential_json:    cGcpCredentialJSON,
+		use_custom_part_upload: true,
+	}
+
+	status := C.InitRemoteArrowFileSystemSingleton(storageConfig)
+	return HandleCStatus(&status, "InitRemoteChunkManagerSingleton failed")
 }
 
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {

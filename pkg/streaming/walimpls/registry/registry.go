@@ -1,8 +1,8 @@
 package registry
 
 import (
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // builders is a map of registered wal builders.
