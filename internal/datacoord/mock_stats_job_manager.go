@@ -3,7 +3,7 @@
 package datacoord
 
 import (
-	indexpb "github.com/milvus-io/milvus/pkg/proto/indexpb"
+	indexpb "github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	mock "github.com/stretchr/testify/mock"
 )
 

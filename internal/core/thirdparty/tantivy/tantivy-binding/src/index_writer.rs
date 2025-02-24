@@ -176,7 +176,7 @@ impl IndexWriterWrapper {
         ))
     }
 
-    pub fn add_multi_i8s(&mut self, datas: &[i8], offset: i64) -> Result<()> {
+    pub fn add_array_i8s(&mut self, datas: &[i8], offset: i64) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {
             document.add_field_value(self.field, &(*data as i64));
@@ -185,7 +185,7 @@ impl IndexWriterWrapper {
         self.index_writer_add_document(document)
     }
 
-    pub fn add_multi_i16s(&mut self, datas: &[i16], offset: i64) -> Result<()> {
+    pub fn add_array_i16s(&mut self, datas: &[i16], offset: i64) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {
             document.add_field_value(self.field, &(*data as i64));
@@ -194,7 +194,7 @@ impl IndexWriterWrapper {
         self.index_writer_add_document(document)
     }
 
-    pub fn add_multi_i32s(&mut self, datas: &[i32], offset: i64) -> Result<()> {
+    pub fn add_array_i32s(&mut self, datas: &[i32], offset: i64) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {
             document.add_field_value(self.field, &(*data as i64));
@@ -203,7 +203,7 @@ impl IndexWriterWrapper {
         self.index_writer_add_document(document)
     }
 
-    pub fn add_multi_i64s(&mut self, datas: &[i64], offset: i64) -> Result<()> {
+    pub fn add_array_i64s(&mut self, datas: &[i64], offset: i64) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {
             document.add_field_value(self.field, data);
@@ -212,7 +212,7 @@ impl IndexWriterWrapper {
         self.index_writer_add_document(document)
     }
 
-    pub fn add_multi_f32s(&mut self, datas: &[f32], offset: i64) -> Result<()> {
+    pub fn add_array_f32s(&mut self, datas: &[f32], offset: i64) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {
             document.add_field_value(self.field, &(*data as f64));
@@ -221,7 +221,7 @@ impl IndexWriterWrapper {
         self.index_writer_add_document(document)
     }
 
-    pub fn add_multi_f64s(&mut self, datas: &[f64], offset: i64) -> Result<()> {
+    pub fn add_array_f64s(&mut self, datas: &[f64], offset: i64) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {
             document.add_field_value(self.field, data);
@@ -230,7 +230,7 @@ impl IndexWriterWrapper {
         self.index_writer_add_document(document)
     }
 
-    pub fn add_multi_bools(&mut self, datas: &[bool], offset: i64) -> Result<()> {
+    pub fn add_array_bools(&mut self, datas: &[bool], offset: i64) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {
             document.add_field_value(self.field, data);
@@ -239,7 +239,7 @@ impl IndexWriterWrapper {
         self.index_writer_add_document(document)
     }
 
-    pub fn add_multi_keywords(&mut self, datas: &[*const c_char], offset: i64) -> Result<()> {
+    pub fn add_array_keywords(&mut self, datas: &[*const c_char], offset: i64) -> Result<()> {
         let mut document = TantivyDocument::default();
         for element in datas {
             let data = unsafe { CStr::from_ptr(*element) };
@@ -289,7 +289,7 @@ impl IndexWriterWrapper {
         ))
     }
 
-    pub fn add_multi_i8s_by_single_segment_writer(&mut self, datas: &[i8]) -> Result<()> {
+    pub fn add_array_i8s_by_single_segment_writer(&mut self, datas: &[i8]) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {
             document.add_field_value(self.field, &(*data as i64));
@@ -297,7 +297,7 @@ impl IndexWriterWrapper {
         self.single_segment_index_writer_add_document(document)
     }
 
-    pub fn add_multi_i16s_by_single_segment_writer(&mut self, datas: &[i16]) -> Result<()> {
+    pub fn add_array_i16s_by_single_segment_writer(&mut self, datas: &[i16]) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {
             document.add_field_value(self.field, &(*data as i64));
@@ -305,7 +305,7 @@ impl IndexWriterWrapper {
         self.single_segment_index_writer_add_document(document)
     }
 
-    pub fn add_multi_i32s_by_single_segment_writer(&mut self, datas: &[i32]) -> Result<()> {
+    pub fn add_array_i32s_by_single_segment_writer(&mut self, datas: &[i32]) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {
             document.add_field_value(self.field, &(*data as i64));
@@ -313,7 +313,7 @@ impl IndexWriterWrapper {
         self.single_segment_index_writer_add_document(document)
     }
 
-    pub fn add_multi_i64s_by_single_segment_writer(&mut self, datas: &[i64]) -> Result<()> {
+    pub fn add_array_i64s_by_single_segment_writer(&mut self, datas: &[i64]) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {
             document.add_field_value(self.field, data);
@@ -321,7 +321,7 @@ impl IndexWriterWrapper {
         self.single_segment_index_writer_add_document(document)
     }
 
-    pub fn add_multi_f32s_by_single_segment_writer(&mut self, datas: &[f32]) -> Result<()> {
+    pub fn add_array_f32s_by_single_segment_writer(&mut self, datas: &[f32]) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {
             document.add_field_value(self.field, &(*data as f64));
@@ -329,7 +329,7 @@ impl IndexWriterWrapper {
         self.single_segment_index_writer_add_document(document)
     }
 
-    pub fn add_multi_f64s_by_single_segment_writer(&mut self, datas: &[f64]) -> Result<()> {
+    pub fn add_array_f64s_by_single_segment_writer(&mut self, datas: &[f64]) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {
             document.add_field_value(self.field, data);
@@ -337,7 +337,7 @@ impl IndexWriterWrapper {
         self.single_segment_index_writer_add_document(document)
     }
 
-    pub fn add_multi_bools_by_single_segment_writer(&mut self, datas: &[bool]) -> Result<()> {
+    pub fn add_array_bools_by_single_segment_writer(&mut self, datas: &[bool]) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {
             document.add_field_value(self.field, data);
@@ -345,7 +345,7 @@ impl IndexWriterWrapper {
         self.single_segment_index_writer_add_document(document)
     }
 
-    pub fn add_multi_keywords_by_single_segment_writer(
+    pub fn add_array_keywords_by_single_segment_writer(
         &mut self,
         datas: &[*const c_char],
     ) -> Result<()> {

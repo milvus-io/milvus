@@ -26,10 +26,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 func TestUpperLimitCalBySchema(t *testing.T) {
@@ -286,4 +286,20 @@ func Test_sealByTotalGrowingSegmentsSize(t *testing.T) {
 	res, _ = fn("ch-0", []*SegmentInfo{seg0, seg1, seg2, seg3}, 0)
 	assert.Equal(t, 1, len(res))
 	assert.Equal(t, seg2.GetID(), res[0].GetID())
+}
+
+func TestFlushPolicyWithZeroCurRows(t *testing.T) {
+	seg := &SegmentInfo{
+		currRows: 0,
+		// lastFlushTime unset because its a sealed segment
+		SegmentInfo: &datapb.SegmentInfo{
+			NumOfRows:      1,
+			State:          commonpb.SegmentState_Sealed,
+			Level:          datapb.SegmentLevel_L1,
+			LastExpireTime: 456094911979061251,
+		},
+	}
+
+	flushed := flushPolicyL1(seg, tsoutil.GetCurrentTime())
+	assert.True(t, flushed)
 }

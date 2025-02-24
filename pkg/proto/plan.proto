@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.plan;
 
-option go_package = "github.com/milvus-io/milvus/pkg/proto/planpb";
+option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/planpb";
 import "schema.proto";
 
 enum OpType {

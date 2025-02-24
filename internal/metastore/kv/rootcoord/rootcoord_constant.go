@@ -3,7 +3,7 @@ package rootcoord
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 )
 
 const (

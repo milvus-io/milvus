@@ -21,11 +21,21 @@ import (
 
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
-func appendValueAt(builder array.Builder, a arrow.Array, idx int) error {
+func AppendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *schemapb.ValueField) error {
 	switch b := builder.(type) {
 	case *array.BooleanBuilder:
+		if a == nil {
+			if defaultValue != nil {
+				b.Append(defaultValue.GetBoolData())
+			} else {
+				b.AppendNull()
+			}
+			return nil
+		}
 		ba, ok := a.(*array.Boolean)
 		if !ok {
 			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
@@ -37,6 +47,14 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int) error {
 		}
 		return nil
 	case *array.Int8Builder:
+		if a == nil {
+			if defaultValue != nil {
+				b.Append(int8(defaultValue.GetIntData()))
+			} else {
+				b.AppendNull()
+			}
+			return nil
+		}
 		ia, ok := a.(*array.Int8)
 		if !ok {
 			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
@@ -48,6 +66,14 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int) error {
 		}
 		return nil
 	case *array.Int16Builder:
+		if a == nil {
+			if defaultValue != nil {
+				b.Append(int16(defaultValue.GetIntData()))
+			} else {
+				b.AppendNull()
+			}
+			return nil
+		}
 		ia, ok := a.(*array.Int16)
 		if !ok {
 			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
@@ -59,6 +85,14 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int) error {
 		}
 		return nil
 	case *array.Int32Builder:
+		if a == nil {
+			if defaultValue != nil {
+				b.Append(defaultValue.GetIntData())
+			} else {
+				b.AppendNull()
+			}
+			return nil
+		}
 		ia, ok := a.(*array.Int32)
 		if !ok {
 			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
@@ -70,6 +104,14 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int) error {
 		}
 		return nil
 	case *array.Int64Builder:
+		if a == nil {
+			if defaultValue != nil {
+				b.Append(defaultValue.GetLongData())
+			} else {
+				b.AppendNull()
+			}
+			return nil
+		}
 		ia, ok := a.(*array.Int64)
 		if !ok {
 			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
@@ -81,6 +123,14 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int) error {
 		}
 		return nil
 	case *array.Float32Builder:
+		if a == nil {
+			if defaultValue != nil {
+				b.Append(defaultValue.GetFloatData())
+			} else {
+				b.AppendNull()
+			}
+			return nil
+		}
 		fa, ok := a.(*array.Float32)
 		if !ok {
 			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
@@ -92,6 +142,14 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int) error {
 		}
 		return nil
 	case *array.Float64Builder:
+		if a == nil {
+			if defaultValue != nil {
+				b.Append(defaultValue.GetDoubleData())
+			} else {
+				b.AppendNull()
+			}
+			return nil
+		}
 		fa, ok := a.(*array.Float64)
 		if !ok {
 			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
@@ -103,6 +161,14 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int) error {
 		}
 		return nil
 	case *array.StringBuilder:
+		if a == nil {
+			if defaultValue != nil {
+				b.Append(defaultValue.GetStringData())
+			} else {
+				b.AppendNull()
+			}
+			return nil
+		}
 		sa, ok := a.(*array.String)
 		if !ok {
 			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
@@ -114,6 +180,11 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int) error {
 		}
 		return nil
 	case *array.BinaryBuilder:
+		// array type, not support defaultValue now
+		if a == nil {
+			b.AppendNull()
+			return nil
+		}
 		ba, ok := a.(*array.Binary)
 		if !ok {
 			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())

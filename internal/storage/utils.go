@@ -35,13 +35,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1423,4 +1423,28 @@ func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb
 		}
 	}
 	return false
+}
+
+func getDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
+	switch fieldSchema.DataType {
+	case schemapb.DataType_Bool:
+		return fieldSchema.GetDefaultValue().GetBoolData()
+	case schemapb.DataType_Int8:
+		return int8(fieldSchema.GetDefaultValue().GetIntData())
+	case schemapb.DataType_Int16:
+		return int16(fieldSchema.GetDefaultValue().GetIntData())
+	case schemapb.DataType_Int32:
+		return fieldSchema.GetDefaultValue().GetIntData()
+	case schemapb.DataType_Int64:
+		return fieldSchema.GetDefaultValue().GetLongData()
+	case schemapb.DataType_Float:
+		return fieldSchema.GetDefaultValue().GetFloatData()
+	case schemapb.DataType_Double:
+		return fieldSchema.GetDefaultValue().GetDoubleData()
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		return fieldSchema.GetDefaultValue().GetStringData()
+	default:
+		// won't happen
+		panic(fmt.Sprintf("undefined data type:%s", fieldSchema.DataType.String()))
+	}
 }

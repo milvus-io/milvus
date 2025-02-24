@@ -3,8 +3,8 @@ package stats
 import (
 	"sync"
 
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // NewSealSignalNotifier creates a new seal signal notifier.
