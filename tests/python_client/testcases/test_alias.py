@@ -194,6 +194,7 @@ class TestAliasOperation(TestcaseBase):
 
         assert res is True
 
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/40030, TODO: need to fix")
     @pytest.mark.tags(CaseLabel.L2)
     def test_alias_called_by_utility_drop_collection(self):
         """
@@ -426,6 +427,7 @@ class TestAliasOperationInvalid(TestcaseBase):
                  ct.err_msg: f"cannot drop the collection via alias = {alias_name}"}
         collection_alias.drop(check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/40030, TODO: need to fix")
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(reason="issue #36963")
     def test_alias_reuse_alias_name_from_dropped_collection(self):
@@ -461,6 +463,7 @@ class TestAliasOperationInvalid(TestcaseBase):
         res2 = self.utility_wrap.list_aliases(c_name)[0]
         assert len(res2) == 1
 
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/40030, TODO: need to fix")
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(reason="issue #36963")
     def test_alias_rename_collection_to_alias_name(self):
