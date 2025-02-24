@@ -328,7 +328,7 @@ pub extern "C" fn tantivy_index_add_bools_by_single_segment_writer(
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_index_add_string(
+pub extern "C" fn tantivy_index_add_strings(
     ptr: *mut c_void,
     array: *const *const c_char,
     len: usize,
@@ -336,17 +336,19 @@ pub extern "C" fn tantivy_index_add_string(
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
     let arr = unsafe { slice::from_raw_parts(array, len) };
-    let mut arr_str = Vec::with_capacity(len);
-    for i in 0..len {
-        let s = cstr_to_str!(arr[i]);
-        arr_str.push(s);
+    unsafe {
+        (*real)
+            .add_strings(
+                // let the Result to be hanlded inside `add_string` in order to avoid `collect` which brings extra cost.
+                arr.iter().map(|s| unsafe { CStr::from_ptr(*s).to_str() }),
+                offset,
+            )
+            .into()
     }
-
-    unsafe { (*real).add_strings(&arr_str, offset).into() }
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_index_add_string_by_single_segment_writer(
+pub extern "C" fn tantivy_index_add_strings_by_single_segment_writer(
     ptr: *mut c_void,
     array: *const *const c_char,
     len: usize,

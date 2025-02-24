@@ -1,4 +1,5 @@
 use std::ffi::CStr;
+use std::str::Utf8Error;
 use std::sync::Arc;
 
 use either::Either;
@@ -16,9 +17,11 @@ use tantivy::{
 
 use crate::data_type::TantivyDataType;
 
-use crate::error::Result;
+use crate::error::{Result, TantivyBindingError};
 use crate::index_reader::IndexReaderWrapper;
 use crate::log::init_log;
+
+const OPERATION_BATCH_SIZE: usize = 1000;
 
 #[macro_export]
 macro_rules! add_batch_documents {
@@ -237,14 +240,24 @@ impl IndexWriterWrapper {
         )
     }
 
-    pub fn add_strings(&mut self, data: &[&str], mut offset: i64) -> Result<()> {
-        add_batch_documents!(
-            self,
-            data.iter().copied(),
-            self.field,
-            self.id_field,
-            offset
-        )
+    pub fn add_strings<'a, I>(&'a mut self, data: I, mut offset: i64) -> Result<()>
+    where
+        I: IntoIterator<Item = std::result::Result<&'a str, Utf8Error>>,
+    {
+        let mut ops = Vec::with_capacity(OPERATION_BATCH_SIZE);
+        for d in data {
+            let d = d.map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
+            ops.push(UserOperation::Add(doc!(
+                self.id_field.unwrap() => offset,
+                self.field => d,
+            )));
+            offset += 1;
+            if ops.len() == OPERATION_BATCH_SIZE {
+                self.index_writer_add_batch_documents(ops)?;
+                ops = Vec::with_capacity(OPERATION_BATCH_SIZE);
+            }
+        }
+        self.index_writer_add_batch_documents(ops)
     }
 
     pub fn add_array_i8s(&mut self, datas: &[i8], offset: i64) -> Result<()> {

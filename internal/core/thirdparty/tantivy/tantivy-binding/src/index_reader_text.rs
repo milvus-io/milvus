@@ -81,8 +81,12 @@ mod tests {
             false,
         );
 
-        writer.add_strings(&["网球和滑雪"], 0).unwrap();
-        writer.add_strings(&["网球以及滑雪"], 1).unwrap();
+        writer
+            .add_strings(["网球和滑雪"].into_iter().map(|str| Ok(str)), 0)
+            .unwrap();
+        writer
+            .add_strings(["网球以及滑雪"].into_iter().map(|str| Ok(str)), 1)
+            .unwrap();
 
         writer.commit().unwrap();
 
