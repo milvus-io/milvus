@@ -19,8 +19,105 @@
 #include "future_c_types.h"
 #include "LeakyResult.h"
 #include "Ready.h"
+#include "pb/cgo_msg.pb.h"
+#include <chrono>
+#include "monitor/prometheus_client.h"
 
 namespace milvus::futures {
+
+template <class Duration>
+class Metrics;
+
+template <class Duration>
+class Metrics {
+ public:
+    class ExecutionGuard {
+     public:
+        explicit ExecutionGuard(Metrics& metrics) : metrics_(metrics) {
+            metrics.startExecute();
+        }
+
+        ExecutionGuard(const ExecutionGuard&) = delete;
+        ExecutionGuard(const ExecutionGuard&&) = delete;
+        ExecutionGuard&
+        operator=(const ExecutionGuard&) = delete;
+        ExecutionGuard&
+        operator=(const ExecutionGuard&&) = delete;
+
+        ~ExecutionGuard() {
+            metrics_.executeDone();
+        }
+
+     private:
+        Metrics& metrics_;
+    };
+
+    explicit Metrics()
+        : time_point_(std::chrono::steady_clock::now()),
+          queue_duration_(0),
+          execute_duration_(0),
+          cancelled_before_execute_(false) {
+        milvus::monitor::internal_cgo_inflight_task_total_all.Increment();
+    }
+
+    Metrics(const Metrics&) = delete;
+    Metrics(const Metrics&&) = delete;
+    Metrics&
+    operator=(const Metrics&) = delete;
+    Metrics&
+    operator=(const Metrics&&) = delete;
+
+    ~Metrics() {
+        milvus::monitor::internal_cgo_inflight_task_total_all.Decrement();
+        milvus::monitor::internal_cgo_queue_duration_seconds_all.Observe(
+            std::chrono::duration<double>(queue_duration_).count());
+        if (cancelled_before_execute_) {
+            milvus::monitor::internal_cgo_cancel_before_execute_total_all
+                .Increment();
+        } else {
+            milvus::monitor::internal_cgo_executing_task_total_all.Decrement();
+            milvus::monitor::internal_cgo_execute_duration_seconds_all.Observe(
+                std::chrono::duration<double>(execute_duration_).count());
+        }
+    }
+
+    void
+    withCancel() {
+        queue_duration_ = std::chrono::duration_cast<Duration>(
+            std::chrono::steady_clock::now() - time_point_);
+        cancelled_before_execute_ = true;
+    }
+
+    void
+    startExecute() {
+        auto now = std::chrono::steady_clock::now();
+        queue_duration_ =
+            std::chrono::duration_cast<Duration>(now - time_point_);
+        time_point_ = now;
+        milvus::monitor::internal_cgo_executing_task_total_all.Increment();
+    }
+
+    void
+    executeDone() {
+        auto now = std::chrono::steady_clock::now();
+        execute_duration_ =
+            std::chrono::duration_cast<Duration>(now - time_point_);
+    }
+
+ private:
+    std::chrono::steady_clock::time_point time_point_;
+    Duration queue_duration_;
+    Duration execute_duration_;
+    bool cancelled_before_execute_;
+};
+
+// FutureResult is a struct that represents the result of the future.
+class FutureResult {
+ public:
+    void* result;
+    CStatus status;
+    Metrics<std::chrono::microseconds> metrics;
+};
 
 /// @brief a virtual class that represents a future can be polymorphic called by CGO code.
 /// implemented by Future template.
@@ -103,7 +200,8 @@ class Future : public IFuture {
 
     /// use `async`.
     Future()
-        : ready_(std::make_shared<Ready<LeakyResult<R>>>()),
+        : metrics_(),
+          ready_(std::make_shared<Ready<LeakyResult<R>>>()),
           promise_(std::make_shared<folly::SharedPromise<R*>>()),
           cancellation_source_() {
     }
@@ -176,8 +274,15 @@ class Future : public IFuture {
         auto cancellation_token =
             CancellationToken(cancellation_source_.getToken());
         auto runner = [fn = std::forward<Fn>(fn),
-                       cancellation_token = std::move(cancellation_token)]() {
-            cancellation_token.throwIfCancelled();
+                       cancellation_token = std::move(cancellation_token),
+                       this]() {
+            if (cancellation_token.isCancellationRequested()) {
+                metrics_.withCancel();
+                throw folly::FutureCancellation();
+            }
+
+            auto executionGuard =
+                Metrics<std::chrono::microseconds>::ExecutionGuard(metrics_);
             return fn(cancellation_token);
         };
 
@@ -222,9 +327,9 @@ class Future : public IFuture {
     }
 
  private:
+    Metrics<std::chrono::microseconds> metrics_;
     std::shared_ptr<Ready<LeakyResult<R>>> ready_;
     std::shared_ptr<folly::SharedPromise<R*>> promise_;
     folly::CancellationSource cancellation_source_;
 };
-
 };  // namespace milvus::futures
