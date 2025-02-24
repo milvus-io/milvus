@@ -342,6 +342,7 @@ pub extern "C" fn tantivy_index_add_strings(
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
     let arr = unsafe { slice::from_raw_parts(array, len) };
+    // todo(SpadeA): avoid this vector allocation in the following PR
     let mut arr_str = Vec::with_capacity(len);
     for i in 0..len {
         let s = cstr_to_str!(arr[i]);
