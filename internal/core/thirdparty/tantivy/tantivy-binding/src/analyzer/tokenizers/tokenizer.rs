@@ -1,7 +1,5 @@
 use tantivy::tokenizer::{TextAnalyzer, TextAnalyzerBuilder};
-use lindera::segmenter::Segmenter;
 use tantivy::tokenizer::*;
-use lindera::mode::Mode;
 use serde_json as json;
 use log::warn;
 
@@ -17,8 +15,12 @@ pub fn whitespace_builder() -> TextAnalyzerBuilder {
     TextAnalyzer::builder(WhitespaceTokenizer::default()).dynamic()
 }
 
-pub fn jieba_builder() -> TextAnalyzerBuilder {
-    TextAnalyzer::builder(JiebaTokenizer::new()).dynamic()
+pub fn jieba_builder(params: Option<&json::Map<String, json::Value>>) -> Result<TextAnalyzerBuilder> {
+    if params.is_none(){
+        return Ok(TextAnalyzer::builder(JiebaTokenizer::new()).dynamic());
+    }
+    let tokenizer = JiebaTokenizer::from_json(params.unwrap())?;
+    Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
 
 pub fn lindera_builder(params: Option<&json::Map<String, json::Value>>) -> Result<TextAnalyzerBuilder>{
@@ -60,7 +62,7 @@ pub fn get_builder_with_tokenizer(params: &json::Value) -> Result<TextAnalyzerBu
     match name {
         "standard" => Ok(standard_builder()),
         "whitespace" => Ok(whitespace_builder()),
-        "jieba" => Ok(jieba_builder()),
+        "jieba" => jieba_builder(params_map),
         "lindera" => lindera_builder(params_map),
         other => {
             warn!("unsupported tokenizer: {}", other);
