@@ -11,7 +11,7 @@ import (
 
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
