@@ -195,7 +195,8 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             auto val_type = expr_->val_.val_case();
-            if (CanUseIndexForJson() && !has_offset_input_) {
+            if (CanUseIndexForJson(FromValCase(val_type)) &&
+                !has_offset_input_) {
                 switch (val_type) {
                     case proto::plan::GenericValue::ValCase::kBoolVal:
                         result = ExecRangeVisitorImplForIndex<bool>();
@@ -1391,9 +1392,11 @@ PhyUnaryRangeFilterExpr::CanUseIndex() {
 }
 
 bool
-PhyUnaryRangeFilterExpr::CanUseIndexForJson() {
-    use_index_ = segment_->HasIndex(
-        field_id_, milvus::Json::pointer(expr_->column_.nested_path_));
+PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
+    use_index_ =
+        segment_->HasIndex(field_id_,
+                           milvus::Json::pointer(expr_->column_.nested_path_),
+                           val_type);
     return use_index_;
 }
 

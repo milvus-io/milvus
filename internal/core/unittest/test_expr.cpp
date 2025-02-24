@@ -15987,18 +15987,21 @@ class JsonIndexTestFixture : public testing::Test {
             lower_bound.set_bool_val(std::numeric_limits<bool>::min());
             upper_bound.set_bool_val(std::numeric_limits<bool>::max());
             cast_type = milvus::DataType::BOOL;
+            wrong_type_val.set_int64_val(123);
         } else if constexpr (std::is_same_v<T, int64_t>) {
             schema_data_type = proto::schema::Int64;
             json_path = "/int";
             lower_bound.set_int64_val(std::numeric_limits<int64_t>::min());
             upper_bound.set_int64_val(std::numeric_limits<int64_t>::max());
             cast_type = milvus::DataType::INT64;
+            wrong_type_val.set_string_val("123");
         } else if constexpr (std::is_same_v<T, double>) {
             schema_data_type = proto::schema::Double;
             json_path = "/double";
             lower_bound.set_float_val(std::numeric_limits<double>::min());
             upper_bound.set_float_val(std::numeric_limits<double>::max());
             cast_type = milvus::DataType::DOUBLE;
+            wrong_type_val.set_string_val("123");
         } else if constexpr (std::is_same_v<T, std::string>) {
             schema_data_type = proto::schema::String;
             json_path = "/string";
@@ -16006,6 +16009,7 @@ class JsonIndexTestFixture : public testing::Test {
             std::string s(1024, '9');
             upper_bound.set_string_val(s);
             cast_type = milvus::DataType::STRING;
+            wrong_type_val.set_int64_val(123);
         }
     }
     proto::schema::DataType schema_data_type;
@@ -16013,6 +16017,8 @@ class JsonIndexTestFixture : public testing::Test {
     proto::plan::GenericValue lower_bound;
     proto::plan::GenericValue upper_bound;
     milvus::DataType cast_type;
+
+    proto::plan::GenericValue wrong_type_val;
 };
 
 using JsonIndexTypes = ::testing::Types<bool, int64_t, double, std::string>;
@@ -16078,6 +16084,17 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
     auto final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
     EXPECT_EQ(final.count(), N);
+
+    // test for wrong filter type
+    unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {this->json_path.substr(1)}),
+        proto::plan::OpType::LessEqual,
+        this->wrong_type_val,
+        std::vector<proto::plan::GenericValue>());
+    plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
+    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 0);
 
     unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(json_fid, DataType::JSON, {this->json_path.substr(1)}),

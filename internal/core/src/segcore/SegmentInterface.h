@@ -293,7 +293,9 @@ class SegmentInternalInterface : public SegmentInterface {
     HasIndex(FieldId field_id) const = 0;
 
     virtual bool
-    HasIndex(FieldId field_id, const std::string& nested_path) const {
+    HasIndex(FieldId field_id,
+             const std::string& nested_path,
+             DataType data_type) const {
         PanicInfo(ErrorCode::NotImplemented, "not implemented");
     };
     virtual bool

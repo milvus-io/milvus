@@ -43,6 +43,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
                       segment,
                       expr->column_.field_id_,
                       expr->column_.nested_path_,
+                      DataType::NONE,
                       active_count,
                       batch_size,
                       consistency_level),
