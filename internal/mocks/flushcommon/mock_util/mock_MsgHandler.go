@@ -5,7 +5,7 @@ package mock_util
 import (
 	context "context"
 
-	message "github.com/milvus-io/milvus/pkg/streaming/util/message"
+	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 
 	mock "github.com/stretchr/testify/mock"
 
