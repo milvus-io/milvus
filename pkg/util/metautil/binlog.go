@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const pathSep = "/"

@@ -10,7 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 func TestChainInterceptor(t *testing.T) {

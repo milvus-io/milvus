@@ -22,7 +22,8 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 func TestSegmentWriterSuite(t *testing.T) {
@@ -41,6 +42,7 @@ func (s *SegmentWriteSuite) SetupSuite() {
 }
 
 func (s *SegmentWriteSuite) TestWriteFailed() {
+	paramtable.Init()
 	s.Run("get bm25 field failed", func() {
 		schema := genCollectionSchemaWithBM25()
 		// init segment writer with invalid bm25 fieldID

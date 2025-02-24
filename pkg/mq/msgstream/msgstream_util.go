@@ -27,12 +27,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	pcommon "github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/common"
-	kafkamqwrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/kafka"
-	pulsarmqwrapper "github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/pulsar"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	pcommon "github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	kafkamqwrapper "github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/kafka"
+	pulsarmqwrapper "github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/pulsar"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // unsubscribeChannels create consumer first, and unsubscribe channel through msgStream.close()

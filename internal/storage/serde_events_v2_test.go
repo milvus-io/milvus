@@ -21,11 +21,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 func TestPackedSerde(t *testing.T) {
-	t.Run("test binlog packed deserialize reader", func(t *testing.T) {
+	t.Run("test binlog packed serde v2", func(t *testing.T) {
+		initcore.InitLocalArrowFileSystem("/tmp")
 		size := 10
 
 		blobs, err := generateTestData(size)
@@ -35,11 +37,17 @@ func TestPackedSerde(t *testing.T) {
 		assert.NoError(t, err)
 		defer reader.Close()
 
-		path := "/tmp"
-		bufferSize := 10 * 1024 * 1024 // 10MB
+		paths := []string{"/tmp/0"}
+		bufferSize := int64(10 * 1024 * 1024) // 10MB
 		schema := generateTestSchema()
-
-		writer, err := NewPackedSerializeWriter(schema, 0, 0, 7, path, bufferSize)
+		group := []int{}
+		for i := 0; i < len(schema.Fields); i++ {
+			group = append(group, i)
+		}
+		columnGroups := [][]int{group}
+		multiPartUploadSize := int64(0)
+		batchSize := 7
+		writer, err := NewPackedSerializeWriter(paths, schema, bufferSize, multiPartUploadSize, columnGroups, batchSize)
 		assert.NoError(t, err)
 
 		for i := 1; i <= size; i++ {
@@ -54,7 +62,7 @@ func TestPackedSerde(t *testing.T) {
 		err = writer.Close()
 		assert.NoError(t, err)
 
-		reader, err = NewPackedDeserializeReader(path, schema, bufferSize, common.RowIDField)
+		reader, err = NewPackedDeserializeReader(paths, schema, bufferSize, common.RowIDField)
 		assert.NoError(t, err)
 		defer reader.Close()
 

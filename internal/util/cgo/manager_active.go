@@ -6,8 +6,8 @@ import (
 
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 const (

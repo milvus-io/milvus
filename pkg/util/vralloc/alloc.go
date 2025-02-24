@@ -22,7 +22,7 @@ import (
 
 	"github.com/shirou/gopsutil/v3/disk"
 
-	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 )
 
 var zero = &Resource{0, 0, 0}

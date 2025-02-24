@@ -27,8 +27,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/log"
-	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 )
 
 type createPartitionTask struct {

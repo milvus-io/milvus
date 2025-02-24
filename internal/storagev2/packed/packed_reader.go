@@ -30,22 +30,27 @@ import (
 
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/cdata"
-	"github.com/cockroachdb/errors"
 )
 
-func NewPackedReader(path string, schema *arrow.Schema, bufferSize int) (*PackedReader, error) {
+func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64) (*PackedReader, error) {
+	cFilePaths := make([]*C.char, len(filePaths))
+	for i, path := range filePaths {
+		cFilePaths[i] = C.CString(path)
+		defer C.free(unsafe.Pointer(cFilePaths[i]))
+	}
+	cFilePathsArray := (**C.char)(unsafe.Pointer(&cFilePaths[0]))
+	cNumPaths := C.int64_t(len(filePaths))
+
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
 	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
-	cPath := C.CString(path)
-	defer C.free(unsafe.Pointer(cPath))
 
 	cBufferSize := C.int64_t(bufferSize)
 
 	var cPackedReader C.CPackedReader
-	status := C.NewPackedReader(cPath, cSchema, cBufferSize, &cPackedReader)
-	if status != 0 {
-		return nil, fmt.Errorf("failed to new packed reader: %s, status: %d", path, status)
+	status := C.NewPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, &cPackedReader)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, err
 	}
 	return &PackedReader{cPackedReader: cPackedReader, schema: schema}, nil
 }
@@ -54,8 +59,8 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 	var cArr C.CArrowArray
 	var cSchema C.CArrowSchema
 	status := C.ReadNext(pr.cPackedReader, &cArr, &cSchema)
-	if status != 0 {
-		return nil, fmt.Errorf("ReadNext failed with error code %d", status)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, err
 	}
 
 	if cArr == nil {
@@ -76,8 +81,8 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 
 func (pr *PackedReader) Close() error {
 	status := C.CloseReader(pr.cPackedReader)
-	if status != 0 {
-		return errors.New("PackedReader: failed to close file")
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return err
 	}
 	return nil
 }

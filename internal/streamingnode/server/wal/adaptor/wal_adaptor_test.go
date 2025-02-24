@@ -19,12 +19,12 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/mocks/streaming/mock_walimpls"
-	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/mock_walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 )
 
 func TestWalAdaptorReadFail(t *testing.T) {

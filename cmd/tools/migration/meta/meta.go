@@ -3,7 +3,7 @@ package meta
 import (
 	"github.com/blang/semver/v4"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type (

@@ -20,9 +20,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/milvus-io/milvus/pkg/mq/common"
-	"github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/client"
-	"github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/client"
+	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
 )
 
 // Consumer is a client that used to consume messages from rocksmq

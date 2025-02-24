@@ -19,7 +19,7 @@ package indexnode
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 func TestGetSystemInfoMetrics(t *testing.T) {
