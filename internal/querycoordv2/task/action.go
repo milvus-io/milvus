@@ -33,14 +33,12 @@ const (
 	ActionTypeGrow ActionType = iota + 1
 	ActionTypeReduce
 	ActionTypeUpdate
-	ActionTypeStatsUpdate
 )
 
 var ActionTypeName = map[ActionType]string{
-	ActionTypeGrow:        "Grow",
-	ActionTypeReduce:      "Reduce",
-	ActionTypeUpdate:      "Update",
-	ActionTypeStatsUpdate: "StatsUpdate",
+	ActionTypeGrow:   "Grow",
+	ActionTypeReduce: "Reduce",
+	ActionTypeUpdate: "Update",
 }
 
 func (t ActionType) String() string {
