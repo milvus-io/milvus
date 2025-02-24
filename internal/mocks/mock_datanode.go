@@ -8,9 +8,9 @@ import (
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 
-	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 

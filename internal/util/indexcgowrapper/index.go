@@ -24,9 +24,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/cgopb"
-	"github.com/milvus-io/milvus/pkg/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/cgopb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 )
 
 type Blob = storage.Blob

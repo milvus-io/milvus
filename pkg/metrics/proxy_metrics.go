@@ -21,7 +21,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var (
@@ -436,6 +436,15 @@ var (
 			Help:      "the latency of parse expression",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, functionLabelName, statusLabelName})
+
+	// ProxyQueueTaskNum records task number of queue in Proxy.
+	ProxyQueueTaskNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "queue_task_num",
+			Help:      "",
+		}, []string{nodeIDLabelName, queueTypeLabelName, taskStateLabel})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -499,6 +508,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyRecallSearchCount)
 
 	registry.MustRegister(ProxySearchSparseNumNonZeros)
+	registry.MustRegister(ProxyQueueTaskNum)
 
 	registry.MustRegister(ProxyParseExpressionLatency)
 

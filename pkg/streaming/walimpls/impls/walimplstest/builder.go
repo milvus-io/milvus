@@ -4,9 +4,9 @@
 package walimplstest
 
 import (
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls/registry"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/registry"
 )
 
 const (

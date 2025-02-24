@@ -125,6 +125,7 @@ const (
 	pathLabelName            = "path"
 	cgoNameLabelName         = `cgo_name`
 	cgoTypeLabelName         = `cgo_type`
+	queueTypeLabelName       = `queue_type`
 
 	// entities label
 	LoadedLabel         = "loaded"

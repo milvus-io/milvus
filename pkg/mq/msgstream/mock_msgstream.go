@@ -5,7 +5,7 @@ package msgstream
 import (
 	context "context"
 
-	common "github.com/milvus-io/milvus/pkg/mq/common"
+	common "github.com/milvus-io/milvus/pkg/v2/mq/common"
 
 	mock "github.com/stretchr/testify/mock"
 

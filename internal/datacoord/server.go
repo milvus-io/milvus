@@ -52,18 +52,18 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/expr"
-	"github.com/milvus-io/milvus/pkg/util/logutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/expr"
+	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -754,11 +754,34 @@ func (s *Server) startServerLoop() {
 	}
 }
 
+func (s *Server) startCollectMetaMetrics(ctx context.Context) {
+	s.serverLoopWg.Add(1)
+	go s.collectMetaMetrics(ctx)
+}
+
+func (s *Server) collectMetaMetrics(ctx context.Context) {
+	defer s.serverLoopWg.Done()
+
+	ticker := time.NewTicker(time.Second * 120)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Ctx(s.ctx).Warn("collectMetaMetrics ctx done")
+			return
+		case <-ticker.C:
+			s.meta.statsTaskMeta.updateMetrics()
+			s.meta.indexMeta.updateIndexTasksMetrics()
+		}
+	}
+}
+
 func (s *Server) startTaskScheduler() {
 	s.taskScheduler.Start()
 	s.jobManager.Start()
 
 	s.startIndexService(s.serverLoopCtx)
+	s.startCollectMetaMetrics(s.serverLoopCtx)
 }
 
 func (s *Server) updateSegmentStatistics(ctx context.Context, stats []*commonpb.SegmentStats) {
@@ -1082,6 +1105,7 @@ func (s *Server) Stop() error {
 	log.Info("datacoord garbage collector stopped")
 
 	s.stopServerLoop()
+	log.Info("datacoord stopServerLoop stopped")
 
 	s.importScheduler.Close()
 	s.importChecker.Close()

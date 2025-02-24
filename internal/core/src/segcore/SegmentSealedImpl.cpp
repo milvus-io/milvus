@@ -1569,7 +1569,21 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
             }
             return get_raw_data(field_id, field_meta, seg_offsets, count);
         }
-        return get_vector(field_id, seg_offsets, count);
+
+        std::chrono::high_resolution_clock::time_point get_vector_start =
+            std::chrono::high_resolution_clock::now();
+
+        auto vector = get_vector(field_id, seg_offsets, count);
+
+        std::chrono::high_resolution_clock::time_point get_vector_end =
+            std::chrono::high_resolution_clock::now();
+        double get_vector_cost = std::chrono::duration<double, std::micro>(
+                                     get_vector_end - get_vector_start)
+                                     .count();
+        monitor::internal_core_get_vector_latency.Observe(get_vector_cost /
+                                                          1000);
+
+        return vector;
     }
 }
 

@@ -26,8 +26,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 const InputErrorFlagKey string = "is_input_error"
@@ -367,8 +367,8 @@ func WrapErrServiceMemoryLimitExceeded(predict, limit float32, msg ...string) er
 	return err
 }
 
-func WrapErrServiceRequestLimitExceeded(limit int32, msg ...string) error {
-	err := wrapFields(ErrServiceRequestLimitExceeded,
+func WrapErrTooManyRequests(limit int32, msg ...string) error {
+	err := wrapFields(ErrServiceTooManyRequests,
 		value("limit", limit),
 	)
 	if len(msg) > 0 {

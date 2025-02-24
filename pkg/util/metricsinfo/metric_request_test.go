@@ -19,7 +19,7 @@ import (
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 func Test_ParseMetricType(t *testing.T) {

@@ -18,6 +18,7 @@ package httpserver
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -27,7 +28,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	mhttp "github.com/milvus-io/milvus/internal/http"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func defaultResponse(c *gin.Context) {
@@ -157,18 +158,22 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 		response: defaultResponse,
 	}
 	bufPool := &BufferPool{}
-	return func(c *gin.Context) {
-		timeoutSecond, err := strconv.ParseInt(c.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout), 10, 64)
+	return func(gCtx *gin.Context) {
+		topCtx, cancel := context.WithCancel(gCtx.Request.Context())
+		defer cancel()
+		gCtx.Request = gCtx.Request.WithContext(topCtx)
+
+		timeoutSecond, err := strconv.ParseInt(gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout), 10, 64)
 		if err == nil {
 			t.timeout = time.Duration(timeoutSecond) * time.Second
 		}
 		finish := make(chan struct{}, 1)
 		panicChan := make(chan interface{}, 1)
 
-		w := c.Writer
+		w := gCtx.Writer
 		buffer := bufPool.Get()
 		tw := NewWriter(w, buffer)
-		c.Writer = tw
+		gCtx.Writer = tw
 		buffer.Reset()
 
 		go func() {
@@ -177,19 +182,19 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 					panicChan <- p
 				}
 			}()
-			t.handler(c)
+			t.handler(gCtx)
 			finish <- struct{}{}
 		}()
 
 		select {
 		case p := <-panicChan:
 			tw.FreeBuffer()
-			c.Writer = w
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{mhttp.HTTPReturnCode: http.StatusInternalServerError})
+			gCtx.Writer = w
+			gCtx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{mhttp.HTTPReturnCode: http.StatusInternalServerError})
 			panic(p)
 
 		case <-finish:
-			c.Next()
+			gCtx.Next()
 			tw.mu.Lock()
 			defer tw.mu.Unlock()
 			dst := tw.ResponseWriter.Header()
@@ -204,16 +209,16 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			bufPool.Put(buffer)
 
 		case <-time.After(t.timeout):
-			c.Abort()
+			gCtx.Abort()
 			tw.mu.Lock()
 			defer tw.mu.Unlock()
 			tw.timeout = true
 			tw.FreeBuffer()
 			bufPool.Put(buffer)
 
-			c.Writer = w
-			t.response(c)
-			c.Writer = tw
+			gCtx.Writer = w
+			t.response(gCtx)
+			gCtx.Writer = tw
 		}
 	}
 }

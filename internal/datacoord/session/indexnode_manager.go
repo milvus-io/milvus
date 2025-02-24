@@ -26,13 +26,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/lock"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	typeutil "github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	typeutil "github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error) {
@@ -44,6 +44,7 @@ type WorkerManager interface {
 	RemoveNode(nodeID typeutil.UniqueID)
 	StoppingNode(nodeID typeutil.UniqueID)
 	PickClient() (typeutil.UniqueID, types.IndexNodeClient)
+	QuerySlots() map[int64]int64
 	ClientSupportDisk() bool
 	GetAllClients() map[typeutil.UniqueID]types.IndexNodeClient
 	GetClientByID(nodeID typeutil.UniqueID) (types.IndexNodeClient, bool)
@@ -113,6 +114,42 @@ func (nm *IndexNodeManager) AddNode(nodeID typeutil.UniqueID, address string) er
 
 	nm.SetClient(nodeID, nodeClient)
 	return nil
+}
+
+func (nm *IndexNodeManager) QuerySlots() map[int64]int64 {
+	nm.lock.Lock()
+	defer nm.lock.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), querySlotTimeout)
+	defer cancel()
+
+	nodeSlots := make(map[int64]int64)
+	mu := &sync.Mutex{}
+	wg := &sync.WaitGroup{}
+	for nodeID, client := range nm.nodeClients {
+		if _, ok := nm.stoppingNodes[nodeID]; !ok {
+			wg.Add(1)
+			go func(nodeID int64) {
+				defer wg.Done()
+				resp, err := client.GetJobStats(ctx, &workerpb.GetJobStatsRequest{})
+				if err != nil {
+					log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+					return
+				}
+				if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+					log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID),
+						zap.String("reason", resp.GetStatus().GetReason()))
+					return
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				nodeSlots[nodeID] = resp.GetTaskSlots()
+			}(nodeID)
+		}
+	}
+	wg.Wait()
+	log.Ctx(context.TODO()).Debug("query slot done", zap.Any("nodeSlots", nodeSlots))
+	return nodeSlots
 }
 
 func (nm *IndexNodeManager) PickClient() (typeutil.UniqueID, types.IndexNodeClient) {

@@ -5,8 +5,8 @@ import (
 
 	"golang.org/x/sys/cpu"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/distance/asm"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/distance/asm"
 )
 
 func init() {

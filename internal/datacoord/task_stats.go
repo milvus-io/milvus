@@ -24,11 +24,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 type statsTask struct {
@@ -142,7 +142,7 @@ func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta
 		log.Warn("segment is contains by l0 compaction, skip stats", zap.Int64("taskID", st.taskID),
 			zap.Int64("segmentID", st.segmentID))
 		st.SetState(indexpb.JobState_JobStateFailed, "segment is contains by l0 compaction")
-		//reset compacting
+		// reset compacting
 		meta.SetSegmentsCompacting(ctx, []UniqueID{st.segmentID}, false)
 		st.SetStartTime(time.Now())
 		return fmt.Errorf("segment is contains by l0 compaction")
@@ -160,7 +160,6 @@ func (st *statsTask) UpdateMetaBuildingState(meta *meta) error {
 }
 
 func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bool {
-	// set segment compacting
 	log := log.Ctx(ctx).With(zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID))
 	segment := dependency.meta.GetHealthySegment(ctx, st.segmentID)
 	if segment == nil {
@@ -234,7 +233,7 @@ func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClien
 	st.req.InsertLogs = segment.GetBinlogs()
 	st.req.DeltaLogs = segment.GetDeltalogs()
 
-	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
 		ClusterID: st.req.GetClusterID(),
@@ -257,7 +256,7 @@ func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClien
 }
 
 func (st *statsTask) QueryResult(ctx context.Context, client types.IndexNodeClient) {
-	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
 		ClusterID: st.req.GetClusterID(),
@@ -293,7 +292,7 @@ func (st *statsTask) QueryResult(ctx context.Context, client types.IndexNodeClie
 }
 
 func (st *statsTask) DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool {
-	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
 		ClusterID: st.req.GetClusterID(),

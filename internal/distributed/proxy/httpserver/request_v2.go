@@ -22,7 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type EmptyReq struct{}
@@ -505,6 +505,7 @@ type CollectionReq struct {
 	Schema           CollectionSchema       `json:"schema"`
 	IndexParams      []IndexParam           `json:"indexParams"`
 	Params           map[string]interface{} `json:"params"`
+	Description      string                 `json:"description"`
 }
 
 func (req *CollectionReq) GetDbName() string { return req.DbName }

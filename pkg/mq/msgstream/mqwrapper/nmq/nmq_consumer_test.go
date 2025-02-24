@@ -25,8 +25,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/mq/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper"
 )
 
 func TestNatsConsumer_Subscription(t *testing.T) {

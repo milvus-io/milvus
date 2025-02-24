@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (

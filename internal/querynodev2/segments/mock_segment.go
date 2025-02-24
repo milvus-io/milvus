@@ -7,19 +7,19 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
-	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 
-	metautil "github.com/milvus-io/milvus/pkg/util/metautil"
+	metautil "github.com/milvus-io/milvus/pkg/v2/util/metautil"
 
 	mock "github.com/stretchr/testify/mock"
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 
-	querypb "github.com/milvus-io/milvus/pkg/proto/querypb"
+	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 
 	segcore "github.com/milvus-io/milvus/internal/util/segcore"
 
-	segcorepb "github.com/milvus-io/milvus/pkg/proto/segcorepb"
+	segcorepb "github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
 )

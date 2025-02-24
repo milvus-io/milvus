@@ -29,10 +29,11 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var _ Checker = (*StatsChecker)(nil)
@@ -142,7 +143,7 @@ func (c *StatsChecker) checkSegment(segment *meta.Segment, resp *milvuspb.Descri
 	var result []int64
 	for _, field := range resp.GetSchema().GetFields() {
 		h := typeutil.CreateFieldSchemaHelper(field)
-		if h.EnableJSONKeyIndex() {
+		if h.EnableJSONKeyIndex() && paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
 			exists := false
 			for i := 0; i < len(segment.JSONIndexField); i++ {
 				if segment.JSONIndexField[i] == field.FieldID {

@@ -26,12 +26,12 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
 type statsTaskMeta struct {
@@ -73,6 +73,9 @@ func (stm *statsTaskMeta) reloadFromKV() error {
 }
 
 func (stm *statsTaskMeta) updateMetrics() {
+	stm.RLock()
+	defer stm.RUnlock()
+
 	taskMetrics := make(map[UniqueID]map[indexpb.JobState]int)
 	for _, t := range stm.tasks {
 		if _, ok := taskMetrics[t.GetCollectionID()]; !ok {
@@ -122,7 +125,6 @@ func (stm *statsTaskMeta) AddStatsTask(t *indexpb.StatsTask) error {
 	}
 
 	stm.tasks[t.GetTaskID()] = t
-	stm.updateMetrics()
 
 	log.Info("add stats task success", zap.Int64("taskID", t.GetTaskID()), zap.Int64("originSegmentID", t.GetSegmentID()),
 		zap.Int64("targetSegmentID", t.GetTargetSegmentID()), zap.String("subJobType", t.GetSubJobType().String()))
@@ -149,7 +151,6 @@ func (stm *statsTaskMeta) DropStatsTask(taskID int64) error {
 	}
 
 	delete(stm.tasks, taskID)
-	stm.updateMetrics()
 
 	log.Info("remove stats task success", zap.Int64("taskID", taskID), zap.Int64("segmentID", t.SegmentID))
 	return nil
@@ -178,7 +179,6 @@ func (stm *statsTaskMeta) UpdateVersion(taskID, nodeID int64) error {
 	}
 
 	stm.tasks[t.TaskID] = cloneT
-	stm.updateMetrics()
 	log.Info("update stats task version success", zap.Int64("taskID", taskID), zap.Int64("nodeID", nodeID),
 		zap.Int64("newVersion", cloneT.GetVersion()))
 	return nil
@@ -205,7 +205,6 @@ func (stm *statsTaskMeta) UpdateBuildingTask(taskID int64) error {
 	}
 
 	stm.tasks[t.TaskID] = cloneT
-	stm.updateMetrics()
 
 	log.Info("update building stats task success", zap.Int64("taskID", taskID))
 	return nil
@@ -233,7 +232,6 @@ func (stm *statsTaskMeta) FinishTask(taskID int64, result *workerpb.StatsResult)
 	}
 
 	stm.tasks[t.TaskID] = cloneT
-	stm.updateMetrics()
 
 	log.Info("finish stats task meta success", zap.Int64("taskID", taskID), zap.Int64("segmentID", t.SegmentID),
 		zap.String("state", result.GetState().String()), zap.String("failReason", t.GetFailReason()))
@@ -334,7 +332,6 @@ func (stm *statsTaskMeta) MarkTaskCanRecycle(taskID int64) error {
 	}
 
 	stm.tasks[t.TaskID] = cloneT
-	stm.updateMetrics()
 
 	log.Info("mark stats task can recycle success", zap.Int64("taskID", taskID),
 		zap.Int64("segmentID", t.SegmentID),

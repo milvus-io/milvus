@@ -27,7 +27,6 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -38,18 +37,18 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/indexparams"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type indexMeta struct {
@@ -66,8 +65,6 @@ type indexMeta struct {
 
 	// segmentID -> indexID -> segmentIndex
 	segmentIndexes map[UniqueID]map[UniqueID]*model.SegmentIndex
-
-	lastUpdateMetricTime atomic.Time
 }
 
 func newIndexTaskStats(s *model.SegmentIndex) *metricsinfo.IndexTaskStats {
@@ -209,10 +206,9 @@ func (m *indexMeta) updateSegIndexMeta(segIdx *model.SegmentIndex, updateFunc fu
 }
 
 func (m *indexMeta) updateIndexTasksMetrics() {
-	if time.Since(m.lastUpdateMetricTime.Load()) < 120*time.Second {
-		return
-	}
-	defer m.lastUpdateMetricTime.Store(time.Now())
+	m.RLock()
+	defer m.RUnlock()
+
 	taskMetrics := make(map[UniqueID]map[commonpb.IndexState]int)
 	for _, segIdx := range m.segmentBuildInfo.List() {
 		if segIdx.IsDeleted || !m.isIndexExist(segIdx.CollectionID, segIdx.IndexID) {
@@ -446,7 +442,6 @@ func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.Segment
 	log.Ctx(ctx).Info("meta update: adding segment index success", zap.Int64("collectionID", segIndex.CollectionID),
 		zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
 		zap.Int64("buildID", buildID))
-	m.updateIndexTasksMetrics()
 	return nil
 }
 
@@ -823,7 +818,6 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		zap.String("state", taskInfo.GetState().String()), zap.String("fail reason", taskInfo.GetFailReason()),
 		zap.Int32("current_index_version", taskInfo.GetCurrentIndexVersion()),
 	)
-	m.updateIndexTasksMetrics()
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.GetIndexFileKeys())))
 	return nil
 }
@@ -848,7 +842,6 @@ func (m *indexMeta) DeleteTask(buildID int64) error {
 	}
 
 	log.Ctx(m.ctx).Info("delete index task success", zap.Int64("buildID", buildID))
-	m.updateIndexTasksMetrics()
 	return nil
 }
 
@@ -877,8 +870,6 @@ func (m *indexMeta) BuildIndex(buildID UniqueID) error {
 	}
 	log.Ctx(m.ctx).Info("meta update: segment index in progress success", zap.Int64("buildID", segIdx.BuildID),
 		zap.Int64("segmentID", segIdx.SegmentID))
-
-	m.updateIndexTasksMetrics()
 	return nil
 }
 
@@ -931,7 +922,6 @@ func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, collID, partID, segI
 	}
 
 	m.segmentBuildInfo.Remove(buildID)
-	m.updateIndexTasksMetrics()
 	return nil
 }
 

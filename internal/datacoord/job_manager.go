@@ -9,11 +9,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type StatsJobManager interface {
@@ -110,7 +110,7 @@ func (jm *statsJobManager) triggerSortStatsTask() {
 	}))
 
 	for _, segment := range visibleSegments {
-		if jm.scheduler.GetTaskCount() > Params.DataCoordCfg.StatsTaskTriggerCount.GetAsInt() {
+		if jm.scheduler.pendingTasks.TaskCount() > Params.DataCoordCfg.StatsTaskTriggerCount.GetAsInt() {
 			break
 		}
 		jm.createSortStatsTaskForSegment(segment)
@@ -200,7 +200,7 @@ func (jm *statsJobManager) triggerJsonKeyIndexStatsTask() {
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
 			h := typeutil.CreateFieldSchemaHelper(field)
-			if h.EnableJSONKeyIndex() && Params.DataCoordCfg.EnabledJSONKeyStats.GetAsBool() {
+			if h.EnableJSONKeyIndex() && Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() {
 				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 			}
 		}
@@ -261,7 +261,7 @@ func (jm *statsJobManager) cleanupStatsTasksLoop() {
 			taskIDs := jm.mt.statsTaskMeta.CanCleanedTasks()
 			for _, taskID := range taskIDs {
 				// waiting for queue processing tasks to complete
-				if jm.scheduler.getTask(taskID) == nil {
+				if !jm.scheduler.exist(taskID) {
 					if err := jm.mt.statsTaskMeta.DropStatsTask(taskID); err != nil {
 						// ignore err, if remove failed, wait next GC
 						log.Warn("clean up stats task failed", zap.Int64("taskID", taskID), zap.Error(err))

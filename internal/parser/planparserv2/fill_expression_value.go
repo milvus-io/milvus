@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.GenericValue) error {

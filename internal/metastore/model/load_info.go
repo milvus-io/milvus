@@ -1,6 +1,6 @@
 package model
 
-import "github.com/milvus-io/milvus/pkg/proto/querypb"
+import "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 
 type CollectionLoadInfo struct {
 	CollectionID         int64

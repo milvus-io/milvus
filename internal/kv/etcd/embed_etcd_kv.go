@@ -29,10 +29,10 @@ import (
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // implementation assertion
@@ -72,7 +72,6 @@ func NewEmbededEtcdKV(cfg *embed.Config, rootPath string, options ...Option) (*E
 		e, err = embed.StartEtcd(cfg)
 		return err
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +101,6 @@ func NewEmbededEtcdKV(cfg *embed.Config, rootPath string, options ...Option) (*E
 			return errors.New("Embedded etcd took too long to start")
 		}
 	})
-
 	if err != nil {
 		return nil, err
 	}

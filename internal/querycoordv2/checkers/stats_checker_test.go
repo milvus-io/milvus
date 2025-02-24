@@ -33,11 +33,11 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type StatsCheckerSuite struct {
@@ -94,7 +94,8 @@ func (suite *StatsCheckerSuite) TearDownTest() {
 func (suite *StatsCheckerSuite) TestLoadJsonIndex() {
 	checker := suite.checker
 	ctx := context.Background()
-
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key)
 	// meta
 	coll := utils.CreateTestCollection(1, 1)
 	coll.FieldIndexID = map[int64]int64{101: 1000}
@@ -155,7 +156,8 @@ func (suite *StatsCheckerSuite) TestLoadJsonIndex() {
 func (suite *StatsCheckerSuite) TestJsonIndexNotMatch() {
 	checker := suite.checker
 	ctx := context.Background()
-
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key)
 	// meta
 	coll := utils.CreateTestCollection(1, 1)
 	coll.FieldIndexID = map[int64]int64{101: 1000}
@@ -198,7 +200,8 @@ func (suite *StatsCheckerSuite) TestJsonIndexNotMatch() {
 func (suite *StatsCheckerSuite) TestDescribeCollectionFailed() {
 	checker := suite.checker
 	ctx := context.Background()
-
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key)
 	// meta
 	coll := utils.CreateTestCollection(1, 1)
 	coll.FieldIndexID = map[int64]int64{101: 1000}
@@ -231,7 +234,8 @@ func (suite *StatsCheckerSuite) TestDescribeCollectionFailed() {
 func (suite *StatsCheckerSuite) TestCreateNewJsonIndex() {
 	checker := suite.checker
 	ctx := context.Background()
-
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnabledJSONKeyStats.Key)
 	// meta
 	coll := utils.CreateTestCollection(1, 1)
 	coll.FieldIndexID = map[int64]int64{101: 1000}

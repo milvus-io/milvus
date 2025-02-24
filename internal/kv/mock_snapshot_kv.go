@@ -3,8 +3,8 @@ package kv
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var _ kv.SnapShotKV = &mockSnapshotKV{}

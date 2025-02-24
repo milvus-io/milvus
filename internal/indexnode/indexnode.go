@@ -49,16 +49,16 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/util/expr"
-	"github.com/milvus-io/milvus/pkg/util/hardware"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/expr"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // TODO add comments
@@ -205,7 +205,7 @@ func (i *IndexNode) initSegcore() {
 	cJSONIndexCommitInterval := C.int64_t(paramtable.Get().QueryNodeCfg.JSONIndexCommitInterval.GetAsInt64())
 	C.InitDefaultJSONKeyIndexCommitInterval(cJSONIndexCommitInterval)
 
-	cJSONIndexEnabled := C.bool(Params.DataCoordCfg.EnabledJSONKeyStats.GetAsBool())
+	cJSONIndexEnabled := C.bool(Params.CommonCfg.EnabledJSONKeyStats.GetAsBool())
 	C.InitDefaultJSONKeyIndexEnable(cJSONIndexEnabled)
 }
 
