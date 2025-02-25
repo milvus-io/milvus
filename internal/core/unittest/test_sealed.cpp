@@ -431,7 +431,7 @@ TEST(Sealed, LoadFieldData) {
 
     auto indexing = GenVecIndexing(
         N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
-
+    //
     auto segment = CreateSealedSegment(schema);
     // std::string dsl = R"({
     //     "bool": {

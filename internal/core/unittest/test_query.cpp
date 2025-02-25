@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <sys/_types/_int32_t.h>
 
 #include "pb/schema.pb.h"
 #include "query/PlanImpl.h"
@@ -528,7 +529,12 @@ TEST(Query, FillSegment) {
     proto.set_name("col");
     proto.set_description("asdfhsalkgfhsadg");
     auto dim = 16;
+    bool bool_default_value = true;
+    int32_t int_default_value = 20;
+    int64_t long_default_value = 20;
+    float float_default_value = 20;
     double double_default_value = 20;
+    string varchar_dafualt_vlaue = "20";
 
     {
         auto field = proto.add_fields();
@@ -608,13 +614,71 @@ TEST(Query, FillSegment) {
 
     {
         auto field = proto.add_fields();
-        field->set_name("lack_default_value_binlog");
+        field->set_name("lack_default_value_binlog_bool");
         field->set_nullable(true);
         field->set_fieldid(104);
         field->set_is_primary_key(false);
         field->set_description("lack default value binlog");
+        field->set_data_type(pb::schema::DataType::Bool);
+        field->mutable_default_value()->set_bool_data(bool_default_value);
+    }
+
+    {
+        auto field = proto.add_fields();
+        field->set_name("lack_default_value_binlog_int");
+        field->set_nullable(true);
+        field->set_fieldid(105);
+        field->set_is_primary_key(false);
+        field->set_description("lack default value binlog");
+        field->set_data_type(pb::schema::DataType::Int32);
+        field->mutable_default_value()->set_int_data(int_default_value);
+    }
+
+    {
+        auto field = proto.add_fields();
+        field->set_name("lack_default_value_binlog_int64");
+        field->set_nullable(true);
+        field->set_fieldid(106);
+        field->set_is_primary_key(false);
+        field->set_description("lack default value binlog");
+        field->set_data_type(pb::schema::DataType::Int64);
+        field->mutable_default_value()->set_int_data(long_default_value);
+    }
+
+    {
+        auto field = proto.add_fields();
+        field->set_name("lack_default_value_binlog_float");
+        field->set_nullable(true);
+        field->set_fieldid(107);
+        field->set_is_primary_key(false);
+        field->set_description("lack default value binlog");
+        field->set_data_type(pb::schema::DataType::Float);
+        field->mutable_default_value()->set_float_data(float_default_value);
+    }
+
+    {
+        auto field = proto.add_fields();
+        field->set_name("lack_default_value_binlog_double");
+        field->set_nullable(true);
+        field->set_fieldid(108);
+        field->set_is_primary_key(false);
+        field->set_description("lack default value binlog");
         field->set_data_type(pb::schema::DataType::Double);
         field->mutable_default_value()->set_double_data(double_default_value);
+    }
+
+    {
+        auto field = proto.add_fields();
+        field->set_name("lack_default_value_binlog_varchar");
+        field->set_nullable(true);
+        field->set_fieldid(109);
+        field->set_is_primary_key(false);
+        field->set_description("lack default value binlog");
+        field->set_data_type(pb::schema::DataType::VarChar);
+        auto str_type_params = field->add_type_params();
+        str_type_params->set_key(MAX_LENGTH);
+        str_type_params->set_value(std::to_string(64));
+        field->mutable_default_value()->set_string_data(varchar_dafualt_vlaue);
     }
 
     schema = Schema::ParseFrom(proto);
@@ -647,14 +711,24 @@ TEST(Query, FillSegment) {
         plan->target_entries_.push_back(
             schema->get_field_id(FieldName("lack_null_binlog")));
         plan->target_entries_.push_back(
-            schema->get_field_id(FieldName("lack_default_value_binlog")));
+            schema->get_field_id(FieldName("lack_default_value_binlog_bool")));
+        plan->target_entries_.push_back(
+            schema->get_field_id(FieldName("lack_default_value_binlog_int")));
+        plan->target_entries_.push_back(
+            schema->get_field_id(FieldName("lack_default_value_binlog_int64")));
+        plan->target_entries_.push_back(
+            schema->get_field_id(FieldName("lack_default_value_binlog_float")));
+        plan->target_entries_.push_back(schema->get_field_id(
+            FieldName("lack_default_value_binlog_double")));
+        plan->target_entries_.push_back(schema->get_field_id(
+            FieldName("lack_default_value_binlog_varchar")));
         auto result = segment->Search(plan.get(), ph.get(), ts);
         result->result_offsets_.resize(topk * num_queries);
         segment->FillTargetEntry(plan.get(), *result);
         segment->FillPrimaryKeys(plan.get(), *result);
 
         auto& fields_data = result->output_fields_data_;
-        ASSERT_EQ(fields_data.size(), 4);
+        ASSERT_EQ(fields_data.size(), 9);
         for (auto field_id : plan->target_entries_) {
             ASSERT_EQ(fields_data.count(field_id), true);
         }
@@ -679,13 +753,62 @@ TEST(Query, FillSegment) {
             fields_data.at(float_field_id)->valid_data();
         ASSERT_EQ(output_float_valid_data.size(), topk * num_queries);
         auto double_field_id =
-            schema->get_field_id(FieldName("lack_default_value_binlog"));
+            schema->get_field_id(FieldName("lack_default_value_binlog_double"));
         auto output_double_field_data =
             fields_data.at(double_field_id)->scalars().double_data().data();
         ASSERT_EQ(output_double_field_data.size(), topk * num_queries);
         auto output_double_valid_data =
             fields_data.at(double_field_id)->valid_data();
         ASSERT_EQ(output_double_valid_data.size(), topk * num_queries);
+
+        auto bool_field_id =
+            schema->get_field_id(FieldName("lack_default_value_binlog_bool"));
+        auto output_bool_field_data =
+            fields_data.at(bool_field_id)->scalars().bool_data().data();
+        ASSERT_EQ(output_bool_field_data.size(), topk * num_queries);
+        auto output_bool_valid_data =
+            fields_data.at(bool_field_id)->valid_data();
+        ASSERT_EQ(output_bool_valid_data.size(), topk * num_queries);
+
+        auto int_field_id =
+            schema->get_field_id(FieldName("lack_default_value_binlog_int"));
+        auto output_int_field_data =
+            fields_data.at(int_field_id)->scalars().int_data().data();
+        ASSERT_EQ(output_int_field_data.size(), topk * num_queries);
+        auto output_int_valid_data = fields_data.at(int_field_id)->valid_data();
+        ASSERT_EQ(output_int_valid_data.size(), topk * num_queries);
+
+        auto int64_field_id =
+            schema->get_field_id(FieldName("lack_default_value_binlog_int64"));
+        auto output_int64_field_data =
+            fields_data.at(int64_field_id)->scalars().long_data().data();
+        ASSERT_EQ(output_int64_field_data.size(), topk * num_queries);
+        auto output_int64_valid_data =
+            fields_data.at(int64_field_id)->valid_data();
+        ASSERT_EQ(output_int64_valid_data.size(), topk * num_queries);
+
+        auto float_field_id_default_value =
+            schema->get_field_id(FieldName("lack_default_value_binlog_float"));
+        auto output_float_field_data_default_value =
+            fields_data.at(float_field_id_default_value)
+                ->scalars()
+                .float_data()
+                .data();
+        ASSERT_EQ(output_float_field_data_default_value.size(),
+                  topk * num_queries);
+        auto output_float_valid_data_default_value =
+            fields_data.at(float_field_id_default_value)->valid_data();
+        ASSERT_EQ(output_float_valid_data_default_value.size(),
+                  topk * num_queries);
+
+        auto varchar_field_id = schema->get_field_id(
+            FieldName("lack_default_value_binlog_varchar"));
+        auto output_varchar_field_data =
+            fields_data.at(varchar_field_id)->scalars().string_data().data();
+        ASSERT_EQ(output_varchar_field_data.size(), topk * num_queries);
+        auto output_varchar_valid_data =
+            fields_data.at(varchar_field_id)->valid_data();
+        ASSERT_EQ(output_varchar_valid_data.size(), topk * num_queries);
 
         for (int i = 0; i < topk * num_queries; i++) {
             int64_t val = std::get<int64_t>(result->primary_keys_[i]);

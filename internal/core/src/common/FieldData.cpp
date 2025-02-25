@@ -380,16 +380,6 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(
                 values.data(), valid_data_ptr.get(), element_count);
         }
-        case DataType::VECTOR_FLOAT:
-        case DataType::VECTOR_FLOAT16:
-        case DataType::VECTOR_BFLOAT16:
-        case DataType::VECTOR_BINARY:
-        case DataType::VECTOR_SPARSE_FLOAT: {
-            PanicInfo(DataTypeInvalid,
-                      GetName() + "::FillFieldData" +
-                          " not support data type for add field api" +
-                          GetDataTypeName(data_type_));
-        }
         default: {
             PanicInfo(DataTypeInvalid,
                       GetName() + "::FillFieldData" +
