@@ -298,6 +298,8 @@ type commonConfig struct {
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
 
 	EnabledJSONKeyStats ParamItem `refreshable:"true"`
+
+	EnabledOptimizeExpr ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1009,6 +1011,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnabledJSONKeyStats.Init(base.mgr)
+
+	p.EnabledOptimizeExpr = ParamItem{
+		Key:          "common.enabledOptimizeExpr",
+		Version:      "2.5.6",
+		DefaultValue: "true",
+		Doc:          "Indicates whether to enable optimize expr",
+		Export:       true,
+	}
+	p.EnabledOptimizeExpr.Init(base.mgr)
 }
 
 type gpuConfig struct {
