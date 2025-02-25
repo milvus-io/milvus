@@ -820,7 +820,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
+			UpdateStatusOperator(1, commonpb.SegmentState_Growing),
 			AddBinlogsOperator(1,
 				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 1)},
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 1)},
@@ -837,7 +837,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.EqualValues(t, 1, updated.getDeltaCount())
 
 		expected := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-			ID: 1, State: commonpb.SegmentState_Flushing, NumOfRows: 10,
+			ID: 1, State: commonpb.SegmentState_Growing, NumOfRows: 10,
 			StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}},
 			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0, 1)},
 			Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0, 1)},
