@@ -303,7 +303,10 @@ proxy:
         format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost]"
       query:
         format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr]"
-        methods: "Query,Search,Delete"
+        methods: "Query, Delete"
+      search:
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [anns_field: $anns_field] [expr: $method_expr]"
+        methods: "HybridSearch, Search"
     cacheSize: 0 # Size of log of write cache, in byte. (Close write cache if size was 0)
     cacheFlushInterval: 3 # time interval of auto flush write cache, in seconds. (Close auto flush if interval was 0)
   connectionCheckIntervalSeconds: 120 # the interval time(in seconds) for connection manager to scan inactive client info
