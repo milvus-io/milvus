@@ -837,7 +837,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.EqualValues(t, 1, updated.getDeltaCount())
 
 		expected := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-			ID: 1, State: commonpb.SegmentState_Growing, NumOfRows: 10,
+			ID: 1, State: commonpb.SegmentState_Growing, NumOfRows: 11,
 			StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}},
 			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(1, 222, 333)},
 			Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0, 1)},
