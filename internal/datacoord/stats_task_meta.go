@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
 
 	"go.uber.org/zap"
@@ -76,25 +75,14 @@ func (stm *statsTaskMeta) updateMetrics() {
 	stm.RLock()
 	defer stm.RUnlock()
 
-	taskMetrics := make(map[UniqueID]map[indexpb.JobState]int)
+	taskMetrics := make(map[indexpb.JobState]int)
 	for _, t := range stm.tasks {
-		if _, ok := taskMetrics[t.GetCollectionID()]; !ok {
-			taskMetrics[t.GetCollectionID()] = make(map[indexpb.JobState]int)
-			taskMetrics[t.GetCollectionID()][indexpb.JobState_JobStateNone] = 0
-			taskMetrics[t.GetCollectionID()][indexpb.JobState_JobStateInit] = 0
-			taskMetrics[t.GetCollectionID()][indexpb.JobState_JobStateInProgress] = 0
-			taskMetrics[t.GetCollectionID()][indexpb.JobState_JobStateFinished] = 0
-			taskMetrics[t.GetCollectionID()][indexpb.JobState_JobStateFailed] = 0
-			taskMetrics[t.GetCollectionID()][indexpb.JobState_JobStateRetry] = 0
-		}
-		taskMetrics[t.GetCollectionID()][t.GetState()]++
+		taskMetrics[t.GetState()]++
 	}
 
 	jobType := indexpb.JobType_JobTypeStatsJob.String()
-	for collID, m := range taskMetrics {
-		for k, v := range m {
-			metrics.TaskNum.WithLabelValues(strconv.FormatInt(collID, 10), jobType, k.String()).Set(float64(v))
-		}
+	for k, v := range taskMetrics {
+		metrics.TaskNum.WithLabelValues(jobType, k.String()).Set(float64(v))
 	}
 }
 
