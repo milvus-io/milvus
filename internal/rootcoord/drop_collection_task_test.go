@@ -193,7 +193,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(coll.Clone(), nil)
-		meta.EXPECT().ListAliasesByID(mock.Anything, mock.Anything).
+		meta.EXPECT().ListAliasesByID(mock.Anything).
 			Return([]string{"mock-alias-0", "mock-alias-1"})
 
 		core := newTestCore(
