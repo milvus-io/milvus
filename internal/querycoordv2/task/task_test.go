@@ -1832,6 +1832,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		suite.replica,
 		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", segmentID, querypb.DataScope_Historical, 100),
 	)
+	task1.SetID(1)
 	suite.NoError(err)
 	err = scheduler.Add(task1)
 	suite.NoError(err)
@@ -1843,6 +1844,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		suite.replica,
 		NewChannelAction(nodeID, ActionTypeGrow, channelName),
 	)
+	task2.SetID(2)
 	suite.NoError(err)
 	err = scheduler.Add(task2)
 	suite.NoError(err)
@@ -1860,6 +1862,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		NewSegmentActionWithScope(nodeID2, ActionTypeGrow, "", segmentID2, querypb.DataScope_Historical, 100),
 	)
 	suite.NoError(err)
+	task3.SetID(3)
 	err = scheduler.Add(task3)
 	suite.NoError(err)
 	task4, err := NewChannelTask(
@@ -1871,6 +1874,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		NewChannelAction(nodeID2, ActionTypeGrow, channelName2),
 	)
 	suite.NoError(err)
+	task4.SetID(4)
 	err = scheduler.Add(task4)
 	suite.NoError(err)
 

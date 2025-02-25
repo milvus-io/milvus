@@ -174,7 +174,7 @@ func (etd *ExecutingTaskDelta) Add(task Task) {
 	}
 	etd.taskIDRecords.Insert(task.ID())
 
-	collectionID := task.ID()
+	collectionID := task.CollectionID()
 	for _, action := range task.Actions() {
 		nodeID := action.Node()
 		delta := action.WorkLoadEffect()
@@ -199,7 +199,7 @@ func (etd *ExecutingTaskDelta) Sub(task Task) {
 	}
 	etd.taskIDRecords.Remove(task.ID())
 
-	collectionID := task.ID()
+	collectionID := task.CollectionID()
 	for _, action := range task.Actions() {
 		nodeID := action.Node()
 		delta := action.WorkLoadEffect()
