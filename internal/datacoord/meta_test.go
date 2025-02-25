@@ -810,7 +810,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		segment1 := NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 1, State: commonpb.SegmentState_Growing,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 1, 222)},
 			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
 		})
 		err = meta.AddSegment(context.TODO(), segment1)
@@ -822,9 +822,9 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 			context.TODO(),
 			UpdateStatusOperator(1, commonpb.SegmentState_Growing),
 			AddBinlogsOperator(1,
-				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 1)},
-				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 1)},
-				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: "", LogID: 2}}}},
+				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 333)},
+				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 334)},
+				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogID: 335}}}},
 				[]*datapb.FieldBinlog{},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
@@ -839,7 +839,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		expected := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, State: commonpb.SegmentState_Growing, NumOfRows: 10,
 			StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}},
-			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0, 1)},
+			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(1, 222, 333)},
 			Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0, 1)},
 			Deltalogs:     []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000}}}},
 		}}
