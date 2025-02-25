@@ -561,11 +561,10 @@ func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
 	s.Run("collection has index, segment is not indexed", func() {
 		task := s.generateBasicTask(false)
 		task.State = datapb.CompactionTaskState_indexing
-		index := &model.Index{
+		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 1,
-			IndexID:      3,
 		}
-		err := s.meta.indexMeta.CreateIndex(index)
+		_, err := s.meta.indexMeta.CreateIndex(indexReq, 3)
 		s.NoError(err)
 
 		s.False(task.Process())
@@ -575,11 +574,10 @@ func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
 	s.Run("collection has index, segment indexed", func() {
 		task := s.generateBasicTask(false)
 		task.State = datapb.CompactionTaskState_indexing
-		index := &model.Index{
+		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 1,
-			IndexID:      3,
 		}
-		err := s.meta.indexMeta.CreateIndex(index)
+		_, err := s.meta.indexMeta.CreateIndex(indexReq, 3)
 		s.NoError(err)
 
 		s.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{

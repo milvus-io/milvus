@@ -135,21 +135,8 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		tmpIndexID, err := m.CanCreateIndex(req)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
-		index := &model.Index{
-			TenantID:        "",
-			CollectionID:    collID,
-			FieldID:         fieldID,
-			IndexID:         indexID,
-			IndexName:       indexName,
-			IsDeleted:       false,
-			CreateTime:      0,
-			TypeParams:      typeParams,
-			IndexParams:     indexParams,
-			IsAutoIndex:     false,
-			UserIndexParams: userIndexParams,
-		}
 
-		err = m.CreateIndex(index)
+		_, err = m.CreateIndex(req, indexID)
 		assert.NoError(t, err)
 
 		tmpIndexID, err = m.CanCreateIndex(req)
@@ -324,21 +311,21 @@ func TestMeta_CreateIndex(t *testing.T) {
 			Value: "FLAT",
 		},
 	}
-	index := &model.Index{
-		TenantID:     "",
-		CollectionID: 1,
-		FieldID:      2,
-		IndexID:      3,
-		IndexName:    "_default_idx",
-		IsDeleted:    false,
-		CreateTime:   12,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   common.DimKey,
-				Value: "128",
-			},
+
+	typeParams := []*commonpb.KeyValuePair{
+		{
+			Key:   common.DimKey,
+			Value: "128",
 		},
+	}
+
+	req := &indexpb.CreateIndexRequest{
+		CollectionID:    1,
+		FieldID:         2,
+		IndexName:       indexName,
+		TypeParams:      typeParams,
 		IndexParams:     indexParams,
+		Timestamp:       12,
 		IsAutoIndex:     false,
 		UserIndexParams: indexParams,
 	}
@@ -351,7 +338,7 @@ func TestMeta_CreateIndex(t *testing.T) {
 		).Return(nil)
 
 		m := newSegmentIndexMeta(sc)
-		err := m.CreateIndex(index)
+		_, err := m.CreateIndex(req, 3)
 		assert.NoError(t, err)
 	})
 
@@ -363,7 +350,7 @@ func TestMeta_CreateIndex(t *testing.T) {
 		).Return(errors.New("fail"))
 
 		m := newSegmentIndexMeta(ec)
-		err := m.CreateIndex(index)
+		_, err := m.CreateIndex(req, 4)
 		assert.Error(t, err)
 	})
 }
