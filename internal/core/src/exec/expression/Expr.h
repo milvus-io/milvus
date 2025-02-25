@@ -114,13 +114,14 @@ class SegmentExpr : public Expr {
                 const segcore::SegmentInternalInterface* segment,
                 const FieldId field_id,
                 const std::vector<std::string> nested_path,
+                const DataType value_type,
                 int64_t active_count,
                 int64_t batch_size)
         : Expr(DataType::BOOL, std::move(input), name),
           segment_(segment),
           field_id_(field_id),
           nested_path_(nested_path),
-
+          value_type_(value_type),
           active_count_(active_count),
           batch_size_(batch_size) {
         size_per_chunk_ = segment_->size_per_chunk();
@@ -146,7 +147,8 @@ class SegmentExpr : public Expr {
 
         if (field_meta.get_data_type() == DataType::JSON) {
             auto pointer = milvus::Json::pointer(nested_path_);
-            if (is_index_mode_ = segment_->HasIndex(field_id_, pointer)) {
+            if (is_index_mode_ =
+                    segment_->HasIndex(field_id_, pointer, value_type_)) {
                 num_index_chunk_ = 1;
             }
         } else {
@@ -1095,7 +1097,7 @@ class SegmentExpr : public Expr {
 
     std::vector<std::string> nested_path_;
     DataType field_type_;
-
+    DataType value_type_;
     bool is_index_mode_{false};
     bool is_data_mode_{false};
     // sometimes need to skip index and using raw data

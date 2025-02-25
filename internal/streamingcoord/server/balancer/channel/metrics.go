@@ -7,7 +7,6 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -24,22 +23,17 @@ type channelMetrics struct {
 	assignmentVersion prometheus.Gauge
 }
 
-// RemovePChannelStatus removes the pchannel status metric
-func (m *channelMetrics) RemovePChannelStatus(assigned types.PChannelInfoAssigned) {
-	m.pchannelInfo.Delete(prometheus.Labels{
-		metrics.WALChannelLabelName:     assigned.Channel.Name,
-		metrics.WALChannelTermLabelName: strconv.FormatInt(assigned.Channel.Term, 10),
-		metrics.StreamingNodeLabelName:  strconv.FormatInt(assigned.Node.ServerID, 10),
-	})
-}
-
 // AssignPChannelStatus assigns the pchannel status metric
 func (m *channelMetrics) AssignPChannelStatus(meta *streamingpb.PChannelMeta) {
+	metrics.StreamingCoordPChannelInfo.DeletePartialMatch(prometheus.Labels{
+		metrics.WALChannelLabelName: meta.GetChannel().GetName(),
+	})
 	m.pchannelInfo.With(prometheus.Labels{
 		metrics.WALChannelLabelName:     meta.GetChannel().GetName(),
 		metrics.WALChannelTermLabelName: strconv.FormatInt(meta.GetChannel().GetTerm(), 10),
 		metrics.StreamingNodeLabelName:  strconv.FormatInt(meta.GetNode().GetServerId(), 10),
-	}).Set(float64(meta.GetState()))
+		metrics.WALStateLabelName:       meta.GetState().String(),
+	}).Set(1)
 }
 
 // UpdateAssignmentVersion updates the assignment version metric

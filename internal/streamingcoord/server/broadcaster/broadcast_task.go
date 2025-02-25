@@ -16,7 +16,8 @@ import (
 )
 
 // newBroadcastTaskFromProto creates a new broadcast task from the proto.
-func newBroadcastTaskFromProto(proto *streamingpb.BroadcastTask) *broadcastTask {
+func newBroadcastTaskFromProto(proto *streamingpb.BroadcastTask, metrics *broadcasterMetrics) *broadcastTask {
+	m := metrics.NewBroadcastTask(proto.GetState())
 	msg := message.NewBroadcastMutableMessageBeforeAppend(proto.Message.Payload, proto.Message.Properties)
 	bh := msg.BroadcastHeader()
 	return &broadcastTask{
@@ -24,11 +25,13 @@ func newBroadcastTaskFromProto(proto *streamingpb.BroadcastTask) *broadcastTask 
 		header:           bh,
 		task:             proto,
 		recoverPersisted: true, // the task is recovered from the recovery info, so it's persisted.
+		metrics:          m,
 	}
 }
 
 // newBroadcastTaskFromBroadcastMessage creates a new broadcast task from the broadcast message.
-func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage) *broadcastTask {
+func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage, metrics *broadcasterMetrics) *broadcastTask {
+	m := metrics.NewBroadcastTask(streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING)
 	header := msg.BroadcastHeader()
 	return &broadcastTask{
 		Binder: log.Binder{},
@@ -40,6 +43,7 @@ func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage) *
 			AckedVchannelBitmap: make([]byte, len(header.VChannels)),
 		},
 		recoverPersisted: false,
+		metrics:          m,
 	}
 }
 
@@ -50,6 +54,7 @@ type broadcastTask struct {
 	header           *message.BroadcastHeader
 	task             *streamingpb.BroadcastTask
 	recoverPersisted bool // a flag to indicate that the task has been persisted into the recovery info and can be recovered.
+	metrics          *taskMetricsGuard
 }
 
 // Header returns the header of the broadcast task.
@@ -116,6 +121,10 @@ func (b *broadcastTask) Ack(ctx context.Context, vchannel string) error {
 		return err
 	}
 	b.task = task
+	b.metrics.ObserveAckAnyOne()
+	if isAllDone(task) {
+		b.metrics.ObserveAckAll()
+	}
 	return nil
 }
 
@@ -159,6 +168,7 @@ func (b *broadcastTask) BroadcastDone(ctx context.Context) error {
 		return err
 	}
 	b.task = task
+	b.metrics.ObserveBroadcastDone()
 	return nil
 }
 
@@ -221,5 +231,6 @@ func (b *broadcastTask) saveTask(ctx context.Context, task *streamingpb.Broadcas
 		return err
 	}
 	logger.Info("save broadcast task done")
+	b.metrics.ToState(task.State)
 	return nil
 }

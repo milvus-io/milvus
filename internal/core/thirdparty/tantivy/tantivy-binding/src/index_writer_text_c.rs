@@ -5,7 +5,8 @@ use crate::array::RustResult;
 use crate::cstr_to_str;
 use crate::index_writer::IndexWriterWrapper;
 use crate::log::init_log;
-use crate::tokenizer::create_tokenizer;
+use crate::string_c::c_str_to_str;
+use crate::analyzer::create_analyzer;
 use crate::util::create_binding;
 
 #[no_mangle]
@@ -23,7 +24,7 @@ pub extern "C" fn tantivy_create_text_writer(
     let path_str = cstr_to_str!(path);
     let tokenizer_name_str = cstr_to_str!(tokenizer_name);
     let params = cstr_to_str!(analyzer_params);
-    let analyzer = create_tokenizer(params);
+    let analyzer = create_analyzer(params);
     match analyzer {
         Ok(text_analyzer) => {
             let wrapper = IndexWriterWrapper::create_text_writer(

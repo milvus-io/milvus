@@ -39,11 +39,10 @@ func NewResumableProducer(f factory, opts *ProducerOptions) *ResumableProducer {
 		lifetime:       typeutil.NewLifetime(),
 		logger:         log.With(zap.String("pchannel", opts.PChannel)),
 		opts:           opts,
-
-		producer: newProducerWithResumingError(), // lazy initialized.
-		cond:     syncutil.NewContextCond(&sync.Mutex{}),
-		factory:  f,
-		metrics:  newProducerMetrics(opts.PChannel),
+		producer:       newProducerWithResumingError(opts.PChannel), // lazy initialized.
+		cond:           syncutil.NewContextCond(&sync.Mutex{}),
+		factory:        f,
+		metrics:        newResumingProducerMetrics(opts.PChannel),
 	}
 	go p.resumeLoop()
 	return p
@@ -74,7 +73,7 @@ type ResumableProducer struct {
 	// factory is used to create a new producer.
 	factory factory
 
-	metrics *producerMetrics
+	metrics *resumingProducerMetrics
 }
 
 // Produce produce a new message to log service.
@@ -82,11 +81,7 @@ func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMess
 	if !p.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, errors.Wrapf(errs.ErrClosed, "produce on closed producer")
 	}
-	metricGuard := p.metrics.StartProduce(msg.EstimateSize())
-	defer func() {
-		metricGuard.Finish(err)
-		p.lifetime.Done()
-	}()
+	defer p.lifetime.Done()
 
 	for {
 		// get producer.
