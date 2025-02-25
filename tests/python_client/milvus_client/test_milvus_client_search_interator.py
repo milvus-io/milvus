@@ -644,7 +644,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         # 3. search iterator
         vectors_to_search = rng.random((1, default_dim))
         search_params = {}
-        with pytest.raises(TypeError, match="missing 1 required positional argument: 'hits'"):
+        with pytest.raises(TypeError, match="got an unexpected keyword argument 'metric_type'"):
             self.search_iterator(client, collection_name, vectors_to_search, batch_size,
                                  search_params=search_params, limit=100,
                                  external_filter_func=external_filter_invalid_arguments(metric_type="L2"),
@@ -653,7 +653,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
                                   search_params=search_params, limit=100,
                                   external_filter_func=external_filter_invalid_arguments,
                                   check_task=CheckTasks.check_nothing)[0]
-        with pytest.raises(TypeError, match="missing 1 required positional argument: 'metric_type'"):
+        with pytest.raises(TypeError, match="missing 1 required positional argument: 'iaminvalid'"):
             it.next()
 
 
@@ -668,7 +668,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
     def metric_type(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[{}, {"radius": 0.1, "range_filter": 0.9}])
+    @pytest.fixture(scope="function", params=[{}, {"radius": 0.1, "range_filter": 90}])
     def search_params(self, request):
         yield request.param
 
@@ -1042,7 +1042,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("metric_type", ["L2"])
-    @pytest.mark.parametrize("params", [{"radius": 0.8, "range_filter": 1}])
+    @pytest.mark.parametrize("params", [{"radius": 20, "range_filter": 10}])
     def test_milvus_client_search_iterator_with_l2_metric_type_with_params(self, metric_type, params):
         """
         target: test search iterator with L2 metric type and search params
@@ -1077,8 +1077,8 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
                              search_params=search_params,
                              check_task=CheckTasks.check_search_iterator,
                              check_items={"metric_type": metric_type,
-                                          "radius": 0.8,
-                                          "range_filter": 1})
+                                          "radius": 20,
+                                          "range_filter": 10})
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 

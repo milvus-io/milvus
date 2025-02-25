@@ -3143,8 +3143,10 @@ class TestDescribeCollection(TestcaseBase):
              'functions': [], 'aliases': [], 'consistency_level': 0, 'properties': {},
              'num_partitions': 1, 'enable_dynamic_field': False}
         res = collection_w.describe()[0]
+        assert res.get('collection_id', None).__class__ is int
+        assert res.get('created_timestamp', None).__class__ is int
         del res['collection_id']
-        log.info(res)
+        del res['created_timestamp']
         assert description == res
 
     @pytest.mark.tags(CaseLabel.L1)
