@@ -3737,6 +3737,7 @@ class TestQueryCount(TestcaseBase):
         collection_w_alias.drop(check_task=CheckTasks.err_res,
                                 check_items={ct.err_code: 1,
                                              ct.err_msg: "cannot drop the collection via alias"})
+        self.utility_wrap.drop_alias(alias)
         collection_w.drop()
 
     @pytest.mark.tags(CaseLabel.L2)
