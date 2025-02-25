@@ -35,6 +35,10 @@ func adaptImplsToWAL(
 		WALImpls: basicWAL,
 		WAL:      syncutil.NewFuture[wal.WAL](),
 	}
+	logger := resource.Resource().Logger().With(
+		log.FieldComponent("wal"),
+		zap.Any("channel", basicWAL.Channel()),
+	)
 	wal := &walAdaptorImpl{
 		lifetime:    typeutil.NewLifetime(),
 		available:   make(chan struct{}),
@@ -51,11 +55,9 @@ func adaptImplsToWAL(
 		cleanup:      cleanup,
 		writeMetrics: metricsutil.NewWriteMetrics(basicWAL.Channel(), basicWAL.WALName()),
 		scanMetrics:  metricsutil.NewScanMetrics(basicWAL.Channel()),
-		logger: resource.Resource().Logger().With(
-			log.FieldComponent("wal"),
-			zap.Any("channel", basicWAL.Channel()),
-		),
+		logger:       logger,
 	}
+	wal.writeMetrics.SetLogger(logger)
 	param.WAL.Set(wal)
 	return wal
 }
@@ -121,8 +123,11 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	// Setup the term of wal.
 	msg = msg.WithWALTerm(w.Channel().Term)
 
+	appendMetrics := w.writeMetrics.StartAppend(msg)
+	ctx = utility.WithAppendMetricsContext(ctx, appendMetrics)
+
 	// Metrics for append message.
-	metricsGuard := w.writeMetrics.StartAppend(msg.MessageType(), msg.EstimateSize())
+	metricsGuard := appendMetrics.StartAppendGuard()
 
 	// Execute the interceptor and wal append.
 	var extraAppendResult utility.ExtraAppendResult
@@ -131,6 +136,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 			if notPersistHint := utility.GetNotPersisted(ctx); notPersistHint != nil {
 				// do not persist the message if the hint is set.
+				appendMetrics.NotPersisted()
 				return notPersistHint.MessageID, nil
 			}
 			metricsGuard.StartWALImplAppend()
@@ -138,8 +144,9 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 			metricsGuard.FinishWALImplAppend()
 			return msgID, err
 		})
+	metricsGuard.FinishAppend()
 	if err != nil {
-		metricsGuard.Finish(err)
+		appendMetrics.Done(nil, err)
 		return nil, err
 	}
 	var extra *anypb.Any
@@ -157,7 +164,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		TxnCtx:    extraAppendResult.TxnCtx,
 		Extra:     extra,
 	}
-	metricsGuard.Finish(nil)
+	appendMetrics.Done(r, nil)
 	return r, nil
 }
 

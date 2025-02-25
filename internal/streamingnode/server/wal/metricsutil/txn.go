@@ -1,6 +1,8 @@
 package metricsutil
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -8,6 +10,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
+
+const labelExpired = "expired"
 
 func NewTxnMetrics(pchannel string) *TxnMetrics {
 	constLabel := prometheus.Labels{
@@ -18,7 +22,7 @@ func NewTxnMetrics(pchannel string) *TxnMetrics {
 		mu:               syncutil.ClosableLock{},
 		constLabel:       constLabel,
 		inflightTxnGauge: metrics.WALInflightTxn.With(constLabel),
-		txnCounter:       metrics.WALFinishTxn.MustCurryWith(constLabel),
+		duration:         metrics.WALTxnDurationSeconds.MustCurryWith(constLabel),
 	}
 }
 
@@ -26,28 +30,46 @@ type TxnMetrics struct {
 	mu               syncutil.ClosableLock
 	constLabel       prometheus.Labels
 	inflightTxnGauge prometheus.Gauge
-	txnCounter       *prometheus.CounterVec
+	duration         prometheus.ObserverVec
 }
 
-func (m *TxnMetrics) BeginTxn() {
+func (m *TxnMetrics) BeginTxn() *TxnMetricsGuard {
 	if !m.mu.LockIfNotClosed() {
-		return
+		return nil
 	}
 	m.inflightTxnGauge.Inc()
 	m.mu.Unlock()
+
+	return &TxnMetricsGuard{
+		inner: m,
+		start: time.Now(),
+	}
 }
 
-func (m *TxnMetrics) Finish(state message.TxnState) {
-	if !m.mu.LockIfNotClosed() {
+type TxnMetricsGuard struct {
+	inner *TxnMetrics
+	start time.Time
+}
+
+func (g *TxnMetricsGuard) Done(state message.TxnState) {
+	if g == nil {
 		return
 	}
-	m.inflightTxnGauge.Dec()
-	m.txnCounter.WithLabelValues(state.String()).Inc()
-	m.mu.Unlock()
+	if !g.inner.mu.LockIfNotClosed() {
+		return
+	}
+	g.inner.inflightTxnGauge.Dec()
+
+	s := labelExpired
+	if state == message.TxnStateRollbacked || state == message.TxnStateCommitted {
+		s = state.String()
+	}
+	g.inner.duration.WithLabelValues(s).Observe(time.Since(g.start).Seconds())
+	g.inner.mu.Unlock()
 }
 
 func (m *TxnMetrics) Close() {
 	m.mu.Close()
 	metrics.WALInflightTxn.Delete(m.constLabel)
-	metrics.WALFinishTxn.DeletePartialMatch(m.constLabel)
+	metrics.WALTxnDurationSeconds.DeletePartialMatch(m.constLabel)
 }

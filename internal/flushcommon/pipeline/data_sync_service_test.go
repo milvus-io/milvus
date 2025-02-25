@@ -489,7 +489,7 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 		return nil
 	})
 	s.msChan <- msgstream.BuildConsumeMsgPack(&msgPack)
-	s.msChan <- msgstream.BuildConsumeMsgPack(&msgPack)
+	s.msChan <- msgstream.BuildConsumeMsgPack(&timeTickMsgPack)
 	<-ch
 }
 
