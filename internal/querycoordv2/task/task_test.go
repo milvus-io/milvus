@@ -1916,14 +1916,28 @@ func (suite *TaskSuite) TestTaskDeltaCache() {
 	nodeID := int64(1)
 	collectionID := int64(100)
 
-	taskDelta = lo.Shuffle(taskDelta)
+	tasks := make([]Task, 0)
 	for i := 0; i < len(taskDelta); i++ {
-		etd.Add(nodeID, collectionID, int64(i), taskDelta[i])
+		task, _ := NewChannelTask(
+			context.TODO(),
+			10*time.Second,
+			WrapIDSource(0),
+			1,
+			suite.replica,
+			NewChannelAction(nodeID, ActionTypeGrow, "channel"),
+		)
+		task.SetID(int64(i))
+		tasks = append(tasks, task)
 	}
 
-	taskDelta = lo.Shuffle(taskDelta)
+	tasks = lo.Shuffle(tasks)
 	for i := 0; i < len(taskDelta); i++ {
-		etd.Sub(nodeID, collectionID, int64(i), taskDelta[i])
+		etd.Add(tasks[i])
+	}
+
+	tasks = lo.Shuffle(tasks)
+	for i := 0; i < len(taskDelta); i++ {
+		etd.Sub(tasks[i])
 	}
 	suite.Equal(0, etd.Get(nodeID, collectionID))
 }
