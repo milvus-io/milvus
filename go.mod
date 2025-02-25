@@ -72,7 +72,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/magiconair/properties v1.8.7
-	github.com/milvus-io/milvus/pkg v0.0.2-0.20250210024444-82bdf8584c13
+	github.com/milvus-io/milvus/pkg/v2 v2.0.0-00010101000000-000000000000
 	github.com/pkg/errors v0.9.1
 	github.com/remeh/sizedwaitgroup v1.0.0
 	github.com/shirou/gopsutil/v4 v4.25.1
