@@ -139,5 +139,7 @@ DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_groupby);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_iterative_filter);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_scalar_proportion);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_get_vector_latency);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_retrieve_get_target_entry_latency);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_get_target_entry_latency);
 
 }  // namespace milvus::monitor
