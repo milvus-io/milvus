@@ -19,7 +19,7 @@ package storage
 import (
 	"testing"
 
-	"github.com/apache/arrow/go/v12/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v2/common"
