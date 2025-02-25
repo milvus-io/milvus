@@ -191,15 +191,10 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		coll := &model.Collection{Name: collectionName, ShardsNum: int32(shardNum), PhysicalChannelNames: pchans}
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.On("GetCollectionByName",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(coll.Clone(), nil)
-		meta.On("ListAliasesByID",
-			mock.Anything,
-		).Return([]string{"mock-alias-0", "mock-alias-1"})
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(coll.Clone(), nil)
+		meta.EXPECT().ListAliasesByID(mock.Anything, mock.Anything).
+			Return([]string{"mock-alias-0", "mock-alias-1"})
 
 		core := newTestCore(
 			withMeta(meta),
