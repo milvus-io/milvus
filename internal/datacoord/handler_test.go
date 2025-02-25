@@ -16,6 +16,7 @@ import (
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -40,11 +41,11 @@ func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 			},
 		},
 	})
-	err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+	indexReq := &indexpb.CreateIndexRequest{
 		CollectionID: 1,
 		FieldID:      2,
-		IndexID:      1,
-	})
+	}
+	_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
 	require.NoError(t, err)
 
 	segArgs := []struct {
@@ -152,12 +153,12 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		},
 	})
 
-	err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
-		TenantID:     "",
+	indexReq := &indexpb.CreateIndexRequest{
 		CollectionID: 0,
 		FieldID:      2,
-		IndexID:      1,
-	})
+	}
+
+	_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
 	assert.NoError(t, err)
 
 	s1 := &datapb.SegmentInfo{
@@ -331,12 +332,11 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			ID:     0,
 			Schema: schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
-			TenantID:     "",
+		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 0,
 			FieldID:      2,
-			IndexID:      1,
-		})
+		}
+		_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
 		assert.NoError(t, err)
 		c := &datapb.SegmentInfo{
 			ID:            1,
@@ -401,12 +401,11 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			ID:     0,
 			Schema: schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
-			TenantID:     "",
+		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 0,
 			FieldID:      2,
-			IndexID:      1,
-		})
+		}
+		_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
 		assert.NoError(t, err)
 		a := &datapb.SegmentInfo{
 			ID:            99,
@@ -487,12 +486,11 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			ID:     0,
 			Schema: schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
-			TenantID:     "",
+		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 0,
 			FieldID:      2,
-			IndexID:      1,
-		})
+		}
+		_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
 		assert.NoError(t, err)
 		c := &datapb.SegmentInfo{
 			ID:            1,
@@ -597,12 +595,11 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			Partitions: []int64{0},
 			Schema:     schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
-			TenantID:     "",
+		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 0,
 			FieldID:      2,
-			IndexID:      1,
-		})
+		}
+		_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
 		assert.NoError(t, err)
 		seg1 := &datapb.SegmentInfo{
 			ID:            1,
@@ -978,12 +975,11 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			Partitions: []int64{0},
 			Schema:     schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
-			TenantID:     "",
+		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 0,
 			FieldID:      2,
-			IndexID:      1,
-		})
+		}
+		_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
 		assert.NoError(t, err)
 		seg1 := &datapb.SegmentInfo{
 			ID:            1,
@@ -1182,12 +1178,12 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 		Partitions: []int64{0},
 		Schema:     schema,
 	})
-	err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
-		TenantID:     "",
+
+	indexReq := &indexpb.CreateIndexRequest{
 		CollectionID: 0,
 		FieldID:      2,
-		IndexID:      1,
-	})
+	}
+	_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
 	assert.NoError(t, err)
 	seg1 := &datapb.SegmentInfo{
 		ID:            1,

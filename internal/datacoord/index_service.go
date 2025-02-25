@@ -291,6 +291,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		if isJson {
 			jsonPath, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
 			if err != nil {
+				log.Warn("get field name from schema failed", zap.Int64("fieldID", req.GetFieldID()))
 				return merr.Status(err), nil
 			}
 
@@ -322,43 +323,15 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		req.IndexParams = UpdateParams(indexes[0], indexes[0].IndexParams, req.GetIndexParams())
 	}
 
-	if indexID == 0 {
-		indexID, err = s.allocator.AllocID(ctx)
-		if err != nil {
-			log.Warn("failed to alloc indexID", zap.Error(err))
-			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
-			return merr.Status(err), nil
-		}
-		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(GetIndexType(req.IndexParams)) && !s.indexNodeManager.ClientSupportDisk() {
-			errMsg := "all IndexNodes do not support disk indexes, please verify"
-			log.Warn(errMsg)
-			err = merr.WrapErrIndexNotSupported(GetIndexType(req.IndexParams))
-			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
-			return merr.Status(err), nil
-		}
-	}
-	// exclude the mmap.enable param, because it will be conflict with the index's mmap.enable param
-	typeParams := DeleteParams(req.GetTypeParams(), []string{common.MmapEnabledKey})
-
-	index := &model.Index{
-		CollectionID:    req.GetCollectionID(),
-		FieldID:         req.GetFieldID(),
-		IndexID:         indexID,
-		IndexName:       req.GetIndexName(),
-		TypeParams:      typeParams,
-		IndexParams:     req.GetIndexParams(),
-		CreateTime:      req.GetTimestamp(),
-		IsAutoIndex:     req.GetIsAutoIndex(),
-		UserIndexParams: req.GetUserIndexParams(),
-	}
-
-	if err := ValidateIndexParams(index); err != nil {
+	allocateIndexID, err := s.allocator.AllocID(ctx)
+	if err != nil {
+		log.Warn("failed to alloc indexID", zap.Error(err))
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	// Get flushed segments and create index
-	err = s.meta.indexMeta.CreateIndex(ctx, index)
+	indexID, err := s.meta.indexMeta.CreateIndex(ctx, req, allocateIndexID)
 	if err != nil {
 		log.Error("CreateIndex fail",
 			zap.Int64("fieldID", req.GetFieldID()), zap.String("indexName", req.GetIndexName()), zap.Error(err))
