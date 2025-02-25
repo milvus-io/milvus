@@ -516,7 +516,7 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 	s.NoError(err)
 	s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
-	s.testServer.meta.SetCurrentRows(segID, 1)
+	s.testServer.meta.SetRowCount(segID, 1)
 	ids, err := s.testServer.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
 	s.NoError(err)
 	s.EqualValues(1, len(ids))

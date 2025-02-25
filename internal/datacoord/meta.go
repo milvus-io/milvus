@@ -647,7 +647,7 @@ func (m *meta) GetAllSegmentsUnsafe() []*SegmentInfo {
 	return m.segments.GetSegments()
 }
 
-func (m *meta) GetSegmentsTotalCurrentRows(segmentIDs []UniqueID) int64 {
+func (m *meta) GetSegmentsTotalNumRows(segmentIDs []UniqueID) int64 {
 	m.RLock()
 	defer m.RUnlock()
 	var sum int64 = 0
@@ -1420,6 +1420,12 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	m.segments.AddAllocation(segmentID, allocation)
 	log.Ctx(m.ctx).Info("meta update: add allocation - complete", zap.Int64("segmentID", segmentID))
 	return nil
+}
+
+func (m *meta) SetRowCount(segmentID UniqueID, rowCount int64) {
+	m.Lock()
+	defer m.Unlock()
+	m.segments.SetRowCount(segmentID, rowCount)
 }
 
 // SetAllocations set Segment allocations, will overwrite ALL original allocations
