@@ -30,7 +30,7 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 PanicInfo(ExprInvalid,
                           "exists expr for json index mode not supported");
             }
-            result = EvalJsonExistsForDataSegment(input);
+            result = EvalJsonExistsForDataSegment(context);
             break;
         }
         default:
@@ -41,7 +41,9 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 }
 
 VectorPtr
-PhyExistsFilterExpr::EvalJsonExistsForDataSegment(OffsetVector* input) {
+PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
+    auto* input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
     if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
         return EvalJsonExistsForDataSegmentForIndex();
@@ -51,15 +53,17 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(OffsetVector* input) {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    int processed_cursor = 0;
     auto execute_sub_batch =
-        []<FilterType filter_type = FilterType::sequential>(
+        [&bitmap_input, &
+         processed_cursor ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -67,6 +71,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(OffsetVector* input) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer) {
+        bool has_bitmap_input = !bitmap_input.empty();
         for (int i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -76,8 +81,12 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(OffsetVector* input) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
             res[i] = data[offset].exist(pointer);
         }
+        processed_cursor += size;
     };
 
     int64_t processed_size;
