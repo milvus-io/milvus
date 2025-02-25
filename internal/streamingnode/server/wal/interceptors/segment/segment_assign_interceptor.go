@@ -22,7 +22,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var _ interceptors.InterceptorWithReady = (*segmentInterceptor)(nil)
+const interceptorName = "segment-assign"
+
+var (
+	_ interceptors.InterceptorWithMetrics = (*segmentInterceptor)(nil)
+	_ interceptors.InterceptorWithReady   = (*segmentInterceptor)(nil)
+)
 
 // segmentInterceptor is the implementation of segment assignment interceptor.
 type segmentInterceptor struct {
@@ -31,6 +36,10 @@ type segmentInterceptor struct {
 
 	logger        *log.MLogger
 	assignManager *syncutil.Future[*manager.PChannelSegmentAllocManager]
+}
+
+func (impl *segmentInterceptor) Name() string {
+	return interceptorName
 }
 
 // Ready returns a channel that will be closed when the segment interceptor is ready.

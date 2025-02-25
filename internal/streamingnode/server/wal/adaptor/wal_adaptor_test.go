@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 )
 
 func TestWalAdaptorReadFail(t *testing.T) {
@@ -84,7 +85,7 @@ func TestWALAdaptor(t *testing.T) {
 	l.EXPECT().Channel().Return(types.PChannelInfo{})
 	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, mm message.MutableMessage) (message.MessageID, error) {
-			return nil, nil
+			return walimplstest.NewTestMessageID(1), nil
 		})
 	l.EXPECT().Read(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ro walimpls.ReadOption) (walimpls.ScannerImpls, error) {
 		scanner := mock_walimpls.NewMockScannerImpls(t)
@@ -162,7 +163,7 @@ func TestNoInterceptor(t *testing.T) {
 	l.EXPECT().WALName().Return("test")
 	l.EXPECT().Channel().Return(types.PChannelInfo{})
 	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (message.MessageID, error) {
-		return nil, nil
+		return walimplstest.NewTestMessageID(1), nil
 	})
 	l.EXPECT().Close().Run(func() {})
 
@@ -181,7 +182,7 @@ func TestWALWithInterceptor(t *testing.T) {
 	l := mock_walimpls.NewMockWALImpls(t)
 	l.EXPECT().Channel().Return(types.PChannelInfo{})
 	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (message.MessageID, error) {
-		return nil, nil
+		return walimplstest.NewTestMessageID(1), nil
 	})
 	l.EXPECT().WALName().Return("test")
 	l.EXPECT().Close().Run(func() {})
