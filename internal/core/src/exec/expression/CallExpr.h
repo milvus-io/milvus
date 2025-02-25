@@ -68,6 +68,21 @@ class PhyCallExpr : public Expr {
         }
     }
 
+    std::string
+    ToString() const {
+        return fmt::format("{}", expr_->ToString());
+    }
+
+    bool
+    IsSource() const override {
+        return false;
+    }
+
+    std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return std::nullopt;
+    }
+
  private:
     std::shared_ptr<const milvus::expr::CallExpr> expr_;
 

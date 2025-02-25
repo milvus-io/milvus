@@ -31,6 +31,7 @@ extern int CPU_NUM;
 extern int64_t EXEC_EVAL_EXPR_BATCH_SIZE;
 extern int64_t JSON_KEY_STATS_COMMIT_INTERVAL;
 extern bool JSON_KEY_STATS_ENABLED;
+extern bool OPTIMIZE_EXPR_ENABLED;
 void
 SetIndexSliceSize(const int64_t size);
 
@@ -54,6 +55,9 @@ SetDefaultJSONKeyStatsCommitInterval(int64_t val);
 
 void
 SetDefaultJSONKeyStatsEnable(bool val);
+
+void
+SetDefaultOptimizeExprEnable(bool val);
 
 struct BufferView {
     struct Element {

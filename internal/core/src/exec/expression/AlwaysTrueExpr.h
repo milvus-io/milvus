@@ -57,6 +57,21 @@ class PhyAlwaysTrueExpr : public Expr {
         }
     }
 
+    std::string
+    ToString() const override {
+        return "[AlwaysTrue]";
+    }
+
+    bool
+    IsSource() const override {
+        return true;
+    }
+
+    std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return std::nullopt;
+    }
+
  private:
     std::shared_ptr<const milvus::expr::AlwaysTrueExpr> expr_;
     int64_t active_count_;
