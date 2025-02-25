@@ -131,8 +131,8 @@ const (
 	LoadedLabel         = "loaded"
 	NumEntitiesAllLabel = "all"
 
-	taskTypeLabel  = "task_type"
-	taskStateLabel = "task_state"
+	TaskTypeLabel  = "task_type"
+	TaskStateLabel = "task_state"
 )
 
 var (

@@ -283,13 +283,16 @@ func (st *statsTask) QueryResult(ctx context.Context, client types.IndexNodeClie
 
 	for _, result := range resp.GetStatsJobResults().GetResults() {
 		if result.GetTaskID() == st.GetTaskID() {
-			log.Ctx(ctx).Info("query stats task result success", zap.Int64("taskID", st.GetTaskID()),
-				zap.Int64("segmentID", st.segmentID), zap.String("result state", result.GetState().String()),
-				zap.String("failReason", result.GetFailReason()))
 			if result.GetState() == indexpb.JobState_JobStateFinished || result.GetState() == indexpb.JobState_JobStateRetry ||
 				result.GetState() == indexpb.JobState_JobStateFailed {
+				log.Ctx(ctx).Info("query stats task result success", zap.Int64("taskID", st.GetTaskID()),
+					zap.Int64("segmentID", st.segmentID), zap.String("result state", result.GetState().String()),
+					zap.String("failReason", result.GetFailReason()))
 				st.setResult(result)
 			} else if result.GetState() == indexpb.JobState_JobStateNone {
+				log.Ctx(ctx).Info("query stats task result success", zap.Int64("taskID", st.GetTaskID()),
+					zap.Int64("segmentID", st.segmentID), zap.String("result state", result.GetState().String()),
+					zap.String("failReason", result.GetFailReason()))
 				st.SetState(indexpb.JobState_JobStateRetry, "stats task state is none in info response")
 			}
 			// inProgress or unissued/init, keep InProgress state
@@ -365,5 +368,14 @@ func (st *statsTask) SetJobInfo(meta *meta) error {
 	log.Info("SetJobInfo for stats task success", zap.Int64("taskID", st.taskID),
 		zap.Int64("oldSegmentID", st.segmentID), zap.Int64("targetSegmentID", st.taskInfo.GetSegmentID()),
 		zap.String("subJobType", st.subJobType.String()), zap.String("state", st.taskInfo.GetState().String()))
+	return nil
+}
+
+func (st *statsTask) DropTaskMeta(ctx context.Context, meta *meta) error {
+	if err := meta.statsTaskMeta.DropStatsTask(st.taskID); err != nil {
+		log.Ctx(ctx).Warn("drop stats task failed", zap.Int64("taskID", st.taskID), zap.Error(err))
+		return err
+	}
+	log.Ctx(ctx).Info("drop stats task success", zap.Int64("taskID", st.taskID))
 	return nil
 }

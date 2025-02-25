@@ -1505,6 +1505,57 @@ func TestRemoveSegmentIndex(t *testing.T) {
 	})
 }
 
+func TestRemoveSegmentIndexByID(t *testing.T) {
+	t.Run("drop segment index fail", func(t *testing.T) {
+		expectedErr := errors.New("error")
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().
+			DropSegmentIndex(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(expectedErr)
+
+		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
+
+		m := newSegmentIndexMeta(catalog)
+		err := m.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+			SegmentID:    3,
+			CollectionID: 1,
+			PartitionID:  2,
+			NumRows:      1024,
+			IndexID:      1,
+			BuildID:      4,
+		})
+		assert.NoError(t, err)
+		err = m.RemoveSegmentIndexByID(context.TODO(), 4)
+		assert.Error(t, err)
+		assert.EqualError(t, err, "error")
+	})
+
+	t.Run("remove segment index ok", func(t *testing.T) {
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().
+			DropSegmentIndex(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil)
+
+		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
+
+		m := newSegmentIndexMeta(catalog)
+		err := m.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+			SegmentID:    3,
+			CollectionID: 1,
+			PartitionID:  2,
+			NumRows:      1024,
+			IndexID:      1,
+			BuildID:      4,
+		})
+		assert.NoError(t, err)
+
+		err = m.RemoveSegmentIndexByID(context.TODO(), 4)
+		assert.NoError(t, err)
+		assert.Equal(t, len(m.segmentIndexes), 0)
+		assert.Equal(t, len(m.segmentBuildInfo.List()), 0)
+	})
+}
+
 func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
 	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
 	m := createMeta(catalog, withIndexMeta(createIndexMeta(catalog)))

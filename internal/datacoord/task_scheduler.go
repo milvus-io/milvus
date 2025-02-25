@@ -125,6 +125,10 @@ func (s *taskScheduler) reloadFromMeta() {
 					State:      segIndex.IndexState,
 					FailReason: segIndex.FailReason,
 				},
+				req: &workerpb.CreateJobRequest{
+					ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
+					BuildID:   segIndex.BuildID,
+				},
 				queueTime: time.Now(),
 				startTime: time.Now(),
 				endTime:   time.Now(),
@@ -149,6 +153,10 @@ func (s *taskScheduler) reloadFromMeta() {
 				TaskID:     taskID,
 				State:      t.State,
 				FailReason: t.FailReason,
+			},
+			req: &workerpb.AnalyzeRequest{
+				ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
+				TaskID:    taskID,
 			},
 			queueTime: time.Now(),
 			startTime: time.Now(),
@@ -175,6 +183,10 @@ func (s *taskScheduler) reloadFromMeta() {
 				TaskID:     taskID,
 				State:      t.GetState(),
 				FailReason: t.GetFailReason(),
+			},
+			req: &workerpb.CreateStatsRequest{
+				ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
+				TaskID:    taskID,
 			},
 			queueTime:  time.Now(),
 			startTime:  time.Now(),
@@ -333,6 +345,9 @@ func (s *taskScheduler) checkProcessingTasks() {
 	}
 	s.runningQueueLock.RUnlock()
 
+	if len(runningTaskIDs) <= 0 {
+		return
+	}
 	log.Ctx(s.ctx).Info("check running tasks", zap.Int("runningTask num", len(runningTaskIDs)))
 
 	var wg sync.WaitGroup
@@ -410,7 +425,9 @@ func (s *taskScheduler) run() {
 
 			switch task.GetState() {
 			case indexpb.JobState_JobStateNone:
-				return
+				if !s.processNone(task) {
+					s.pendingTasks.Push(task)
+				}
 			case indexpb.JobState_JobStateInit:
 				s.pendingTasks.Push(task)
 			default:
@@ -433,7 +450,7 @@ func (s *taskScheduler) process(task Task, nodeID int64) bool {
 
 	switch task.GetState() {
 	case indexpb.JobState_JobStateNone:
-		return true
+		return s.processNone(task)
 	case indexpb.JobState_JobStateInit:
 		return s.processInit(task, nodeID)
 	default:
@@ -574,6 +591,14 @@ func (s *taskScheduler) processInit(task Task, nodeID int64) bool {
 		WithLabelValues(task.GetTaskType(), metrics.Pending).Observe(float64(queueingTime.Milliseconds()))
 	log.Ctx(s.ctx).Info("update task meta state to InProgress success", zap.Int64("taskID", task.GetTaskID()),
 		zap.Int64("nodeID", nodeID))
+	return true
+}
+
+func (s *taskScheduler) processNone(task Task) bool {
+	if err := task.DropTaskMeta(s.ctx, s.meta); err != nil {
+		log.Ctx(s.ctx).Warn("set job info failed", zap.Error(err))
+		return false
+	}
 	return true
 }
 
