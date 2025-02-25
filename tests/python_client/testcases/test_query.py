@@ -5807,7 +5807,7 @@ class TestQueryTextMatch(TestcaseBase):
         text_fields = ["sentence"]
         # query sentence field with word list
         for field in text_fields:
-            match_text = fake.sentence()
+            match_text = df["sentence"].iloc[0]
             expr = f"text_match({field}, '{match_text}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
