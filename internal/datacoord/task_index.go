@@ -317,14 +317,17 @@ func (it *indexBuildTask) QueryResult(ctx context.Context, node types.DataNodeCl
 	// indexInfos length is always one.
 	for _, info := range resp.GetIndexJobResults().GetResults() {
 		if info.GetBuildID() == it.GetTaskID() {
-			log.Ctx(ctx).Info("query task index info successfully",
-				zap.Int64("taskID", it.GetTaskID()), zap.String("result state", info.GetState().String()),
-				zap.String("failReason", info.GetFailReason()))
 			if info.GetState() == commonpb.IndexState_Finished || info.GetState() == commonpb.IndexState_Failed ||
 				info.GetState() == commonpb.IndexState_Retry {
+				log.Ctx(ctx).Info("query task index info successfully",
+					zap.Int64("taskID", it.GetTaskID()), zap.String("result state", info.GetState().String()),
+					zap.String("failReason", info.GetFailReason()))
 				// state is retry or finished or failed
 				it.setResult(info)
 			} else if info.GetState() == commonpb.IndexState_IndexStateNone {
+				log.Ctx(ctx).Info("query task index info successfully",
+					zap.Int64("taskID", it.GetTaskID()), zap.String("result state", info.GetState().String()),
+					zap.String("failReason", info.GetFailReason()))
 				it.SetState(indexpb.JobState_JobStateRetry, "index state is none in info response")
 			}
 			// inProgress or unissued, keep InProgress state
@@ -357,4 +360,8 @@ func (it *indexBuildTask) DropTaskOnWorker(ctx context.Context, client types.Dat
 
 func (it *indexBuildTask) SetJobInfo(meta *meta) error {
 	return meta.indexMeta.FinishTask(it.taskInfo)
+}
+
+func (it *indexBuildTask) DropTaskMeta(ctx context.Context, meta *meta) error {
+	return meta.indexMeta.RemoveSegmentIndexByID(ctx, it.taskID)
 }

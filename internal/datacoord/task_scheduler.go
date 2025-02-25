@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type taskScheduler struct {
@@ -43,9 +44,8 @@ type taskScheduler struct {
 	scheduleDuration       time.Duration
 	collectMetricsDuration time.Duration
 
-	pendingTasks     schedulePolicy
-	runningTasks     map[UniqueID]Task
-	runningQueueLock sync.RWMutex
+	pendingTasks schedulePolicy
+	runningTasks *typeutil.ConcurrentMap[UniqueID, Task]
 
 	taskLock *lock.KeyLock[int64]
 
@@ -80,7 +80,7 @@ func newTaskScheduler(
 		cancel:                    cancel,
 		meta:                      metaTable,
 		pendingTasks:              newFairQueuePolicy(),
-		runningTasks:              make(map[UniqueID]Task),
+		runningTasks:              typeutil.NewConcurrentMap[UniqueID, Task](),
 		notifyChan:                make(chan struct{}, 1),
 		taskLock:                  lock.NewKeyLock[int64](),
 		scheduleDuration:          Params.DataCoordCfg.IndexTaskSchedulerInterval.GetAsDuration(time.Millisecond),
@@ -125,6 +125,10 @@ func (s *taskScheduler) reloadFromMeta() {
 					State:      segIndex.IndexState,
 					FailReason: segIndex.FailReason,
 				},
+				req: &workerpb.CreateJobRequest{
+					ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
+					BuildID:   segIndex.BuildID,
+				},
 				queueTime: time.Now(),
 				startTime: time.Now(),
 				endTime:   time.Now(),
@@ -133,9 +137,7 @@ func (s *taskScheduler) reloadFromMeta() {
 			case commonpb.IndexState_IndexStateNone, commonpb.IndexState_Unissued:
 				s.pendingTasks.Push(task)
 			case commonpb.IndexState_InProgress, commonpb.IndexState_Retry:
-				s.runningQueueLock.Lock()
-				s.runningTasks[segIndex.BuildID] = task
-				s.runningQueueLock.Unlock()
+				s.runningTasks.Insert(segIndex.BuildID, task)
 			}
 		}
 	}
@@ -150,6 +152,10 @@ func (s *taskScheduler) reloadFromMeta() {
 				State:      t.State,
 				FailReason: t.FailReason,
 			},
+			req: &workerpb.AnalyzeRequest{
+				ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
+				TaskID:    taskID,
+			},
 			queueTime: time.Now(),
 			startTime: time.Now(),
 			endTime:   time.Now(),
@@ -158,9 +164,7 @@ func (s *taskScheduler) reloadFromMeta() {
 		case indexpb.JobState_JobStateNone, indexpb.JobState_JobStateInit:
 			s.pendingTasks.Push(task)
 		case indexpb.JobState_JobStateInProgress, indexpb.JobState_JobStateRetry:
-			s.runningQueueLock.Lock()
-			s.runningTasks[taskID] = task
-			s.runningQueueLock.Unlock()
+			s.runningTasks.Insert(taskID, task)
 		}
 	}
 
@@ -175,6 +179,10 @@ func (s *taskScheduler) reloadFromMeta() {
 				TaskID:     taskID,
 				State:      t.GetState(),
 				FailReason: t.GetFailReason(),
+			},
+			req: &workerpb.CreateStatsRequest{
+				ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
+				TaskID:    taskID,
 			},
 			queueTime:  time.Now(),
 			startTime:  time.Now(),
@@ -208,9 +216,7 @@ func (s *taskScheduler) reloadFromMeta() {
 					task.taskInfo.FailReason = "segment is not exist or is l0 compacting"
 				}
 			}
-			s.runningQueueLock.Lock()
-			s.runningTasks[taskID] = task
-			s.runningQueueLock.Unlock()
+			s.runningTasks.Insert(taskID, task)
 		}
 	}
 }
@@ -228,34 +234,14 @@ func (s *taskScheduler) exist(taskID UniqueID) bool {
 	if exist {
 		return true
 	}
-
-	s.runningQueueLock.RLock()
-	defer s.runningQueueLock.RUnlock()
-	_, ok := s.runningTasks[taskID]
+	_, ok := s.runningTasks.Get(taskID)
 	return ok
-}
-
-func (s *taskScheduler) getRunningTask(taskID UniqueID) Task {
-	s.runningQueueLock.RLock()
-	defer s.runningQueueLock.RUnlock()
-
-	return s.runningTasks[taskID]
-}
-
-func (s *taskScheduler) removeRunningTask(taskID UniqueID) {
-	s.runningQueueLock.Lock()
-	defer s.runningQueueLock.Unlock()
-
-	delete(s.runningTasks, taskID)
 }
 
 func (s *taskScheduler) enqueue(task Task) {
 	defer s.notify()
 	taskID := task.GetTaskID()
-
-	s.runningQueueLock.RLock()
-	_, ok := s.runningTasks[taskID]
-	s.runningQueueLock.RUnlock()
+	_, ok := s.runningTasks.Get(taskID)
 	if !ok {
 		s.pendingTasks.Push(task)
 		task.SetQueueTime(time.Now())
@@ -265,25 +251,21 @@ func (s *taskScheduler) enqueue(task Task) {
 
 func (s *taskScheduler) AbortTask(taskID int64) {
 	log.Ctx(s.ctx).Info("task scheduler receive abort task request", zap.Int64("taskID", taskID))
+	s.taskLock.Lock(taskID)
+	defer s.taskLock.Unlock(taskID)
 
 	task := s.pendingTasks.Get(taskID)
 	if task != nil {
-		s.taskLock.Lock(taskID)
 		task.SetState(indexpb.JobState_JobStateFailed, "canceled")
-		s.taskLock.Unlock(taskID)
+		s.runningTasks.Insert(taskID, task)
+		s.pendingTasks.Remove(taskID)
+		return
 	}
 
-	s.runningQueueLock.Lock()
-	if task != nil {
-		s.runningTasks[taskID] = task
-	}
-	if runningTask, ok := s.runningTasks[taskID]; ok {
-		s.taskLock.Lock(taskID)
+	if runningTask, ok := s.runningTasks.Get(taskID); ok {
 		runningTask.SetState(indexpb.JobState_JobStateFailed, "canceled")
-		s.taskLock.Unlock(taskID)
+		s.runningTasks.Insert(taskID, runningTask)
 	}
-	s.runningQueueLock.Unlock()
-	s.pendingTasks.Remove(taskID)
 }
 
 func (s *taskScheduler) schedule() {
@@ -326,34 +308,29 @@ func (s *taskScheduler) checkProcessingTasksLoop() {
 }
 
 func (s *taskScheduler) checkProcessingTasks() {
-	runningTaskIDs := make([]UniqueID, 0)
-	s.runningQueueLock.RLock()
-	for taskID := range s.runningTasks {
-		runningTaskIDs = append(runningTaskIDs, taskID)
+	if s.runningTasks.Len() <= 0 {
+		return
 	}
-	s.runningQueueLock.RUnlock()
+	log.Ctx(s.ctx).Info("check running tasks", zap.Int("runningTask num", s.runningTasks.Len()))
 
-	log.Ctx(s.ctx).Info("check running tasks", zap.Int("runningTask num", len(runningTaskIDs)))
-
+	allRunningTasks := s.runningTasks.Values()
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 100)
-	for _, taskID := range runningTaskIDs {
+	for _, task := range allRunningTasks {
 		wg.Add(1)
 		sem <- struct{}{}
-		taskID := taskID
-		go func(taskID int64) {
+		go func(task Task) {
 			defer wg.Done()
 			defer func() {
 				<-sem
 			}()
-			task := s.getRunningTask(taskID)
-			s.taskLock.Lock(taskID)
+			s.taskLock.Lock(task.GetTaskID())
 			suc := s.checkProcessingTask(task)
-			s.taskLock.Unlock(taskID)
+			s.taskLock.Unlock(task.GetTaskID())
 			if suc {
-				s.removeRunningTask(taskID)
+				s.runningTasks.Remove(task.GetTaskID())
 			}
-		}(taskID)
+		}(task)
 	}
 	wg.Wait()
 }
@@ -410,13 +387,13 @@ func (s *taskScheduler) run() {
 
 			switch task.GetState() {
 			case indexpb.JobState_JobStateNone:
-				return
+				if !s.processNone(task) {
+					s.pendingTasks.Push(task)
+				}
 			case indexpb.JobState_JobStateInit:
 				s.pendingTasks.Push(task)
 			default:
-				s.runningQueueLock.Lock()
-				s.runningTasks[task.GetTaskID()] = task
-				s.runningQueueLock.Unlock()
+				s.runningTasks.Insert(task.GetTaskID(), task)
 			}
 		}(task, nodeID)
 	}
@@ -433,7 +410,7 @@ func (s *taskScheduler) process(task Task, nodeID int64) bool {
 
 	switch task.GetState() {
 	case indexpb.JobState_JobStateNone:
-		return true
+		return s.processNone(task)
 	case indexpb.JobState_JobStateInit:
 		return s.processInit(task, nodeID)
 	default:
@@ -505,11 +482,10 @@ func (s *taskScheduler) collectTaskMetrics() {
 				collectPendingMetricsFunc(taskID)
 			}
 
-			s.runningQueueLock.RLock()
-			for _, task := range s.runningTasks {
+			allRunningTasks := s.runningTasks.Values()
+			for _, task := range allRunningTasks {
 				collectRunningMetricsFunc(task)
 			}
-			s.runningQueueLock.RUnlock()
 
 			for taskType, queueingTime := range maxTaskQueueingTime {
 				metrics.DataCoordTaskExecuteLatency.
@@ -574,6 +550,14 @@ func (s *taskScheduler) processInit(task Task, nodeID int64) bool {
 		WithLabelValues(task.GetTaskType(), metrics.Pending).Observe(float64(queueingTime.Milliseconds()))
 	log.Ctx(s.ctx).Info("update task meta state to InProgress success", zap.Int64("taskID", task.GetTaskID()),
 		zap.Int64("nodeID", nodeID))
+	return true
+}
+
+func (s *taskScheduler) processNone(task Task) bool {
+	if err := task.DropTaskMeta(s.ctx, s.meta); err != nil {
+		log.Ctx(s.ctx).Warn("set job info failed", zap.Error(err))
+		return false
+	}
 	return true
 }
 

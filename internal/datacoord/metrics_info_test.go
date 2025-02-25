@@ -649,6 +649,25 @@ func TestGetDistJSON(t *testing.T) {
 }
 
 func TestServer_getSegmentsJSON(t *testing.T) {
+	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+	segIdx0 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx0.Insert(10, &model.SegmentIndex{
+		SegmentID:           1000,
+		CollectionID:        1,
+		PartitionID:         2,
+		NumRows:             10250,
+		IndexID:             10,
+		BuildID:             10000,
+		NodeID:              1,
+		IndexVersion:        0,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      12,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+	})
+	segIndexes.Insert(1000, segIdx0)
 	s := &Server{
 		meta: &meta{
 			segments: &SegmentsInfo{
@@ -664,26 +683,7 @@ func TestServer_getSegmentsJSON(t *testing.T) {
 				},
 			},
 			indexMeta: &indexMeta{
-				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-					1000: {
-						10: &model.SegmentIndex{
-							SegmentID:           1000,
-							CollectionID:        1,
-							PartitionID:         2,
-							NumRows:             10250,
-							IndexID:             10,
-							BuildID:             10000,
-							NodeID:              1,
-							IndexVersion:        0,
-							IndexState:          commonpb.IndexState_Finished,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      12,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-						},
-					},
-				},
+				segmentIndexes: segIndexes,
 				indexes: map[UniqueID]map[UniqueID]*model.Index{
 					1: {
 						10: &model.Index{
