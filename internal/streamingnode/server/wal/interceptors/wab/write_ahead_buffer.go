@@ -8,6 +8,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
@@ -24,6 +25,7 @@ type ROWriteAheadBuffer interface {
 
 // NewWriteAheadBuffer creates a new WriteAheadBuffer.
 func NewWirteAheadBuffer(
+	pchannel string,
 	logger *log.MLogger,
 	capacity int,
 	keepalive time.Duration,
@@ -34,6 +36,7 @@ func NewWirteAheadBuffer(
 		cond:                syncutil.NewContextCond(&sync.Mutex{}),
 		pendingMessages:     newPendingQueue(capacity, keepalive, lastConfirmedTimeTickMessage),
 		lastTimeTickMessage: lastConfirmedTimeTickMessage,
+		metrics:             metricsutil.NewWriteAheadBufferMetrics(pchannel, capacity),
 	}
 }
 
@@ -41,15 +44,20 @@ func NewWirteAheadBuffer(
 type WriteAheadBuffer struct {
 	logger          *log.MLogger
 	cond            *syncutil.ContextCond
+	closed          bool
 	pendingMessages *pendingQueue // The pending message is always sorted by timetick in monotonic ascending order.
 	// Only keep the persisted messages in the buffer.
 	lastTimeTickMessage message.ImmutableMessage
+	metrics             *metricsutil.WriteAheadBufferMetrics
 }
 
 // Append appends a message to the buffer.
 func (w *WriteAheadBuffer) Append(msgs []message.ImmutableMessage, tsMsg message.ImmutableMessage) {
 	w.cond.LockAndBroadcast()
 	defer w.cond.L.Unlock()
+	if w.closed {
+		return
+	}
 
 	if tsMsg.MessageType() != message.MessageTypeTimeTick {
 		panic("the message is not a time tick message")
@@ -71,6 +79,13 @@ func (w *WriteAheadBuffer) Append(msgs []message.ImmutableMessage, tsMsg message
 		w.pendingMessages.Evict()
 	}
 	w.lastTimeTickMessage = tsMsg
+
+	w.metrics.Observe(
+		w.pendingMessages.Len(),
+		w.pendingMessages.Size(),
+		w.pendingMessages.EarliestTimeTick(),
+		w.lastTimeTickMessage.TimeTick(),
+	)
 }
 
 // ReadFromExclusiveTimeTick reads messages from the buffer from the exclusive time tick.
@@ -89,6 +104,11 @@ func (w *WriteAheadBuffer) ReadFromExclusiveTimeTick(ctx context.Context, timeti
 // createSnapshotFromOffset creates a snapshot of the buffer from the given offset.
 func (w *WriteAheadBuffer) createSnapshotFromOffset(ctx context.Context, offset int, timeTick uint64) ([]messageWithOffset, error) {
 	w.cond.L.Lock()
+	if w.closed {
+		w.cond.L.Unlock()
+		return nil, ErrClosed
+	}
+
 	for {
 		msgs, err := w.pendingMessages.CreateSnapshotFromOffset(offset)
 		if err == nil {
@@ -122,6 +142,11 @@ func (w *WriteAheadBuffer) createSnapshotFromOffset(ctx context.Context, offset 
 // createSnapshotFromTimeTick creates a snapshot of the buffer from the given time tick.
 func (w *WriteAheadBuffer) createSnapshotFromTimeTick(ctx context.Context, timeTick uint64) ([]messageWithOffset, int, error) {
 	w.cond.L.Lock()
+	if w.closed {
+		w.cond.L.Unlock()
+		return nil, 0, ErrClosed
+	}
+
 	for {
 		msgs, err := w.pendingMessages.CreateSnapshotFromExclusiveTimeTick(timeTick)
 		if err == nil {
@@ -155,4 +180,11 @@ func (w *WriteAheadBuffer) createSnapshotFromTimeTick(ctx context.Context, timeT
 			return nil, 0, err
 		}
 	}
+}
+
+func (w *WriteAheadBuffer) Close() {
+	w.cond.L.Lock()
+	w.metrics.Close()
+	w.closed = true
+	w.cond.L.Unlock()
 }
