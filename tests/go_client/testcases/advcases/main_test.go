@@ -1,4 +1,4 @@
-package L3cases
+package advcases
 
 import (
 	"os"

@@ -470,7 +470,7 @@ func TestDeleteComplexExpr(t *testing.T) {
 			<-ch
 		}()
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-		mc := createDefaultMilvusClient(ctx, t)
+		mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 		// create collection and a partition
 		cp := hp.NewCreateCollectionParams(hp.Int64VecAllScalar)

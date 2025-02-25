@@ -624,7 +624,7 @@ func TestQueryCountJsonDynamicExpr(t *testing.T) {
 
 func TestQueryNestedJsonExpr(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))

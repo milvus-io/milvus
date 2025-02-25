@@ -143,9 +143,9 @@ var (
 	FieldsFact  FieldsFactory
 )
 
-func mergeOptions(schema *entity.Schema, opts ...CreateCollectionOpt) clientv2.CreateCollectionOption {
+func mergeOptions(schema *entity.Schema, opts ...CreateCollectionOpt) client.CreateCollectionOption {
 	//
-	collectionOption := clientv2.NewCreateCollectionOption(schema.CollectionName, schema)
+	collectionOption := client.NewCreateCollectionOption(schema.CollectionName, schema)
 	tmpOption := &createCollectionOpt{}
 	for _, o := range opts {
 		o(tmpOption)
@@ -190,7 +190,7 @@ func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *tes
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second*10)
 		defer cancel()
 
-		err := mc.DropCollection(ctx, clientv2.NewDropCollectionOption(schema.CollectionName))
+		err := mc.DropCollection(ctx, client.NewDropCollectionOption(schema.CollectionName))
 		common.CheckErr(t, err, true)
 	})
 	return chainTask, schema

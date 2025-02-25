@@ -499,7 +499,7 @@ func TestSearchGroupByRangeSearch(t *testing.T) {
 	common.CheckErr(t, err, false, "Not allowed to do range-search when doing search-group-by")
 }
 
-// groupBy + L3cases search
+// groupBy + advanced search
 func TestSearchGroupByHybridSearch(t *testing.T) {
 	t.Skipf("Waiting for HybridSearch implemention")
 }

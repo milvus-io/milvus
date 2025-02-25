@@ -237,10 +237,9 @@ func CheckTransfer(t *testing.T, actualRgs []*entity.ResourceGroupTransfer, expR
 		}
 		require.ElementsMatch(t, _expRgs, _actualRgs)
 	}
-
 }
 
-func checkResourceGroupConfig(t *testing.T, actualConfig *entity.ResourceGroupConfig, expConfig *entity.ResourceGroupConfig) {
+func CheckResourceGroupConfig(t *testing.T, actualConfig *entity.ResourceGroupConfig, expConfig *entity.ResourceGroupConfig) {
 	if expConfig.Requests.NodeNum != 0 {
 		require.EqualValuesf(t, expConfig.Requests.NodeNum, actualConfig.Requests.NodeNum, "Requests.NodeNum mismatch")
 	}
@@ -269,7 +268,7 @@ func CheckResourceGroup(t *testing.T, actualRg *entity.ResourceGroup, expRg *ent
 	}
 
 	if expRg.Config != nil {
-		checkResourceGroupConfig(t, actualRg.Config, expRg.Config)
+		CheckResourceGroupConfig(t, actualRg.Config, expRg.Config)
 	}
 
 	if expRg.Nodes != nil {

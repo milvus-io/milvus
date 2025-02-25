@@ -1,6 +1,6 @@
-//go:build L3
+//go:build rg
 
-package L3cases
+package advcases
 
 import (
 	"context"
@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
@@ -25,7 +25,7 @@ const (
 	newRgNode     = 2
 )
 
-func teardownTest(t *testing.T, ctx context.Context, mc *base.MilvusClient) {
+func resetRgs(t *testing.T, ctx context.Context, mc *base.MilvusClient) {
 	t.Helper()
 	// release and drop all collections
 	collections, _ := mc.ListCollections(ctx, client.NewListCollectionOption())
@@ -47,6 +47,8 @@ func teardownTest(t *testing.T, ctx context.Context, mc *base.MilvusClient) {
 		}))
 		common.CheckErr(t, err, true)
 	}
+
+	// UpdateResourceGroup is lazy
 	for _, rg := range rgs {
 		if rg != common.DefaultRgName {
 			errDrop := mc.DropResourceGroup(ctx, client.NewDropResourceGroupOption(rg))
@@ -57,6 +59,13 @@ func teardownTest(t *testing.T, ctx context.Context, mc *base.MilvusClient) {
 	rgs2, errList2 := mc.ListResourceGroups(ctx, client.NewListResourceGroupsOption())
 	common.CheckErr(t, errList2, true)
 	require.Len(t, rgs2, 1)
+}
+
+func setupTest(t *testing.T, ctx context.Context, mc *base.MilvusClient) {
+	resetRgs(t, ctx, mc)
+	t.Cleanup(func() {
+		resetRgs(t, ctx, mc)
+	})
 }
 
 func checkResourceGroup(t *testing.T, ctx context.Context, mc *base.MilvusClient, expRg *entity.ResourceGroup) {
@@ -70,7 +79,7 @@ func checkResourceGroup(t *testing.T, ctx context.Context, mc *base.MilvusClient
 func TestRgDefault(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	defer teardownTest(t, ctx, mc)
+	setupTest(t, ctx, mc)
 
 	// describe default rg and check default rg info: Limits: 1000000, Nodes: all
 	expDefaultRg := &entity.ResourceGroup{
@@ -137,7 +146,6 @@ func TestRgDefault(t *testing.T) {
 
 // test create rg with invalid name
 func TestCreateRgInvalidNames(t *testing.T) {
-	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -165,7 +173,7 @@ func TestCreateRgInvalidNames(t *testing.T) {
 func TestCreateExistedRg(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	defer teardownTest(t, ctx, mc)
+	setupTest(t, ctx, mc)
 
 	// create default rg
 	mc.DescribeResourceGroup(ctx, client.NewDescribeResourceGroupOption(common.DefaultRgName))
@@ -182,7 +190,7 @@ func TestCreateExistedRg(t *testing.T) {
 	errCreate = mc.CreateResourceGroup(ctx, client.NewCreateResourceGroupOption(rgName).WithNodeRequest(newRgNode).WithNodeLimit(newRgNode))
 	common.CheckErr(t, errCreate, false, "resource group already exist")
 	rg1, _ := mc.DescribeResourceGroup(ctx, client.NewDescribeResourceGroupOption(rgName))
-	//require.EqualValues(t, rg1, rg)
+	// require.EqualValues(t, rg1, rg)
 	common.CheckResourceGroup(t, rg1, rg)
 
 	// create existed rg with same config
@@ -217,7 +225,7 @@ func TestCreateRgWithRequestsLimits(t *testing.T) {
 	err := mc.CreateResourceGroup(ctx, client.NewCreateResourceGroupOption(rgName).WithNodeRequest(newRgNode))
 	common.CheckErr(t, err, false, "limits node num should not less than requests node num")
 
-	//create rg with limit only -> use default 0 request
+	// create rg with limit only -> use default 0 request
 	err = mc.CreateResourceGroup(ctx, client.NewCreateResourceGroupOption(rgName).WithNodeLimit(newRgNode))
 	common.CheckErr(t, err, true)
 
@@ -240,7 +248,7 @@ func TestCreateRgWithRequestsLimits(t *testing.T) {
 			}
 			checkResourceGroup(t, ctx, mc, expDefaultRg)
 		}
-		teardownTest(t, ctx, mc)
+		setupTest(t, ctx, mc)
 	}
 }
 
@@ -248,7 +256,7 @@ func TestRgAdvanced(t *testing.T) {
 	// test transfer replica from rg to default rg
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	defer teardownTest(t, ctx, mc)
+	setupTest(t, ctx, mc)
 
 	// create new rg with requests 2
 	rgName := common.GenRandomString("rg", 6)
@@ -281,7 +289,7 @@ func TestRgAdvanced(t *testing.T) {
 func TestUpdateRgWithTransfer(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	defer teardownTest(t, ctx, mc)
+	setupTest(t, ctx, mc)
 
 	// create rg0 with requests=2, limits=3, total 4 nodes
 	rg0 := common.GenRandomString("rg0", 6)
@@ -290,8 +298,10 @@ func TestUpdateRgWithTransfer(t *testing.T) {
 	common.CheckErr(t, errCreate, true)
 
 	// check rg0 available node: 3, default available node: 1
-	actualRg0, _ := mc.DescribeResourceGroup(ctx, client.NewDescribeResourceGroupOption(rg0))
-	require.Lenf(t, actualRg0.Nodes, rg0Limits, fmt.Sprintf("expected %s has %d available nodes", rg0, rg0Limits))
+	require.Eventuallyf(t, func() bool {
+		actualRg0, _ := mc.DescribeResourceGroup(ctx, client.NewDescribeResourceGroupOption(rg0))
+		return len(actualRg0.Nodes) == rg0Limits
+	}, time.Second*5, 2*time.Second, fmt.Sprintf("expected %s has %d available nodes", rg0, rg0Limits))
 	actualRgDef, _ := mc.DescribeResourceGroup(ctx, client.NewDescribeResourceGroupOption(common.DefaultRgName))
 	require.Lenf(t, actualRgDef.Nodes, configQnNodes-rg0Limits, fmt.Sprintf("expected %s has %d available nodes", common.DefaultRgName, configQnNodes-rg0Limits))
 
@@ -314,7 +324,7 @@ func TestUpdateRgWithTransfer(t *testing.T) {
 
 	// verify available nodes: rg0 + rg1 = configQnNodes = 4
 	time.Sleep(time.Duration(rand.Intn(6)) * time.Second)
-	actualRg0, _ = mc.DescribeResourceGroup(ctx, client.NewDescribeResourceGroupOption(rg0))
+	actualRg0, _ := mc.DescribeResourceGroup(ctx, client.NewDescribeResourceGroupOption(rg0))
 	actualRg1, _ := mc.DescribeResourceGroup(ctx, client.NewDescribeResourceGroupOption(rg1))
 	require.EqualValuesf(t, configQnNodes, len(actualRg0.Nodes)+len(actualRg1.Nodes), fmt.Sprintf("Expected the total available nodes of %s and %s is %d ", rg0, rg1, configQnNodes))
 	expDefaultRg1 := &entity.ResourceGroup{
@@ -332,7 +342,7 @@ func TestUpdateRgWithTransfer(t *testing.T) {
 func TestUpdateRgWithNotExistTransfer(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	defer teardownTest(t, ctx, mc)
+	setupTest(t, ctx, mc)
 
 	rgName := common.GenRandomString("rg", 6)
 	errCreate := mc.CreateResourceGroup(ctx, client.NewCreateResourceGroupOption(rgName))
@@ -380,7 +390,7 @@ func TestUpdateRgWithRequestsLimits(t *testing.T) {
 	// connect
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	defer teardownTest(t, ctx, mc)
+	setupTest(t, ctx, mc)
 
 	rgName := common.GenRandomString("rg", 6)
 	mc.CreateResourceGroup(ctx, client.NewCreateResourceGroupOption(rgName).WithNodeRequest(newRgNode).WithNodeLimit(newRgNode))
@@ -438,7 +448,7 @@ func TestDropRg(t *testing.T) {
 	t.Log("https://github.com/milvus-io/milvus/issues/39942")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	defer teardownTest(t, ctx, mc)
+	setupTest(t, ctx, mc)
 
 	// try to drop default rg
 	errDropDefault := mc.DropResourceGroup(ctx, client.NewDropResourceGroupOption(common.DefaultRgName))
@@ -470,7 +480,7 @@ func TestDropRg(t *testing.T) {
 func TestListRgs(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	defer teardownTest(t, ctx, mc)
+	setupTest(t, ctx, mc)
 
 	rgNum := 10
 	rgs := []string{common.DefaultRgName}
@@ -498,7 +508,7 @@ func TestListRgs(t *testing.T) {
 func TestTransferReplicaNotExisted(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	defer teardownTest(t, ctx, mc)
+	setupTest(t, ctx, mc)
 
 	// create new rg with 0 node
 	rgName := common.GenRandomString("rg", 6)
@@ -530,7 +540,7 @@ func TestTransferReplicaNotExisted(t *testing.T) {
 func TestTransferReplicaInvalidReplicaNumber(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	defer teardownTest(t, ctx, mc)
+	setupTest(t, ctx, mc)
 
 	// create new rg
 	rgName := common.GenRandomString("rg", 6)
@@ -563,7 +573,7 @@ func TestTransferReplicaInvalidReplicaNumber(t *testing.T) {
 func TestTransferReplicas(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	defer teardownTest(t, ctx, mc)
+	setupTest(t, ctx, mc)
 
 	// create new rg1 and rg2
 	rg1Name := common.GenRandomString("rg1", 6)
@@ -617,7 +627,7 @@ func TestTransferReplicas(t *testing.T) {
 func TestTransferReplicasNodesNotEnough(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	defer teardownTest(t, ctx, mc)
+	setupTest(t, ctx, mc)
 
 	// create new rg with requests 2
 	rgName := common.GenRandomString("rg", 6)
@@ -680,7 +690,7 @@ if n > 1:
 func TestLoadReplicasRgs(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	defer teardownTest(t, ctx, mc)
+	setupTest(t, ctx, mc)
 
 	// create new rg with requests 2
 	rgName := common.GenRandomString("rg", 6)
@@ -739,7 +749,7 @@ func TestLoadReplicasRgs(t *testing.T) {
 func TestTransferReplicaLoadedRg(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	defer teardownTest(t, ctx, mc)
+	setupTest(t, ctx, mc)
 
 	// create new rg with requests 2
 	rgName := common.GenRandomString("rg", 6)
