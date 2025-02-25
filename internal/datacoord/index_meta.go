@@ -399,12 +399,13 @@ func (m *indexMeta) CreateIndex(ctx context.Context, index *model.Index) error {
 			}
 
 			if existIndex.IndexName == index.IndexName {
+				useIndexParams := DeleteParams(existIndex.UserIndexParams, []string{common.MmapEnabledKey, common.IndexOffsetCacheEnabledKey})
 				req := &indexpb.CreateIndexRequest{
 					CollectionID:    existIndex.CollectionID,
 					FieldID:         existIndex.FieldID,
 					IndexName:       existIndex.IndexName,
 					IndexParams:     existIndex.IndexParams,
-					UserIndexParams: existIndex.UserIndexParams,
+					UserIndexParams: useIndexParams,
 					TypeParams:      existIndex.TypeParams,
 					IsAutoIndex:     existIndex.IsAutoIndex,
 				}
