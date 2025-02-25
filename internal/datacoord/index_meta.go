@@ -390,44 +390,6 @@ func (m *indexMeta) CreateIndex(ctx context.Context, index *model.Index) error {
 	m.Lock()
 	defer m.Unlock()
 
-	// double check whether need to create index
-	indexes, ok := m.indexes[index.CollectionID]
-	if ok {
-		for _, existIndex := range indexes {
-			if existIndex.IsDeleted {
-				continue
-			}
-
-			if existIndex.IndexName == index.IndexName {
-				req := &indexpb.CreateIndexRequest{
-					CollectionID:    existIndex.CollectionID,
-					FieldID:         existIndex.FieldID,
-					IndexName:       existIndex.IndexName,
-					IndexParams:     existIndex.IndexParams,
-					UserIndexParams: existIndex.UserIndexParams,
-					TypeParams:      existIndex.TypeParams,
-					IsAutoIndex:     existIndex.IsAutoIndex,
-				}
-				if existIndex.FieldID == index.FieldID && checkParams(index, req) {
-					return nil
-				}
-				errMsg := "at most one distinct index is allowed per field"
-				log.Warn(errMsg,
-					zap.String("source index", fmt.Sprintf("{index_name: %s, field_id: %d, index_params: %v, user_params: %v, type_params: %v}",
-						index.IndexName, index.FieldID, index.IndexParams, index.UserIndexParams, index.TypeParams)),
-					zap.String("current index", fmt.Sprintf("{index_name: %s, field_id: %d, index_params: %v, user_params: %v, type_params: %v}",
-						req.GetIndexName(), req.GetFieldID(), req.GetIndexParams(), req.GetUserIndexParams(), req.GetTypeParams())))
-				return fmt.Errorf("CreateIndex failed: %s", errMsg)
-			}
-
-			if existIndex.FieldID == index.FieldID {
-				errMsg := "CreateIndex failed: creating multiple indexes on same field is not supported"
-				log.Warn(errMsg)
-				return fmt.Errorf(errMsg)
-			}
-		}
-	}
-
 	if err := m.catalog.CreateIndex(ctx, index); err != nil {
 		log.Ctx(ctx).Error("meta update: CreateIndex save meta fail", zap.Int64("collectionID", index.CollectionID),
 			zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID),
