@@ -403,13 +403,6 @@ func (m *indexMeta) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReq
 		return indexID, nil
 	}
 
-	// merge with previous params because create index would not pass mmap params
-	indexes := m.getFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
-	if len(indexes) == 1 {
-		req.UserIndexParams = UpdateParams(indexes[0], indexes[0].UserIndexParams, req.GetUserIndexParams())
-		req.IndexParams = UpdateParams(indexes[0], indexes[0].IndexParams, req.GetIndexParams())
-	}
-
 	// exclude the mmap.enable param, because it will be conflicted with the index's mmap.enable param
 	typeParams := DeleteParams(req.GetTypeParams(), []string{common.MmapEnabledKey})
 	index := &model.Index{
