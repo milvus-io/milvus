@@ -48,6 +48,9 @@ InitTrace(CTraceConfig* config);
 void
 SetTrace(CTraceConfig* config);
 
+void
+InitDefaultScalarIndexHasRawData(bool val);
+
 #ifdef __cplusplus
 };
 #endif
