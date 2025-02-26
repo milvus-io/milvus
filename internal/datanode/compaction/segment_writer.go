@@ -125,7 +125,8 @@ func (w *MultiSegmentWriter) closeWriter() error {
 		log.Info("created new segment",
 			zap.Int64("segmentID", w.currentSegmentID),
 			zap.String("channel", w.channel),
-			zap.Int64("totalRows", w.writer.GetRowNum()))
+			zap.Int64("totalRows", w.writer.GetRowNum()),
+			zap.Int64("segment size", w.segmentSize))
 	}
 	return nil
 }
