@@ -2135,6 +2135,21 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 
 	var tsMsg msgstream.TsMsg
 	switch r := request.(type) {
+	case *milvuspb.AlterCollectionRequest:
+		tsMsg = &msgstream.AlterCollectionMsg{
+			BaseMsg:                getBaseMsg(ctx, ts),
+			AlterCollectionRequest: r,
+		}
+	case *milvuspb.AlterCollectionFieldRequest:
+		tsMsg = &msgstream.AlterCollectionFieldMsg{
+			BaseMsg:                     getBaseMsg(ctx, ts),
+			AlterCollectionFieldRequest: r,
+		}
+	case *milvuspb.RenameCollectionRequest:
+		tsMsg = &msgstream.RenameCollectionMsg{
+			BaseMsg:                 getBaseMsg(ctx, ts),
+			RenameCollectionRequest: r,
+		}
 	case *milvuspb.CreateDatabaseRequest:
 		tsMsg = &msgstream.CreateDatabaseMsg{
 			BaseMsg:               getBaseMsg(ctx, ts),
@@ -2229,6 +2244,21 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 		tsMsg = &msgstream.OperatePrivilegeV2Msg{
 			BaseMsg:                   getBaseMsg(ctx, ts),
 			OperatePrivilegeV2Request: r,
+		}
+	case *milvuspb.CreateAliasRequest:
+		tsMsg = &msgstream.CreateAliasMsg{
+			BaseMsg:            getBaseMsg(ctx, ts),
+			CreateAliasRequest: r,
+		}
+	case *milvuspb.DropAliasRequest:
+		tsMsg = &msgstream.DropAliasMsg{
+			BaseMsg:          getBaseMsg(ctx, ts),
+			DropAliasRequest: r,
+		}
+	case *milvuspb.AlterAliasRequest:
+		tsMsg = &msgstream.AlterAliasMsg{
+			BaseMsg:           getBaseMsg(ctx, ts),
+			AlterAliasRequest: r,
 		}
 	default:
 		log.Warn("unknown request", zap.Any("request", request))
