@@ -298,6 +298,8 @@ type commonConfig struct {
 	LocalRPCEnabled ParamItem `refreshable:"false"`
 
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
+
+	EnabledJSONKeyStats ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1000,6 +1002,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.SyncTaskPoolReleaseTimeoutSeconds.Init(base.mgr)
+
+	p.EnabledJSONKeyStats = ParamItem{
+		Key:          "common.enabledJsonKeyStats",
+		Version:      "2.5.5",
+		DefaultValue: "false",
+		Doc:          "Indicates whether to enable JSON key stats",
+		Export:       true,
+	}
+	p.EnabledJSONKeyStats.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -2712,6 +2723,9 @@ type queryNodeConfig struct {
 
 	// worker
 	WorkerPoolingSize ParamItem `refreshable:"false"`
+
+	// Json Key Index
+	JSONIndexCommitInterval ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -3371,6 +3385,15 @@ user-task-polling:
 	}
 	p.ExprEvalBatchSize.Init(base.mgr)
 
+	p.JSONIndexCommitInterval = ParamItem{
+		Key:          "queryNode.segcore.jsonIndexCommitInterval",
+		Version:      "2.5.0",
+		DefaultValue: "200",
+		Doc:          "the commit interval for the JSON index to commit",
+		Export:       true,
+	}
+	p.JSONIndexCommitInterval.Init(base.mgr)
+
 	p.CleanExcludeSegInterval = ParamItem{
 		Key:          "queryCoord.cleanExcludeSegmentInterval",
 		Version:      "2.4.0",
@@ -3583,7 +3606,8 @@ type dataCoordConfig struct {
 	EnableStatsTask   ParamItem `refreshable:"true"`
 	TaskCheckInterval ParamItem `refreshable:"true"`
 
-	RequestTimeoutSeconds ParamItem `refreshable:"true"`
+	RequestTimeoutSeconds             ParamItem `refreshable:"true"`
+	JSONKeyStatsMemoryBudgetInTantivy ParamItem `refreshable:"false"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -4477,6 +4501,14 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.RequestTimeoutSeconds.Init(base.mgr)
+	p.JSONKeyStatsMemoryBudgetInTantivy = ParamItem{
+		Key:          "dataCoord.segcore.jsonKeyStatsMemoryBudgetInTantivy",
+		Version:      "2.5.5",
+		DefaultValue: "16777216",
+		Doc:          "the memory budget for the JSON index In Tantivy, the unit is bytes",
+		Export:       true,
+	}
+	p.JSONKeyStatsMemoryBudgetInTantivy.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

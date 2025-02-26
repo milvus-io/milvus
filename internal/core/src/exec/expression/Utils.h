@@ -64,6 +64,16 @@ CompareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
                                      simdjson::ondemand::value>>>) {
         json_array_length = arr1.size();
     }
+
+    if constexpr (std::is_same_v<
+                      T,
+                      simdjson::simdjson_result<simdjson::dom::array>>) {
+        json_array_length = arr1.size();
+    }
+
+    if constexpr (std::is_same_v<T, simdjson::dom::array>) {
+        json_array_length = arr1.size();
+    }
     if (arr2.array_size() != json_array_length) {
         return false;
     }

@@ -215,7 +215,10 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		NumRows:         segment.GetNumOfRows(),
 		CollectionTtl:   collTtl.Nanoseconds(),
 		CurrentTs:       tsoutil.GetCurrentTime(),
-		BinlogMaxSize:   Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		// update version after check
+		BinlogMaxSize:             Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		EnableJsonKeyStats:        Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
+		JsonKeyStatsTantivyMemory: Params.DataCoordCfg.JSONKeyStatsMemoryBudgetInTantivy.GetAsInt64(),
 	}
 
 	return true
@@ -332,6 +335,13 @@ func (st *statsTask) SetJobInfo(meta *meta) error {
 			err := meta.UpdateSegment(st.taskInfo.GetSegmentID(), SetTextIndexLogs(st.taskInfo.GetTextStatsLogs()))
 			if err != nil {
 				log.Warn("save text index stats result failed", zap.Int64("taskID", st.taskID),
+					zap.Int64("segmentID", st.segmentID), zap.Error(err))
+				return err
+			}
+		case indexpb.StatsSubJob_JsonKeyIndexJob:
+			err := meta.UpdateSegment(st.taskInfo.GetSegmentID(), SetJsonKeyIndexLogs(st.taskInfo.GetJsonKeyStatsLogs()))
+			if err != nil {
+				log.Warn("save json key index stats result failed", zap.Int64("taskId", st.taskID),
 					zap.Int64("segmentID", st.segmentID), zap.Error(err))
 				return err
 			}

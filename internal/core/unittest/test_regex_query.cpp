@@ -171,7 +171,7 @@ TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnJsonField) {
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto segpromote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     BitsetType final;
     final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);

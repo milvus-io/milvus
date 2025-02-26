@@ -298,18 +298,19 @@ func (i *IndexNode) waitTaskFinish() {
 }
 
 type statsTaskInfo struct {
-	cancel        context.CancelFunc
-	state         indexpb.JobState
-	failReason    string
-	collID        UniqueID
-	partID        UniqueID
-	segID         UniqueID
-	insertChannel string
-	numRows       int64
-	insertLogs    []*datapb.FieldBinlog
-	statsLogs     []*datapb.FieldBinlog
-	textStatsLogs map[int64]*datapb.TextIndexStats
-	bm25Logs      []*datapb.FieldBinlog
+	cancel           context.CancelFunc
+	state            indexpb.JobState
+	failReason       string
+	collID           UniqueID
+	partID           UniqueID
+	segID            UniqueID
+	insertChannel    string
+	numRows          int64
+	insertLogs       []*datapb.FieldBinlog
+	statsLogs        []*datapb.FieldBinlog
+	textStatsLogs    map[int64]*datapb.TextIndexStats
+	bm25Logs         []*datapb.FieldBinlog
+	jsonKeyStatsLogs map[int64]*datapb.JsonKeyStats
 }
 
 func (i *IndexNode) loadOrStoreStatsTask(clusterID string, taskID UniqueID, info *statsTaskInfo) *statsTaskInfo {
@@ -396,24 +397,46 @@ func (i *IndexNode) storeStatsTextIndexResult(
 	}
 }
 
+func (i *IndexNode) storeJSONKeyIndexResult(
+	clusterID string,
+	taskID UniqueID,
+	collID UniqueID,
+	partID UniqueID,
+	segID UniqueID,
+	channel string,
+	jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats,
+) {
+	key := taskKey{ClusterID: clusterID, TaskID: taskID}
+	i.stateLock.Lock()
+	defer i.stateLock.Unlock()
+	if info, ok := i.statsTasks[key]; ok {
+		info.jsonKeyStatsLogs = jsonKeyIndexLogs
+		info.segID = segID
+		info.collID = collID
+		info.partID = partID
+		info.insertChannel = channel
+	}
+}
+
 func (i *IndexNode) getStatsTaskInfo(clusterID string, taskID UniqueID) *statsTaskInfo {
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 
 	if info, ok := i.statsTasks[taskKey{ClusterID: clusterID, TaskID: taskID}]; ok {
 		return &statsTaskInfo{
-			cancel:        info.cancel,
-			state:         info.state,
-			failReason:    info.failReason,
-			collID:        info.collID,
-			partID:        info.partID,
-			segID:         info.segID,
-			insertChannel: info.insertChannel,
-			numRows:       info.numRows,
-			insertLogs:    info.insertLogs,
-			statsLogs:     info.statsLogs,
-			textStatsLogs: info.textStatsLogs,
-			bm25Logs:      info.bm25Logs,
+			cancel:           info.cancel,
+			state:            info.state,
+			failReason:       info.failReason,
+			collID:           info.collID,
+			partID:           info.partID,
+			segID:            info.segID,
+			insertChannel:    info.insertChannel,
+			numRows:          info.numRows,
+			insertLogs:       info.insertLogs,
+			statsLogs:        info.statsLogs,
+			textStatsLogs:    info.textStatsLogs,
+			bm25Logs:         info.bm25Logs,
+			jsonKeyStatsLogs: info.jsonKeyStatsLogs,
 		}
 	}
 	return nil
