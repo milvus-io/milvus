@@ -100,6 +100,7 @@ service QueryCoord {
   rpc GetQueryNodeDistribution(GetQueryNodeDistributionRequest) returns (GetQueryNodeDistributionResponse) {}
   rpc SuspendBalance(SuspendBalanceRequest) returns (common.Status)  {}
   rpc ResumeBalance(ResumeBalanceRequest) returns (common.Status)  {}
+  rpc CheckBalanceStatus(CheckBalanceStatusRequest) returns (CheckBalanceStatusResponse) {}
   rpc SuspendNode(SuspendNodeRequest) returns (common.Status) {}
   rpc ResumeNode(ResumeNodeRequest) returns (common.Status) {}
   rpc TransferSegment(TransferSegmentRequest) returns (common.Status) {}
@@ -881,6 +882,15 @@ message SuspendBalanceRequest {
 
 message ResumeBalanceRequest {
   common.MsgBase base = 1;
+}
+
+message CheckBalanceStatusRequest {
+  common.MsgBase base = 1;
+}
+
+message CheckBalanceStatusResponse {
+  common.Status status = 1;
+  bool is_active = 2;
 }
 
 message SuspendNodeRequest {
