@@ -83,6 +83,16 @@ require (
 	google.golang.org/api v0.220.0
 	google.golang.org/protobuf v1.36.5
 	gopkg.in/yaml.v3 v3.0.1
+	mosn.io/holmes v1.0.2
+)
+
+require (
+	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
+	github.com/hashicorp/go-syslog v1.0.0 // indirect
+	github.com/rcrowley/go-metrics v0.0.0-20200313005456-10cdbea86bc0 // indirect
+	github.com/shirou/gopsutil v3.20.11+incompatible // indirect
+	mosn.io/api v0.0.0-20210204052134-5b9a826795fd // indirect
+	mosn.io/pkg v0.0.0-20211217101631-d914102d1baf // indirect
 )
 
 require (
