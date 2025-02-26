@@ -445,6 +445,7 @@ type BinlogRecordWriter interface {
 	)
 	GetRowNum() int64
 	FlushChunk() error
+	GetBufferUncompressed() uint64
 	Schema() *schemapb.CollectionSchema
 }
 
@@ -475,6 +476,8 @@ type CompositeBinlogRecordWriter struct {
 	fieldBinlogs map[FieldID]*datapb.FieldBinlog
 	statsLog     *datapb.FieldBinlog
 	bm25StatsLog map[FieldID]*datapb.FieldBinlog
+
+	flushedUncompressed uint64
 }
 
 var _ BinlogRecordWriter = (*CompositeBinlogRecordWriter)(nil)
@@ -573,11 +576,15 @@ func (c *CompositeBinlogRecordWriter) Close() error {
 	return nil
 }
 
-func (c *CompositeBinlogRecordWriter) GetWrittenUncompressed() uint64 {
+func (c *CompositeBinlogRecordWriter) GetBufferUncompressed() uint64 {
 	if c.rw == nil {
 		return 0
 	}
 	return c.rw.GetWrittenUncompressed()
+}
+
+func (c *CompositeBinlogRecordWriter) GetWrittenUncompressed() uint64 {
+	return c.flushedUncompressed + c.GetBufferUncompressed()
 }
 
 func (c *CompositeBinlogRecordWriter) FlushChunk() error {
@@ -624,6 +631,8 @@ func (c *CompositeBinlogRecordWriter) FlushChunk() error {
 			TimestampTo:   c.tsTo,
 		})
 	}
+
+	c.flushedUncompressed += c.rw.GetWrittenUncompressed()
 
 	// reset writers
 	c.resetWriters()

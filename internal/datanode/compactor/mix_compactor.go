@@ -167,6 +167,18 @@ func (t *mixCompactionTask) mergeSplit(
 		return nil, err
 	}
 	res := mWriter.GetCompactionSegments()
+	if len(res) == 0 {
+		// append an empty segment
+		id, err := segIDAlloc.AllocOne()
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, &datapb.CompactionSegment{
+			SegmentID: id,
+			NumOfRows: 0,
+			Channel:   t.GetChannelName(),
+		})
+	}
 
 	totalElapse := t.tr.RecordSpan()
 	log.Info("compact mergeSplit end",

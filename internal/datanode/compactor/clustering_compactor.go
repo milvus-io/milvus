@@ -127,10 +127,16 @@ func (b *ClusterBuffer) Close() error {
 	return b.writer.Close()
 }
 
+func (b *ClusterBuffer) GetCompactionSegments() []*datapb.CompactionSegment {
+	b.lock.RLock()
+	defer b.lock.RUnlock()
+	return b.writer.GetCompactionSegments()
+}
+
 func (b *ClusterBuffer) GetBufferSize() uint64 {
 	b.lock.RLock()
 	defer b.lock.RUnlock()
-	return b.writer.GetWrittenUncompressed()
+	return b.writer.GetBufferUncompressed()
 }
 
 func newClusterBuffer(id int, writer *MultiSegmentWriter, clusteringKeyFieldStats *storage.FieldStats) *ClusterBuffer {
@@ -477,7 +483,7 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 		SegmentStats: make(map[typeutil.UniqueID]storage.SegmentStats),
 	}
 	for _, buffer := range t.clusterBuffers {
-		segments := buffer.writer.GetCompactionSegments()
+		segments := buffer.GetCompactionSegments()
 		log.Debug("compaction segments", zap.Any("segments", segments))
 		resultSegments = append(resultSegments, segments...)
 
