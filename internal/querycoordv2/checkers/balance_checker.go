@@ -46,6 +46,9 @@ type BalanceChecker struct {
 	scheduler                            task.Scheduler
 	targetMgr                            meta.TargetManagerInterface
 	getBalancerFunc                      GetBalancerFunc
+
+	// record auto balance ts
+	autoBalanceTs time.Time
 }
 
 func NewBalanceChecker(meta *meta.Meta,
@@ -80,22 +83,12 @@ func (b *BalanceChecker) readyToCheck(collectionID int64) bool {
 	return metaExist && targetExist
 }
 
-func (b *BalanceChecker) replicasToBalance() []int64 {
+func (b *BalanceChecker) getReplicaForStoppingBalance(ctx context.Context) []int64 {
 	ids := b.meta.GetAll()
-
-	// all replicas belonging to loading collection will be skipped
-	loadedCollections := lo.Filter(ids, func(cid int64, _ int) bool {
-		collection := b.meta.GetCollection(cid)
-		return collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded
-	})
-	sort.Slice(loadedCollections, func(i, j int) bool {
-		return loadedCollections[i] < loadedCollections[j]
-	})
-
 	if paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
 		// balance collections influenced by stopping nodes
 		stoppingReplicas := make([]int64, 0)
-		for _, cid := range loadedCollections {
+		for _, cid := range ids {
 			// if target and meta isn't ready, skip balance this collection
 			if !b.readyToCheck(cid) {
 				continue
@@ -113,11 +106,26 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 		}
 	}
 
+	return nil
+}
+
+func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context) []int64 {
 	// 1. no stopping balance and auto balance is disabled, return empty collections for balance
 	// 2. when balancer isn't active, skip auto balance
 	if !Params.QueryCoordCfg.AutoBalance.GetAsBool() || !b.IsActive() {
 		return nil
 	}
+
+	ids := b.meta.GetAll()
+
+	// all replicas belonging to loading collection will be skipped
+	loadedCollections := lo.Filter(ids, func(cid int64, _ int) bool {
+		collection := b.meta.GetCollection(cid)
+		return collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded
+	})
+	sort.Slice(loadedCollections, func(i, j int) bool {
+		return loadedCollections[i] < loadedCollections[j]
+	})
 
 	// Before performing balancing, check the CurrentTarget/LeaderView/Distribution for all collections.
 	// If any collection has unready info, skip the balance operation to avoid inconsistencies.
@@ -173,16 +181,27 @@ func (b *BalanceChecker) balanceReplicas(replicaIDs []int64) ([]balance.SegmentA
 }
 
 func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
-	ret := make([]task.Task, 0)
-
-	replicasToBalance := b.replicasToBalance()
-	segmentPlans, channelPlans := b.balanceReplicas(replicasToBalance)
-	// iterate all collection to find a collection to balance
-	for len(segmentPlans) == 0 && len(channelPlans) == 0 && b.normalBalanceCollectionsCurrentRound.Len() > 0 {
-		replicasToBalance := b.replicasToBalance()
-		segmentPlans, channelPlans = b.balanceReplicas(replicasToBalance)
+	var segmentPlans []balance.SegmentAssignPlan
+	var channelPlans []balance.ChannelAssignPlan
+	stoppingReplicas := b.getReplicaForStoppingBalance(ctx)
+	if len(stoppingReplicas) > 0 {
+		// check for stopping balance first
+		segmentPlans, channelPlans = b.balanceReplicas(stoppingReplicas)
+	} else {
+		// then check for auto balance
+		if time.Since(b.autoBalanceTs) > paramtable.Get().QueryCoordCfg.AutoBalanceInterval.GetAsDuration(time.Millisecond) {
+			b.autoBalanceTs = time.Now()
+			replicasToBalance := b.getReplicaForNormalBalance(ctx)
+			segmentPlans, channelPlans = b.balanceReplicas(replicasToBalance)
+			// iterate all collection to find a collection to balance
+			for len(segmentPlans) == 0 && len(channelPlans) == 0 && b.normalBalanceCollectionsCurrentRound.Len() > 0 {
+				replicasToBalance := b.getReplicaForNormalBalance(ctx)
+				segmentPlans, channelPlans = b.balanceReplicas(replicasToBalance)
+			}
+		}
 	}
 
+	ret := make([]task.Task, 0)
 	tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), segmentPlans)
 	task.SetPriority(task.TaskPriorityLow, tasks...)
 	task.SetReason("segment unbalanced", tasks...)
