@@ -23,6 +23,7 @@
 #include <string>
 #include <map>
 
+#include "common/Common.h"
 #include "index/IndexStructure.h"
 #include "index/ScalarIndex.h"
 #include "storage/MemFileManagerImpl.h"
@@ -95,6 +96,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     const bool
     HasRawData() const override {
+        if (!SCALAR_INDEX_HAS_RAW_DATA) {
+            return false;
+        }
         return true;
     }
 

@@ -22,6 +22,7 @@
 #include <roaring/roaring.hh>
 
 #include "common/RegexQuery.h"
+#include "common/Common.h"
 #include "index/ScalarIndex.h"
 #include "storage/FileManager.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -119,6 +120,10 @@ class BitmapIndex : public ScalarIndex<T> {
 
     const bool
     HasRawData() const override {
+        if (!SCALAR_INDEX_HAS_RAW_DATA) {
+            return false;
+        }
+
         if (schema_.data_type() == proto::schema::DataType::Array) {
             return false;
         }
