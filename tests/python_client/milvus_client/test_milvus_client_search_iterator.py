@@ -39,7 +39,6 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/39045")
     def test_milvus_client_search_iterator_using_mul_db(self, search_params):
         """
         target: test search iterator(high level api) case about mul db
@@ -57,8 +56,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         collections = self.list_collections(client)[0]
         assert collection_name in collections
         # 2. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
@@ -71,7 +69,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 5. search_iterator
-        vectors_to_search = rng.random((1, default_dim))
+        vectors_to_search = cf.gen_vectors(1, default_dim)
         search_params = {"params": search_params}
         error_msg = "alias or database may have been changed"
         self.search_iterator(client, collection_name, vectors_to_search, batch_size, search_params=search_params,
@@ -82,7 +80,6 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/39087")
     def test_milvus_client_search_iterator_alias_different_col(self, search_params):
         """
         target: test search iterator(high level api) case about alias
@@ -104,15 +101,14 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         collections = self.list_collections(client)[0]
         assert collection_name_new in collections
         # 2. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.insert(client, collection_name_new, rows)
         self.flush(client, collection_name_new)
         # 3. search_iterator
-        vectors_to_search = rng.random((1, default_dim))
+        vectors_to_search = cf.gen_vectors(1, default_dim)
         search_params = {"params": search_params}
         error_msg = "alias or database may have been changed"
         self.search_iterator(client, alias, vectors_to_search, batch_size, search_params=search_params,
@@ -168,13 +164,12 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
                                               "dim": default_dim,
                                               "consistency_level": 0})
         # 2. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search iterator
-        vectors_to_search = rng.random((1, default_dim))
+        vectors_to_search = cf.gen_vectors(1, default_dim)
         check_items = {"batch_size": batch_size, "limit": default_nb, "metric_type": default_metric_type}
         if "radius" in search_params:
             check_items["radius"] = search_params["radius"]
@@ -211,14 +206,13 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, metric_type=default_metric_type)
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
-        rng = np.random.default_rng(seed=19530)
         rows = [
-            {default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            {default_primary_key_field_name: str(i), default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
              default_string_field_name: str(i), "nullable_field": None, "array_field": None} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search iterator
-        vectors_to_search = rng.random((1, default_dim))
+        vectors_to_search = cf.gen_vectors(1, default_dim)
         check_items = {"batch_size": batch_size, "limit": default_nb, "metric_type": default_metric_type}
         if "radius" in search_params:
             check_items["radius"] = search_params["radius"]
@@ -254,14 +248,13 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         new_name = collection_name + "new"
         self.rename_collection(client, old_name, new_name)
         # 2. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         self.insert(client, new_name, rows)
         self.flush(client, new_name)
         # assert self.num_entities(client, collection_name)[0] == default_nb
         # 3. search_iterator
-        vectors_to_search = rng.random((1, default_dim))
+        vectors_to_search = cf.gen_vectors(1, default_dim)
         check_items = {"batch_size": batch_size, "limit": default_nb, "metric_type": default_metric_type}
         if "radius" in search_params:
             check_items["radius"] = search_params["radius"]
@@ -288,17 +281,16 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         collections = self.list_collections(client)[0]
         assert collection_name in collections
         # 2. insert
-        rng = np.random.default_rng(seed=19530)
         rows = [{
             default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
             default_float_field_name: i * 1.0,
             default_int32_array_field_name: [i, i + 1, i + 2],
             default_string_array_field_name: [str(i), str(i + 1), str(i + 2)]
         } for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         # 3. search iterator
-        vectors_to_search = rng.random((1, default_dim))
+        vectors_to_search = cf.gen_vectors(1, default_dim)
         check_items = {"batch_size": batch_size, "limit": default_nb, "metric_type": default_metric_type}
         if "radius" in search_params:
             check_items["radius"] = search_params["radius"]
@@ -321,14 +313,13 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, id_type="string", max_length=ct.default_length)
         # 2. insert
-        rng = np.random.default_rng(seed=19530)
         rows = [
-            {default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            {default_primary_key_field_name: str(i), default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
              default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search_iterator
-        vectors_to_search = rng.random((1, default_dim))
+        vectors_to_search = cf.gen_vectors(1, default_dim)
         check_items = {"batch_size": batch_size, "limit": default_nb, "metric_type": default_metric_type}
         if "radius" in search_params:
             check_items["radius"] = search_params["radius"]
@@ -353,15 +344,14 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, metric_type=metric_type, auto_id=auto_id,
                                consistency_level="Strong")
         # 2. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         if auto_id:
             for row in rows:
                 row.pop(default_primary_key_field_name)
         self.insert(client, collection_name, rows)
         # 3. search_iterator
-        vectors_to_search = rng.random((1, default_dim))
+        vectors_to_search = cf.gen_vectors(1, default_dim)
         limit = default_limit if default_limit < default_batch_size else default_batch_size
         check_items = {"batch_size": default_batch_size, "limit": limit, "metric_type": metric_type}
         if "radius" in search_params:
@@ -390,15 +380,14 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, metric_type=metric_type, auto_id=auto_id,
                                consistency_level="Strong")
         # 2. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         if auto_id:
             for row in rows:
                 row.pop(default_primary_key_field_name)
         self.insert(client, collection_name, rows)
         # 3. search_iterator
-        vectors_to_search = rng.random((1, default_dim))
+        vectors_to_search = cf.gen_vectors(1, default_dim)
         limit = default_limit if default_limit < default_batch_size else default_batch_size
         check_items = {"batch_size": default_batch_size, "limit": limit, "metric_type": metric_type}
         if "radius" in search_params:
@@ -427,15 +416,14 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
         default_nb = 1000
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         pks = self.insert(client, collection_name, rows)[0]
         # 3. delete
         delete_num = 3
         self.delete(client, collection_name, ids=[i for i in range(delete_num)])
         # 4. search_iterator
-        vectors_to_search = rng.random((1, default_dim))
+        vectors_to_search = cf.gen_vectors(1, default_dim)
         insert_ids = [i for i in range(default_nb)]
         for insert_id in range(delete_num):
             if insert_id in insert_ids:
@@ -466,15 +454,14 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
         default_nb = 1000
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         pks = self.insert(client, collection_name, rows)[0]
         # 3. delete
         delete_num = 3
         self.delete(client, collection_name, filter=f"id < {delete_num}")
         # 4. search_iterator
-        vectors_to_search = rng.random((1, default_dim))
+        vectors_to_search = cf.gen_vectors(1, default_dim)
         insert_ids = [i for i in range(default_nb)]
         for insert_id in range(delete_num):
             if insert_id in insert_ids:

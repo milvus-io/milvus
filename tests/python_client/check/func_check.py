@@ -458,8 +458,8 @@ class ResponseChecker:
         if check_items.get("limit"):
             if "range_filter" not in check_items and "radius" not in check_items:
                 assert len(pk_list) / check_items["limit"] >= 0.9
-        assert len(pk_list) == len(set(pk_list))
-        log.info("check: total %d results" % len(pk_list))
+        log.debug(f"check: total {len(pk_list)} results, set len: {len(set(pk_list))}")
+        assert len(pk_list) == len(set(pk_list)) != 0
 
         return True
 
