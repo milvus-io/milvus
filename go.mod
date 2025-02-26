@@ -57,7 +57,7 @@ require (
 require (
 	cloud.google.com/go/storage v1.50.0
 	github.com/antlr4-go/antlr/v4 v4.13.1
-	github.com/apache/arrow/go/v12 v12.0.1
+	github.com/apache/arrow/go/v17 v17.0.0-00010101000000-000000000000
 	github.com/aws/aws-sdk-go-v2 v1.32.8
 	github.com/aws/aws-sdk-go-v2/config v1.28.9
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.50
@@ -149,7 +149,6 @@ require (
 	github.com/envoyproxy/go-control-plane v0.13.1 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.2.1 // indirect
 	github.com/expr-lang/expr v1.16.9 // indirect
-	github.com/fatih/color v1.15.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/form3tech-oss/jwt-go v3.2.3+incompatible // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
@@ -286,7 +285,7 @@ require (
 	golang.org/x/tools v0.29.0 // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 	gonum.org/v1/gonum v0.15.0 // indirect
-	google.golang.org/genproto v0.0.0-20250106144421-5f5ef82da422 // indirect
+	google.golang.org/genproto v0.0.0-20250106144421-5f5ef82da422 // indirect; indirectstatus
 	google.golang.org/genproto/googleapis/api v0.0.0-20250115164207-1a7da9e5054f // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250127172529-29210b9bc287 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
