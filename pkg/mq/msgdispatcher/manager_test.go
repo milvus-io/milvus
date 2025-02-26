@@ -20,20 +20,14 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"reflect"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestManager(t *testing.T) {
@@ -52,7 +46,7 @@ func TestManager(t *testing.T) {
 		factory := newMockFactory()
 		producer, err := newMockProducer(factory, pchannel)
 		assert.NoError(t, err)
-		go produceTimeTick(ctx, producer)
+		go produceTimeTick(t, ctx, producer)
 
 		c := NewDispatcherManager(pchannel, typeutil.ProxyRole, 1, factory)
 		assert.NotNil(t, c)
@@ -99,7 +93,7 @@ func TestManager(t *testing.T) {
 		factory := newMockFactory()
 		producer, err := newMockProducer(factory, pchannel)
 		assert.NoError(t, err)
-		go produceTimeTick(ctx, producer)
+		go produceTimeTick(t, ctx, producer)
 
 		c := NewDispatcherManager(pchannel, typeutil.ProxyRole, 1, factory)
 		assert.NotNil(t, c)
@@ -163,7 +157,7 @@ func TestManager(t *testing.T) {
 		factory := newMockFactory()
 		producer, err := newMockProducer(factory, pchannel)
 		assert.NoError(t, err)
-		go produceTimeTick(ctx, producer)
+		go produceTimeTick(t, ctx, producer)
 
 		c := NewDispatcherManager(pchannel, typeutil.ProxyRole, 1, factory)
 		assert.NotNil(t, c)
@@ -205,7 +199,7 @@ func TestManager(t *testing.T) {
 		factory := newMockFactory()
 		producer, err := newMockProducer(factory, pchannel)
 		assert.NoError(t, err)
-		go produceTimeTick(ctx, producer)
+		go produceTimeTick(t, ctx, producer)
 
 		c := NewDispatcherManager(pchannel, typeutil.ProxyRole, 1, factory)
 
@@ -231,296 +225,4 @@ func TestManager(t *testing.T) {
 			return c.NumConsumer() >= 1
 		}, 3*time.Second, 10*time.Millisecond)
 	})
-}
-
-type vchannelHelper struct {
-	output <-chan *msgstream.MsgPack
-
-	pubInsMsgNum int
-	pubDelMsgNum int
-	pubDDLMsgNum int
-	pubPackNum   int
-
-	subInsMsgNum int
-	subDelMsgNum int
-	subDDLMsgNum int
-	subPackNum   int
-}
-
-type SimulationSuite struct {
-	suite.Suite
-
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     *sync.WaitGroup
-
-	testVchannelNum int
-
-	manager   DispatcherManager
-	pchannel  string
-	vchannels map[string]*vchannelHelper
-
-	producer msgstream.MsgStream
-	factory  msgstream.Factory
-}
-
-func (suite *SimulationSuite) SetupSuite() {
-	suite.factory = newMockFactory()
-}
-
-func (suite *SimulationSuite) SetupTest() {
-	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.wg = &sync.WaitGroup{}
-
-	suite.pchannel = fmt.Sprintf("by-dev-rootcoord-dispatcher-simulation-dml_%d", time.Now().UnixNano())
-	producer, err := newMockProducer(suite.factory, suite.pchannel)
-	assert.NoError(suite.T(), err)
-	suite.producer = producer
-
-	suite.manager = NewDispatcherManager(suite.pchannel, typeutil.DataNodeRole, 0, suite.factory)
-	go suite.manager.Run()
-}
-
-func (suite *SimulationSuite) produceMsg(wg *sync.WaitGroup, collectionID int64) {
-	defer wg.Done()
-
-	const timeTickCount = 100
-	var uniqueMsgID int64
-	vchannelKeys := reflect.ValueOf(suite.vchannels).MapKeys()
-
-	for i := 1; i <= timeTickCount; i++ {
-		// produce random insert
-		insNum := rand.Intn(10)
-		for j := 0; j < insNum; j++ {
-			vchannel := vchannelKeys[rand.Intn(len(vchannelKeys))].Interface().(string)
-			err := suite.producer.Produce(context.TODO(), &msgstream.MsgPack{
-				Msgs: []msgstream.TsMsg{genInsertMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
-			})
-			assert.NoError(suite.T(), err)
-			uniqueMsgID++
-			suite.vchannels[vchannel].pubInsMsgNum++
-		}
-		// produce random delete
-		delNum := rand.Intn(2)
-		for j := 0; j < delNum; j++ {
-			vchannel := vchannelKeys[rand.Intn(len(vchannelKeys))].Interface().(string)
-			err := suite.producer.Produce(context.TODO(), &msgstream.MsgPack{
-				Msgs: []msgstream.TsMsg{genDeleteMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
-			})
-			assert.NoError(suite.T(), err)
-			uniqueMsgID++
-			suite.vchannels[vchannel].pubDelMsgNum++
-		}
-		// produce random ddl
-		ddlNum := rand.Intn(2)
-		for j := 0; j < ddlNum; j++ {
-			err := suite.producer.Produce(context.TODO(), &msgstream.MsgPack{
-				Msgs: []msgstream.TsMsg{genDDLMsg(commonpb.MsgType_DropCollection, collectionID)},
-			})
-			assert.NoError(suite.T(), err)
-			for k := range suite.vchannels {
-				suite.vchannels[k].pubDDLMsgNum++
-			}
-		}
-		// produce time tick
-		ts := uint64(i * 100)
-		err := suite.producer.Produce(context.TODO(), &msgstream.MsgPack{
-			Msgs: []msgstream.TsMsg{genTimeTickMsg(ts)},
-		})
-		assert.NoError(suite.T(), err)
-		for k := range suite.vchannels {
-			suite.vchannels[k].pubPackNum++
-		}
-	}
-	suite.T().Logf("[%s] produce %d msgPack for %s done", time.Now(), timeTickCount, suite.pchannel)
-}
-
-func (suite *SimulationSuite) consumeMsg(ctx context.Context, wg *sync.WaitGroup, vchannel string) {
-	defer wg.Done()
-	var lastTs typeutil.Timestamp
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case pack := <-suite.vchannels[vchannel].output:
-			if pack == nil || pack.EndTs == 0 {
-				continue
-			}
-			assert.Greater(suite.T(), pack.EndTs, lastTs, fmt.Sprintf("vchannel=%s", vchannel))
-			lastTs = pack.EndTs
-			helper := suite.vchannels[vchannel]
-			helper.subPackNum++
-			for _, msg := range pack.Msgs {
-				switch msg.Type() {
-				case commonpb.MsgType_Insert:
-					helper.subInsMsgNum++
-				case commonpb.MsgType_Delete:
-					helper.subDelMsgNum++
-				case commonpb.MsgType_CreateCollection, commonpb.MsgType_DropCollection,
-					commonpb.MsgType_CreatePartition, commonpb.MsgType_DropPartition:
-					helper.subDDLMsgNum++
-				}
-			}
-		}
-	}
-}
-
-func (suite *SimulationSuite) produceTimeTickOnly(ctx context.Context) {
-	tt := 1
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			ts := uint64(tt * 1000)
-			err := suite.producer.Produce(ctx, &msgstream.MsgPack{
-				Msgs: []msgstream.TsMsg{genTimeTickMsg(ts)},
-			})
-			assert.NoError(suite.T(), err)
-			tt++
-		}
-	}
-}
-
-func (suite *SimulationSuite) TestDispatchToVchannels() {
-	ctx, cancel := context.WithTimeout(suite.ctx, 5000*time.Millisecond)
-	defer cancel()
-
-	const (
-		vchannelNum        = 10
-		collectionID int64 = 1234
-	)
-	suite.vchannels = make(map[string]*vchannelHelper, vchannelNum)
-	for i := 0; i < vchannelNum; i++ {
-		vchannel := fmt.Sprintf("%s_%dv%d", suite.pchannel, collectionID, i)
-		output, err := suite.manager.Add(ctx, NewStreamConfig(vchannel, nil, common.SubscriptionPositionEarliest))
-		assert.NoError(suite.T(), err)
-		suite.vchannels[vchannel] = &vchannelHelper{output: output}
-	}
-
-	wg := suite.wg
-	wg.Add(1)
-	go suite.produceMsg(wg, collectionID)
-	for vchannel := range suite.vchannels {
-		wg.Add(1)
-		go suite.consumeMsg(ctx, wg, vchannel)
-	}
-	wg.Wait()
-	for vchannel, helper := range suite.vchannels {
-		msg := fmt.Sprintf("vchannel=%s", vchannel)
-		assert.Equal(suite.T(), helper.pubInsMsgNum, helper.subInsMsgNum, msg)
-		assert.Equal(suite.T(), helper.pubDelMsgNum, helper.subDelMsgNum, msg)
-		assert.Equal(suite.T(), helper.pubDDLMsgNum, helper.subDDLMsgNum, msg)
-		assert.Equal(suite.T(), helper.pubPackNum, helper.subPackNum, msg)
-	}
-}
-
-func (suite *SimulationSuite) TestMerge() {
-	go suite.produceTimeTickOnly(suite.ctx)
-
-	const vchannelNum = 10
-	suite.vchannels = make(map[string]*vchannelHelper, vchannelNum)
-	positions, err := getSeekPositions(suite.factory, suite.pchannel, 100)
-	assert.NoError(suite.T(), err)
-	assert.NotEqual(suite.T(), 0, len(positions))
-
-	for i := 0; i < vchannelNum; i++ {
-		vchannel := fmt.Sprintf("%s_vchannelv%d", suite.pchannel, i)
-		output, err := suite.manager.Add(suite.ctx, NewStreamConfig(
-			vchannel, positions[rand.Intn(len(positions))],
-			common.SubscriptionPositionUnknown,
-		)) // seek from random position
-		require.NoError(suite.T(), err)
-		suite.vchannels[vchannel] = &vchannelHelper{output: output}
-	}
-	for vchannel := range suite.vchannels {
-		suite.wg.Add(1)
-		go suite.consumeMsg(suite.ctx, suite.wg, vchannel)
-	}
-
-	suite.Eventually(func() bool {
-		suite.T().Logf("dispatcherManager.dispatcherNum = %d", suite.manager.NumConsumer())
-		return suite.manager.NumConsumer() == 1 // expected all merged, only mainDispatcher exist
-	}, 15*time.Second, 100*time.Millisecond)
-	assert.Equal(suite.T(), vchannelNum, suite.manager.NumTarget())
-}
-
-func (suite *SimulationSuite) TestSplit() {
-	go suite.produceTimeTickOnly(suite.ctx)
-
-	const (
-		vchannelNum = 10
-		splitNum    = 3
-	)
-	suite.vchannels = make(map[string]*vchannelHelper, vchannelNum)
-	maxTolerantLagK := paramtable.Get().MQCfg.MaxTolerantLag.Key
-	paramtable.Get().Save(maxTolerantLagK, "0.5")
-	defer paramtable.Get().Reset(maxTolerantLagK)
-
-	targetBufSizeK := paramtable.Get().MQCfg.TargetBufSize.Key
-	defer paramtable.Get().Reset(targetBufSizeK)
-
-	for i := 0; i < vchannelNum; i++ {
-		paramtable.Get().Save(targetBufSizeK, "512")
-		vchannel := fmt.Sprintf("%s_vchannelv%d", suite.pchannel, i)
-		output, err := suite.manager.Add(suite.ctx, NewStreamConfig(vchannel, nil, common.SubscriptionPositionEarliest))
-		assert.NoError(suite.T(), err)
-		suite.vchannels[vchannel] = &vchannelHelper{output: output}
-	}
-
-	suite.Eventually(func() bool {
-		return suite.manager.NumConsumer() == 1 // expected all merged, only mainDispatcher exist
-	}, 15*time.Second, 100*time.Millisecond)
-	assert.Equal(suite.T(), vchannelNum, suite.manager.NumTarget())
-
-	// produce additional MsgPacks to trigger lag and split
-	ctx, cancel := context.WithCancel(context.Background())
-	for i := 0; i < splitNum; i++ {
-		suite.wg.Add(1)
-		vchannel := fmt.Sprintf("%s_vchannelv%d", suite.pchannel, i)
-		target, ok := suite.manager.(*dispatcherManager).registeredTargets.Get(vchannel)
-		assert.True(suite.T(), ok)
-		go func() {
-			defer suite.wg.Done()
-			for {
-				select {
-				case target.ch <- &MsgPack{}:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-	}
-
-	suite.Eventually(func() bool {
-		suite.T().Logf("dispatcherManager.dispatcherNum = %d, splitNum+1 = %d", suite.manager.NumConsumer(), splitNum+1)
-		return suite.manager.NumConsumer() > 1 // expected 1 mainDispatcher and 1 or more split deputyDispatchers
-	}, 20*time.Second, 100*time.Millisecond)
-	assert.Equal(suite.T(), vchannelNum, suite.manager.NumTarget())
-
-	cancel()
-	suite.wg.Wait()
-
-	for vchannel := range suite.vchannels {
-		suite.wg.Add(1)
-		go suite.consumeMsg(suite.ctx, suite.wg, vchannel)
-	}
-}
-
-func (suite *SimulationSuite) TearDownTest() {
-	for vchannel := range suite.vchannels {
-		suite.manager.Remove(vchannel)
-	}
-	suite.manager.Close()
-	suite.cancel()
-	suite.wg.Wait()
-}
-
-func (suite *SimulationSuite) TearDownSuite() {
-}
-
-func TestSimulation(t *testing.T) {
-	suite.Run(t, new(SimulationSuite))
 }

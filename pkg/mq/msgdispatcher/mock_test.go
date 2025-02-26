@@ -21,14 +21,19 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -227,7 +232,92 @@ func defaultInsertRepackFunc(
 	return pack, nil
 }
 
-func produceTimeTick(ctx context.Context, producer msgstream.MsgStream) {
+func produceMsg(t *testing.T, wg *sync.WaitGroup, producer msgstream.MsgStream, vchannels map[string]*vchannelHelper) {
+	defer wg.Done()
+
+	const msgPackCount = 100
+	uniqueMsgID := int64(0)
+	vchannelNames := lo.Keys(vchannels)
+
+	for i := 1; i <= msgPackCount; i++ {
+		// produce random insert
+		insNum := rand.Intn(10)
+		for j := 0; j < insNum; j++ {
+			vchannel := vchannelNames[rand.Intn(len(vchannels))]
+			err := producer.Produce(context.TODO(), &msgstream.MsgPack{
+				Msgs: []msgstream.TsMsg{genInsertMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
+			})
+			assert.NoError(t, err)
+			uniqueMsgID++
+			vchannels[vchannel].pubInsMsgNum++
+		}
+		// produce random delete
+		delNum := rand.Intn(2)
+		for j := 0; j < delNum; j++ {
+			vchannel := vchannelNames[rand.Intn(len(vchannels))]
+			err := producer.Produce(context.TODO(), &msgstream.MsgPack{
+				Msgs: []msgstream.TsMsg{genDeleteMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
+			})
+			assert.NoError(t, err)
+			uniqueMsgID++
+			vchannels[vchannel].pubDelMsgNum++
+		}
+		// produce random ddl
+		ddlNum := rand.Intn(2)
+		for j := 0; j < ddlNum; j++ {
+			vchannel := vchannelNames[rand.Intn(len(vchannels))]
+			collectionID := funcutil.GetCollectionIDFromVChannel(vchannel)
+			err := producer.Produce(context.TODO(), &msgstream.MsgPack{
+				Msgs: []msgstream.TsMsg{genDDLMsg(commonpb.MsgType_DropCollection, collectionID)},
+			})
+			assert.NoError(t, err)
+			uniqueMsgID++
+			vchannels[vchannel].pubDDLMsgNum++
+		}
+		// produce time tick
+		ts := uint64(i * 100)
+		err := producer.Produce(context.TODO(), &msgstream.MsgPack{
+			Msgs: []msgstream.TsMsg{genTimeTickMsg(ts)},
+		})
+		assert.NoError(t, err)
+		for k := range vchannels {
+			vchannels[k].pubPackNum++
+		}
+	}
+	t.Logf("[%s] produce %d msgPack done", time.Now(), msgPackCount)
+}
+
+func consumeMsg(t *testing.T, ctx context.Context, wg *sync.WaitGroup, vchannel string, helper *vchannelHelper) {
+	defer wg.Done()
+
+	var lastTs typeutil.Timestamp
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case pack := <-helper.output:
+			if pack == nil || pack.EndTs == 0 {
+				continue
+			}
+			assert.Greater(t, pack.EndTs, lastTs, fmt.Sprintf("vchannel=%s", vchannel))
+			lastTs = pack.EndTs
+			helper.subPackNum++
+			for _, msg := range pack.Msgs {
+				switch msg.Type() {
+				case commonpb.MsgType_Insert:
+					helper.subInsMsgNum++
+				case commonpb.MsgType_Delete:
+					helper.subDelMsgNum++
+				case commonpb.MsgType_CreateCollection, commonpb.MsgType_DropCollection,
+					commonpb.MsgType_CreatePartition, commonpb.MsgType_DropPartition:
+					helper.subDDLMsgNum++
+				}
+			}
+		}
+	}
+}
+
+func produceTimeTick(t *testing.T, ctx context.Context, producer msgstream.MsgStream) {
 	tt := 1
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -240,9 +330,7 @@ func produceTimeTick(ctx context.Context, producer msgstream.MsgStream) {
 			err := producer.Produce(ctx, &msgstream.MsgPack{
 				Msgs: []msgstream.TsMsg{genTimeTickMsg(ts)},
 			})
-			if err != nil {
-				panic(err)
-			}
+			assert.NoError(t, err)
 			tt++
 		}
 	}
