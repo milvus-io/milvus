@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models/ali"
 	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
 	"github.com/milvus-io/milvus/internal/util/function/models/openai"
+	"github.com/milvus-io/milvus/internal/util/function/models/siliconflow"
 	"github.com/milvus-io/milvus/internal/util/function/models/vertexai"
 	"github.com/milvus-io/milvus/internal/util/function/models/voyageai"
 )
@@ -125,6 +126,32 @@ func CreateVoyageAIEmbeddingServer() *httptest.Server {
 		}
 
 		res.Usage = voyageai.Usage{
+			TotalTokens: 100,
+		}
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(res)
+		w.Write(data)
+	}))
+	return ts
+}
+
+func CreateSiliconflowEmbeddingServer(dim int) *httptest.Server {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req siliconflow.EmbeddingRequest
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		json.Unmarshal(body, &req)
+		embs := mockEmbedding(req.Input, dim)
+		var res siliconflow.EmbeddingResponse
+		for i := 0; i < len(req.Input); i++ {
+			res.Data = append(res.Data, siliconflow.EmbeddingData{
+				Object:    "list",
+				Embedding: embs[i],
+				Index:     i,
+			})
+		}
+
+		res.Usage = siliconflow.Usage{
 			TotalTokens: 100,
 		}
 		w.WriteHeader(http.StatusOK)
