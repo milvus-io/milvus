@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -317,8 +318,11 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         if (system_field_type == SystemFieldType::Timestamp) {
             std::vector<Timestamp> timestamps(num_rows);
             int64_t offset = 0;
-            FieldMeta field_meta(
-                FieldName(""), FieldId(0), DataType::INT64, false);
+            FieldMeta field_meta(FieldName(""),
+                                 FieldId(0),
+                                 DataType::INT64,
+                                 false,
+                                 std::nullopt);
             std::shared_ptr<milvus::ArrowDataWrapper> r;
             while (data.arrow_reader_channel->pop(r)) {
                 auto chunk = std::dynamic_pointer_cast<FixedWidthChunk>(
@@ -1151,15 +1155,15 @@ ChunkedSegmentSealedImpl::check_search(const query::Plan* plan) const {
                "check search");
     auto absent_fields = request_fields - field_ready_bitset;
 
-    if (absent_fields.any()) {
-        // absent_fields.find_first() returns std::optional<>
-        auto field_id =
-            FieldId(absent_fields.find_first().value() + START_USER_FIELDID);
-        auto& field_meta = schema_->operator[](field_id);
-        PanicInfo(
-            FieldNotLoaded,
-            "User Field(" + field_meta.get_name().get() + ") is not loaded");
-    }
+    // if (absent_fields.any()) {
+    //     // absent_fields.find_first() returns std::optional<>
+    //     auto field_id =
+    //         FieldId(absent_fields.find_first().value() + START_USER_FIELDID);
+    //     auto& field_meta = schema_->operator[](field_id);
+    //     PanicInfo(
+    //         FieldNotLoaded,
+    //         "User Field(" + field_meta.get_name().get() + ") is not loaded");
+    // }
 }
 
 std::vector<SegOffset>

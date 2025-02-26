@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <boost/algorithm/string.hpp>
+#include <optional>
 #include <sys/errno.h>
 #include <unistd.h>
 #include <yaml-cpp/yaml.h>
@@ -76,6 +77,25 @@ BitmapIndex<T>::Build(const Config& config) {
 
     auto field_datas =
         file_manager_->CacheRawDataToMemory(insert_files.value());
+
+    auto lack_binlog_rows =
+        GetValueFromConfig<int64_t>(config, "lack_binlog_rows");
+    if (lack_binlog_rows.has_value()) {
+        auto field_schema = file_manager_->GetFieldDataMeta().field_schema;
+        auto default_value = [&]() -> std::optional<DefaultValueType> {
+            if (!field_schema.has_default_value()) {
+                return std::nullopt;
+            }
+            return field_schema.default_value();
+        }();
+        auto field_data = storage::CreateFieldData(
+            static_cast<DataType>(field_schema.data_type()),
+            true,
+            1,
+            lack_binlog_rows.value());
+        field_data->FillFieldData(default_value, lack_binlog_rows.value());
+        field_datas.insert(field_datas.begin(), field_data);
+    }
 
     BuildWithFieldData(field_datas);
 }
@@ -1103,7 +1123,7 @@ template <typename T>
 std::optional<T>
 BitmapIndex<T>::Reverse_Lookup(size_t idx) const {
     AssertInfo(is_built_, "index has not been built");
-    AssertInfo(idx < total_num_rows_, "out of range of total coun");
+    AssertInfo(idx < total_num_rows_, "out of range of total count");
 
     if (!valid_bitset_[idx]) {
         return std::nullopt;
