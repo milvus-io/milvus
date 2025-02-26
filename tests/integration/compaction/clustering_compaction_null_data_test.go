@@ -238,7 +238,7 @@ func (s *ClusteringCompactionNullDataSuite) TestClusteringCompactionNullData() {
 
 	// 30000*(128*4+8+8) = 15.1MB/1MB = 15+1
 	// The check is done every 100 lines written, so the size of each segment may be up to 99 lines larger.
-	s.Equal(9, len(flushedSegmentsResp.GetSegments()))
+	s.Contains([]int{15, 16}, len(flushedSegmentsResp.GetSegments()))
 	log.Info("get flushed segments done", zap.Int64s("segments", flushedSegmentsResp.GetSegments()))
 	totalRows := int64(0)
 	segsInfoResp, err := c.DataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{

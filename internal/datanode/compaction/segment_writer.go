@@ -126,7 +126,8 @@ func (w *MultiSegmentWriter) closeWriter() error {
 			zap.Int64("segmentID", w.currentSegmentID),
 			zap.String("channel", w.channel),
 			zap.Int64("totalRows", w.writer.GetRowNum()),
-			zap.Int64("segment size", w.segmentSize))
+			zap.Uint64("totalSize", w.writer.GetWrittenUncompressed()),
+			zap.Int64("expected segment size", w.segmentSize))
 	}
 	return nil
 }
@@ -163,6 +164,13 @@ func (w *MultiSegmentWriter) GetWrittenUncompressed() uint64 {
 		return 0
 	}
 	return w.writer.GetWrittenUncompressed()
+}
+
+func (w *MultiSegmentWriter) GetBufferUncompressed() uint64 {
+	if w.writer == nil {
+		return 0
+	}
+	return w.writer.GetBufferUncompressed()
 }
 
 func (w *MultiSegmentWriter) GetCompactionSegments() []*datapb.CompactionSegment {
@@ -202,20 +210,10 @@ func (w *MultiSegmentWriter) FlushChunk() error {
 // DONOT return an empty list if every insert of the segment is deleted,
 // append an empty segment instead
 func (w *MultiSegmentWriter) Close() error {
-	if w.writer == nil && len(w.res) == 0 {
-		// append an empty segment
-		id, err := w.allocator.segmentAlloc.AllocOne()
-		if err != nil {
-			return err
-		}
-		w.res = append(w.res, &datapb.CompactionSegment{
-			SegmentID: id,
-			NumOfRows: 0,
-			Channel:   w.channel,
-		})
-		return nil
+	if w.writer != nil {
+		return w.closeWriter()
 	}
-	return w.closeWriter()
+	return nil
 }
 
 func NewSegmentDeltaWriter(segmentID, partitionID, collectionID int64) *SegmentDeltaWriter {
