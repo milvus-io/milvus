@@ -1230,7 +1230,6 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				fieldSchema.AutoID = httpReq.Schema.AutoId
 			}
 			if field.IsPartitionKey {
-				partitionsNum = int64(64)
 				if partitionsNumStr, ok := httpReq.Params["partitionsNum"]; ok {
 					if partitions, err := strconv.ParseInt(fmt.Sprintf("%v", partitionsNumStr), 10, 64); err == nil {
 						partitionsNum = partitions
