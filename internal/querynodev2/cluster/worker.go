@@ -42,6 +42,7 @@ type Worker interface {
 	DeleteBatch(ctx context.Context, req *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error)
 	SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error)
 	QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
+	QuerySegmentsOffset(ctx context.Context, req *querypb.QueryOffsetsRequest) (*internalpb.RetrieveResults, error)
 	QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error)
 
@@ -208,6 +209,11 @@ func (w *remoteWorker) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	}
 
 	return ret, err
+}
+
+func (w *remoteWorker) QuerySegmentsOffset(ctx context.Context, req *querypb.QueryOffsetsRequest) (*internalpb.RetrieveResults, error) {
+	client := w.getClient()
+	return client.QuerySegmentsOffset(ctx, req)
 }
 
 func (w *remoteWorker) QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {

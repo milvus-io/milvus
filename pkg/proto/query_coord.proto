@@ -154,6 +154,8 @@ service QueryNode {
     }
     rpc QuerySegments(QueryRequest) returns (internal.RetrieveResults) {
     }
+    rpc QuerySegmentsOffset(QueryOffsetsRequest) returns (internal.RetrieveResults) {
+    }
     rpc QueryStreamSegments(QueryRequest)
         returns (stream internal.RetrieveResults) {
     }
@@ -445,6 +447,18 @@ message QueryRequest {
     repeated int64 segmentIDs = 3;
     bool from_shard_leader = 4;
     DataScope scope = 5;  // All, Streaming, Historical
+}
+
+message QueryOffsetsRequest {
+    common.MsgBase base = 1;
+    int64 collection_id = 2;
+    string shard_name = 3;
+    repeated int64 segment_ids = 4;
+    repeated schema.LongArray offsets = 5;
+    repeated schema.LongArray indexes = 6;
+    uint64 mvcc_timestamp = 7;
+    repeated int64 output_fields_id = 8;
+    string username = 9;
 }
 
 message SyncReplicaSegmentsRequest {

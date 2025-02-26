@@ -45,20 +45,29 @@ func newDefaultLimitReducer(req *querypb.QueryRequest, schema *schemapb.Collecti
 }
 
 type defaultLimitReducerSegcore struct {
-	req     *querypb.QueryRequest
-	schema  *schemapb.CollectionSchema
-	manager *Manager
+	limit           int64
+	outputFieldsIDs []int64
+	reduceType      int32
+	schema          *schemapb.CollectionSchema
+	manager         *Manager
 }
 
 func (r *defaultLimitReducerSegcore) Reduce(ctx context.Context, results []*segcorepb.RetrieveResults, segments []Segment, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
-	mergeParam := NewMergeParam(r.req.GetReq().GetLimit(), r.req.GetReq().GetOutputFieldsId(), r.schema, reduce.ToReduceType(r.req.GetReq().GetReduceType()))
+	mergeParam := NewMergeParam(r.limit, r.outputFieldsIDs, r.schema, reduce.ToReduceType(r.reduceType))
 	return mergeSegcoreRetrieveResultsAndFillIfEmpty(ctx, results, mergeParam, segments, plan, r.manager)
 }
 
-func newDefaultLimitReducerSegcore(req *querypb.QueryRequest, schema *schemapb.CollectionSchema, manager *Manager) *defaultLimitReducerSegcore {
+func newDefaultLimitReducerSegcore(limit int64,
+	outputFieldsIDs []int64,
+	reduceType int32,
+	schema *schemapb.CollectionSchema,
+	manager *Manager,
+) *defaultLimitReducerSegcore {
 	return &defaultLimitReducerSegcore{
-		req:     req,
-		schema:  schema,
-		manager: manager,
+		limit:           limit,
+		outputFieldsIDs: outputFieldsIDs,
+		reduceType:      reduceType,
+		schema:          schema,
+		manager:         manager,
 	}
 }

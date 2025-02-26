@@ -796,6 +796,65 @@ func (_c *MockQueryNodeServer_QuerySegments_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// QuerySegmentsOffset provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryNodeServer) QuerySegmentsOffset(_a0 context.Context, _a1 *querypb.QueryOffsetsRequest) (*internalpb.RetrieveResults, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for QuerySegmentsOffset")
+	}
+
+	var r0 *internalpb.RetrieveResults
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryOffsetsRequest) (*internalpb.RetrieveResults, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryOffsetsRequest) *internalpb.RetrieveResults); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.RetrieveResults)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.QueryOffsetsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryNodeServer_QuerySegmentsOffset_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QuerySegmentsOffset'
+type MockQueryNodeServer_QuerySegmentsOffset_Call struct {
+	*mock.Call
+}
+
+// QuerySegmentsOffset is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.QueryOffsetsRequest
+func (_e *MockQueryNodeServer_Expecter) QuerySegmentsOffset(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_QuerySegmentsOffset_Call {
+	return &MockQueryNodeServer_QuerySegmentsOffset_Call{Call: _e.mock.On("QuerySegmentsOffset", _a0, _a1)}
+}
+
+func (_c *MockQueryNodeServer_QuerySegmentsOffset_Call) Run(run func(_a0 context.Context, _a1 *querypb.QueryOffsetsRequest)) *MockQueryNodeServer_QuerySegmentsOffset_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.QueryOffsetsRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryNodeServer_QuerySegmentsOffset_Call) Return(_a0 *internalpb.RetrieveResults, _a1 error) *MockQueryNodeServer_QuerySegmentsOffset_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryNodeServer_QuerySegmentsOffset_Call) RunAndReturn(run func(context.Context, *querypb.QueryOffsetsRequest) (*internalpb.RetrieveResults, error)) *MockQueryNodeServer_QuerySegmentsOffset_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // QueryStream provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryNodeServer) QueryStream(_a0 *querypb.QueryRequest, _a1 querypb.QueryNode_QueryStreamServer) error {
 	ret := _m.Called(_a0, _a1)

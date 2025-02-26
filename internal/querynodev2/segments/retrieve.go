@@ -24,7 +24,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -67,6 +70,72 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		if err != nil {
 			return err
 		}
+		resultCh <- RetrieveSegmentResult{
+			result,
+			s,
+		}
+		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		return nil
+	}
+
+	err := doOnSegments(ctx, mgr, segments, retriever)
+	close(resultCh)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]RetrieveSegmentResult, 0, len(segments))
+	for r := range resultCh {
+		results = append(results, r)
+	}
+	return results, nil
+}
+
+func retrieveOnSegmentsWithOffsets(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, req *querypb.QueryOffsetsRequest) ([]RetrieveSegmentResult, error) {
+	// segment ids & offsets are validated before calling this function
+	segID2Offsets := make(map[int64][]int64)
+	segID2Indexes := make(map[int64][]int64)
+	for i, segID := range req.GetSegmentIds() {
+		offsets := req.GetOffsets()[i].GetData()
+		segID2Offsets[segID] = offsets
+		indexes := req.GetIndexes()[i].GetData()
+		segID2Indexes[segID] = indexes
+	}
+	// for i, segID := range req.GetSegmentIds()
+
+	resultCh := make(chan RetrieveSegmentResult, len(segments))
+	plan.SetIgnoreNonPk(false)
+
+	label := metrics.SealedSegmentLabel
+	if segType == commonpb.SegmentState_Growing {
+		label = metrics.GrowingSegmentLabel
+	}
+
+	retriever := func(ctx context.Context, s Segment) error {
+		tr := timerecord.NewTimeRecorder("retrieveOnSegmentsWithOffsets")
+		result, err := s.RetrieveByOffsets(ctx, &segcore.RetrievePlanWithOffsets{
+			RetrievePlan: plan,
+			Offsets:      segID2Offsets[s.ID()],
+			FillPKs:      true,
+		})
+		if err != nil {
+			return err
+		}
+		// append result index column into result set
+		result.FieldsData = append(result.FieldsData, &schemapb.FieldData{
+			Type:    schemapb.DataType_Int64,
+			FieldId: common.ResultIndexField,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: segID2Indexes[s.ID()],
+						},
+					},
+				},
+			},
+		})
 		resultCh <- RetrieveSegmentResult{
 			result,
 			s,
@@ -168,6 +237,30 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 	}
 
 	result, err := retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan, req)
+	return result, retrieveSegments, err
+}
+
+// retrieve will retrieve all the validate target segments
+func RetrieveByOffsets(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryOffsetsRequest) ([]RetrieveSegmentResult, []Segment, error) {
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
+
+	var err error
+	var SegType commonpb.SegmentState
+	var retrieveSegments []Segment
+
+	segIDs := req.GetSegmentIds()
+	collID := req.GetCollectionId()
+	log := log.Ctx(ctx)
+	log.Debug("retrieve on segments", zap.Int64s("segmentIDs", segIDs), zap.Int64("collectionID", collID))
+
+	retrieveSegments, err = validate(ctx, manager, collID, nil, segIDs)
+	if err != nil {
+		return nil, retrieveSegments, err
+	}
+
+	result, err := retrieveOnSegmentsWithOffsets(ctx, manager, retrieveSegments, SegType, plan, req)
 	return result, retrieveSegments, err
 }
 

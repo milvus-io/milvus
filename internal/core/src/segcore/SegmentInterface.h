@@ -77,7 +77,8 @@ class SegmentInterface {
     Retrieve(tracer::TraceContext* trace_ctx,
              const query::RetrievePlan* Plan,
              const int64_t* offsets,
-             int64_t size) const = 0;
+             int64_t size,
+             bool fill_pks) const = 0;
 
     virtual size_t
     GetMemoryUsageInBytes() const = 0;
@@ -276,7 +277,8 @@ class SegmentInternalInterface : public SegmentInterface {
     Retrieve(tracer::TraceContext* trace_ctx,
              const query::RetrievePlan* Plan,
              const int64_t* offsets,
-             int64_t size) const override;
+             int64_t size,
+             bool fill_pks) const override;
 
     virtual bool
     HasIndex(FieldId field_id) const = 0;
