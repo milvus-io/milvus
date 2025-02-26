@@ -25,7 +25,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -159,22 +158,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 		return partition.PartitionID
 	})
 
-	channelInfos := make(map[string][]*datapb.VchannelInfo)
 	segments := make(map[int64]*datapb.SegmentInfo, 0)
-	dmChannels := make(map[string]*DmChannel)
-
-	for _, info := range vChannelInfos {
-		channelInfos[info.GetChannelName()] = append(channelInfos[info.GetChannelName()], info)
-		for _, segmentID := range info.GetLevelZeroSegmentIds() {
-			segments[segmentID] = &datapb.SegmentInfo{
-				ID:            segmentID,
-				CollectionID:  collectionID,
-				InsertChannel: info.GetChannelName(),
-				State:         commonpb.SegmentState_Flushed,
-				Level:         datapb.SegmentLevel_L0,
-			}
-		}
-	}
 	partitionSet := typeutil.NewUniqueSet(partitionIDs...)
 	for _, segmentInfo := range segmentInfos {
 		if partitionSet.Contain(segmentInfo.GetPartitionID()) || segmentInfo.GetPartitionID() == common.AllPartitionsID {
@@ -182,9 +166,9 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 		}
 	}
 
-	for _, infos := range channelInfos {
-		merged := mergeDmChannelInfo(infos)
-		dmChannels[merged.GetChannelName()] = merged
+	dmChannels := make(map[string]*DmChannel)
+	for _, channelInfo := range vChannelInfos {
+		dmChannels[channelInfo.ChannelName] = DmChannelFromVChannel(channelInfo)
 	}
 
 	if len(segments) == 0 && len(dmChannels) == 0 {
@@ -574,12 +558,12 @@ func (mgr *TargetManager) Recover(ctx context.Context, catalog metastore.QueryCo
 // if segment isn't l0 segment, and exist in current/next target, then it can be moved
 func (mgr *TargetManager) CanSegmentBeMoved(ctx context.Context, collectionID, segmentID int64) bool {
 	current := mgr.current.getCollectionTarget(collectionID)
-	if current != nil && current.segments[segmentID] != nil && current.segments[segmentID].GetLevel() != datapb.SegmentLevel_L0 {
+	if current != nil && current.segments[segmentID] != nil {
 		return true
 	}
 
 	next := mgr.next.getCollectionTarget(collectionID)
-	if next != nil && next.segments[segmentID] != nil && next.segments[segmentID].GetLevel() != datapb.SegmentLevel_L0 {
+	if next != nil && next.segments[segmentID] != nil {
 		return true
 	}
 
