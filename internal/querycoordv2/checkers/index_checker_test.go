@@ -407,7 +407,7 @@ func (suite *IndexCheckerSuite) TestLoadJsonIndex() {
 	}
 
 	indexInfo := make(map[int64]*querypb.FieldIndexInfo)
-	indexInfo[fieldIndexInfo.FieldID] = fieldIndexInfo
+	indexInfo[fieldIndexInfo.IndexID] = fieldIndexInfo
 	segment := utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel")
 	segment.IndexInfo = indexInfo
 	checker.dist.SegmentDistManager.Update(1, segment)
@@ -555,7 +555,7 @@ func (suite *IndexCheckerSuite) TestCreateNewJsonIndex() {
 	}
 
 	indexInfo := make(map[int64]*querypb.FieldIndexInfo)
-	indexInfo[fieldIndexInfo.FieldID] = fieldIndexInfo
+	indexInfo[fieldIndexInfo.IndexID] = fieldIndexInfo
 	segment := utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel")
 	segment.IndexInfo = indexInfo
 	checker.dist.SegmentDistManager.Update(1, segment)

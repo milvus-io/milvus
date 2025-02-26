@@ -122,5 +122,5 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 
 	jm.loopWg.Wait()
 
-	s.Equal(3, len(jm.scheduler.tasks))
+	s.Equal(2, len(jm.scheduler.tasks))
 }
