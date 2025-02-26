@@ -19,16 +19,16 @@ func hasWildcards(pattern string) (string, bool) {
 	hasWildcard := false
 
 	for i := 0; i < len(pattern); i++ {
-		if pattern[i] == '\\' && i+1 < len(pattern) {
+		if pattern[i] == escapeCharacter && i+1 < len(pattern) {
 			next := pattern[i+1]
-			if next == '_' || next == '%' {
+			if _, ok := wildcards[next]; ok {
 				result.WriteByte(next)
 				i++
 				continue
 			}
 		}
 
-		if pattern[i] == '_' || pattern[i] == '%' {
+		if _, ok := wildcards[pattern[i]]; ok {
 			hasWildcard = true
 		}
 		result.WriteByte(pattern[i])
