@@ -337,11 +337,11 @@ func (m *indexMeta) CreateIndex(req *indexpb.CreateIndexRequest, allocatedIndexI
 	if err := ValidateIndexParams(index); err != nil {
 		return indexID, err
 	}
-	log.Ctx(ctx).Info("meta update: CreateIndex", zap.Int64("collectionID", index.CollectionID),
+	log.Ctx(m.ctx).Info("meta update: CreateIndex", zap.Int64("collectionID", index.CollectionID),
 		zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID), zap.String("indexName", index.IndexName))
 
 	if err := m.catalog.CreateIndex(m.ctx, index); err != nil {
-		log.Ctx(ctx).Error("meta update: CreateIndex save meta fail", zap.Int64("collectionID", index.CollectionID),
+		log.Ctx(m.ctx).Error("meta update: CreateIndex save meta fail", zap.Int64("collectionID", index.CollectionID),
 			zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID),
 			zap.String("indexName", index.IndexName), zap.Error(err))
 		return indexID, err

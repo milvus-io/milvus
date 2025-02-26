@@ -24,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
-<<<<<<< HEAD
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/proto/datapb"
@@ -34,17 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-=======
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
->>>>>>> 27fb8d9512 (fix: create multiple identical indexes by accident (#40180))
 )
 
 type ServerSuite struct {
@@ -1144,16 +1132,11 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-<<<<<<< HEAD
-		err = svr.meta.indexMeta.CreateIndex(&model.Index{
-			TenantID:     "",
-=======
 		indexReq := &indexpb.CreateIndexRequest{
->>>>>>> 27fb8d9512 (fix: create multiple identical indexes by accident (#40180))
 			CollectionID: 0,
 			FieldID:      2,
 		}
-		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0)
+		_, err = svr.meta.indexMeta.CreateIndex(indexReq, 0)
 		assert.NoError(t, err)
 
 		seg1 := createSegment(0, 0, 0, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
@@ -1372,16 +1355,11 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
-<<<<<<< HEAD
-		err = svr.meta.indexMeta.CreateIndex(&model.Index{
-			TenantID:     "",
-=======
 		indexReq := &indexpb.CreateIndexRequest{
->>>>>>> 27fb8d9512 (fix: create multiple identical indexes by accident (#40180))
 			CollectionID: 0,
 			FieldID:      2,
 		}
-		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0)
+		_, err = svr.meta.indexMeta.CreateIndex(indexReq, 0)
 		assert.NoError(t, err)
 		err = svr.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
 			SegmentID: segment.ID,
@@ -1541,28 +1519,12 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
 		assert.NoError(t, err)
-<<<<<<< HEAD
-		err = svr.meta.indexMeta.CreateIndex(&model.Index{
-			TenantID:        "",
-			CollectionID:    0,
-			FieldID:         2,
-			IndexID:         0,
-			IndexName:       "_default_idx_2",
-			IsDeleted:       false,
-			CreateTime:      0,
-			TypeParams:      nil,
-			IndexParams:     nil,
-			IsAutoIndex:     false,
-			UserIndexParams: nil,
-		})
-=======
 		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexName:    "_default_idx_2",
 		}
-		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0)
->>>>>>> 27fb8d9512 (fix: create multiple identical indexes by accident (#40180))
+		_, err = svr.meta.indexMeta.CreateIndex(indexReq, 0)
 		assert.NoError(t, err)
 		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			SegmentID:     seg4.ID,
