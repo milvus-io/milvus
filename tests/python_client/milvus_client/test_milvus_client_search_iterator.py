@@ -133,7 +133,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
     def metric_type(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[{"radius": 0.1, "range_filter": 0.9}])
+    @pytest.fixture(scope="function", params=[{}, {"radius": 0.1, "range_filter": 0.9}])
     def search_params(self, request):
         yield request.param
 
