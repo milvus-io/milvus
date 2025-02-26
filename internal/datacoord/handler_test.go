@@ -39,11 +39,11 @@ func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 			},
 		},
 	})
-	err := svr.meta.indexMeta.CreateIndex(&model.Index{
+	indexReq := &indexpb.CreateIndexRequest{
 		CollectionID: 1,
 		FieldID:      2,
-		IndexID:      1,
-	})
+	}
+	_, err := svr.meta.indexMeta.CreateIndex(indexReq, 1)
 	require.NoError(t, err)
 
 	segArgs := []struct {
@@ -150,12 +150,12 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		},
 	})
 
-	err := svr.meta.indexMeta.CreateIndex(&model.Index{
-		TenantID:     "",
+	indexReq := &indexpb.CreateIndexRequest{
 		CollectionID: 0,
 		FieldID:      2,
-		IndexID:      1,
-	})
+	}
+
+	_, err := svr.meta.indexMeta.CreateIndex(indexReq, 1)
 	assert.NoError(t, err)
 
 	s1 := &datapb.SegmentInfo{
@@ -321,12 +321,11 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			ID:     0,
 			Schema: schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(&model.Index{
-			TenantID:     "",
+		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 0,
 			FieldID:      2,
-			IndexID:      1,
-		})
+		}
+		_, err := svr.meta.indexMeta.CreateIndex(indexReq, 1)
 		assert.NoError(t, err)
 		c := &datapb.SegmentInfo{
 			ID:            1,
@@ -391,12 +390,11 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			ID:     0,
 			Schema: schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(&model.Index{
-			TenantID:     "",
+		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 0,
 			FieldID:      2,
-			IndexID:      1,
-		})
+		}
+		_, err := svr.meta.indexMeta.CreateIndex(indexReq, 1)
 		assert.NoError(t, err)
 		a := &datapb.SegmentInfo{
 			ID:            99,
@@ -477,12 +475,11 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			ID:     0,
 			Schema: schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(&model.Index{
-			TenantID:     "",
+		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 0,
 			FieldID:      2,
-			IndexID:      1,
-		})
+		}
+		_, err := svr.meta.indexMeta.CreateIndex(indexReq, 1)
 		assert.NoError(t, err)
 		c := &datapb.SegmentInfo{
 			ID:            1,
@@ -586,12 +583,11 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			ID:     0,
 			Schema: schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(&model.Index{
-			TenantID:     "",
+		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 0,
 			FieldID:      2,
-			IndexID:      1,
-		})
+		}
+		_, err := svr.meta.indexMeta.CreateIndex(indexReq, 1)
 		assert.NoError(t, err)
 		seg1 := &datapb.SegmentInfo{
 			ID:            1,

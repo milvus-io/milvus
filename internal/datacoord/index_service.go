@@ -26,7 +26,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/common"
 	pkgcommon "github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -209,58 +208,24 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 	}
 
-	indexID, err := s.meta.indexMeta.CanCreateIndex(req)
-	if err != nil {
+	if isDiskANNIndex(GetIndexType(req.IndexParams)) && !s.indexNodeManager.ClientSupportDisk() {
+		errMsg := "all IndexNodes do not support disk indexes, please verify"
+		log.Warn(errMsg)
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(err), nil
+		return merr.Status(merr.WrapErrIndexNotSupported(GetIndexType(req.IndexParams))), nil
 	}
 
-	// merge with previous params because create index would not pass mmap params
-	indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
-	if len(indexes) == 1 {
-		req.UserIndexParams = UpdateParams(indexes[0], indexes[0].UserIndexParams, req.GetUserIndexParams())
-		req.IndexParams = UpdateParams(indexes[0], indexes[0].IndexParams, req.GetIndexParams())
-	}
-
-	if indexID == 0 {
-		indexID, err = s.allocator.allocID(ctx)
-		if err != nil {
-			log.Warn("failed to alloc indexID", zap.Error(err))
-			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
-			return merr.Status(err), nil
-		}
-		if GetIndexType(req.GetIndexParams()) == indexparamcheck.IndexDISKANN && !s.indexNodeManager.ClientSupportDisk() {
-			errMsg := "all IndexNodes do not support disk indexes, please verify"
-			log.Warn(errMsg)
-			err = merr.WrapErrIndexNotSupported(indexparamcheck.IndexDISKANN)
-			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
-			return merr.Status(err), nil
-		}
-	}
-	// exclude the mmap.enable param, because it will be conflict with the index's mmap.enable param
-	typeParams := DeleteParams(req.GetTypeParams(), []string{common.MmapEnabledKey})
-
-	index := &model.Index{
-		CollectionID:    req.GetCollectionID(),
-		FieldID:         req.GetFieldID(),
-		IndexID:         indexID,
-		IndexName:       req.GetIndexName(),
-		TypeParams:      typeParams,
-		IndexParams:     req.GetIndexParams(),
-		CreateTime:      req.GetTimestamp(),
-		IsAutoIndex:     req.GetIsAutoIndex(),
-		UserIndexParams: req.GetUserIndexParams(),
-	}
-
-	if err := ValidateIndexParams(index); err != nil {
+	allocatedIndexID, err := s.allocator.allocID(ctx)
+	if err != nil {
+		log.Warn("failed to alloc indexID", zap.Error(err))
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	// Get flushed segments and create index
-	err = s.meta.indexMeta.CreateIndex(index)
+	indexID, err := s.meta.indexMeta.CreateIndex(req, allocatedIndexID)
 	if err != nil {
-		log.Error("CreateIndex fail",
+		log.Warn("CreateIndex fail",
 			zap.Int64("fieldID", req.GetFieldID()), zap.String("indexName", req.GetIndexName()), zap.Error(err))
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil

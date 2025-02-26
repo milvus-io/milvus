@@ -1160,13 +1160,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(&model.Index{
-			TenantID:     "",
+		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 0,
 			FieldID:      2,
-			IndexID:      0,
-			IndexName:    "",
-		})
+		}
+		_, err = svr.meta.indexMeta.CreateIndex(indexReq, 0)
 		assert.NoError(t, err)
 
 		seg1 := createSegment(0, 0, 0, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
@@ -1383,13 +1381,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(&model.Index{
-			TenantID:     "",
+		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 0,
 			FieldID:      2,
-			IndexID:      0,
-			IndexName:    "",
-		})
+		}
+		_, err = svr.meta.indexMeta.CreateIndex(indexReq, 0)
 		assert.NoError(t, err)
 		err = svr.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
 			SegmentID: segment.ID,
@@ -1548,19 +1544,12 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.CreateIndex(&model.Index{
-			TenantID:        "",
-			CollectionID:    0,
-			FieldID:         2,
-			IndexID:         0,
-			IndexName:       "_default_idx_2",
-			IsDeleted:       false,
-			CreateTime:      0,
-			TypeParams:      nil,
-			IndexParams:     nil,
-			IsAutoIndex:     false,
-			UserIndexParams: nil,
-		})
+		indexReq := &indexpb.CreateIndexRequest{
+			CollectionID: 0,
+			FieldID:      2,
+			IndexName:    "_default_idx_2",
+		}
+		_, err = svr.meta.indexMeta.CreateIndex(indexReq, 0)
 		assert.NoError(t, err)
 		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			SegmentID:     seg4.ID,
