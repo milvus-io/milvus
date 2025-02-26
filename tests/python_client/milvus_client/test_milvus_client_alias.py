@@ -179,6 +179,7 @@ class TestMilvusClientAliasInvalid(TestMilvusClientV2Base):
                                                 f"[alias={alias}]"}
         self.create_alias(client, collection_name_1, alias,
                           check_task=CheckTasks.err_res, check_items=error)
+        self.drop_alias(client, alias)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -349,6 +350,7 @@ class TestMilvusClientAliasInvalid(TestMilvusClientV2Base):
         error = {ct.err_code: 1600, ct.err_msg: f"alias not found[database=default][alias={another_alias}]"}
         self.alter_alias(client, collection_name, another_alias,
                          check_task=CheckTasks.err_res, check_items=error)
+        self.drop_alias(client, alias)
         self.drop_collection(client, collection_name)
 
 
@@ -477,4 +479,6 @@ class TestMilvusClientAliasValid(TestMilvusClientV2Base):
         # 4. assert collection is equal to alias according to partitions
         partition_name_list_alias = self.list_partitions(client, another_alias)[0]
         assert partition_name_list == partition_name_list_alias
+        self.drop_alias(client, alias)
+        self.drop_alias(client, another_alias)
         self.drop_collection(client, collection_name)

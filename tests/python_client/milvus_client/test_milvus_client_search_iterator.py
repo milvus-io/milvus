@@ -118,6 +118,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
         self.release_collection(client, collection_name_new)
+        self.drop_alias(client, alias)
         self.drop_collection(client, collection_name_new)
 
 
