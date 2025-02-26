@@ -3,7 +3,7 @@
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 
 String cron_timezone = 'TZ=Asia/Shanghai'
-String cron_string = "50 3 * * * "
+String cron_string = "50 20 * * * "
 
 // Make timeout 4 hours so that we can run two nightly during the ci
 int total_timeout_minutes = 7 * 60
