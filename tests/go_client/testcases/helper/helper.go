@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
-	clientv2 "github.com/milvus-io/milvus/client/v2/milvusclient"
+	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
@@ -104,6 +104,37 @@ func GetInvalidPartitionKeyFieldType() []entity.FieldType {
 	return nonPkFieldTypes
 }
 
+// CreateDefaultMilvusClient creates a new client with default configuration
+func CreateDefaultMilvusClient(ctx context.Context, t *testing.T) *base.MilvusClient {
+	t.Helper()
+	mc, err := base.NewMilvusClient(ctx, defaultClientConfig)
+	common.CheckErr(t, err, true)
+
+	t.Cleanup(func() {
+		mc.Close(ctx)
+	})
+
+	return mc
+}
+
+// CreateMilvusClient create connect
+func CreateMilvusClient(ctx context.Context, t *testing.T, cfg *client.ClientConfig) *base.MilvusClient {
+	t.Helper()
+
+	var (
+		mc  *base.MilvusClient
+		err error
+	)
+	mc, err = base.NewMilvusClient(ctx, cfg)
+	common.CheckErr(t, err, true)
+
+	t.Cleanup(func() {
+		mc.Close(ctx)
+	})
+
+	return mc
+}
+
 // CollectionPrepare ----------------- prepare data --------------------------
 type CollectionPrepare struct{}
 
@@ -112,9 +143,9 @@ var (
 	FieldsFact  FieldsFactory
 )
 
-func mergeOptions(schema *entity.Schema, opts ...CreateCollectionOpt) clientv2.CreateCollectionOption {
+func mergeOptions(schema *entity.Schema, opts ...CreateCollectionOpt) client.CreateCollectionOption {
 	//
-	collectionOption := clientv2.NewCreateCollectionOption(schema.CollectionName, schema)
+	collectionOption := client.NewCreateCollectionOption(schema.CollectionName, schema)
 	tmpOption := &createCollectionOpt{}
 	for _, o := range opts {
 		o(tmpOption)
@@ -159,7 +190,7 @@ func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *tes
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second*10)
 		defer cancel()
 
-		err := mc.DropCollection(ctx, clientv2.NewDropCollectionOption(schema.CollectionName))
+		err := mc.DropCollection(ctx, client.NewDropCollectionOption(schema.CollectionName))
 		common.CheckErr(t, err, true)
 	})
 	return chainTask, schema
@@ -167,14 +198,14 @@ func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *tes
 
 func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T, mc *base.MilvusClient,
 	ip *InsertParams, option *GenDataOption,
-) (*CollectionPrepare, clientv2.InsertResult) {
+) (*CollectionPrepare, client.InsertResult) {
 	if nil == ip.Schema || ip.Schema.CollectionName == "" {
 		log.Fatal("[InsertData] Nil Schema is not expected")
 	}
 	// print option
 	log.Info("GenDataOption", zap.Any("option", option))
 	columns, dynamicColumns := GenColumnsBasedSchema(ip.Schema, option)
-	insertOpt := clientv2.NewColumnBasedInsertOption(ip.Schema.CollectionName).WithColumns(columns...).WithColumns(dynamicColumns...)
+	insertOpt := client.NewColumnBasedInsertOption(ip.Schema.CollectionName).WithColumns(columns...).WithColumns(dynamicColumns...)
 	if ip.PartitionName != "" {
 		insertOpt.WithPartition(ip.PartitionName)
 	}
@@ -185,7 +216,7 @@ func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T
 }
 
 func (chainTask *CollectionPrepare) FlushData(ctx context.Context, t *testing.T, mc *base.MilvusClient, collName string) *CollectionPrepare {
-	flushTask, err := mc.Flush(ctx, clientv2.NewFlushOption(collName))
+	flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
 	common.CheckErr(t, err, true)
 	err = flushTask.Await(ctx)
 	common.CheckErr(t, err, true)
@@ -203,14 +234,14 @@ func (chainTask *CollectionPrepare) CreateIndex(ctx context.Context, t *testing.
 		if field.DataType >= 100 {
 			if idx, ok := mFieldIndex[field.Name]; ok {
 				log.Info("CreateIndex", zap.String("indexName", idx.Name()), zap.Any("indexType", idx.IndexType()), zap.Any("indexParams", idx.Params()))
-				createIndexTask, err := mc.CreateIndex(ctx, clientv2.NewCreateIndexOption(collName, field.Name, idx))
+				createIndexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, field.Name, idx))
 				common.CheckErr(t, err, true)
 				err = createIndexTask.Await(ctx)
 				common.CheckErr(t, err, true)
 			} else {
 				idx := GetDefaultVectorIndex(field.DataType)
 				log.Info("CreateIndex", zap.String("indexName", idx.Name()), zap.Any("indexType", idx.IndexType()), zap.Any("indexParams", idx.Params()))
-				createIndexTask, err := mc.CreateIndex(ctx, clientv2.NewCreateIndexOption(collName, field.Name, idx))
+				createIndexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, field.Name, idx))
 				common.CheckErr(t, err, true)
 				err = createIndexTask.Await(ctx)
 				common.CheckErr(t, err, true)
@@ -224,7 +255,8 @@ func (chainTask *CollectionPrepare) Load(ctx context.Context, t *testing.T, mc *
 	if lp.CollectionName == "" {
 		log.Fatal("[Load] Empty collection name is not expected")
 	}
-	loadTask, err := mc.LoadCollection(ctx, clientv2.NewLoadCollectionOption(lp.CollectionName).WithReplica(lp.Replica).WithLoadFields(lp.LoadFields...).WithSkipLoadDynamicField(lp.SkipLoadDynamicField))
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(lp.CollectionName).WithReplica(lp.Replica).WithLoadFields(lp.LoadFields...).
+		WithSkipLoadDynamicField(lp.SkipLoadDynamicField).WithResourceGroup(lp.ResourceGroups...).WithRefresh(lp.IsRefresh))
 	common.CheckErr(t, err, true)
 	err = loadTask.Await(ctx)
 	common.CheckErr(t, err, true)
