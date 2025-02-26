@@ -149,10 +149,11 @@ TEST(RandomSampleTest, SampleWithEmptyInput) {
 
     milvus::proto::plan::GenericValue val;
     val.set_int64_val(0);
+    // Less than 0 will not match any data
     auto expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
         milvus::expr::ColumnInfo(
             fid_64, DataType::INT64, std::vector<std::string>()),
-        OpType::Less,
+        OpType::LessThan,
         val,
         std::vector<proto::plan::GenericValue>{});
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
