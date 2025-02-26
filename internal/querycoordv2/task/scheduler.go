@@ -651,9 +651,9 @@ func (scheduler *taskScheduler) incExecutingTaskDelta(task Task) {
 func (scheduler *taskScheduler) decExecutingTaskDelta(task Task) {
 	switch task := task.(type) {
 	case *SegmentTask:
-		scheduler.segmentTaskDelta.Add(task)
+		scheduler.segmentTaskDelta.Sub(task)
 	case *ChannelTask:
-		scheduler.channelTaskDelta.Add(task)
+		scheduler.channelTaskDelta.Sub(task)
 	}
 }
 
