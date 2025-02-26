@@ -154,6 +154,7 @@ func NewClusteringCompactionTask(
 		binlogIO:       binlogIO,
 		plan:           plan,
 		tr:             timerecord.NewTimeRecorder("clustering_compaction"),
+		done:           make(chan struct{}, 1),
 		clusterBuffers: make([]*ClusterBuffer, 0),
 		flushCount:     atomic.NewInt64(0),
 		writtenRowNum:  atomic.NewInt64(0),
