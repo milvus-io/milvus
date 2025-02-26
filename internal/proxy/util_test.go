@@ -2446,6 +2446,9 @@ func TestSendReplicateMessagePack(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		mockStream.EXPECT().Produce(mock.Anything, mock.Anything).Return(nil)
 
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.AlterCollectionRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.AlterCollectionFieldRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.RenameCollectionRequest{})
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateDatabaseRequest{})
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DropDatabaseRequest{})
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.FlushRequest{})
@@ -2455,6 +2458,15 @@ func TestSendReplicateMessagePack(t *testing.T) {
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DropIndexRequest{})
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.LoadPartitionsRequest{})
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.ReleasePartitionsRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateCredentialRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DeleteCredentialRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateRoleRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DropRoleRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.OperateUserRoleRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.OperatePrivilegeRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateAliasRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DropAliasRequest{})
+		SendReplicateMessagePack(ctx, mockStream, &milvuspb.AlterAliasRequest{})
 	})
 }
 

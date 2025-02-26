@@ -868,11 +868,13 @@ type alterCollectionTask struct {
 	baseTask
 	Condition
 	*milvuspb.AlterCollectionRequest
-	ctx        context.Context
-	rootCoord  types.RootCoordClient
-	result     *commonpb.Status
-	queryCoord types.QueryCoordClient
-	dataCoord  types.DataCoordClient
+
+	ctx                context.Context
+	rootCoord          types.RootCoordClient
+	result             *commonpb.Status
+	replicateMsgStream msgstream.MsgStream
+	queryCoord         types.QueryCoordClient
+	dataCoord          types.DataCoordClient
 }
 
 func (t *alterCollectionTask) TraceCtx() context.Context {
@@ -1084,8 +1086,13 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 
 func (t *alterCollectionTask) Execute(ctx context.Context) error {
 	var err error
+
 	t.result, err = t.rootCoord.AlterCollection(ctx, t.AlterCollectionRequest)
-	return merr.CheckRPCCall(t.result, err)
+	if err = merr.CheckRPCCall(t.result, err); err != nil {
+		return err
+	}
+	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.AlterCollectionRequest)
+	return nil
 }
 
 func (t *alterCollectionTask) PostExecute(ctx context.Context) error {
@@ -1096,11 +1103,13 @@ type alterCollectionFieldTask struct {
 	baseTask
 	Condition
 	*milvuspb.AlterCollectionFieldRequest
-	ctx        context.Context
-	rootCoord  types.RootCoordClient
-	result     *commonpb.Status
-	queryCoord types.QueryCoordClient
-	dataCoord  types.DataCoordClient
+
+	ctx                context.Context
+	rootCoord          types.RootCoordClient
+	result             *commonpb.Status
+	replicateMsgStream msgstream.MsgStream
+	queryCoord         types.QueryCoordClient
+	dataCoord          types.DataCoordClient
 }
 
 func (t *alterCollectionFieldTask) TraceCtx() context.Context {
@@ -1262,8 +1271,13 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 
 func (t *alterCollectionFieldTask) Execute(ctx context.Context) error {
 	var err error
+
 	t.result, err = t.rootCoord.AlterCollectionField(ctx, t.AlterCollectionFieldRequest)
-	return merr.CheckRPCCall(t.result, err)
+	if err = merr.CheckRPCCall(t.result, err); err != nil {
+		return err
+	}
+	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.AlterCollectionFieldRequest)
+	return nil
 }
 
 func (t *alterCollectionFieldTask) PostExecute(ctx context.Context) error {
