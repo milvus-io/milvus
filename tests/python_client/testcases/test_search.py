@@ -10403,12 +10403,16 @@ class TestSearchIterator(TestcaseBase):
         collection_w.create_index(field_name, {"metric_type": metric_type})
         collection_w.load()
         search_vector = cf.gen_vectors(1, default_dim, vector_data_type)
-        search_params = {}
+        search_params = {"metric_type": metric_type}
+        collection_w.search_iterator(search_vector, field_name, search_params, batch_size,
+                                     check_task=CheckTasks.check_search_iterator,
+                                     check_items={"metric_type": metric_type,
+                                                  "batch_size": batch_size})
+
         limit = 200
         res = collection_w.search(search_vector, field_name, param=search_params, limit=200,
                                   check_task=CheckTasks.check_search_results,
                                   check_items={"nq": 1, "limit": limit})[0]
-
         # 2. search iterator
         if metric_type != "L2":
             radius = res[0][limit//2].distance - 0.1       # pick a radius to make sure there exists results
@@ -10416,7 +10420,7 @@ class TestSearchIterator(TestcaseBase):
             search_params = {"metric_type": metric_type, "params": {"radius": radius, "range_filter": range_filter}}
             collection_w.search_iterator(search_vector, field_name, search_params, batch_size,
                                          check_task=CheckTasks.check_search_iterator,
-                                         check_items={"metric_type": metric_type,
+                                         check_items={"metric_type": metric_type, "batch_size": batch_size,
                                                       "radius": radius,
                                                       "range_filter": range_filter})
         else:
@@ -10425,7 +10429,7 @@ class TestSearchIterator(TestcaseBase):
             search_params = {"metric_type": metric_type, "params": {"radius": radius, "range_filter": range_filter}}
             collection_w.search_iterator(search_vector, field_name, search_params, batch_size,
                                          check_task=CheckTasks.check_search_iterator,
-                                         check_items={"metric_type": metric_type,
+                                         check_items={"metric_type": metric_type, "batch_size": batch_size,
                                                       "radius": radius,
                                                       "range_filter": range_filter})
 
