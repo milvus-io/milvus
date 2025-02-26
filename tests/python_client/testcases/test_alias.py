@@ -222,6 +222,7 @@ class TestAliasOperation(TestcaseBase):
         self.utility_wrap.drop_collection(alias_name,
                                           check_task=CheckTasks.err_res,
                                           check_items=error)
+        self.utility_wrap.drop_alias(alias_name)
         self.utility_wrap.drop_collection(c_name)
         assert not self.utility_wrap.has_collection(c_name)[0]
 
@@ -450,6 +451,7 @@ class TestAliasOperationInvalid(TestcaseBase):
         assert len(res) == 1
 
         # dropping collection that has an alias shall drop the alias as well
+        self.utility_wrap.drop_alias(alias_name)
         collection_w.drop()
         collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
                                                  check_task=CheckTasks.check_collection_property,
@@ -470,6 +472,7 @@ class TestAliasOperationInvalid(TestcaseBase):
                 1.create a collection
                 2.create an alias for the collection
                 3.rename the collection to the alias name
+        expected: in step 3, rename collection to alias name failed
         """
         self._connect()
         c_name = cf.gen_unique_str("collection")
@@ -482,13 +485,3 @@ class TestAliasOperationInvalid(TestcaseBase):
                  ct.err_msg: f"duplicated new collection name default:{alias_name} with other collection name or alias"}
         self.utility_wrap.rename_collection(collection_w.name, alias_name,
                                             check_task=CheckTasks.err_res, check_items=error)
-
-        collection_w.drop()
-        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
-                                                 check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: c_name, exp_schema: default_schema})
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"this is not expected, any collection name or alias name shall be unique"}
-        self.utility_wrap.rename_collection(collection_w.name, alias_name,
-                                            check_task=CheckTasks.err_res, check_items=error)
-
