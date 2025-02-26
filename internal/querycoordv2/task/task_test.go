@@ -1910,6 +1910,21 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID, coll))
 	suite.Equal(0, scheduler.GetSegmentTaskDelta(nodeID2, coll2))
 	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID2, coll2))
+
+	task5, err := NewChannelTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll2,
+		suite.replica,
+		NewChannelAction(nodeID2, ActionTypeGrow, channelName2),
+	)
+	suite.NoError(err)
+	task4.SetID(5)
+	scheduler.incExecutingTaskDelta(task5)
+	suite.Equal(1, scheduler.GetChannelTaskDelta(nodeID2, coll2))
+	scheduler.decExecutingTaskDelta(task5)
+	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID2, coll2))
 }
 
 func (suite *TaskSuite) TestTaskDeltaCache() {
