@@ -31,17 +31,30 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
 	"github.com/milvus-io/milvus/internal/util/function/models/openai"
 	"github.com/milvus-io/milvus/internal/util/function/models/siliconflow"
+	"github.com/milvus-io/milvus/internal/util/function/models/tei"
 	"github.com/milvus-io/milvus/internal/util/function/models/vertexai"
 	"github.com/milvus-io/milvus/internal/util/function/models/voyageai"
 )
 
-func mockEmbedding(texts []string, dim int) [][]float32 {
-	embeddings := make([][]float32, 0)
+// func mockEmbedding(texts []string, dim int) [][]float32 {
+// 	embeddings := make([][]float32, 0)
+// 	for i := 0; i < len(texts); i++ {
+// 		f := float32(i)
+// 		emb := make([]float32, 0)
+// 		for j := 0; j < dim; j++ {
+// 			emb = append(emb, f+float32(j)*0.1)
+// 		}
+// 		embeddings = append(embeddings, emb)
+// 	}
+// 	return embeddings
+// }
+
+func mockEmbedding[T int8 | float32](texts []string, dim int) [][]T {
+	embeddings := make([][]T, 0)
 	for i := 0; i < len(texts); i++ {
-		f := float32(i)
-		emb := make([]float32, 0)
+		emb := make([]T, 0)
 		for j := 0; j < dim; j++ {
-			emb = append(emb, f+float32(j)*0.1)
+			emb = append(emb, T(i+j))
 		}
 		embeddings = append(embeddings, emb)
 	}
@@ -61,7 +74,7 @@ func CreateOpenAIEmbeddingServer() *httptest.Server {
 		body, _ := io.ReadAll(r.Body)
 		defer r.Body.Close()
 		json.Unmarshal(body, &req)
-		embs := mockEmbedding(req.Input, req.Dimensions)
+		embs := mockEmbedding[float32](req.Input, req.Dimensions)
 		var res openai.EmbeddingResponse
 		res.Object = "list"
 		res.Model = "text-embedding-3-small"
@@ -90,7 +103,7 @@ func CreateAliEmbeddingServer() *httptest.Server {
 		body, _ := io.ReadAll(r.Body)
 		defer r.Body.Close()
 		json.Unmarshal(body, &req)
-		embs := mockEmbedding(req.Input.Texts, req.Parameters.Dimension)
+		embs := mockEmbedding[float32](req.Input.Texts, req.Parameters.Dimension)
 		var res ali.EmbeddingResponse
 		for i := 0; i < len(req.Input.Texts); i++ {
 			res.Output.Embeddings = append(res.Output.Embeddings, ali.Embeddings{
@@ -109,16 +122,16 @@ func CreateAliEmbeddingServer() *httptest.Server {
 	return ts
 }
 
-func CreateVoyageAIEmbeddingServer() *httptest.Server {
+func CreateVoyageAIEmbeddingServer[T int8 | float32]() *httptest.Server {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req voyageai.EmbeddingRequest
 		body, _ := io.ReadAll(r.Body)
 		defer r.Body.Close()
 		json.Unmarshal(body, &req)
-		embs := mockEmbedding(req.Input, int(req.OutputDimension))
-		var res voyageai.EmbeddingResponse
+		embs := mockEmbedding[T](req.Input, int(req.OutputDimension))
+		var res voyageai.EmbeddingResponse[T]
 		for i := 0; i < len(req.Input); i++ {
-			res.Data = append(res.Data, voyageai.EmbeddingData{
+			res.Data = append(res.Data, voyageai.EmbeddingData[T]{
 				Object:    "list",
 				Embedding: embs[i],
 				Index:     i,
@@ -141,7 +154,7 @@ func CreateSiliconflowEmbeddingServer(dim int) *httptest.Server {
 		body, _ := io.ReadAll(r.Body)
 		defer r.Body.Close()
 		json.Unmarshal(body, &req)
-		embs := mockEmbedding(req.Input, dim)
+		embs := mockEmbedding[float32](req.Input, dim)
 		var res siliconflow.EmbeddingResponse
 		for i := 0; i < len(req.Input); i++ {
 			res.Data = append(res.Data, siliconflow.EmbeddingData{
@@ -171,7 +184,7 @@ func CreateVertexAIEmbeddingServer() *httptest.Server {
 		for _, item := range req.Instances {
 			texts = append(texts, item.Content)
 		}
-		embs := mockEmbedding(texts, int(req.Parameters.OutputDimensionality))
+		embs := mockEmbedding[float32](texts, int(req.Parameters.OutputDimensionality))
 		var res vertexai.EmbeddingResponse
 		for i := 0; i < len(req.Instances); i++ {
 			res.Predictions = append(res.Predictions, vertexai.Prediction{
@@ -195,17 +208,36 @@ func CreateVertexAIEmbeddingServer() *httptest.Server {
 	return ts
 }
 
-func CreateCohereEmbeddingServer() *httptest.Server {
+func CreateCohereEmbeddingServer[T int8 | float32]() *httptest.Server {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req cohere.EmbeddingRequest
 		body, _ := io.ReadAll(r.Body)
 		defer r.Body.Close()
 		json.Unmarshal(body, &req)
-		embs := mockEmbedding(req.Texts, 4)
+		embs := mockEmbedding[T](req.Texts, 4)
 		var res cohere.EmbeddingResponse
-		res.Embeddings.Float = embs
+		switch any(embs).(type) {
+		case [][]float32:
+			res.Embeddings.Float = any(embs).([][]float32)
+		case [][]int8:
+			res.Embeddings.Int8 = any(embs).([][]int8)
+		}
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)
+		w.Write(data)
+	}))
+	return ts
+}
+
+func CreateTEIEmbeddingServer(dim int) *httptest.Server {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req tei.EmbeddingRequest
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		json.Unmarshal(body, &req)
+		embs := mockEmbedding[float32](req.Inputs, dim)
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(embs)
 		w.Write(data)
 	}))
 	return ts
@@ -218,7 +250,7 @@ type MockBedrockClient struct {
 func (c *MockBedrockClient) InvokeModel(ctx context.Context, params *bedrockruntime.InvokeModelInput, optFns ...func(*bedrockruntime.Options)) (*bedrockruntime.InvokeModelOutput, error) {
 	var req BedRockRequest
 	json.Unmarshal(params.Body, &req)
-	embs := mockEmbedding([]string{req.InputText}, c.dim)
+	embs := mockEmbedding[float32]([]string{req.InputText}, c.dim)
 
 	var resp BedRockResponse
 	resp.Embedding = embs[0]
