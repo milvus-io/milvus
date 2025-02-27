@@ -43,9 +43,11 @@ ScalarIndexCreator::ScalarIndexCreator(
     index_info.field_type = dtype_;
     index_info.index_type = index_type();
     if (dtype == DataType::JSON) {
-        index_info.json_cast_type = static_cast<DataType>(
-            std::stoi(config.at(JSON_CAST_TYPE).get<std::string>()));
-        index_info.json_path = config.at(JSON_PATH).get<std::string>();
+        if (config.contains(JSON_PATH)) {
+            index_info.json_cast_type = static_cast<DataType>(
+                std::stoi(config.at(JSON_CAST_TYPE).get<std::string>()));
+            index_info.json_path = config.at(JSON_PATH).get<std::string>();
+        }
     }
     index_ = index::IndexFactory::GetInstance().CreateIndex(
         index_info, file_manager_context);

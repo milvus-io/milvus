@@ -150,6 +150,7 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 			segments := s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
 				return isFlush(info) && (!Params.DataCoordCfg.EnableStatsTask.GetAsBool() || info.GetIsSorted())
 			}))
+
 			for _, segment := range segments {
 				if err := s.createIndexesForSegment(ctx, segment); err != nil {
 					log.Warn("create index for segment fail, wait for retry", zap.Int64("segmentID", segment.ID))
@@ -268,16 +269,15 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	if isJson {
 		jsonPath, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
-		if err != nil {
-			log.Error("get json path from index params failed", zap.Error(err))
-			return merr.Status(err), nil
+		if err == nil {
+			nestedPath, err := s.parseAndVerifyNestedPath(jsonPath, schema, req.GetFieldID())
+			if err != nil {
+				log.Error("parse nested path failed", zap.Error(err))
+				return merr.Status(err), nil
+			}
+			// set nested path as json path
+			setIndexParam(req.GetIndexParams(), common.JSONPathKey, nestedPath)
 		}
-		nestedPath, err := s.parseAndVerifyNestedPath(jsonPath, schema, req.GetFieldID())
-		if err != nil {
-			log.Error("parse nested path failed", zap.Error(err))
-			return merr.Status(err), nil
-		}
-		setIndexParam(req.GetIndexParams(), common.JSONPathKey, nestedPath)
 	}
 
 	if req.GetIndexName() == "" {
@@ -290,18 +290,17 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		defaultIndexName := fieldName
 		if isJson {
 			jsonPath, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
-			if err != nil {
-				return merr.Status(err), nil
+			if err == nil {
+				// filter indexes by json path, the length of indexes should not be larger than 1
+				// this is guaranteed by CanCreateIndex
+				indexes = lo.Filter(indexes, func(index *model.Index, i int) bool {
+					path, err := getIndexParam(index.IndexParams, common.JSONPathKey)
+					return err == nil && path == jsonPath
+				})
+
+				defaultIndexName += jsonPath
 			}
-
-			indexes = lo.Filter(indexes, func(index *model.Index, i int) bool {
-				path, err := getIndexParam(index.IndexParams, common.JSONPathKey)
-				return err == nil && path == jsonPath
-			})
-
-			defaultIndexName += jsonPath
 		}
-
 		if len(indexes) == 0 {
 			req.IndexName = defaultIndexName
 		} else if len(indexes) == 1 {
