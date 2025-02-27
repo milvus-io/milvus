@@ -75,15 +75,15 @@ func genPKs(numRows int) []typeutil.IntPrimaryKey {
 	return ids
 }
 
-func genTimestamps(numRows int) []typeutil.Timestamp {
-	ts := make([]typeutil.Timestamp, numRows)
+func genTimestamps(numRows int, ts typeutil.Timestamp) []typeutil.Timestamp {
+	tss := make([]typeutil.Timestamp, numRows)
 	for i := 0; i < numRows; i++ {
-		ts[i] = typeutil.Timestamp(i + 1)
+		tss[i] = ts
 	}
-	return ts
+	return tss
 }
 
-func genInsertMsg(numRows int, vchannel string, msgID typeutil.UniqueID) *msgstream.InsertMsg {
+func genInsertMsg(numRows int, vchannel string, msgID typeutil.UniqueID, ts typeutil.Timestamp) *msgstream.InsertMsg {
 	floatVec := make([]float32, numRows*dim)
 	for i := 0; i < numRows*dim; i++ {
 		floatVec[i] = rand.Float32()
@@ -95,9 +95,9 @@ func genInsertMsg(numRows int, vchannel string, msgID typeutil.UniqueID) *msgstr
 	return &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{HashValues: hashValues},
 		InsertRequest: &msgpb.InsertRequest{
-			Base:       &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert, MsgID: msgID},
+			Base:       &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert, MsgID: msgID, Timestamp: ts},
 			ShardName:  vchannel,
-			Timestamps: genTimestamps(numRows),
+			Timestamps: genTimestamps(numRows, ts),
 			RowIDs:     genPKs(numRows),
 			FieldsData: []*schemapb.FieldData{{
 				Field: &schemapb.FieldData_Vectors{
@@ -113,11 +113,11 @@ func genInsertMsg(numRows int, vchannel string, msgID typeutil.UniqueID) *msgstr
 	}
 }
 
-func genDeleteMsg(numRows int, vchannel string, msgID typeutil.UniqueID) *msgstream.DeleteMsg {
+func genDeleteMsg(numRows int, vchannel string, msgID typeutil.UniqueID, ts typeutil.Timestamp) *msgstream.DeleteMsg {
 	return &msgstream.DeleteMsg{
 		BaseMsg: msgstream.BaseMsg{HashValues: make([]uint32, numRows)},
 		DeleteRequest: &msgpb.DeleteRequest{
-			Base:      &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete, MsgID: msgID},
+			Base:      &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete, MsgID: msgID, Timestamp: ts},
 			ShardName: vchannel,
 			PrimaryKeys: &schemapb.IDs{
 				IdField: &schemapb.IDs_IntId{
@@ -126,19 +126,19 @@ func genDeleteMsg(numRows int, vchannel string, msgID typeutil.UniqueID) *msgstr
 					},
 				},
 			},
-			Timestamps: genTimestamps(numRows),
+			Timestamps: genTimestamps(numRows, ts),
 			NumRows:    int64(numRows),
 		},
 	}
 }
 
-func genDDLMsg(msgType commonpb.MsgType, collectionID int64) msgstream.TsMsg {
+func genDDLMsg(msgType commonpb.MsgType, collectionID int64, ts typeutil.Timestamp) msgstream.TsMsg {
 	switch msgType {
 	case commonpb.MsgType_CreateCollection:
 		return &msgstream.CreateCollectionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
 			CreateCollectionRequest: &msgpb.CreateCollectionRequest{
-				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection, Timestamp: ts},
 				CollectionID: collectionID,
 			},
 		}
@@ -146,7 +146,7 @@ func genDDLMsg(msgType commonpb.MsgType, collectionID int64) msgstream.TsMsg {
 		return &msgstream.DropCollectionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
 			DropCollectionRequest: &msgpb.DropCollectionRequest{
-				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection, Timestamp: ts},
 				CollectionID: collectionID,
 			},
 		}
@@ -154,7 +154,7 @@ func genDDLMsg(msgType commonpb.MsgType, collectionID int64) msgstream.TsMsg {
 		return &msgstream.CreatePartitionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
 			CreatePartitionRequest: &msgpb.CreatePartitionRequest{
-				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_CreatePartition},
+				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_CreatePartition, Timestamp: ts},
 				CollectionID: collectionID,
 			},
 		}
@@ -162,7 +162,7 @@ func genDDLMsg(msgType commonpb.MsgType, collectionID int64) msgstream.TsMsg {
 		return &msgstream.DropPartitionMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{0}},
 			DropPartitionRequest: &msgpb.DropPartitionRequest{
-				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
+				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition, Timestamp: ts},
 				CollectionID: collectionID,
 			},
 		}
@@ -251,9 +251,7 @@ func produceMsgs(t *testing.T, ctx context.Context, wg *sync.WaitGroup, producer
 			for j := 0; j < insNum; j++ {
 				vchannel := vchannelNames[rand.Intn(len(vchannels))]
 				err := producer.Produce(context.Background(), &msgstream.MsgPack{
-					BeginTs: ts,
-					EndTs:   ts,
-					Msgs:    []msgstream.TsMsg{genInsertMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
+					Msgs: []msgstream.TsMsg{genInsertMsg(rand.Intn(20)+1, vchannel, uniqueMsgID, ts)},
 				})
 				assert.NoError(t, err)
 				uniqueMsgID++
@@ -264,9 +262,7 @@ func produceMsgs(t *testing.T, ctx context.Context, wg *sync.WaitGroup, producer
 			for j := 0; j < delNum; j++ {
 				vchannel := vchannelNames[rand.Intn(len(vchannels))]
 				err := producer.Produce(context.Background(), &msgstream.MsgPack{
-					BeginTs: ts,
-					EndTs:   ts,
-					Msgs:    []msgstream.TsMsg{genDeleteMsg(rand.Intn(10)+1, vchannel, uniqueMsgID)},
+					Msgs: []msgstream.TsMsg{genDeleteMsg(rand.Intn(10)+1, vchannel, uniqueMsgID, ts)},
 				})
 				assert.NoError(t, err)
 				uniqueMsgID++
@@ -278,9 +274,7 @@ func produceMsgs(t *testing.T, ctx context.Context, wg *sync.WaitGroup, producer
 				vchannel := vchannelNames[rand.Intn(len(vchannels))]
 				collectionID := funcutil.GetCollectionIDFromVChannel(vchannel)
 				err := producer.Produce(context.Background(), &msgstream.MsgPack{
-					BeginTs: ts,
-					EndTs:   ts,
-					Msgs:    []msgstream.TsMsg{genDDLMsg(commonpb.MsgType_DropCollection, collectionID)},
+					Msgs: []msgstream.TsMsg{genDDLMsg(commonpb.MsgType_DropCollection, collectionID, ts)},
 				})
 				assert.NoError(t, err)
 				uniqueMsgID++
@@ -288,9 +282,7 @@ func produceMsgs(t *testing.T, ctx context.Context, wg *sync.WaitGroup, producer
 			}
 			// produce time tick
 			err := producer.Produce(context.Background(), &msgstream.MsgPack{
-				BeginTs: ts,
-				EndTs:   ts,
-				Msgs:    []msgstream.TsMsg{genTimeTickMsg(ts)},
+				Msgs: []msgstream.TsMsg{genTimeTickMsg(ts)},
 			})
 			assert.NoError(t, err)
 			for k := range vchannels {
