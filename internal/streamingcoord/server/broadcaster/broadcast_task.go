@@ -20,20 +20,25 @@ func newBroadcastTaskFromProto(proto *streamingpb.BroadcastTask, metrics *broadc
 	m := metrics.NewBroadcastTask(proto.GetState())
 	msg := message.NewBroadcastMutableMessageBeforeAppend(proto.Message.Payload, proto.Message.Properties)
 	bh := msg.BroadcastHeader()
-	return &broadcastTask{
+	bt := &broadcastTask{
 		mu:               sync.Mutex{},
 		header:           bh,
 		task:             proto,
 		recoverPersisted: true, // the task is recovered from the recovery info, so it's persisted.
 		metrics:          m,
+		allAcked:         make(chan struct{}),
 	}
+	if isAllDone(proto) {
+		close(bt.allAcked)
+	}
+	return bt
 }
 
 // newBroadcastTaskFromBroadcastMessage creates a new broadcast task from the broadcast message.
 func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage, metrics *broadcasterMetrics) *broadcastTask {
 	m := metrics.NewBroadcastTask(streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING)
 	header := msg.BroadcastHeader()
-	return &broadcastTask{
+	bt := &broadcastTask{
 		Binder: log.Binder{},
 		mu:     sync.Mutex{},
 		header: header,
@@ -44,7 +49,12 @@ func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage, m
 		},
 		recoverPersisted: false,
 		metrics:          m,
+		allAcked:         make(chan struct{}),
 	}
+	if isAllDone(bt.task) {
+		close(bt.allAcked)
+	}
+	return bt
 }
 
 // broadcastTask is the state of the broadcast task.
@@ -55,6 +65,7 @@ type broadcastTask struct {
 	task             *streamingpb.BroadcastTask
 	recoverPersisted bool // a flag to indicate that the task has been persisted into the recovery info and can be recovered.
 	metrics          *taskMetricsGuard
+	allAcked         chan struct{}
 }
 
 // Header returns the header of the broadcast task.
@@ -121,11 +132,21 @@ func (b *broadcastTask) Ack(ctx context.Context, vchannel string) error {
 		return err
 	}
 	b.task = task
-	b.metrics.ObserveAckAnyOne()
 	if isAllDone(task) {
 		b.metrics.ObserveAckAll()
+		close(b.allAcked)
 	}
 	return nil
+}
+
+// BlockUntilAllAck blocks until all the vchannels are acked.
+func (b *broadcastTask) BlockUntilAllAck(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-b.allAcked:
+		return nil
+	}
 }
 
 // copyAndSetVChannelAcked copies the task and set the vchannel as acked.
@@ -185,13 +206,6 @@ func (b *broadcastTask) copyAndMarkBroadcastDone() *streamingpb.BroadcastTask {
 	return task
 }
 
-// IsAllAcked returns true if all the vchannels are acked.
-func (b *broadcastTask) IsAllAcked() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return isAllDone(b.task)
-}
-
 // isAllDone check if all the vchannels are acked.
 func isAllDone(task *streamingpb.BroadcastTask) bool {
 	for _, acked := range task.AckedVchannelBitmap {
@@ -209,18 +223,6 @@ func ackedCount(task *streamingpb.BroadcastTask) int {
 		count += int(acked)
 	}
 	return count
-}
-
-// IsAcked returns true if any vchannel is acked.
-func (b *broadcastTask) IsAcked() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, acked := range b.task.AckedVchannelBitmap {
-		if acked != 0 {
-			return true
-		}
-	}
-	return false
 }
 
 // saveTask saves the broadcast task recovery info.
