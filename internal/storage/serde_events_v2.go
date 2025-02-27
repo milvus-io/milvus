@@ -19,7 +19,6 @@ package storage
 import (
 	"fmt"
 	"io"
-	"math"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -357,10 +356,6 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 	if err != nil {
 		return merr.WrapErrServiceInternal(fmt.Sprintf("write record batch error: %s", err.Error()))
 	}
-
-	if pw.writer.GetWrittenUncompressed() >= pw.chunkSize {
-		return pw.flushChunk()
-	}
 	return nil
 }
 
@@ -384,18 +379,12 @@ func (pw *PackedBinlogRecordWriter) initWriters() error {
 	return nil
 }
 
-func (pw *PackedBinlogRecordWriter) resetWriters() {
-	pw.writer = nil
-	pw.tsFrom = math.MaxUint64
-	pw.tsTo = 0
-}
-
 func (pw *PackedBinlogRecordWriter) GetWrittenUncompressed() uint64 {
 	return pw.writtenUncompressed
 }
 
 func (pw *PackedBinlogRecordWriter) Close() error {
-	if err := pw.flushChunk(); err != nil {
+	if err := pw.finalizeBinlogs(); err != nil {
 		return err
 	}
 	if err := pw.writeStats(); err != nil {
@@ -404,19 +393,18 @@ func (pw *PackedBinlogRecordWriter) Close() error {
 	if err := pw.writeBm25Stats(); err != nil {
 		return err
 	}
-	if pw.writer != nil {
-		// already handle flushing the last chunk when close
-		return pw.writer.Close()
+	if err := pw.writer.Close(); err != nil {
+		return err
 	}
 	return nil
 }
 
-func (pw *PackedBinlogRecordWriter) flushChunk() error {
+func (pw *PackedBinlogRecordWriter) finalizeBinlogs() error {
 	if pw.writer == nil {
 		return nil
 	}
-	pw.rowNum += pw.writer.GetWrittenRowNum()
-	pw.writtenUncompressed += pw.writer.GetWrittenUncompressed()
+	pw.rowNum = pw.writer.GetWrittenRowNum()
+	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	if pw.fieldBinlogs == nil {
 		pw.fieldBinlogs = make(map[FieldID]*datapb.FieldBinlog, len(pw.columnGroups))
 	}
@@ -436,11 +424,6 @@ func (pw *PackedBinlogRecordWriter) flushChunk() error {
 			TimestampTo:   pw.tsTo,
 		})
 	}
-	if err := pw.writer.Close(); err != nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("close current packed writer error: %s", err.Error()))
-	}
-
-	pw.resetWriters()
 	return nil
 }
 

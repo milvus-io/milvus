@@ -96,28 +96,28 @@ func (s *PackedBinlogRecordSuite) SetupTest() {
 
 func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-	size := 10
+	rows := 10000
+	read_batch_size := 1024
 	wOption := []RwOption{
 		WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return s.mockBinlogIO.Upload(ctx, kvs)
 		}),
 		WithVersion(StorageV2),
 		WithMultiPartUploadSize(0),
-		WithBufferSize(10 * 1024 * 1024), // 10MB
+		WithBufferSize(1 * 1024 * 1024), // 1MB
 	}
 
 	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.rootPath, s.maxRowNum, wOption...)
 	s.NoError(err)
-	defer w.Close()
 
-	blobs, err := generateTestData(size)
+	blobs, err := generateTestData(rows)
 	s.NoError(err)
 
 	reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
 	s.NoError(err)
 	defer reader.Close()
 
-	for i := 1; i <= size; i++ {
+	for i := 1; i <= rows; i++ {
 		err = reader.Next()
 		s.NoError(err)
 
@@ -130,20 +130,17 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	err = w.Close()
 	s.NoError(err)
 	writtenUncompressed := w.GetWrittenUncompressed()
-	chunkNum := int(writtenUncompressed/s.chunkSize) + 1
+	s.Positive(writtenUncompressed)
 
 	fieldBinlogs, statsLog, bm25StatsLog := w.GetLogs()
-	s.Equal(len(fieldBinlogs[0].Binlogs), chunkNum)
-	entries := []int{}
-	totalRows := 0
-	for _, binlog := range fieldBinlogs[0].Binlogs {
-		totalRows += int(binlog.EntriesNum)
-		entries = append(entries, int(binlog.EntriesNum))
+	for _, columnGroup := range fieldBinlogs {
+		s.Equal(len(columnGroup.Binlogs), 1)
+		s.Equal(columnGroup.Binlogs[0].EntriesNum, int64(rows))
+		s.Positive(columnGroup.Binlogs[0].MemorySize)
 	}
-	s.Equal(totalRows, size)
 
 	s.Equal(len(statsLog.Binlogs), 1)
-	s.Equal(statsLog.Binlogs[0].EntriesNum, int64(size))
+	s.Equal(statsLog.Binlogs[0].EntriesNum, int64(rows))
 
 	s.Equal(len(bm25StatsLog), 0)
 
@@ -153,15 +150,20 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	}
 	r, err := NewBinlogRecordReader(s.ctx, binlogs, s.schema, rOption...)
 	s.NoError(err)
-	defer r.Close()
-
-	for i := 0; i < len(fieldBinlogs[0].Binlogs); i++ {
+	for i := 0; i < rows/read_batch_size+1; i++ {
 		rec, err := r.Next()
 		s.NoError(err)
-		s.Equal(rec.Len(), entries[i])
+		if i < rows/read_batch_size {
+			s.Equal(rec.Len(), read_batch_size)
+		} else {
+			s.Equal(rec.Len(), rows%read_batch_size)
+		}
 	}
+
 	_, err = r.Next()
 	s.Equal(err, io.EOF)
+	err = r.Close()
+	s.NoError(err)
 }
 
 func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
