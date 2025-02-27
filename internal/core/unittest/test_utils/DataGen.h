@@ -328,6 +328,7 @@ GenerateRandomSparseFloatVector(size_t rows,
 inline GeneratedData DataGen(SchemaPtr schema,
                              int64_t N,
                              uint64_t seed = 42,
+                             uint64_t offset_begin = 0,
                              uint64_t ts_offset = 0,
                              int repeat_count = 1,
                              int array_len = 10,
@@ -655,7 +656,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
     res.schema_ = schema;
     res.raw_ = insert_data.release();
     res.raw_->set_num_rows(N);
-    for (int i = 0; i < N; ++i) {
+    for (int i = offset_begin; i < N + offset_begin; ++i) {
         res.row_ids_.push_back(i);
         res.timestamps_.push_back(i + ts_offset);
     }
