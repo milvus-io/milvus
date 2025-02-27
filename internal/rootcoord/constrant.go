@@ -24,31 +24,18 @@ import (
 
 const (
 	// TODO: better to make them configurable, use default value if no config was set since we never explode these before.
-	globalIDAllocatorKey      = "idTimestamp"
-	globalIDAllocatorSubPath  = "gid"
-	globalTSOAllocatorKey     = "timestamp"
-	globalTSOAllocatorSubPath = "tso"
+	globalIDAllocatorKey     = "idTimestamp"
+	globalIDAllocatorSubPath = "gid"
+	globalTSOAllocatorKey    = "timestamp"
 )
 
-func checkGeneralCapacity(ctx context.Context, newColNum int,
-	newParNum int64,
-	newShardNum int32,
-	core *Core,
+func checkPartitionNumber(ctx context.Context, newParNum int64, core *Core,
 ) error {
-	var addedNum int64 = 0
-	if newColNum > 0 && newParNum > 0 && newShardNum > 0 {
-		// create collections scenarios
-		addedNum += int64(newColNum) * newParNum * int64(newShardNum)
-	} else if newColNum == 0 && newShardNum == 0 && newParNum > 0 {
-		// add partitions to existing collections
-		addedNum += newParNum
-	}
-
-	generalCount := core.meta.GetGeneralCount(ctx)
-	generalCount += int(addedNum)
-	if generalCount > Params.RootCoordCfg.MaxGeneralCapacity.GetAsInt() {
-		return merr.WrapGeneralCapacityExceed(generalCount, Params.RootCoordCfg.MaxGeneralCapacity.GetAsInt64(),
-			"failed checking constraint: sum_collections(parition*shard) exceeding the max general capacity:")
+	partitionNumber := core.meta.GetTotalPartitionNumber(ctx)
+	partitionNumber += int(newParNum)
+	if partitionNumber > Params.QuotaConfig.MaxPartitionNum.GetAsInt() {
+		return merr.WrapPartitionExceed(partitionNumber, Params.QuotaConfig.MaxPartitionNum.GetAsInt(),
+			"failed checking constraint: total partition number exceeds the maximum partition limit of the cluster: ")
 	}
 	return nil
 }

@@ -125,6 +125,7 @@ type quotaConfig struct {
 
 	// limits
 	MaxCollectionNum               ParamItem `refreshable:"true"`
+	MaxPartitionNum                ParamItem `refreshable:"true"`
 	MaxCollectionNumPerDB          ParamItem `refreshable:"true"`
 	TopKLimit                      ParamItem `refreshable:"true"`
 	NQLimit                        ParamItem `refreshable:"true"`
@@ -1521,6 +1522,14 @@ To use this setting, set quotaAndLimits.dql.enabled to true at the same time.`,
 		Export:       true,
 	}
 	p.MaxCollectionNum.Init(base.mgr)
+
+	p.MaxPartitionNum = ParamItem{
+		Key:          "quotaAndLimits.limits.maxPartitionNum",
+		Version:      "2.5.4",
+		DefaultValue: "65536",
+		Export:       true,
+	}
+	p.MaxPartitionNum.Init(base.mgr)
 
 	p.MaxCollectionNumPerDB = ParamItem{
 		Key:          "quotaAndLimits.limits.maxCollectionNumPerDB",

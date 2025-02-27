@@ -1359,6 +1359,7 @@ Segments with smaller size than this parameter will not be indexed, and will be 
 	}
 	p.MaxDatabaseNum.Init(base.mgr)
 
+	// Deprecated. use partition number limit instead
 	p.MaxGeneralCapacity = ParamItem{
 		Key:          "rootCoord.maxGeneralCapacity",
 		Version:      "2.3.5",

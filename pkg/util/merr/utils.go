@@ -619,9 +619,9 @@ func WrapErrPartitionNotFullyLoaded(partition any, msg ...string) error {
 	return err
 }
 
-func WrapGeneralCapacityExceed(newGeneralSize any, generalCapacity any, msg ...string) error {
-	err := wrapFields(ErrGeneralCapacityExceeded, value("newGeneralSize", newGeneralSize),
-		value("generalCapacity", generalCapacity))
+func WrapPartitionExceed(partitionNumber any, partitonLimit any, msg ...string) error {
+	err := wrapFields(ErrGeneralCapacityExceeded, value("partition number", partitionNumber),
+		value("partition limit", partitonLimit))
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}

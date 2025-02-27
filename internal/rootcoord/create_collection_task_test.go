@@ -238,15 +238,15 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("collection general number exceeds limit", func(t *testing.T) {
-		paramtable.Get().Save(Params.RootCoordCfg.MaxGeneralCapacity.Key, strconv.Itoa(1))
-		defer paramtable.Get().Reset(Params.RootCoordCfg.MaxGeneralCapacity.Key)
+	t.Run("collection partition number exceeds limit", func(t *testing.T) {
+		paramtable.Get().Save(Params.QuotaConfig.MaxPartitionNum.Key, strconv.Itoa(1))
+		defer paramtable.Get().Reset(Params.QuotaConfig.MaxPartitionNum.Key)
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{1: {1, 2}})
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
 			Return(&model.Database{Name: "db1"}, nil).Once()
-		meta.EXPECT().GetGeneralCount(mock.Anything).Return(1)
+		meta.EXPECT().GetTotalPartitionNumber(mock.Anything).Return(1)
 
 		core := newTestCore(withMeta(meta))
 
@@ -279,7 +279,7 @@ func Test_createCollectionTask_validate(t *testing.T) {
 					},
 				},
 			}, nil).Once()
-		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
+		meta.EXPECT().GetTotalPartitionNumber(mock.Anything).Return(0)
 
 		core := newTestCore(withMeta(meta))
 		task := createCollectionTask{
@@ -717,7 +717,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 	).Return(map[int64][]int64{
 		util.DefaultDBID: {1, 2},
 	}, nil)
-	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
+	meta.EXPECT().GetTotalPartitionNumber(mock.Anything).Return(0)
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)
@@ -840,7 +840,7 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
 			util.DefaultDBID: {1, 2},
 		}).Once()
-		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
+		meta.EXPECT().GetTotalPartitionNumber(mock.Anything).Return(0).Once()
 
 		defer cleanTestEnv()
 
@@ -1208,7 +1208,7 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 	).Return(map[int64][]int64{
 		util.DefaultDBID: {1, 2},
 	}, nil)
-	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
+	meta.EXPECT().GetTotalPartitionNumber(mock.Anything).Return(0)
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)
