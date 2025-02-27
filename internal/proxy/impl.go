@@ -5494,7 +5494,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 	}
 	req.Grantor.User = &milvuspb.UserEntity{Name: curUser}
 	request := &milvuspb.OperatePrivilegeRequest{
-		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_OperatePrivilege},
+		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_OperatePrivilegeV2},
 		Entity: &milvuspb.GrantEntity{
 			Role:       req.Role,
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
