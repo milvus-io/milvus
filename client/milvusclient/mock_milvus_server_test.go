@@ -27,6 +27,65 @@ func (_m *MilvusServiceServer) EXPECT() *MilvusServiceServer_Expecter {
 	return &MilvusServiceServer_Expecter{mock: &_m.Mock}
 }
 
+// AddCollectionField provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) AddCollectionField(_a0 context.Context, _a1 *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddCollectionField")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddCollectionFieldRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AddCollectionFieldRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MilvusServiceServer_AddCollectionField_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddCollectionField'
+type MilvusServiceServer_AddCollectionField_Call struct {
+	*mock.Call
+}
+
+// AddCollectionField is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AddCollectionFieldRequest
+func (_e *MilvusServiceServer_Expecter) AddCollectionField(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_AddCollectionField_Call {
+	return &MilvusServiceServer_AddCollectionField_Call{Call: _e.mock.On("AddCollectionField", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_AddCollectionField_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AddCollectionFieldRequest)) *MilvusServiceServer_AddCollectionField_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AddCollectionFieldRequest))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_AddCollectionField_Call) Return(_a0 *commonpb.Status, _a1 error) *MilvusServiceServer_AddCollectionField_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MilvusServiceServer_AddCollectionField_Call) RunAndReturn(run func(context.Context, *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error)) *MilvusServiceServer_AddCollectionField_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AllocTimestamp provides a mock function with given fields: _a0, _a1
 func (_m *MilvusServiceServer) AllocTimestamp(_a0 context.Context, _a1 *milvuspb.AllocTimestampRequest) (*milvuspb.AllocTimestampResponse, error) {
 	ret := _m.Called(_a0, _a1)
