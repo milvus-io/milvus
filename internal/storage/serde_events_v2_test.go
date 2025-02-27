@@ -69,7 +69,7 @@ func TestPackedSerde(t *testing.T) {
 			prepareChunkData(chunkPaths, size)
 		}
 
-		reader, err := NewPackedDeserializeReader(MakeChunkedPathsReader(paths), schema, bufferSize)
+		reader, err := NewPackedDeserializeReader(paths, schema, bufferSize)
 		assert.NoError(t, err)
 		defer reader.Close()
 

@@ -47,7 +47,8 @@ type RwOption func(*rwOptions)
 
 func defaultRwOptions() *rwOptions {
 	return &rwOptions{
-		bufferSize: 32 * 1024 * 1024,
+		bufferSize:          32 * 1024 * 1024,
+		multiPartUploadSize: 10 * 1024 * 1024,
 	}
 }
 
@@ -111,21 +112,19 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			return blobs, nil
 		})
 	case StorageV2:
-		itr := 0
-		return newPackedRecordReader(func() ([]string, error) {
-			if len(binlogs) <= 0 {
-				return nil, sio.EOF
+		if len(binlogs) <= 0 {
+			return nil, sio.EOF
+		}
+		binlogLists := lo.Map(binlogs, func(fieldBinlog *datapb.FieldBinlog, _ int) []*datapb.Binlog {
+			return fieldBinlog.GetBinlogs()
+		})
+		paths := make([][]string, len(binlogLists[0]))
+		for _, binlogs := range binlogLists {
+			for j, binlog := range binlogs {
+				paths[j] = append(paths[j], binlog.GetLogPath())
 			}
-			paths := make([]string, len(binlogs))
-			for i, fieldBinlog := range binlogs {
-				if itr >= len(fieldBinlog.GetBinlogs()) {
-					return nil, sio.EOF
-				}
-				paths[i] = fieldBinlog.GetBinlogs()[itr].GetLogPath()
-			}
-			itr++
-			return paths, nil
-		}, schema, rwOptions.bufferSize)
+		}
+		return newPackedRecordReader(paths, schema, rwOptions.bufferSize)
 	}
 	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
 }

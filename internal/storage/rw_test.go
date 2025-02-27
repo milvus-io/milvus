@@ -219,10 +219,8 @@ func (s *PackedBinlogRecordSuite) TestEmptyBinlog() {
 	rOption := []RwOption{
 		WithVersion(StorageV2),
 	}
-	r, err := NewBinlogRecordReader(s.ctx, []*datapb.FieldBinlog{}, s.schema, rOption...)
-	s.NoError(err)
-	_, err = r.Next()
-	s.Equal(err, io.EOF)
+	_, err := NewBinlogRecordReader(s.ctx, []*datapb.FieldBinlog{}, s.schema, rOption...)
+	s.Error(err)
 }
 
 func (s *PackedBinlogRecordSuite) TestAllocIDExhausedError() {

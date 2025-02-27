@@ -38,11 +38,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-type ChunkedPathsReader func() ([]string, error)
-
 type packedRecordReader struct {
-	pathsReader ChunkedPathsReader
-	reader      *packed.PackedReader
+	paths  [][]string
+	chunk  int
+	reader *packed.PackedReader
 
 	bufferSize  int64
 	arrowSchema *arrow.Schema
@@ -56,12 +55,12 @@ func (pr *packedRecordReader) iterateNextBatch() error {
 		pr.reader.Close()
 	}
 
-	paths, err := pr.pathsReader()
-	if err != nil {
-		return err
+	if pr.chunk >= len(pr.paths) {
+		return io.EOF
 	}
 
-	reader, err := packed.NewPackedReader(paths, pr.arrowSchema, pr.bufferSize)
+	reader, err := packed.NewPackedReader(pr.paths[pr.chunk], pr.arrowSchema, pr.bufferSize)
+	pr.chunk++
 	if err != nil {
 		return merr.WrapErrParameterInvalid("New binlog record packed reader error: %s", err.Error())
 	}
@@ -78,38 +77,26 @@ func (pr *packedRecordReader) Next() (Record, error) {
 
 	for {
 		rec, err := pr.reader.ReadNext()
-		if err != nil {
+		if err == io.EOF {
+			if err := pr.iterateNextBatch(); err != nil {
+				return nil, err
+			}
+		} else if err != nil {
 			return nil, err
-		}
-		if rec != nil {
+		} else {
 			return NewSimpleArrowRecord(rec, pr.field2Col), nil
 		}
-		if err := pr.iterateNextBatch(); err != nil {
-			return nil, err
-		}
-	}
-}
-
-func MakeChunkedPathsReader(paths [][]string) ChunkedPathsReader {
-	chunkPos := 0
-	return func() ([]string, error) {
-		if chunkPos >= len(paths) {
-			return nil, io.EOF
-		}
-		chunkPaths := paths[chunkPos]
-		chunkPos++
-		return chunkPaths, nil
 	}
 }
 
 func (pr *packedRecordReader) Close() error {
 	if pr.reader != nil {
-		pr.reader.Close()
+		return pr.reader.Close()
 	}
 	return nil
 }
 
-func newPackedRecordReader(pathsReader ChunkedPathsReader, schema *schemapb.CollectionSchema, bufferSize int64,
+func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, bufferSize int64,
 ) (*packedRecordReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
 	if err != nil {
@@ -120,17 +107,17 @@ func newPackedRecordReader(pathsReader ChunkedPathsReader, schema *schemapb.Coll
 		field2Col[field.FieldID] = i
 	}
 	return &packedRecordReader{
-		pathsReader: pathsReader,
+		paths:       paths,
 		bufferSize:  bufferSize,
 		arrowSchema: arrowSchema,
 		field2Col:   field2Col,
 	}, nil
 }
 
-func NewPackedDeserializeReader(pathsReader ChunkedPathsReader, schema *schemapb.CollectionSchema,
+func NewPackedDeserializeReader(paths [][]string, schema *schemapb.CollectionSchema,
 	bufferSize int64,
 ) (*DeserializeReader[*Value], error) {
-	reader, err := newPackedRecordReader(pathsReader, schema, bufferSize)
+	reader, err := newPackedRecordReader(paths, schema, bufferSize)
 	if err != nil {
 		return nil, err
 	}

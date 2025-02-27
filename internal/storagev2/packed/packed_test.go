@@ -15,6 +15,7 @@
 package packed
 
 import (
+	"io"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -148,8 +149,10 @@ func (suite *PackedTestSuite) TestPackedMultiFiles() {
 	var rr arrow.Record
 	for {
 		rr, err = reader.ReadNext()
-		suite.NoError(err)
-		if rr == nil {
+		if err == nil {
+			suite.NotNil(rr)
+		}
+		if err == io.EOF {
 			// end of file
 			break
 		}
