@@ -205,7 +205,7 @@ func (suite *SimulationSuite) TestDispatchToVchannels() {
 		go produceMsgs(suite.T(), produceCtx, suite.wg, suite.pchannel2Producer[pchannel], vchannels)
 	}
 	// Mock pipelines consume messages.
-	consumeCtx, consumeCancel := context.WithTimeout(suite.ctx, 20*time.Second)
+	consumeCtx, consumeCancel := context.WithTimeout(suite.ctx, 10*time.Second)
 	defer consumeCancel()
 	for _, vchannels := range suite.pchannel2Vchannels {
 		for vchannel, helper := range vchannels {
@@ -244,6 +244,7 @@ func (suite *SimulationSuite) TestMerge() {
 		for vchannel, helper := range vchannels {
 			pos := helper.seekPos
 			assert.NotNil(suite.T(), pos)
+			suite.T().Logf("seekTs = %d, vchannel = %s, msgID=%v\n", pos.GetTimestamp(), vchannel, pos.GetMsgID())
 			output, err := suite.client.Register(suite.ctx, NewStreamConfig(
 				vchannel, pos,
 				common.SubscriptionPositionUnknown,
@@ -279,20 +280,24 @@ func (suite *SimulationSuite) TestMerge() {
 	suite.Eventually(func() bool {
 		for _, vchannels := range suite.pchannel2Vchannels {
 			for vchannel, helper := range vchannels {
+				logFn := func(pubNum, skipNum, subNum int32, name string) {
+					suite.T().Logf("pub%sNum[%d]-skipped%sNum[%d] = %d, sub%sNum = %d, vchannel = %s\n",
+						name, pubNum, name, skipNum, pubNum-skipNum, name, subNum, vchannel)
+				}
 				if helper.pubInsMsgNum.Load()-helper.skippedInsMsgNum != helper.subInsMsgNum.Load() {
-					suite.T().Logf("pubInsMsgNum = %d, subInsMsgNum = %d, vchannel = %s\n", helper.pubInsMsgNum.Load()-helper.skippedInsMsgNum, helper.subInsMsgNum.Load(), vchannel)
+					logFn(helper.pubInsMsgNum.Load(), helper.skippedInsMsgNum, helper.subInsMsgNum.Load(), "InsMsg")
 					return false
 				}
 				if helper.pubDelMsgNum.Load()-helper.skippedDelMsgNum != helper.subDelMsgNum.Load() {
-					suite.T().Logf("pubDelMsgNum = %d, subDelMsgNum = %d, vchannel = %s\n", helper.pubDelMsgNum.Load()-helper.skippedDelMsgNum, helper.subDelMsgNum.Load(), vchannel)
+					logFn(helper.pubDelMsgNum.Load(), helper.skippedDelMsgNum, helper.subDelMsgNum.Load(), "DelMsg")
 					return false
 				}
 				if helper.pubDDLMsgNum.Load()-helper.skippedDDLMsgNum != helper.subDDLMsgNum.Load() {
-					suite.T().Logf("pubDDLMsgNum = %d, subDDLMsgNum = %d, vchannel = %s\n", helper.pubDDLMsgNum.Load()-helper.skippedDDLMsgNum, helper.subDDLMsgNum.Load(), vchannel)
+					logFn(helper.pubDDLMsgNum.Load(), helper.skippedDDLMsgNum, helper.subDDLMsgNum.Load(), "DDLMsg")
 					return false
 				}
-				if helper.pubPackNum.Load()-helper.skippedPacNum != helper.subPackNum.Load() {
-					suite.T().Logf("pubPackNum = %d, subPackNum = %d, vchannel = %s\n", helper.pubPackNum.Load()-helper.skippedPacNum, helper.subPackNum.Load(), vchannel)
+				if helper.pubPackNum.Load()-helper.skippedPackNum != helper.subPackNum.Load() {
+					logFn(helper.pubPackNum.Load(), helper.skippedPackNum, helper.subPackNum.Load(), "Pack")
 					return false
 				}
 			}
@@ -375,7 +380,8 @@ func (suite *SimulationSuite) TestSplit() {
 		for pchannel := range suite.pchannel2Producer {
 			manager, ok := suite.client.(*client).managers.Get(pchannel)
 			suite.True(ok)
-			suite.T().Logf("verifing split, dispatcherNum = %d, splitNum+1 = %d, pchannel = %s\n", manager.NumConsumer(), splitNumPerPchannel+1, pchannel)
+			suite.T().Logf("verifing split, dispatcherNum = %d, splitNum+1 = %d, pchannel = %s\n",
+				manager.NumConsumer(), splitNumPerPchannel+1, pchannel)
 			if manager.NumConsumer() < 1 { // expected 1 mainDispatcher and 1 or more split deputyDispatchers
 				return false
 			}
@@ -412,19 +418,23 @@ func (suite *SimulationSuite) TestSplit() {
 		for _, vchannels := range suite.pchannel2Vchannels {
 			for vchannel, helper := range vchannels {
 				if helper.pubInsMsgNum.Load() != helper.subInsMsgNum.Load() {
-					suite.T().Logf("pubInsMsgNum = %d, subInsMsgNum = %d, vchannel = %s\n", helper.pubInsMsgNum.Load(), helper.subInsMsgNum.Load(), vchannel)
+					suite.T().Logf("pubInsMsgNum = %d, subInsMsgNum = %d, vchannel = %s\n",
+						helper.pubInsMsgNum.Load(), helper.subInsMsgNum.Load(), vchannel)
 					return false
 				}
 				if helper.pubDelMsgNum.Load() != helper.subDelMsgNum.Load() {
-					suite.T().Logf("pubDelMsgNum = %d, subDelMsgNum = %d, vchannel = %s\n", helper.pubDelMsgNum.Load(), helper.subDelMsgNum.Load(), vchannel)
+					suite.T().Logf("pubDelMsgNum = %d, subDelMsgNum = %d, vchannel = %s\n",
+						helper.pubDelMsgNum.Load(), helper.subDelMsgNum.Load(), vchannel)
 					return false
 				}
 				if helper.pubDDLMsgNum.Load() != helper.subDDLMsgNum.Load() {
-					suite.T().Logf("pubDDLMsgNum = %d, subDDLMsgNum = %d, vchannel = %s\n", helper.pubDDLMsgNum.Load(), helper.subDDLMsgNum.Load(), vchannel)
+					suite.T().Logf("pubDDLMsgNum = %d, subDDLMsgNum = %d, vchannel = %s\n",
+						helper.pubDDLMsgNum.Load(), helper.subDDLMsgNum.Load(), vchannel)
 					return false
 				}
 				if helper.pubPackNum.Load() != helper.subPackNum.Load() {
-					suite.T().Logf("pubPackNum = %d, subPackNum = %d, vchannel = %s\n", helper.pubPackNum.Load(), helper.subPackNum.Load(), vchannel)
+					suite.T().Logf("pubPackNum = %d, subPackNum = %d, vchannel = %s\n",
+						helper.pubPackNum.Load(), helper.subPackNum.Load(), vchannel)
 					return false
 				}
 			}

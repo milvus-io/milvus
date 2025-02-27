@@ -228,7 +228,7 @@ type vchannelHelper struct {
 	skippedInsMsgNum int32
 	skippedDelMsgNum int32
 	skippedDDLMsgNum int32
-	skippedPacNum    int32
+	skippedPackNum   int32
 }
 
 func produceMsgs(t *testing.T, ctx context.Context, wg *sync.WaitGroup, producer msgstream.MsgStream, vchannels map[string]*vchannelHelper) {
@@ -245,12 +245,15 @@ func produceMsgs(t *testing.T, ctx context.Context, wg *sync.WaitGroup, producer
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			ts := uint64(i * 100)
 			// produce random insert
-			insNum := rand.Intn(10) + 1
+			insNum := rand.Intn(10)
 			for j := 0; j < insNum; j++ {
 				vchannel := vchannelNames[rand.Intn(len(vchannels))]
 				err := producer.Produce(context.Background(), &msgstream.MsgPack{
-					Msgs: []msgstream.TsMsg{genInsertMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
+					BeginTs: ts,
+					EndTs:   ts,
+					Msgs:    []msgstream.TsMsg{genInsertMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
 				})
 				assert.NoError(t, err)
 				uniqueMsgID++
@@ -261,7 +264,9 @@ func produceMsgs(t *testing.T, ctx context.Context, wg *sync.WaitGroup, producer
 			for j := 0; j < delNum; j++ {
 				vchannel := vchannelNames[rand.Intn(len(vchannels))]
 				err := producer.Produce(context.Background(), &msgstream.MsgPack{
-					Msgs: []msgstream.TsMsg{genDeleteMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
+					BeginTs: ts,
+					EndTs:   ts,
+					Msgs:    []msgstream.TsMsg{genDeleteMsg(rand.Intn(10)+1, vchannel, uniqueMsgID)},
 				})
 				assert.NoError(t, err)
 				uniqueMsgID++
@@ -273,16 +278,19 @@ func produceMsgs(t *testing.T, ctx context.Context, wg *sync.WaitGroup, producer
 				vchannel := vchannelNames[rand.Intn(len(vchannels))]
 				collectionID := funcutil.GetCollectionIDFromVChannel(vchannel)
 				err := producer.Produce(context.Background(), &msgstream.MsgPack{
-					Msgs: []msgstream.TsMsg{genDDLMsg(commonpb.MsgType_DropCollection, collectionID)},
+					BeginTs: ts,
+					EndTs:   ts,
+					Msgs:    []msgstream.TsMsg{genDDLMsg(commonpb.MsgType_DropCollection, collectionID)},
 				})
 				assert.NoError(t, err)
 				uniqueMsgID++
 				vchannels[vchannel].pubDDLMsgNum.Inc()
 			}
 			// produce time tick
-			ts := uint64(i * 100)
 			err := producer.Produce(context.Background(), &msgstream.MsgPack{
-				Msgs: []msgstream.TsMsg{genTimeTickMsg(ts)},
+				BeginTs: ts,
+				EndTs:   ts,
+				Msgs:    []msgstream.TsMsg{genTimeTickMsg(ts)},
 			})
 			assert.NoError(t, err)
 			for k := range vchannels {
@@ -358,26 +366,34 @@ func getRandomSeekPositions(t *testing.T, ctx context.Context, factory msgstream
 			for _, msg := range pack.Msgs {
 				switch msg.GetType() {
 				case commonpb.MsgType_Insert:
-					vchannels[msg.GetVChannel()].skippedInsMsgNum++
+					if vchannels[msg.GetVChannel()].seekPos == nil {
+						vchannels[msg.GetVChannel()].skippedInsMsgNum++
+					}
 				case commonpb.MsgType_Delete:
-					vchannels[msg.GetVChannel()].skippedDelMsgNum++
+					if vchannels[msg.GetVChannel()].seekPos == nil {
+						vchannels[msg.GetVChannel()].skippedDelMsgNum++
+					}
 				case commonpb.MsgType_DropCollection:
 					collectionID, err := strconv.ParseInt(msg.GetCollectionID(), 10, 64)
 					assert.NoError(t, err)
 					for vchannel := range vchannels {
-						if funcutil.GetCollectionIDFromVChannel(vchannel) == collectionID {
+						if vchannels[vchannel].seekPos == nil &&
+							funcutil.GetCollectionIDFromVChannel(vchannel) == collectionID {
 							vchannels[vchannel].skippedDDLMsgNum++
 						}
 					}
 				}
 			}
 			for _, helper := range vchannels {
-				helper.skippedPacNum++
+				if helper.seekPos == nil {
+					helper.skippedPackNum++
+				}
 			}
-			if rand.Intn(3) == 0 { // assign random seek position
+			if rand.Intn(5) == 0 { // assign random seek position
 				for _, helper := range vchannels {
 					if helper.seekPos == nil {
 						helper.seekPos = pack.EndPositions[0]
+						break
 					}
 				}
 			}
