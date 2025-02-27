@@ -52,6 +52,15 @@ echo auto-compaction-retention: '1000'
 echo # Extra config to override default milvus.yaml
 ) > user.yaml
 
+if not exist "embedEtcd.yaml" (
+    echo embedEtcd.yaml file does not exist. Please try to create it in the current directory.
+    exit /b 1
+)
+if not exist "user.yaml" (
+    echo user.yaml file does not exist. Please try to create it in the current directory.
+    exit /b 1
+)
+
 docker run -d ^
     --name milvus-standalone ^
     --security-opt seccomp:unconfined ^
@@ -70,7 +79,7 @@ docker run -d ^
     --health-start-period=90s ^
     --health-timeout=20s ^
     --health-retries=3 ^
-    milvusdb/milvus:v2.4.13 ^
+    milvusdb/milvus:v2.5.5 ^
     milvus run standalone >nul
 if %errorlevel% neq 0 (
     echo Failed to start Milvus container.
