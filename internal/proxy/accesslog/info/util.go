@@ -24,8 +24,10 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
 var ClusterPrefix atomic.String
@@ -88,4 +90,23 @@ func getSdkTypeByUserAgent(userAgents []string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func getAnnsFieldFromKvs(kvs []*commonpb.KeyValuePair) string {
+	field, err := funcutil.GetAttrByKeyFromRepeatedKV("anns_field", kvs)
+	if err != nil {
+		return "default"
+	}
+	return field
+}
+
+func listToString(strs []string) string {
+	result := "["
+	for i, str := range strs {
+		if i != 0 {
+			result += ", "
+		}
+		result += "\"" + str + "\""
+	}
+	return result + "]"
 }
