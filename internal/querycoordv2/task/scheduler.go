@@ -163,39 +163,53 @@ func NewExecutingTaskDelta() *ExecutingTaskDelta {
 }
 
 // Add updates the taskDelta for the given nodeID and collectionID
-func (etd *ExecutingTaskDelta) Add(nodeID int64, collectionID int64, taskID int64, delta int) {
+func (etd *ExecutingTaskDelta) Add(task Task) {
 	etd.mu.Lock()
 	defer etd.mu.Unlock()
 
-	if etd.taskIDRecords.Contain(taskID) {
-		log.Warn("task already exists in delta cache", zap.Int64("taskID", taskID))
+	if etd.taskIDRecords.Contain(task.ID()) {
+		log.Warn("task already exists in delta cache",
+			zap.Int64("collectionID", task.CollectionID()),
+			zap.Int64("replicaID", task.ReplicaID()),
+			zap.Int64("taskID", task.ID()))
+		return
 	}
-	etd.taskIDRecords.Insert(taskID)
+	etd.taskIDRecords.Insert(task.ID())
 
-	if _, exists := etd.data[nodeID]; !exists {
-		etd.data[nodeID] = make(map[int64]int)
+	collectionID := task.CollectionID()
+	for _, action := range task.Actions() {
+		nodeID := action.Node()
+		delta := action.WorkLoadEffect()
+		if _, exists := etd.data[nodeID]; !exists {
+			etd.data[nodeID] = make(map[int64]int)
+		}
+		etd.data[nodeID][collectionID] += delta
 	}
-	etd.data[nodeID][collectionID] += delta
 }
 
 // Sub updates the taskDelta for the given nodeID and collectionID by subtracting delta
-func (etd *ExecutingTaskDelta) Sub(nodeID int64, collectionID int64, taskID int64, delta int) {
+func (etd *ExecutingTaskDelta) Sub(task Task) {
 	etd.mu.Lock()
 	defer etd.mu.Unlock()
 
-	if !etd.taskIDRecords.Contain(taskID) {
-		log.Warn("task doesn't exists in delta cache", zap.Int64("taskID", taskID))
+	if !etd.taskIDRecords.Contain(task.ID()) {
+		log.Warn("task already exists in delta cache",
+			zap.Int64("collectionID", task.CollectionID()),
+			zap.Int64("replicaID", task.ReplicaID()),
+			zap.Int64("taskID", task.ID()))
+		return
 	}
-	etd.taskIDRecords.Remove(taskID)
+	etd.taskIDRecords.Remove(task.ID())
 
-	if _, exists := etd.data[nodeID]; exists {
+	collectionID := task.CollectionID()
+	for _, action := range task.Actions() {
+		nodeID := action.Node()
+		delta := action.WorkLoadEffect()
+		if _, exists := etd.data[nodeID]; !exists {
+			etd.data[nodeID] = make(map[int64]int)
+		}
+
 		etd.data[nodeID][collectionID] -= delta
-		if etd.data[nodeID][collectionID] == 0 {
-			delete(etd.data[nodeID], collectionID)
-		}
-		if len(etd.data[nodeID]) == 0 {
-			delete(etd.data, nodeID)
-		}
 	}
 }
 
@@ -231,6 +245,13 @@ func (etd *ExecutingTaskDelta) printDetailInfos() {
 	if etd.taskIDRecords.Len() > 0 {
 		log.Info("task delta cache info", zap.Any("taskIDRecords", etd.taskIDRecords.Collect()), zap.Any("data", etd.data))
 	}
+}
+
+func (etd *ExecutingTaskDelta) Clear() {
+	etd.mu.RLock()
+	defer etd.mu.RUnlock()
+	etd.data = make(map[int64]map[int64]int)
+	etd.taskIDRecords.Clear()
 }
 
 type Scheduler interface {
@@ -286,13 +307,12 @@ func NewScheduler(ctx context.Context,
 	cluster session.Cluster,
 	nodeMgr *session.NodeManager,
 ) *taskScheduler {
-	id := time.Now().UnixMilli()
+	id := atomic.NewInt64(time.Now().UnixMilli())
 	return &taskScheduler{
 		ctx:       ctx,
 		executors: NewConcurrentMap[int64, *Executor](),
 		idAllocator: func() UniqueID {
-			id++
-			return id
+			return id.Inc()
 		},
 
 		distMgr:   distMgr,
@@ -619,26 +639,20 @@ func (scheduler *taskScheduler) GetChannelTaskDelta(nodeID, collectionID int64) 
 }
 
 func (scheduler *taskScheduler) incExecutingTaskDelta(task Task) {
-	for _, action := range task.Actions() {
-		delta := action.WorkLoadEffect()
-		switch action.(type) {
-		case *SegmentAction:
-			scheduler.segmentTaskDelta.Add(action.Node(), task.CollectionID(), task.ID(), delta)
-		case *ChannelAction:
-			scheduler.channelTaskDelta.Add(action.Node(), task.CollectionID(), task.ID(), delta)
-		}
+	switch task := task.(type) {
+	case *SegmentTask:
+		scheduler.segmentTaskDelta.Add(task)
+	case *ChannelTask:
+		scheduler.channelTaskDelta.Add(task)
 	}
 }
 
 func (scheduler *taskScheduler) decExecutingTaskDelta(task Task) {
-	for _, action := range task.Actions() {
-		delta := action.WorkLoadEffect()
-		switch action.(type) {
-		case *SegmentAction:
-			scheduler.segmentTaskDelta.Sub(action.Node(), task.CollectionID(), task.ID(), delta)
-		case *ChannelAction:
-			scheduler.channelTaskDelta.Sub(action.Node(), task.CollectionID(), task.ID(), delta)
-		}
+	switch task := task.(type) {
+	case *SegmentTask:
+		scheduler.segmentTaskDelta.Sub(task)
+	case *ChannelTask:
+		scheduler.channelTaskDelta.Sub(task)
 	}
 }
 
@@ -956,11 +970,14 @@ func (scheduler *taskScheduler) remove(task Task) {
 	scheduler.processQueue.Remove(task)
 	if ok {
 		scheduler.decExecutingTaskDelta(task)
-	}
 
-	if scheduler.tasks.Len() == 0 {
-		scheduler.segmentTaskDelta.printDetailInfos()
-		scheduler.channelTaskDelta.printDetailInfos()
+		if scheduler.tasks.Len() == 0 {
+			// in case of task delta leak, try to print detail info before clear
+			scheduler.segmentTaskDelta.printDetailInfos()
+			scheduler.segmentTaskDelta.Clear()
+			scheduler.channelTaskDelta.printDetailInfos()
+			scheduler.channelTaskDelta.Clear()
+		}
 	}
 
 	switch task := task.(type) {
