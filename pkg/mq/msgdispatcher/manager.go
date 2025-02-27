@@ -288,9 +288,11 @@ func (c *dispatcherManager) tryMerge() {
 		return
 	}
 
-	log.Info("start merging...", zap.Int64s("dispatchers", lo.Map(candidates, func(d *Dispatcher, _ int) int64 {
+	dispatcherIDs := lo.Map(candidates, func(d *Dispatcher, _ int) int64 {
 		return d.ID()
-	})))
+	})
+
+	log.Info("start merging...", zap.Int64s("dispatchers", dispatcherIDs))
 	mergeCandidates := make([]*Dispatcher, 0, len(candidates))
 	c.mainDispatcher.Handle(pause)
 	for _, dispatcher := range candidates {
@@ -312,9 +314,7 @@ func (c *dispatcherManager) tryMerge() {
 		delete(c.deputyDispatchers, dispatcher.ID())
 	}
 	c.mainDispatcher.Handle(resume)
-	log.Info("merge done", zap.Int64s("dispatchers", lo.Map(candidates, func(d *Dispatcher, _ int) int64 {
-		return d.ID()
-	})),
+	log.Info("merge done", zap.Int64s("dispatchers", dispatcherIDs),
 		zap.Uint64("mergeTs", mergeTs),
 		zap.Duration("dur", time.Since(start)))
 }

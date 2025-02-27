@@ -21,12 +21,14 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -63,29 +65,6 @@ func newMockProducer(factory msgstream.Factory, pchannel string) (msgstream.MsgS
 	stream.AsProducer(context.Background(), []string{pchannel})
 	stream.SetRepackFunc(defaultInsertRepackFunc)
 	return stream, nil
-}
-
-func getSeekPositions(factory msgstream.Factory, pchannel string, maxNum int) ([]*msgstream.MsgPosition, error) {
-	stream, err := factory.NewTtMsgStream(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	defer stream.Close()
-	stream.AsConsumer(context.Background(), []string{pchannel}, fmt.Sprintf("%d", rand.Int()), common.SubscriptionPositionEarliest)
-	positions := make([]*msgstream.MsgPosition, 0)
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	for {
-		select {
-		case <-timeoutCtx.Done(): // no message to consume
-			return positions, nil
-		case pack := <-stream.Chan():
-			positions = append(positions, pack.EndPositions[0])
-			if len(positions) >= maxNum {
-				return positions, nil
-			}
-		}
-	}
 }
 
 func genPKs(numRows int) []typeutil.IntPrimaryKey {
@@ -232,62 +211,89 @@ func defaultInsertRepackFunc(
 	return pack, nil
 }
 
-func produceMsg(t *testing.T, wg *sync.WaitGroup, producer msgstream.MsgStream, vchannels map[string]*vchannelHelper) {
-	defer wg.Done()
+type vchannelHelper struct {
+	output <-chan *msgstream.MsgPack
 
-	const msgPackCount = 100
-	uniqueMsgID := int64(0)
-	vchannelNames := lo.Keys(vchannels)
+	pubInsMsgNum atomic.Int32
+	pubDelMsgNum atomic.Int32
+	pubDDLMsgNum atomic.Int32
+	pubPackNum   atomic.Int32
 
-	for i := 1; i <= msgPackCount; i++ {
-		// produce random insert
-		insNum := rand.Intn(10)
-		for j := 0; j < insNum; j++ {
-			vchannel := vchannelNames[rand.Intn(len(vchannels))]
-			err := producer.Produce(context.Background(), &msgstream.MsgPack{
-				Msgs: []msgstream.TsMsg{genInsertMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
-			})
-			assert.NoError(t, err)
-			uniqueMsgID++
-			vchannels[vchannel].pubInsMsgNum++
-		}
-		// produce random delete
-		delNum := rand.Intn(2)
-		for j := 0; j < delNum; j++ {
-			vchannel := vchannelNames[rand.Intn(len(vchannels))]
-			err := producer.Produce(context.Background(), &msgstream.MsgPack{
-				Msgs: []msgstream.TsMsg{genDeleteMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
-			})
-			assert.NoError(t, err)
-			uniqueMsgID++
-			vchannels[vchannel].pubDelMsgNum++
-		}
-		// produce random ddl
-		ddlNum := rand.Intn(2)
-		for j := 0; j < ddlNum; j++ {
-			vchannel := vchannelNames[rand.Intn(len(vchannels))]
-			collectionID := funcutil.GetCollectionIDFromVChannel(vchannel)
-			err := producer.Produce(context.Background(), &msgstream.MsgPack{
-				Msgs: []msgstream.TsMsg{genDDLMsg(commonpb.MsgType_DropCollection, collectionID)},
-			})
-			assert.NoError(t, err)
-			uniqueMsgID++
-			vchannels[vchannel].pubDDLMsgNum++
-		}
-		// produce time tick
-		ts := uint64(i * 100)
-		err := producer.Produce(context.Background(), &msgstream.MsgPack{
-			Msgs: []msgstream.TsMsg{genTimeTickMsg(ts)},
-		})
-		assert.NoError(t, err)
-		for k := range vchannels {
-			vchannels[k].pubPackNum++
-		}
-	}
-	t.Logf("[%s] produce %d msgPack done", time.Now(), msgPackCount)
+	subInsMsgNum atomic.Int32
+	subDelMsgNum atomic.Int32
+	subDDLMsgNum atomic.Int32
+	subPackNum   atomic.Int32
+
+	seekPos          *Pos
+	skippedInsMsgNum int32
+	skippedDelMsgNum int32
+	skippedDDLMsgNum int32
+	skippedPacNum    int32
 }
 
-func consumeMsg(t *testing.T, ctx context.Context, wg *sync.WaitGroup, vchannel string, helper *vchannelHelper) {
+func produceMsgs(t *testing.T, ctx context.Context, wg *sync.WaitGroup, producer msgstream.MsgStream, vchannels map[string]*vchannelHelper) {
+	defer wg.Done()
+
+	uniqueMsgID := int64(0)
+	vchannelNames := lo.Keys(vchannels)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	i := 1
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// produce random insert
+			insNum := rand.Intn(10) + 1
+			for j := 0; j < insNum; j++ {
+				vchannel := vchannelNames[rand.Intn(len(vchannels))]
+				err := producer.Produce(context.Background(), &msgstream.MsgPack{
+					Msgs: []msgstream.TsMsg{genInsertMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
+				})
+				assert.NoError(t, err)
+				uniqueMsgID++
+				vchannels[vchannel].pubInsMsgNum.Inc()
+			}
+			// produce random delete
+			delNum := rand.Intn(2)
+			for j := 0; j < delNum; j++ {
+				vchannel := vchannelNames[rand.Intn(len(vchannels))]
+				err := producer.Produce(context.Background(), &msgstream.MsgPack{
+					Msgs: []msgstream.TsMsg{genDeleteMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
+				})
+				assert.NoError(t, err)
+				uniqueMsgID++
+				vchannels[vchannel].pubDelMsgNum.Inc()
+			}
+			// produce random ddl
+			ddlNum := rand.Intn(2)
+			for j := 0; j < ddlNum; j++ {
+				vchannel := vchannelNames[rand.Intn(len(vchannels))]
+				collectionID := funcutil.GetCollectionIDFromVChannel(vchannel)
+				err := producer.Produce(context.Background(), &msgstream.MsgPack{
+					Msgs: []msgstream.TsMsg{genDDLMsg(commonpb.MsgType_DropCollection, collectionID)},
+				})
+				assert.NoError(t, err)
+				uniqueMsgID++
+				vchannels[vchannel].pubDDLMsgNum.Inc()
+			}
+			// produce time tick
+			ts := uint64(i * 100)
+			err := producer.Produce(context.Background(), &msgstream.MsgPack{
+				Msgs: []msgstream.TsMsg{genTimeTickMsg(ts)},
+			})
+			assert.NoError(t, err)
+			for k := range vchannels {
+				vchannels[k].pubPackNum.Inc()
+			}
+			i++
+		}
+	}
+}
+
+func consumeMsgsFromTargets(t *testing.T, ctx context.Context, wg *sync.WaitGroup, vchannel string, helper *vchannelHelper) {
 	defer wg.Done()
 
 	var lastTs typeutil.Timestamp
@@ -301,16 +307,16 @@ func consumeMsg(t *testing.T, ctx context.Context, wg *sync.WaitGroup, vchannel 
 			}
 			assert.Greater(t, pack.EndTs, lastTs, fmt.Sprintf("vchannel=%s", vchannel))
 			lastTs = pack.EndTs
-			helper.subPackNum++
+			helper.subPackNum.Inc()
 			for _, msg := range pack.Msgs {
 				switch msg.Type() {
 				case commonpb.MsgType_Insert:
-					helper.subInsMsgNum++
+					helper.subInsMsgNum.Inc()
 				case commonpb.MsgType_Delete:
-					helper.subDelMsgNum++
+					helper.subDelMsgNum.Inc()
 				case commonpb.MsgType_CreateCollection, commonpb.MsgType_DropCollection,
 					commonpb.MsgType_CreatePartition, commonpb.MsgType_DropPartition:
-					helper.subDDLMsgNum++
+					helper.subDDLMsgNum.Inc()
 				}
 			}
 		}
@@ -319,7 +325,7 @@ func consumeMsg(t *testing.T, ctx context.Context, wg *sync.WaitGroup, vchannel 
 
 func produceTimeTick(t *testing.T, ctx context.Context, producer msgstream.MsgStream) {
 	tt := 1
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
@@ -332,6 +338,59 @@ func produceTimeTick(t *testing.T, ctx context.Context, producer msgstream.MsgSt
 			})
 			assert.NoError(t, err)
 			tt++
+		}
+	}
+}
+
+func getRandomSeekPositions(t *testing.T, ctx context.Context, factory msgstream.Factory, pchannel string, vchannels map[string]*vchannelHelper) {
+	stream, err := factory.NewTtMsgStream(context.Background())
+	assert.NoError(t, err)
+	defer stream.Close()
+
+	err = stream.AsConsumer(context.Background(), []string{pchannel}, fmt.Sprintf("%d", rand.Int()), common.SubscriptionPositionEarliest)
+	assert.NoError(t, err)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case pack := <-stream.Chan():
+			for _, msg := range pack.Msgs {
+				switch msg.GetType() {
+				case commonpb.MsgType_Insert:
+					vchannels[msg.GetVChannel()].skippedInsMsgNum++
+				case commonpb.MsgType_Delete:
+					vchannels[msg.GetVChannel()].skippedDelMsgNum++
+				case commonpb.MsgType_DropCollection:
+					collectionID, err := strconv.ParseInt(msg.GetCollectionID(), 10, 64)
+					assert.NoError(t, err)
+					for vchannel := range vchannels {
+						if funcutil.GetCollectionIDFromVChannel(vchannel) == collectionID {
+							vchannels[vchannel].skippedDDLMsgNum++
+						}
+					}
+				}
+			}
+			for _, helper := range vchannels {
+				helper.skippedPacNum++
+			}
+			if rand.Intn(3) == 0 { // assign random seek position
+				for _, helper := range vchannels {
+					if helper.seekPos == nil {
+						helper.seekPos = pack.EndPositions[0]
+					}
+				}
+			}
+			allAssigned := true
+			for _, helper := range vchannels {
+				if helper.seekPos == nil {
+					allAssigned = false
+					break
+				}
+			}
+			if allAssigned {
+				return // all seek positions have been assigned
+			}
 		}
 	}
 }

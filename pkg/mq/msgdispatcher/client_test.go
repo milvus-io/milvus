@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -86,7 +85,7 @@ func TestClient_Concurrency(t *testing.T) {
 		producer, err := newMockProducer(factory, pchannel)
 		assert.NoError(t, err)
 		go produceTimeTick(t, ctx, producer)
-		t.Logf("start to produce time tick to pchannel %s", pchannel)
+		t.Logf("start to produce time tick to pchannel %s\n", pchannel)
 	}
 
 	wg := &sync.WaitGroup{}
@@ -139,20 +138,6 @@ func TestClient_Concurrency(t *testing.T) {
 	}, 15*time.Second, 100*time.Millisecond)
 }
 
-type vchannelHelper struct {
-	output <-chan *msgstream.MsgPack
-
-	pubInsMsgNum int
-	pubDelMsgNum int
-	pubDDLMsgNum int
-	pubPackNum   int
-
-	subInsMsgNum int
-	subDelMsgNum int
-	subDDLMsgNum int
-	subPackNum   int
-}
-
 type SimulationSuite struct {
 	suite.Suite
 
@@ -177,7 +162,7 @@ func (suite *SimulationSuite) SetupTest() {
 		vchannelNumPerPchannel = 10
 	)
 
-	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.ctx, suite.cancel = context.WithTimeout(context.Background(), time.Minute*3)
 	suite.wg = &sync.WaitGroup{}
 	suite.client = NewClient(suite.factory, "test-client", 1)
 
@@ -203,28 +188,29 @@ func (suite *SimulationSuite) SetupTest() {
 }
 
 func (suite *SimulationSuite) TestDispatchToVchannels() {
-	ctx, cancel := context.WithTimeout(suite.ctx, 20*time.Second)
-	defer cancel()
-
 	// Register vchannels.
 	for _, vchannels := range suite.pchannel2Vchannels {
 		for vchannel, helper := range vchannels {
-			output, err := suite.client.Register(ctx, NewStreamConfig(vchannel, nil, common.SubscriptionPositionEarliest))
+			output, err := suite.client.Register(suite.ctx, NewStreamConfig(vchannel, nil, common.SubscriptionPositionEarliest))
 			suite.NoError(err)
 			helper.output = output
 		}
 	}
 
 	// Produce and dispatch messages to vchannel targets.
+	produceCtx, produceCancel := context.WithTimeout(suite.ctx, time.Second*3)
+	defer produceCancel()
 	for pchannel, vchannels := range suite.pchannel2Vchannels {
 		suite.wg.Add(1)
-		go produceMsg(suite.T(), suite.wg, suite.pchannel2Producer[pchannel], vchannels)
+		go produceMsgs(suite.T(), produceCtx, suite.wg, suite.pchannel2Producer[pchannel], vchannels)
 	}
 	// Mock pipelines consume messages.
+	consumeCtx, consumeCancel := context.WithTimeout(suite.ctx, 20*time.Second)
+	defer consumeCancel()
 	for _, vchannels := range suite.pchannel2Vchannels {
 		for vchannel, helper := range vchannels {
 			suite.wg.Add(1)
-			go consumeMsg(suite.T(), ctx, suite.wg, vchannel, helper)
+			go consumeMsgsFromTargets(suite.T(), consumeCtx, suite.wg, vchannel, helper)
 		}
 	}
 	suite.wg.Wait()
@@ -232,36 +218,34 @@ func (suite *SimulationSuite) TestDispatchToVchannels() {
 	// Verify pub-sub messages number.
 	for _, vchannels := range suite.pchannel2Vchannels {
 		for vchannel, helper := range vchannels {
-			suite.Equal(helper.pubInsMsgNum, helper.subInsMsgNum, vchannel)
-			suite.Equal(helper.pubDelMsgNum, helper.subDelMsgNum, vchannel)
-			suite.Equal(helper.pubDDLMsgNum, helper.subDDLMsgNum, vchannel)
-			suite.Equal(helper.pubPackNum, helper.subPackNum, vchannel)
+			suite.Equal(helper.pubInsMsgNum.Load(), helper.subInsMsgNum.Load(), vchannel)
+			suite.Equal(helper.pubDelMsgNum.Load(), helper.subDelMsgNum.Load(), vchannel)
+			suite.Equal(helper.pubDDLMsgNum.Load(), helper.subDDLMsgNum.Load(), vchannel)
+			suite.Equal(helper.pubPackNum.Load(), helper.subPackNum.Load(), vchannel)
 		}
 	}
 }
 
-// TODO: verify skipped message number
 func (suite *SimulationSuite) TestMerge() {
-	// Produce timetick msgs.
-	for _, producer := range suite.pchannel2Producer {
-		go produceTimeTick(suite.T(), suite.ctx, producer)
+	// Produce msgs.
+	produceCtx, produceCancel := context.WithCancel(suite.ctx)
+	for pchannel, producer := range suite.pchannel2Producer {
+		suite.wg.Add(1)
+		go produceMsgs(suite.T(), produceCtx, suite.wg, producer, suite.pchannel2Vchannels[pchannel])
 	}
 
-	// Fetch many msg positions to seek.
-	pchannel2Positions := make(map[string][]*msgpb.MsgPosition)
-	for pchannel := range suite.pchannel2Producer {
-		positions, err := getSeekPositions(suite.factory, pchannel, 100)
-		suite.NoError(err)
-		suite.NotEqual(0, len(positions))
-		pchannel2Positions[pchannel] = positions
+	// Get random msg positions to seek for each vchannel.
+	for pchannel, vchannels := range suite.pchannel2Vchannels {
+		getRandomSeekPositions(suite.T(), suite.ctx, suite.factory, pchannel, vchannels)
 	}
 
 	// Register vchannels.
-	for pchannel, vchannels := range suite.pchannel2Vchannels {
-		positions := pchannel2Positions[pchannel]
+	for _, vchannels := range suite.pchannel2Vchannels {
 		for vchannel, helper := range vchannels {
+			pos := helper.seekPos
+			assert.NotNil(suite.T(), pos)
 			output, err := suite.client.Register(suite.ctx, NewStreamConfig(
-				vchannel, positions[rand.Intn(len(positions))], // seek from random position
+				vchannel, pos,
 				common.SubscriptionPositionUnknown,
 			))
 			suite.NoError(err)
@@ -273,7 +257,7 @@ func (suite *SimulationSuite) TestMerge() {
 	for _, vchannels := range suite.pchannel2Vchannels {
 		for vchannel, helper := range vchannels {
 			suite.wg.Add(1)
-			go consumeMsg(suite.T(), suite.ctx, suite.wg, vchannel, helper)
+			go consumeMsgsFromTargets(suite.T(), suite.ctx, suite.wg, vchannel, helper)
 		}
 	}
 
@@ -281,10 +265,36 @@ func (suite *SimulationSuite) TestMerge() {
 	suite.Eventually(func() bool {
 		for pchannel := range suite.pchannel2Producer {
 			manager, ok := suite.client.(*client).managers.Get(pchannel)
-			suite.T().Logf("dispatcherNum = %d, pchannel = %s", manager.NumConsumer(), pchannel)
+			suite.T().Logf("dispatcherNum = %d, pchannel = %s\n", manager.NumConsumer(), pchannel)
 			suite.True(ok)
 			if manager.NumConsumer() != 1 { // expected all merged, only mainDispatcher exist
 				return false
+			}
+		}
+		return true
+	}, 15*time.Second, 100*time.Millisecond)
+
+	// Stop produce and verify pub-sub messages number.
+	produceCancel()
+	suite.Eventually(func() bool {
+		for _, vchannels := range suite.pchannel2Vchannels {
+			for vchannel, helper := range vchannels {
+				if helper.pubInsMsgNum.Load()-helper.skippedInsMsgNum != helper.subInsMsgNum.Load() {
+					suite.T().Logf("pubInsMsgNum = %d, subInsMsgNum = %d, vchannel = %s\n", helper.pubInsMsgNum.Load()-helper.skippedInsMsgNum, helper.subInsMsgNum.Load(), vchannel)
+					return false
+				}
+				if helper.pubDelMsgNum.Load()-helper.skippedDelMsgNum != helper.subDelMsgNum.Load() {
+					suite.T().Logf("pubDelMsgNum = %d, subDelMsgNum = %d, vchannel = %s\n", helper.pubDelMsgNum.Load()-helper.skippedDelMsgNum, helper.subDelMsgNum.Load(), vchannel)
+					return false
+				}
+				if helper.pubDDLMsgNum.Load()-helper.skippedDDLMsgNum != helper.subDDLMsgNum.Load() {
+					suite.T().Logf("pubDDLMsgNum = %d, subDDLMsgNum = %d, vchannel = %s\n", helper.pubDDLMsgNum.Load()-helper.skippedDDLMsgNum, helper.subDDLMsgNum.Load(), vchannel)
+					return false
+				}
+				if helper.pubPackNum.Load()-helper.skippedPacNum != helper.subPackNum.Load() {
+					suite.T().Logf("pubPackNum = %d, subPackNum = %d, vchannel = %s\n", helper.pubPackNum.Load()-helper.skippedPacNum, helper.subPackNum.Load(), vchannel)
+					return false
+				}
 			}
 		}
 		return true
@@ -298,9 +308,11 @@ func (suite *SimulationSuite) TestSplit() {
 	paramtable.Get().Save(paramtable.Get().MQCfg.TargetBufSize.Key, "512")
 	defer paramtable.Get().Reset(paramtable.Get().MQCfg.TargetBufSize.Key)
 
-	// Produce timetick msgs.
-	for _, producer := range suite.pchannel2Producer {
-		go produceTimeTick(suite.T(), suite.ctx, producer)
+	// Produce msgs.
+	produceCtx, produceCancel := context.WithCancel(suite.ctx)
+	for pchannel, producer := range suite.pchannel2Producer {
+		suite.wg.Add(1)
+		go produceMsgs(suite.T(), produceCtx, suite.wg, producer, suite.pchannel2Vchannels[pchannel])
 	}
 
 	// Register vchannels.
@@ -316,7 +328,7 @@ func (suite *SimulationSuite) TestSplit() {
 	suite.Eventually(func() bool {
 		for pchannel := range suite.pchannel2Producer {
 			manager, ok := suite.client.(*client).managers.Get(pchannel)
-			suite.T().Logf("dispatcherNum = %d, pchannel = %s", manager.NumConsumer(), pchannel)
+			suite.T().Logf("verifing dispatchers merged, dispatcherNum = %d, pchannel = %s\n", manager.NumConsumer(), pchannel)
 			suite.True(ok)
 			if manager.NumConsumer() != 1 { // expected all merged, only mainDispatcher exist
 				return false
@@ -363,7 +375,7 @@ func (suite *SimulationSuite) TestSplit() {
 		for pchannel := range suite.pchannel2Producer {
 			manager, ok := suite.client.(*client).managers.Get(pchannel)
 			suite.True(ok)
-			suite.T().Logf("dispatcherNum = %d, splitNum+1 = %d, pchannel = %s", manager.NumConsumer(), splitNumPerPchannel+1, pchannel)
+			suite.T().Logf("verifing split, dispatcherNum = %d, splitNum+1 = %d, pchannel = %s\n", manager.NumConsumer(), splitNumPerPchannel+1, pchannel)
 			if manager.NumConsumer() < 1 { // expected 1 mainDispatcher and 1 or more split deputyDispatchers
 				return false
 			}
@@ -372,13 +384,12 @@ func (suite *SimulationSuite) TestSplit() {
 	}, 20*time.Second, 100*time.Millisecond)
 
 	injectCancel()
-	suite.wg.Wait()
 
 	// Mock pipelines consume messages to trigger merged again.
 	for _, vchannels := range suite.pchannel2Vchannels {
 		for vchannel, helper := range vchannels {
 			suite.wg.Add(1)
-			go consumeMsg(suite.T(), suite.ctx, suite.wg, vchannel, helper)
+			go consumeMsgsFromTargets(suite.T(), suite.ctx, suite.wg, vchannel, helper)
 		}
 	}
 
@@ -386,10 +397,36 @@ func (suite *SimulationSuite) TestSplit() {
 	suite.Eventually(func() bool {
 		for pchannel := range suite.pchannel2Producer {
 			manager, ok := suite.client.(*client).managers.Get(pchannel)
-			suite.T().Logf("dispatcherNum = %d, pchannel = %s", manager.NumConsumer(), pchannel)
+			suite.T().Logf("verifing dispatchers merged agian, dispatcherNum = %d, pchannel = %s\n", manager.NumConsumer(), pchannel)
 			suite.True(ok)
 			if manager.NumConsumer() != 1 { // expected all merged, only mainDispatcher exist
 				return false
+			}
+		}
+		return true
+	}, 15*time.Second, 100*time.Millisecond)
+
+	// Stop produce and verify pub-sub messages number.
+	produceCancel()
+	suite.Eventually(func() bool {
+		for _, vchannels := range suite.pchannel2Vchannels {
+			for vchannel, helper := range vchannels {
+				if helper.pubInsMsgNum.Load() != helper.subInsMsgNum.Load() {
+					suite.T().Logf("pubInsMsgNum = %d, subInsMsgNum = %d, vchannel = %s\n", helper.pubInsMsgNum.Load(), helper.subInsMsgNum.Load(), vchannel)
+					return false
+				}
+				if helper.pubDelMsgNum.Load() != helper.subDelMsgNum.Load() {
+					suite.T().Logf("pubDelMsgNum = %d, subDelMsgNum = %d, vchannel = %s\n", helper.pubDelMsgNum.Load(), helper.subDelMsgNum.Load(), vchannel)
+					return false
+				}
+				if helper.pubDDLMsgNum.Load() != helper.subDDLMsgNum.Load() {
+					suite.T().Logf("pubDDLMsgNum = %d, subDDLMsgNum = %d, vchannel = %s\n", helper.pubDDLMsgNum.Load(), helper.subDDLMsgNum.Load(), vchannel)
+					return false
+				}
+				if helper.pubPackNum.Load() != helper.subPackNum.Load() {
+					suite.T().Logf("pubPackNum = %d, subPackNum = %d, vchannel = %s\n", helper.pubPackNum.Load(), helper.subPackNum.Load(), vchannel)
+					return false
+				}
 			}
 		}
 		return true
