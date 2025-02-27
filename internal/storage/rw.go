@@ -41,6 +41,7 @@ type rwOptions struct {
 	downloader          func(ctx context.Context, paths []string) ([][]byte, error)
 	uploader            func(ctx context.Context, kvs map[string][]byte) error
 	multiPartUploadSize int64
+	columnGroups        []storagecommon.ColumnGroup
 }
 
 type RwOption func(*rwOptions)
@@ -79,6 +80,12 @@ func WithDownloader(downloader func(ctx context.Context, paths []string) ([][]by
 func WithUploader(uploader func(ctx context.Context, kvs map[string][]byte) error) RwOption {
 	return func(options *rwOptions) {
 		options.uploader = uploader
+	}
+}
+
+func WithColumnGroups(columnGroups []storagecommon.ColumnGroup) RwOption {
+	return func(options *rwOptions) {
+		options.columnGroups = columnGroups
 	}
 }
 
@@ -150,12 +157,9 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			blobsWriter, allocator, chunkSize, rootPath, maxRowNum,
 		)
 	case StorageV2:
-		// TODO: support column groups generator to split columns by stats
-		splitter := storagecommon.NewColumnGroupSplitter(schema)
-		columnGroups := splitter.SplitByFieldType()
 		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
 			blobsWriter, allocator, chunkSize, rootPath, maxRowNum,
-			rwOptions.bufferSize, rwOptions.multiPartUploadSize, columnGroups,
+			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 		)
 	}
 	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))

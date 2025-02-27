@@ -416,7 +416,7 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() error {
 			}
 		}
 		pw.fieldBinlogs[columnGroupID].Binlogs = append(pw.fieldBinlogs[columnGroupID].Binlogs, &datapb.Binlog{
-			LogSize:       0, // TODO: should provide the log size of each column group file in storage v2
+			LogSize:       int64(pw.writer.GetColumnGroupUncompressed(columnGroup)), // TODO: should provide the log size of each column group file in storage v2
 			MemorySize:    int64(pw.writer.GetColumnGroupUncompressed(columnGroup)),
 			LogPath:       pw.writer.GetWrittenPaths()[columnGroupID],
 			EntriesNum:    pw.writer.GetWrittenRowNum(),
@@ -530,6 +530,9 @@ func (pw *PackedBinlogRecordWriter) GetRowNum() int64 {
 func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, rootPath string, maxRowNum int64, bufferSize, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup,
 ) (*PackedBinlogRecordWriter, error) {
+	if len(columnGroups) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("please specify column group for packed binlog record writer")
+	}
 	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())

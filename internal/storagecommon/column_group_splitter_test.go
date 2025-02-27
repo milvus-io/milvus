@@ -17,39 +17,105 @@
 package storagecommon
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
-func TestColumnGroupSplitter_Split(t *testing.T) {
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{Name: "double", DataType: schemapb.DataType_Double},
-			{Name: "bool", DataType: schemapb.DataType_Bool},
-			{Name: "string", DataType: schemapb.DataType_String},
-			{Name: "float", DataType: schemapb.DataType_Float},
-			{Name: "int8", DataType: schemapb.DataType_Int8},
-			{Name: "int16", DataType: schemapb.DataType_Int16},
-			{Name: "int32", DataType: schemapb.DataType_Int32},
-			{Name: "int64", DataType: schemapb.DataType_Int64},
-			{Name: "FloatVector", DataType: schemapb.DataType_FloatVector},
-			{Name: "BinaryVector", DataType: schemapb.DataType_BinaryVector},
+func TestSplitByFieldSize(t *testing.T) {
+	tests := []struct {
+		name           string
+		fieldBinlogs   []*datapb.FieldBinlog
+		splitThresHold int64
+		expected       []ColumnGroup
+	}{
+		{
+			name:           "Empty input",
+			fieldBinlogs:   []*datapb.FieldBinlog{},
+			splitThresHold: 100,
+			expected:       []ColumnGroup{},
+		},
+		{
+			name: "above threshold",
+			fieldBinlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 0,
+					Binlogs: []*datapb.Binlog{
+						{LogSize: 1000, EntriesNum: 10},
+					},
+				},
+				{
+					FieldID: 1,
+					Binlogs: []*datapb.Binlog{
+						{LogSize: 2000, EntriesNum: 10},
+					},
+				},
+			},
+			splitThresHold: 50,
+			expected: []ColumnGroup{
+				{Columns: []int{0}},
+				{Columns: []int{1}},
+			},
+		},
+		{
+			name: "one field",
+			fieldBinlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 0,
+					Binlogs: []*datapb.Binlog{
+						{LogSize: 100, EntriesNum: 10},
+					},
+				},
+			},
+			splitThresHold: 50,
+			expected: []ColumnGroup{
+				{Columns: []int{0}},
+			},
+		},
+		{
+			name: "Multiple fields, mixed sizes",
+			fieldBinlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 0,
+					Binlogs: []*datapb.Binlog{ // (above)
+						{LogSize: 500, EntriesNum: 5},
+						{LogSize: 500, EntriesNum: 5},
+					},
+				},
+				{
+					FieldID: 1,
+					Binlogs: []*datapb.Binlog{
+						{LogSize: 200, EntriesNum: 20}, // (below)
+					},
+				},
+				{
+					FieldID: 2,
+					Binlogs: []*datapb.Binlog{
+						{LogSize: 500, EntriesNum: 10}, // (threshold)
+					},
+				},
+				{
+					FieldID: 3,
+					Binlogs: []*datapb.Binlog{
+						{LogSize: 400, EntriesNum: 10}, // (below)
+					},
+				},
+			},
+			splitThresHold: 50,
+			expected: []ColumnGroup{
+				{Columns: []int{0}},
+				{Columns: []int{2}},
+				{Columns: []int{1, 3}},
+			},
 		},
 	}
 
-	expected := []ColumnGroup{
-		{Columns: []int{2}},
-		{Columns: []int{8}},
-		{Columns: []int{9}},
-		{Columns: []int{0, 1, 3, 4, 5, 6, 7}},
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := SplitByFieldSize(tt.fieldBinlogs, tt.splitThresHold)
+			assert.Equal(t, tt.expected, result)
+		})
 	}
-
-	splitter := NewColumnGroupSplitter(schema)
-	result := splitter.SplitByFieldType()
-
-	assert.True(t, reflect.DeepEqual(result, expected))
 }

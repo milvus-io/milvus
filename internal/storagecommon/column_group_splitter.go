@@ -16,41 +16,34 @@
 
 package storagecommon
 
-import "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+import (
+	"github.com/samber/lo"
 
-type ColumnGroupSplitter struct {
-	schema *schemapb.CollectionSchema
-}
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+)
 
 type ColumnGroup struct {
-	Columns []int
+	Columns []int // column indices
 }
 
-func NewColumnGroupSplitter(schema *schemapb.CollectionSchema) *ColumnGroupSplitter {
-	return &ColumnGroupSplitter{schema: schema}
-}
-
-func (s *ColumnGroupSplitter) SplitByFieldType() []ColumnGroup {
+// split by row average size
+func SplitByFieldSize(fieldBinlogs []*datapb.FieldBinlog, splitThresHold int64) []ColumnGroup {
 	groups := make([]ColumnGroup, 0)
-	shortColumnGroups := make([]int, 0)
-	for i, field := range s.schema.Fields {
-		if isShortField(field) {
-			shortColumnGroups = append(shortColumnGroups, i)
-		} else {
+	shortColumnGroup := ColumnGroup{Columns: make([]int, 0)}
+	for i, fieldBinlog := range fieldBinlogs {
+		if len(fieldBinlog.Binlogs) == 0 {
+			continue
+		}
+		totalSize := lo.SumBy(fieldBinlog.Binlogs, func(b *datapb.Binlog) int64 { return b.LogSize })
+		totalNumRows := lo.SumBy(fieldBinlog.Binlogs, func(b *datapb.Binlog) int64 { return b.EntriesNum })
+		if totalSize/totalNumRows >= splitThresHold {
 			groups = append(groups, ColumnGroup{Columns: []int{i}})
+		} else {
+			shortColumnGroup.Columns = append(shortColumnGroup.Columns, i)
 		}
 	}
-	groups = append(groups, ColumnGroup{Columns: shortColumnGroups})
-	return groups
-}
-
-func isShortField(field *schemapb.FieldSchema) bool {
-	switch field.DataType {
-	case schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16,
-		schemapb.DataType_Int32, schemapb.DataType_Int64,
-		schemapb.DataType_Float, schemapb.DataType_Double:
-		return true
-	default:
-		return false
+	if len(shortColumnGroup.Columns) > 0 {
+		groups = append(groups, shortColumnGroup)
 	}
+	return groups
 }

@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -94,10 +95,27 @@ func (s *PackedBinlogRecordSuite) SetupTest() {
 	s.chunkSize = uint64(1024)
 }
 
+func genTestColumnGroups(schema *schemapb.CollectionSchema) []storagecommon.ColumnGroup {
+	fieldBinlogs := make([]*datapb.FieldBinlog, 0)
+	for i, field := range schema.Fields {
+		fieldBinlogs = append(fieldBinlogs, &datapb.FieldBinlog{
+			FieldID: field.FieldID,
+			Binlogs: []*datapb.Binlog{
+				{
+					EntriesNum: int64(10 * (i + 1)),
+					LogSize:    int64(1000 / (i + 1)),
+				},
+			},
+		})
+	}
+	return storagecommon.SplitByFieldSize(fieldBinlogs, 10)
+}
+
 func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 	rows := 10000
-	read_batch_size := 1024
+	readBatchSize := 1024
+	columnGroups := genTestColumnGroups(s.schema)
 	wOption := []RwOption{
 		WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return s.mockBinlogIO.Upload(ctx, kvs)
@@ -105,6 +123,7 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 		WithVersion(StorageV2),
 		WithMultiPartUploadSize(0),
 		WithBufferSize(1 * 1024 * 1024), // 1MB
+		WithColumnGroups(columnGroups),
 	}
 
 	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.rootPath, s.maxRowNum, wOption...)
@@ -133,6 +152,7 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	s.Positive(writtenUncompressed)
 
 	fieldBinlogs, statsLog, bm25StatsLog := w.GetLogs()
+	s.Equal(len(fieldBinlogs), len(columnGroups))
 	for _, columnGroup := range fieldBinlogs {
 		s.Equal(len(columnGroup.Binlogs), 1)
 		s.Equal(columnGroup.Binlogs[0].EntriesNum, int64(rows))
@@ -150,13 +170,13 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	}
 	r, err := NewBinlogRecordReader(s.ctx, binlogs, s.schema, rOption...)
 	s.NoError(err)
-	for i := 0; i < rows/read_batch_size+1; i++ {
+	for i := 0; i < rows/readBatchSize+1; i++ {
 		rec, err := r.Next()
 		s.NoError(err)
-		if i < rows/read_batch_size {
-			s.Equal(rec.Len(), read_batch_size)
+		if i < rows/readBatchSize {
+			s.Equal(rec.Len(), readBatchSize)
 		} else {
-			s.Equal(rec.Len(), rows%read_batch_size)
+			s.Equal(rec.Len(), rows%readBatchSize)
 		}
 	}
 
@@ -169,6 +189,7 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 	s.schema = genCollectionSchemaWithBM25()
+	columnGroups := genTestColumnGroups(s.schema)
 	wOption := []RwOption{
 		WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return s.mockBinlogIO.Upload(ctx, kvs)
@@ -176,6 +197,7 @@ func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
 		WithVersion(StorageV2),
 		WithMultiPartUploadSize(0),
 		WithBufferSize(10 * 1024 * 1024), // 10MB
+		WithColumnGroups(columnGroups),
 	}
 
 	v := &Value{
@@ -193,7 +215,7 @@ func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
 	err = w.Close()
 	s.NoError(err)
 	fieldBinlogs, statsLog, bm25StatsLog := w.GetLogs()
-	s.Equal(len(fieldBinlogs), 3)
+	s.Equal(len(fieldBinlogs), len(columnGroups))
 
 	s.Equal(statsLog.Binlogs[0].EntriesNum, int64(1))
 	s.Positive(statsLog.Binlogs[0].MemorySize)
@@ -217,6 +239,14 @@ func (s *PackedBinlogRecordSuite) TestUnsuportedStorageVersion() {
 	s.Error(err)
 }
 
+func (s *PackedBinlogRecordSuite) TestEmptyColumnGroup() {
+	wOption := []RwOption{
+		WithVersion(StorageV2),
+	}
+	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.rootPath, s.maxRowNum, wOption...)
+	s.Error(err)
+}
+
 func (s *PackedBinlogRecordSuite) TestEmptyBinlog() {
 	rOption := []RwOption{
 		WithVersion(StorageV2),
@@ -226,8 +256,10 @@ func (s *PackedBinlogRecordSuite) TestEmptyBinlog() {
 }
 
 func (s *PackedBinlogRecordSuite) TestAllocIDExhausedError() {
+	columnGroups := genTestColumnGroups(s.schema)
 	wOption := []RwOption{
 		WithVersion(StorageV2),
+		WithColumnGroups(columnGroups),
 	}
 	logIDAlloc := allocator.NewLocalAllocator(1, 1)
 	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, logIDAlloc, s.chunkSize, s.rootPath, s.maxRowNum, wOption...)
