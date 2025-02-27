@@ -57,6 +57,11 @@ func NewCredentialProvider() (minioCred.Provider, error) {
 	return &CredentialProvider{tencentCreds: cred}, nil
 }
 
+// RetrieveWithCredContext retrieves the credentials with context.
+func (c *CredentialProvider) RetrieveWithCredContext(*minioCred.CredContext) (minioCred.Value, error) {
+	return c.Retrieve()
+}
+
 // Retrieve returns nil if it successfully retrieved the value.
 // Error is returned if the value were not obtainable, or empty.
 // according to the caller minioCred.Credentials.Get(),
