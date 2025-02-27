@@ -403,7 +403,7 @@ func (suite *SimulationSuite) TestSplit() {
 	suite.Eventually(func() bool {
 		for pchannel := range suite.pchannel2Producer {
 			manager, ok := suite.client.(*client).managers.Get(pchannel)
-			suite.T().Logf("verifing dispatchers merged agian, dispatcherNum = %d, pchannel = %s\n", manager.NumConsumer(), pchannel)
+			suite.T().Logf("verifing dispatchers merged again, dispatcherNum = %d, pchannel = %s\n", manager.NumConsumer(), pchannel)
 			suite.True(ok)
 			if manager.NumConsumer() != 1 { // expected all merged, only mainDispatcher exist
 				return false
