@@ -28,9 +28,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -47,7 +47,7 @@ func TestLevelZeroCompactionTaskSuite(t *testing.T) {
 type LevelZeroCompactionTaskSuite struct {
 	suite.Suite
 
-	mockBinlogIO *io.MockBinlogIO
+	mockBinlogIO *mock_util.MockBinlogIO
 	task         *LevelZeroCompactionTask
 
 	dData *storage.DeleteData
@@ -56,7 +56,7 @@ type LevelZeroCompactionTaskSuite struct {
 
 func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 	paramtable.Init()
-	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
+	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	// plan of the task is unset
 	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, nil, nil)
 
