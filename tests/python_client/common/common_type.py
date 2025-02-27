@@ -251,11 +251,11 @@ default_sparse_inverted_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_
                                  "params": {"drop_ratio_build": 0.2}}
 default_text_sparse_inverted_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "BM25",
                                  "params": {"drop_ratio_build": 0.2, "bm25_k1": 1.5, "bm25_b": 0.75,}}
-default_search_params = {"params": default_all_search_params_params[2].copy()}
-default_search_ip_params = {"metric_type": "IP", "params": default_all_search_params_params[2].copy()}
+default_search_params = {"params": {"nlist": 128}}
+default_search_ip_params = {"metric_type": "IP", "params": {"nlist": 128}}
 default_search_binary_params = {"metric_type": "JACCARD", "params": {"nprobe": 32}}
-default_index = {"index_type": "IVF_SQ8", "metric_type": default_L0_metric, "params": default_all_indexes_params[2].copy()}
-default_binary_index = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": default_all_indexes_params[8].copy()}
+default_index = {"index_type": "IVF_SQ8", "metric_type": default_L0_metric, "params": {"nlist": 128}}
+default_binary_index = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": {"nlist": 64}}
 default_diskann_index = {"index_type": "DISKANN", "metric_type": default_L0_metric, "params": {}}
 default_diskann_search_params = {"params": {"search_list": 30}}
 default_sparse_search_params = {"metric_type": "IP", "params": {"drop_ratio_search": "0.2"}}
