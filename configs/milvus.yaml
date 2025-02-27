@@ -912,6 +912,7 @@ quotaAndLimits:
     allocWaitInterval: 1000 # retry wait duration when delete alloc forward data rate failed, in millisecond
     complexDeleteLimitEnable: false # whether complex delete check forward data by limiter
     maxCollectionNum: 65536
+    maxPartitionNum: 65536
     maxCollectionNumPerDB: 65536 # Maximum number of collections per database.
     maxInsertSize: -1 # maximum size of a single insert request, in bytes, -1 means no limit
     maxResourceGroupNumOfQueryNode: 1024 # maximum number of resource groups of query nodes
