@@ -71,40 +71,72 @@ func TestClient_Concurrency(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().MQCfg.MaxDispatcherNumPerPchannel.Key, "65536")
 	defer paramtable.Get().Reset(paramtable.Get().MQCfg.MaxDispatcherNumPerPchannel.Key)
 
-	pchannel := fmt.Sprintf("by-dev-rootcoord-dml_%d", rand.Int63())
+	const (
+		vchannelNumPerPchannel = 10
+		pchannelNum            = 16
+	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	producer, err := newMockProducer(factory, pchannel)
-	assert.NoError(t, err)
-	go produceTimeTick(t, ctx, producer)
-	t.Logf("start to produce time tick to pchannel %s", pchannel)
+
+	pchannels := make([]string, pchannelNum)
+	for i := 0; i < pchannelNum; i++ {
+		pchannel := fmt.Sprintf("by-dev-rootcoord-dml-%d_%d", rand.Int63(), i)
+		pchannels[i] = pchannel
+		producer, err := newMockProducer(factory, pchannel)
+		assert.NoError(t, err)
+		go produceTimeTick(t, ctx, producer)
+		t.Logf("start to produce time tick to pchannel %s", pchannel)
+	}
 
 	wg := &sync.WaitGroup{}
-	const total = 100
 	deregisterCount := atomic.NewInt32(0)
-	for i := 0; i < total; i++ {
-		i := i
-		vchannel := fmt.Sprintf("%s_vchannel-%d-%d", pchannel, i, rand.Int())
-		wg.Add(1)
-		go func() {
-			_, err := client1.Register(context.Background(), NewStreamConfig(vchannel, nil, common.SubscriptionPositionUnknown))
-			assert.NoError(t, err)
-			for j := 0; j < rand.Intn(2); j++ {
-				client1.Deregister(vchannel)
-				deregisterCount.Inc()
-			}
-			wg.Done()
-		}()
+	for i := 0; i < vchannelNumPerPchannel; i++ {
+		for j := 0; j < pchannelNum; j++ {
+			vchannel := fmt.Sprintf("%s_%dv%d", pchannels[i], rand.Int(), i)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := client1.Register(ctx, NewStreamConfig(vchannel, nil, common.SubscriptionPositionUnknown))
+				assert.NoError(t, err)
+				for j := 0; j < rand.Intn(2); j++ {
+					client1.Deregister(vchannel)
+					deregisterCount.Inc()
+				}
+			}()
+		}
 	}
 	wg.Wait()
-	// TODO: fix
-	// expected := int(total - deregisterCount.Load())
-	expected := 1
 
 	c := client1.(*client)
-	n := c.managers.Len()
-	assert.Equal(t, expected, n)
+	expected := int(vchannelNumPerPchannel*pchannelNum - deregisterCount.Load())
+
+	// Verify registered targets number.
+	actual := 0
+	c.managers.Range(func(pchannel string, manager DispatcherManager) bool {
+		actual += manager.NumTarget()
+		return true
+	})
+	assert.Equal(t, expected, actual)
+
+	// Verify active targets number.
+	assert.Eventually(t, func() bool {
+		actual = 0
+		c.managers.Range(func(pchannel string, manager DispatcherManager) bool {
+			m := manager.(*dispatcherManager)
+			m.mu.RLock()
+			defer m.mu.RUnlock()
+			if m.mainDispatcher != nil {
+				actual += m.mainDispatcher.targets.Len()
+			}
+			for _, d := range m.deputyDispatchers {
+				actual += d.targets.Len()
+			}
+			return true
+		})
+		t.Logf("expect = %d, actual = %d\n", expected, actual)
+		return expected == actual
+	}, 15*time.Second, 100*time.Millisecond)
 }
 
 type vchannelHelper struct {

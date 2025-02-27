@@ -60,7 +60,7 @@ func newMockProducer(factory msgstream.Factory, pchannel string) (msgstream.MsgS
 	if err != nil {
 		return nil, err
 	}
-	stream.AsProducer(context.TODO(), []string{pchannel})
+	stream.AsProducer(context.Background(), []string{pchannel})
 	stream.SetRepackFunc(defaultInsertRepackFunc)
 	return stream, nil
 }
@@ -71,7 +71,7 @@ func getSeekPositions(factory msgstream.Factory, pchannel string, maxNum int) ([
 		return nil, err
 	}
 	defer stream.Close()
-	stream.AsConsumer(context.TODO(), []string{pchannel}, fmt.Sprintf("%d", rand.Int()), common.SubscriptionPositionEarliest)
+	stream.AsConsumer(context.Background(), []string{pchannel}, fmt.Sprintf("%d", rand.Int()), common.SubscriptionPositionEarliest)
 	positions := make([]*msgstream.MsgPosition, 0)
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -244,7 +244,7 @@ func produceMsg(t *testing.T, wg *sync.WaitGroup, producer msgstream.MsgStream, 
 		insNum := rand.Intn(10)
 		for j := 0; j < insNum; j++ {
 			vchannel := vchannelNames[rand.Intn(len(vchannels))]
-			err := producer.Produce(context.TODO(), &msgstream.MsgPack{
+			err := producer.Produce(context.Background(), &msgstream.MsgPack{
 				Msgs: []msgstream.TsMsg{genInsertMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
 			})
 			assert.NoError(t, err)
@@ -255,7 +255,7 @@ func produceMsg(t *testing.T, wg *sync.WaitGroup, producer msgstream.MsgStream, 
 		delNum := rand.Intn(2)
 		for j := 0; j < delNum; j++ {
 			vchannel := vchannelNames[rand.Intn(len(vchannels))]
-			err := producer.Produce(context.TODO(), &msgstream.MsgPack{
+			err := producer.Produce(context.Background(), &msgstream.MsgPack{
 				Msgs: []msgstream.TsMsg{genDeleteMsg(rand.Intn(20)+1, vchannel, uniqueMsgID)},
 			})
 			assert.NoError(t, err)
@@ -267,7 +267,7 @@ func produceMsg(t *testing.T, wg *sync.WaitGroup, producer msgstream.MsgStream, 
 		for j := 0; j < ddlNum; j++ {
 			vchannel := vchannelNames[rand.Intn(len(vchannels))]
 			collectionID := funcutil.GetCollectionIDFromVChannel(vchannel)
-			err := producer.Produce(context.TODO(), &msgstream.MsgPack{
+			err := producer.Produce(context.Background(), &msgstream.MsgPack{
 				Msgs: []msgstream.TsMsg{genDDLMsg(commonpb.MsgType_DropCollection, collectionID)},
 			})
 			assert.NoError(t, err)
@@ -276,7 +276,7 @@ func produceMsg(t *testing.T, wg *sync.WaitGroup, producer msgstream.MsgStream, 
 		}
 		// produce time tick
 		ts := uint64(i * 100)
-		err := producer.Produce(context.TODO(), &msgstream.MsgPack{
+		err := producer.Produce(context.Background(), &msgstream.MsgPack{
 			Msgs: []msgstream.TsMsg{genTimeTickMsg(ts)},
 		})
 		assert.NoError(t, err)

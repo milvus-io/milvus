@@ -224,7 +224,7 @@ OUTER:
 
 	isMain := c.mainDispatcher == nil
 
-	// TODO: fix context
+	// TODO: add newDispatcher timeout param and init context
 	d, err := NewDispatcher(context.Background(), c.factory, isMain, c.pchannel, earliestTarget.pos, earliestTarget.subPos, latestTarget.pos.GetTimestamp())
 	if err != nil {
 		panic(err)
