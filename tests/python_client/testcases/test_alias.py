@@ -453,14 +453,19 @@ class TestAliasOperationInvalid(TestcaseBase):
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         res2 = self.utility_wrap.list_aliases(c_name)[0]
         assert len(res2) == 0
-        # the same alias name can be reused for another collection
+        # the same alias name can not be reused for another collection
         error = {ct.err_code: 999,
                  ct.err_msg: f"{alias_name} is alias to another collection: {collection_w.name}: alias already exist"}
         self.utility_wrap.create_alias(c_name, alias_name,
                                        check_task=CheckTasks.err_res,
                                        check_items=error)
-        # res2 = self.utility_wrap.list_aliases(c_name)[0]
-        # assert len(res2) == 1
+        # TODO: uncomment the assertion below after pr#40143 merged
+        # should not create a collection with the same name with alias
+        # error = {ct.err_code: 999,
+        #          ct.err_msg: f"collection name {alias_name} conflicts with an existing alias, "
+        #                      f"please choose a unique name"}
+        # self.init_collection_wrap(name=alias_name, schema=default_schema,
+        #                           check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_alias_rename_collection_to_alias_name(self):
