@@ -355,6 +355,7 @@ class Checker:
         self.dim = cf.get_dim_by_schema(schema=schema)
         self.int64_field_name = cf.get_int64_field_name(schema=schema)
         self.text_field_name = cf.get_text_field_name(schema=schema)
+        self.text_match_field_name_list = cf.get_text_match_field_name(schema=schema)
         self.float_vector_field_name = cf.get_float_vec_field_name(schema=schema)
         self.c_wrap.init_collection(name=c_name,
                                     schema=schema,
@@ -428,10 +429,11 @@ class Checker:
         for i in range(nb):
             data[i][self.int64_field_name] = ts_data[i]
         df = pd.DataFrame(data)
-        if self.text_field_name in df.columns:
-            texts = df[self.text_field_name].tolist()
-            wf = cf.analyze_documents(texts)
-            self.word_freq.update(wf)
+        for text_field in self.text_match_field_name_list:
+            if text_field in df.columns:
+                texts = df[text_field].tolist()
+                wf = cf.analyze_documents(texts)
+                self.word_freq.update(wf)
 
         res, result = self.c_wrap.insert(data=data,
                                          partition_name=partition_name,
@@ -1391,10 +1393,11 @@ class TextMatchChecker(Checker):
         self.c_wrap.load(replica_number=replica_number)  # do load before query
         self.insert_data()
         key_word = self.word_freq.most_common(1)[0][0]
-        self.term_expr = f"TEXT_MATCH({self.text_field_name}, '{key_word}')"
+        text_match_field_name = random.choice(self.text_match_field_name_list)
+        self.term_expr = f"TEXT_MATCH({text_match_field_name}, '{key_word}')"
 
     @trace()
-    def query(self):
+    def text_match(self):
         res, result = self.c_wrap.query(self.term_expr, timeout=query_timeout,
                                         check_task=CheckTasks.check_query_not_empty)
         return res, result
@@ -1402,8 +1405,9 @@ class TextMatchChecker(Checker):
     @exception_handler()
     def run_task(self):
         key_word = self.word_freq.most_common(1)[0][0]
-        self.term_expr = f"TEXT_MATCH({self.text_field_name}, '{key_word}')"
-        res, result = self.query()
+        text_match_field_name = random.choice(self.text_match_field_name_list)
+        self.term_expr = f"TEXT_MATCH({text_match_field_name}, '{key_word}')"
+        res, result = self.text_match()
         return res, result
 
     def keep_running(self):
