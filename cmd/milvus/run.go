@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
@@ -55,12 +56,12 @@ func (c *run) printBanner(w io.Writer) {
 	fmt.Fprintln(w, " /_/  /_/___/____/___/\\____/___/     ")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Welcome to use Milvus!")
-	fmt.Fprintln(w, "Version:   "+BuildTags)
+	fmt.Fprintln(w, "Version:   "+common.Version.String())
 	fmt.Fprintln(w, "Built:     "+BuildTime)
 	fmt.Fprintln(w, "GitCommit: "+GitCommit)
 	fmt.Fprintln(w, "GoVersion: "+GoVersion)
 	fmt.Fprintln(w)
-	metrics.BuildInfo.WithLabelValues(BuildTags, BuildTime, GitCommit).Set(1)
+	metrics.BuildInfo.WithLabelValues(common.Version.String(), BuildTime, GitCommit).Set(1)
 }
 
 func (c *run) printHardwareInfo(w io.Writer) {
@@ -82,7 +83,7 @@ func (c *run) injectVariablesToEnv() {
 			zap.Error(err))
 	}
 
-	err = os.Setenv(metricsinfo.GitBuildTagsEnvKey, BuildTags)
+	err = os.Setenv(metricsinfo.GitBuildTagsEnvKey, common.Version.String())
 	if err != nil {
 		log.Warn(fmt.Sprintf("failed to inject %s to environment variable", metricsinfo.GitBuildTagsEnvKey),
 			zap.Error(err))
