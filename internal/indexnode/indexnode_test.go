@@ -185,6 +185,7 @@ type IndexNodeSuite struct {
 	logID         int64
 	numRows       int64
 	data          []*Blob
+	deleteData    []*Blob
 	in            *IndexNode
 	storageConfig *indexpb.StorageConfig
 	cm            storage.ChunkManager
@@ -205,7 +206,10 @@ func (s *IndexNodeSuite) SetupTest() {
 	Params.MinioCfg.RootPath.SwapTempValue("indexnode-ut")
 
 	var err error
-	s.data, err = generateTestData(s.collID, s.partID, s.segID, 3000)
+	s.data, err = generateTestData(s.collID, s.partID, s.segID, int(s.numRows))
+	s.NoError(err)
+
+	s.deleteData, err = generateDeleteData(s.collID, s.partID, s.segID, int(s.numRows))
 	s.NoError(err)
 
 	s.storageConfig = &indexpb.StorageConfig{
@@ -246,6 +250,13 @@ func (s *IndexNodeSuite) SetupTest() {
 	for i, blob := range s.data {
 		fID, _ := strconv.ParseInt(blob.GetKey(), 10, 64)
 		filePath, err := binlog.BuildLogPath(storage.InsertBinlog, s.collID, s.partID, s.segID, fID, logID+int64(i))
+		s.NoError(err)
+		err = s.cm.Write(context.Background(), filePath, blob.GetValue())
+		s.NoError(err)
+	}
+	for i, blob := range s.deleteData {
+		fID, _ := strconv.ParseInt(blob.GetKey(), 10, 64)
+		filePath, err := binlog.BuildLogPath(storage.DeleteBinlog, s.collID, s.partID, s.segID, fID, logID+int64(i))
 		s.NoError(err)
 		err = s.cm.Write(context.Background(), filePath, blob.GetValue())
 		s.NoError(err)
@@ -666,6 +677,88 @@ func (s *IndexNodeSuite) Test_CreateStatsTask() {
 				s.NotZero(len(resp.GetStatsJobResults().GetResults()[0].GetInsertLogs()))
 				s.NotZero(len(resp.GetStatsJobResults().GetResults()[0].GetStatsLogs()))
 				s.Equal(s.numRows, resp.GetStatsJobResults().GetResults()[0].GetNumRows())
+				break
+			}
+			s.Equal(indexpb.JobState_JobStateInProgress, resp.GetStatsJobResults().GetResults()[0].GetState())
+			time.Sleep(time.Second)
+		}
+
+		slotResp, err := s.in.GetJobStats(ctx, &workerpb.GetJobStatsRequest{})
+		s.NoError(err)
+		err = merr.Error(slotResp.GetStatus())
+		s.NoError(err)
+
+		s.Equal(int64(1), slotResp.GetTaskSlots())
+
+		status, err = s.in.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
+			ClusterID: "cluster2",
+			TaskIDs:   []int64{taskID},
+			JobType:   indexpb.JobType_JobTypeStatsJob,
+		})
+		s.NoError(err)
+		err = merr.Error(status)
+		s.NoError(err)
+	})
+
+	s.Run("all deleted", func() {
+		deltaLogs := make([]*datapb.FieldBinlog, 0)
+		for i := range s.deleteData {
+			deltaLogs = append(deltaLogs, &datapb.FieldBinlog{
+				Binlogs: []*datapb.Binlog{{
+					EntriesNum:    s.numRows,
+					LogSize:       int64(len(s.deleteData[0].GetValue())),
+					MemorySize:    s.deleteData[0].GetMemorySize(),
+					LogID:         s.logID + int64(i),
+					TimestampFrom: 1,
+					TimestampTo:   3001,
+				}},
+			})
+		}
+		taskID := int64(200)
+		req := &workerpb.CreateStatsRequest{
+			ClusterID:       "cluster2",
+			TaskID:          taskID,
+			CollectionID:    s.collID,
+			PartitionID:     s.partID,
+			InsertChannel:   "ch1",
+			SegmentID:       s.segID,
+			InsertLogs:      fieldBinlogs,
+			DeltaLogs:       deltaLogs,
+			StorageConfig:   s.storageConfig,
+			Schema:          generateTestSchema(),
+			TargetSegmentID: s.segID + 1,
+			StartLogID:      s.logID + 100,
+			EndLogID:        s.logID + 200,
+			NumRows:         s.numRows,
+			BinlogMaxSize:   131000,
+			SubJobType:      indexpb.StatsSubJob_Sort,
+		}
+
+		status, err := s.in.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
+			ClusterID: "cluster2",
+			TaskID:    taskID,
+			JobType:   indexpb.JobType_JobTypeStatsJob,
+			Request: &workerpb.CreateJobV2Request_StatsRequest{
+				StatsRequest: req,
+			},
+		})
+		s.NoError(err)
+		err = merr.Error(status)
+		s.NoError(err)
+
+		for {
+			resp, err := s.in.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
+				ClusterID: "cluster2",
+				TaskIDs:   []int64{taskID},
+				JobType:   indexpb.JobType_JobTypeStatsJob,
+			})
+			s.NoError(err)
+			err = merr.Error(resp.GetStatus())
+			s.NoError(err)
+			s.Equal(1, len(resp.GetStatsJobResults().GetResults()))
+			if resp.GetStatsJobResults().GetResults()[0].GetState() == indexpb.JobState_JobStateFinished {
+				s.Zero(len(resp.GetStatsJobResults().GetResults()[0].GetInsertLogs()))
+				s.Equal(int64(0), resp.GetStatsJobResults().GetResults()[0].GetNumRows())
 				break
 			}
 			s.Equal(indexpb.JobState_JobStateInProgress, resp.GetStatsJobResults().GetResults()[0].GetState())
