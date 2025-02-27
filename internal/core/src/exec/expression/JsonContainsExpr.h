@@ -51,37 +51,52 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    std::string
+    ToString() const {
+        return fmt::format("{}", expr_->ToString());
+    }
+
+    bool
+    IsSource() const override {
+        return true;
+    }
+
+    std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return expr_->column_;
+    }
+
  private:
     VectorPtr
-    EvalJsonContainsForDataSegment(OffsetVector* input = nullptr);
+    EvalJsonContainsForDataSegment(EvalCtx& context);
 
     template <typename ExprValueType>
     VectorPtr
-    ExecJsonContains(OffsetVector* input = nullptr);
+    ExecJsonContains(EvalCtx& context);
 
     template <typename ExprValueType>
     VectorPtr
-    ExecArrayContains(OffsetVector* input = nullptr);
+    ExecArrayContains(EvalCtx& context);
 
     template <typename ExprValueType>
     VectorPtr
-    ExecJsonContainsAll(OffsetVector* input = nullptr);
+    ExecJsonContainsAll(EvalCtx& context);
 
     template <typename ExprValueType>
     VectorPtr
-    ExecArrayContainsAll(OffsetVector* input = nullptr);
+    ExecArrayContainsAll(EvalCtx& context);
 
     VectorPtr
-    ExecJsonContainsArray(OffsetVector* input = nullptr);
+    ExecJsonContainsArray(EvalCtx& context);
 
     VectorPtr
-    ExecJsonContainsAllArray(OffsetVector* input = nullptr);
+    ExecJsonContainsAllArray(EvalCtx& context);
 
     VectorPtr
-    ExecJsonContainsAllWithDiffType(OffsetVector* input = nullptr);
+    ExecJsonContainsAllWithDiffType(EvalCtx& context);
 
     VectorPtr
-    ExecJsonContainsWithDiffType(OffsetVector* input = nullptr);
+    ExecJsonContainsWithDiffType(EvalCtx& context);
 
     VectorPtr
     EvalArrayContainsForIndexSegment();
