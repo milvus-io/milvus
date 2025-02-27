@@ -23,7 +23,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.17.9
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.5
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.6-0.20250218041440-2ba1bebc12f0
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
 	github.com/prometheus/client_golang v1.14.0
@@ -69,6 +69,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/milvus-io/milvus/pkg/v2 v2.0.0-00010101000000-000000000000
+	github.com/magiconair/properties v1.8.5
 	github.com/pkg/errors v0.9.1
 	github.com/remeh/sizedwaitgroup v1.0.0
 	github.com/shirou/gopsutil/v4 v4.24.10
@@ -166,7 +167,6 @@ require (
 	github.com/leodido/go-urn v1.2.4 // indirect
 	github.com/linkedin/goavro/v2 v2.11.1 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
-	github.com/magiconair/properties v1.8.5 // indirect
 	github.com/mattn/go-colorable v0.1.11 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect

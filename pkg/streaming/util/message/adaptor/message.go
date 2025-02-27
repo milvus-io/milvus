@@ -175,6 +175,12 @@ func recoverMessageFromHeader(tsMsg msgstream.TsMsg, msg message.ImmutableMessag
 			return nil, errors.Wrap(err, "Failed to convert message to delete message")
 		}
 		return recoverDeleteMsgFromHeader(tsMsg.(*msgstream.DeleteMsg), deleteMessage.Header(), msg.TimeTick())
+	case message.MessageTypeImport:
+		importMessage, err := message.AsImmutableImportMessageV1(msg)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to convert message to import message")
+		}
+		return recoverImportMsgFromHeader(tsMsg.(*msgstream.ImportMsg), importMessage.Header(), msg.TimeTick())
 	default:
 		return tsMsg, nil
 	}
@@ -219,4 +225,9 @@ func recoverDeleteMsgFromHeader(deleteMsg *msgstream.DeleteMsg, header *message.
 	}
 	deleteMsg.Timestamps = timestamps
 	return deleteMsg, nil
+}
+
+func recoverImportMsgFromHeader(importMsg *msgstream.ImportMsg, header *message.ImportMessageHeader, timetick uint64) (msgstream.TsMsg, error) {
+	importMsg.Base.Timestamp = timetick
+	return importMsg, nil
 }
