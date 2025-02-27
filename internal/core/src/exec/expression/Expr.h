@@ -905,17 +905,33 @@ class SegmentExpr : public Expr {
 
             size = std::min(size, batch_size_ - processed_size);
 
-            auto chunk = segment_->chunk_data<T>(field_id_, i);
-            const bool* valid_data = chunk.valid_data();
-            if (valid_data == nullptr) {
-                return valid_result;
-            }
-            valid_data += data_pos;
-            for (int j = 0; j < size; j++) {
-                if (!valid_data[j]) {
-                    valid_result[j + processed_size] = false;
+            bool access_sealed_variable_column = false;
+            if constexpr (std::is_same_v<T, std::string_view> ||
+                          std::is_same_v<T, Json>) {
+                if (segment_->type() == SegmentType::Sealed) {
+                    auto [data_vec, valid_data] = segment_->get_batch_views<T>(
+                        field_id_, i, data_pos, size);
+                    ApplyValidData(valid_data.data(),
+                                   valid_result + processed_size,
+                                   valid_result + processed_size,
+                                   size);
+                    access_sealed_variable_column = true;
                 }
             }
+
+            if (!access_sealed_variable_column) {
+                auto chunk = segment_->chunk_data<T>(field_id_, i);
+                const bool* valid_data = chunk.valid_data();
+                if (valid_data == nullptr) {
+                    return valid_result;
+                }
+                valid_data += data_pos;
+                ApplyValidData(valid_data,
+                               valid_result + processed_size,
+                               valid_result + processed_size,
+                               size);
+            }
+
             processed_size += size;
             if (processed_size >= batch_size_) {
                 current_data_chunk_ = i;

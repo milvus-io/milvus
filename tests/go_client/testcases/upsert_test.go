@@ -28,7 +28,7 @@ func TestUpsertAllFields(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	// connect
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create -> insert [0, 3000) -> flush -> index -> load
 	// create -> insert -> flush -> index -> load
@@ -98,7 +98,7 @@ func TestUpsertSparse(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	// connect
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create -> insert [0, 3000) -> flush -> index -> load
 	// create -> insert -> flush -> index -> load
@@ -163,7 +163,7 @@ func TestUpsertVarcharPk(t *testing.T) {
 		upsert "a" -> " a " -> actually new insert
 	*/
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create -> insert [0, 3000) -> flush -> index -> load
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -212,7 +212,7 @@ func TestUpsertVarcharPk(t *testing.T) {
 // test upsert with partition
 func TestUpsertMultiPartitions(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	parName := common.GenRandomString("p", 4)
 	err := mc.CreatePartition(ctx, client.NewCreatePartitionOption(schema.CollectionName, parName))
@@ -247,7 +247,7 @@ func TestUpsertSamePksManyTimes(t *testing.T) {
 	// query -> gets last upsert entities
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create and insert
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -286,7 +286,7 @@ func TestUpsertAutoID(t *testing.T) {
 		upsert exist pk -> error ? autoID not supported upsert
 	*/
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	nb := 100
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption().TWithAutoID(true), hp.TNewSchemaOption())
@@ -335,7 +335,7 @@ func TestUpsertAutoID(t *testing.T) {
 // test upsert with invalid collection / partition name
 func TestUpsertNotExistCollectionPartition(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// upsert not exist collection
 	_, errUpsert := mc.Upsert(ctx, client.NewColumnBasedInsertOption("aaa"))
@@ -357,7 +357,7 @@ func TestUpsertNotExistCollectionPartition(t *testing.T) {
 // test upsert with invalid column data
 func TestUpsertInvalidColumnData(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create and insert
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -408,7 +408,7 @@ func TestUpsertInvalidColumnData(t *testing.T) {
 func TestUpsertDynamicField(t *testing.T) {
 	// enable dynamic field and insert dynamic column
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create -> insert [0, 3000) -> flush -> index -> load
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -451,7 +451,7 @@ func TestUpsertDynamicField(t *testing.T) {
 
 func TestUpsertWithoutLoading(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create and insert
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption())
