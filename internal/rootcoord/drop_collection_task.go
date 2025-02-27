@@ -63,13 +63,19 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 		log.Ctx(ctx).Warn("drop non-existent collection", zap.String("collection", t.Req.GetCollectionName()), zap.String("database", t.Req.GetDbName()))
 		return nil
 	}
-
 	if err != nil {
 		return err
 	}
 
 	// meta cache of all aliases should also be cleaned.
 	aliases := t.core.meta.ListAliasesByID(ctx, collMeta.CollectionID)
+
+	// Check if all aliases have been dropped.
+	if len(aliases) > 0 {
+		err = fmt.Errorf("unable to drop the collection [%s] because it has associated aliases %v, please remove all aliases before dropping the collection", t.Req.GetCollectionName(), aliases)
+		log.Ctx(ctx).Warn("drop collection failed", zap.String("database", t.Req.GetDbName()), zap.Error(err))
+		return err
+	}
 
 	ts := t.GetTs()
 	return executeDropCollectionTaskSteps(ctx,

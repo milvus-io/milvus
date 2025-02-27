@@ -98,16 +98,6 @@ func (c *dispatcherManager) Remove(vchannel string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.mainDispatcher != nil && c.mainDispatcher.HasTarget(vchannel) {
-		c.mainDispatcher.Handle(pause)
-		c.mainDispatcher.RemoveTarget(vchannel)
-		if c.mainDispatcher.TargetNum() == 0 && len(c.deputyDispatchers) == 0 {
-			c.mainDispatcher.Handle(terminate)
-			c.mainDispatcher = nil
-		} else {
-			c.mainDispatcher.Handle(resume)
-		}
-	}
 	for _, dispatcher := range c.deputyDispatchers {
 		if dispatcher.HasTarget(vchannel) {
 			dispatcher.Handle(pause)
@@ -121,6 +111,17 @@ func (c *dispatcherManager) Remove(vchannel string) {
 			}
 		}
 	}
+	if c.mainDispatcher != nil && c.mainDispatcher.HasTarget(vchannel) {
+		c.mainDispatcher.Handle(pause)
+		c.mainDispatcher.RemoveTarget(vchannel)
+		if c.mainDispatcher.TargetNum() == 0 && len(c.deputyDispatchers) == 0 {
+			c.mainDispatcher.Handle(terminate)
+			c.mainDispatcher = nil
+		} else {
+			c.mainDispatcher.Handle(resume)
+		}
+	}
+
 	t.close()
 }
 

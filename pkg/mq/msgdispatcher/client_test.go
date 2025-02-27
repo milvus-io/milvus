@@ -460,3 +460,40 @@ func (suite *SimulationSuite) TearDownSuite() {
 func TestSimulation(t *testing.T) {
 	suite.Run(t, new(SimulationSuite))
 }
+
+func TestClientMainDispatcherLeak(t *testing.T) {
+	client := NewClient(newMockFactory(), typeutil.ProxyRole, 1)
+	assert.NotNil(t, client)
+	pchannel := "mock_vchannel_0"
+
+	vchannel1 := fmt.Sprintf("%s_abc_v0", pchannel) //"mock_vchannel_0_abc_v0"
+	vchannel2 := fmt.Sprintf("%s_abc_v1", pchannel) //"mock_vchannel_0_abc_v0"
+	_, err := client.Register(context.Background(), NewStreamConfig(vchannel1, nil, common.SubscriptionPositionUnknown))
+	assert.NoError(t, err)
+
+	_, err = client.Register(context.Background(), NewStreamConfig(vchannel2, nil, common.SubscriptionPositionUnknown))
+	assert.NoError(t, err)
+
+	client.Deregister(vchannel2)
+	client.Deregister(vchannel1)
+
+	assert.NotPanics(
+		t, func() {
+			_, err = client.Register(context.Background(), NewStreamConfig(vchannel1, nil, common.SubscriptionPositionUnknown))
+			assert.NoError(t, err)
+			_, err = client.Register(context.Background(), NewStreamConfig(vchannel2, nil, common.SubscriptionPositionUnknown))
+			assert.NoError(t, err)
+		},
+	)
+
+	client.Deregister(vchannel1)
+	client.Deregister(vchannel2)
+	assert.NotPanics(
+		t, func() {
+			_, err = client.Register(context.Background(), NewStreamConfig(vchannel1, nil, common.SubscriptionPositionUnknown))
+			assert.NoError(t, err)
+			_, err = client.Register(context.Background(), NewStreamConfig(vchannel2, nil, common.SubscriptionPositionUnknown))
+			assert.NoError(t, err)
+		},
+	)
+}
