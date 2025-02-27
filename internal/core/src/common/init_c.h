@@ -57,6 +57,9 @@ InitDefaultJSONKeyIndexCommitInterval(int64_t val);
 void
 InitDefaultJSONKeyIndexEnable(bool val);
 
+void
+InitDefaultScalarIndexHasRawData(bool val);
+
 #ifdef __cplusplus
 };
 #endif
