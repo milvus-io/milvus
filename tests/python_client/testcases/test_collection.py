@@ -3249,14 +3249,6 @@ class TestLoadPartition(TestcaseBase):
       The following cases are used to test `load_collection` function
     ******************************************************************
     """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_simple_index(self, request, connect):
-        return request.param
-
     @pytest.fixture(
         scope="function",
         params=gen_binary_index()

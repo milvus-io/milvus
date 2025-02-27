@@ -4797,33 +4797,6 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.all_index_types[1:4])
-    def test_search_repeatedly_ivf_index_same_limit(self, index):
-        """
-        target: test create collection repeatedly
-        method: search twice, check the results is the same
-        expected: search results are as expected
-        """
-        nb = 5000
-        limit = 30
-        # 1. create a collection
-        collection_w = self.init_collection_general(prefix, True, nb, is_index=False)[0]
-
-        # 2. insert data again
-        params = cf.get_index_params_params(index)
-        index_params = {"metric_type": "COSINE", "index_type": index, "params": params}
-        collection_w.create_index(default_search_field, index_params)
-
-        # 3. search with param ignore_growing=True
-        collection_w.load()
-        search_params = cf.gen_search_param(index, "COSINE")[0]
-        vector = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        res1 = collection_w.search(vector[:default_nq], default_search_field, search_params, limit)[0]
-        res2 = collection_w.search(vector[:default_nq], default_search_field, search_params, limit)[0]
-        for i in range(default_nq):
-            assert res1[i].ids == res2[i].ids
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[1:4])
     def test_search_repeatedly_ivf_index_different_limit(self, index):
         """
         target: test create collection repeatedly
@@ -4848,6 +4821,10 @@ class TestCollectionSearch(TestcaseBase):
         res2 = collection_w.search(vector, default_search_field, search_params, limit * 2)[0]
         for i in range(default_nq):
             assert res1[i].ids == res2[i].ids[:limit]
+        # search again with the previous limit
+        res3 = collection_w.search(vector, default_search_field, search_params, limit)[0]
+        for i in range(default_nq):
+            assert res1[i].ids == res3[i].ids
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metrics", ct.binary_metrics[:2])

@@ -424,17 +424,9 @@ class TestNewIndexBase(TestcaseBase):
       The following cases are used to test `create_index` function
     ******************************************************************
     """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_simple_index(self, request):
-        log.info(request.param)
-        return copy.deepcopy(request.param)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_create_index_new(self, get_simple_index):
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("index_type", ct.all_index_types[0:7])
+    def test_create_index_default(self, index_type):
         """
         target: test create index interface
         method: create collection and add entities in it, create index
@@ -442,34 +434,15 @@ class TestNewIndexBase(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name, shards_num=1)
-        data = cf.gen_default_list_data(nb=5000)
+        data = cf.gen_default_list_data(nb=1500)
         collection_w.insert(data=data)
-        log.debug(collection_w.num_entities)
-        if get_simple_index["index_type"] != "FLAT":
-            collection_w.create_index(ct.default_float_vec_field_name, get_simple_index,
-                                      index_name=ct.default_index_name)
-            assert len(collection_w.indexes) == 1
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="The scenario in this case is not existed for each RPC is limited to 64 MB")
-    def test_annoy_index(self):
-        # The strange thing is that the indexnode crash is only reproduced when nb is 50000 and dim is 512
-        nb = 50000
-        dim = 512
-
-        fields = [cf.gen_int64_field(), cf.gen_float_vec_field(dim=dim)]
-        schema = cf.gen_collection_schema(fields, primary_field=ct.default_int64_field_name)
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(), schema=schema)
-
-        # use python random to generate the data as usual doesn't reproduce
-        data = [[i for i in range(nb)], np.random.random([nb, dim]).tolist()]
-        collection_w.insert(data)
-        log.debug(collection_w.num_entities)
-
-        index_params = {"index_type": "ANNOY", "metric_type": "IP", "params": {"n_trees": 10}}
-        index_wrapper = ApiIndexWrapper()
-        index, _ = index_wrapper.init_index(collection_w.collection, ct.default_float_vec_field_name, index_params)
-        assert index.params == index_params
+        params = cf.get_index_params_params(index_type)
+        index_params = {"index_type": index_type, "metric_type": "L2", "params": params}
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=index_params,
+                                  index_name=ct.default_index_name)
+        assert len(collection_w.indexes) == 1
+        collection_w.drop_index(index_name=ct.default_index_name)
+        assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_index_non_existed_field(self):
@@ -535,7 +508,7 @@ class TestNewIndexBase(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_all_indexes_params,
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index,
                                   check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 999, ct.err_msg: "should create connection first"})
 
@@ -582,20 +555,6 @@ class TestNewIndexBase(TestcaseBase):
             time.sleep(0.2)
         for t in threads:
             t.join()
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_create_index_insert_flush(self, get_simple_index):
-        """
-        target: test create index
-        method: create collection and create index, add entities in it
-        expected: create index ok, and count correct
-        """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)
-        data = cf.gen_default_list_data(default_nb)
-        collection_w.insert(data=data)
-        assert collection_w.num_entities == default_nb
-        collection_w.create_index(ct.default_float_vec_field_name, get_simple_index)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_same_index_repeatedly(self):
@@ -795,27 +754,8 @@ class TestNewIndexBase(TestcaseBase):
          The following cases are used to test `drop_index` function
        ******************************************************************
     """
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_drop_index(self, get_simple_index):
-        """
-        target: test drop index interface
-        method: create collection and add entities in it, create index, call drop index
-        expected: return code 0, and default index param
-        """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)
-        data = cf.gen_default_list_data()
-        collection_w.insert(data=data)
-        if get_simple_index["index_type"] != "FLAT":
-            collection_w.create_index(ct.default_float_vec_field_name, get_simple_index,
-                                      index_name=ct.default_index_name)
-            assert len(collection_w.indexes) == 1
-            collection_w.drop_index(index_name=ct.default_index_name)
-            assert len(collection_w.indexes) == 0
-
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_index_repeatedly(self, get_simple_index):
+    def test_drop_index_repeatedly(self):
         """
         target: test drop index repeatedly
         method: create index, call drop index, and drop again
@@ -823,14 +763,15 @@ class TestNewIndexBase(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        if get_simple_index["index_type"] != "FLAT":
-            collection_w.create_index(ct.default_float_vec_field_name, get_simple_index,
-                                      index_name=ct.default_index_name)
-            assert len(collection_w.indexes) == 1
-            collection_w.drop_index(index_name=ct.default_index_name)
-            assert len(collection_w.indexes) == 0
-            collection_w.drop_index(index_name=ct.default_index_name)
-            assert len(collection_w.indexes) == 0
+        params = cf.get_index_params_params("HNSW")
+        index_params = {"index_type": "HNSW", "metric_type": "L2", "params": params}
+        collection_w.create_index(ct.default_float_vec_field_name, index_params,
+                                  index_name=ct.default_index_name)
+        assert len(collection_w.indexes) == 1
+        collection_w.drop_index(index_name=ct.default_index_name)
+        assert len(collection_w.indexes) == 0
+        collection_w.drop_index(index_name=ct.default_index_name)
+        assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index_without_connect(self):
@@ -849,7 +790,7 @@ class TestNewIndexBase(TestcaseBase):
                                 check_items={ct.err_code: 999, ct.err_msg: "should create connection first."})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_create_drop_index_repeatedly(self, get_simple_index):
+    def test_create_drop_index_repeatedly(self):
         """
         target: test create / drop index repeatedly, use the same index params
         method: create index, drop index, four times
@@ -857,13 +798,14 @@ class TestNewIndexBase(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        if get_simple_index["index_type"] != "FLAT":
-            for i in range(4):
-                collection_w.create_index(ct.default_float_vec_field_name, get_simple_index,
-                                          index_name=ct.default_index_name)
-                assert len(collection_w.indexes) == 1
-                collection_w.drop_index(index_name=ct.default_index_name)
-                assert len(collection_w.indexes) == 0
+        params = cf.get_index_params_params("HNSW")
+        index_params = {"index_type": "HNSW", "metric_type": "L2", "params": params}
+        for i in range(4):
+            collection_w.create_index(ct.default_float_vec_field_name, index_params,
+                                      index_name=ct.default_index_name)
+            assert len(collection_w.indexes) == 1
+            collection_w.drop_index(index_name=ct.default_index_name)
+            assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_PQ_without_nbits(self):
@@ -948,8 +890,8 @@ class TestNewIndexBase(TestcaseBase):
                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index, params", zip(ct.all_index_types[:6], ct.default_all_indexes_params[:6]))
-    def test_drop_mmap_index(self, index, params):
+    @pytest.mark.parametrize("index", ct.all_index_types[:6])
+    def test_drop_mmap_index(self, index):
         """
         target: disabling and re-enabling mmap for index
         method: disabling and re-enabling mmap for index
@@ -957,6 +899,7 @@ class TestNewIndexBase(TestcaseBase):
         """
         self._connect()
         collection_w = self.init_collection_general(prefix, insert_data=True, is_index=False)[0]
+        params = cf.get_index_params_params(index)
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index(field_name, default_index, index_name=f"mmap_index_{index}")
         collection_w.alter_index(f"mmap_index_{index}", {'mmap.enabled': True})

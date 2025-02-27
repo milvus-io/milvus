@@ -2208,21 +2208,6 @@ def gen_default_binary_list_data(nb=ct.default_nb, dim=ct.default_dim):
     return data, binary_raw_values
 
 
-def gen_simple_index():
-    index_params = []
-    for i in range(len(ct.all_index_types)):
-        if ct.all_index_types[i] in ct.binary_support:
-            continue
-        elif ct.all_index_types[i] in ct.sparse_support:
-            continue
-        elif ct.all_index_types[i] in ct.gpu_support:
-            continue
-        dic = {"index_type": ct.all_index_types[i], "metric_type": "L2"}
-        dic.update({"params": ct.default_all_indexes_params[i]})
-        index_params.append(dic)
-    return index_params
-
-
 def gen_autoindex_params():
     index_params = [
         {},
@@ -2767,12 +2752,14 @@ def index_to_dict(index):
 
 def get_index_params_params(index_type):
     """get default params of index params  by index type"""
-    return ct.default_all_indexes_params[ct.all_index_types.index(index_type)].copy()
+    params = ct.default_all_indexes_params[ct.all_index_types.index(index_type)].copy()
+    return params
 
 
 def get_search_params_params(index_type):
     """get default params of search params by index type"""
-    return ct.default_all_search_params_params[ct.all_index_types.index(index_type)].copy()
+    params = ct.default_all_search_params_params[ct.all_index_types.index(index_type)].copy()
+    return params
 
 
 def assert_json_contains(expr, list_data):
