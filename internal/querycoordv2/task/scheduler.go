@@ -307,13 +307,12 @@ func NewScheduler(ctx context.Context,
 	cluster session.Cluster,
 	nodeMgr *session.NodeManager,
 ) *taskScheduler {
-	id := time.Now().UnixMilli()
+	id := atomic.NewInt64(time.Now().UnixMilli())
 	return &taskScheduler{
 		ctx:       ctx,
 		executors: NewConcurrentMap[int64, *Executor](),
 		idAllocator: func() UniqueID {
-			id++
-			return id
+			return id.Inc()
 		},
 
 		distMgr:   distMgr,
