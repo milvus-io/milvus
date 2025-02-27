@@ -402,7 +402,7 @@ func (t *LevelZeroCompactionTask) loadDelta(ctx context.Context, deltaLogs []str
 
 	dData := &storage.DeleteData{}
 	for {
-		err := reader.Next()
+		dl, err := reader.NextValue()
 		if err != nil {
 			if err == sio.EOF {
 				break
@@ -411,8 +411,7 @@ func (t *LevelZeroCompactionTask) loadDelta(ctx context.Context, deltaLogs []str
 			return nil, err
 		}
 
-		dl := reader.Value()
-		dData.Append(dl.Pk, dl.Ts)
+		dData.Append((*dl).Pk, (*dl).Ts)
 	}
 
 	return dData, nil

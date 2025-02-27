@@ -80,7 +80,7 @@ func newPackedRecordReader(paths []string, schema *schemapb.CollectionSchema, bu
 
 func NewPackedDeserializeReader(paths []string, schema *schemapb.CollectionSchema,
 	bufferSize int64, pkFieldID FieldID,
-) (*DeserializeReader[*Value], error) {
+) (*DeserializeReaderImpl[*Value], error) {
 	reader, err := newPackedRecordReader(paths, schema, bufferSize)
 	if err != nil {
 		return nil, err
@@ -191,7 +191,8 @@ func NewPackedRecordWriter(paths []string, schema *arrow.Schema, bufferSize int6
 	}, nil
 }
 
-func NewPackedSerializeWriter(paths []string, schema *schemapb.CollectionSchema, bufferSize int64, multiPartUploadSize int64, columnGroups [][]int, batchSize int) (*SerializeWriter[*Value], error) {
+func NewPackedSerializeWriter(paths []string, schema *schemapb.CollectionSchema, bufferSize int64, multiPartUploadSize int64, columnGroups [][]int, batchSize int,
+) (*SerializeWriterImpl[*Value], error) {
 	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
