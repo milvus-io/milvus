@@ -46,6 +46,7 @@ type ServiceParam struct {
 	EtcdCfg         EtcdConfig
 	TiKVCfg         TiKVConfig
 	MQCfg           MQConfig
+	WoodpeckerCfg   WoodpeckerConfig
 	PulsarCfg       PulsarConfig
 	KafkaCfg        KafkaConfig
 	RocksmqCfg      RocksmqConfig
@@ -60,6 +61,7 @@ func (p *ServiceParam) init(bt *BaseTable) {
 	p.EtcdCfg.Init(bt)
 	p.TiKVCfg.Init(bt)
 	p.MQCfg.Init(bt)
+	p.WoodpeckerCfg.Init(bt)
 	p.PulsarCfg.Init(bt)
 	p.KafkaCfg.Init(bt)
 	p.RocksmqCfg.Init(bt)
@@ -83,6 +85,10 @@ func (p *ServiceParam) PulsarEnable() bool {
 
 func (p *ServiceParam) KafkaEnable() bool {
 	return p.KafkaCfg.Address.GetValue() != ""
+}
+
+func (p *ServiceParam) WoodpeckerEnable() bool {
+	return p.WoodpeckerCfg.MetaPrefix.GetValue() != ""
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -642,6 +648,189 @@ Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 		Doc:          "A switch for ignoring message queue failing to parse message ID from checkpoint position. Usually caused by switching among different mq implementations. May caused data loss when used by mistake",
 	}
 	p.IgnoreBadPosition.Init(base.mgr)
+}
+
+// /////////////////////////////////////////////////////////////////////////////
+// --- woodpecker ---
+type WoodpeckerConfig struct {
+	// meta
+	MetaType   ParamItem `refreshable:"false"`
+	MetaPrefix ParamItem `refreshable:"false"`
+
+	// client
+	AppendQueueSize       ParamItem `refreshable:"true"`
+	AppendMaxRetries      ParamItem `refreshable:"true"`
+	SegmentRollingMaxSize ParamItem `refreshable:"true"`
+	SegmentRollingMaxTime ParamItem `refreshable:"true"`
+	AuditorMaxInterval    ParamItem `refreshable:"true"`
+
+	// logstore
+	SyncMaxInterval        ParamItem `refreshable:"true"`
+	SyncMaxBytes           ParamItem `refreshable:"true"`
+	SyncMaxEntries         ParamItem `refreshable:"true"`
+	FlushMaxRetries        ParamItem `refreshable:"true"`
+	RetryInterval          ParamItem `refreshable:"true"`
+	FlushMaxSize           ParamItem `refreshable:"true"`
+	FlushMaxThreads        ParamItem `refreshable:"true"`
+	FragmentCachedMaxBytes ParamItem `refreshable:"true"`
+	FragmentCachedInterval ParamItem `refreshable:"true"`
+
+	// storage
+	StorageType ParamItem `refreshable:"false"`
+	RootPath    ParamItem `refreshable:"false"`
+}
+
+func (p *WoodpeckerConfig) Init(base *BaseTable) {
+	p.MetaType = ParamItem{
+		Key:          "woodpecker.meta.type",
+		Version:      "2.6.0",
+		DefaultValue: "etcd",
+		Doc:          "The Type of the metadata provider. currently only support etcd.",
+		Export:       false,
+	}
+	p.MetaType.Init(base.mgr)
+
+	p.MetaPrefix = ParamItem{
+		Key:          "woodpecker.meta.prefix",
+		Version:      "2.6.0",
+		DefaultValue: "woodpecker",
+		Doc:          "The Prefix of the metadata provider. default is woodpecker.",
+		Export:       false,
+	}
+	p.MetaPrefix.Init(base.mgr)
+
+	p.AppendQueueSize = ParamItem{
+		Key:          "woodpecker.client.segmentAppend.queueSize",
+		Version:      "2.6.0",
+		DefaultValue: "10000",
+		Doc:          "The size of the queue for pending messages to be sent of each log.",
+		Export:       true,
+	}
+	p.AppendQueueSize.Init(base.mgr)
+
+	p.AppendMaxRetries = ParamItem{
+		Key:          "woodpecker.client.segmentAppend.maxRetries",
+		Version:      "2.6.0",
+		DefaultValue: "3",
+		Doc:          "Maximum number of retries for segment append operations.",
+		Export:       true,
+	}
+	p.AppendMaxRetries.Init(base.mgr)
+
+	p.SegmentRollingMaxSize = ParamItem{
+		Key:          "woodpecker.client.segmentRollingPolicy.maxSize",
+		Version:      "2.6.0",
+		DefaultValue: "2000000000", // 1 GB
+		Doc:          "Maximum entries count of a segment, default is 2GB",
+		Export:       true,
+	}
+	p.SegmentRollingMaxSize.Init(base.mgr)
+
+	p.SegmentRollingMaxTime = ParamItem{
+		Key:          "woodpecker.client.segmentRollingPolicy.maxTime",
+		Version:      "2.6.0",
+		DefaultValue: "600",
+		Doc:          "Maximum interval between two segments in seconds, default is 10 minutes.",
+		Export:       true,
+	}
+	p.SegmentRollingMaxTime.Init(base.mgr)
+
+	p.AuditorMaxInterval = ParamItem{
+		Key:          "woodpecker.client.auditor.maxInterval",
+		Version:      "2.6.0",
+		DefaultValue: "10",
+		Doc:          "Maximum interval between two auditing operations in seconds, default is 10 seconds.",
+		Export:       true,
+	}
+	p.AuditorMaxInterval.Init(base.mgr)
+
+	p.SyncMaxInterval = ParamItem{
+		Key:          "woodpecker.logstore.logFileSyncPolicy.maxInterval",
+		Version:      "2.6.0",
+		DefaultValue: "1000",
+		Doc:          "Maximum interval between two sync operations in milliseconds.",
+	}
+	p.SyncMaxInterval.Init(base.mgr)
+
+	p.SyncMaxEntries = ParamItem{
+		Key:          "woodpecker.logstore.logFileSyncPolicy.maxEntries",
+		Version:      "2.6.0",
+		DefaultValue: "100000",
+		Doc:          "Maximum entries number of write buffer.",
+	}
+	p.SyncMaxEntries.Init(base.mgr)
+
+	p.SyncMaxBytes = ParamItem{
+		Key:          "woodpecker.logstore.logFileSyncPolicy.maxBytes",
+		Version:      "2.6.0",
+		DefaultValue: "64000000",
+		Doc:          "Maximum size of write buffer in bytes.",
+	}
+	p.SyncMaxBytes.Init(base.mgr)
+
+	p.FlushMaxRetries = ParamItem{
+		Key:          "woodpecker.logstore.logFileSyncPolicy.maxFlushRetries",
+		Version:      "2.6.0",
+		DefaultValue: "5",
+		Doc:          "Maximum size of write buffer in bytes.",
+	}
+	p.FlushMaxRetries.Init(base.mgr)
+
+	p.FlushMaxSize = ParamItem{
+		Key:          "woodpecker.logstore.logFileSyncPolicy.maxFlushSize",
+		Version:      "2.6.0",
+		DefaultValue: "8000000",
+		Doc:          "Maximum size of a fragment in bytes to flush, default is 8M.",
+	}
+	p.FlushMaxSize.Init(base.mgr)
+
+	p.RetryInterval = ParamItem{
+		Key:          "woodpecker.logstore.logFileSyncPolicy.retryInterval",
+		Version:      "2.6.0",
+		DefaultValue: "1000",
+		Doc:          "Maximum interval between two retries in milliseconds.",
+	}
+	p.RetryInterval.Init(base.mgr)
+
+	p.FlushMaxThreads = ParamItem{
+		Key:          "woodpecker.logstore.logFileSyncPolicy.maxFlushThreads",
+		Version:      "2.6.0",
+		DefaultValue: "4",
+		Doc:          "Maximum number of threads to flush data",
+	}
+	p.FlushMaxThreads.Init(base.mgr)
+
+	p.FragmentCachedMaxBytes = ParamItem{
+		Key:          "woodpecker.logstore.fragmentManager.maxBytes",
+		Version:      "2.6.0",
+		DefaultValue: "1000000000",
+		Doc:          "Maximum size of fragment cached data in bytes.",
+	}
+	p.FragmentCachedMaxBytes.Init(base.mgr)
+
+	p.FragmentCachedInterval = ParamItem{
+		Key:          "woodpecker.logstore.fragmentManager.maxInterval",
+		Version:      "2.6.0",
+		DefaultValue: "1000",
+		Doc:          "Maximum interval between two fragment evicts in milliseconds.",
+	}
+	p.FragmentCachedInterval.Init(base.mgr)
+
+	p.StorageType = ParamItem{
+		Key:          "woodpecker.storage.type",
+		Version:      "2.6.0",
+		DefaultValue: "minio",
+		Doc:          "The Type of the storage provider. currently only support minio.",
+	}
+	p.StorageType.Init(base.mgr)
+
+	p.RootPath = ParamItem{
+		Key:          "woodpecker.storage.rootPath",
+		Version:      "2.6.0",
+		DefaultValue: "/var/lib/woodpecker",
+		Doc:          "The root path of the storage provider.",
+	}
+	p.RootPath.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
