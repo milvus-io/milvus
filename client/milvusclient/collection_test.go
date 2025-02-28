@@ -104,7 +104,9 @@ func (s *CollectionSuite) TestCreateCollectionOptions() {
 	s.True(collSchema.GetEnableDynamicField())
 
 	collectionName = fmt.Sprintf("test_collection_%s", s.randString(6))
-	opt = SimpleCreateCollectionOptions(collectionName, 128).WithVarcharPK(true, 64).WithAutoID(false).WithDynamicSchema(false)
+	opt = SimpleCreateCollectionOptions(collectionName, 128).WithVarcharPK(true, 64).WithAutoID(false).
+		WithPKFieldName("pk").WithVectorFieldName("embedding").WithMetricType(entity.L2).
+		WithDynamicSchema(false)
 	req = opt.Request()
 	s.Equal(collectionName, req.GetCollectionName())
 	s.EqualValues(1, req.GetShardsNum())

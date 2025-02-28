@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -102,7 +103,7 @@ func (s *UserSuite) TestCreateUser() {
 		password := s.randString(12)
 		s.mock.EXPECT().CreateCredential(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ccr *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
 			s.Equal(userName, ccr.GetUsername())
-			s.Equal(password, ccr.GetPassword())
+			s.Equal(crypto.Base64Encode(password), ccr.GetPassword())
 			return merr.Success(), nil
 		}).Once()
 
@@ -121,8 +122,8 @@ func (s *UserSuite) TestUpdatePassword() {
 		newPassword := s.randString(12)
 		s.mock.EXPECT().UpdateCredential(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ucr *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
 			s.Equal(userName, ucr.GetUsername())
-			s.Equal(oldPassword, ucr.GetOldPassword())
-			s.Equal(newPassword, ucr.GetNewPassword())
+			s.Equal(crypto.Base64Encode(oldPassword), ucr.GetOldPassword())
+			s.Equal(crypto.Base64Encode(newPassword), ucr.GetNewPassword())
 			return merr.Success(), nil
 		}).Once()
 
