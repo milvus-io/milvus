@@ -802,9 +802,10 @@ class SegmentExpr : public Expr {
                     auto json_flat_index =
                         dynamic_cast<const index::JsonFlatIndex*>(index);
                     if (json_flat_index) {
+                        auto index_path = json_flat_index->GetNestedPath();
                         executor =
                             json_flat_index->create_executor<IndexInnerType>(
-                                pointer);
+                                pointer.substr(index_path.size()));
                         index_ptr = executor.get();
                     } else {
                         auto json_index = const_cast<index::IndexBase*>(index);

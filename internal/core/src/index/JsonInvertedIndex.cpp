@@ -33,7 +33,6 @@ JsonInvertedIndex<T>::build_index_for_json(
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         for (int64_t i = 0; i < n; i++) {
-            auto json_column = static_cast<const Json*>(data->RawValue(i));
             if (this->schema_.nullable() && !data->is_valid(i)) {
                 {
                     folly::SharedMutex::WriteHolder lock(this->mutex_);
@@ -43,6 +42,7 @@ JsonInvertedIndex<T>::build_index_for_json(
                     nullptr, 0, offset++);
                 continue;
             }
+            auto json_column = static_cast<const Json*>(data->RawValue(i));
             value_result<GetType> res = json_column->at<GetType>(nested_path_);
             auto err = res.error();
             if (err != simdjson::SUCCESS) {

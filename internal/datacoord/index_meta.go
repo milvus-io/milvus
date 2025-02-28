@@ -241,30 +241,16 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 }
 
 func checkJsonParams(index *model.Index, req *indexpb.CreateIndexRequest) bool {
-	jsonPath1, err := getIndexParam(index.IndexParams, common.JSONPathKey)
-	hasJsonPath1 := err == nil
-	jsonPath2, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
-	hasJsonPath2 := err == nil
+	// Skip error handling since json path existence is guaranteed in CreateIndex
+	jsonPath1, _ := getIndexParam(index.IndexParams, common.JSONPathKey)
+	jsonPath2, _ := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
 
-	if hasJsonPath1 != hasJsonPath2 {
-		// if one is json path index but another is json flat index, return false
+	if jsonPath1 != jsonPath2 {
 		return false
 	}
-
-	if !hasJsonPath1 {
-		// if both are not json path index, return true
-		return true
-	}
-
-	castType1, err := getIndexParam(index.IndexParams, common.JSONCastTypeKey)
-	if err != nil {
-		return false
-	}
-	castType2, err := getIndexParam(req.GetIndexParams(), common.JSONCastTypeKey)
-	if err != nil || castType1 != castType2 {
-		return false
-	}
-	return err == nil && jsonPath1 == jsonPath2
+	castType1, _ := getIndexParam(index.IndexParams, common.JSONCastTypeKey)
+	castType2, _ := getIndexParam(req.GetIndexParams(), common.JSONCastTypeKey)
+	return castType1 == castType2
 }
 
 func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
@@ -382,12 +368,12 @@ func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 		}
 		if req.FieldID == index.FieldID {
 			if isJson {
-				// only check json path if both are json path index
-				jsonPath1, err := getIndexParam(index.IndexParams, common.JSONPathKey)
-				hasJsonPath1 := err == nil
-				jsonPath2, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
-				hasJsonPath2 := err == nil
-				if hasJsonPath1 && hasJsonPath2 && jsonPath1 != jsonPath2 {
+				// Skip error handling since json path existence is guaranteed in CreateIndex
+				jsonPath1, _ := getIndexParam(index.IndexParams, common.JSONPathKey)
+				jsonPath2, _ := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
+
+				if jsonPath1 != jsonPath2 {
+					// if json path is not same, create index is allowed
 					continue
 				}
 			}
