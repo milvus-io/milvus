@@ -788,14 +788,15 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
 
 
 def gen_all_datatype_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                       auto_id=False, dim=ct.default_dim, enable_dynamic_field=True, **kwargs):
+                                       auto_id=False, dim=ct.default_dim, enable_dynamic_field=True, nullable=True,**kwargs):
     analyzer_params = {
         "tokenizer": "standard",
     }
     fields = [
         gen_int64_field(),
-        gen_float_field(),
-        gen_string_field(),
+        gen_float_field(nullable=nullable),
+        gen_string_field(nullable=nullable),
+        gen_string_field(name="text_match", max_length=2000, enable_analyzer=True, enable_match=True, nullable=nullable),
         gen_string_field(name="text", max_length=2000, enable_analyzer=True, enable_match=True,
                          analyzer_params=analyzer_params),
         gen_json_field(),
@@ -1782,6 +1783,10 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=None):
             if start is not None and field.dtype == DataType.INT64:
                 tmp[field.name] = start
                 start += 1
+            if field.nullable is True:
+                # 10% percent of data is null
+                if random.random() < 0.1:
+                    tmp[field.name] = None
         data.append(tmp)
     return data
 
@@ -1819,21 +1824,27 @@ def get_varchar_field_name(schema=None):
 def get_text_field_name(schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
-    fields = schema.fields
-    for field in fields:
-        if field.dtype == DataType.VARCHAR and field.params.get("enable_analyzer", False):
-            return field.name
-    return None
+    if not hasattr(schema, "functions"):
+        return []
+    functions = schema.functions
+    bm25_func = [func for func in functions if func.type == FunctionType.BM25]
+    bm25_inputs = []
+    for func in bm25_func:
+        bm25_inputs.extend(func.input_field_names)
+    bm25_inputs = list(set(bm25_inputs))
+
+    return bm25_inputs
+
 
 def get_text_match_field_name(schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
+    text_match_field_list = []
     fields = schema.fields
     for field in fields:
         if field.dtype == DataType.VARCHAR and field.params.get("enable_match", False):
-            return field.name
-    return None
-
+            text_match_field_list.append(field.name)
+    return text_match_field_list
 
 
 def get_float_field_name(schema=None):
