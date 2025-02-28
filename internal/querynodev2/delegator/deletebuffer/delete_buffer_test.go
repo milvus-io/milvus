@@ -20,8 +20,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
@@ -134,6 +137,67 @@ func (s *DoubleCacheBufferSuite) TestPut() {
 	entryNum, memorySize = buffer.Size()
 	s.EqualValues(2, entryNum)
 	s.EqualValues(234, memorySize)
+}
+
+func (s *DoubleCacheBufferSuite) TestL0SegmentOperations() {
+	buffer := NewDoubleCacheDeleteBuffer[*Item](10, 1000)
+
+	// Create mock segments with specific IDs
+	seg1 := segments.NewMockSegment(s.T())
+	seg1.On("ID").Return(int64(1))
+	seg1.On("Release", mock.Anything).Return()
+	seg1.On("StartPosition").Return(&msgpb.MsgPosition{
+		Timestamp: 10,
+	})
+
+	seg2 := segments.NewMockSegment(s.T())
+	seg2.On("ID").Return(int64(2))
+	seg2.On("Release", mock.Anything).Return()
+	seg2.On("StartPosition").Return(&msgpb.MsgPosition{
+		Timestamp: 20,
+	})
+
+	seg3 := segments.NewMockSegment(s.T())
+	seg3.On("Release", mock.Anything).Return()
+
+	// Test RegisterL0 with multiple segments
+	buffer.RegisterL0(seg1, seg2)
+	segments := buffer.ListL0()
+	s.Equal(2, len(segments))
+
+	// Verify segment IDs by collecting them first
+	ids := make([]int64, 0, len(segments))
+	for _, seg := range segments {
+		ids = append(ids, seg.ID())
+	}
+	s.ElementsMatch([]int64{1, 2}, ids, "expected segment IDs 1 and 2 in any order")
+
+	// Test ListL0 with empty buffer
+	emptyBuffer := NewDoubleCacheDeleteBuffer[*Item](10, 1000)
+	s.Equal(0, len(emptyBuffer.ListL0()))
+
+	// Test UnRegister
+	buffer.UnRegister(15)
+	segments = buffer.ListL0()
+	s.Equal(1, len(segments))
+	s.Equal(int64(2), segments[0].ID())
+
+	// Verify Release was called on unregistered segment
+	seg1.AssertCalled(s.T(), "Release", mock.Anything)
+
+	// Test Clear
+	buffer.RegisterL0(seg3)
+	s.Equal(2, len(buffer.ListL0()))
+	buffer.Clear()
+	s.Equal(0, len(buffer.ListL0()))
+
+	// Verify Release was called on all segments
+	seg2.AssertCalled(s.T(), "Release", mock.Anything)
+	seg3.AssertCalled(s.T(), "Release", mock.Anything)
+
+	// Test RegisterL0 with nil segment (should not panic)
+	buffer.RegisterL0(nil)
+	s.Equal(0, len(buffer.ListL0()))
 }
 
 func TestDoubleCacheDeleteBuffer(t *testing.T) {

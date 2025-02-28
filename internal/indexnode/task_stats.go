@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/apache/arrow/go/v12/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -274,6 +274,11 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	if len(insertLogs) == 0 {
+		log.Ctx(ctx).Info("there is no insertBinlogs, skip creating text index")
+		return nil
 	}
 
 	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort || st.req.GetSubJobType() == indexpb.StatsSubJob_TextIndexJob {

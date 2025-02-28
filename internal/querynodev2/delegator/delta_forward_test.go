@@ -416,7 +416,7 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingBF() {
 	}
 	err = l0Segment.LoadDeltaData(context.Background(), deltaData)
 	s.Require().NoError(err)
-	s.manager.Segment.Put(context.Background(), segments.SegmentTypeSealed, l0Segment)
+	s.delegator.deleteBuffer.RegisterL0(l0Segment)
 
 	seg.EXPECT().ID().Return(10000)
 	seg.EXPECT().Partition().Return(100)
@@ -463,7 +463,7 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingLoad() {
 	}
 	err = l0Segment.LoadDeltaData(context.Background(), deltaData)
 	s.Require().NoError(err)
-	s.manager.Segment.Put(context.Background(), segments.SegmentTypeSealed, l0Segment)
+	s.delegator.deleteBuffer.RegisterL0(l0Segment)
 
 	seg.EXPECT().ID().Return(10000)
 	seg.EXPECT().Partition().Return(100)

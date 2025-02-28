@@ -1,6 +1,8 @@
 package planparserv2
 
 import (
+	"strings"
+
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 )
 
@@ -12,20 +14,27 @@ var wildcards = map[byte]struct{}{
 var escapeCharacter byte = '\\'
 
 // hasWildcards returns true if pattern contains any wildcard.
-func hasWildcards(pattern string) bool {
-	l := len(pattern)
-	i := l - 1
-	for ; i >= 0; i-- {
-		_, ok := wildcards[pattern[i]]
-		if ok {
-			if i > 0 && pattern[i-1] == escapeCharacter {
-				i--
+func hasWildcards(pattern string) (string, bool) {
+	var result strings.Builder
+	hasWildcard := false
+
+	for i := 0; i < len(pattern); i++ {
+		if pattern[i] == escapeCharacter && i+1 < len(pattern) {
+			next := pattern[i+1]
+			if _, ok := wildcards[next]; ok {
+				result.WriteByte(next)
+				i++
 				continue
 			}
-			return true
 		}
+
+		if _, ok := wildcards[pattern[i]]; ok {
+			hasWildcard = true
+		}
+		result.WriteByte(pattern[i])
 	}
-	return false
+
+	return result.String(), hasWildcard
 }
 
 // findLastNotOfWildcards find the last location not of last wildcard.
@@ -55,14 +64,14 @@ func translatePatternMatch(pattern string) (op planpb.OpType, operand string, er
 		return planpb.OpType_PrefixMatch, "", nil
 	}
 
-	exist := hasWildcards(pattern[:loc+1])
+	newPattern, exist := hasWildcards(pattern[:loc+1])
 	if loc >= l-1 && !exist {
 		// equal match.
-		return planpb.OpType_Equal, pattern, nil
+		return planpb.OpType_Equal, newPattern, nil
 	}
 	if !exist {
 		// prefix match.
-		return planpb.OpType_PrefixMatch, pattern[:loc+1], nil
+		return planpb.OpType_PrefixMatch, newPattern, nil
 	}
 
 	return planpb.OpType_Match, pattern, nil

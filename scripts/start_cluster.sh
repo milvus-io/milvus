@@ -50,3 +50,6 @@ nohup ./bin/milvus run indexcoord  --run-with-subprocess  > /tmp/indexcoord.log 
 
 echo "Starting indexnode..."
 nohup ./bin/milvus run indexnode  --run-with-subprocess > /tmp/indexnode.log 2>&1 &
+
+echo "Starting streamingnode..."
+nohup ./bin/milvus run streamingnode --run-with-subprocess > /tmp/streamingnode.log 2>&1 &

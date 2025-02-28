@@ -595,7 +595,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		zap.String("consistency_level", request.ConsistencyLevel.String()),
 	)
 
-	log.Debug(rpcReceived(method))
+	log.Info(rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(cct); err != nil {
 		log.Warn(
@@ -846,7 +846,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		zap.Bool("refreshMode", request.Refresh),
 	)
 
-	log.Debug("LoadCollection received")
+	log.Info("LoadCollection received")
 
 	if err := node.sched.ddQueue.Enqueue(lct); err != nil {
 		log.Warn("LoadCollection failed to enqueue",
@@ -5494,7 +5494,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 	}
 	req.Grantor.User = &milvuspb.UserEntity{Name: curUser}
 	request := &milvuspb.OperatePrivilegeRequest{
-		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_OperatePrivilege},
+		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_OperatePrivilegeV2},
 		Entity: &milvuspb.GrantEntity{
 			Role:       req.Role,
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},

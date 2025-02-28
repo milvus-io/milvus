@@ -106,22 +106,27 @@ PhyRandomSampleNode::GetOutput() {
         TargetBitmapView input_data(input_col->GetRawData(), input_col->size());
         // note: false means the elemnt is hit
         size_t input_false_count = input_data.size() - input_data.count();
-        FixedVector<uint32_t> pos{};
-        pos.reserve(input_false_count);
-        auto value = input_data.find_first(false);
-        while (value.has_value()) {
-            auto offset = value.value();
-            pos.push_back(offset);
-            value = input_data.find_next(offset, false);
-        }
-        assert(pos.size() == input_false_count);
 
-        input_data.set();
-        auto sampled = Sample(input_false_count, factor_);
-        assert(sampled.back() < input_false_count);
-        for (auto i = 0; i < sampled.size(); ++i) {
-            input_data[pos[sampled[i]]] = false;
+        if (input_false_count > 0) {
+            FixedVector<uint32_t> pos{};
+            pos.reserve(input_false_count);
+            auto value = input_data.find_first(false);
+            while (value.has_value()) {
+                auto offset = value.value();
+                pos.push_back(offset);
+                value = input_data.find_next(offset, false);
+            }
+            assert(pos.size() == input_false_count);
+
+            input_data.set();
+            auto sampled = Sample(input_false_count, factor_);
+            assert(sampled.back() < input_false_count);
+            for (auto i = 0; i < sampled.size(); ++i) {
+                input_data[pos[sampled[i]]] = false;
+            }
         }
+
+        is_finished_ = true;
         return std::make_shared<RowVector>(std::vector<VectorPtr>{input_col});
     } else {
         auto sample_output = std::make_shared<ColumnVector>(
@@ -143,10 +148,11 @@ PhyRandomSampleNode::GetOutput() {
             data[n] = true;
         }
 
-        is_finished_ = true;
         if (need_flip) {
             data.flip();
         }
+
+        is_finished_ = true;
         return std::make_shared<RowVector>(
             std::vector<VectorPtr>{sample_output});
     }
