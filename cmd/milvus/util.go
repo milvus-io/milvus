@@ -147,7 +147,6 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 	case typeutil.IndexCoordRole:
 		role.EnableIndexCoord = true
 	case typeutil.StreamingNodeRole:
-		streamingutil.MustEnableStreamingService()
 		streamingutil.EnableEmbededQueryNode()
 		role.EnableStreamingNode = true
 		role.EnableQueryNode = true
@@ -200,10 +199,6 @@ func formatFlags(args []string, flags *flag.FlagSet) (alias string, enableRootCo
 	flags.BoolVar(&enableDataNode, typeutil.DataNodeRole, false, "enable data node")
 	flags.BoolVar(&enableProxy, typeutil.ProxyRole, false, "enable proxy node")
 	flags.BoolVar(&enableStreamingNode, typeutil.StreamingNodeRole, false, "enable streaming node")
-
-	if enableStreamingNode {
-		streamingutil.MustEnableStreamingService()
-	}
 
 	serverType := args[2]
 	if serverType == typeutil.EmbeddedRole {
