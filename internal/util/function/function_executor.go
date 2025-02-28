@@ -140,7 +140,7 @@ func (executor *FunctionExecutor) ProcessInsert(msg *msgstream.InsertMsg) error 
 		errs = append(errs, err)
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("multiple errors occurred: %v", errs)
+		return fmt.Errorf("%v", errs)
 	}
 
 	for output := range outputs {
