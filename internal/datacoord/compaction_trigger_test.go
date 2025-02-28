@@ -50,6 +50,11 @@ type spyCompactionHandler struct {
 	meta    *meta
 }
 
+// getCompactionTasksNum implements compactionPlanContext.
+func (h *spyCompactionHandler) getCompactionTasksNum(filters ...compactionTaskFilter) int {
+	return 0
+}
+
 func (h *spyCompactionHandler) getCompactionTasksNumBySignalID(signalID int64) int {
 	return 0
 }

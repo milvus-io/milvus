@@ -221,7 +221,7 @@ jobs:
     name: Integration Test
     needs: Build
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master

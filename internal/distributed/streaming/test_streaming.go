@@ -18,7 +18,14 @@
 
 package streaming
 
+import kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+
 // SetWALForTest initializes the singleton of wal for test.
 func SetWALForTest(w WALAccesser) {
 	singleton = w
+}
+
+func RecoverWALForTest() {
+	c, _ := kvfactory.GetEtcdAndPath()
+	singleton = newWALAccesser(c)
 }
