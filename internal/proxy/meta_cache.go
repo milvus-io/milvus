@@ -860,7 +860,10 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 	if dbOk {
 		delete(m.collInfo[database], collectionName)
 	}
-	log.Ctx(ctx).Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName))
+	if database == "" {
+		delete(m.collInfo[defaultDB], collectionName)
+	}
+	log.Ctx(ctx).Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName), zap.Bool("dbok", dbOk))
 }
 
 func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string {
