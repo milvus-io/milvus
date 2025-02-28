@@ -240,6 +240,11 @@ func WriteYaml(w io.Writer) {
 # 2. cluster mode:  Pulsar(default) > Kafka (rocksmq and natsmq is unsupported in cluster mode)`,
 		},
 		{
+			name: "woodpecker",
+			header: `
+# Related configuration of woodpecker, used to manage Milvus logs of recent mutation operations, output streaming log, and provide embedded log sequential read and write.`,
+		},
+		{
 			name: "pulsar",
 			header: `
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.`,
