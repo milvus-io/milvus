@@ -199,20 +199,13 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 }
 
 func (it *importTask) setChannels() error {
-	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.req.GetDbName(), it.req.CollectionName)
-	if err != nil {
-		return err
-	}
-	channels, err := it.node.chMgr.getChannels(collID)
-	if err != nil {
-		return err
-	}
-	it.pchannels = channels
+	// import task only send message by broadcast, which didn't affect the time tick rule at proxy.
+	// so we don't need to set channels here.
 	return nil
 }
 
 func (it *importTask) getChannels() []pChan {
-	return it.pchannels
+	return nil
 }
 
 func (it *importTask) Execute(ctx context.Context) error {

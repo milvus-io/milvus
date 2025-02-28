@@ -1648,7 +1648,6 @@ func TestProxy_ImportV2(t *testing.T) {
 		err = node.sched.Start()
 		assert.NoError(t, err)
 		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getChannels(mock.Anything).Return([]string{"p1"}, nil)
 		node.chMgr = chMgr
 
 		// no such collection
@@ -1685,7 +1684,6 @@ func TestProxy_ImportV2(t *testing.T) {
 		// set partition name and with partition key
 		chMgr = NewMockChannelsMgr(t)
 		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"ch0"}, nil)
-		chMgr.EXPECT().getChannels(mock.Anything).Return([]string{"p1"}, nil)
 		node.chMgr = chMgr
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa", PartitionName: "bbb"})
 		assert.NoError(t, err)
