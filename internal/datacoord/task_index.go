@@ -103,8 +103,8 @@ func (it *indexBuildTask) GetTaskType() string {
 }
 
 func (it *indexBuildTask) CheckTaskHealthy(mt *meta) bool {
-	_, exist := mt.indexMeta.GetIndexJob(it.GetTaskID())
-	return exist
+	job, exist := mt.indexMeta.GetIndexJob(it.GetTaskID())
+	return exist && !job.IsDeleted
 }
 
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
@@ -262,7 +262,8 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	log.Ctx(ctx).Info("index task pre check successfully", zap.Int64("taskID", it.GetTaskID()),
 		zap.Int64("segID", segment.GetID()),
 		zap.Int32("CurrentIndexVersion", it.req.GetCurrentIndexVersion()),
-		zap.Int32("CurrentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()))
+		zap.Int32("CurrentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()),
+		zap.Int64("segID", segment.GetID()))
 	return true
 }
 
