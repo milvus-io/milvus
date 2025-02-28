@@ -4688,7 +4688,6 @@ func TestProxy_Import(t *testing.T) {
 
 		chMgr := NewMockChannelsMgr(t)
 		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"foo"}, nil)
-		chMgr.EXPECT().getChannels(mock.Anything).Return([]string{"foo_v1"}, nil)
 		proxy.chMgr = chMgr
 
 		factory := dependency.NewDefaultFactory(true)
