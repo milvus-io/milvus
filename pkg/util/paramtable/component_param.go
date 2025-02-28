@@ -1864,6 +1864,7 @@ type queryCoordConfig struct {
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval       ParamItem `refreshable:"true"`
 	BalanceCheckInterval       ParamItem `refreshable:"true"`
+	AutoBalanceInterval        ParamItem `refreshable:"true"`
 	IndexCheckInterval         ParamItem `refreshable:"true"`
 	ChannelTaskTimeout         ParamItem `refreshable:"true"`
 	SegmentTaskTimeout         ParamItem `refreshable:"true"`
@@ -2479,6 +2480,16 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.ClusterLevelLoadResourceGroups.Init(base.mgr)
+
+	p.AutoBalanceInterval = ParamItem{
+		Key:          "queryCoord.autoBalanceInterval",
+		Version:      "2.5.3",
+		DefaultValue: "3000",
+		Doc:          "the interval for triggerauto balance",
+		PanicIfEmpty: true,
+		Export:       true,
+	}
+	p.AutoBalanceInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
