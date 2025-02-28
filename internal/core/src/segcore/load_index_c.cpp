@@ -307,11 +307,9 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         config[milvus::index::INDEX_FILES] = load_index_info->index_files;
 
         if (load_index_info->field_type == milvus::DataType::JSON) {
-            if (config.contains(JSON_PATH)) {
-                index_info.json_cast_type = static_cast<milvus::DataType>(
-                    std::stoi(config.at(JSON_CAST_TYPE).get<std::string>()));
-                index_info.json_path = config.at(JSON_PATH).get<std::string>();
-            }
+            index_info.json_cast_type = static_cast<milvus::DataType>(
+                std::stoi(config.at(JSON_CAST_TYPE).get<std::string>()));
+            index_info.json_path = config.at(JSON_PATH).get<std::string>();
         }
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, remote_chunk_manager);

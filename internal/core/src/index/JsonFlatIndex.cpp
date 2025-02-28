@@ -12,6 +12,9 @@
 #include "index/JsonFlatIndex.h"
 #include "common/Types.h"
 #include "index/InvertedIndexUtil.h"
+#include "log/Log.h"
+#include "simdjson/builtin.h"
+#include "simdjson/padded_string.h"
 namespace milvus::index {
 
 void
@@ -23,10 +26,25 @@ JsonFlatIndex::build_index_for_json(
         for (int i = 0; i < n; i++) {
             if (schema_.nullable() && !data->is_valid(i)) {
                 null_offset.push_back(i);
+                wrapper_->add_json_data(nullptr, 0, offset++);
                 continue;
             }
             auto json = static_cast<const Json*>(data->RawValue(i));
-            wrapper_->add_json_data(json, 1, offset++);
+            auto res = json->doc().at_pointer(nested_path_);
+            auto err = res.error();
+            if (err != simdjson::SUCCESS) {
+                AssertInfo(err == simdjson::INCORRECT_TYPE ||
+                               err == simdjson::NO_SUCH_FIELD,
+                           "Failed to parse json, err: {}",
+                           err);
+                wrapper_->add_json_data(nullptr, 0, offset++);
+                continue;
+            }
+
+            // auto str = simdjson::to_json_string(res).value();
+            Json subpath_json = Json(simdjson::padded_string(
+                simdjson::to_json_string(res.value()).value()));
+            wrapper_->add_json_data(&subpath_json, 1, offset++);
         }
     }
 }

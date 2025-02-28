@@ -180,14 +180,14 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         !get_bit(index_ready_bitset_, field_id),
         "scalar index has been exist at " + std::to_string(field_id.get()));
 
-    if (field_meta.get_data_type() == DataType::JSON &&
-        info.index_params.find(JSON_PATH) != info.index_params.end()) {
+    if (field_meta.get_data_type() == DataType::JSON) {
         auto path = info.index_params.at(JSON_PATH);
-        JSONIndexKey key;
-        key.nested_path = path;
-        key.field_id = field_id;
-        json_indexings_[key] =
-            std::move(const_cast<LoadIndexInfo&>(info).index);
+        JsonIndex index;
+        index.nested_path = path;
+        index.field_id = field_id;
+        index.index = std::move(const_cast<LoadIndexInfo&>(info).index);
+        index.cast_type = index.index->JsonCastType();
+        json_indices.push_back(std::move(index));
         return;
     }
     auto row_count = info.index->Count();

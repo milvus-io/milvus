@@ -196,8 +196,9 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
     JsonFlatIndex() : InvertedIndexTantivy<std::string>() {
     }
 
-    explicit JsonFlatIndex(const storage::FileManagerContext& ctx)
-        : InvertedIndexTantivy<std::string>(ctx) {
+    explicit JsonFlatIndex(const storage::FileManagerContext& ctx,
+                           const std::string& nested_path)
+        : InvertedIndexTantivy<std::string>(ctx), nested_path_(nested_path) {
     }
 
     void
@@ -219,5 +220,18 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
         return std::make_shared<JsonFlatIndexQueryExecutor<T>>(json_path,
                                                                this->wrapper_);
     }
+
+    DataType
+    JsonCastType() const override {
+        return DataType::JSON;
+    }
+
+    std::string
+    GetNestedPath() const {
+        return nested_path_;
+    }
+
+ private:
+    std::string nested_path_;
 };
 }  // namespace milvus::index

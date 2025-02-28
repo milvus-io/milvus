@@ -68,13 +68,21 @@ class SegmentSealed : public SegmentInternalInterface {
     HasIndex(FieldId field_id,
              const std::string& path,
              DataType data_type) const override {
-        JSONIndexKey key;
-        key.field_id = field_id;
-        key.nested_path = path;
-        auto index = json_indexings_.find(key);
-        bool has_index = index != json_indexings_.end() &&
-               data_type == index->second->JsonCastType();
-        return has_index || HasIndex(field_id);
+        auto it = std::find_if(
+            json_indices.begin(),
+            json_indices.end(),
+            [field_id, path, data_type](const JsonIndex& index) {
+                if (index.field_id != field_id) {
+                    return false;
+                }
+                if (index.cast_type != DataType::JSON) {
+                    return index.nested_path == path &&
+                           index.cast_type == data_type;
+                }
+                return path.substr(0, index.nested_path.length()) ==
+                       index.nested_path;
+            });
+        return it != json_indices.end();
     }
 
  protected:
@@ -85,40 +93,31 @@ class SegmentSealed : public SegmentInternalInterface {
     chunk_index_impl(FieldId field_id,
                      std::string path,
                      int64_t chunk_id) const override {
-        JSONIndexKey key;
-        key.field_id = field_id;
-        key.nested_path = path;
-        // AssertInfo(json_indexings_.find(key) != json_indexings_.end(),
-        //            "Cannot find json index with path: " + path);
-        if (json_indexings_.find(key) != json_indexings_.end()) {
-            return json_indexings_.at(key).get();
-        }
-        return chunk_index_impl(field_id, chunk_id);
+        auto it = std::find_if(json_indices.begin(),
+                               json_indices.end(),
+                               [field_id, path](const JsonIndex& index) {
+                                   if (index.field_id != field_id) {
+                                       return false;
+                                   }
+                                   if (index.cast_type != DataType::JSON) {
+                                       // json path index
+                                       return index.nested_path == path;
+                                   }
+                                   // json flat index
+                                   return path.substr(
+                                              0, index.nested_path.length()) ==
+                                          index.nested_path;
+                               });
+        return it != json_indices.end() ? it->index.get() : nullptr;
     }
-
-    struct JSONIndexKey {
+    struct JsonIndex {
         FieldId field_id;
         std::string nested_path;
-        bool
-        operator==(const JSONIndexKey& other) const {
-            return field_id == other.field_id &&
-                   nested_path == other.nested_path;
-        }
+        DataType cast_type;
+        index::IndexBasePtr index;
     };
 
-    struct hash_helper {
-        size_t
-        operator()(const JSONIndexKey& k) const {
-            std::hash<int64_t> h1;
-            std::hash<std::string> h2;
-            size_t hash_result = 0;
-            boost::hash_combine(hash_result, h1(k.field_id.get()));
-            boost::hash_combine(hash_result, h2(k.nested_path));
-            return hash_result;
-        }
-    };
-    std::unordered_map<JSONIndexKey, index::IndexBasePtr, hash_helper>
-        json_indexings_;
+    std::vector<JsonIndex> json_indices;
 };
 
 using SegmentSealedSPtr = std::shared_ptr<SegmentSealed>;

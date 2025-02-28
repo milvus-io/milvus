@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["lindera-ipadic", "lindera-ko-dic", "lindera-cc-cedict"]
+default = []
 lindera-ipadic = ["lindera/ipadic"]
 lindera-ipadic-neologd = ["lindera/ipadic-neologd"]
 lindera-unidic = ["lindera/unidic"]
