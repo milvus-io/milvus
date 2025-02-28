@@ -82,7 +82,11 @@ class Base:
             collection_list = self.utility_wrap.list_collections()[0]
             for collection_name in self.tear_down_collection_names:
                 if collection_name is not None and collection_name in collection_list:
-                    self.collection_wrap.init_collection(name=collection_name)[0].drop()
+                    alias_list = self.utility_wrap.list_aliases(collection_name)[0]
+                    if alias_list:
+                        for alias in alias_list:
+                            self.utility_wrap.drop_alias(alias)
+                    self.utility_wrap.drop_collection(collection_name)
 
             """ Clean up the rgs before disconnect """
             rgs_list = self.utility_wrap.list_resource_groups()[0]
