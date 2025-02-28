@@ -78,7 +78,6 @@ type ComponentParam struct {
 	QueryNodeCfg   queryNodeConfig
 	DataCoordCfg   dataCoordConfig
 	DataNodeCfg    dataNodeConfig
-	IndexNodeCfg   indexNodeConfig
 	KnowhereConfig knowhereConfig
 	HTTPCfg        httpConfig
 	LogCfg         logConfig
@@ -94,7 +93,6 @@ type ComponentParam struct {
 	QueryNodeGrpcServerCfg     GrpcServerConfig
 	DataCoordGrpcServerCfg     GrpcServerConfig
 	DataNodeGrpcServerCfg      GrpcServerConfig
-	IndexNodeGrpcServerCfg     GrpcServerConfig
 	StreamingNodeGrpcServerCfg GrpcServerConfig
 
 	RootCoordGrpcClientCfg      GrpcClientConfig
@@ -103,7 +101,6 @@ type ComponentParam struct {
 	QueryNodeGrpcClientCfg      GrpcClientConfig
 	DataCoordGrpcClientCfg      GrpcClientConfig
 	DataNodeGrpcClientCfg       GrpcClientConfig
-	IndexNodeGrpcClientCfg      GrpcClientConfig
 	StreamingCoordGrpcClientCfg GrpcClientConfig
 	StreamingNodeGrpcClientCfg  GrpcClientConfig
 	IntegrationTestCfg          integrationTestConfig
@@ -134,7 +131,6 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.QueryNodeCfg.init(bt)
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)
-	p.IndexNodeCfg.init(bt)
 	p.StreamingCfg.init(bt)
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
@@ -152,7 +148,6 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.QueryNodeGrpcServerCfg.Init("queryNode", bt)
 	p.DataCoordGrpcServerCfg.Init("dataCoord", bt)
 	p.DataNodeGrpcServerCfg.Init("dataNode", bt)
-	p.IndexNodeGrpcServerCfg.Init("indexNode", bt)
 	p.StreamingNodeGrpcServerCfg.Init("streamingNode", bt)
 
 	p.RootCoordGrpcClientCfg.Init("rootCoord", bt)
@@ -161,7 +156,6 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.QueryNodeGrpcClientCfg.Init("queryNode", bt)
 	p.DataCoordGrpcClientCfg.Init("dataCoord", bt)
 	p.DataNodeGrpcClientCfg.Init("dataNode", bt)
-	p.IndexNodeGrpcClientCfg.Init("indexNode", bt)
 	p.StreamingCoordGrpcClientCfg.Init("streamingCoord", bt)
 	p.StreamingNodeGrpcClientCfg.Init("streamingNode", bt)
 
@@ -4563,6 +4557,12 @@ type dataNodeConfig struct {
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
 	DeltalogFormat ParamItem `refreshable:"false"`
+
+	// index services config
+	BuildParallel          ParamItem `refreshable:"false"`
+	EnableDisk             ParamItem `refreshable:"false"`
+	DiskCapacityLimit      ParamItem `refreshable:"true"`
+	MaxDiskUsagePercentage ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -4955,23 +4955,10 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.DeltalogFormat.Init(base.mgr)
-}
 
-// /////////////////////////////////////////////////////////////////////////////
-// --- indexnode ---
-type indexNodeConfig struct {
-	BuildParallel ParamItem `refreshable:"false"`
-	// enable disk
-	EnableDisk             ParamItem `refreshable:"false"`
-	DiskCapacityLimit      ParamItem `refreshable:"true"`
-	MaxDiskUsagePercentage ParamItem `refreshable:"true"`
-
-	GracefulStopTimeout ParamItem `refreshable:"true"`
-}
-
-func (p *indexNodeConfig) init(base *BaseTable) {
 	p.BuildParallel = ParamItem{
-		Key:          "indexNode.scheduler.buildParallel",
+		Key:          "dataNode.scheduler.buildParallel",
+		FallbackKeys: []string{"indexNode.scheduler.buildParallel"},
 		Version:      "2.0.0",
 		DefaultValue: "1",
 		Export:       true,
@@ -4979,7 +4966,8 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 	p.BuildParallel.Init(base.mgr)
 
 	p.EnableDisk = ParamItem{
-		Key:          "indexNode.enableDisk",
+		Key:          "dataNode.enableDisk",
+		FallbackKeys: []string{"indexNode.scheduler.buildParallel"},
 		Version:      "2.2.0",
 		DefaultValue: "false",
 		PanicIfEmpty: true,
@@ -5013,7 +5001,8 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 	p.DiskCapacityLimit.Init(base.mgr)
 
 	p.MaxDiskUsagePercentage = ParamItem{
-		Key:          "indexNode.maxDiskUsagePercentage",
+		Key:          "dataNode.maxDiskUsagePercentage",
+		FallbackKeys: []string{"indexNode.scheduler.buildParallel"},
 		Version:      "2.2.0",
 		DefaultValue: "95",
 		PanicIfEmpty: true,
@@ -5023,14 +5012,6 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		Export: true,
 	}
 	p.MaxDiskUsagePercentage.Init(base.mgr)
-
-	p.GracefulStopTimeout = ParamItem{
-		Key:          "indexNode.gracefulStopTimeout",
-		Version:      "2.2.1",
-		FallbackKeys: []string{"common.gracefulStopTimeout"},
-		Doc:          "seconds. force stop node without graceful stop",
-	}
-	p.GracefulStopTimeout.Init(base.mgr)
 }
 
 type streamingConfig struct {

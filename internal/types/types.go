@@ -55,12 +55,14 @@ type Component interface {
 type DataNodeClient interface {
 	io.Closer
 	datapb.DataNodeClient
+	workerpb.IndexNodeClient
 }
 
 // DataNode is the interface `datanode` package implements
 type DataNode interface {
 	Component
 	datapb.DataNodeServer
+	workerpb.IndexNodeServer
 }
 
 // DataNodeComponent is used by grpc server of DataNode
@@ -133,35 +135,6 @@ type DataCoordComponent interface {
 
 	// SetDataNodeCreator set DataNode client creator func for DataCoord
 	SetDataNodeCreator(func(context.Context, string, int64) (DataNodeClient, error))
-
-	// SetIndexNodeCreator set Index client creator func for DataCoord
-	SetIndexNodeCreator(func(context.Context, string, int64) (IndexNodeClient, error))
-}
-
-// IndexNodeClient is the client interface for indexnode server
-type IndexNodeClient interface {
-	io.Closer
-	workerpb.IndexNodeClient
-}
-
-// IndexNode is the interface `indexnode` package implements
-type IndexNode interface {
-	Component
-	workerpb.IndexNodeServer
-}
-
-// IndexNodeComponent is used by grpc server of IndexNode
-type IndexNodeComponent interface {
-	IndexNode
-
-	SetAddress(address string)
-	GetAddress() string
-	// SetEtcdClient set etcd client for IndexNodeComponent
-	SetEtcdClient(etcdClient *clientv3.Client)
-
-	// UpdateStateCode updates state code for IndexNodeComponent
-	//  `stateCode` is current statement of this QueryCoord, indicating whether it's healthy.
-	UpdateStateCode(stateCode commonpb.StateCode)
 }
 
 // RootCoordClient is the client interface for rootcoord server
@@ -253,10 +226,6 @@ type ProxyComponent interface {
 	// SetDataCoordClient set DataCoord for Proxy
 	// `dataCoord` is a client of data coordinator.
 	SetDataCoordClient(dataCoord DataCoordClient)
-
-	// SetIndexCoordClient set IndexCoord for Proxy
-	//  `indexCoord` is a client of index coordinator.
-	// SetIndexCoordClient(indexCoord IndexCoord)
 
 	// SetQueryCoordClient set QueryCoord for Proxy
 	//  `queryCoord` is a client of query coordinator.

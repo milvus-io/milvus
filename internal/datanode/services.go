@@ -60,7 +60,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 // GetComponentStates will return current state of DataNode
 func (node *DataNode) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	nodeID := common.NotRegisteredID
-	state := node.stateCode.Load().(commonpb.StateCode)
+	state := node.GetStateCode()
 	log.Ctx(ctx).Debug("DataNode current state", zap.String("State", state.String()))
 	if node.GetSession() != nil && node.session.Registered() {
 		nodeID = node.GetSession().ServerID
@@ -70,7 +70,7 @@ func (node *DataNode) GetComponentStates(ctx context.Context, req *milvuspb.GetC
 			// NodeID:    Params.NodeID, // will race with DataNode.Register()
 			NodeID:    nodeID,
 			Role:      node.Role,
-			StateCode: node.stateCode.Load().(commonpb.StateCode),
+			StateCode: state,
 		},
 		SubcomponentStates: make([]*milvuspb.ComponentInfo, 0),
 		Status:             merr.Success(),

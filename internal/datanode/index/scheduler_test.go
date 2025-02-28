@@ -1,4 +1,20 @@
-package indexnode
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package index
 
 import (
 	"context"
@@ -77,7 +93,7 @@ type fakeTask struct {
 	failReason    string
 }
 
-var _ task = &fakeTask{}
+var _ Task = &fakeTask{}
 
 func (t *fakeTask) Name() string {
 	return fmt.Sprintf("fake-task-%d", t.id)
@@ -136,7 +152,7 @@ var (
 	id     = 0
 )
 
-func newTask(cancelStage fakeTaskState, reterror map[fakeTaskState]error, expectedState indexpb.JobState) task {
+func newTask(cancelStage fakeTaskState, reterror map[fakeTaskState]error, expectedState indexpb.JobState) Task {
 	idLock.Lock()
 	newID := id
 	id++
@@ -162,7 +178,7 @@ func TestIndexTaskScheduler(t *testing.T) {
 	scheduler := NewTaskScheduler(context.TODO())
 	scheduler.Start()
 
-	tasks := make([]task, 0)
+	tasks := make([]Task, 0)
 
 	tasks = append(tasks,
 		newTask(fakeTaskEnqueued, nil, indexpb.JobState_JobStateRetry),
@@ -187,7 +203,7 @@ func TestIndexTaskScheduler(t *testing.T) {
 	assert.Equal(t, tasks[len(tasks)-1].Ctx().(*stagectx).curstate, fakeTaskState(fakeTaskSavedIndexes))
 
 	scheduler = NewTaskScheduler(context.TODO())
-	tasks = make([]task, 0, 1024)
+	tasks = make([]Task, 0, 1024)
 	for i := 0; i < 1024; i++ {
 		tasks = append(tasks, newTask(fakeTaskSavedIndexes, nil, indexpb.JobState_JobStateFinished))
 		assert.Nil(t, scheduler.TaskQueue.Enqueue(tasks[len(tasks)-1]))

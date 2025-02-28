@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package index
 
 import (
 	"context"
@@ -49,7 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var _ task = (*statsTask)(nil)
+var _ Task = (*statsTask)(nil)
 
 const statsBatchSize = 100
 
@@ -61,17 +61,17 @@ type statsTask struct {
 
 	tr       *timerecord.TimeRecorder
 	queueDur time.Duration
-	node     *IndexNode
+	manager  *Manager
 	binlogIO io.BinlogIO
 
 	deltaLogs   []string
 	logIDOffset int64
 }
 
-func newStatsTask(ctx context.Context,
+func NewStatsTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.CreateStatsRequest,
-	node *IndexNode,
+	manager *Manager,
 	binlogIO io.BinlogIO,
 ) *statsTask {
 	return &statsTask{
@@ -79,7 +79,7 @@ func newStatsTask(ctx context.Context,
 		ctx:         ctx,
 		cancel:      cancel,
 		req:         req,
-		node:        node,
+		manager:     manager,
 		binlogIO:    binlogIO,
 		tr:          timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
 		logIDOffset: 0,
@@ -104,11 +104,11 @@ func (st *statsTask) OnEnqueue(ctx context.Context) error {
 }
 
 func (st *statsTask) SetState(state indexpb.JobState, failReason string) {
-	st.node.storeStatsTaskState(st.req.GetClusterID(), st.req.GetTaskID(), state, failReason)
+	st.manager.StoreStatsTaskState(st.req.GetClusterID(), st.req.GetTaskID(), state, failReason)
 }
 
 func (st *statsTask) GetState() indexpb.JobState {
-	return st.node.getStatsTaskState(st.req.GetClusterID(), st.req.GetTaskID())
+	return st.manager.GetStatsTaskState(st.req.GetClusterID(), st.req.GetTaskID())
 }
 
 func (st *statsTask) PreExecute(ctx context.Context) error {
@@ -241,7 +241,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		return nil, err
 	}
 
-	st.node.storePKSortStatsResult(st.req.GetClusterID(),
+	st.manager.StorePKSortStatsResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),
@@ -309,7 +309,7 @@ func (st *statsTask) Reset() {
 	st.req = nil
 	st.cancel = nil
 	st.tr = nil
-	st.node = nil
+	st.manager = nil
 }
 
 func (st *statsTask) loadDeltalogs(ctx context.Context, dpaths []string) (map[interface{}]typeutil.Timestamp, error) {
@@ -507,7 +507,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		)
 	}
 
-	st.node.storeStatsTextIndexResult(st.req.GetClusterID(),
+	st.manager.StoreStatsTextIndexResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),

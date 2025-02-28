@@ -31,7 +31,6 @@ func TestRegisterMetrics(t *testing.T) {
 		RegisterRootCoord(r)
 		RegisterDataNode(r)
 		RegisterDataCoord(r)
-		RegisterIndexNode(r)
 		RegisterProxy(r)
 		RegisterQueryNode(r)
 		RegisterQueryCoord(r)

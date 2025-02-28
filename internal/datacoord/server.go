@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
-	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -148,7 +147,6 @@ type Server struct {
 	activateFunc        func() error
 
 	dataNodeCreator        session.DataNodeCreatorFunc
-	indexNodeCreator       session.IndexNodeCreatorFunc
 	rootCoordClientCreator rootCoordCreatorFunc
 	// indexCoord             types.IndexCoord
 
@@ -211,7 +209,6 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		flushCh:                make(chan UniqueID, 1024),
 		notifyIndexChan:        make(chan UniqueID, 1024),
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
-		indexNodeCreator:       defaultIndexNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
 		metricsCacheManager:    metricsinfo.NewMetricsCacheManager(),
 		enableActiveStandBy:    Params.DataCoordCfg.EnableActiveStandby.GetAsBool(),
@@ -226,11 +223,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 }
 
 func defaultDataNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-	return datanodeclient.NewClient(ctx, addr, nodeID)
-}
-
-func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error) {
-	return indexnodeclient.NewClient(ctx, addr, nodeID, Params.DataCoordCfg.WithCredential.GetAsBool())
+	return datanodeclient.NewClient(ctx, addr, nodeID, Params.DataCoordCfg.WithCredential.GetAsBool())
 }
 
 func defaultRootCoordCreatorFunc(ctx context.Context) (types.RootCoordClient, error) {
@@ -526,10 +519,6 @@ func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (type
 	s.dataNodeCreator = f
 }
 
-func (s *Server) SetIndexNodeCreator(f func(context.Context, string, int64) (types.IndexNodeClient, error)) {
-	s.indexNodeCreator = f
-}
-
 func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
 	cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(s.ctx)
@@ -698,7 +687,7 @@ func (s *Server) initJobManager() {
 
 func (s *Server) initIndexNodeManager() {
 	if s.indexNodeManager == nil {
-		s.indexNodeManager = session.NewNodeManager(s.ctx, s.indexNodeCreator)
+		s.indexNodeManager = session.NewNodeManager(s.ctx, s.dataNodeCreator)
 	}
 }
 
@@ -907,6 +896,14 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 				return err
 			}
 			s.metricsCacheManager.InvalidateSystemInfoMetrics()
+			if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
+				log.Info("receive datanode session event, but adding datanode by bind mode, skip it",
+					zap.String("address", event.Session.Address),
+					zap.Int64("serverID", event.Session.ServerID),
+					zap.String("event type", event.EventType.String()))
+				return nil
+			}
+			return s.indexNodeManager.AddNode(event.Session.ServerID, event.Session.Address)
 		case sessionutil.SessionDelEvent:
 			log.Info("received datanode unregister",
 				zap.String("address", info.Address),
@@ -916,32 +913,24 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 				return err
 			}
 			s.metricsCacheManager.InvalidateSystemInfoMetrics()
-		default:
-			log.Warn("receive unknown service event type",
-				zap.Any("type", event.EventType))
-		}
-	case typeutil.IndexNodeRole:
-		if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
-			log.Info("receive indexnode session event, but adding indexnode by bind mode, skip it",
-				zap.String("address", event.Session.Address),
-				zap.Int64("serverID", event.Session.ServerID),
-				zap.String("event type", event.EventType.String()))
-			return nil
-		}
-		switch event.EventType {
-		case sessionutil.SessionAddEvent:
-			log.Info("received indexnode register",
-				zap.String("address", event.Session.Address),
-				zap.Int64("serverID", event.Session.ServerID))
-			return s.indexNodeManager.AddNode(event.Session.ServerID, event.Session.Address)
-		case sessionutil.SessionDelEvent:
-			log.Info("received indexnode unregister",
-				zap.String("address", event.Session.Address),
-				zap.Int64("serverID", event.Session.ServerID))
+			if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
+				log.Info("receive datanode session event, but adding datanode by bind mode, skip it",
+					zap.String("address", event.Session.Address),
+					zap.Int64("serverID", event.Session.ServerID),
+					zap.String("event type", event.EventType.String()))
+				return nil
+			}
 			s.indexNodeManager.RemoveNode(event.Session.ServerID)
 		case sessionutil.SessionUpdateEvent:
+			if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
+				log.Info("receive datanode session event, but adding indexnode by bind mode, skip it",
+					zap.String("address", event.Session.Address),
+					zap.Int64("serverID", event.Session.ServerID),
+					zap.String("event type", event.EventType.String()))
+				return nil
+			}
 			serverID := event.Session.ServerID
-			log.Info("received indexnode SessionUpdateEvent", zap.Int64("serverID", serverID))
+			log.Info("received datanode SessionUpdateEvent", zap.Int64("serverID", serverID))
 			s.indexNodeManager.StoppingNode(serverID)
 		default:
 			log.Warn("receive unknown service event type",

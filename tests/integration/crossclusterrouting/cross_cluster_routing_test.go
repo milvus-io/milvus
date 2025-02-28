@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -133,16 +132,6 @@ func (s *CrossClusterRoutingSuite) TestCrossClusterRouting() {
 	// test queryNode
 	s.Eventually(func() bool {
 		resp, err := s.Cluster.QueryNodeClient.Search(s.Cluster.GetContext(), &querypb.SearchRequest{})
-		s.Suite.T().Logf("resp: %s, err: %s", resp, err)
-		if err != nil {
-			return strings.Contains(err.Error(), merr.ErrServiceUnavailable.Error())
-		}
-		return false
-	}, waitFor, duration)
-
-	// test indexNode
-	s.Eventually(func() bool {
-		resp, err := s.Cluster.IndexNodeClient.CreateJob(s.Cluster.GetContext(), &workerpb.CreateJobRequest{})
 		s.Suite.T().Logf("resp: %s, err: %s", resp, err)
 		if err != nil {
 			return strings.Contains(err.Error(), merr.ErrServiceUnavailable.Error())
