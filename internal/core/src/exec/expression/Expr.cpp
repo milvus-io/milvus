@@ -310,8 +310,104 @@ CompileExpression(const expr::TypedExprPtr& expr,
 }
 
 inline void
+ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
+                    ExecContext* context,
+                    bool& has_heavy_operation) {
+    auto* segment = context->get_query_context()->get_segment();
+    if (!segment || !expr) {
+        return;
+    }
+    std::vector<size_t> reorder;
+    std::vector<size_t> numeric_expr;
+    std::vector<size_t> indexed_expr;
+    std::vector<size_t> string_expr;
+    std::vector<size_t> json_expr;
+    std::vector<size_t> compare_expr;
+    std::vector<size_t> other_expr;
+    std::vector<size_t> heavy_conjunct_expr;
+    std::vector<size_t> light_conjunct_expr;
+
+    auto& inputs = expr->GetInputsRef();
+    for (int i = 0; i < inputs.size(); i++) {
+        auto input = inputs[i];
+
+        if (input->IsSource() && input->GetColumnInfo().has_value()) {
+            auto column = input->GetColumnInfo().value();
+            if (IsNumericDataType(column.data_type_)) {
+                numeric_expr.push_back(i);
+                continue;
+            }
+            if (segment->HasIndex(column.field_id_)) {
+                indexed_expr.push_back(i);
+                continue;
+            }
+            if (IsStringDataType(column.data_type_)) {
+                string_expr.push_back(i);
+                continue;
+            }
+            if (IsJsonDataType(column.data_type_)) {
+                json_expr.push_back(i);
+                has_heavy_operation = true;
+                continue;
+            }
+        }
+
+        if (input->name() == "PhyConjunctFilterExpr") {
+            bool sub_expr_heavy = false;
+            auto expr = std::dynamic_pointer_cast<PhyConjunctFilterExpr>(input);
+            ReorderConjunctExpr(expr, context, sub_expr_heavy);
+            has_heavy_operation |= sub_expr_heavy;
+            if (sub_expr_heavy) {
+                heavy_conjunct_expr.push_back(i);
+            } else {
+                light_conjunct_expr.push_back(i);
+            }
+            continue;
+        }
+
+        if (input->name() == "PhyCompareFilterExpr") {
+            compare_expr.push_back(i);
+            has_heavy_operation = true;
+            continue;
+        }
+
+        other_expr.push_back(i);
+    }
+
+    reorder.insert(reorder.end(), numeric_expr.begin(), numeric_expr.end());
+    reorder.insert(reorder.end(), indexed_expr.begin(), indexed_expr.end());
+    reorder.insert(reorder.end(), string_expr.begin(), string_expr.end());
+    reorder.insert(
+        reorder.end(), light_conjunct_expr.begin(), light_conjunct_expr.end());
+    reorder.insert(reorder.end(), other_expr.begin(), other_expr.end());
+    reorder.insert(reorder.end(), json_expr.begin(), json_expr.end());
+    reorder.insert(
+        reorder.end(), heavy_conjunct_expr.begin(), heavy_conjunct_expr.end());
+    reorder.insert(reorder.end(), compare_expr.begin(), compare_expr.end());
+
+    AssertInfo(reorder.size() == inputs.size(),
+               "reorder size:{} but input size:{}",
+               reorder.size(),
+               inputs.size());
+
+    expr->Reorder(reorder);
+}
+
+inline void
 OptimizeCompiledExprs(ExecContext* context, const std::vector<ExprPtr>& exprs) {
-    //TODO: add optimization pattern
+    // Rule 1: reoder conjucts expr's subexpr, postpone heavy operations
+    // sequence: int(column) -> index(column) -> string(column) -> light conjuct
+    // ...... -> json(column) -> heavy conjuct -> two_column_compare
+    for (const auto& expr : exprs) {
+        if (expr->name() == "PhyConjunctFilterExpr") {
+            LOG_INFO("before reoder filter expression: {}", expr->ToString());
+            auto conjunct_expr =
+                std::dynamic_pointer_cast<PhyConjunctFilterExpr>(expr);
+            bool has_heavy_operation = false;
+            ReorderConjunctExpr(conjunct_expr, context, has_heavy_operation);
+            LOG_INFO("after reorder filter expression: {}", expr->ToString());
+        }
+    }
 }
 
 }  // namespace exec
