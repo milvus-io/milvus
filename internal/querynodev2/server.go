@@ -242,6 +242,9 @@ func (node *QueryNode) InitSegcore() error {
 	cJSONIndexEnabled := C.bool(paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool())
 	C.InitDefaultJSONKeyIndexEnable(cJSONIndexEnabled)
 
+	cScalarIndexHasRawDataEnabled := C.bool(paramtable.Get().QueryNodeCfg.ScalarIndexHasRawDataEnabled.GetAsBool())
+	C.InitDefaultScalarIndexHasRawData(cScalarIndexHasRawDataEnabled)
+
 	cGpuMemoryPoolInitSize := C.uint32_t(paramtable.Get().GpuConfig.InitSize.GetAsUint32())
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
