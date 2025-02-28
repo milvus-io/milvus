@@ -41,7 +41,6 @@ func TestPackedSerde(t *testing.T) {
 
 			reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
 			assert.NoError(t, err)
-			defer reader.Close()
 
 			group := storagecommon.ColumnGroup{}
 			for i := 0; i < len(schema.Fields); i++ {
@@ -49,7 +48,7 @@ func TestPackedSerde(t *testing.T) {
 			}
 			multiPartUploadSize := int64(0)
 			batchSize := 7
-			writer, err := NewPackedSerializeWriter(chunkPaths, schema, bufferSize, multiPartUploadSize, []storagecommon.ColumnGroup{group}, batchSize)
+			writer, err := NewPackedSerializeWriter(chunkPaths, generateTestSchema(), bufferSize, multiPartUploadSize, []storagecommon.ColumnGroup{group}, batchSize)
 			assert.NoError(t, err)
 
 			for i := 1; i <= size; i++ {
@@ -62,6 +61,8 @@ func TestPackedSerde(t *testing.T) {
 				assert.NoError(t, err)
 			}
 			err = writer.Close()
+			assert.NoError(t, err)
+			err = reader.Close()
 			assert.NoError(t, err)
 		}
 

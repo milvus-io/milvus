@@ -51,7 +51,9 @@ var _ RecordReader = (*packedRecordReader)(nil)
 
 func (pr *packedRecordReader) iterateNextBatch() error {
 	if pr.reader != nil {
-		pr.reader.Close()
+		if err := pr.reader.Close(); err != nil {
+			return err
+		}
 	}
 
 	if pr.chunk >= len(pr.paths) {
@@ -80,11 +82,11 @@ func (pr *packedRecordReader) Next() (Record, error) {
 			if err := pr.iterateNextBatch(); err != nil {
 				return nil, err
 			}
+			continue
 		} else if err != nil {
 			return nil, err
-		} else {
-			return NewSimpleArrowRecord(rec, pr.field2Col), nil
 		}
+		return NewSimpleArrowRecord(rec, pr.field2Col), nil
 	}
 }
 
@@ -228,13 +230,6 @@ func (pw *packedRecordWriter) GetWrittenPaths() []string {
 
 func (pw *packedRecordWriter) GetWrittenRowNum() int64 {
 	return pw.rowNum
-}
-
-func (pw *packedRecordWriter) GetColumnGroupUncompressed(columnGroup int) uint64 {
-	if columnGroup >= len(pw.columnGroupUncompressed) {
-		return 0
-	}
-	return pw.columnGroupUncompressed[columnGroup]
 }
 
 func (pw *packedRecordWriter) Close() error {
@@ -384,9 +379,7 @@ func (pw *PackedBinlogRecordWriter) GetWrittenUncompressed() uint64 {
 }
 
 func (pw *PackedBinlogRecordWriter) Close() error {
-	if err := pw.finalizeBinlogs(); err != nil {
-		return err
-	}
+	pw.finalizeBinlogs()
 	if err := pw.writeStats(); err != nil {
 		return err
 	}
@@ -399,9 +392,9 @@ func (pw *PackedBinlogRecordWriter) Close() error {
 	return nil
 }
 
-func (pw *PackedBinlogRecordWriter) finalizeBinlogs() error {
+func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 	if pw.writer == nil {
-		return nil
+		return
 	}
 	pw.rowNum = pw.writer.GetWrittenRowNum()
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
@@ -416,15 +409,14 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() error {
 			}
 		}
 		pw.fieldBinlogs[columnGroupID].Binlogs = append(pw.fieldBinlogs[columnGroupID].Binlogs, &datapb.Binlog{
-			LogSize:       int64(pw.writer.GetColumnGroupUncompressed(columnGroup)), // TODO: should provide the log size of each column group file in storage v2
-			MemorySize:    int64(pw.writer.GetColumnGroupUncompressed(columnGroup)),
+			LogSize:       int64(pw.writer.columnGroupUncompressed[columnGroup]), // TODO: should provide the log size of each column group file in storage v2
+			MemorySize:    int64(pw.writer.columnGroupUncompressed[columnGroup]),
 			LogPath:       pw.writer.GetWrittenPaths()[columnGroupID],
 			EntriesNum:    pw.writer.GetWrittenRowNum(),
 			TimestampFrom: pw.tsFrom,
 			TimestampTo:   pw.tsTo,
 		})
 	}
-	return nil
 }
 
 func (pw *PackedBinlogRecordWriter) writeStats() error {

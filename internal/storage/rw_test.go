@@ -20,6 +20,7 @@ import (
 	"context"
 	"io"
 	"math"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -151,6 +152,9 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	writtenUncompressed := w.GetWrittenUncompressed()
 	s.Positive(writtenUncompressed)
 
+	rowNum := w.GetRowNum()
+	s.Equal(rowNum, int64(rows))
+
 	fieldBinlogs, statsLog, bm25StatsLog := w.GetLogs()
 	s.Equal(len(fieldBinlogs), len(columnGroups))
 	for _, columnGroup := range fieldBinlogs {
@@ -201,7 +205,7 @@ func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
 	}
 
 	v := &Value{
-		PK:        NewInt64PrimaryKey(0),
+		PK:        NewVarCharPrimaryKey("0"),
 		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
 		Value:     genRowWithBM25(0),
 	}
@@ -236,6 +240,32 @@ func (s *PackedBinlogRecordSuite) TestUnsuportedStorageVersion() {
 		WithVersion(-1),
 	}
 	_, err = NewBinlogRecordReader(s.ctx, []*datapb.FieldBinlog{{}}, s.schema, rOption...)
+	s.Error(err)
+}
+
+func (s *PackedBinlogRecordSuite) TestNoPrimaryKeyError() {
+	s.schema = &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 13, Name: "field12", DataType: schemapb.DataType_JSON},
+	}}
+	columnGroups := genTestColumnGroups(s.schema)
+	wOption := []RwOption{
+		WithVersion(StorageV2),
+		WithColumnGroups(columnGroups),
+	}
+	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.rootPath, s.maxRowNum, wOption...)
+	s.Error(err)
+}
+
+func (s *PackedBinlogRecordSuite) TestConvertArrowSchemaError() {
+	s.schema = &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 14, Name: "field13", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{}},
+	}}
+	columnGroups := genTestColumnGroups(s.schema)
+	wOption := []RwOption{
+		WithVersion(StorageV2),
+		WithColumnGroups(columnGroups),
+	}
+	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.rootPath, s.maxRowNum, wOption...)
 	s.Error(err)
 }
 
@@ -290,7 +320,7 @@ func genRowWithBM25(magic int64) map[int64]interface{} {
 	return map[int64]interface{}{
 		common.RowIDField:     magic,
 		common.TimeStampField: int64(ts),
-		100:                   magic,
+		100:                   strconv.FormatInt(magic, 10),
 		101:                   "varchar",
 		102:                   typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 1}),
 	}
@@ -314,7 +344,7 @@ func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {
 			{
 				FieldID:      100,
 				Name:         "pk",
-				DataType:     schemapb.DataType_Int64,
+				DataType:     schemapb.DataType_VarChar,
 				IsPrimaryKey: true,
 			},
 			{
