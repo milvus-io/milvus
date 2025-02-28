@@ -61,7 +61,7 @@ func Test_createPartitionTask_Prepare(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(coll.Clone(), nil)
-		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
+		meta.EXPECT().GetTotalPartitionNumber(mock.Anything).Return(0)
 
 		core := newTestCore(withMeta(meta))
 		task := &createPartitionTask{
