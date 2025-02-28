@@ -28,6 +28,7 @@ int64_t LOW_PRIORITY_THREAD_CORE_COEFFICIENT =
     DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 int CPU_NUM = DEFAULT_CPU_NUM;
 int64_t EXEC_EVAL_EXPR_BATCH_SIZE = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE;
+bool SCALAR_INDEX_HAS_RAW_DATA = DEFAULT_SCALAR_INDEX_HAS_RAW_DATA;
 
 void
 SetIndexSliceSize(const int64_t size) {
@@ -67,4 +68,10 @@ SetCpuNum(const int num) {
     CPU_NUM = num;
 }
 
+void
+SetDefaultScalarIndexHasRawData(bool val) {
+    SCALAR_INDEX_HAS_RAW_DATA = val;
+    LOG_INFO("set default scalar index has raw data: {}",
+             SCALAR_INDEX_HAS_RAW_DATA);
+}
 }  // namespace milvus
