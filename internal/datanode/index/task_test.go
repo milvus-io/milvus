@@ -112,11 +112,10 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 		FieldType:    schemapb.DataType_FloatVector,
 	}
 
-	cm := mocks.NewChunkManager(suite.T())
 	blobs, err := suite.serializeData()
 	suite.NoError(err)
-	err = cm.Write(ctx, suite.dataPath, blobs[0].Value)
-	suite.NoError(err)
+	cm := mocks.NewChunkManager(suite.T())
+	cm.EXPECT().Write(ctx, suite.dataPath, blobs[0].Value).Return(nil)
 
 	t := NewIndexBuildTask(ctx, cancel, req, cm, NewManager(context.Background()))
 
@@ -207,14 +206,14 @@ func (suite *AnalyzeTaskSuite) TestAnalyze() {
 		Dim: 1,
 	}
 
-	cm := mocks.NewChunkManager(suite.T())
 	blobs, err := suite.serializeData()
 	suite.NoError(err)
+
+	cm := mocks.NewChunkManager(suite.T())
+	cm.EXPECT().RootPath().Return("/tmp/milvus/data")
 	dataPath := metautil.BuildInsertLogPath(cm.RootPath(), suite.collectionID, suite.partitionID, suite.segmentID,
 		suite.fieldID, 1)
-
-	err = cm.Write(ctx, dataPath, blobs[0].Value)
-	suite.NoError(err)
+	cm.EXPECT().Write(ctx, dataPath, blobs[0].Value).Return(nil)
 
 	t := &analyzeTask{
 		ident:    "",

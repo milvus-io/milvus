@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -131,7 +133,17 @@ func (s *IndexServiceSuite) SetupTest() {
 		factory = dependency.NewMockFactory(s.T())
 		ctx     = context.TODO()
 	)
+
+	cm := mocks.NewChunkManager(s.T())
+
+	factory.EXPECT().Init(mock.Anything).Return()
+	factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(cm, nil)
+
 	s.in = NewDataNode(ctx, factory)
+
+	dc := mocks.NewMockDataCoordClient(s.T())
+	dc.EXPECT().ReportDataNodeTtMsgs(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	s.in.dataCoord = dc
 
 	err = s.in.Init()
 	s.NoError(err)
