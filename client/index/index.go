@@ -68,8 +68,12 @@ func (gi GenericIndex) Params() map[string]string {
 	return m
 }
 
+func (gi GenericIndex) WithMetricType(metricType MetricType) {
+	gi.baseIndex.metricType = metricType
+}
+
 // NewGenericIndex create generic index instance
-func NewGenericIndex(name string, params map[string]string) Index {
+func NewGenericIndex(name string, params map[string]string) GenericIndex {
 	return GenericIndex{
 		baseIndex: baseIndex{
 			name: name,
