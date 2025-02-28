@@ -82,11 +82,11 @@ func (pr *packedRecordReader) Next() (Record, error) {
 			if err := pr.iterateNextBatch(); err != nil {
 				return nil, err
 			}
+			continue
 		} else if err != nil {
 			return nil, err
-		} else {
-			return NewSimpleArrowRecord(rec, pr.field2Col), nil
 		}
+		return NewSimpleArrowRecord(rec, pr.field2Col), nil
 	}
 }
 
@@ -379,9 +379,7 @@ func (pw *PackedBinlogRecordWriter) GetWrittenUncompressed() uint64 {
 }
 
 func (pw *PackedBinlogRecordWriter) Close() error {
-	if err := pw.finalizeBinlogs(); err != nil {
-		return err
-	}
+	pw.finalizeBinlogs()
 	if err := pw.writeStats(); err != nil {
 		return err
 	}
@@ -394,9 +392,9 @@ func (pw *PackedBinlogRecordWriter) Close() error {
 	return nil
 }
 
-func (pw *PackedBinlogRecordWriter) finalizeBinlogs() error {
+func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 	if pw.writer == nil {
-		return nil
+		return
 	}
 	pw.rowNum = pw.writer.GetWrittenRowNum()
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
@@ -419,7 +417,6 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() error {
 			TimestampTo:   pw.tsTo,
 		})
 	}
-	return nil
 }
 
 func (pw *PackedBinlogRecordWriter) writeStats() error {
