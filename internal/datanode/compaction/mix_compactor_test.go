@@ -32,9 +32,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
+	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -51,7 +51,7 @@ func TestMixCompactionTaskSuite(t *testing.T) {
 type MixCompactionTaskSuite struct {
 	suite.Suite
 
-	mockBinlogIO *io.MockBinlogIO
+	mockBinlogIO *mock_util.MockBinlogIO
 
 	meta      *etcdpb.CollectionMeta
 	segWriter *SegmentWriter
@@ -64,7 +64,7 @@ func (s *MixCompactionTaskSuite) SetupSuite() {
 }
 
 func (s *MixCompactionTaskSuite) SetupTest() {
-	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
+	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 
 	s.meta = genTestCollectionMeta()
 
@@ -90,7 +90,7 @@ func (s *MixCompactionTaskSuite) SetupTest() {
 }
 
 func (s *MixCompactionTaskSuite) SetupBM25() {
-	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
+	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.meta = genTestCollectionMetaWithBM25()
 
 	plan := &datapb.CompactionPlan{
