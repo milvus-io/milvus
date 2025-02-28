@@ -23,11 +23,14 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // check replica, find read only nodes and remove it from replica if all segment/channel has been moved
@@ -55,6 +58,10 @@ func (ob *ReplicaObserver) Start() {
 
 		ob.wg.Add(1)
 		go ob.schedule(ctx)
+		if streamingutil.IsStreamingServiceEnabled() {
+			ob.wg.Add(1)
+			go ob.scheduleStreamingQN(ctx)
+		}
 	})
 }
 
@@ -85,10 +92,72 @@ func (ob *ReplicaObserver) schedule(ctx context.Context) {
 	}
 }
 
+// scheduleStreamingQN is used to check streaming query node in replica
+func (ob *ReplicaObserver) scheduleStreamingQN(ctx context.Context) {
+	defer ob.wg.Done()
+	log.Info("Start streaming query node check replica loop")
+
+	listener := snmanager.StaticStreamingNodeManager.ListenNodeChanged()
+	for {
+		ob.waitNodeChangedOrTimeout(ctx, listener)
+		if ctx.Err() != nil {
+			log.Info("Stop streaming query node check replica observer")
+			return
+		}
+
+		ids := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
+		ob.checkStreamingQueryNodesInReplica(ids)
+	}
+}
+
 func (ob *ReplicaObserver) waitNodeChangedOrTimeout(ctx context.Context, listener *syncutil.VersionedListener) {
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, params.Params.QueryCoordCfg.CheckNodeInReplicaInterval.GetAsDuration(time.Second))
 	defer cancel()
 	listener.Wait(ctxWithTimeout)
+}
+
+func (ob *ReplicaObserver) checkStreamingQueryNodesInReplica(sqNodeIDs typeutil.UniqueSet) {
+	ctx := context.Background()
+	log := log.Ctx(ctx).WithRateGroup("qcv2.replicaObserver", 1, 60)
+	collections := ob.meta.GetAll(context.Background())
+
+	for _, collectionID := range collections {
+		ob.meta.RecoverSQNodesInCollection(context.Background(), collectionID, sqNodeIDs)
+	}
+
+	for _, collectionID := range collections {
+		replicas := ob.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+		for _, replica := range replicas {
+			roSQNodes := replica.GetROSQNodes()
+			rwSQNodes := replica.GetRWSQNodes()
+			if len(roSQNodes) == 0 {
+				continue
+			}
+			removeNodes := make([]int64, 0, len(roSQNodes))
+			for _, node := range roSQNodes {
+				channels := ob.distMgr.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(node))
+				segments := ob.distMgr.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID), meta.WithNodeID(node))
+				if len(channels) == 0 && len(segments) == 0 {
+					removeNodes = append(removeNodes, node)
+				}
+			}
+			if len(removeNodes) == 0 {
+				continue
+			}
+			logger := log.With(
+				zap.Int64("collectionID", replica.GetCollectionID()),
+				zap.Int64("replicaID", replica.GetID()),
+				zap.Int64s("removedNodes", removeNodes),
+				zap.Int64s("roNodes", roSQNodes),
+				zap.Int64s("rwNodes", rwSQNodes),
+			)
+			if err := ob.meta.ReplicaManager.RemoveSQNode(ctx, replica.GetID(), removeNodes...); err != nil {
+				logger.Warn("fail to remove streaming query node from replica", zap.Error(err))
+				continue
+			}
+			logger.Info("all segment/channel has been removed from ro streaming query node, remove it from replica")
+		}
+	}
 }
 
 func (ob *ReplicaObserver) checkNodesInReplica() {
@@ -135,7 +204,7 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 				logger.Warn("fail to remove node from replica", zap.Error(err))
 				continue
 			}
-			logger.Info("all segment/channel has been removed from ro node, try to remove it from replica")
+			logger.Info("all segment/channel has been removed from ro node, remove it from replica")
 		}
 	}
 }

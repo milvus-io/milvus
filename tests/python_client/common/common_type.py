@@ -220,10 +220,12 @@ all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ",
                    "SPARSE_INVERTED_INDEX", "SPARSE_WAND",
                    "GPU_IVF_FLAT", "GPU_IVF_PQ"]
 
+inverted_index_algo = ['TAAT_NAIVE', 'DAAT_WAND', 'DAAT_MAXSCORE']
+
 default_all_indexes_params = [{}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
                               {"M": 32, "efConstruction": 360}, {"nlist": 128}, {},
                               {}, {"nlist": 64},
-                              {"drop_ratio_build": 0.2}, {"drop_ratio_build": 0.2},
+                              {}, {"drop_ratio_build": 0.2},
                               {"nlist": 64}, {"nlist": 64, "m": 16, "nbits": 8}]
 
 default_all_search_params_params = [{}, {"nprobe": 32}, {"nprobe": 32}, {"nprobe": 32},
@@ -304,6 +306,7 @@ class CheckTasks:
     check_value_equal = "check_value_equal"
     check_rg_property = "check_resource_group_property"
     check_describe_collection_property = "check_describe_collection_property"
+    check_describe_database_property = "check_describe_database_property"
     check_insert_result = "check_insert_result"
     check_collection_fields_properties = "check_collection_fields_properties"
 

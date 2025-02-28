@@ -4,9 +4,10 @@ import (
 	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 type txnSessionKeyType int
@@ -17,14 +18,15 @@ var txnSessionKeyValue txnSessionKeyType = 1
 type TxnSession struct {
 	mu sync.Mutex
 
-	lastTimetick     uint64             // session last timetick.
-	expired          bool               // The flag indicates the transaction has trigger expired once.
-	txnContext       message.TxnContext // transaction id of the session
-	inFlightCount    int                // The message is in flight count of the session.
-	state            message.TxnState   // The state of the session.
-	doneWait         chan struct{}      // The channel for waiting the transaction committed.
-	rollback         bool               // The flag indicates the transaction is rollbacked.
-	cleanupCallbacks []func()           // The cleanup callbacks function for the session.
+	lastTimetick     uint64                       // session last timetick.
+	expired          bool                         // The flag indicates the transaction has trigger expired once.
+	txnContext       message.TxnContext           // transaction id of the session
+	inFlightCount    int                          // The message is in flight count of the session.
+	state            message.TxnState             // The state of the session.
+	doneWait         chan struct{}                // The channel for waiting the transaction committed.
+	rollback         bool                         // The flag indicates the transaction is rollbacked.
+	cleanupCallbacks []func()                     // The cleanup callbacks function for the session.
+	metricsGuard     *metricsutil.TxnMetricsGuard // The metrics guard for the session.
 }
 
 // TxnContext returns the txn context of the session.
@@ -212,6 +214,8 @@ func (s *TxnSession) cleanup() {
 	for _, f := range s.cleanupCallbacks {
 		f()
 	}
+	s.metricsGuard.Done(s.state)
+	s.metricsGuard = nil
 	s.cleanupCallbacks = nil
 }
 

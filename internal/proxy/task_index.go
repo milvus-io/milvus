@@ -29,17 +29,17 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/indexparams"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metric"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -195,7 +195,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 	if exist && specifyIndexType != "" {
 		if err := indexparamcheck.ValidateMmapIndexParams(specifyIndexType, indexParamsMap); err != nil {
 			log.Ctx(ctx).Warn("Invalid mmap type params", zap.String(common.IndexTypeKey, specifyIndexType), zap.Error(err))
-			return merr.WrapErrParameterInvalidMsg("invalid mmap type params", err.Error())
+			return merr.WrapErrParameterInvalidMsg("invalid mmap type params: %s", err.Error())
 		}
 		checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(specifyIndexType)
 		// not enable hybrid index for user, used in milvus internally
@@ -426,7 +426,7 @@ func (cit *createIndexTask) getIndexedFieldAndFunction(ctx context.Context) erro
 		return fmt.Errorf("failed to get collection schema: %s", err)
 	}
 
-	field, err := schema.schemaHelper.GetFieldFromName(cit.req.GetFieldName())
+	field, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(cit.req.GetFieldName())
 	if err != nil {
 		log.Ctx(ctx).Error("create index on non-exist field", zap.Error(err))
 		return fmt.Errorf("cannot create index on non-exist field: %s", cit.req.GetFieldName())
@@ -594,7 +594,7 @@ func (t *alterIndexTask) SetID(uid UniqueID) {
 }
 
 func (t *alterIndexTask) Name() string {
-	return CreateIndexTaskName
+	return AlterIndexTaskName
 }
 
 func (t *alterIndexTask) Type() commonpb.MsgType {

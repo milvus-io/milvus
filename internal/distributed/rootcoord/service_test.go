@@ -31,16 +31,17 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tikv"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
 )
 
 type mockCore struct {
@@ -117,10 +118,14 @@ func (m *mockCore) Stop() error {
 	return fmt.Errorf("stop error")
 }
 
+func (m *mockCore) GracefulStop() {
+}
+
 func TestRun(t *testing.T) {
 	paramtable.Init()
 	parameters := []string{"tikv", "etcd"}
 	for _, v := range parameters {
+		coordclient.ResetRegistration()
 		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
 		ctx := context.Background()
 		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
@@ -228,6 +233,7 @@ func TestServerRun_DataCoordClientInitErr(t *testing.T) {
 	paramtable.Init()
 	parameters := []string{"tikv", "etcd"}
 	for _, v := range parameters {
+		coordclient.ResetRegistration()
 		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
 		ctx := context.Background()
 		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
@@ -258,6 +264,7 @@ func TestServerRun_DataCoordClientStartErr(t *testing.T) {
 	paramtable.Init()
 	parameters := []string{"tikv", "etcd"}
 	for _, v := range parameters {
+		coordclient.ResetRegistration()
 		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
 		ctx := context.Background()
 		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
@@ -288,6 +295,7 @@ func TestServerRun_QueryCoordClientInitErr(t *testing.T) {
 	paramtable.Init()
 	parameters := []string{"tikv", "etcd"}
 	for _, v := range parameters {
+		coordclient.ResetRegistration()
 		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
 		ctx := context.Background()
 		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
@@ -318,6 +326,7 @@ func TestServer_QueryCoordClientStartErr(t *testing.T) {
 	paramtable.Init()
 	parameters := []string{"tikv", "etcd"}
 	for _, v := range parameters {
+		coordclient.ResetRegistration()
 		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
 		ctx := context.Background()
 		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {

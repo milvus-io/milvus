@@ -167,9 +167,12 @@ class ConcurrentVectorImpl : public VectorBase {
             std::conditional_t<
                 std::is_same_v<Type, float16>,
                 Float16Vector,
-                std::conditional_t<std::is_same_v<Type, bfloat16>,
-                                   BFloat16Vector,
-                                   BinaryVector>>>>;
+                std::conditional_t<
+                    std::is_same_v<Type, bfloat16>,
+                    BFloat16Vector,
+                    std::conditional_t<std::is_same_v<Type, int8>,
+                                       Int8Vector,
+                                       BinaryVector>>>>>;
 
  public:
     explicit ConcurrentVectorImpl(
@@ -537,6 +540,17 @@ class ConcurrentVector<BFloat16Vector>
                      int64_t size_per_chunk,
                      storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
         : ConcurrentVectorImpl<bfloat16, false>::ConcurrentVectorImpl(
+              dim, size_per_chunk, std::move(mmap_descriptor)) {
+    }
+};
+
+template <>
+class ConcurrentVector<Int8Vector> : public ConcurrentVectorImpl<int8, false> {
+ public:
+    ConcurrentVector(int64_t dim,
+                     int64_t size_per_chunk,
+                     storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
+        : ConcurrentVectorImpl<int8, false>::ConcurrentVectorImpl(
               dim, size_per_chunk, std::move(mmap_descriptor)) {
     }
 };

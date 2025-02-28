@@ -25,9 +25,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestL0CompactionPolicySuite(t *testing.T) {
@@ -113,6 +113,30 @@ func (s *L0CompactionPolicySuite) TestTriggerIdle() {
 	for _, view := range cView.GetSegmentsView() {
 		s.Equal(datapb.SegmentLevel_L0, view.Level)
 	}
+
+	// test for skip collection
+	s.l0_policy.AddSkipCollection(1)
+	s.l0_policy.AddSkipCollection(1)
+	// Test for skip collection
+	events, err = s.l0_policy.Trigger()
+	s.NoError(err)
+	s.Empty(events)
+
+	// Test for skip collection with ref count
+	s.l0_policy.RemoveSkipCollection(1)
+	events, err = s.l0_policy.Trigger()
+	s.NoError(err)
+	s.Empty(events)
+
+	s.l0_policy.RemoveSkipCollection(1)
+	events, err = s.l0_policy.Trigger()
+	s.NoError(err)
+	s.Equal(1, len(events))
+	gotViews, ok = events[TriggerTypeLevelZeroViewIDLE]
+	s.True(ok)
+	s.NotNil(gotViews)
+	s.Equal(1, len(gotViews))
+
 	log.Info("cView", zap.String("string", cView.String()))
 }
 

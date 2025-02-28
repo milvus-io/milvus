@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package milvus.proto.data;
 
-option go_package = "github.com/milvus-io/milvus/pkg/proto/datapb";
+option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/datapb";
 
 import "common.proto";
 import "internal.proto";
@@ -288,6 +288,8 @@ message VchannelInfo {
   repeated SegmentInfo indexed_segments = 11; // deprecated, keep it for compatibility
   repeated int64 level_zero_segment_ids = 12;
   map<int64, int64> partition_stats_versions = 13;
+  // delete record which ts is smaller than delete_checkpoint already be dispatch to sealed segments.
+  msg.MsgPosition delete_checkpoint = 14; 
 }
 
 message WatchDmChannelsRequest {
@@ -594,6 +596,7 @@ message CompactionSegmentBinlogs {
   int64 collectionID = 7;
   int64 partitionID = 8;
   bool is_sorted = 9;
+  int64 storage_version = 10;
 }
 
 message CompactionPlan {
@@ -617,6 +620,8 @@ message CompactionPlan {
   IDRange pre_allocated_segmentIDs = 18;
   int64 slot_usage = 19;
   int64 max_size = 20;
+  // bf path for importing
+  // collection is importing
 }
 
 message CompactionSegment {
@@ -629,6 +634,7 @@ message CompactionSegment {
   string channel = 7;
   bool is_sorted = 8;
   repeated FieldBinlog bm25logs = 9;
+  int64 storage_version = 10;
 }
 
 message CompactionPlanResult {
@@ -850,6 +856,7 @@ message ImportSegmentInfo {
   repeated FieldBinlog binlogs = 3;
   repeated FieldBinlog statslogs = 4;
   repeated FieldBinlog deltalogs = 5;
+  repeated FieldBinlog bm25logs = 6;
 }
 
 message QueryImportResponse {
@@ -884,6 +891,8 @@ message ImportJob {
   repeated internal.ImportFile files = 14;
   repeated common.KeyValuePair options = 15;
   string start_time = 16;
+  repeated string ready_vchannels = 17;
+  uint64 data_ts = 18;
 }
 
 enum ImportTaskStateV2 {
@@ -892,6 +901,11 @@ enum ImportTaskStateV2 {
   InProgress = 2;
   Failed = 3;
   Completed = 4;
+}
+
+enum ImportTaskSourceV2 {
+  Request = 0;
+  L0Compaction = 1;
 }
 
 message PreImportTask {
@@ -918,6 +932,7 @@ message ImportTaskV2 {
   repeated ImportFileStats file_stats = 9;
   repeated int64 stats_segmentIDs = 10;
   string created_time = 11;
+  ImportTaskSourceV2 source = 12;
 }
 
 enum GcCommand {

@@ -39,10 +39,10 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 const (
@@ -143,8 +143,11 @@ func initHTTPServer(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 ----|----------------|----------------|----------------
 */
 func genAuthMiddleWare(needAuth bool) gin.HandlerFunc {
+	InitMockGlobalMetaCache()
+	proxy.AddRootUserToAdminRole()
 	if needAuth {
 		return func(c *gin.Context) {
+			// proxy.RemoveRootUserFromAdminRole()
 			c.Set(ContextUsername, "")
 			username, password, ok := ParseUsernamePassword(c)
 			if !ok {
@@ -159,6 +162,10 @@ func genAuthMiddleWare(needAuth bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set(ContextUsername, util.UserRoot)
 	}
+}
+
+func InitMockGlobalMetaCache() {
+	proxy.InitEmptyGlobalCache()
 }
 
 func Print(code int32, message string) string {
@@ -1270,7 +1277,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": [3.0],
 							"bfloat16Vector": [4.4, 442],
-							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+							"sparseFloatVector": {"1": 0.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						}
 					]
 				}`),
@@ -1289,7 +1297,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": [3, 3.0],
 							"bfloat16Vector": [4.4, 442],
-							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+							"sparseFloatVector": {"1": 0.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						}
 					]
 				}`),
@@ -1308,7 +1317,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": [3, 3],
 							"bfloat16Vector": [4.4, 442],
-							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+							"sparseFloatVector": {"1": 0.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						}
 					]
 				}`),
@@ -1326,7 +1336,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": "AQIDBA==",
 							"bfloat16Vector": "AQIDBA==",
-							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+							"sparseFloatVector": {"1": 0.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						}
 					]
 				}`),
@@ -1344,7 +1355,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": [3, 3.0, 3],
 							"bfloat16Vector": [4.4, 44],
-							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+							"sparseFloatVector": {"1": 0.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						}
 					]
 				}`),
@@ -1363,7 +1375,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": [3, 3.0],
 							"bfloat16Vector": [4.4, 442, 44],
-							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+							"sparseFloatVector": {"1": 0.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						}
 					]
 				}`),
@@ -1382,7 +1395,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": "AQIDBA==",
 							"bfloat16Vector": [4.4, 442],
-							"sparseFloatVector": {"1": 0.1, "2": 0.44}
+							"sparseFloatVector": {"1": 0.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						},
 						{
 							"book_id": 1,
@@ -1391,7 +1405,8 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 							"binaryVector": "AQ==",
 							"float16Vector": [3.1, 3.1],
 							"bfloat16Vector": "AQIDBA==",
-							"sparseFloatVector": {"3": 1.1, "2": 0.44}
+							"sparseFloatVector": {"3": 1.1, "2": 0.44},
+							"int8Vector": [1, 2]
 						}
 					]
 				}`),

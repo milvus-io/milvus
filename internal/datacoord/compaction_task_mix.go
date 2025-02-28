@@ -13,10 +13,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 var _ CompactionTask = (*mixCompactionTask)(nil)
@@ -70,11 +71,17 @@ func (t *mixCompactionTask) processPipelining() bool {
 		// Compaction tasks may be refused by DataNode because of slot limit. In this case, the node id is reset
 		//  to enable a retry in compaction.checkCompaction().
 		// This is tricky, we should remove the reassignment here.
-		log.Warn("mixCompactionTask failed to notify compaction tasks to DataNode", zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.Error(err))
+		originNodeID := t.GetTaskProto().GetNodeID()
+		log.Warn("mixCompactionTask failed to notify compaction tasks to DataNode",
+			zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+			zap.Int64("nodeID", originNodeID),
+			zap.Error(err))
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		if err != nil {
 			log.Warn("mixCompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
 		}
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
 		return false
 	}
 	log.Info("mixCompactionTask notify compaction tasks to DataNode")
@@ -290,6 +297,14 @@ func (t *mixCompactionTask) SetTask(task *datapb.CompactionTask) {
 	t.taskProto.Store(task)
 }
 
+func (t *mixCompactionTask) PreparePlan() bool {
+	return true
+}
+
+func (t *mixCompactionTask) CheckCompactionContainsSegment(segmentID int64) bool {
+	return false
+}
+
 func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
 	beginLogID, _, err := t.allocator.AllocN(1)
@@ -328,6 +343,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 			Field2StatslogPaths: segInfo.GetStatslogs(),
 			Deltalogs:           segInfo.GetDeltalogs(),
 			IsSorted:            segInfo.GetIsSorted(),
+			StorageVersion:      segInfo.GetStorageVersion(),
 		})
 		segIDMap[segID] = segInfo.GetDeltalogs()
 	}

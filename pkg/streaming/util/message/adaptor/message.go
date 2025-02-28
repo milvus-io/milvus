@@ -5,11 +5,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
-var unmashalerDispatcher = (&msgstream.ProtoUDFactory{}).NewUnmarshalDispatcher()
+var UnmashalerDispatcher = (&msgstream.ProtoUDFactory{}).NewUnmarshalDispatcher()
 
 // FromMessageToMsgPack converts message to msgpack.
 // Same TimeTick must be sent with same msgpack.
@@ -97,8 +97,6 @@ func parseTxnMsg(msg message.ImmutableMessage) ([]msgstream.TsMsg, error) {
 // parseSingleMsg converts message to ts message.
 func parseSingleMsg(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
 	switch msg.Version() {
-	case message.VersionOld:
-		return fromMessageToTsMsgVOld(msg)
 	case message.VersionV1:
 		return fromMessageToTsMsgV1(msg)
 	case message.VersionV2:
@@ -108,13 +106,9 @@ func parseSingleMsg(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
 	}
 }
 
-func fromMessageToTsMsgVOld(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
-	panic("Not implemented")
-}
-
 // fromMessageToTsMsgV1 converts message to ts message.
 func fromMessageToTsMsgV1(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
-	tsMsg, err := unmashalerDispatcher.Unmarshal(msg.Payload(), MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()))
+	tsMsg, err := UnmashalerDispatcher.Unmarshal(msg.Payload(), MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()))
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to unmarshal message")
 	}
@@ -175,6 +169,12 @@ func recoverMessageFromHeader(tsMsg msgstream.TsMsg, msg message.ImmutableMessag
 			return nil, errors.Wrap(err, "Failed to convert message to delete message")
 		}
 		return recoverDeleteMsgFromHeader(tsMsg.(*msgstream.DeleteMsg), deleteMessage.Header(), msg.TimeTick())
+	case message.MessageTypeImport:
+		importMessage, err := message.AsImmutableImportMessageV1(msg)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to convert message to import message")
+		}
+		return recoverImportMsgFromHeader(tsMsg.(*msgstream.ImportMsg), importMessage.Header(), msg.TimeTick())
 	default:
 		return tsMsg, nil
 	}
@@ -219,4 +219,9 @@ func recoverDeleteMsgFromHeader(deleteMsg *msgstream.DeleteMsg, header *message.
 	}
 	deleteMsg.Timestamps = timestamps
 	return deleteMsg, nil
+}
+
+func recoverImportMsgFromHeader(importMsg *msgstream.ImportMsg, _ *message.ImportMessageHeader, timetick uint64) (msgstream.TsMsg, error) {
+	importMsg.Base.Timestamp = timetick
+	return importMsg, nil
 }

@@ -11,15 +11,14 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
 func TestIndexVectorDefault(t *testing.T) {
-	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64MultiVec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -50,9 +49,8 @@ func TestIndexVectorDefault(t *testing.T) {
 }
 
 func TestIndexVectorIP(t *testing.T) {
-	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64MultiVec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -84,9 +82,8 @@ func TestIndexVectorIP(t *testing.T) {
 }
 
 func TestIndexVectorCosine(t *testing.T) {
-	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64MultiVec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -118,9 +115,8 @@ func TestIndexVectorCosine(t *testing.T) {
 }
 
 func TestIndexAutoFloatVector(t *testing.T) {
-	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -155,9 +151,8 @@ func TestIndexAutoFloatVector(t *testing.T) {
 }
 
 func TestIndexAutoBinaryVector(t *testing.T) {
-	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.VarcharBinary)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -196,9 +191,8 @@ func TestIndexAutoBinaryVector(t *testing.T) {
 }
 
 func TestIndexAutoSparseVector(t *testing.T) {
-	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -235,7 +229,7 @@ func TestIndexAutoSparseVector(t *testing.T) {
 // test create auto index on all vector and scalar index
 func TestCreateAutoIndexAllFields(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.AllFields)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -281,7 +275,7 @@ func TestCreateAutoIndexAllFields(t *testing.T) {
 
 func TestIndexBinaryFlat(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.VarcharBinary)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -312,7 +306,7 @@ func TestIndexBinaryFlat(t *testing.T) {
 
 func TestIndexBinaryIvfFlat(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.VarcharBinary)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -344,7 +338,7 @@ func TestIndexBinaryIvfFlat(t *testing.T) {
 // test create binary index with unsupported metrics type
 func TestCreateBinaryIndexNotSupportedMetricType(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.VarcharBinary)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -388,7 +382,7 @@ func TestCreateBinaryIndexNotSupportedMetricType(t *testing.T) {
 
 func TestIndexInvalidMetricType(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -409,7 +403,7 @@ func TestIndexInvalidMetricType(t *testing.T) {
 // Trie scalar Trie index only supported on varchar
 func TestCreateTrieScalarIndex(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VecAllScalar)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -445,7 +439,7 @@ func TestCreateTrieScalarIndex(t *testing.T) {
 // Sort scalar index only supported on numeric field
 func TestCreateSortedScalarIndex(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VecAllScalar)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -495,7 +489,7 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 // create Inverted index for all scalar fields
 func TestCreateInvertedScalarIndex(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VecAllScalar)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -538,7 +532,7 @@ func TestCreateInvertedScalarIndex(t *testing.T) {
 // test create index on vector field -> error
 func TestCreateScalarIndexVectorField(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64MultiVec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -562,7 +556,7 @@ func TestCreateScalarIndexVectorField(t *testing.T) {
 // test create scalar index with vector field name
 func TestCreateIndexWithOtherFieldName(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.VarcharBinary)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -594,7 +588,7 @@ func TestCreateIndexWithOtherFieldName(t *testing.T) {
 // create all scalar index on json field -> error
 func TestCreateIndexJsonField(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VecJSON)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -615,7 +609,6 @@ func TestCreateIndexJsonField(t *testing.T) {
 		errMsg string
 	}
 	inxError := []scalarIndexError{
-		{index.NewInvertedIndex(), "INVERTED are not supported on JSON field"},
 		{index.NewSortedIndex(), "STL_SORT are only supported on numeric field"},
 		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
 	}
@@ -628,7 +621,7 @@ func TestCreateIndexJsonField(t *testing.T) {
 // array field on supported array field
 func TestCreateUnsupportedIndexArrayField(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VecArray)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -666,7 +659,7 @@ func TestCreateUnsupportedIndexArrayField(t *testing.T) {
 // create inverted index on array field
 func TestCreateInvertedIndexArrayField(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VecArray)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -704,7 +697,7 @@ func TestCreateInvertedIndexArrayField(t *testing.T) {
 // test create index without specify index name: default index name is field name
 func TestCreateIndexWithoutName(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -731,7 +724,7 @@ func TestCreateIndexWithoutName(t *testing.T) {
 // test create index on same field twice
 func TestCreateIndexDup(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -758,13 +751,12 @@ func TestCreateIndexDup(t *testing.T) {
 }
 
 func TestCreateIndexSparseVectorGeneric(t *testing.T) {
-	t.Parallel()
 	idxInverted := index.NewGenericIndex(common.DefaultSparseVecFieldName, map[string]string{"drop_ratio_build": "0.2", index.MetricTypeKey: "IP", index.IndexTypeKey: "SPARSE_INVERTED_INDEX"})
 	idxWand := index.NewGenericIndex(common.DefaultSparseVecFieldName, map[string]string{"drop_ratio_build": "0.3", index.MetricTypeKey: "IP", index.IndexTypeKey: "SPARSE_WAND"})
 
 	for _, idx := range []index.Index{idxInverted, idxWand} {
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-		mc := createDefaultMilvusClient(ctx, t)
+		mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 		cp := hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec)
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -787,12 +779,11 @@ func TestCreateIndexSparseVectorGeneric(t *testing.T) {
 }
 
 func TestCreateIndexSparseVector(t *testing.T) {
-	t.Parallel()
 	idxInverted1 := index.NewSparseInvertedIndex(entity.IP, 0.2)
 	idxWand1 := index.NewSparseWANDIndex(entity.IP, 0.3)
 	for _, idx := range []index.Index{idxInverted1, idxWand1} {
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-		mc := createDefaultMilvusClient(ctx, t)
+		mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 		cp := hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec)
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -815,7 +806,7 @@ func TestCreateIndexSparseVector(t *testing.T) {
 
 func TestCreateSparseIndexInvalidParams(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -851,7 +842,7 @@ func TestCreateSparseIndexInvalidParams(t *testing.T) {
 // create sparse unsupported index: other vector index and scalar index and auto index
 func TestCreateSparseUnsupportedIndex(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -881,7 +872,7 @@ func TestCreateSparseUnsupportedIndex(t *testing.T) {
 // test new index by Generic index
 func TestCreateIndexGeneric(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -908,7 +899,7 @@ func TestCreateIndexGeneric(t *testing.T) {
 // test create index with not exist index name and not exist field name
 func TestIndexNotExistName(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create index with not exist collection
 	idx := index.NewHNSWIndex(entity.L2, 8, 96)
@@ -919,7 +910,7 @@ func TestIndexNotExistName(t *testing.T) {
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	_, err1 := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, "aaa", idx))
-	common.CheckErr(t, err1, false, "cannot create index on non-exist field: aaa")
+	common.CheckErr(t, err1, false, "index HNSW only supports vector data type")
 
 	// describe index with not exist field name
 	_, errDesc := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, "aaa"))
@@ -933,7 +924,7 @@ func TestIndexNotExistName(t *testing.T) {
 // test create float / binary / sparse vector index on non-vector field
 func TestCreateVectorIndexScalarField(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VecAllScalar)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -968,7 +959,7 @@ func TestCreateVectorIndexScalarField(t *testing.T) {
 // test create index with invalid params
 func TestCreateIndexInvalidParams(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -1025,7 +1016,7 @@ func TestCreateIndexInvalidParams(t *testing.T) {
 func TestCreateIndexNil(t *testing.T) {
 	t.Skip("Issue: https://github.com/milvus-io/milvus-sdk-go/issues/358")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -1038,7 +1029,7 @@ func TestCreateIndexNil(t *testing.T) {
 func TestCreateIndexAsync(t *testing.T) {
 	t.Log("wait GetIndexState")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -1060,7 +1051,7 @@ func TestCreateIndexAsync(t *testing.T) {
 // create same index name on different vector field
 func TestIndexMultiVectorDupName(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64MultiVec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -1088,7 +1079,7 @@ func TestIndexMultiVectorDupName(t *testing.T) {
 
 func TestDropIndex(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64MultiVec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -1132,7 +1123,7 @@ func TestDropIndex(t *testing.T) {
 
 func TestDropIndexCreateIndexWithIndexName(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64MultiVec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))

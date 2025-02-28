@@ -27,9 +27,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // MsgType is an alias of commonpb.MsgType
@@ -47,6 +47,10 @@ type TsMsg interface {
 	BeginTs() Timestamp
 	EndTs() Timestamp
 	Type() MsgType
+	VChannel() string
+	// CollID return msg collection id
+	// return 0 if not exist
+	CollID() int64
 	SourceID() int64
 	HashKeys() []uint32
 	Marshal(TsMsg) (MarshalType, error)
@@ -117,6 +121,14 @@ func (bm *BaseMsg) SetTs(ts uint64) {
 	bm.EndTimestamp = ts
 }
 
+func (it *BaseMsg) VChannel() string {
+	return ""
+}
+
+func (it *BaseMsg) CollID() int64 {
+	return 0
+}
+
 func convertToByteArray(input interface{}) ([]byte, error) {
 	switch output := input.(type) {
 	case []byte:
@@ -155,6 +167,14 @@ func (it *InsertMsg) Type() MsgType {
 // SourceID indicates which component generated this message
 func (it *InsertMsg) SourceID() int64 {
 	return it.Base.SourceID
+}
+
+func (it *InsertMsg) VChannel() string {
+	return it.ShardName
+}
+
+func (it *InsertMsg) CollID() int64 {
+	return it.GetCollectionID()
 }
 
 // Marshal is used to serialize a message pack to byte array
@@ -343,6 +363,14 @@ func (dt *DeleteMsg) SourceID() int64 {
 	return dt.Base.SourceID
 }
 
+func (it *DeleteMsg) VChannel() string {
+	return it.ShardName
+}
+
+func (it *DeleteMsg) CollID() int64 {
+	return it.GetCollectionID()
+}
+
 // Marshal is used to serializing a message pack to byte array
 func (dt *DeleteMsg) Marshal(input TsMsg) (MarshalType, error) {
 	deleteMsg := input.(*DeleteMsg)
@@ -516,6 +544,10 @@ func (cc *CreateCollectionMsg) SourceID() int64 {
 	return cc.Base.SourceID
 }
 
+func (it *CreateCollectionMsg) CollID() int64 {
+	return it.GetCollectionID()
+}
+
 // Marshal is used to serializing a message pack to byte array
 func (cc *CreateCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	createCollectionMsg := input.(*CreateCollectionMsg)
@@ -578,6 +610,10 @@ func (dc *DropCollectionMsg) Type() MsgType {
 // SourceID indicates which component generated this message
 func (dc *DropCollectionMsg) SourceID() int64 {
 	return dc.Base.SourceID
+}
+
+func (it *DropCollectionMsg) CollID() int64 {
+	return it.GetCollectionID()
 }
 
 // Marshal is used to serializing a message pack to byte array
@@ -644,6 +680,10 @@ func (cp *CreatePartitionMsg) SourceID() int64 {
 	return cp.Base.SourceID
 }
 
+func (it *CreatePartitionMsg) CollID() int64 {
+	return it.GetCollectionID()
+}
+
 // Marshal is used to serializing a message pack to byte array
 func (cp *CreatePartitionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	createPartitionMsg := input.(*CreatePartitionMsg)
@@ -706,6 +746,10 @@ func (dp *DropPartitionMsg) Type() MsgType {
 // SourceID indicates which component generated this message
 func (dp *DropPartitionMsg) SourceID() int64 {
 	return dp.Base.SourceID
+}
+
+func (it *DropPartitionMsg) CollID() int64 {
+	return it.GetCollectionID()
 }
 
 // Marshal is used to serializing a message pack to byte array

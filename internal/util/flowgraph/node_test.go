@@ -28,8 +28,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/pkg/mq/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 )
 
 func generateMsgPack() msgstream.MsgPack {
@@ -89,7 +89,8 @@ func TestNodeManager_Start(t *testing.T) {
 	produceStream.Produce(context.TODO(), &msgPack)
 
 	nodeName := "input_node"
-	inputNode := NewInputNode(msgStream.Chan(), nodeName, 100, 100, "", 0, 0, "")
+	dispatcher := msgstream.NewSimpleMsgDispatcher(msgStream, func(pm msgstream.ConsumeMsg) bool { return true })
+	inputNode := NewInputNode(dispatcher.Chan(), nodeName, 100, 100, "", 0, 0, "")
 
 	ddNode := BaseNode{}
 

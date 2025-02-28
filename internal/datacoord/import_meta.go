@@ -21,12 +21,13 @@ import (
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
+	"github.com/samber/lo"
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/util/lock"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
 type ImportMeta interface {
@@ -53,7 +54,7 @@ type importTasks struct {
 func newImportTasks() *importTasks {
 	return &importTasks{
 		tasks:     make(map[int64]ImportTask),
-		taskStats: expirable.NewLRU[UniqueID, ImportTask](64, nil, time.Minute*30),
+		taskStats: expirable.NewLRU[UniqueID, ImportTask](512, nil, time.Minute*30),
 	}
 }
 
@@ -140,6 +141,13 @@ func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (Imp
 func (m *importMeta) AddJob(ctx context.Context, job ImportJob) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	originJob := m.jobs[job.GetJobID()]
+	if originJob != nil {
+		originJob := originJob.Clone()
+		internalJob := originJob.(*importJob).ImportJob
+		internalJob.ReadyVchannels = lo.Union(originJob.GetReadyVchannels(), job.GetReadyVchannels())
+		job = originJob
+	}
 	err := m.catalog.SaveImportJob(ctx, job.(*importJob).ImportJob)
 	if err != nil {
 		return err

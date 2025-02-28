@@ -12,14 +12,15 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type insertTask struct {
@@ -29,15 +30,16 @@ type insertTask struct {
 	insertMsg *BaseInsertTask
 	ctx       context.Context
 
-	result        *milvuspb.MutationResult
-	idAllocator   *allocator.IDAllocator
-	segIDAssigner *segIDAssigner
-	chMgr         channelsMgr
-	chTicker      channelsTimeTicker
-	vChannels     []vChan
-	pChannels     []pChan
-	schema        *schemapb.CollectionSchema
-	partitionKeys *schemapb.FieldData
+	result          *milvuspb.MutationResult
+	idAllocator     *allocator.IDAllocator
+	segIDAssigner   *segIDAssigner
+	chMgr           channelsMgr
+	chTicker        channelsTimeTicker
+	vChannels       []vChan
+	pChannels       []pChan
+	schema          *schemapb.CollectionSchema
+	partitionKeys   *schemapb.FieldData
+	schemaTimestamp uint64
 }
 
 // TraceCtx returns insertTask context
@@ -134,6 +136,24 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrCollectionReplicateMode("insert")
 	}
 
+	collID, err := globalMetaCache.GetCollectionID(context.Background(), it.insertMsg.GetDbName(), collectionName)
+	if err != nil {
+		log.Ctx(ctx).Warn("fail to get collection id", zap.Error(err))
+		return err
+	}
+	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
+	if err != nil {
+		log.Ctx(ctx).Warn("fail to get collection info", zap.Error(err))
+		return err
+	}
+	if it.schemaTimestamp != 0 {
+		if it.schemaTimestamp != colInfo.updateTimestamp {
+			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)
+			log.Ctx(ctx).Info("collection schema mismatch", zap.String("collectionName", collectionName), zap.Error(err))
+			return err
+		}
+	}
+
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Ctx(ctx).Warn("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
@@ -141,6 +161,16 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema.CollectionSchema
 
+	// Calculate embedding fields
+	if function.HasNonBM25Functions(schema.CollectionSchema.Functions, []int64{}) {
+		exec, err := function.NewFunctionExecutor(schema.CollectionSchema)
+		if err != nil {
+			return err
+		}
+		if err := exec.ProcessInsert(it.insertMsg); err != nil {
+			return err
+		}
+	}
 	rowNums := uint32(it.insertMsg.NRows())
 	// set insertTask.rowIDs
 	var rowIDBegin UniqueID
@@ -183,6 +213,13 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		log.Warn("check primary field data and hash primary key failed",
 			zap.Error(err))
+		return err
+	}
+
+	// check varchar/text with analyzer was utf-8 format
+	err = checkInputUtf8Compatiable(it.schema, it.insertMsg)
+	if err != nil {
+		log.Warn("check varchar/text format failed", zap.Error(err))
 		return err
 	}
 
@@ -250,6 +287,8 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		return err
 	}
 	it.insertMsg.CollectionID = collID
+	it.insertMsg.BeginTimestamp = it.BeginTs()
+	it.insertMsg.EndTimestamp = it.EndTs()
 
 	getCacheDur := tr.RecordSpan()
 	stream, err := it.chMgr.getOrCreateDmlStream(ctx, collID)

@@ -21,10 +21,10 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/mq/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
 // implementation assertion

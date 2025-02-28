@@ -29,11 +29,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func newCompactionTaskStats(task *datapb.CompactionTask) *metricsinfo.CompactionTask {
@@ -52,6 +52,7 @@ func newCompactionTaskStats(task *datapb.CompactionTask) *metricsinfo.Compaction
 		ResultSegments: lo.Map(task.ResultSegments, func(t int64, i int) string {
 			return strconv.FormatInt(t, 10)
 		}),
+		NodeID: task.NodeID,
 	}
 }
 
@@ -70,7 +71,7 @@ func newCompactionTaskMeta(ctx context.Context, catalog metastore.DataCoordCatal
 		ctx:             ctx,
 		catalog:         catalog,
 		compactionTasks: make(map[int64]map[int64]*datapb.CompactionTask, 0),
-		taskStats:       expirable.NewLRU[UniqueID, *metricsinfo.CompactionTask](32, nil, time.Minute*15),
+		taskStats:       expirable.NewLRU[UniqueID, *metricsinfo.CompactionTask](512, nil, time.Minute*15),
 	}
 	if err := csm.reloadFromKV(); err != nil {
 		return nil, err

@@ -13,16 +13,25 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <regex>
 #include <string>
+#include <type_traits>
 #include <vector>
 #include <chrono>
 #include <roaring/roaring.hh>
 
+#include "common/FieldDataInterface.h"
 #include "common/Json.h"
+#include "common/LoadInfo.h"
 #include "common/Types.h"
+#include "index/Meta.h"
+#include "index/JsonInvertedIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "mmap/Types.h"
 #include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
 #include "query/Plan.h"
 #include "query/PlanNode.h"
 #include "query/PlanProto.h"
@@ -30,6 +39,8 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "simdjson/padded_string.h"
 #include "segcore/segment_c.h"
+#include "storage/FileManager.h"
+#include "storage/Types.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "index/IndexFactory.h"
@@ -15982,4 +15993,136 @@ TEST_P(ExprTest, TestJsonContainsDiffTypeNullable) {
             }
         }
     }
+}
+
+template <typename T>
+class JsonIndexTestFixture : public testing::Test {
+ public:
+    using DataType = T;
+
+    JsonIndexTestFixture() {
+        if constexpr (std::is_same_v<T, bool>) {
+            schema_data_type = proto::schema::Bool;
+            json_path = "/bool";
+            lower_bound.set_bool_val(std::numeric_limits<bool>::min());
+            upper_bound.set_bool_val(std::numeric_limits<bool>::max());
+            cast_type = milvus::DataType::BOOL;
+            wrong_type_val.set_int64_val(123);
+        } else if constexpr (std::is_same_v<T, int64_t>) {
+            schema_data_type = proto::schema::Int64;
+            json_path = "/int";
+            lower_bound.set_int64_val(std::numeric_limits<int64_t>::min());
+            upper_bound.set_int64_val(std::numeric_limits<int64_t>::max());
+            cast_type = milvus::DataType::INT64;
+            wrong_type_val.set_string_val("123");
+        } else if constexpr (std::is_same_v<T, double>) {
+            schema_data_type = proto::schema::Double;
+            json_path = "/double";
+            lower_bound.set_float_val(std::numeric_limits<double>::min());
+            upper_bound.set_float_val(std::numeric_limits<double>::max());
+            cast_type = milvus::DataType::DOUBLE;
+            wrong_type_val.set_string_val("123");
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            schema_data_type = proto::schema::String;
+            json_path = "/string";
+            lower_bound.set_string_val("");
+            std::string s(1024, '9');
+            upper_bound.set_string_val(s);
+            cast_type = milvus::DataType::STRING;
+            wrong_type_val.set_int64_val(123);
+        }
+    }
+    proto::schema::DataType schema_data_type;
+    std::string json_path;
+    proto::plan::GenericValue lower_bound;
+    proto::plan::GenericValue upper_bound;
+    milvus::DataType cast_type;
+
+    proto::plan::GenericValue wrong_type_val;
+};
+
+using JsonIndexTypes = ::testing::Types<bool, int64_t, double, std::string>;
+TYPED_TEST_SUITE(JsonIndexTestFixture, JsonIndexTypes);
+
+TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i32_fid = schema->AddDebugField("age32", DataType::INT32);
+    auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    int N = 1000;
+    auto raw_data = DataGen(schema, N);
+    segcore::LoadIndexInfo load_index_info;
+
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        milvus::proto::schema::JSON);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        index::INVERTED_INDEX_TYPE,
+        this->cast_type,
+        this->json_path,
+        file_manager_ctx);
+
+    using json_index_type =
+        index::JsonInvertedIndex<typename TestFixture::DataType>;
+    auto json_index = std::unique_ptr<json_index_type>(
+        static_cast<json_index_type*>(inv_index.release()));
+    auto json_col = raw_data.get_col<std::string>(json_fid);
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    std::vector<milvus::Json> jsons;
+
+    for (auto& json : json_col) {
+        jsons.push_back(milvus::Json(simdjson::padded_string(json)));
+    }
+    json_field->add_json_data(jsons);
+
+    json_index->BuildWithFieldData({json_field});
+    json_index->finish();
+    json_index->create_reader();
+
+    load_index_info.field_id = json_fid.get();
+    load_index_info.field_type = DataType::JSON;
+    load_index_info.index = std::move(json_index);
+    load_index_info.index_params = {{JSON_PATH, this->json_path}};
+    seg->LoadIndex(load_index_info);
+
+    auto json_field_data_info = FieldDataInfo(json_fid.get(), N, {json_field});
+    seg->LoadFieldData(json_fid, json_field_data_info);
+
+    auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {this->json_path.substr(1)}),
+        proto::plan::OpType::LessEqual,
+        this->upper_bound,
+        std::vector<proto::plan::GenericValue>());
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
+    auto final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), N);
+
+    // test for wrong filter type
+    unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {this->json_path.substr(1)}),
+        proto::plan::OpType::LessEqual,
+        this->wrong_type_val,
+        std::vector<proto::plan::GenericValue>());
+    plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
+    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 0);
+
+    unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {this->json_path.substr(1)}),
+        proto::plan::OpType::GreaterEqual,
+        this->lower_bound,
+        std::vector<proto::plan::GenericValue>());
+    plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
+    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), N);
 }

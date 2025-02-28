@@ -154,8 +154,8 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
-    def search_interator(self, client, collection_name, data, batch_size=20, limit=100, filter=None, output_fields=None,
-                         search_params=None, timeout=None, check_task=None, check_items=None, **kwargs):
+    def search_iterator(self, client, collection_name, data, batch_size, limit=-1, filter=None, output_fields=None,
+                        search_params=None, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
         func_name = sys._getframe().f_code.co_name
@@ -170,6 +170,20 @@ class TestMilvusClientV2Base(Base):
                                        collection_name=collection_name, data=data, batch_size=batch_size, filter=filter,
                                        limit=limit, output_fields=output_fields, search_params=search_params,
                                        **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def hybrid_search(self, client, collection_name, reqs, rerank, limit=10,
+                      output_fields=None, timeout=None, partition_names=None,
+                      check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        # kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.hybrid_search, collection_name, reqs, rerank, limit,
+                                  output_fields, timeout, partition_names], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       collection_name=collection_name, reqs=reqs, rerank=rerank, limit=limit,
+                                       output_fields=output_fields, timeout=timeout, partition_names=partition_names, **kwargs).run()
         return res, check_result
 
     @trace()
@@ -602,6 +616,16 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
+    @trace()
+    def use_database(self, client, db_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.use_database, db_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
     def create_user(self, client, user_name, password, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
@@ -893,6 +917,16 @@ class TestMilvusClientV2Base(Base):
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.list_databases], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def run_analyzer(self, client, text, analyzer_params, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.run_analyzer, text, analyzer_params], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, text=text,
+                                       analyzer_params=analyzer_params, **kwargs).run()
         return res, check_result
 
 

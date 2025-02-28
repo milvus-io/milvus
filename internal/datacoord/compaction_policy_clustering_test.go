@@ -29,9 +29,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestClusteringCompactionPolicySuite(t *testing.T) {
@@ -99,7 +99,7 @@ func (s *ClusteringCompactionPolicySuite) TestEnable() {
 
 func (s *ClusteringCompactionPolicySuite) TestTriggerWithNoCollecitons() {
 	// trigger with no collections
-	events, err := s.clusteringCompactionPolicy.Trigger()
+	events, err := s.clusteringCompactionPolicy.Trigger(context.Background())
 	s.NoError(err)
 	gotViews, ok := events[TriggerTypeClustering]
 	s.True(ok)
@@ -132,7 +132,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerWithCollections() {
 	})
 
 	// trigger
-	events, err := s.clusteringCompactionPolicy.Trigger()
+	events, err := s.clusteringCompactionPolicy.Trigger(context.Background())
 	s.NoError(err)
 	gotViews, ok := events[TriggerTypeClustering]
 	s.True(ok)

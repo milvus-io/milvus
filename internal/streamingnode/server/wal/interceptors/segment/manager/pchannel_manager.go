@@ -11,13 +11,13 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // RecoverPChannelSegmentAllocManager recovers the segment assignment manager at the specified pchannel.
@@ -265,31 +265,35 @@ func (m *PChannelSegmentAllocManager) Close(ctx context.Context) {
 
 	// Try to seal all wait
 	m.helper.SealAllWait(ctx)
-	m.logger.Info("seal all waited segments done", zap.Int("waitCounter", m.helper.WaitCounter()))
+	m.logger.Info("seal all waited segments done, may be some not done here", zap.Int("waitCounter", m.helper.WaitCounter()))
 
 	segments := make([]*segmentAllocManager, 0)
 	m.managers.Range(func(pm *partitionSegmentManager) {
-		segments = append(segments, pm.CollectDirtySegmentsAndClear()...)
+		segments = append(segments, pm.CollectAllSegmentsAndClear()...)
 	})
 
-	// commitAllSegmentsOnSamePChannel commits all segments on the same pchannel.
+	// Try to seal the dirty segment to avoid generate too large segment.
 	protoSegments := make([]*streamingpb.SegmentAssignmentMeta, 0, len(segments))
+	growingCnt := 0
 	for _, segment := range segments {
-		protoSegments = append(protoSegments, segment.Snapshot())
+		if segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
+			growingCnt++
+		}
+		if segment.IsDirtyEnough() {
+			// Only persist the dirty segment.
+			protoSegments = append(protoSegments, segment.Snapshot())
+		}
 	}
-
-	m.logger.Info("segment assignment manager save all dirty segment assignments info", zap.Int("segmentCount", len(protoSegments)))
+	m.logger.Info("segment assignment manager save all dirty segment assignments info",
+		zap.Int("dirtySegmentCount", len(protoSegments)),
+		zap.Int("growingSegmentCount", growingCnt),
+		zap.Int("segmentCount", len(segments)))
 	if err := resource.Resource().StreamingNodeCatalog().SaveSegmentAssignments(ctx, m.pchannel.Name, protoSegments); err != nil {
 		m.logger.Warn("commit segment assignment at pchannel failed", zap.Error(err))
 	}
 
 	// remove the stats from stats manager.
-	m.logger.Info("segment assignment manager remove all segment stats from stats manager")
-	for _, segment := range segments {
-		if segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
-			resource.Resource().SegmentAssignStatsManager().UnregisterSealedSegment(segment.GetSegmentID())
-		}
-	}
-
+	removedStatsSegmentCnt := resource.Resource().SegmentAssignStatsManager().UnregisterAllStatsOnPChannel(m.pchannel.Name)
+	m.logger.Info("segment assignment manager remove all segment stats from stats manager", zap.Int("removedStatsSegmentCount", removedStatsSegmentCnt))
 	m.metrics.Close()
 }

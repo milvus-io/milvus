@@ -7,14 +7,14 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchantempstore"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var r = &resourceImpl{
@@ -23,13 +23,6 @@ var r = &resourceImpl{
 
 // optResourceInit is the option to initialize the resource.
 type optResourceInit func(r *resourceImpl)
-
-// OptFlusher provides the flusher to the resource.
-func OptFlusher(flusher flusher.Flusher) optResourceInit {
-	return func(r *resourceImpl) {
-		r.flusher = flusher
-	}
-}
 
 // OptETCD provides the etcd client to the resource.
 func OptETCD(etcd *clientv3.Client) optResourceInit {
@@ -51,6 +44,7 @@ func OptRootCoordClient(rootCoordClient *syncutil.Future[types.RootCoordClient])
 		r.rootCoordClient = rootCoordClient
 		r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
 		r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
+		r.vchannelTempStorage = vchantempstore.NewVChannelTempStorage(r.rootCoordClient)
 	}
 }
 
@@ -80,6 +74,7 @@ func Apply(opts ...optResourceInit) {
 func Done() {
 	r.segmentAssignStatsManager = stats.NewStatsManager()
 	r.timeTickInspector = tinspector.NewTimeTickSyncInspector()
+	assertNotNil(r.ChunkManager())
 	assertNotNil(r.TSOAllocator())
 	assertNotNil(r.RootCoordClient())
 	assertNotNil(r.DataCoordClient())
@@ -96,7 +91,6 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
-	flusher                   flusher.Flusher
 	logger                    *log.MLogger
 	timestampAllocator        idalloc.Allocator
 	idAllocator               idalloc.Allocator
@@ -107,11 +101,7 @@ type resourceImpl struct {
 	streamingNodeCatalog      metastore.StreamingNodeCataLog
 	segmentAssignStatsManager *stats.StatsManager
 	timeTickInspector         tinspector.TimeTickSyncInspector
-}
-
-// Flusher returns the flusher.
-func (r *resourceImpl) Flusher() flusher.Flusher {
-	return r.flusher
+	vchannelTempStorage       *vchantempstore.VChannelTempStorage
 }
 
 // TSOAllocator returns the timestamp allocator to allocate timestamp.
@@ -156,6 +146,11 @@ func (r *resourceImpl) SegmentAssignStatsManager() *stats.StatsManager {
 
 func (r *resourceImpl) TimeTickInspector() tinspector.TimeTickSyncInspector {
 	return r.timeTickInspector
+}
+
+// VChannelTempStorage returns the vchannel temp storage.
+func (r *resourceImpl) VChannelTempStorage() *vchantempstore.VChannelTempStorage {
+	return r.vchannelTempStorage
 }
 
 func (r *resourceImpl) Logger() *log.MLogger {

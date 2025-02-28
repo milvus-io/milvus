@@ -17,17 +17,19 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/log"
-	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // prefix/collection/collection_id 					-> CollectionInfo
@@ -38,6 +40,13 @@ import (
 type Catalog struct {
 	Txn      kv.TxnKV
 	Snapshot kv.SnapShotKV
+
+	pool *conc.Pool[any]
+}
+
+func NewCatalog(metaKV kv.TxnKV, ss kv.SnapShotKV) metastore.RootCoordCatalog {
+	ioPool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
+	return &Catalog{Txn: metaKV, Snapshot: ss, pool: ioPool}
 }
 
 func BuildCollectionKey(dbID typeutil.UniqueID, collectionID typeutil.UniqueID) string {
@@ -498,7 +507,6 @@ func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *p
 	return collection, nil
 }
 
-// TODO: This function will be invoked many times if there are many databases, leading to significant overhead.
 func (kc *Catalog) batchAppendPartitionAndFieldsInfo(ctx context.Context, collMeta []*pb.CollectionInfo,
 	ts typeutil.Timestamp,
 ) ([]*model.Collection, error) {
@@ -798,27 +806,33 @@ func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.
 	}
 
 	start := time.Now()
-	colls := make([]*pb.CollectionInfo, 0, len(vals))
-	for _, val := range vals {
-		collMeta := &pb.CollectionInfo{}
-		err := proto.Unmarshal([]byte(val), collMeta)
-		if err != nil {
-			log.Ctx(ctx).Warn("unmarshal collection info failed", zap.Error(err))
-			continue
-		}
-		kc.fixDefaultDBIDConsistency(ctx, collMeta, ts)
-		colls = append(colls, collMeta)
+	colls := make([]*model.Collection, len(vals))
+	futures := make([]*conc.Future[any], 0, len(vals))
+	for i, val := range vals {
+		i := i
+		val := val
+		futures = append(futures, kc.pool.Submit(func() (any, error) {
+			collMeta := &pb.CollectionInfo{}
+			err := proto.Unmarshal([]byte(val), collMeta)
+			if err != nil {
+				log.Ctx(ctx).Warn("unmarshal collection info failed", zap.Error(err))
+				return nil, err
+			}
+			kc.fixDefaultDBIDConsistency(ctx, collMeta, ts)
+			collection, err := kc.appendPartitionAndFieldsInfo(ctx, collMeta, ts)
+			if err != nil {
+				return nil, err
+			}
+			colls[i] = collection
+			return nil, nil
+		}))
 	}
-	log.Ctx(ctx).Info("unmarshal all collection details cost", zap.Int64("db", dbID), zap.Duration("cost", time.Since(start)))
-
-	start = time.Now()
-	ret, err := kc.batchAppendPartitionAndFieldsInfo(ctx, colls, ts)
-	log.Ctx(ctx).Info("append partition and fields info cost", zap.Int64("db", dbID), zap.Duration("cost", time.Since(start)))
+	err = conc.AwaitAll(futures...)
 	if err != nil {
 		return nil, err
 	}
-
-	return ret, nil
+	log.Ctx(ctx).Info("unmarshal all collection details cost", zap.Int64("db", dbID), zap.Duration("cost", time.Since(start)))
+	return colls, nil
 }
 
 // fixDefaultDBIDConsistency fix dbID consistency for collectionInfo.
@@ -826,12 +840,12 @@ func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.
 // all collections in default database should be marked with dbID 1.
 // this method also update dbid in meta store when dbid is 0
 // see also: https://github.com/milvus-io/milvus/issues/33608
-func (kv *Catalog) fixDefaultDBIDConsistency(ctx context.Context, collMeta *pb.CollectionInfo, ts typeutil.Timestamp) {
+func (kc *Catalog) fixDefaultDBIDConsistency(ctx context.Context, collMeta *pb.CollectionInfo, ts typeutil.Timestamp) {
 	if collMeta.DbId == util.NonDBID {
 		coll := model.UnmarshalCollectionModel(collMeta)
 		cloned := coll.Clone()
 		cloned.DBID = util.DefaultDBID
-		kv.alterModifyCollection(ctx, coll, cloned, ts)
+		kc.alterModifyCollection(ctx, coll, cloned, ts)
 
 		collMeta.DbId = util.DefaultDBID
 	}

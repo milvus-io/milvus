@@ -21,7 +21,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var (
@@ -427,6 +427,24 @@ var (
 			Help:      "the number of non-zeros in each sparse search task",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, collectionName})
+
+	// ProxyQueueTaskNum records task number of queue in Proxy.
+	ProxyQueueTaskNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "queue_task_num",
+			Help:      "",
+		}, []string{nodeIDLabelName, queueTypeLabelName, taskStateLabel})
+
+	ProxyParseExpressionLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "parse_expr_latency",
+			Help:      "the latency of parse expression",
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, functionLabelName, statusLabelName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -490,6 +508,9 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyRecallSearchCount)
 
 	registry.MustRegister(ProxySearchSparseNumNonZeros)
+	registry.MustRegister(ProxyQueueTaskNum)
+
+	registry.MustRegister(ProxyParseExpressionLatency)
 
 	RegisterStreamingServiceClient(registry)
 }

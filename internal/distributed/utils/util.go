@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func GracefulStopGRPCServer(s *grpc.Server) {
@@ -23,7 +23,7 @@ func GracefulStopGRPCServer(s *grpc.Server) {
 	ch := make(chan struct{})
 	go func() {
 		defer close(ch)
-		log.Debug("try to graceful stop grpc server...")
+		log.Info("try to graceful stop grpc server...")
 		// will block until all rpc finished.
 		s.GracefulStop()
 	}()
@@ -31,7 +31,7 @@ func GracefulStopGRPCServer(s *grpc.Server) {
 	case <-ch:
 	case <-time.After(paramtable.Get().ProxyGrpcServerCfg.GracefulStopTimeout.GetAsDuration(time.Second)):
 		// took too long, manually close grpc server
-		log.Debug("stop grpc server...")
+		log.Info("force to stop grpc server...")
 		s.Stop()
 		// concurrent GracefulStop should be interrupted
 		<-ch

@@ -30,11 +30,11 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 )
 
 const (
@@ -278,8 +278,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Failed {
-		err = s.imeta.UpdateJob(context.TODO(), task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed),
-			UpdateJobReason(resp.GetReason()))
+		err = s.imeta.UpdateJob(context.TODO(), task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(resp.GetReason()))
 		if err != nil {
 			log.Warn("failed to update job state to Failed", zap.Int64("jobID", task.GetJobID()), zap.Error(err))
 		}
@@ -314,17 +313,21 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		for _, info := range resp.GetImportSegmentsInfo() {
 			// try to parse path and fill logID
-			err = binlog.CompressBinLogs(info.GetBinlogs(), info.GetDeltalogs(), info.GetStatslogs())
+			err = binlog.CompressBinLogs(info.GetBinlogs(), info.GetDeltalogs(), info.GetStatslogs(), info.GetBm25Logs())
 			if err != nil {
 				log.Warn("fail to CompressBinLogs for import binlogs",
 					WrapTaskLog(task, zap.Int64("segmentID", info.GetSegmentID()), zap.Error(err))...)
 				return
 			}
-			op1 := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), info.GetDeltalogs())
+			op1 := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), info.GetDeltalogs(), info.GetBm25Logs())
 			op2 := UpdateStatusOperator(info.GetSegmentID(), commonpb.SegmentState_Flushed)
 			err = s.meta.UpdateSegmentsInfo(context.TODO(), op1, op2)
 			if err != nil {
-				log.Warn("update import segment binlogs failed", WrapTaskLog(task, zap.Error(err))...)
+				updateErr := s.imeta.UpdateJob(context.TODO(), task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
+				if updateErr != nil {
+					log.Warn("failed to update job state to Failed", zap.Int64("jobID", task.GetJobID()), zap.Error(updateErr))
+				}
+				log.Warn("update import segment binlogs failed", WrapTaskLog(task, zap.String("err", err.Error()))...)
 				return
 			}
 		}

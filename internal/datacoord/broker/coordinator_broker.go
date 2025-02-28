@@ -26,10 +26,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 //go:generate mockery --name=Broker --structname=MockBroker --output=./  --filename=mock_coordinator_broker.go --with-expecter --inpackage
@@ -37,6 +38,7 @@ type Broker interface {
 	DescribeCollectionInternal(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error)
 	ShowPartitionsInternal(ctx context.Context, collectionID int64) ([]int64, error)
 	ShowCollections(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error)
+	ShowCollectionIDs(ctx context.Context) (*rootcoordpb.ShowCollectionIDsResponse, error)
 	ListDatabases(ctx context.Context) (*milvuspb.ListDatabasesResponse, error)
 	HasCollection(ctx context.Context, collectionID int64) (bool, error)
 }
@@ -110,6 +112,24 @@ func (b *coordinatorBroker) ShowCollections(ctx context.Context, dbName string) 
 		log.Warn("ShowCollections failed",
 			zap.String("dbName", dbName),
 			zap.Error(err))
+		return nil, err
+	}
+
+	return resp, nil
+}
+
+func (b *coordinatorBroker) ShowCollectionIDs(ctx context.Context) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+	resp, err := b.rootCoord.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
+		),
+		AllowUnavailable: true,
+	})
+
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		log.Ctx(ctx).Warn("ShowCollectionIDs failed", zap.Error(err))
 		return nil, err
 	}
 

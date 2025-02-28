@@ -25,8 +25,8 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // TODO support set EmbddingType
@@ -67,6 +67,9 @@ func newEmbeddingNode(channelName string, schema *schemapb.CollectionSchema) (*e
 		if err != nil {
 			return nil, err
 		}
+		if functionRunner == nil {
+			continue
+		}
 		node.functionRunners[tf.GetId()] = functionRunner
 	}
 	return node, nil
@@ -83,7 +86,7 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, inputF
 
 	embeddingData, ok := data.Data[inputFieldId].GetDataRows().([]string)
 	if !ok {
-		return fmt.Errorf("BM25 embedding failed: input field data not varchar")
+		return fmt.Errorf("BM25 embedding failed: input field data not varchar/text")
 	}
 
 	output, err := runner.BatchRun(embeddingData)

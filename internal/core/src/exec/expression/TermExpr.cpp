@@ -271,7 +271,11 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(OffsetVector* input) {
 
     AssertInfo(expr_->vals_.size() == 1,
                "element length in json array must be one");
-    ValueType target_val = GetValueFromProto<ValueType>(expr_->vals_[0]);
+    if (!arg_inited_) {
+        arg_val_.SetValue<ValueType>(expr_->vals_[0]);
+        arg_inited_ = true;
+    }
+    auto target_val = arg_val_.GetValue<ValueType>();
 
     auto execute_sub_batch =
         []<FilterType filter_type = FilterType::sequential>(
@@ -348,12 +352,12 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(OffsetVector* input) {
     if (expr_->column_.nested_path_.size() > 0) {
         index = std::stoi(expr_->column_.nested_path_[0]);
     }
-    std::unordered_set<ValueType> term_set;
-    for (const auto& element : expr_->vals_) {
-        term_set.insert(GetValueFromProto<ValueType>(element));
+    if (!arg_inited_) {
+        arg_set_ = std::make_shared<SortVectorElement<ValueType>>(expr_->vals_);
+        arg_inited_ = true;
     }
 
-    if (term_set.empty()) {
+    if (arg_set_->Empty()) {
         res.reset();
         MoveCursor();
         return res_vec;
@@ -368,7 +372,7 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(OffsetVector* input) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             int index,
-            const std::unordered_set<ValueType>& term_set) {
+            const std::shared_ptr<MultiElement>& term_set) {
         for (int i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -378,12 +382,12 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(OffsetVector* input) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            if (term_set.empty() || index >= data[offset].length()) {
+            if (term_set->Empty() || index >= data[offset].length()) {
                 res[i] = false;
                 continue;
             }
             auto value = data[offset].get_data<GetType>(index);
-            res[i] = term_set.find(ValueType(value)) != term_set.end();
+            res[i] = term_set->In(ValueType(value));
         }
     };
 
@@ -396,14 +400,14 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(OffsetVector* input) {
                                                     res,
                                                     valid_res,
                                                     index,
-                                                    term_set);
+                                                    arg_set_);
     } else {
         processed_size = ProcessDataChunks<milvus::ArrayView>(execute_sub_batch,
                                                               std::nullptr_t{},
                                                               res,
                                                               valid_res,
                                                               index,
-                                                              term_set);
+                                                              arg_set_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -433,7 +437,12 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(OffsetVector* input) {
 
     AssertInfo(expr_->vals_.size() == 1,
                "element length in json array must be one");
-    ValueType val = GetValueFromProto<ValueType>(expr_->vals_[0]);
+    if (!arg_inited_) {
+        arg_val_.SetValue<ValueType>(expr_->vals_[0]);
+        arg_inited_ = true;
+    }
+    auto val = arg_val_.GetValue<ValueType>();
+
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
     auto execute_sub_batch =
@@ -514,12 +523,12 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(OffsetVector* input) {
     valid_res.set();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-    std::unordered_set<ValueType> term_set;
-    for (const auto& element : expr_->vals_) {
-        term_set.insert(GetValueFromProto<ValueType>(element));
+    if (!arg_inited_) {
+        arg_set_ = std::make_shared<SortVectorElement<ValueType>>(expr_->vals_);
+        arg_inited_ = true;
     }
 
-    if (term_set.empty()) {
+    if (arg_set_->Empty()) {
         res.reset();
         MoveCursor();
         return res_vec;
@@ -534,7 +543,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(OffsetVector* input) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string pointer,
-            const std::unordered_set<ValueType>& terms) {
+            const std::shared_ptr<MultiElement>& terms) {
         auto executor = [&](size_t i) {
             auto x = data[i].template at<GetType>(pointer);
             if (x.error()) {
@@ -547,11 +556,11 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(OffsetVector* input) {
                     auto value = x.value();
                     // if the term set is {1}, and the value is 1.1, we should not return true.
                     return std::floor(value) == value &&
-                           terms.find(ValueType(value)) != terms.end();
+                           terms->In(ValueType(x.value()));
                 }
                 return false;
             }
-            return terms.find(ValueType(x.value())) != terms.end();
+            return terms->In(ValueType(x.value()));
         };
         for (size_t i = 0; i < size; ++i) {
             auto offset = i;
@@ -562,7 +571,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(OffsetVector* input) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            if (terms.empty()) {
+            if (terms->Empty()) {
                 res[i] = false;
                 continue;
             }
@@ -577,14 +586,14 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(OffsetVector* input) {
                                                             res,
                                                             valid_res,
                                                             pointer,
-                                                            term_set);
+                                                            arg_set_);
     } else {
         processed_size = ProcessDataChunks<milvus::Json>(execute_sub_batch,
                                                          std::nullptr_t{},
                                                          res,
                                                          valid_res,
                                                          pointer,
-                                                         term_set);
+                                                         arg_set_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -676,16 +685,21 @@ PhyTermFilterExpr::ExecVisitorImplForData(OffsetVector* input) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     valid_res.set();
 
-    std::vector<T> vals;
-    for (auto& val : expr_->vals_) {
-        // Integral overflow process
-        bool overflowed = false;
-        auto converted_val = GetValueFromProtoWithOverflow<T>(val, overflowed);
-        if (!overflowed) {
-            vals.emplace_back(converted_val);
+    if (!arg_inited_) {
+        std::vector<T> vals;
+        for (auto& val : expr_->vals_) {
+            // Integral overflow process
+            bool overflowed = false;
+            auto converted_val =
+                GetValueFromProtoWithOverflow<T>(val, overflowed);
+            if (!overflowed) {
+                vals.emplace_back(converted_val);
+            }
         }
+        arg_set_ = std::make_shared<SortVectorElement<T>>(vals);
+        arg_inited_ = true;
     }
-    std::unordered_set<T> vals_set(vals.begin(), vals.end());
+
     auto execute_sub_batch =
         []<FilterType filter_type = FilterType::sequential>(
             const T* data,
@@ -694,8 +708,7 @@ PhyTermFilterExpr::ExecVisitorImplForData(OffsetVector* input) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            const std::unordered_set<T>& vals) {
-        TermElementFuncSet<T> func;
+            const std::shared_ptr<MultiElement>& vals) {
         for (size_t i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -705,7 +718,7 @@ PhyTermFilterExpr::ExecVisitorImplForData(OffsetVector* input) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            res[i] = func(vals, data[offset]);
+            res[i] = vals->In(data[offset]);
         }
     };
     int64_t processed_size;
@@ -715,10 +728,10 @@ PhyTermFilterExpr::ExecVisitorImplForData(OffsetVector* input) {
                                                  input,
                                                  res,
                                                  valid_res,
-                                                 vals_set);
+                                                 arg_set_);
     } else {
         processed_size = ProcessDataChunks<T>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, vals_set);
+            execute_sub_batch, std::nullptr_t{}, res, valid_res, arg_set_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "

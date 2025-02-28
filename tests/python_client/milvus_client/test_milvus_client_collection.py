@@ -103,7 +103,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        error = {ct.err_code: 65535, ct.err_msg: f"invalid dimension: {dim}. "
+        error = {ct.err_code: 65535, ct.err_msg: f"invalid dimension: {dim} of field {default_vector_field_name}. "
                                                  f"float vector dimension should be in range 2 ~ 32768"}
         if dim < ct.min_dim:
             error = {ct.err_code: 65535, ct.err_msg: f"invalid dimension: {dim}. "
@@ -137,8 +137,8 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for varChar "
-                                                 f"field of collection {collection_name}"}
+        error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for the "
+                                                 f"field({default_primary_key_field_name}) of collection {collection_name}"}
         self.create_collection(client, collection_name, default_dim, id_type="string", auto_id=True,
                                check_task=CheckTasks.err_res, check_items=error)
 
@@ -1137,3 +1137,157 @@ class TestMilvusClientUsingDatabaseInvalid(TestMilvusClientV2Base):
         expected: drop successfully
         """
         pass
+
+class TestMilvusClientCollectionPropertiesInvalid(TestMilvusClientV2Base):
+    """ Test case of alter/drop collection properties """
+    """
+    ******************************************************************
+    #  The following are invalid base cases
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("alter_name", ["%$#", "test", " "])
+    def test_milvus_client_alter_collection_properties_invalid_collection_name(self, alter_name):
+        """
+        target: test alter collection properties with invalid collection name
+        method: alter collection properties with non-existent collection name
+        expected: raise exception
+        """
+        client = self._client()
+        # alter collection properties
+        properties = {'mmap.enabled': True}
+        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={alter_name}]"}
+        self.alter_collection_properties(client, alter_name, properties,
+                                     check_task=CheckTasks.err_res,
+                                     check_items=error)
+        
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("properties", [""])
+    def test_milvus_client_alter_collection_properties_invalid_properties(self, properties):
+        """
+        target: test alter collection properties with invalid properties
+        method: alter collection properties with invalid properties
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, id_type="string", max_length=ct.default_length)
+        self.describe_collection(client, collection_name,
+                                     check_task=CheckTasks.check_describe_collection_property,
+                                     check_items={"collection_name": collection_name,
+                                                  "dim": default_dim,
+                                                  "consistency_level": 0})
+        error = {ct.err_code: 1, ct.err_msg: f"`properties` value {properties} is illegal"}
+        self.alter_collection_properties(client, collection_name, properties,
+                                     check_task=CheckTasks.err_res,
+                                     check_items=error)
+
+        self.drop_collection(client, collection_name)
+
+    #TODO properties with non-existent params
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("drop_name", ["%$#", "test", " "])
+    def test_milvus_client_drop_collection_properties_invalid_collection_name(self, drop_name):
+        """
+        target: test drop collection properties with invalid collection name
+        method: drop collection properties with non-existent collection name
+        expected: raise exception
+        """
+        client = self._client()
+        # drop collection properties
+        properties = {'mmap.enabled': True}
+        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={drop_name}]"}
+        self.drop_collection_properties(client, drop_name, properties,
+                                     check_task=CheckTasks.err_res,
+                                     check_items=error)
+        
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("property_keys", ["", {}, []])
+    def test_milvus_client_drop_collection_properties_invalid_properties(self, property_keys):
+        """
+        target: test drop collection properties with invalid properties
+        method: drop collection properties with invalid properties
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, id_type="string", max_length=ct.default_length)
+        self.describe_collection(client, collection_name,
+                                     check_task=CheckTasks.check_describe_collection_property,
+                                     check_items={"collection_name": collection_name,
+                                                  "dim": default_dim,
+                                                  "consistency_level": 0})
+        error = {ct.err_code: 65535, ct.err_msg: f"The collection properties to alter and keys to delete must not be empty at the same time"}
+        self.drop_collection_properties(client, collection_name, property_keys,
+                                     check_task=CheckTasks.err_res,
+                                     check_items=error)
+
+        self.drop_collection(client, collection_name)
+
+    #TODO properties with non-existent params
+
+
+class TestMilvusClientCollectionPropertiesValid(TestMilvusClientV2Base):
+    """ Test case of alter/drop collection properties """
+
+    """
+    ******************************************************************
+    #  The following are valid base cases
+    ******************************************************************
+    """
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_collection_alter_collection_properties(self):
+        """
+        target: test alter collection
+        method: alter collection
+        expected: alter successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        self.using_database(client, "default")
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.release_collection(client, collection_name)
+        properties = {"mmap.enabled": True}
+        self.alter_collection_properties(client, collection_name, properties)
+        describe = self.describe_collection(client, collection_name)[0].get("properties")
+        assert describe["mmap.enabled"] == 'True'
+        self.release_collection(client, collection_name)
+        properties = {"mmap.enabled": False}
+        self.alter_collection_properties(client, collection_name, properties)
+        describe = self.describe_collection(client, collection_name)[0].get("properties")
+        assert describe["mmap.enabled"] == 'False'
+        #TODO add case that confirm the parameter is actually valid
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_collection_drop_collection_properties(self):
+        """
+        target: test drop collection
+        method: drop collection
+        expected: drop successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        self.using_database(client, "default")
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.release_collection(client, collection_name)
+        properties = {"mmap.enabled": True}
+        self.alter_collection_properties(client, collection_name, properties)
+        describe = self.describe_collection(client, collection_name)[0].get("properties")
+        assert describe["mmap.enabled"] == 'True'
+        property_keys = ["mmap.enabled"]
+        self.drop_collection_properties(client, collection_name, property_keys)
+        describe = self.describe_collection(client, collection_name)[0].get("properties")
+        assert "mmap.enabled" not in describe
+        #TODO add case that confirm the parameter is actually invalid
+        self.drop_collection(client, collection_name)

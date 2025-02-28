@@ -41,13 +41,13 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var dataSyncServiceTestDir = "/tmp/milvus_test/data_sync_service"
@@ -308,7 +308,7 @@ type DataSyncServiceSuite struct {
 	channelCheckpointUpdater *util2.ChannelCheckpointUpdater
 	factory                  *dependency.MockFactory
 	ms                       *msgstream.MockMsgStream
-	msChan                   chan *msgstream.MsgPack
+	msChan                   chan *msgstream.ConsumeMsgPack
 }
 
 func (s *DataSyncServiceSuite) SetupSuite() {
@@ -330,7 +330,7 @@ func (s *DataSyncServiceSuite) SetupTest() {
 	s.channelCheckpointUpdater = util2.NewChannelCheckpointUpdater(s.broker)
 
 	go s.channelCheckpointUpdater.Start()
-	s.msChan = make(chan *msgstream.MsgPack, 1)
+	s.msChan = make(chan *msgstream.ConsumeMsgPack, 1)
 
 	s.factory = dependency.NewMockFactory(s.T())
 	s.ms = msgstream.NewMockMsgStream(s.T())
@@ -338,6 +338,7 @@ func (s *DataSyncServiceSuite) SetupTest() {
 	s.ms.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	s.ms.EXPECT().Chan().Return(s.msChan)
 	s.ms.EXPECT().Close().Return()
+	s.ms.EXPECT().GetUnmarshalDispatcher().Return(nil)
 
 	s.pipelineParams = &util2.PipelineParams{
 		Ctx:                context.TODO(),
@@ -487,8 +488,8 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 		close(ch)
 		return nil
 	})
-	s.msChan <- &msgPack
-	s.msChan <- &timeTickMsgPack
+	s.msChan <- msgstream.BuildConsumeMsgPack(&msgPack)
+	s.msChan <- msgstream.BuildConsumeMsgPack(&timeTickMsgPack)
 	<-ch
 }
 

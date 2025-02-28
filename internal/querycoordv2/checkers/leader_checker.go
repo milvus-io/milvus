@@ -26,9 +26,9 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 var _ Checker = (*LeaderChecker)(nil)
@@ -92,7 +92,11 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 
 		replicas := c.meta.ReplicaManager.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
-			for _, node := range replica.GetRWNodes() {
+			nodes := replica.GetRWNodes()
+			if streamingutil.IsStreamingServiceEnabled() {
+				nodes = replica.GetRWSQNodes()
+			}
+			for _, node := range nodes {
 				leaderViews := c.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID2LeaderView(replica.GetCollectionID()), meta.WithNodeID2LeaderView(node))
 				for _, leaderView := range leaderViews {
 					dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(leaderView.Channel), meta.WithReplica(replica))
@@ -164,10 +168,7 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *met
 	latestNodeDist := utils.FindMaxVersionSegments(dist)
 	for _, s := range latestNodeDist {
 		segment := c.target.GetSealedSegment(ctx, leaderView.CollectionID, s.GetID(), meta.CurrentTargetFirst)
-		existInTarget := segment != nil
-		isL0Segment := existInTarget && segment.GetLevel() == datapb.SegmentLevel_L0
-		// shouldn't set l0 segment location to delegator. l0 segment should be reload in delegator
-		if !existInTarget || isL0Segment {
+		if segment == nil {
 			continue
 		}
 
@@ -218,8 +219,7 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica *me
 		_, ok := distMap[sid]
 		segment := c.target.GetSealedSegment(ctx, leaderView.CollectionID, sid, meta.CurrentTargetFirst)
 		existInTarget := segment != nil
-		isL0Segment := existInTarget && segment.GetLevel() == datapb.SegmentLevel_L0
-		if ok || existInTarget || isL0Segment {
+		if ok || existInTarget {
 			continue
 		}
 		log.Debug("leader checker append a segment to remove",

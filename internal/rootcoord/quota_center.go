@@ -38,18 +38,18 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/quota"
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/config"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/config"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -1182,6 +1182,15 @@ func (q *QuotaCenter) calculateRates() error {
 func (q *QuotaCenter) resetAllCurrentRates() error {
 	clusterLimiter := newParamLimiterFunc(internalpb.RateScope_Cluster, allOps)()
 	q.rateLimiter = rlinternal.NewRateLimiterTree(clusterLimiter)
+
+	enablePartitionRateLimit := false
+	for rt := range getRateTypes(internalpb.RateScope_Partition, allOps) {
+		r := quota.GetQuotaValue(internalpb.RateScope_Partition, rt, Params)
+		if Limit(r) != Inf {
+			enablePartitionRateLimit = true
+		}
+	}
+
 	initLimiters := func(sourceCollections map[int64]map[int64][]int64) {
 		for dbID, collections := range sourceCollections {
 			for collectionID, partitionIDs := range collections {
@@ -1192,17 +1201,18 @@ func (q *QuotaCenter) resetAllCurrentRates() error {
 					}
 					return limitVal
 				}
+				q.rateLimiter.GetOrCreateCollectionLimiters(dbID, collectionID,
+					newParamLimiterFunc(internalpb.RateScope_Database, allOps),
+					newParamLimiterFuncWithLimitFunc(internalpb.RateScope_Collection, allOps, getCollectionLimitVal))
 
+				if !enablePartitionRateLimit {
+					continue
+				}
 				for _, partitionID := range partitionIDs {
 					q.rateLimiter.GetOrCreatePartitionLimiters(dbID, collectionID, partitionID,
 						newParamLimiterFunc(internalpb.RateScope_Database, allOps),
 						newParamLimiterFuncWithLimitFunc(internalpb.RateScope_Collection, allOps, getCollectionLimitVal),
 						newParamLimiterFunc(internalpb.RateScope_Partition, allOps))
-				}
-				if len(partitionIDs) == 0 {
-					q.rateLimiter.GetOrCreateCollectionLimiters(dbID, collectionID,
-						newParamLimiterFunc(internalpb.RateScope_Database, allOps),
-						newParamLimiterFuncWithLimitFunc(internalpb.RateScope_Collection, allOps, getCollectionLimitVal))
 				}
 			}
 			if len(collections) == 0 {

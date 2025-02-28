@@ -21,7 +21,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var (
@@ -125,9 +125,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			collectionIDLabelName,
-			partitionIDLabelName,
 			segmentStateLabelName,
-			indexCountLabelName,
 			segmentLevelLabelName,
 		})
 
@@ -455,7 +453,6 @@ var (
 			collectionName,
 			nodeIDLabelName,
 			collectionIDLabelName,
-			partitionIDLabelName,
 			segmentStateLabelName,
 		})
 

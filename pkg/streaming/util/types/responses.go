@@ -4,13 +4,20 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/milvus-io/milvus/pkg/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
+
+type BroadcastAckRequest struct {
+	// BroadcastID is the broadcast id of the ack request.
+	BroadcastID uint64
+	VChannel    string
+}
 
 // BroadcastAppendResult is the result of broadcast append operation.
 type BroadcastAppendResult struct {
+	BroadcastID   uint64                   // the broadcast id of the append operation.
 	AppendResults map[string]*AppendResult // make the channel name to the append result.
 }
 

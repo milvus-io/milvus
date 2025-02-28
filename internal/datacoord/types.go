@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
 
 type Task interface {
@@ -33,9 +33,9 @@ type Task interface {
 	SetState(state indexpb.JobState, failReason string)
 	GetState() indexpb.JobState
 	GetFailReason() string
-	UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error
+	UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error
 	UpdateMetaBuildingState(meta *meta) error
-	AssignTask(ctx context.Context, client types.DataNodeClient) bool
+	AssignTask(ctx context.Context, client types.DataNodeClient, meta *meta) bool
 	QueryResult(ctx context.Context, client types.DataNodeClient)
 	DropTaskOnWorker(ctx context.Context, client types.DataNodeClient) bool
 	SetJobInfo(meta *meta) error

@@ -44,27 +44,27 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ServiceSuite struct {
 	suite.Suite
 	// Data
-	msgChan        chan *msgstream.MsgPack
+	msgChan        chan *msgstream.ConsumeMsgPack
 	collectionID   int64
 	collectionName string
 	schema         *schemapb.CollectionSchema
@@ -543,18 +543,6 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Normal() {
 	// prepate
 	suite.TestWatchDmChannelsInt64()
 
-	l0Segment := segments.NewMockSegment(suite.T())
-	l0Segment.EXPECT().ID().Return(10000)
-	l0Segment.EXPECT().Collection().Return(suite.collectionID)
-	l0Segment.EXPECT().Partition().Return(common.AllPartitionsID)
-	l0Segment.EXPECT().Level().Return(datapb.SegmentLevel_L0)
-	l0Segment.EXPECT().Type().Return(commonpb.SegmentState_Sealed)
-	l0Segment.EXPECT().Indexes().Return(nil)
-	l0Segment.EXPECT().Shard().Return(suite.channel)
-	l0Segment.EXPECT().Release(ctx).Return()
-
-	suite.node.manager.Segment.Put(ctx, segments.SegmentTypeSealed, l0Segment)
-
 	// data
 	req := &querypb.UnsubDmChannelRequest{
 		Base: &commonpb.MsgBase{
@@ -569,10 +557,6 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Normal() {
 
 	status, err := suite.node.UnsubDmChannel(ctx, req)
 	suite.NoError(merr.CheckRPCCall(status, err))
-
-	suite.Len(suite.node.manager.Segment.GetBy(
-		segments.WithChannel(suite.vchannel),
-		segments.WithLevel(datapb.SegmentLevel_L0)), 0)
 }
 
 func (suite *ServiceSuite) TestUnsubDmChannels_Failed() {
@@ -1419,7 +1403,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 
 	syncVersionAction := &querypb.SyncAction{
 		Type:           querypb.SyncType_UpdateVersion,
-		SealedInTarget: []int64{1, 2, 3, 4},
+		SealedInTarget: []int64{1, 2, 3},
 		TargetVersion:  time.Now().UnixMilli(),
 	}
 
@@ -2136,7 +2120,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	suite.True(ok)
 	sealedSegments, _ := delegator.GetSegmentInfo(false)
 	// 1 level 0 + 3 sealed segments
-	suite.Len(sealedSegments[0].Segments, 4)
+	suite.Len(sealedSegments[0].Segments, 3)
 
 	// data
 	req := &querypb.SyncDistributionRequest{
@@ -2160,7 +2144,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 	sealedSegments, _ = delegator.GetSegmentInfo(false)
-	suite.Len(sealedSegments[0].Segments, 3)
+	suite.Len(sealedSegments[0].Segments, 2)
 
 	releaseAction = &querypb.SyncAction{
 		Type:      querypb.SyncType_Remove,
@@ -2174,7 +2158,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 	sealedSegments, _ = delegator.GetSegmentInfo(false)
-	suite.Len(sealedSegments[0].Segments, 2)
+	suite.Len(sealedSegments[0].Segments, 1)
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_Failed() {

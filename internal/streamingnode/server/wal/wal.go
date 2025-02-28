@@ -3,8 +3,8 @@ package wal
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
 type AppendResult = types.AppendResult
@@ -13,6 +13,9 @@ type AppendResult = types.AppendResult
 // !!! Don't implement it directly, implement walimpls.WAL instead.
 type WAL interface {
 	WALName() string
+
+	// GetLatestMVCCTimestamp get the latest mvcc timestamp of the wal at vchannel.
+	GetLatestMVCCTimestamp(ctx context.Context, vchannel string) (uint64, error)
 
 	// Channel returns the channel assignment info of the wal.
 	Channel() types.PChannelInfo

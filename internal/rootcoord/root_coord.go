@@ -54,26 +54,26 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	tsoutil2 "github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/expr"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/expr"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // UniqueID is an alias of typeutil.UniqueID.
@@ -370,7 +370,7 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 			if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, Params.EtcdCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
 				return err
 			}
-			catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
+			catalog = kvmetestore.NewCatalog(metaKV, ss)
 		case util.MetaStoreTypeTiKV:
 			log.Ctx(initCtx).Info("Using tikv as meta storage.")
 			var ss *kvmetestore.SuffixSnapshot
@@ -380,7 +380,7 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 			if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, Params.TiKVCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
 				return err
 			}
-			catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
+			catalog = kvmetestore.NewCatalog(metaKV, ss)
 		default:
 			return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType.GetValue()))
 		}
@@ -578,7 +578,11 @@ func (c *Core) initCredentials(initCtx context.Context) error {
 		}
 		log.Ctx(initCtx).Info("RootCoord init user root")
 		err = c.meta.AddCredential(initCtx, &internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
-		return err
+		if err != nil {
+			log.Ctx(initCtx).Warn("RootCoord init user root failed", zap.Error(err))
+			return err
+		}
+		return nil
 	}
 	return nil
 }
@@ -593,7 +597,7 @@ func (c *Core) initRbac(initCtx context.Context) error {
 		}
 	}
 
-	if Params.ProxyCfg.EnablePublicPrivilege.GetAsBool() {
+	if Params.CommonCfg.EnablePublicPrivilege.GetAsBool() {
 		err = c.initPublicRolePrivilege(initCtx)
 		if err != nil {
 			return err
@@ -660,15 +664,12 @@ func (c *Core) initBuiltinRoles() error {
 			return errors.Wrapf(err, "failed to create a builtin role: %s", role)
 		}
 		for _, privilege := range privilegesJSON[util.RoleConfigPrivileges] {
-			privilegeName := privilege[util.RoleConfigPrivilege]
-			if !util.IsAnyWord(privilege[util.RoleConfigPrivilege]) {
-				dbPrivName, err := c.getMetastorePrivilegeName(c.ctx, privilege[util.RoleConfigPrivilege])
-				if err != nil {
-					return errors.Wrapf(err, "failed to get metastore privilege name for: %s", privilege[util.RoleConfigPrivilege])
-				}
-				privilegeName = dbPrivName
+			privilegeName, err := c.getMetastorePrivilegeName(c.ctx, privilege[util.RoleConfigPrivilege])
+			if err != nil {
+				return errors.Wrapf(err, "failed to get metastore privilege name for: %s", privilege[util.RoleConfigPrivilege])
 			}
-			err := c.meta.OperatePrivilege(c.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+
+			err = c.meta.OperatePrivilege(c.ctx, util.DefaultTenant, &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: role},
 				Object:     &milvuspb.ObjectEntity{Name: privilege[util.RoleConfigObjectType]},
 				ObjectName: privilege[util.RoleConfigObjectName],
@@ -825,15 +826,18 @@ func (c *Core) revokeSession() {
 	}
 }
 
+func (c *Core) GracefulStop() {
+	if c.streamingCoord != nil {
+		c.streamingCoord.Stop()
+	}
+}
+
 // Stop stops rootCoord.
 func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
 	c.stopExecutor()
 	c.stopScheduler()
 
-	if c.streamingCoord != nil {
-		c.streamingCoord.Stop()
-	}
 	if c.proxyWatcher != nil {
 		c.proxyWatcher.Stop()
 	}
@@ -1223,6 +1227,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.Properties = collInfo.Properties
 	resp.NumPartitions = int64(len(collInfo.Partitions))
 	resp.DbId = collInfo.DBID
+	resp.UpdateTimestamp = collInfo.UpdateTimestamp
 	return resp
 }
 
@@ -1330,6 +1335,75 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("ShowCollections").Observe(float64(t.queueDur.Milliseconds()))
 
 	return t.Rsp, nil
+}
+
+// ShowCollectionIDs returns all collection IDs.
+func (c *Core) ShowCollectionIDs(ctx context.Context, in *rootcoordpb.ShowCollectionIDsRequest) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &rootcoordpb.ShowCollectionIDsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionIDs", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("ShowCollectionIDs")
+
+	ts := typeutil.MaxTimestamp
+	log := log.Ctx(ctx).With(zap.Strings("dbNames", in.GetDbNames()), zap.Bool("allowUnavailable", in.GetAllowUnavailable()))
+
+	// Currently, this interface is only called during startup, so there is no need to execute it within the scheduler.
+	var err error
+	var dbs []*model.Database
+	if len(in.GetDbNames()) == 0 {
+		// show all collections
+		dbs, err = c.meta.ListDatabases(ctx, ts)
+		if err != nil {
+			log.Info("failed to ListDatabases", zap.Error(err))
+			metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionIDs", metrics.FailLabel).Inc()
+			return &rootcoordpb.ShowCollectionIDsResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+	} else {
+		dbs = make([]*model.Database, 0, len(in.GetDbNames()))
+		for _, name := range in.GetDbNames() {
+			db, err := c.meta.GetDatabaseByName(ctx, name, ts)
+			if err != nil {
+				log.Info("failed to GetDatabaseByName", zap.Error(err))
+				metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionIDs", metrics.FailLabel).Inc()
+				return &rootcoordpb.ShowCollectionIDsResponse{
+					Status: merr.Status(err),
+				}, nil
+			}
+			dbs = append(dbs, db)
+		}
+	}
+	dbCollections := make([]*rootcoordpb.DBCollections, 0, len(dbs))
+	for _, db := range dbs {
+		collections, err := c.meta.ListCollections(ctx, db.Name, ts, !in.GetAllowUnavailable())
+		if err != nil {
+			log.Info("failed to ListCollections", zap.Error(err))
+			metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionIDs", metrics.FailLabel).Inc()
+			return &rootcoordpb.ShowCollectionIDsResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+		dbCollections = append(dbCollections, &rootcoordpb.DBCollections{
+			DbName: db.Name,
+			CollectionIDs: lo.Map(collections, func(col *model.Collection, _ int) int64 {
+				return col.CollectionID
+			}),
+		})
+	}
+	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollectionIDs", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowCollectionIDs").Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	log.Info("ShowCollectionIDs done", zap.Any("collectionIDs", dbCollections))
+
+	return &rootcoordpb.ShowCollectionIDsResponse{
+		Status:        merr.Success(),
+		DbCollections: dbCollections,
+	}, nil
 }
 
 func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
@@ -2702,6 +2776,10 @@ func (c *Core) validatePrivilegeGroupParams(ctx context.Context, entity string, 
 }
 
 func (c *Core) getMetastorePrivilegeName(ctx context.Context, privName string) (string, error) {
+	// if it is '*', return directly
+	if util.IsAnyWord(privName) {
+		return privName, nil
+	}
 	// if it is built-in privilege, return the privilege name directly
 	if util.IsPrivilegeNameDefined(privName) {
 		return util.PrivilegeNameForMetastore(privName), nil
@@ -2714,7 +2792,7 @@ func (c *Core) getMetastorePrivilegeName(ctx context.Context, privName string) (
 	if customGroup {
 		return util.PrivilegeGroupNameForMetastore(privName), nil
 	}
-	return "", errors.New("not found the privilege name")
+	return "", errors.Newf("not found the privilege name [%s] from metastore", privName)
 }
 
 // SelectGrant select grant

@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
-	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 )
 
 func TestDetail(t *testing.T) {
@@ -28,8 +28,9 @@ func TestDetail(t *testing.T) {
 	OptError(errors.New("test"))(ackDetail)
 	assert.Error(t, ackDetail.Err)
 
-	OptMessageID(walimplstest.NewTestMessageID(1))(ackDetail)
-	assert.NotNil(t, ackDetail.MessageID)
+	msg := mock_message.NewMockImmutableMessage(t)
+	OptImmutableMessage(msg)(ackDetail)
+	assert.NotNil(t, ackDetail.Message)
 
 	OptTxnSession(&txn.TxnSession{})(ackDetail)
 	assert.NotNil(t, ackDetail.TxnSession)

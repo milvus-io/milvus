@@ -22,7 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 )
 
 func (s *MiniClusterSuite) WaitForFlush(ctx context.Context, segIDs []int64, flushTs uint64, dbName, collectionName string) {
@@ -153,6 +153,10 @@ func NewBinaryVectorFieldData(fieldName string, numRows, dim int) *schemapb.Fiel
 
 func NewSparseFloatVectorFieldData(fieldName string, numRows int) *schemapb.FieldData {
 	return testutils.NewSparseFloatVectorFieldData(fieldName, numRows)
+}
+
+func NewInt8VectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
+	return testutils.NewInt8VectorFieldData(fieldName, numRows, dim)
 }
 
 func GenerateInt64Array(numRows int, start int64) []int64 {

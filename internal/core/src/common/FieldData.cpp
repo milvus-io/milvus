@@ -179,7 +179,8 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(array_info.first, array_info.second);
         }
         case DataType::STRING:
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             AssertInfo(array->type()->id() == arrow::Type::type::STRING,
                        "inconsistent data type");
             auto string_array =
@@ -238,6 +239,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
         case DataType::VECTOR_FLOAT:
         case DataType::VECTOR_FLOAT16:
         case DataType::VECTOR_BFLOAT16:
+        case DataType::VECTOR_INT8:
         case DataType::VECTOR_BINARY: {
             auto array_info =
                 GetDataInfoFromArray<arrow::FixedSizeBinaryArray,
@@ -310,6 +312,7 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
                 type, nullable, cap_rows);
         case DataType::STRING:
         case DataType::VARCHAR:
+        case DataType::TEXT:
             return std::make_shared<FieldData<std::string>>(
                 type, nullable, cap_rows);
         case DataType::JSON:

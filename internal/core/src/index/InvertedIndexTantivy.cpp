@@ -30,36 +30,6 @@ namespace milvus::index {
 constexpr const char* TMP_INVERTED_INDEX_PREFIX = "/tmp/milvus/inverted-index/";
 
 inline TantivyDataType
-get_tantivy_data_type(proto::schema::DataType data_type) {
-    switch (data_type) {
-        case proto::schema::DataType::Bool: {
-            return TantivyDataType::Bool;
-        }
-
-        case proto::schema::DataType::Int8:
-        case proto::schema::DataType::Int16:
-        case proto::schema::DataType::Int32:
-        case proto::schema::DataType::Int64: {
-            return TantivyDataType::I64;
-        }
-
-        case proto::schema::DataType::Float:
-        case proto::schema::DataType::Double: {
-            return TantivyDataType::F64;
-        }
-
-        case proto::schema::DataType::String:
-        case proto::schema::DataType::VarChar: {
-            return TantivyDataType::Keyword;
-        }
-
-        default:
-            PanicInfo(ErrorCode::NotImplemented,
-                      fmt::format("not implemented data type: {}", data_type));
-    }
-}
-
-inline TantivyDataType
 get_tantivy_data_type(const proto::schema::FieldSchema& schema) {
     switch (schema.data_type()) {
         case proto::schema::Array:
@@ -311,7 +281,6 @@ template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::Range(T value, OpType op) {
     TargetBitmap bitset(Count());
-
     switch (op) {
         case OpType::LessThan: {
             auto array = wrapper_->upper_bound_range_query(value, false);
@@ -433,7 +402,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
             // only used in ut.
             auto arr = static_cast<const boost::container::vector<T>*>(values);
             for (size_t i = 0; i < n; i++) {
-                wrapper_->template add_multi_data(
+                wrapper_->template add_array_data(
                     arr[i].data(), arr[i].size(), i);
             }
         } else {
@@ -444,7 +413,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
             // only used in ut.
             auto arr = static_cast<const boost::container::vector<T>*>(values);
             for (size_t i = 0; i < n; i++) {
-                wrapper_->template add_multi_data_by_single_segment_writer(
+                wrapper_->template add_array_data_by_single_segment_writer(
                     arr[i].data(), arr[i].size());
             }
         } else {
@@ -489,7 +458,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                             if (!data->is_valid(i)) {
                                 null_offset.push_back(i);
                             }
-                            wrapper_->add_multi_data<T>(
+                            wrapper_->add_array_data<T>(
                                 static_cast<const T*>(data->RawValue(i)),
                                 data->is_valid(i),
                                 offset++);
@@ -512,7 +481,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                                 null_offset.push_back(i);
                             }
                             wrapper_
-                                ->add_multi_data_by_single_segment_writer<T>(
+                                ->add_array_data_by_single_segment_writer<T>(
                                     static_cast<const T*>(data->RawValue(i)),
                                     data->is_valid(i));
                         }
@@ -527,6 +496,11 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
 
         case proto::schema::DataType::Array: {
             build_index_for_array(field_datas);
+            break;
+        }
+
+        case proto::schema::DataType::JSON: {
+            build_index_for_json(field_datas);
             break;
         }
 
@@ -551,12 +525,12 @@ InvertedIndexTantivy<T>::build_index_for_array(
             }
             auto length = data->is_valid(i) ? array_column[i].length() : 0;
             if (!inverted_index_single_segment_) {
-                wrapper_->template add_multi_data(
+                wrapper_->template add_array_data(
                     reinterpret_cast<const T*>(array_column[i].data()),
                     length,
                     offset++);
             } else {
-                wrapper_->template add_multi_data_by_single_segment_writer(
+                wrapper_->template add_array_data_by_single_segment_writer(
                     reinterpret_cast<const T*>(array_column[i].data()), length);
             }
         }
@@ -585,10 +559,10 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
             }
             auto length = data->is_valid(i) ? output.size() : 0;
             if (!inverted_index_single_segment_) {
-                wrapper_->template add_multi_data(
+                wrapper_->template add_array_data(
                     output.data(), length, offset++);
             } else {
-                wrapper_->template add_multi_data_by_single_segment_writer(
+                wrapper_->template add_array_data_by_single_segment_writer(
                     output.data(), length);
             }
         }

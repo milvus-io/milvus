@@ -67,12 +67,40 @@ class AsyncMilvusClientWrapper:
     @logger_interceptor()
     async def load_collection(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
         return await self.async_milvus_client.load_collection(collection_name, timeout, **kwargs)
+    
+    @logger_interceptor()
+    async def release_collection(self, collection_name, timeout=None, **kwargs):
+        return await self.async_milvus_client.release_collection(collection_name, timeout, **kwargs)
 
     @logger_interceptor()
     async def create_index(self, collection_name: str, index_params, timeout: Optional[float] = None,
                            **kwargs):
         return await self.async_milvus_client.create_index(collection_name, index_params, timeout, **kwargs)
 
+    @logger_interceptor()
+    async def drop_index(self, collection_name, index_name, timeout=None, **kwargs):
+        return await self.async_milvus_client.drop_index(collection_name, index_name, timeout, **kwargs)
+
+    # @logger_interceptor()
+    # async def list_indexes(self, collection_name, field_name="", timeout=None, **kwargs):
+    #     return await self.async_milvus_client.list_indexes(collection_name, field_name, timeout, **kwargs)
+
+    @logger_interceptor()
+    async def create_partition(self, collection_name, partition_name, timeout=None, **kwargs):
+        return await self.async_milvus_client.create_partition(collection_name, partition_name, timeout, **kwargs)
+    
+    @logger_interceptor()
+    async def drop_partition(self, collection_name, partition_name, timeout=None, **kwargs):
+        return await self.async_milvus_client.drop_partition(collection_name, partition_name, timeout, **kwargs)
+    
+    @logger_interceptor()
+    async def load_partitions(self, collection_name, partition_names, timeout=None, **kwargs):
+        return await self.async_milvus_client.load_partitions(collection_name, partition_names, timeout, **kwargs)
+
+    @logger_interceptor()
+    async def release_partitions(self, collection_name, partition_names, timeout=None, **kwargs):
+        return await self.async_milvus_client.release_partitions(collection_name, partition_names, timeout, **kwargs)
+    
     @logger_interceptor()
     async def insert(self,
                      collection_name: str,

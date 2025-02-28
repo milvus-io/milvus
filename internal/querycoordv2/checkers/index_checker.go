@@ -28,11 +28,10 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const MaxSegmentNumPerGetIndexInfoRPC = 1024
@@ -120,12 +119,6 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 			continue
 		}
 
-		// skip update index for l0 segment
-		segmentInTarget := c.targetMgr.GetSealedSegment(ctx, collection.GetCollectionID(), segment.GetID(), meta.CurrentTargetFirst)
-		if segmentInTarget == nil || segmentInTarget.GetLevel() == datapb.SegmentLevel_L0 {
-			continue
-		}
-
 		missing := c.checkSegment(segment, indexInfos)
 		if len(missing) > 0 {
 			targets[segment.GetID()] = missing
@@ -164,7 +157,7 @@ func (c *IndexChecker) checkSegment(segment *meta.Segment, indexInfos []*indexpb
 	var result []int64
 	for _, indexInfo := range indexInfos {
 		fieldID, indexID := indexInfo.FieldID, indexInfo.IndexID
-		info, ok := segment.IndexInfo[fieldID]
+		info, ok := segment.IndexInfo[indexID]
 		if !ok {
 			result = append(result, fieldID)
 			continue
@@ -177,7 +170,7 @@ func (c *IndexChecker) checkSegment(segment *meta.Segment, indexInfos []*indexpb
 }
 
 func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *meta.Segment, replica *meta.Replica) (task.Task, bool) {
-	action := task.NewSegmentActionWithScope(segment.Node, task.ActionTypeUpdate, segment.GetInsertChannel(), segment.GetID(), querypb.DataScope_Historical)
+	action := task.NewSegmentActionWithScope(segment.Node, task.ActionTypeUpdate, segment.GetInsertChannel(), segment.GetID(), querypb.DataScope_Historical, int(segment.GetNumOfRows()))
 	t, err := task.NewSegmentTask(
 		ctx,
 		params.Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),

@@ -17,7 +17,7 @@
 package allocator
 
 import (
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // UniqueID is alias of typeutil.UniqueID

@@ -33,12 +33,12 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type collectionLoadConfig struct {
@@ -154,7 +154,7 @@ func (suite *ReplicaManagerSuite) TestGet() {
 			suite.Equal(collectionID, replica.GetCollectionID())
 			suite.Equal(replica, mgr.Get(ctx, replica.GetID()))
 			suite.Equal(len(replica.replicaPB.GetNodes()), replica.RWNodesCount())
-			suite.Equal(replica.replicaPB.GetNodes(), replica.GetNodes())
+			suite.ElementsMatch(replica.replicaPB.GetNodes(), replica.GetNodes())
 			replicaNodes[replica.GetID()] = replica.GetNodes()
 			nodes = append(nodes, replica.GetNodes()...)
 		}
@@ -221,7 +221,7 @@ func (suite *ReplicaManagerSuite) TestRecover() {
 	replica := mgr.Get(ctx, 2100)
 	suite.NotNil(replica)
 	suite.EqualValues(1000, replica.GetCollectionID())
-	suite.EqualValues([]int64{1, 2, 3}, replica.GetNodes())
+	suite.ElementsMatch([]int64{1, 2, 3}, replica.GetNodes())
 	suite.Len(replica.GetNodes(), len(replica.GetNodes()))
 	for _, node := range replica.GetNodes() {
 		suite.True(replica.Contains(node))
@@ -332,12 +332,14 @@ func (suite *ReplicaManagerSuite) clearMemory() {
 type ReplicaManagerV2Suite struct {
 	suite.Suite
 
-	rgs         map[string]typeutil.UniqueSet
-	collections map[int64]collectionLoadConfig
-	kv          kv.MetaKv
-	catalog     metastore.QueryCoordCatalog
-	mgr         *ReplicaManager
-	ctx         context.Context
+	rgs             map[string]typeutil.UniqueSet
+	sqNodes         typeutil.UniqueSet
+	outboundSQNodes []int64
+	collections     map[int64]collectionLoadConfig
+	kv              kv.MetaKv
+	catalog         metastore.QueryCoordCatalog
+	mgr             *ReplicaManager
+	ctx             context.Context
 }
 
 func (suite *ReplicaManagerV2Suite) SetupSuite() {
@@ -350,6 +352,8 @@ func (suite *ReplicaManagerV2Suite) SetupSuite() {
 		"RG4": typeutil.NewUniqueSet(7, 8, 9, 10),
 		"RG5": typeutil.NewUniqueSet(11, 12, 13, 14, 15),
 	}
+	suite.sqNodes = typeutil.NewUniqueSet(16, 17, 18, 19, 20)
+	suite.outboundSQNodes = []int64{}
 	suite.collections = map[int64]collectionLoadConfig{
 		1000: {
 			spawnConfig: map[string]int{"RG1": 1},
@@ -406,6 +410,7 @@ func (suite *ReplicaManagerV2Suite) TestSpawn() {
 			rgsOfCollection[rg] = suite.rgs[rg]
 		}
 		mgr.RecoverNodesInCollection(ctx, id, rgsOfCollection)
+		mgr.RecoverSQNodesInCollection(ctx, id, suite.sqNodes)
 		for rg := range cfg.spawnConfig {
 			for _, node := range suite.rgs[rg].Collect() {
 				replica := mgr.GetByCollectionAndNode(ctx, id, node)
@@ -428,6 +433,10 @@ func (suite *ReplicaManagerV2Suite) testIfBalanced() {
 		for _, r := range replicas {
 			rgToReplica[r.GetResourceGroup()] = append(rgToReplica[r.GetResourceGroup()], r)
 		}
+
+		maximumSQNodes := -1
+		minimumSQNodes := -1
+		sqNodes := make([]int64, 0)
 		for _, replicas := range rgToReplica {
 			maximumNodes := -1
 			minimumNodes := -1
@@ -440,7 +449,15 @@ func (suite *ReplicaManagerV2Suite) testIfBalanced() {
 				if minimumNodes == -1 || r.RWNodesCount() < minimumNodes {
 					minimumNodes = r.RWNodesCount()
 				}
-				nodes = append(nodes, r.GetNodes()...)
+				if maximumSQNodes == -1 || r.RWSQNodesCount() > maximumSQNodes {
+					maximumSQNodes = r.RWSQNodesCount()
+				}
+				if minimumSQNodes == -1 || r.RWSQNodesCount() < minimumSQNodes {
+					minimumSQNodes = r.RWSQNodesCount()
+				}
+				nodes = append(nodes, r.GetRWNodes()...)
+				nodes = append(nodes, r.GetRONodes()...)
+				sqNodes = append(sqNodes, r.GetRWSQNodes()...)
 				r.RangeOverRONodes(func(node int64) bool {
 					if availableNodes.Contain(node) {
 						nodes = append(nodes, node)
@@ -451,6 +468,10 @@ func (suite *ReplicaManagerV2Suite) testIfBalanced() {
 			suite.ElementsMatch(nodes, suite.rgs[replicas[0].GetResourceGroup()].Collect())
 			suite.True(maximumNodes-minimumNodes <= 1)
 		}
+		availableSQNodes := suite.sqNodes.Clone()
+		availableSQNodes.Remove(suite.outboundSQNodes...)
+		suite.ElementsMatch(availableSQNodes.Collect(), sqNodes)
+		suite.True(maximumSQNodes-minimumSQNodes <= 1)
 	}
 }
 
@@ -475,6 +496,7 @@ func (suite *ReplicaManagerV2Suite) TestTransferReplicaAndAddNode() {
 	suite.mgr.TransferReplica(ctx, 1005, "RG4", "RG5", 1)
 	suite.recoverReplica(1, false)
 	suite.rgs["RG5"].Insert(16, 17, 18)
+	suite.sqNodes.Insert(20, 21, 22)
 	suite.recoverReplica(2, true)
 	suite.testIfBalanced()
 }
@@ -482,6 +504,7 @@ func (suite *ReplicaManagerV2Suite) TestTransferReplicaAndAddNode() {
 func (suite *ReplicaManagerV2Suite) TestTransferNode() {
 	suite.rgs["RG4"].Remove(7)
 	suite.rgs["RG5"].Insert(7)
+	suite.outboundSQNodes = []int64{16, 17, 18}
 	suite.recoverReplica(2, true)
 	suite.testIfBalanced()
 }
@@ -497,7 +520,10 @@ func (suite *ReplicaManagerV2Suite) recoverReplica(k int, clearOutbound bool) {
 			for rg := range cfg.spawnConfig {
 				rgsOfCollection[rg] = suite.rgs[rg]
 			}
+			sqNodes := suite.sqNodes.Clone()
+			sqNodes.Remove(suite.outboundSQNodes...)
 			suite.mgr.RecoverNodesInCollection(ctx, id, rgsOfCollection)
+			suite.mgr.RecoverSQNodesInCollection(ctx, id, sqNodes)
 		}
 
 		// clear all outbound nodes
@@ -507,6 +533,7 @@ func (suite *ReplicaManagerV2Suite) recoverReplica(k int, clearOutbound bool) {
 				for _, r := range replicas {
 					outboundNodes := r.GetRONodes()
 					suite.mgr.RemoveNode(ctx, r.GetID(), outboundNodes...)
+					suite.mgr.RemoveSQNode(ctx, r.GetID(), r.GetROSQNodes()...)
 				}
 			}
 		}

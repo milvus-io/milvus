@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
 
 func TestStreamingError(t *testing.T) {
@@ -56,4 +56,10 @@ func TestStreamingError(t *testing.T) {
 	assert.False(t, streamingErr.IsWrongStreamingNode())
 	pbErr = streamingErr.AsPBError()
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, pbErr.Code)
+
+	streamingErr = NewResourceAcquired("test, %d", 1)
+	assert.Contains(t, streamingErr.Error(), "code: STREAMING_CODE_RESOURCE_ACQUIRED, cause: test, 1")
+	assert.False(t, streamingErr.IsWrongStreamingNode())
+	pbErr = streamingErr.AsPBError()
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_RESOURCE_ACQUIRED, pbErr.Code)
 }

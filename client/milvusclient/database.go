@@ -23,7 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func (c *Client) UseDatabase(ctx context.Context, option UseDatabaseOption) error {
@@ -87,7 +87,7 @@ func (c *Client) DescribeDatabase(ctx context.Context, option DescribeDatabaseOp
 	return db, err
 }
 
-func (c *Client) AlterDatabaseProperies(ctx context.Context, option AlterDatabasePropertiesOption, callOptions ...grpc.CallOption) error {
+func (c *Client) AlterDatabaseProperties(ctx context.Context, option AlterDatabasePropertiesOption, callOptions ...grpc.CallOption) error {
 	req := option.Request()
 
 	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {

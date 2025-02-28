@@ -8,7 +8,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 func TestCtxWithLevelAndTrace(t *testing.T) {

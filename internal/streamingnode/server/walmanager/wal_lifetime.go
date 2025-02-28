@@ -3,13 +3,13 @@ package walmanager
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
 // newWALLifetime create a WALLifetime with opener.
@@ -72,7 +72,14 @@ func (w *walLifetime) Remove(ctx context.Context, term int64) error {
 	}
 
 	// Wait until the WAL state is ready or term expired or error occurs.
-	return w.statePair.WaitCurrentStateReachExpected(ctx, expected)
+	err := w.statePair.WaitCurrentStateReachExpected(ctx, expected)
+	if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
+		return err
+	}
+	if err != nil {
+		w.logger.Info("remove wal success because that previous open operation is failure", zap.NamedError("previousOpenError", err))
+	}
+	return nil
 }
 
 // Close closes the wal lifetime.
@@ -132,7 +139,6 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 	// term must be increasing or available -> unavailable, close current term wal is always applied.
 	term := currentState.Term()
 	if oldWAL := currentState.GetWAL(); oldWAL != nil {
-		resource.Resource().Flusher().UnregisterPChannel(w.channel)
 		oldWAL.Close()
 		logger.Info("close current term wal done")
 		// Push term to current state unavailable and open a new wal.
@@ -160,14 +166,6 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 		return
 	}
 	logger.Info("open new wal done")
-	err = resource.Resource().Flusher().RegisterPChannel(w.channel, l)
-	if err != nil {
-		logger.Warn("open flusher fail", zap.Error(err))
-		w.statePair.SetCurrentState(newUnavailableCurrentState(expectedState.Term(), err))
-		// wal is opened, if register flusher failure, we should close the wal.
-		l.Close()
-		return
-	}
 	// -> (expectedTerm,true)
 	w.statePair.SetCurrentState(newAvailableCurrentState(l))
 }

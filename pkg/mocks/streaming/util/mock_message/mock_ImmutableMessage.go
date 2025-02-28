@@ -3,7 +3,7 @@
 package mock_message
 
 import (
-	message "github.com/milvus-io/milvus/pkg/streaming/util/message"
+	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -61,6 +61,53 @@ func (_c *MockImmutableMessage_BarrierTimeTick_Call) Return(_a0 uint64) *MockImm
 }
 
 func (_c *MockImmutableMessage_BarrierTimeTick_Call) RunAndReturn(run func() uint64) *MockImmutableMessage_BarrierTimeTick_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// BroadcastHeader provides a mock function with given fields:
+func (_m *MockImmutableMessage) BroadcastHeader() *message.BroadcastHeader {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for BroadcastHeader")
+	}
+
+	var r0 *message.BroadcastHeader
+	if rf, ok := ret.Get(0).(func() *message.BroadcastHeader); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*message.BroadcastHeader)
+		}
+	}
+
+	return r0
+}
+
+// MockImmutableMessage_BroadcastHeader_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BroadcastHeader'
+type MockImmutableMessage_BroadcastHeader_Call struct {
+	*mock.Call
+}
+
+// BroadcastHeader is a helper method to define mock.On call
+func (_e *MockImmutableMessage_Expecter) BroadcastHeader() *MockImmutableMessage_BroadcastHeader_Call {
+	return &MockImmutableMessage_BroadcastHeader_Call{Call: _e.mock.On("BroadcastHeader")}
+}
+
+func (_c *MockImmutableMessage_BroadcastHeader_Call) Run(run func()) *MockImmutableMessage_BroadcastHeader_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockImmutableMessage_BroadcastHeader_Call) Return(_a0 *message.BroadcastHeader) *MockImmutableMessage_BroadcastHeader_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImmutableMessage_BroadcastHeader_Call) RunAndReturn(run func() *message.BroadcastHeader) *MockImmutableMessage_BroadcastHeader_Call {
 	_c.Call.Return(run)
 	return _c
 }

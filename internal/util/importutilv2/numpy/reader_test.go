@@ -37,9 +37,9 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ReaderSuite struct {
@@ -190,6 +190,14 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
+		case schemapb.DataType_Int8Vector:
+			rows := fieldData.GetDataRows().([]int8)
+			chunked := lo.Chunk(rows, dim)
+			chunkedRows := make([][dim]int8, len(chunked))
+			for i, innerSlice := range chunked {
+				copy(chunkedRows[i][:], innerSlice)
+			}
+			data = chunkedRows
 		default:
 			data = fieldData.GetDataRows()
 		}
@@ -324,6 +332,14 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 				copy(chunkedRows[i][:], innerSlice)
 			}
 			data = chunkedRows
+		case schemapb.DataType_Int8Vector:
+			rows := fieldData.GetDataRows().([]int8)
+			chunked := lo.Chunk(rows, dim)
+			chunkedRows := make([][dim]int8, len(chunked))
+			for i, innerSlice := range chunked {
+				copy(chunkedRows[i][:], innerSlice)
+			}
+			data = chunkedRows
 		default:
 			data = fieldData.GetDataRows()
 		}
@@ -432,6 +448,8 @@ func (suite *ReaderSuite) TestVector() {
 	suite.run(schemapb.DataType_Int32)
 	// suite.vecDataType = schemapb.DataType_SparseFloatVector
 	// suite.run(schemapb.DataType_Int32)
+	suite.vecDataType = schemapb.DataType_Int8Vector
+	suite.run(schemapb.DataType_Int32)
 }
 
 func TestUtil(t *testing.T) {

@@ -27,8 +27,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ...grpc.CallOption) ([]ResultSet, error) {
@@ -69,6 +69,11 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 			ResultCount: rc,
 			Scores:      results.GetScores()[offset : offset+rc],
 			sch:         schema,
+		}
+
+		// set recall if returned
+		if i < len(results.Recalls) {
+			entry.Recall = results.Recalls[i]
 		}
 
 		entry.IDs, entry.Err = column.IDColumns(schema, results.GetIds(), offset, offset+rc)

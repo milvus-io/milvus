@@ -11,9 +11,10 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 )
 
 func TestResumableConsumer(t *testing.T) {
@@ -22,22 +23,25 @@ func TestResumableConsumer(t *testing.T) {
 	ch := make(chan struct{})
 	c.EXPECT().Done().Return(ch)
 	c.EXPECT().Error().Return(errors.New("test"))
-	c.EXPECT().Close().Return()
+	c.EXPECT().Close().Return(nil)
 	rc := NewResumableConsumer(func(ctx context.Context, opts *handler.ConsumerOptions) (consumer.Consumer, error) {
 		if i == 0 {
 			i++
-			ok, err := opts.MessageHandler.Handle(context.Background(), message.NewImmutableMesasge(
-				walimplstest.NewTestMessageID(123),
-				[]byte("payload"),
-				map[string]string{
-					"key": "value",
-					"_t":  "1",
-					"_tt": message.EncodeUint64(456),
-					"_v":  "1",
-					"_lc": walimplstest.NewTestMessageID(123).Marshal(),
-				}))
-			assert.True(t, ok)
-			assert.NoError(t, err)
+			result := opts.MessageHandler.Handle(message.HandleParam{
+				Ctx: context.Background(),
+				Message: message.NewImmutableMesasge(
+					walimplstest.NewTestMessageID(123),
+					[]byte("payload"),
+					map[string]string{
+						"key": "value",
+						"_t":  "1",
+						"_tt": message.EncodeUint64(456),
+						"_v":  "1",
+						"_lc": walimplstest.NewTestMessageID(123).Marshal(),
+					}),
+			})
+			assert.True(t, result.MessageHandled)
+			assert.NoError(t, result.Error)
 			return c, nil
 		} else if i == 1 {
 			i++
@@ -46,7 +50,7 @@ func TestResumableConsumer(t *testing.T) {
 		newC := mock_consumer.NewMockConsumer(t)
 		newC.EXPECT().Done().Return(make(<-chan struct{}))
 		newC.EXPECT().Error().Return(errors.New("test"))
-		newC.EXPECT().Close().Return()
+		newC.EXPECT().Close().Return(nil)
 		return newC, nil
 	}, &ConsumerOptions{
 		PChannel:      "test",
@@ -54,7 +58,7 @@ func TestResumableConsumer(t *testing.T) {
 		DeliverFilters: []options.DeliverFilter{
 			options.DeliverFilterTimeTickGT(1),
 		},
-		MessageHandler: message.ChanMessageHandler(make(chan message.ImmutableMessage, 2)),
+		MessageHandler: adaptor.ChanMessageHandler(make(chan message.ImmutableMessage, 2)),
 	})
 
 	select {
@@ -76,10 +80,13 @@ func TestResumableConsumer(t *testing.T) {
 func TestHandler(t *testing.T) {
 	ch := make(chan message.ImmutableMessage, 100)
 	hNop := nopCloseHandler{
-		Handler: message.ChanMessageHandler(ch),
+		Handler: adaptor.ChanMessageHandler(ch),
 	}
-	hNop.Handle(context.Background(), nil)
-	assert.Nil(t, <-ch)
+	hNop.Handle(message.HandleParam{
+		Ctx:     context.Background(),
+		Message: message.NewImmutableMesasge(walimplstest.NewTestMessageID(123), []byte("payload"), nil),
+	})
+	assert.NotNil(t, <-ch)
 	hNop.Close()
 	select {
 	case <-ch:

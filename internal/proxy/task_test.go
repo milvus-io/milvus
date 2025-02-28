@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -39,21 +40,21 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metric"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/testutils"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/uniquegenerator"
 )
 
 // TODO(dragondriver): add more test cases
@@ -1021,6 +1022,47 @@ func TestCreateCollectionTask(t *testing.T) {
 
 		err = task2.PreExecute(ctx)
 		assert.Error(t, err)
+	})
+
+	t.Run("collection with embedding function ", func(t *testing.T) {
+		fmt.Println(schema)
+		schema.Functions = []*schemapb.FunctionSchema{
+			{
+				Name:             "test",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldNames:  []string{varCharField},
+				OutputFieldNames: []string{floatVecField},
+				Params: []*commonpb.KeyValuePair{
+					{Key: "provider", Value: "openai"},
+					{Key: "model_name", Value: "text-embedding-ada-002"},
+					{Key: "api_key", Value: "mock"},
+				},
+			},
+		}
+
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task2 := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				ShardsNum:      shardsNum,
+			},
+			ctx:       ctx,
+			rootCoord: rc,
+			result:    nil,
+			schema:    nil,
+		}
+
+		err = task2.OnEnqueue()
+		assert.NoError(t, err)
+
+		err = task2.PreExecute(ctx)
+		assert.NoError(t, err)
 	})
 }
 

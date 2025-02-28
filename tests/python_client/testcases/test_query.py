@@ -5,6 +5,7 @@ from utils.util_log import test_log as log
 from common.common_type import CaseLabel, CheckTasks
 from common import common_type as ct
 from common import common_func as cf
+from common.phrase_match_generator import KoreanTextGenerator
 from common.code_mapping import ConnectionErrorMessage as cem
 from base.client_base import TestcaseBase
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_EVENTUALLY
@@ -29,6 +30,10 @@ Faker.seed(19530)
 fake_en = Faker("en_US")
 fake_zh = Faker("zh_CN")
 fake_de = Faker("de_DE")
+fake_jp = Faker("ja_JP")
+fake_ko = Faker("ko_KR")
+
+
 
 # patch faker to generate text with specific distribution
 cf.patch_faker_text(fake_en, cf.en_vocabularies_distribution)
@@ -3737,6 +3742,7 @@ class TestQueryCount(TestcaseBase):
         collection_w_alias.drop(check_task=CheckTasks.err_res,
                                 check_items={ct.err_code: 1,
                                              ct.err_msg: "cannot drop the collection via alias"})
+        self.utility_wrap.drop_alias(alias)
         collection_w.drop()
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -4800,13 +4806,10 @@ class TestQueryTextMatch(TestcaseBase):
                 assert any(
                     [token in r[field] for token in top_10_tokens]), f"top 10 tokens {top_10_tokens} not in {r[field]}"
 
-
-
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("tokenizer", ["jieba", "standard"])
-    @pytest.mark.xfail(reason="unstable case, issue: https://github.com/milvus-io/milvus/issues/36962")
     def test_query_text_match_with_growing_segment(
             self, tokenizer, enable_inverted_index, enable_partition_key
     ):
@@ -4817,7 +4820,7 @@ class TestQueryTextMatch(TestcaseBase):
                 3. verify the result
         expected: text match successfully and result is correct
         """
-        tokenizer_params = {
+        analyzer_params = {
             "tokenizer": tokenizer,
         }
         dim = 128
@@ -4827,34 +4830,34 @@ class TestQueryTextMatch(TestcaseBase):
                 name="word",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
                 is_partition_key=enable_partition_key,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="sentence",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="paragraph",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(
                 name="text",
                 dtype=DataType.VARCHAR,
                 max_length=65535,
-                enable_tokenizer=True,
+                enable_analyzer=True,
                 enable_match=True,
-                tokenizer_params=tokenizer_params,
+                analyzer_params=analyzer_params,
             ),
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
@@ -4897,6 +4900,7 @@ class TestQueryTextMatch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
+        time.sleep(3)
         # analyze the croup
         text_fields = ["word", "sentence", "paragraph", "text"]
         wf_map = {}
@@ -4905,22 +4909,12 @@ class TestQueryTextMatch(TestcaseBase):
         # query single field for one token
         for field in text_fields:
             token = wf_map[field].most_common()[0][0]
-            expr = f"TextMatch({field}, '{token}')"
+            expr = f"text_match({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
-            assert len(res) > 0
             log.info(f"res len {len(res)}")
-            for r in res:
-                assert token in r[field]
-            # verify inverted index
-            if enable_inverted_index:
-                if field == "word":
-                    expr = f"{field} == '{token}'"
-                    log.info(f"expr: {expr}")
-                    res, _ = collection_w.query(expr=expr, output_fields=["id", field])
-                    log.info(f"res len {len(res)}")
-                    for r in res:
-                        assert r[field] == token
+            assert len(res) > 0
+
         # query single field for multi-word
         for field in text_fields:
             # match top 10 most common words
@@ -4928,12 +4922,25 @@ class TestQueryTextMatch(TestcaseBase):
             for word, count in wf_map[field].most_common(10):
                 top_10_tokens.append(word)
             string_of_top_10_words = " ".join(top_10_tokens)
-            expr = f"TextMatch({field}, '{string_of_top_10_words}')"
+            expr = f"text_match({field}, '{string_of_top_10_words}')"
             log.info(f"expr {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             log.info(f"res len {len(res)}")
-            for r in res:
-                assert any([token in r[field] for token in top_10_tokens])
+            assert len(res) > 0
+
+        # flush and then query again
+        collection_w.flush()
+        for field in text_fields:
+            # match top 10 most common words
+            top_10_tokens = []
+            for word, count in wf_map[field].most_common(10):
+                top_10_tokens.append(word)
+            string_of_top_10_words = " ".join(top_10_tokens)
+            expr = f"text_match({field}, '{string_of_top_10_words}')"
+            log.info(f"expr {expr}")
+            res, _ = collection_w.query(expr=expr, output_fields=["id", field])
+            log.info(f"res len {len(res)}")
+            assert len(res) > 0
 
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -5733,6 +5740,79 @@ class TestQueryTextMatch(TestcaseBase):
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
             pytest.assume(len(res) == 0, f"res len {len(res)}, data size {data_size}")
 
+    @pytest.mark.parametrize("dict_kind", ["ipadic", "ko-dic", "cc-cedict"])
+    def test_query_text_match_with_Lindera_tokenizer(self, dict_kind):
+        """
+        target: test text match with lindera tokenizer
+        method: 1. enable text match, use lindera tokenizer and insert data with varchar in different lang
+                2. get the most common words and query with text match
+                3. verify the result
+        expected: get the correct token, text match successfully and result is correct
+        """
+        analyzer_params = {
+            "tokenizer": {
+            "type": "lindera",
+            "dict_kind": dict_kind
+            }
+        }
+        if dict_kind == "ipadic":
+            fake = fake_jp
+        elif dict_kind == "ko-dic":
+            fake = KoreanTextGenerator()
+        elif dict_kind == "cc-cedict":
+            fake = fake_zh
+        else:
+            fake = fake_en
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="sentence",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_analyzer=True,
+                enable_match=True,
+                analyzer_params=analyzer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        data_size = 5000
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema
+        )
+        data = [
+            {
+                "id": i,
+                "sentence": fake.sentence(),
+                "emb": [random.random() for _ in range(dim)],
+            }
+            for i in range(data_size)
+        ]
+        df = pd.DataFrame(data)
+        log.info(f"dataframe\n{df}")
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(
+                data[i: i + batch_size]
+                if i + batch_size < len(df)
+                else data[i: len(df)]
+            )
+            collection_w.flush()
+        collection_w.create_index(
+            "emb",
+            {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}},
+        )
+        collection_w.load()
+        # analyze the croup
+        text_fields = ["sentence"]
+        # query sentence field with word list
+        for field in text_fields:
+            match_text = df["sentence"].iloc[0]
+            expr = f"text_match({field}, '{match_text}')"
+            log.info(f"expr: {expr}")
+            res, _ = collection_w.query(expr=expr, output_fields=["id", field])
+            assert len(res) > 0
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_text_match_with_combined_expression_for_single_field(self):

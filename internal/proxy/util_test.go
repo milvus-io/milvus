@@ -37,18 +37,18 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestValidateCollectionName(t *testing.T) {
@@ -2848,6 +2848,79 @@ func TestValidateFunction(t *testing.T) {
 	})
 }
 
+func TestValidateModelFunction(t *testing.T) {
+	t.Run("Valid model function schema", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector},
+				{
+					Name: "output_dense_field", DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "4"},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+				{
+					Name:             "text_embedding_func",
+					Type:             schemapb.FunctionType_TextEmbedding,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_dense_field"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "provider", Value: "openai"},
+						{Key: "model_name", Value: "text-embedding-ada-002"},
+						{Key: "api_key", Value: "mock"},
+						{Key: "url", Value: "mock_url"},
+						{Key: "dim", Value: "4"},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Invalid function schema - Invalid function info ", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector},
+				{Name: "output_dense_field", DataType: schemapb.DataType_FloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+				{
+					Name:             "text_embedding_func",
+					Type:             schemapb.FunctionType_TextEmbedding,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_dense_field"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "provider", Value: "UnkownProvider"},
+						{Key: "model_name", Value: "text-embedding-ada-002"},
+						{Key: "api_key", Value: "mock"},
+						{Key: "url", Value: "mock_url"},
+						{Key: "dim", Value: "4"},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema)
+		assert.Error(t, err)
+	})
+}
+
 func TestValidateFunctionInputField(t *testing.T) {
 	t.Run("Valid BM25 function input", func(t *testing.T) {
 		function := &schemapb.FunctionSchema{
@@ -2920,6 +2993,28 @@ func TestValidateFunctionInputField(t *testing.T) {
 		err := checkFunctionInputField(function, fields)
 		assert.Error(t, err)
 	})
+
+	t.Run("Invalid TextEmbedding function input - multiple fields", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_TextEmbedding,
+		}
+		fields := []*schemapb.FieldSchema{}
+		err := checkFunctionInputField(function, fields)
+		assert.Error(t, err)
+	})
+
+	t.Run("Invalid TextEmbedding function input - wrong type", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_TextEmbedding,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_Int64,
+			},
+		}
+		err := checkFunctionInputField(function, fields)
+		assert.Error(t, err)
+	})
 }
 
 func TestValidateFunctionOutputField(t *testing.T) {
@@ -2972,6 +3067,28 @@ func TestValidateFunctionOutputField(t *testing.T) {
 		fields := []*schemapb.FieldSchema{
 			{
 				DataType: schemapb.DataType_FloatVector,
+			},
+		}
+		err := checkFunctionOutputField(function, fields)
+		assert.Error(t, err)
+	})
+
+	t.Run("Invalid TextEmbedding function input - multiple fields", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_TextEmbedding,
+		}
+		fields := []*schemapb.FieldSchema{}
+		err := checkFunctionOutputField(function, fields)
+		assert.Error(t, err)
+	})
+
+	t.Run("Invalid TextEmbedding function input - wrong type", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_TextEmbedding,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_Int64,
 			},
 		}
 		err := checkFunctionOutputField(function, fields)
@@ -3078,6 +3195,36 @@ func TestValidateFunctionBasicParams(t *testing.T) {
 		err := checkFunctionBasicParams(function)
 		assert.Error(t, err)
 	})
+
+	t.Run("Empty text embedding params", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Name:             "textEmbeddingParam",
+			Type:             schemapb.FunctionType_TextEmbedding,
+			InputFieldNames:  []string{"input1"},
+			OutputFieldNames: []string{"output1"},
+		}
+		err := checkFunctionBasicParams(function)
+		assert.Error(t, err)
+	})
+}
+
+func TestIsBM25FunctionOutputField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+			{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"input_field"},
+				OutputFieldNames: []string{"output_field"},
+			},
+		},
+	}
+	assert.False(t, IsBM25FunctionOutputField(schema.Fields[0], schema))
+	assert.True(t, IsBM25FunctionOutputField(schema.Fields[1], schema))
 }
 
 func TestComputeRecall(t *testing.T) {
@@ -3240,4 +3387,109 @@ func TestComputeRecall(t *testing.T) {
 		err := computeRecall(result1, gt)
 		assert.Error(t, err)
 	})
+}
+
+func TestCheckVarcharFormat(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_VarChar,
+				FieldID:  100,
+				TypeParams: []*commonpb.KeyValuePair{{
+					Key:   common.EnableAnalyzerKey,
+					Value: "true",
+				}},
+			},
+			// skip field
+			{
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+
+	data := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			FieldsData: []*schemapb.FieldData{{
+				FieldId: 100,
+				Type:    schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: []string{"valid string"},
+							},
+						},
+					},
+				},
+			}},
+		},
+	}
+
+	err := checkInputUtf8Compatiable(schema, data)
+	assert.NoError(t, err)
+
+	// invalid data
+	invalidUTF8 := []byte{0xC0, 0xAF}
+	data = &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			FieldsData: []*schemapb.FieldData{{
+				FieldId: 100,
+				Type:    schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: []string{string(invalidUTF8)},
+							},
+						},
+					},
+				},
+			}},
+		},
+	}
+	err = checkInputUtf8Compatiable(schema, data)
+	assert.Error(t, err)
+}
+
+func BenchmarkCheckVarcharFormat(b *testing.B) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_VarChar,
+				FieldID:  100,
+				TypeParams: []*commonpb.KeyValuePair{{
+					Key:   common.EnableAnalyzerKey,
+					Value: "true",
+				}},
+			},
+			// skip field
+			{
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+
+	data := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			FieldsData: []*schemapb.FieldData{{
+				FieldId: 100,
+				Type:    schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: []string{strings.Repeat("a", 1024*1024)},
+							},
+						},
+					},
+				},
+			}},
+		},
+	}
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		checkInputUtf8Compatiable(schema, data)
+	}
 }

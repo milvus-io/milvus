@@ -25,8 +25,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 )
 
 const (
@@ -39,11 +39,11 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 	for _, p := range plans {
 		actions := make([]task.Action, 0)
 		if p.To != -1 {
-			action := task.NewSegmentActionWithScope(p.To, task.ActionTypeGrow, p.Segment.GetInsertChannel(), p.Segment.GetID(), querypb.DataScope_Historical)
+			action := task.NewSegmentActionWithScope(p.To, task.ActionTypeGrow, p.Segment.GetInsertChannel(), p.Segment.GetID(), querypb.DataScope_Historical, int(p.Segment.GetNumOfRows()))
 			actions = append(actions, action)
 		}
 		if p.From != -1 {
-			action := task.NewSegmentActionWithScope(p.From, task.ActionTypeReduce, p.Segment.GetInsertChannel(), p.Segment.GetID(), querypb.DataScope_Historical)
+			action := task.NewSegmentActionWithScope(p.From, task.ActionTypeReduce, p.Segment.GetInsertChannel(), p.Segment.GetID(), querypb.DataScope_Historical, int(p.Segment.GetNumOfRows()))
 			actions = append(actions, action)
 		}
 		t, err := task.NewSegmentTask(

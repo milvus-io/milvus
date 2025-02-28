@@ -27,8 +27,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus/pkg/mq/common"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestClient(t *testing.T) {
@@ -81,4 +81,41 @@ func TestClient_Concurrency(t *testing.T) {
 	c := client1.(*client)
 	n := c.managers.Len()
 	assert.Equal(t, expected, n)
+}
+
+func TestClientMainDispatcherLeak(t *testing.T) {
+	client := NewClient(newMockFactory(), typeutil.ProxyRole, 1)
+	assert.NotNil(t, client)
+	pchannel := "mock_vchannel_0"
+
+	vchannel1 := fmt.Sprintf("%s_abc_v0", pchannel) //"mock_vchannel_0_abc_v0"
+	vchannel2 := fmt.Sprintf("%s_abc_v1", pchannel) //"mock_vchannel_0_abc_v0"
+	_, err := client.Register(context.Background(), NewStreamConfig(vchannel1, nil, common.SubscriptionPositionUnknown))
+	assert.NoError(t, err)
+
+	_, err = client.Register(context.Background(), NewStreamConfig(vchannel2, nil, common.SubscriptionPositionUnknown))
+	assert.NoError(t, err)
+
+	client.Deregister(vchannel2)
+	client.Deregister(vchannel1)
+
+	assert.NotPanics(
+		t, func() {
+			_, err = client.Register(context.Background(), NewStreamConfig(vchannel1, nil, common.SubscriptionPositionUnknown))
+			assert.NoError(t, err)
+			_, err = client.Register(context.Background(), NewStreamConfig(vchannel2, nil, common.SubscriptionPositionUnknown))
+			assert.NoError(t, err)
+		},
+	)
+
+	client.Deregister(vchannel1)
+	client.Deregister(vchannel2)
+	assert.NotPanics(
+		t, func() {
+			_, err = client.Register(context.Background(), NewStreamConfig(vchannel1, nil, common.SubscriptionPositionUnknown))
+			assert.NoError(t, err)
+			_, err = client.Register(context.Background(), NewStreamConfig(vchannel2, nil, common.SubscriptionPositionUnknown))
+			assert.NoError(t, err)
+		},
+	)
 }

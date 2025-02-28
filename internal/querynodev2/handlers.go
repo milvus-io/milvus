@@ -31,15 +31,15 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
 func loadL0Segments(ctx context.Context, delegator delegator.ShardDelegator, req *querypb.WatchDmChannelsRequest) error {
@@ -68,18 +68,7 @@ func loadL0Segments(ctx context.Context, delegator delegator.ShardDelegator, req
 		}
 	}
 
-	return delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
-		Base:          req.GetBase(),
-		DstNodeID:     req.GetNodeID(),
-		Infos:         l0Segments,
-		Schema:        req.GetSchema(),
-		CollectionID:  req.GetCollectionID(),
-		LoadMeta:      req.GetLoadMeta(),
-		ReplicaID:     req.GetReplicaID(),
-		Version:       req.GetVersion(),
-		NeedTransfer:  false,
-		IndexInfoList: req.GetIndexInfoList(),
-	})
+	return delegator.LoadL0(ctx, l0Segments, req.GetVersion())
 }
 
 func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator, req *querypb.WatchDmChannelsRequest) error {

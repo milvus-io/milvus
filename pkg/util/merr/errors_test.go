@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type ErrSuite struct {
@@ -74,7 +74,7 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrServiceNotReady("test", 0, "test init..."), ErrServiceNotReady)
 	s.ErrorIs(WrapErrServiceUnavailable("test", "test init"), ErrServiceUnavailable)
 	s.ErrorIs(WrapErrServiceMemoryLimitExceeded(110, 100, "MLE"), ErrServiceMemoryLimitExceeded)
-	s.ErrorIs(WrapErrServiceRequestLimitExceeded(100, "too many requests"), ErrServiceRequestLimitExceeded)
+	s.ErrorIs(WrapErrTooManyRequests(100, "too many requests"), ErrServiceTooManyRequests)
 	s.ErrorIs(WrapErrServiceInternal("never throw out"), ErrServiceInternal)
 	s.ErrorIs(WrapErrServiceCrossClusterRouting("ins-0", "ins-1"), ErrServiceCrossClusterRouting)
 	s.ErrorIs(WrapErrServiceDiskLimitExceeded(110, 100, "DLE"), ErrServiceDiskLimitExceeded)
@@ -88,7 +88,7 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrCollectionNotLoaded("test_collection", "failed to alter index %s", "hnsw"), ErrCollectionNotLoaded)
 	s.ErrorIs(WrapErrCollectionOnRecovering("test_collection", "channel lost %s", "dev"), ErrCollectionOnRecovering)
 	s.ErrorIs(WrapErrCollectionVectorClusteringKeyNotAllowed("test_collection", "field"), ErrCollectionVectorClusteringKeyNotAllowed)
-
+	s.ErrorIs(WrapErrCollectionSchemaMisMatch("schema mismatch", "field"), ErrCollectionSchemaMismatch)
 	// Partition related
 	s.ErrorIs(WrapErrPartitionNotFound("test_partition", "failed to get partition"), ErrPartitionNotFound)
 	s.ErrorIs(WrapErrPartitionNotLoaded("test_partition", "failed to query"), ErrPartitionNotLoaded)

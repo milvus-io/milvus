@@ -24,6 +24,7 @@
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/Element.h"
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
 #include "segcore/SegmentInterface.h"
@@ -320,6 +321,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       name,
                       segment,
                       expr->column_.field_id_,
+                      expr->column_.nested_path_,
+                      FromValCase(expr->val_.val_case()),
                       active_count,
                       batch_size),
           expr_(expr) {
@@ -379,12 +382,17 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     bool
     CanUseIndexForArray();
 
+    bool
+    CanUseIndexForJson(DataType val_type);
+
     VectorPtr
     ExecTextMatch();
 
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;
     int64_t overflow_check_pos_{0};
+    bool arg_inited_{false};
+    SingleElement value_arg_;
 };
 }  // namespace exec
 }  // namespace milvus

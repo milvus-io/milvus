@@ -29,12 +29,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/lock"
-	"github.com/milvus-io/milvus/pkg/util/retry"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // allocPool pool of Allocation, to reduce allocation of Allocation
@@ -90,6 +90,8 @@ type Manager interface {
 	ExpireAllocations(ctx context.Context, channel string, ts Timestamp)
 	// DropSegmentsOfChannel drops all segments in a channel
 	DropSegmentsOfChannel(ctx context.Context, channel string)
+	// CleanZeroSealedSegmentsOfChannel try to clean real empty sealed segments in a channel
+	CleanZeroSealedSegmentsOfChannel(ctx context.Context, channel string, cpTs Timestamp)
 }
 
 // Allocation records the allocation info
@@ -196,7 +198,7 @@ func defaultAllocatePolicy() AllocatePolicy {
 func defaultSegmentSealPolicy() []SegmentSealPolicy {
 	return []SegmentSealPolicy{
 		sealL1SegmentByBinlogFileNumber(Params.DataCoordCfg.SegmentMaxBinlogFileNumber.GetAsInt()),
-		sealL1SegmentByLifetime(Params.DataCoordCfg.SegmentMaxLifetime.GetAsDuration(time.Second)),
+		sealL1SegmentByLifetime(),
 		sealL1SegmentByCapacity(Params.DataCoordCfg.SegmentSealProportion.GetAsFloat()),
 		sealL1SegmentByIdleTime(Params.DataCoordCfg.SegmentMaxIdleTime.GetAsDuration(time.Second), Params.DataCoordCfg.SegmentMinSizeFromIdleToSealed.GetAsFloat(), Params.DataCoordCfg.SegmentMaxSize.GetAsFloat()),
 	}
@@ -511,9 +513,6 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 		return nil, err
 	}
 
-	// TODO: It's too frequent; perhaps each channel could check once per minute instead.
-	s.cleanupSealedSegment(ctx, t, channel)
-
 	sealed, ok := s.channel2Sealed.Get(channel)
 	if !ok {
 		return nil, nil
@@ -565,26 +564,35 @@ func (s *SegmentManager) ExpireAllocations(ctx context.Context, channel string, 
 	})
 }
 
-func (s *SegmentManager) cleanupSealedSegment(ctx context.Context, ts Timestamp, channel string) {
+func (s *SegmentManager) CleanZeroSealedSegmentsOfChannel(ctx context.Context, channel string, cpTs Timestamp) {
+	s.channelLock.Lock(channel)
+	defer s.channelLock.Unlock(channel)
+
 	sealed, ok := s.channel2Sealed.Get(channel)
 	if !ok {
+		log.Info("try remove empty sealed segment after channel cp updated failed to get channel", zap.String("channel", channel))
 		return
 	}
 	sealed.Range(func(id int64) bool {
 		segment := s.meta.GetHealthySegment(ctx, id)
 		if segment == nil {
-			log.Warn("failed to get segment, remove it", zap.String("channel", channel), zap.Int64("segmentID", id))
+			log.Warn("try remove empty sealed segment, failed to get segment, remove it in channel2Sealed", zap.String("channel", channel), zap.Int64("segmentID", id))
 			sealed.Remove(id)
 			return true
 		}
 		// Check if segment is empty
-		if segment.GetLastExpireTime() <= ts && segment.currRows == 0 {
-			log.Info("remove empty sealed segment", zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id))
+		if segment.GetLastExpireTime() > 0 && segment.GetLastExpireTime() < cpTs && segment.currRows == 0 && segment.GetNumOfRows() == 0 {
+			log.Info("try remove empty sealed segment after channel cp updated",
+				zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id),
+				zap.String("channel", channel), zap.Any("cpTs", cpTs))
 			if err := s.meta.SetState(ctx, id, commonpb.SegmentState_Dropped); err != nil {
-				log.Warn("failed to set segment state to dropped", zap.String("channel", channel),
+				log.Warn("try remove empty sealed segment after channel cp updated, failed to set segment state to dropped", zap.String("channel", channel),
 					zap.Int64("segmentID", id), zap.Error(err))
 			} else {
 				sealed.Remove(id)
+				log.Info("succeed to remove empty sealed segment",
+					zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id),
+					zap.String("channel", channel), zap.Any("cpTs", cpTs), zap.Any("expireTs", segment.GetLastExpireTime()))
 			}
 		}
 		return true

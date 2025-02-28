@@ -218,49 +218,17 @@ generate_params(const knowhere::IndexType& index_type,
 }
 
 auto
-GenDataset(int64_t N,
-           const knowhere::MetricType& metric_type,
-           bool is_binary,
-           int64_t dim = DIM) {
+GenFieldData(int64_t N,
+             const knowhere::MetricType& metric_type,
+             milvus::DataType data_type = milvus::DataType::VECTOR_FLOAT,
+             int64_t dim = DIM) {
     auto schema = std::make_shared<milvus::Schema>();
-    if (!is_binary) {
-        schema->AddDebugField(
-            "fakevec", milvus::DataType::VECTOR_FLOAT, dim, metric_type);
-        return milvus::segcore::DataGen(schema, N);
-    } else {
-        schema->AddDebugField(
-            "fakebinvec", milvus::DataType::VECTOR_BINARY, dim, metric_type);
-        return milvus::segcore::DataGen(schema, N);
-    }
-}
-
-auto
-GenDatasetWithDataType(int64_t N,
-                       const knowhere::MetricType& metric_type,
-                       milvus::DataType data_type,
-                       int64_t dim = DIM) {
-    auto schema = std::make_shared<milvus::Schema>();
-    if (data_type == milvus::DataType::VECTOR_FLOAT16) {
-        schema->AddDebugField(
-            "fakevec", milvus::DataType::VECTOR_FLOAT16, dim, metric_type);
-        return milvus::segcore::DataGen(schema, N);
-    } else if (data_type == milvus::DataType::VECTOR_BFLOAT16) {
-        schema->AddDebugField(
-            "fakevec", milvus::DataType::VECTOR_BFLOAT16, dim, metric_type);
-        return milvus::segcore::DataGen(schema, N);
-    } else if (data_type == milvus::DataType::VECTOR_FLOAT) {
-        schema->AddDebugField(
-            "fakevec", milvus::DataType::VECTOR_FLOAT, dim, metric_type);
-        return milvus::segcore::DataGen(schema, N);
-    } else if (data_type == milvus::DataType::VECTOR_SPARSE_FLOAT) {
-        schema->AddDebugField(
-            "fakevec", milvus::DataType::VECTOR_SPARSE_FLOAT, 0, metric_type);
-        return milvus::segcore::DataGen(schema, N);
-    } else {
-        schema->AddDebugField(
-            "fakebinvec", milvus::DataType::VECTOR_BINARY, dim, metric_type);
-        return milvus::segcore::DataGen(schema, N);
-    }
+    schema->AddDebugField(
+        "fakevec",
+        data_type,
+        (data_type != milvus::DataType::VECTOR_SPARSE_FLOAT ? dim : 0),
+        metric_type);
+    return milvus::segcore::DataGen(schema, N);
 }
 
 using QueryResultPtr = std::unique_ptr<milvus::SearchResult>;

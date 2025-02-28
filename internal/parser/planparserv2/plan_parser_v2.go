@@ -11,10 +11,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	planparserv2 "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var (
@@ -191,6 +191,8 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 		vectorType = planpb.VectorType_BFloat16Vector
 	case schemapb.DataType_SparseFloatVector:
 		vectorType = planpb.VectorType_SparseFloatVector
+	case schemapb.DataType_Int8Vector:
+		vectorType = planpb.VectorType_Int8Vector
 	default:
 		log.Error("Invalid dataType", zap.Any("dataType", dataType))
 		return nil, err

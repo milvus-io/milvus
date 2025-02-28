@@ -21,6 +21,7 @@
 
 #include "FieldIndexing.h"
 #include "common/Common.h"
+#include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/SystemProperty.h"
@@ -147,18 +148,28 @@ class SegmentInternalInterface : public SegmentInterface {
 
     template <typename ViewType>
     std::pair<std::vector<ViewType>, FixedVector<bool>>
-    chunk_view(FieldId field_id, int64_t chunk_id) const {
-        auto [string_views, valid_data] = chunk_view_impl(field_id, chunk_id);
+    chunk_view(FieldId field_id,
+               int64_t chunk_id,
+               std::optional<std::pair<int64_t, int64_t>> offset_len =
+                   std::nullopt) const {
         if constexpr (std::is_same_v<ViewType, std::string_view>) {
+            auto [string_views, valid_data] =
+                chunk_string_view_impl(field_id, chunk_id, offset_len);
             return std::make_pair(std::move(string_views),
                                   std::move(valid_data));
-        } else {
-            std::vector<ViewType> res;
+        } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
+            auto [array_views, valid_data] =
+                chunk_array_view_impl(field_id, chunk_id, offset_len);
+            return std::make_pair(array_views, valid_data);
+        } else if constexpr (std::is_same_v<ViewType, Json>) {
+            auto [string_views, valid_data] =
+                chunk_string_view_impl(field_id, chunk_id, offset_len);
+            std::vector<Json> res;
             res.reserve(string_views.size());
-            for (const auto& view : string_views) {
-                res.emplace_back(view);
+            for (const auto& str_view : string_views) {
+                res.emplace_back(str_view);
             }
-            return std::make_pair(res, valid_data);
+            return {std::move(res), std::move(valid_data)};
         }
     }
 
@@ -172,31 +183,8 @@ class SegmentInternalInterface : public SegmentInterface {
             PanicInfo(ErrorCode::Unsupported,
                       "get chunk views not supported for growing segment");
         }
-        auto chunk_info =
-            get_chunk_buffer(field_id, chunk_id, start_offset, length);
-        BufferView buffer = chunk_info.first;
-        std::vector<ViewType> res;
-        res.reserve(length);
-        if (buffer.data_.index() == 1) {
-            char* pos = std::get<1>(buffer.data_).first;
-            for (size_t j = 0; j < length; j++) {
-                uint32_t size;
-                size = *reinterpret_cast<uint32_t*>(pos);
-                pos += sizeof(uint32_t);
-                res.emplace_back(ViewType(pos, size));
-                pos += size;
-            }
-        } else {
-            auto elements = std::get<0>(buffer.data_);
-            for (auto& element : elements) {
-                for (int i = element.start_; i < element.end_; i++) {
-                    res.emplace_back(ViewType(
-                        element.data_ + element.offsets_[i],
-                        element.offsets_[i + 1] - element.offsets_[i]));
-                }
-            }
-        }
-        return std::make_pair(res, chunk_info.second);
+        return chunk_view<ViewType>(
+            field_id, chunk_id, std::make_pair(start_offset, length));
     }
 
     template <typename ViewType>
@@ -239,6 +227,18 @@ class SegmentInternalInterface : public SegmentInterface {
                std::to_string(field_id);
     }
 
+    template <typename T>
+    const index::ScalarIndex<T>&
+    chunk_scalar_index(FieldId field_id,
+                       std::string path,
+                       int64_t chunk_id) const {
+        using IndexType = index::ScalarIndex<T>;
+        auto base_ptr = chunk_index_impl(field_id, path, chunk_id);
+        auto ptr = dynamic_cast<const IndexType*>(base_ptr);
+        AssertInfo(ptr, "entry mismatch");
+        return *ptr;
+    }
+
     std::unique_ptr<SearchResult>
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_group,
@@ -268,6 +268,12 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual bool
     HasIndex(FieldId field_id) const = 0;
 
+    virtual bool
+    HasIndex(FieldId field_id,
+             const std::string& nested_path,
+             DataType data_type) const {
+        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+    };
     virtual bool
     HasFieldData(FieldId field_id) const = 0;
 
@@ -426,7 +432,16 @@ class SegmentInternalInterface : public SegmentInterface {
 
     // internal API: return chunk string views in vector
     virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    chunk_view_impl(FieldId field_id, int64_t chunk_id) const = 0;
+    chunk_string_view_impl(FieldId field_id,
+                           int64_t chunk_id,
+                           std::optional<std::pair<int64_t, int64_t>>
+                               offset_len = std::nullopt) const = 0;
+
+    virtual std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    chunk_array_view_impl(FieldId field_id,
+                          int64_t chunk_id,
+                          std::optional<std::pair<int64_t, int64_t>>
+                              offset_len = std::nullopt) const = 0;
 
     // internal API: return buffer reference to field chunk data located from start_offset
     virtual std::pair<BufferView, FixedVector<bool>>
@@ -450,6 +465,13 @@ class SegmentInternalInterface : public SegmentInterface {
     get_timestamps() const = 0;
 
  public:
+    virtual const index::IndexBase*
+    chunk_index_impl(FieldId field_id,
+                     std::string path,
+                     int64_t chunk_id) const {
+        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+    };
+
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type
     virtual void
     bulk_subscript(SystemFieldType system_type,

@@ -28,10 +28,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/metric"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -132,6 +132,8 @@ func (s *TestGetVectorSuite) run() {
 		vecFieldData = integration.NewBFloat16VectorFieldData(vecFieldName, NB, dim)
 	} else if typeutil.IsSparseFloatVectorType(s.vecType) {
 		vecFieldData = integration.NewSparseFloatVectorFieldData(vecFieldName, NB)
+	} else if s.vecType == schemapb.DataType_Int8Vector {
+		vecFieldData = integration.NewInt8VectorFieldData(vecFieldName, NB, dim)
 	} else {
 		vecFieldData = integration.NewBinaryVectorFieldData(vecFieldName, NB, dim)
 	}
@@ -294,6 +296,26 @@ func (s *TestGetVectorSuite) run() {
 				s.Require().Equal(rawData[id], resData[i])
 			}
 		}
+	} else if s.vecType == schemapb.DataType_Int8Vector {
+		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetInt8Vector(), nq*topk*dim)
+		rawData := vecFieldData.GetVectors().GetInt8Vector()
+		resData := result.GetFieldsData()[vecFieldIndex].GetVectors().GetInt8Vector()
+		rowBytes := dim
+		if s.pkType == schemapb.DataType_Int64 {
+			for i, id := range result.GetIds().GetIntId().GetData() {
+				expect := rawData[int(id)*rowBytes : (int(id)+1)*rowBytes]
+				actual := resData[i*rowBytes : (i+1)*rowBytes]
+				s.Require().ElementsMatch(expect, actual)
+			}
+		} else {
+			for i, idStr := range result.GetIds().GetStrId().GetData() {
+				id, err := strconv.Atoi(idStr)
+				s.Require().NoError(err)
+				expect := rawData[id*rowBytes : (id+1)*rowBytes]
+				actual := resData[i*rowBytes : (i+1)*rowBytes]
+				s.Require().ElementsMatch(expect, actual)
+			}
+		}
 	} else {
 		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetBinaryVector(), nq*topk*dim/8)
 		rawData := vecFieldData.GetVectors().GetBinaryVector()
@@ -445,6 +467,16 @@ func (s *TestGetVectorSuite) TestGetVector_BFloat16Vector() {
 	s.metricType = metric.L2
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_BFloat16Vector
+	s.run()
+}
+
+func (s *TestGetVectorSuite) TestGetVector_Int8Vector() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = integration.IndexHNSW
+	s.metricType = metric.L2
+	s.pkType = schemapb.DataType_Int64
+	s.vecType = schemapb.DataType_Int8Vector
 	s.run()
 }
 

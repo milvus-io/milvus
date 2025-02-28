@@ -25,20 +25,21 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/mq/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type DispatcherManager interface {
 	Add(ctx context.Context, streamConfig *StreamConfig) (<-chan *MsgPack, error)
 	Remove(vchannel string)
-	Num() int
+	NumTarget() int
+	NumConsumer() int
 	Run()
 	Close()
 }
@@ -125,16 +126,6 @@ func (c *dispatcherManager) Remove(vchannel string) {
 		zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.mainDispatcher != nil {
-		c.mainDispatcher.Handle(pause)
-		c.mainDispatcher.CloseTarget(vchannel)
-		if c.mainDispatcher.TargetNum() == 0 && len(c.soloDispatchers) == 0 {
-			c.mainDispatcher.Handle(terminate)
-			c.mainDispatcher = nil
-		} else {
-			c.mainDispatcher.Handle(resume)
-		}
-	}
 	if _, ok := c.soloDispatchers[vchannel]; ok {
 		c.soloDispatchers[vchannel].Handle(terminate)
 		c.soloDispatchers[vchannel].CloseTarget(vchannel)
@@ -143,9 +134,31 @@ func (c *dispatcherManager) Remove(vchannel string) {
 		log.Info("remove soloDispatcher done")
 	}
 	c.lagTargets.GetAndRemove(vchannel)
+
+	if c.mainDispatcher != nil {
+		c.mainDispatcher.Handle(pause)
+		c.mainDispatcher.CloseTarget(vchannel)
+		if c.mainDispatcher.TargetNum() == 0 && len(c.soloDispatchers) == 0 {
+			c.mainDispatcher.Handle(terminate)
+			c.mainDispatcher = nil
+			log.Info("remove mainDispatcher done")
+		} else {
+			c.mainDispatcher.Handle(resume)
+		}
+	}
 }
 
-func (c *dispatcherManager) Num() int {
+func (c *dispatcherManager) NumTarget() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var res int
+	if c.mainDispatcher != nil {
+		res += c.mainDispatcher.TargetNum()
+	}
+	return res + len(c.soloDispatchers) + c.lagTargets.Len()
+}
+
+func (c *dispatcherManager) NumConsumer() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	var res int

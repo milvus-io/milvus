@@ -30,8 +30,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/mq/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 )
 
 func TestDispatcher(t *testing.T) {
@@ -150,7 +150,7 @@ func TestGroupMessage(t *testing.T) {
 	d.AddTarget(newTarget("mock_pchannel_0_2v0", nil, msgstream.GetReplicateConfig("local-test", "foo", "coo")))
 	{
 		// no replicate msg
-		packs := d.groupingMsgs(&MsgPack{
+		packs := d.groupAndParseMsgs(msgstream.BuildConsumeMsgPack(&MsgPack{
 			BeginTs: 1,
 			EndTs:   10,
 			StartPositions: []*msgstream.MsgPosition{
@@ -182,13 +182,13 @@ func TestGroupMessage(t *testing.T) {
 					},
 				},
 			},
-		})
+		}), nil)
 		assert.Len(t, packs, 1)
 	}
 
 	{
 		// equal to replicateID
-		packs := d.groupingMsgs(&MsgPack{
+		packs := d.groupAndParseMsgs(msgstream.BuildConsumeMsgPack(&MsgPack{
 			BeginTs: 1,
 			EndTs:   10,
 			StartPositions: []*msgstream.MsgPosition{
@@ -222,7 +222,7 @@ func TestGroupMessage(t *testing.T) {
 					},
 				},
 			},
-		})
+		}), nil)
 		assert.Len(t, packs, 2)
 		{
 			replicatePack := packs["mock_pchannel_0_2v0"]
@@ -244,7 +244,7 @@ func TestGroupMessage(t *testing.T) {
 
 	{
 		// not equal to replicateID
-		packs := d.groupingMsgs(&MsgPack{
+		packs := d.groupAndParseMsgs(msgstream.BuildConsumeMsgPack(&MsgPack{
 			BeginTs: 1,
 			EndTs:   10,
 			StartPositions: []*msgstream.MsgPosition{
@@ -278,7 +278,7 @@ func TestGroupMessage(t *testing.T) {
 					},
 				},
 			},
-		})
+		}), nil)
 		assert.Len(t, packs, 1)
 		replicatePack := packs["mock_pchannel_0_2v0"]
 		assert.Nil(t, replicatePack)
@@ -288,7 +288,7 @@ func TestGroupMessage(t *testing.T) {
 		// replicate end
 		replicateTarget := d.targets["mock_pchannel_0_2v0"]
 		assert.NotNil(t, replicateTarget.replicateConfig)
-		packs := d.groupingMsgs(&MsgPack{
+		packs := d.groupAndParseMsgs(msgstream.BuildConsumeMsgPack(&MsgPack{
 			BeginTs: 1,
 			EndTs:   10,
 			StartPositions: []*msgstream.MsgPosition{
@@ -324,7 +324,7 @@ func TestGroupMessage(t *testing.T) {
 					},
 				},
 			},
-		})
+		}), nil)
 		assert.Len(t, packs, 2)
 		replicatePack := packs["mock_pchannel_0_2v0"]
 		assert.EqualValues(t, 100, replicatePack.BeginTs)

@@ -3,7 +3,7 @@ package planparserv2
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 )
 
 func Test_hasWildcards(t *testing.T) {
@@ -11,38 +11,44 @@ func Test_hasWildcards(t *testing.T) {
 		pattern string
 	}
 	tests := []struct {
-		name string
-		args args
-		want bool
+		name   string
+		args   args
+		want   bool
+		target string
 	}{
 		{
 			args: args{
 				pattern: "no-wildcards",
 			},
-			want: false,
+			want:   false,
+			target: "no-wildcards",
 		},
 		{
 			args: args{
 				pattern: "has\\%",
 			},
-			want: false,
+			want:   false,
+			target: "has%",
 		},
 		{
 			args: args{
 				pattern: "%",
 			},
-			want: true,
+			want:   true,
+			target: "%",
 		},
 		{
 			args: args{
 				pattern: "has%",
 			},
-			want: true,
+			want:   true,
+			target: "has%",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := hasWildcards(tt.args.pattern); got != tt.want {
+			patten, got := hasWildcards(tt.args.pattern)
+			if got != tt.want || patten != tt.target {
 				t.Errorf("hasWildcards(%s) = %v, want %v", tt.args.pattern, got, tt.want)
 			}
 		})

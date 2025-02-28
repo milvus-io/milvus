@@ -27,12 +27,12 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func executeDeleteCredentialTaskSteps(ctx context.Context, core *Core, username string) error {
@@ -148,16 +148,14 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, in *milvu
 	privName := in.Entity.Grantor.Privilege.Name
 	redoTask := newBaseRedoTask(core.stepExecutor)
 	redoTask.AddSyncStep(NewSimpleStep("operate privilege meta data", func(ctx context.Context) ([]nestedStep, error) {
-		if !util.IsAnyWord(privName) {
-			// set up privilege name for metastore
-			dbPrivName, err := core.getMetastorePrivilegeName(ctx, privName)
-			if err != nil {
-				return nil, err
-			}
-			in.Entity.Grantor.Privilege.Name = dbPrivName
+		// set up privilege name for metastore
+		dbPrivName, err := core.getMetastorePrivilegeName(ctx, privName)
+		if err != nil {
+			return nil, err
 		}
+		in.Entity.Grantor.Privilege.Name = dbPrivName
 
-		err := core.meta.OperatePrivilege(ctx, util.DefaultTenant, in.Entity, in.Type)
+		err = core.meta.OperatePrivilege(ctx, util.DefaultTenant, in.Entity, in.Type)
 		if err != nil && !common.IsIgnorableError(err) {
 			log.Ctx(ctx).Warn("fail to operate the privilege", zap.Any("in", in), zap.Error(err))
 			return nil, err

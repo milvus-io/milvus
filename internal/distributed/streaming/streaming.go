@@ -6,9 +6,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
 var singleton WALAccesser = nil
@@ -84,16 +84,24 @@ type WALAccesser interface {
 	// WALName returns the name of the wal.
 	WALName() string
 
-	// Txn returns a transaction for writing records to the log.
+	// GetLatestMVCCTimestampIfLocal gets the latest mvcc timestamp of the vchannel.
+	// If the wal is located at remote, it will return 0, error.
+	GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error)
+
+	// Txn returns a transaction for writing records to one vchannel.
+	// It promises the atomicity written of the messages.
 	// Once the txn is returned, the Commit or Rollback operation must be called once, otherwise resource leak on wal.
 	Txn(ctx context.Context, opts TxnOption) (Txn, error)
 
 	// RawAppend writes a records to the log.
 	RawAppend(ctx context.Context, msgs message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error)
 
-	// BroadcastAppend sends a broadcast message to all target vchannels.
-	// BroadcastAppend guarantees the atomicity written of the messages and eventual consistency.
-	BroadcastAppend(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
+	// Broadcast returns a broadcast service of wal.
+	// Broadcast support cross-vchannel message broadcast.
+	// It promises the atomicity written of the messages and eventual consistency.
+	// And the broadcasted message must be acked cat consuming-side, otherwise resource leak on broadcast.
+	// Broadcast also support the resource-key to achieve a resource-exclusive acquirsion.
+	Broadcast() Broadcast
 
 	// Read returns a scanner for reading records from the wal.
 	Read(ctx context.Context, opts ReadOption) Scanner
@@ -103,13 +111,31 @@ type WALAccesser interface {
 	// If the messages is belong to one vchannel, it will be sent as a transaction.
 	// Otherwise, it will be sent as individual messages.
 	// !!! This function do not promise the atomicity and deliver order of the messages appending.
-	// TODO: Remove after we support cross-wal txn.
 	AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses
 
 	// AppendMessagesWithOption appends messages to the wal with the given option.
 	// Same with AppendMessages, but with the given option.
-	// TODO: Remove after we support cross-wal txn.
 	AppendMessagesWithOption(ctx context.Context, opts AppendOption, msgs ...message.MutableMessage) AppendResponses
+}
+
+// Broadcast is the interface for writing broadcast message into the wal.
+type Broadcast interface {
+	// Append of Broadcast sends a broadcast message to all target vchannels.
+	// Guarantees the atomicity written of the messages and eventual consistency.
+	// The resource-key bound at the message will be held until the message is acked at consumer.
+	// Once the resource-key is held, the append operation will be rejected.
+	// Use resource-key to make a sequential operation at same resource-key.
+	Append(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
+
+	// Ack acknowledges a broadcast message at the specified vchannel.
+	// It must be called after the message is comsumed by the unique-consumer.
+	Ack(ctx context.Context, req types.BroadcastAckRequest) error
+
+	// BlockUntilResourceKeyAckOnce blocks until the resource-key-bind broadcast message is acked at any one vchannel.
+	BlockUntilResourceKeyAckOnce(ctx context.Context, rk message.ResourceKey) error
+
+	// BlockUntilResourceKeyAckOnce blocks until the resource-key-bind broadcast message is acked at all vchannel.
+	BlockUntilResourceKeyAckAll(ctx context.Context, rk message.ResourceKey) error
 }
 
 // Txn is the interface for writing transaction into the wal.

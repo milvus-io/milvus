@@ -21,8 +21,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/common"
-	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 )
 
 type Collection struct {
@@ -46,6 +46,7 @@ type Collection struct {
 	Properties           []*commonpb.KeyValuePair
 	State                pb.CollectionState
 	EnableDynamicField   bool
+	UpdateTimestamp      uint64
 }
 
 func (c *Collection) Available() bool {
@@ -74,6 +75,7 @@ func (c *Collection) ShallowClone() *Collection {
 		State:                c.State,
 		EnableDynamicField:   c.EnableDynamicField,
 		Functions:            c.Functions,
+		UpdateTimestamp:      c.UpdateTimestamp,
 	}
 }
 
@@ -99,6 +101,7 @@ func (c *Collection) Clone() *Collection {
 		State:                c.State,
 		EnableDynamicField:   c.EnableDynamicField,
 		Functions:            CloneFunctions(c.Functions),
+		UpdateTimestamp:      c.UpdateTimestamp,
 	}
 }
 
@@ -156,6 +159,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		State:                coll.State,
 		Properties:           coll.Properties,
 		EnableDynamicField:   coll.Schema.EnableDynamicField,
+		UpdateTimestamp:      coll.UpdateTimestamp,
 	}
 }
 
@@ -218,6 +222,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		StartPositions:       coll.StartPositions,
 		State:                coll.State,
 		Properties:           coll.Properties,
+		UpdateTimestamp:      coll.UpdateTimestamp,
 	}
 
 	if c.withPartitions {

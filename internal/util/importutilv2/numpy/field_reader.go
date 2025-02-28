@@ -30,9 +30,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/parameterutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type FieldReader struct {
@@ -104,6 +104,8 @@ func (c *FieldReader) getCount(count int64) int64 {
 		count *= c.dim
 	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		count *= c.dim * 2
+	case schemapb.DataType_Int8Vector:
+		count *= c.dim
 	}
 	if int(count) > (total - c.readPosition) {
 		return int64(total - c.readPosition)
@@ -199,6 +201,12 @@ func (c *FieldReader) Next(count int64) (any, error) {
 		c.readPosition += int(readCount)
 	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		data, err = ReadN[uint8](c.reader, c.order, readCount)
+		if err != nil {
+			return nil, err
+		}
+		c.readPosition += int(readCount)
+	case schemapb.DataType_Int8Vector:
+		data, err = ReadN[int8](c.reader, c.order, readCount)
 		if err != nil {
 			return nil, err
 		}

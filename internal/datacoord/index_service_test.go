@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -41,11 +42,11 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func TestServerId(t *testing.T) {
@@ -551,6 +552,23 @@ func TestServer_AlterIndex(t *testing.T) {
 		},
 	}
 
+	mockHandler := NewNMockHandler(t)
+
+	mockGetCollectionInfo := func() {
+		mockHandler.EXPECT().GetCollection(mock.Anything, collID).Return(&collectionInfo{
+			ID: collID,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:  fieldID,
+						Name:     "FieldFloatVector",
+						DataType: schemapb.DataType_FloatVector,
+					},
+				},
+			},
+		}, nil).Once()
+	}
+
 	s := &Server{
 		meta: &meta{
 			catalog:   catalog,
@@ -608,6 +626,7 @@ func TestServer_AlterIndex(t *testing.T) {
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
+		handler:         mockHandler,
 	}
 
 	t.Run("server not available", func(t *testing.T) {
@@ -620,6 +639,7 @@ func TestServer_AlterIndex(t *testing.T) {
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 
 	t.Run("mmap_unsupported", func(t *testing.T) {
+		mockGetCollectionInfo()
 		indexParams[0].Value = "GPU_CAGRA"
 
 		resp, err := s.AlterIndex(ctx, req)
@@ -630,6 +650,7 @@ func TestServer_AlterIndex(t *testing.T) {
 	})
 
 	t.Run("param_value_invalied", func(t *testing.T) {
+		mockGetCollectionInfo()
 		req.Params[0].Value = "abc"
 		resp, err := s.AlterIndex(ctx, req)
 		assert.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
@@ -638,6 +659,7 @@ func TestServer_AlterIndex(t *testing.T) {
 	})
 
 	t.Run("delete_params", func(t *testing.T) {
+		mockGetCollectionInfo()
 		deleteReq := &indexpb.AlterIndexRequest{
 			CollectionID: collID,
 			IndexName:    indexName,
@@ -657,6 +679,7 @@ func TestServer_AlterIndex(t *testing.T) {
 		}
 	})
 	t.Run("update_and_delete_params", func(t *testing.T) {
+		mockGetCollectionInfo()
 		updateAndDeleteReq := &indexpb.AlterIndexRequest{
 			CollectionID: collID,
 			IndexName:    indexName,
@@ -2561,4 +2584,179 @@ func TestValidateIndexParams(t *testing.T) {
 		err := ValidateIndexParams(index)
 		assert.Error(t, err)
 	})
+}
+
+func TestJsonIndex(t *testing.T) {
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Maybe()
+	mock0Allocator := newMockAllocator(t)
+	indexMeta := newSegmentIndexMeta(catalog)
+	b := mocks.NewMockRootCoordClient(t)
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+			Code:      0,
+		},
+		Schema: &schemapb.CollectionSchema{
+			Name: "test_index",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  0,
+					Name:     "json",
+					DataType: schemapb.DataType_JSON,
+				},
+				{
+					FieldID:  1,
+					Name:     "json2",
+					DataType: schemapb.DataType_JSON,
+				},
+				{
+					FieldID:   2,
+					Name:      "dynamic",
+					DataType:  schemapb.DataType_JSON,
+					IsDynamic: true,
+				},
+			},
+		},
+	}, nil)
+
+	s := &Server{
+		meta: &meta{
+			catalog: catalog,
+			collections: map[UniqueID]*collectionInfo{
+				collID: {
+					ID: collID,
+				},
+			},
+			indexMeta: indexMeta,
+		},
+		allocator:       mock0Allocator,
+		notifyIndexChan: make(chan UniqueID, 1),
+		broker:          broker.NewCoordinatorBroker(b),
+	}
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+
+	req := &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "a",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_String))}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
+	}
+	resp, err := s.CreateIndex(context.Background(), req)
+	assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_String))}, {Key: common.JSONPathKey, Value: "json[\"c\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+	// different json field with same json path
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     1,
+		IndexName:   "",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_String))}, {Key: common.JSONPathKey, Value: "json2[\"c\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+	// duplicated index with same params
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "a",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_String))}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+	// duplicated index with different cast type
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "a",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.Error(t, merr.CheckRPCCall(resp, err))
+
+	// duplicated index with different index name
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "b",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.Error(t, merr.CheckRPCCall(resp, err))
+
+	// another field json index with same index name
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "a",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"b\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.Error(t, merr.CheckRPCCall(resp, err))
+
+	// lack of json params
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "a",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONPathKey, Value: "json[\"a\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.Error(t, merr.CheckRPCCall(resp, err))
+
+	// incorrect field name in json path
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     1,
+		IndexName:   "c",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "bad_json[\"a\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.Error(t, merr.CheckRPCCall(resp, err))
+
+	// dynamic field
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     2,
+		IndexName:   "",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "dynamic_a_field"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+	// wrong path: missing quotes
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "d",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[a][\"b\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.Error(t, merr.CheckRPCCall(resp, err))
+
+	// wrong path: missing closing quote
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "e",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"][\"b"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.Error(t, merr.CheckRPCCall(resp, err))
+
+	// wrong path: malformed brackets
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "f",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"[\"b]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.Error(t, merr.CheckRPCCall(resp, err))
+
+	// valid path with array index
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "g",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"][0][\"b\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.NoError(t, merr.CheckRPCCall(resp, err))
 }

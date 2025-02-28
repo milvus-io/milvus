@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // We wrap original protobuf structure for 2 reasons:
@@ -307,6 +307,37 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 						Dim:      dim,
 						Contents: data,
 					},
+				},
+			},
+		}
+	case schemapb.DataType_Int8Vector:
+		wrappedData := [][]int8{}
+		err := json.Unmarshal(raw, &wrappedData)
+		if err != nil {
+			return nil, newFieldDataError(f.FieldName, err)
+		}
+		if len(wrappedData) < 1 {
+			return nil, errors.New("at least one row for insert")
+		}
+		array0 := wrappedData[0]
+		dim := len(array0)
+		if dim < 1 {
+			return nil, errors.New("dim must >= 1")
+		}
+		data := make([]byte, len(wrappedData)*dim)
+
+		var i int
+		for _, dataArray := range wrappedData {
+			for _, v := range dataArray {
+				data[i] = byte(v)
+				i++
+			}
+		}
+		ret.Field = &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_Int8Vector{
+					Int8Vector: data,
 				},
 			},
 		}

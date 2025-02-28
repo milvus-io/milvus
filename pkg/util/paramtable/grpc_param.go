@@ -26,8 +26,8 @@ import (
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
 const (
@@ -203,7 +203,7 @@ func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "grpc.gracefulStopTimeout",
 		Version:      "2.3.1",
-		DefaultValue: "10",
+		DefaultValue: "3",
 		Doc:          "second, time to wait graceful stop finish",
 		Export:       true,
 	}

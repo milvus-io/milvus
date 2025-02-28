@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
@@ -43,23 +44,24 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
-	"github.com/milvus-io/milvus/pkg/util/metric"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // ShardDelegator is the interface definition.
@@ -79,9 +81,10 @@ type ShardDelegator interface {
 	ProcessInsert(insertRecords map[int64]*InsertData)
 	ProcessDelete(deleteData []*DeleteData, ts uint64)
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
+	LoadL0(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
-	SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition)
+	SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition, deleteSeekPos *msgpb.MsgPosition)
 	GetTargetVersion() int64
 	GetDeleteBufferSize() (entryNum int64, memorySize int64)
 
@@ -349,6 +352,14 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
 
+	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
+		ctx,
+		req.Req.GetConsistencyLevel(),
+		req.Req.GetGuaranteeTimestamp(),
+		req.Req.GetMvccTimestamp(),
+		req.Req.GetIsIterator(),
+	)
+
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
 	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
@@ -390,13 +401,14 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				Nq:                 subReq.GetNq(),
 				Topk:               subReq.GetTopk(),
 				MetricType:         subReq.GetMetricType(),
-				IgnoreGrowing:      req.GetReq().GetIgnoreGrowing(),
+				IgnoreGrowing:      subReq.GetIgnoreGrowing(),
 				Username:           req.GetReq().GetUsername(),
 				IsAdvanced:         false,
 				GroupByFieldId:     subReq.GetGroupByFieldId(),
 				GroupSize:          subReq.GetGroupSize(),
 				FieldId:            subReq.GetFieldId(),
 				IsTopkReduce:       req.GetReq().GetIsTopkReduce(),
+				IsIterator:         req.GetReq().GetIsIterator(),
 			}
 			future := conc.Go(func() (*internalpb.SearchResults, error) {
 				searchReq := &querypb.SearchRequest{
@@ -456,6 +468,14 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		)
 		return fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
+
+	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
+		ctx,
+		req.Req.GetConsistencyLevel(),
+		req.Req.GetGuaranteeTimestamp(),
+		req.Req.GetMvccTimestamp(),
+		req.Req.GetIsIterator(),
+	)
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
@@ -519,6 +539,14 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		)
 		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
+
+	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
+		ctx,
+		req.Req.GetConsistencyLevel(),
+		req.Req.GetGuaranteeTimestamp(),
+		req.Req.GetMvccTimestamp(),
+		req.Req.GetIsIterator(),
+	)
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
@@ -738,6 +766,28 @@ func executeSubTasks[T any, R interface {
 	return results, nil
 }
 
+// speedupGuranteeTS returns the guarantee timestamp for strong consistency search.
+// TODO: we just make a speedup right now, but in the future, we will make the mvcc and guarantee timestamp same.
+func (sd *shardDelegator) speedupGuranteeTS(
+	ctx context.Context,
+	cl commonpb.ConsistencyLevel,
+	guaranteeTS uint64,
+	mvccTS uint64,
+	isIterator bool,
+) uint64 {
+	// when 1. streaming service is disable,
+	// 2. consistency level is not strong,
+	// 3. cannot speed iterator, because current client of milvus doesn't support shard level mvcc.
+	if !streamingutil.IsStreamingServiceEnabled() || isIterator || cl != commonpb.ConsistencyLevel_Strong || mvccTS != 0 {
+		return guaranteeTS
+	}
+	// use the mvcc timestamp of the wal as the guarantee timestamp to make fast strong consistency search.
+	if mvcc, err := streaming.WAL().GetLatestMVCCTimestampIfLocal(ctx, sd.vchannelName); err == nil && mvcc < guaranteeTS {
+		return mvcc
+	}
+	return guaranteeTS
+}
+
 // waitTSafe returns when tsafe listener notifies a timestamp which meet the guarantee ts.
 func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, error) {
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "Delegator-waitTSafe")
@@ -813,6 +863,11 @@ func (sd *shardDelegator) Close() {
 	// broadcast to all waitTsafe goroutine to quit
 	sd.tsCond.Broadcast()
 	sd.lifetime.Wait()
+
+	// clean up l0 segment in delete buffer
+	start := time.Now()
+	sd.deleteBuffer.Clear()
+	log.Info("unregister all  l0 segments", zap.Duration("cost", time.Since(start)))
 
 	metrics.QueryNodeDeleteBufferSize.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
 	metrics.QueryNodeDeleteBufferRowNum.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)

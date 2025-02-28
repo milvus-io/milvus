@@ -22,10 +22,10 @@ import (
 	"github.com/milvus-io/milvus/cmd/roles"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/hardware"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func makeRuntimeDir(dir string) error {
@@ -148,7 +148,9 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableIndexCoord = true
 	case typeutil.StreamingNodeRole:
 		streamingutil.MustEnableStreamingService()
+		streamingutil.EnableEmbededQueryNode()
 		role.EnableStreamingNode = true
+		role.EnableQueryNode = true
 	case typeutil.StandaloneRole, typeutil.EmbeddedRole:
 		role.EnableRootCoord = true
 		role.EnableProxy = true
@@ -171,6 +173,10 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableDataNode = enableDataNode
 		role.EnableProxy = enableProxy
 		role.EnableStreamingNode = enableStreamingNode
+		if enableStreamingNode && !enableQueryNode {
+			role.EnableQueryNode = true
+			streamingutil.EnableEmbededQueryNode()
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n%s", serverType, getHelp())
 		os.Exit(-1)

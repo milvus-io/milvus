@@ -18,17 +18,19 @@ package compaction
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -176,6 +178,24 @@ func (e *executor) executeTask(task Compactor) {
 	}
 	e.completed.Insert(result.GetPlanID(), result)
 	e.completedCompactor.Insert(result.GetPlanID(), task)
+
+	getLogSize := func(binlogs []*datapb.FieldBinlog) int64 {
+		size := int64(0)
+		for _, binlog := range binlogs {
+			for _, fbinlog := range binlog.GetBinlogs() {
+				size += fbinlog.GetLogSize()
+			}
+		}
+		return size
+	}
+
+	totalSize := lo.SumBy(result.Segments, func(seg *datapb.CompactionSegment) int64 {
+		return getLogSize(seg.GetInsertLogs()) +
+			getLogSize(seg.GetField2StatslogPaths()) +
+			getLogSize(seg.GetBm25Logs()) +
+			getLogSize(seg.GetDeltalogs())
+	})
+	metrics.DataNodeWriteBinlogSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.CompactionDataSourceLabel, fmt.Sprint(task.GetCollection())).Add(float64(totalSize))
 
 	log.Info("end to execute compaction")
 }

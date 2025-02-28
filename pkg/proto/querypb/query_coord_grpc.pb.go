@@ -10,7 +10,7 @@ import (
 	context "context"
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -54,6 +54,7 @@ const (
 	QueryCoord_GetQueryNodeDistribution_FullMethodName   = "/milvus.proto.query.QueryCoord/GetQueryNodeDistribution"
 	QueryCoord_SuspendBalance_FullMethodName             = "/milvus.proto.query.QueryCoord/SuspendBalance"
 	QueryCoord_ResumeBalance_FullMethodName              = "/milvus.proto.query.QueryCoord/ResumeBalance"
+	QueryCoord_CheckBalanceStatus_FullMethodName         = "/milvus.proto.query.QueryCoord/CheckBalanceStatus"
 	QueryCoord_SuspendNode_FullMethodName                = "/milvus.proto.query.QueryCoord/SuspendNode"
 	QueryCoord_ResumeNode_FullMethodName                 = "/milvus.proto.query.QueryCoord/ResumeNode"
 	QueryCoord_TransferSegment_FullMethodName            = "/milvus.proto.query.QueryCoord/TransferSegment"
@@ -101,6 +102,7 @@ type QueryCoordClient interface {
 	GetQueryNodeDistribution(ctx context.Context, in *GetQueryNodeDistributionRequest, opts ...grpc.CallOption) (*GetQueryNodeDistributionResponse, error)
 	SuspendBalance(ctx context.Context, in *SuspendBalanceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ResumeBalance(ctx context.Context, in *ResumeBalanceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	CheckBalanceStatus(ctx context.Context, in *CheckBalanceStatusRequest, opts ...grpc.CallOption) (*CheckBalanceStatusResponse, error)
 	SuspendNode(ctx context.Context, in *SuspendNodeRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ResumeNode(ctx context.Context, in *ResumeNodeRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	TransferSegment(ctx context.Context, in *TransferSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -405,6 +407,15 @@ func (c *queryCoordClient) ResumeBalance(ctx context.Context, in *ResumeBalanceR
 	return out, nil
 }
 
+func (c *queryCoordClient) CheckBalanceStatus(ctx context.Context, in *CheckBalanceStatusRequest, opts ...grpc.CallOption) (*CheckBalanceStatusResponse, error) {
+	out := new(CheckBalanceStatusResponse)
+	err := c.cc.Invoke(ctx, QueryCoord_CheckBalanceStatus_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryCoordClient) SuspendNode(ctx context.Context, in *SuspendNodeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, QueryCoord_SuspendNode_FullMethodName, in, out, opts...)
@@ -498,6 +509,7 @@ type QueryCoordServer interface {
 	GetQueryNodeDistribution(context.Context, *GetQueryNodeDistributionRequest) (*GetQueryNodeDistributionResponse, error)
 	SuspendBalance(context.Context, *SuspendBalanceRequest) (*commonpb.Status, error)
 	ResumeBalance(context.Context, *ResumeBalanceRequest) (*commonpb.Status, error)
+	CheckBalanceStatus(context.Context, *CheckBalanceStatusRequest) (*CheckBalanceStatusResponse, error)
 	SuspendNode(context.Context, *SuspendNodeRequest) (*commonpb.Status, error)
 	ResumeNode(context.Context, *ResumeNodeRequest) (*commonpb.Status, error)
 	TransferSegment(context.Context, *TransferSegmentRequest) (*commonpb.Status, error)
@@ -605,6 +617,9 @@ func (UnimplementedQueryCoordServer) SuspendBalance(context.Context, *SuspendBal
 }
 func (UnimplementedQueryCoordServer) ResumeBalance(context.Context, *ResumeBalanceRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ResumeBalance not implemented")
+}
+func (UnimplementedQueryCoordServer) CheckBalanceStatus(context.Context, *CheckBalanceStatusRequest) (*CheckBalanceStatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CheckBalanceStatus not implemented")
 }
 func (UnimplementedQueryCoordServer) SuspendNode(context.Context, *SuspendNodeRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SuspendNode not implemented")
@@ -1212,6 +1227,24 @@ func _QueryCoord_ResumeBalance_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryCoord_CheckBalanceStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckBalanceStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryCoordServer).CheckBalanceStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryCoord_CheckBalanceStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryCoordServer).CheckBalanceStatus(ctx, req.(*CheckBalanceStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _QueryCoord_SuspendNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SuspendNodeRequest)
 	if err := dec(in); err != nil {
@@ -1454,6 +1487,10 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResumeBalance",
 			Handler:    _QueryCoord_ResumeBalance_Handler,
+		},
+		{
+			MethodName: "CheckBalanceStatus",
+			Handler:    _QueryCoord_CheckBalanceStatus_Handler,
 		},
 		{
 			MethodName: "SuspendNode",

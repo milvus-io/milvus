@@ -27,10 +27,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
-	"github.com/milvus-io/milvus/pkg/log"
-	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type dropCollectionTask struct {
@@ -63,13 +63,19 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 		log.Ctx(ctx).Warn("drop non-existent collection", zap.String("collection", t.Req.GetCollectionName()), zap.String("database", t.Req.GetDbName()))
 		return nil
 	}
-
 	if err != nil {
 		return err
 	}
 
 	// meta cache of all aliases should also be cleaned.
 	aliases := t.core.meta.ListAliasesByID(ctx, collMeta.CollectionID)
+
+	// Check if all aliases have been dropped.
+	if len(aliases) > 0 {
+		err = fmt.Errorf("unable to drop the collection [%s] because it has associated aliases %v, please remove all aliases before dropping the collection", t.Req.GetCollectionName(), aliases)
+		log.Ctx(ctx).Warn("drop collection failed", zap.String("database", t.Req.GetDbName()), zap.Error(err))
+		return err
+	}
 
 	ts := t.GetTs()
 	return executeDropCollectionTaskSteps(ctx,

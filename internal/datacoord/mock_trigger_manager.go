@@ -21,6 +21,104 @@ func (_m *MockTriggerManager) EXPECT() *MockTriggerManager_Expecter {
 	return &MockTriggerManager_Expecter{mock: &_m.Mock}
 }
 
+// GetPauseCompactionChan provides a mock function with given fields: jobID, collectionID
+func (_m *MockTriggerManager) GetPauseCompactionChan(jobID int64, collectionID int64) <-chan struct{} {
+	ret := _m.Called(jobID, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPauseCompactionChan")
+	}
+
+	var r0 <-chan struct{}
+	if rf, ok := ret.Get(0).(func(int64, int64) <-chan struct{}); ok {
+		r0 = rf(jobID, collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(<-chan struct{})
+		}
+	}
+
+	return r0
+}
+
+// MockTriggerManager_GetPauseCompactionChan_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPauseCompactionChan'
+type MockTriggerManager_GetPauseCompactionChan_Call struct {
+	*mock.Call
+}
+
+// GetPauseCompactionChan is a helper method to define mock.On call
+//   - jobID int64
+//   - collectionID int64
+func (_e *MockTriggerManager_Expecter) GetPauseCompactionChan(jobID interface{}, collectionID interface{}) *MockTriggerManager_GetPauseCompactionChan_Call {
+	return &MockTriggerManager_GetPauseCompactionChan_Call{Call: _e.mock.On("GetPauseCompactionChan", jobID, collectionID)}
+}
+
+func (_c *MockTriggerManager_GetPauseCompactionChan_Call) Run(run func(jobID int64, collectionID int64)) *MockTriggerManager_GetPauseCompactionChan_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockTriggerManager_GetPauseCompactionChan_Call) Return(_a0 <-chan struct{}) *MockTriggerManager_GetPauseCompactionChan_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTriggerManager_GetPauseCompactionChan_Call) RunAndReturn(run func(int64, int64) <-chan struct{}) *MockTriggerManager_GetPauseCompactionChan_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetResumeCompactionChan provides a mock function with given fields: jobID, collectionID
+func (_m *MockTriggerManager) GetResumeCompactionChan(jobID int64, collectionID int64) <-chan struct{} {
+	ret := _m.Called(jobID, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetResumeCompactionChan")
+	}
+
+	var r0 <-chan struct{}
+	if rf, ok := ret.Get(0).(func(int64, int64) <-chan struct{}); ok {
+		r0 = rf(jobID, collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(<-chan struct{})
+		}
+	}
+
+	return r0
+}
+
+// MockTriggerManager_GetResumeCompactionChan_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetResumeCompactionChan'
+type MockTriggerManager_GetResumeCompactionChan_Call struct {
+	*mock.Call
+}
+
+// GetResumeCompactionChan is a helper method to define mock.On call
+//   - jobID int64
+//   - collectionID int64
+func (_e *MockTriggerManager_Expecter) GetResumeCompactionChan(jobID interface{}, collectionID interface{}) *MockTriggerManager_GetResumeCompactionChan_Call {
+	return &MockTriggerManager_GetResumeCompactionChan_Call{Call: _e.mock.On("GetResumeCompactionChan", jobID, collectionID)}
+}
+
+func (_c *MockTriggerManager_GetResumeCompactionChan_Call) Run(run func(jobID int64, collectionID int64)) *MockTriggerManager_GetResumeCompactionChan_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockTriggerManager_GetResumeCompactionChan_Call) Return(_a0 <-chan struct{}) *MockTriggerManager_GetResumeCompactionChan_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTriggerManager_GetResumeCompactionChan_Call) RunAndReturn(run func(int64, int64) <-chan struct{}) *MockTriggerManager_GetResumeCompactionChan_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ManualTrigger provides a mock function with given fields: ctx, collectionID, clusteringCompaction
 func (_m *MockTriggerManager) ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool) (int64, error) {
 	ret := _m.Called(ctx, collectionID, clusteringCompaction)
@@ -75,6 +173,39 @@ func (_c *MockTriggerManager_ManualTrigger_Call) Return(_a0 int64, _a1 error) *M
 }
 
 func (_c *MockTriggerManager_ManualTrigger_Call) RunAndReturn(run func(context.Context, int64, bool) (int64, error)) *MockTriggerManager_ManualTrigger_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// OnCollectionUpdate provides a mock function with given fields: collectionID
+func (_m *MockTriggerManager) OnCollectionUpdate(collectionID int64) {
+	_m.Called(collectionID)
+}
+
+// MockTriggerManager_OnCollectionUpdate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'OnCollectionUpdate'
+type MockTriggerManager_OnCollectionUpdate_Call struct {
+	*mock.Call
+}
+
+// OnCollectionUpdate is a helper method to define mock.On call
+//   - collectionID int64
+func (_e *MockTriggerManager_Expecter) OnCollectionUpdate(collectionID interface{}) *MockTriggerManager_OnCollectionUpdate_Call {
+	return &MockTriggerManager_OnCollectionUpdate_Call{Call: _e.mock.On("OnCollectionUpdate", collectionID)}
+}
+
+func (_c *MockTriggerManager_OnCollectionUpdate_Call) Run(run func(collectionID int64)) *MockTriggerManager_OnCollectionUpdate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockTriggerManager_OnCollectionUpdate_Call) Return() *MockTriggerManager_OnCollectionUpdate_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockTriggerManager_OnCollectionUpdate_Call) RunAndReturn(run func(int64)) *MockTriggerManager_OnCollectionUpdate_Call {
 	_c.Call.Return(run)
 	return _c
 }

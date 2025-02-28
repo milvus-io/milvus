@@ -13,10 +13,11 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var errGracefulShutdown = errors.New("graceful shutdown")
@@ -38,11 +39,10 @@ func NewResumableProducer(f factory, opts *ProducerOptions) *ResumableProducer {
 		lifetime:       typeutil.NewLifetime(),
 		logger:         log.With(zap.String("pchannel", opts.PChannel)),
 		opts:           opts,
-
-		producer: newProducerWithResumingError(), // lazy initialized.
-		cond:     syncutil.NewContextCond(&sync.Mutex{}),
-		factory:  f,
-		metrics:  newProducerMetrics(opts.PChannel),
+		producer:       newProducerWithResumingError(opts.PChannel), // lazy initialized.
+		cond:           syncutil.NewContextCond(&sync.Mutex{}),
+		factory:        f,
+		metrics:        newResumingProducerMetrics(opts.PChannel),
 	}
 	go p.resumeLoop()
 	return p
@@ -73,19 +73,15 @@ type ResumableProducer struct {
 	// factory is used to create a new producer.
 	factory factory
 
-	metrics *producerMetrics
+	metrics *resumingProducerMetrics
 }
 
 // Produce produce a new message to log service.
-func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMessage) (result *producer.ProduceResult, err error) {
+func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMessage) (result *types.AppendResult, err error) {
 	if !p.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, errors.Wrapf(errs.ErrClosed, "produce on closed producer")
 	}
-	metricGuard := p.metrics.StartProduce(msg.EstimateSize())
-	defer func() {
-		metricGuard.Finish(err)
-		p.lifetime.Done()
-	}()
+	defer p.lifetime.Done()
 
 	for {
 		// get producer.
@@ -94,7 +90,7 @@ func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMess
 			return nil, err
 		}
 
-		produceResult, err := producerHandler.Produce(ctx, msg)
+		produceResult, err := producerHandler.Append(ctx, msg)
 		if err == nil {
 			return produceResult, nil
 		}

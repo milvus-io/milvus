@@ -2,6 +2,7 @@ package testcases
 
 import (
 	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -12,14 +13,14 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
 func TestInsertDefault(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	for _, autoID := range [2]bool{false, true} {
 		// create collection
 		cp := hp.NewCreateCollectionParams(hp.Int64Vec)
@@ -43,7 +44,7 @@ func TestInsertDefault(t *testing.T) {
 
 func TestInsertDefaultPartition(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	for _, autoID := range [2]bool{false, true} {
 		// create collection
 		cp := hp.NewCreateCollectionParams(hp.Int64Vec)
@@ -72,7 +73,7 @@ func TestInsertDefaultPartition(t *testing.T) {
 
 func TestInsertVarcharPkDefault(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	for _, autoID := range [2]bool{false, true} {
 		// create collection
 		cp := hp.NewCreateCollectionParams(hp.VarcharBinary)
@@ -98,7 +99,7 @@ func TestInsertVarcharPkDefault(t *testing.T) {
 func TestInsertAllFieldsData(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	for _, dynamic := range [2]bool{false, true} {
 		// create collection
 		cp := hp.NewCreateCollectionParams(hp.AllFields)
@@ -126,13 +127,18 @@ func TestInsertAllFieldsData(t *testing.T) {
 		flushTak, _ := mc.Flush(ctx, client.NewFlushOption(schema.CollectionName))
 		err := flushTak.Await(ctx)
 		common.CheckErr(t, err, true)
+
+		// check collection stats
+		stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(schema.CollectionName))
+		common.CheckErr(t, err, true)
+		require.Equal(t, map[string]string{common.RowCount: strconv.Itoa(common.DefaultNb)}, stats)
 	}
 }
 
 // test insert dynamic data with column
 func TestInsertDynamicExtraColumn(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
@@ -185,7 +191,7 @@ func TestInsertDynamicExtraColumn(t *testing.T) {
 
 func TestInsertFp16OrBf16VectorsWithFp32Vector(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
 	fp16VecField := entity.NewField().WithName(common.DefaultFloat16VecFieldName).WithDataType(entity.FieldTypeFloat16Vector).WithDim(common.DefaultDim)
@@ -208,7 +214,7 @@ func TestInsertFp16OrBf16VectorsWithFp32Vector(t *testing.T) {
 // test insert array column with empty data
 func TestInsertEmptyArray(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VecArray)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -230,7 +236,7 @@ func TestInsertEmptyArray(t *testing.T) {
 func TestInsertArrayDataTypeNotMatch(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// share field and data
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
@@ -261,7 +267,7 @@ func TestInsertArrayDataTypeNotMatch(t *testing.T) {
 func TestInsertArrayDataCapacityExceed(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// share field and data
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
@@ -288,7 +294,7 @@ func TestInsertArrayDataCapacityExceed(t *testing.T) {
 // test insert not exist collection or not exist partition
 func TestInsertNotExist(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// insert data into not exist collection
 	intColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeInt64, *hp.TNewDataOption())
@@ -307,7 +313,7 @@ func TestInsertNotExist(t *testing.T) {
 // test insert data columns len, order mismatch fields
 func TestInsertColumnsMismatchFields(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -341,7 +347,7 @@ func TestInsertColumnsMismatchFields(t *testing.T) {
 // test insert with columns which has different len
 func TestInsertColumnsDifferentLen(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -358,7 +364,7 @@ func TestInsertColumnsDifferentLen(t *testing.T) {
 
 func TestInsertAutoIdPkData(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
@@ -377,7 +383,7 @@ func TestInsertAutoIdPkData(t *testing.T) {
 // test insert invalid column: empty column or dim not match
 func TestInsertInvalidColumn(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	// create collection
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -403,7 +409,7 @@ func TestInsertInvalidColumn(t *testing.T) {
 // test insert invalid column: empty column or dim not match
 func TestInsertColumnVarcharExceedLen(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	// create collection
 	varcharMaxLen := 10
 	cp := hp.NewCreateCollectionParams(hp.VarcharBinary)
@@ -425,7 +431,7 @@ func TestInsertColumnVarcharExceedLen(t *testing.T) {
 // test insert sparse vector
 func TestInsertSparseData(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -445,7 +451,7 @@ func TestInsertSparseData(t *testing.T) {
 
 func TestInsertSparseDataMaxDim(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -471,7 +477,7 @@ func TestInsertSparseDataMaxDim(t *testing.T) {
 func TestInsertReadSparseEmptyVector(t *testing.T) {
 	// invalid sparse vector: positions >= uint32
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -510,7 +516,7 @@ func TestInsertSparseInvalidVector(t *testing.T) {
 
 	// invalid sparse vector: positions >= uint32
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -534,7 +540,7 @@ func TestInsertSparseInvalidVector(t *testing.T) {
 func TestInsertSparseVectorSamePosition(t *testing.T) {
 	// invalid sparse vector: positions >= uint32
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -561,7 +567,7 @@ func TestInsertSparseVectorSamePosition(t *testing.T) {
 func TestInsertDefaultRows(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, autoId := range []bool{false, true} {
 		cp := hp.NewCreateCollectionParams(hp.Int64Vec)
@@ -587,6 +593,11 @@ func TestInsertDefaultRows(t *testing.T) {
 		common.CheckErr(t, errFlush, true)
 		errFlush = flushTask.Await(ctx)
 		common.CheckErr(t, errFlush, true)
+
+		// check collection stats
+		stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(schema.CollectionName))
+		common.CheckErr(t, err, true)
+		require.Equal(t, map[string]string{common.RowCount: strconv.Itoa(common.DefaultNb)}, stats)
 	}
 }
 
@@ -595,7 +606,7 @@ func TestInsertAllFieldsRows(t *testing.T) {
 	t.Skip("https://github.com/milvus-io/milvus/issues/33459")
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, enableDynamicField := range [2]bool{true, false} {
 		cp := hp.NewCreateCollectionParams(hp.AllFields)
@@ -628,7 +639,7 @@ func TestInsertVarcharRows(t *testing.T) {
 	t.Skip("https://github.com/milvus-io/milvus/issues/33457")
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, autoId := range []bool{true} {
 		cp := hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec)
@@ -656,7 +667,7 @@ func TestInsertVarcharRows(t *testing.T) {
 
 func TestInsertSparseRows(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
 	sparseField := entity.NewField().WithName(common.DefaultSparseVecFieldName).WithDataType(entity.FieldTypeSparseVector)
@@ -697,7 +708,7 @@ func TestInsertSparseRows(t *testing.T) {
 // test field name: pk, row json name: int64
 func TestInsertRowFieldNameNotMatch(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection with pk name: pk
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
@@ -716,7 +727,7 @@ func TestInsertRowFieldNameNotMatch(t *testing.T) {
 // test field name: pk, row json name: int64
 func TestInsertRowMismatchFields(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption().TWithDim(8), hp.TNewSchemaOption())
@@ -771,7 +782,7 @@ func TestInsertDisableAutoIDRow(t *testing.T) {
 	*/
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption().TWithAutoID(false), hp.TNewSchemaOption().TWithAutoID(false))
 
@@ -806,7 +817,7 @@ func TestInsertEnableAutoIDRow(t *testing.T) {
 	*/
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption().TWithAutoID(true), hp.TNewSchemaOption().TWithAutoID(true))
 
@@ -839,7 +850,7 @@ func TestInsertEnableAutoIDRow(t *testing.T) {
 
 func TestFlushRate(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	// create collection
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption().TWithAutoID(true), hp.TNewSchemaOption())

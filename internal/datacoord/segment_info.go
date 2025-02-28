@@ -17,6 +17,8 @@
 package datacoord
 
 import (
+	"fmt"
+	"runtime/debug"
 	"time"
 
 	"github.com/samber/lo"
@@ -26,9 +28,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // SegmentsInfo wraps a map, which maintains ID to SegmentInfo relation
@@ -56,6 +58,9 @@ type SegmentInfo struct {
 	size            atomic.Int64
 	deltaRowcount   atomic.Int64
 	lastWrittenTime time.Time
+
+	// It is only to ensure mutual exclusion between L0 compacting and stats tasks
+	isStating bool
 }
 
 // NewSegmentInfo create `SegmentInfo` wrapper from `datapb.SegmentInfo`
@@ -273,8 +278,17 @@ func (s *SegmentsInfo) SetFlushTime(segmentID UniqueID, t time.Time) {
 
 // SetIsCompacting sets compaction status for segment
 func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
+	st := fmt.Sprintf("%s", debug.Stack())
+	log.Info("set compacting", zap.Int64("segmentID", segmentID), zap.Bool("isCompacting", isCompacting), zap.Any("stacktrace", st))
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.ShadowClone(SetIsCompacting(isCompacting))
+	}
+}
+
+// SetIsStating sets stating status for segment
+func (s *SegmentsInfo) SetIsStating(segmentID UniqueID, isStating bool) {
+	if segment, ok := s.segments[segmentID]; ok {
+		s.segments[segmentID] = segment.ShadowClone(SetIsStating(isStating))
 	}
 }
 
@@ -462,6 +476,13 @@ func SetFlushTime(t time.Time) SegmentInfoOption {
 func SetIsCompacting(isCompacting bool) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.isCompacting = isCompacting
+	}
+}
+
+// SetIsStating is the option to set stats state for segment info
+func SetIsStating(isStating bool) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.isStating = isStating
 	}
 }
 

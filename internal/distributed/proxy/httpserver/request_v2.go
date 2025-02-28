@@ -22,7 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type EmptyReq struct{}
@@ -47,6 +47,13 @@ type DatabaseReqWithProperties struct {
 }
 
 func (req *DatabaseReqWithProperties) GetDbName() string { return req.DbName }
+
+type DropDatabasePropertiesReq struct {
+	DbName       string   `json:"dbName" binding:"required"`
+	PropertyKeys []string `json:"propertyKeys"`
+}
+
+func (req *DatabaseReqWithProperties) DropDatabasPropertiesReq() string { return req.DbName }
 
 type CollectionNameReq struct {
 	DbName         string   `json:"dbName"`
@@ -103,12 +110,39 @@ func (req *RenameCollectionReq) GetDbName() string { return req.DbName }
 type DropCollectionPropertiesReq struct {
 	DbName         string   `json:"dbName"`
 	CollectionName string   `json:"collectionName" binding:"required"`
-	DeleteKeys     []string `json:"deleteKeys"`
+	PropertyKeys   []string `json:"propertyKeys"`
 }
 
 func (req *DropCollectionPropertiesReq) GetDbName() string { return req.DbName }
 
 func (req *DropCollectionPropertiesReq) GetCollectionName() string {
+	return req.CollectionName
+}
+
+type CompactReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	IsClustering   bool   `json:"isClustering"`
+}
+
+func (req *CompactReq) GetDbName() string { return req.DbName }
+
+func (req *CompactReq) GetCollectionName() string {
+	return req.CollectionName
+}
+
+type GetCompactionStateReq struct {
+	JobID int64 `json:"jobID"`
+}
+
+type FlushReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+}
+
+func (req *FlushReq) GetDbName() string { return req.DbName }
+
+func (req *FlushReq) GetCollectionName() string {
 	return req.CollectionName
 }
 
@@ -217,14 +251,6 @@ type CollectionDataReq struct {
 
 func (req *CollectionDataReq) GetDbName() string { return req.DbName }
 
-type searchParams struct {
-	// not use metricType any more, just for compatibility
-	MetricType    string                 `json:"metricType"`
-	Params        map[string]interface{} `json:"params"`
-	IgnoreGrowing bool                   `json:"ignoreGrowing"`
-	Hints         string                 `json:"hints"`
-}
-
 type SearchReqV2 struct {
 	DbName           string                 `json:"dbName"`
 	CollectionName   string                 `json:"collectionName" binding:"required"`
@@ -238,7 +264,7 @@ type SearchReqV2 struct {
 	Limit            int32                  `json:"limit"`
 	Offset           int32                  `json:"offset"`
 	OutputFields     []string               `json:"outputFields"`
-	SearchParams     searchParams           `json:"searchParams"`
+	SearchParams     map[string]interface{} `json:"searchParams"`
 	ConsistencyLevel string                 `json:"consistencyLevel"`
 	ExprParams       map[string]interface{} `json:"exprParams"`
 	// not use Params any more, just for compatibility
@@ -260,7 +286,7 @@ type SubSearchReq struct {
 	MetricType   string                 `json:"metricType"`
 	Limit        int32                  `json:"limit"`
 	Offset       int32                  `json:"offset"`
-	SearchParams searchParams           `json:"params"`
+	SearchParams map[string]interface{} `json:"params"`
 	ExprParams   map[string]interface{} `json:"exprParams"`
 }
 
@@ -426,7 +452,7 @@ type DropIndexPropertiesReq struct {
 	DbName         string   `json:"dbName"`
 	CollectionName string   `json:"collectionName" binding:"required"`
 	IndexName      string   `json:"indexName" binding:"required"`
-	DeleteKeys     []string `json:"deleteKeys"`
+	PropertyKeys   []string `json:"propertyKeys"`
 }
 
 func (req *DropIndexPropertiesReq) GetDbName() string { return req.DbName }
@@ -479,6 +505,7 @@ type CollectionReq struct {
 	Schema           CollectionSchema       `json:"schema"`
 	IndexParams      []IndexParam           `json:"indexParams"`
 	Params           map[string]interface{} `json:"params"`
+	Description      string                 `json:"description"`
 }
 
 func (req *CollectionReq) GetDbName() string { return req.DbName }

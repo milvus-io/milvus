@@ -196,6 +196,7 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
         case DataType::VECTOR_FLOAT16:
         case DataType::VECTOR_BFLOAT16:
         case DataType::VECTOR_BINARY:
+        case DataType::VECTOR_INT8:
         case DataType::VECTOR_FLOAT: {
             add_vector_payload(builder, const_cast<uint8_t*>(raw_data), length);
             break;
@@ -271,7 +272,8 @@ CreateArrowBuilder(DataType data_type) {
             return std::make_shared<arrow::DoubleBuilder>();
         }
         case DataType::VARCHAR:
-        case DataType::STRING: {
+        case DataType::STRING:
+        case DataType::TEXT: {
             return std::make_shared<arrow::StringBuilder>();
         }
         case DataType::ARRAY:
@@ -312,6 +314,11 @@ CreateArrowBuilder(DataType data_type, int dim) {
             return std::make_shared<arrow::FixedSizeBinaryBuilder>(
                 arrow::fixed_size_binary(dim * sizeof(bfloat16)));
         }
+        case DataType::VECTOR_INT8: {
+            AssertInfo(dim > 0, "invalid dim value");
+            return std::make_shared<arrow::FixedSizeBinaryBuilder>(
+                arrow::fixed_size_binary(dim * sizeof(int8)));
+        }
         default: {
             PanicInfo(
                 DataTypeInvalid, "unsupported vector data type {}", data_type);
@@ -351,7 +358,8 @@ CreateArrowSchema(DataType data_type, bool nullable) {
                 {arrow::field("val", arrow::float64(), nullable)});
         }
         case DataType::VARCHAR:
-        case DataType::STRING: {
+        case DataType::STRING:
+        case DataType::TEXT: {
             return arrow::schema(
                 {arrow::field("val", arrow::utf8(), nullable)});
         }
@@ -405,6 +413,13 @@ CreateArrowSchema(DataType data_type, int dim, bool nullable) {
             return arrow::schema(
                 {arrow::field("val", arrow::binary(), nullable)});
         }
+        case DataType::VECTOR_INT8: {
+            AssertInfo(dim > 0, "invalid dim value");
+            return arrow::schema(
+                {arrow::field("val",
+                              arrow::fixed_size_binary(dim * sizeof(int8)),
+                              nullable)});
+        }
         default: {
             PanicInfo(
                 DataTypeInvalid, "unsupported vector data type {}", data_type);
@@ -432,6 +447,9 @@ GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
             PanicInfo(DataTypeInvalid,
                       fmt::format("GetDimensionFromFileMetaData should not be "
                                   "called for sparse vector"));
+        }
+        case DataType::VECTOR_INT8: {
+            return schema->type_length() / sizeof(int8);
         }
         default:
             PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
@@ -477,6 +495,15 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data,
             auto array =
                 std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(data);
             return array->byte_width() / sizeof(bfloat16);
+        }
+        case DataType::VECTOR_INT8: {
+            AssertInfo(
+                data->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY,
+                "inconsistent data type: {}",
+                data->type_id());
+            auto array =
+                std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(data);
+            return array->byte_width() / sizeof(int8);
         }
         default:
             PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
@@ -787,6 +814,7 @@ CreateFieldData(const DataType& type,
                 type, nullable, total_num_rows);
         case DataType::STRING:
         case DataType::VARCHAR:
+        case DataType::TEXT:
             return std::make_shared<FieldData<std::string>>(
                 type, nullable, total_num_rows);
         case DataType::JSON:
@@ -810,6 +838,9 @@ CreateFieldData(const DataType& type,
         case DataType::VECTOR_SPARSE_FLOAT:
             return std::make_shared<FieldData<SparseFloatVector>>(
                 type, total_num_rows);
+        case DataType::VECTOR_INT8:
+            return std::make_shared<FieldData<Int8Vector>>(
+                dim, type, total_num_rows);
         default:
             PanicInfo(DataTypeInvalid,
                       "CreateFieldData not support data type " +

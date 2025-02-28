@@ -31,14 +31,14 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/eventlog"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/eventlog"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type Collection struct {
@@ -123,18 +123,24 @@ func NewCollectionManager(catalog metastore.QueryCoordCatalog) *CollectionManage
 // Recover recovers collections from kv store,
 // panics if failed
 func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
+	start := time.Now()
 	collections, err := m.catalog.GetCollections(ctx)
 	if err != nil {
 		return err
 	}
-	partitions, err := m.catalog.GetPartitions(ctx)
+	log.Ctx(ctx).Info("recover collections from kv store", zap.Duration("dur", time.Since(start)))
+
+	start = time.Now()
+	partitions, err := m.catalog.GetPartitions(ctx, lo.Map(collections, func(collection *querypb.CollectionLoadInfo, _ int) int64 {
+		return collection.GetCollectionID()
+	}))
 	if err != nil {
 		return err
 	}
 
 	ctx = log.WithTraceID(ctx, strconv.FormatInt(time.Now().UnixNano(), 10))
 	ctxLog := log.Ctx(ctx)
-	ctxLog.Info("recover collections and partitions from kv store")
+	ctxLog.Info("recover partitions from kv store", zap.Duration("dur", time.Since(start)))
 
 	for _, collection := range collections {
 		if collection.GetReplicaNumber() <= 0 {
@@ -207,11 +213,6 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 		}
 	}
 
-	err = m.upgradeRecover(ctx, broker)
-	if err != nil {
-		log.Warn("upgrade recover failed", zap.Error(err))
-		return err
-	}
 	return nil
 }
 
@@ -242,73 +243,6 @@ func (m *CollectionManager) upgradeLoadFields(ctx context.Context, collection *q
 		return err
 	}
 
-	return nil
-}
-
-// upgradeRecover recovers from old version <= 2.2.x for compatibility.
-func (m *CollectionManager) upgradeRecover(ctx context.Context, broker Broker) error {
-	// for loaded collection from 2.2, it only save a old version CollectionLoadInfo without LoadType.
-	// we should update the CollectionLoadInfo and save all PartitionLoadInfo to meta store
-	for _, collection := range m.GetAllCollections(ctx) {
-		if collection.GetLoadType() == querypb.LoadType_UnKnownType {
-			partitionIDs, err := broker.GetPartitions(context.Background(), collection.GetCollectionID())
-			if err != nil {
-				return err
-			}
-			partitions := lo.Map(partitionIDs, func(partitionID int64, _ int) *Partition {
-				return &Partition{
-					PartitionLoadInfo: &querypb.PartitionLoadInfo{
-						CollectionID:  collection.GetCollectionID(),
-						PartitionID:   partitionID,
-						ReplicaNumber: collection.GetReplicaNumber(),
-						Status:        querypb.LoadStatus_Loaded,
-						FieldIndexID:  collection.GetFieldIndexID(),
-					},
-					LoadPercentage: 100,
-				}
-			})
-			err = m.putPartition(ctx, partitions, true)
-			if err != nil {
-				return err
-			}
-
-			newInfo := collection.Clone()
-			newInfo.LoadType = querypb.LoadType_LoadCollection
-			err = m.putCollection(ctx, true, newInfo)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	// for loaded partition from 2.2, it only save load PartitionLoadInfo.
-	// we should save it's CollectionLoadInfo to meta store
-	for _, partition := range m.GetAllPartitions(ctx) {
-		// In old version, collection would NOT be stored if the partition existed.
-		if !m.Exist(ctx, partition.GetCollectionID()) {
-			collectionInfo, err := broker.DescribeCollection(ctx, partition.GetCollectionID())
-			if err != nil {
-				log.Warn("failed to describe collection from RootCoord", zap.Error(err))
-				return err
-			}
-
-			col := &Collection{
-				CollectionLoadInfo: &querypb.CollectionLoadInfo{
-					CollectionID:  partition.GetCollectionID(),
-					ReplicaNumber: partition.GetReplicaNumber(),
-					Status:        partition.GetStatus(),
-					FieldIndexID:  partition.GetFieldIndexID(),
-					LoadType:      querypb.LoadType_LoadPartition,
-					DbID:          collectionInfo.GetDbId(),
-				},
-				LoadPercentage: 100,
-			}
-			err = m.PutCollection(ctx, col)
-			if err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 

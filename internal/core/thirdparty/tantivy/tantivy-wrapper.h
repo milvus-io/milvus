@@ -5,6 +5,7 @@
 #include <iostream>
 #include <map>
 #include <vector>
+#include <type_traits>
 
 #include "common/EasyAssert.h"
 #include "tantivy-binding.h"
@@ -263,12 +264,12 @@ struct TantivyIndexWrapper {
 
     template <typename T>
     void
-    add_multi_data(const T* array, uintptr_t len, int64_t offset) {
+    add_array_data(const T* array, uintptr_t len, int64_t offset) {
         assert(!finished_);
 
         if constexpr (std::is_same_v<T, bool>) {
             auto res = RustResultWrapper(
-                tantivy_index_add_multi_bools(writer_, array, len, offset));
+                tantivy_index_add_array_bools(writer_, array, len, offset));
             AssertInfo(res.result_->success,
                        "failed to add multi bools: {}",
                        res.result_->error);
@@ -277,7 +278,7 @@ struct TantivyIndexWrapper {
 
         if constexpr (std::is_same_v<T, int8_t>) {
             auto res = RustResultWrapper(
-                tantivy_index_add_multi_int8s(writer_, array, len, offset));
+                tantivy_index_add_array_int8s(writer_, array, len, offset));
             AssertInfo(res.result_->success,
                        "failed to add multi int8s: {}",
                        res.result_->error);
@@ -286,7 +287,7 @@ struct TantivyIndexWrapper {
 
         if constexpr (std::is_same_v<T, int16_t>) {
             auto res = RustResultWrapper(
-                tantivy_index_add_multi_int16s(writer_, array, len, offset));
+                tantivy_index_add_array_int16s(writer_, array, len, offset));
             AssertInfo(res.result_->success,
                        "failed to add multi int16s: {}",
                        res.result_->error);
@@ -295,7 +296,7 @@ struct TantivyIndexWrapper {
 
         if constexpr (std::is_same_v<T, int32_t>) {
             auto res = RustResultWrapper(
-                tantivy_index_add_multi_int32s(writer_, array, len, offset));
+                tantivy_index_add_array_int32s(writer_, array, len, offset));
             AssertInfo(res.result_->success,
                        "failed to add multi int32s: {}",
                        res.result_->error);
@@ -304,7 +305,7 @@ struct TantivyIndexWrapper {
 
         if constexpr (std::is_same_v<T, int64_t>) {
             auto res = RustResultWrapper(
-                tantivy_index_add_multi_int64s(writer_, array, len, offset));
+                tantivy_index_add_array_int64s(writer_, array, len, offset));
             AssertInfo(res.result_->success,
                        "failed to add multi int64s: {}",
                        res.result_->error);
@@ -313,7 +314,7 @@ struct TantivyIndexWrapper {
 
         if constexpr (std::is_same_v<T, float>) {
             auto res = RustResultWrapper(
-                tantivy_index_add_multi_f32s(writer_, array, len, offset));
+                tantivy_index_add_array_f32s(writer_, array, len, offset));
             AssertInfo(res.result_->success,
                        "failed to add multi f32s: {}",
                        res.result_->error);
@@ -322,7 +323,7 @@ struct TantivyIndexWrapper {
 
         if constexpr (std::is_same_v<T, double>) {
             auto res = RustResultWrapper(
-                tantivy_index_add_multi_f64s(writer_, array, len, offset));
+                tantivy_index_add_array_f64s(writer_, array, len, offset));
             AssertInfo(res.result_->success,
                        "failed to add multi f64s: {}",
                        res.result_->error);
@@ -334,7 +335,7 @@ struct TantivyIndexWrapper {
             for (uintptr_t i = 0; i < len; i++) {
                 views.push_back(array[i].c_str());
             }
-            auto res = RustResultWrapper(tantivy_index_add_multi_keywords(
+            auto res = RustResultWrapper(tantivy_index_add_array_keywords(
                 writer_, views.data(), len, offset));
             AssertInfo(res.result_->success,
                        "failed to add multi keywords: {}",
@@ -343,7 +344,7 @@ struct TantivyIndexWrapper {
         }
 
         throw fmt::format(
-            "InvertedIndex.add_multi_data: unsupported data type: {}",
+            "InvertedIndex.add_array_data: unsupported data type: {}",
             typeid(T).name());
     }
 
@@ -442,12 +443,12 @@ struct TantivyIndexWrapper {
 
     template <typename T>
     void
-    add_multi_data_by_single_segment_writer(const T* array, uintptr_t len) {
+    add_array_data_by_single_segment_writer(const T* array, uintptr_t len) {
         assert(!finished_);
 
         if constexpr (std::is_same_v<T, bool>) {
             auto res = RustResultWrapper(
-                tantivy_index_add_multi_bools_by_single_segment_writer(
+                tantivy_index_add_array_bools_by_single_segment_writer(
                     writer_, array, len));
             AssertInfo(res.result_->success,
                        "failed to add multi bools: {}",
@@ -457,7 +458,7 @@ struct TantivyIndexWrapper {
 
         if constexpr (std::is_same_v<T, int8_t>) {
             auto res = RustResultWrapper(
-                tantivy_index_add_multi_int8s_by_single_segment_writer(
+                tantivy_index_add_array_int8s_by_single_segment_writer(
                     writer_, array, len));
             AssertInfo(res.result_->success,
                        "failed to add multi int8s: {}",
@@ -467,7 +468,7 @@ struct TantivyIndexWrapper {
 
         if constexpr (std::is_same_v<T, int16_t>) {
             auto res = RustResultWrapper(
-                tantivy_index_add_multi_int16s_by_single_segment_writer(
+                tantivy_index_add_array_int16s_by_single_segment_writer(
                     writer_, array, len));
             AssertInfo(res.result_->success,
                        "failed to add multi int16s: {}",
@@ -477,7 +478,7 @@ struct TantivyIndexWrapper {
 
         if constexpr (std::is_same_v<T, int32_t>) {
             auto res = RustResultWrapper(
-                tantivy_index_add_multi_int32s_by_single_segment_writer(
+                tantivy_index_add_array_int32s_by_single_segment_writer(
                     writer_, array, len));
             AssertInfo(res.result_->success,
                        "failed to add multi int32s: {}",
@@ -487,7 +488,7 @@ struct TantivyIndexWrapper {
 
         if constexpr (std::is_same_v<T, int64_t>) {
             auto res = RustResultWrapper(
-                tantivy_index_add_multi_int64s_by_single_segment_writer(
+                tantivy_index_add_array_int64s_by_single_segment_writer(
                     writer_, array, len));
             AssertInfo(res.result_->success,
                        "failed to add multi int64s: {}",
@@ -497,7 +498,7 @@ struct TantivyIndexWrapper {
 
         if constexpr (std::is_same_v<T, float>) {
             auto res = RustResultWrapper(
-                tantivy_index_add_multi_f32s_by_single_segment_writer(
+                tantivy_index_add_array_f32s_by_single_segment_writer(
                     writer_, array, len));
             AssertInfo(res.result_->success,
                        "failed to add multi f32s: {}",
@@ -507,7 +508,7 @@ struct TantivyIndexWrapper {
 
         if constexpr (std::is_same_v<T, double>) {
             auto res = RustResultWrapper(
-                tantivy_index_add_multi_f64s_by_single_segment_writer(
+                tantivy_index_add_array_f64s_by_single_segment_writer(
                     writer_, array, len));
             AssertInfo(res.result_->success,
                        "failed to add multi f64s: {}",
@@ -521,7 +522,7 @@ struct TantivyIndexWrapper {
                 views.push_back(array[i].c_str());
             }
             auto res = RustResultWrapper(
-                tantivy_index_add_multi_keywords_by_single_segment_writer(
+                tantivy_index_add_array_keywords_by_single_segment_writer(
                     writer_, views.data(), len));
             AssertInfo(res.result_->success,
                        "failed to add multi keywords: {}",
@@ -530,7 +531,7 @@ struct TantivyIndexWrapper {
         }
 
         throw fmt::format(
-            "InvertedIndex.add_multi_data: unsupported data type: {}",
+            "InvertedIndex.add_array_data: unsupported data type: {}",
             typeid(T).name());
     }
 
@@ -619,6 +620,11 @@ struct TantivyIndexWrapper {
     RustArrayWrapper
     lower_bound_range_query(T lower_bound, bool inclusive) {
         auto array = [&]() {
+            if constexpr (std::is_same_v<T, bool>) {
+                return tantivy_lower_bound_range_query_bool(
+                    reader_, static_cast<bool>(lower_bound), inclusive);
+            }
+
             if constexpr (std::is_integral_v<T>) {
                 return tantivy_lower_bound_range_query_i64(
                     reader_, static_cast<int64_t>(lower_bound), inclusive);
@@ -656,6 +662,11 @@ struct TantivyIndexWrapper {
     RustArrayWrapper
     upper_bound_range_query(T upper_bound, bool inclusive) {
         auto array = [&]() {
+            if constexpr (std::is_same_v<T, bool>) {
+                return tantivy_upper_bound_range_query_bool(
+                    reader_, static_cast<bool>(upper_bound), inclusive);
+            }
+
             if constexpr (std::is_integral_v<T>) {
                 return tantivy_upper_bound_range_query_i64(
                     reader_, static_cast<int64_t>(upper_bound), inclusive);
@@ -696,6 +707,14 @@ struct TantivyIndexWrapper {
                 bool lb_inclusive,
                 bool ub_inclusive) {
         auto array = [&]() {
+            if constexpr (std::is_same_v<T, bool>) {
+                return tantivy_range_query_bool(reader_,
+                                                static_cast<bool>(lower_bound),
+                                                static_cast<bool>(upper_bound),
+                                                lb_inclusive,
+                                                ub_inclusive);
+            }
+
             if constexpr (std::is_integral_v<T>) {
                 return tantivy_range_query_i64(
                     reader_,

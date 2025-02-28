@@ -24,9 +24,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/parquet"
-	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/parquet"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/exp/slices"
@@ -36,9 +36,9 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ReaderSuite struct {
@@ -494,6 +494,8 @@ func (s *ReaderSuite) TestVector() {
 	s.vecDataType = schemapb.DataType_BFloat16Vector
 	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
 	s.vecDataType = schemapb.DataType_SparseFloatVector
+	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
+	s.vecDataType = schemapb.DataType_Int8Vector
 	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
 }
 

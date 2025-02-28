@@ -29,7 +29,7 @@ import (
 	"golang.org/x/text/encoding/unicode"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 var (
@@ -222,6 +222,16 @@ func validateHeader(npyReader *npy.Reader, field *schemapb.FieldSchema, dim int)
 		}
 		if shape[1] != dim/8 {
 			return wrapDimError(shape[1]*8, dim, field)
+		}
+	case schemapb.DataType_Int8Vector:
+		if elementType != schemapb.DataType_Int8 {
+			return wrapElementTypeError(elementType, field)
+		}
+		if len(shape) != 2 {
+			return wrapShapeError(len(shape), 2, field)
+		}
+		if shape[1] != dim {
+			return wrapDimError(shape[1], dim, field)
 		}
 	case schemapb.DataType_VarChar, schemapb.DataType_JSON:
 		if len(shape) != 1 {

@@ -7,8 +7,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // AckManager manages the timestampAck.
@@ -55,16 +55,17 @@ func (ta *AckManager) AllocateWithBarrier(ctx context.Context, barrierTimeTick u
 // Allocate allocates a timestamp.
 // Concurrent safe to call with Sync and Allocate.
 func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
+	metricsGuard := ta.metrics.StartAllocateTimeTick()
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
 
 	// allocate one from underlying allocator first.
 	ts, err := resource.Resource().TSOAllocator().Allocate(ctx)
 	if err != nil {
+		metricsGuard.Done(0, err)
 		return nil, err
 	}
 	ta.lastAllocatedTimeTick = ts
-	ta.metrics.CountAllocateTimeTick(ts)
 
 	// create new timestampAck for ack process.
 	// add ts to heap wait for ack.
@@ -74,6 +75,7 @@ func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
 		manager:      ta,
 	}
 	ta.notAckHeap.Push(acker)
+	metricsGuard.Done(ts, err)
 	return acker, nil
 }
 

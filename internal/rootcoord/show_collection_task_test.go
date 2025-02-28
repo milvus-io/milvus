@@ -28,9 +28,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 func Test_showCollectionTask_Prepare(t *testing.T) {
@@ -161,6 +161,68 @@ func TestShowCollectionsAuth(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(task.Rsp.GetCollectionNames()))
 		assert.Equal(t, "foo", task.Rsp.GetCollectionNames()[0])
+	})
+
+	t.Run("root user", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		meta := mockrootcoord.NewIMetaTable(t)
+		core := newTestCore(withMeta(meta))
+
+		meta.EXPECT().ListCollections(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]*model.Collection{
+			{
+				DBID:         1,
+				CollectionID: 100,
+				Name:         "foo",
+				CreateTime:   tsoutil.GetCurrentTime(),
+			},
+		}, nil).Once()
+
+		task := &showCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req:      &milvuspb.ShowCollectionsRequest{DbName: "default"},
+			Rsp:      &milvuspb.ShowCollectionsResponse{},
+		}
+
+		ctx := GetContext(context.Background(), "root:root")
+		err := task.Execute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(task.Rsp.GetCollectionNames()))
+		assert.Equal(t, "foo", task.Rsp.GetCollectionNames()[0])
+	})
+
+	t.Run("root user, should bind role", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		Params.Save(Params.CommonCfg.RootShouldBindRole.Key, "true")
+		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		defer Params.Reset(Params.CommonCfg.RootShouldBindRole.Key)
+		meta := mockrootcoord.NewIMetaTable(t)
+		core := newTestCore(withMeta(meta))
+
+		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return([]*milvuspb.UserResult{
+				{
+					User: &milvuspb.UserEntity{
+						Name: "foo",
+					},
+					Roles: []*milvuspb.RoleEntity{
+						{
+							Name: "public",
+						},
+					},
+				},
+			}, nil).Once()
+
+		task := &showCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req:      &milvuspb.ShowCollectionsRequest{DbName: "default"},
+			Rsp:      &milvuspb.ShowCollectionsResponse{},
+		}
+
+		ctx := GetContext(context.Background(), "root:root")
+		err := task.Execute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, 0, len(task.Rsp.GetCollectionNames()))
 	})
 
 	t.Run("fail to select user", func(t *testing.T) {

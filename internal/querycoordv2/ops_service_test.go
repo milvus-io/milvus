@@ -42,14 +42,14 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type OpsServiceSuite struct {
@@ -402,10 +402,18 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeBalance() {
 	suite.True(merr.Ok(resp))
 	suite.False(suite.checkerController.IsActive(utils.BalanceChecker))
 
+	resp1, err := suite.server.CheckBalanceStatus(ctx, &querypb.CheckBalanceStatusRequest{})
+	suite.NoError(err)
+	suite.Equal(false, resp1.GetIsActive())
+
 	resp, err = suite.server.ResumeBalance(ctx, &querypb.ResumeBalanceRequest{})
 	suite.NoError(err)
 	suite.True(merr.Ok(resp))
 	suite.True(suite.checkerController.IsActive(utils.BalanceChecker))
+
+	resp2, err := suite.server.CheckBalanceStatus(ctx, &querypb.CheckBalanceStatusRequest{})
+	suite.NoError(err)
+	suite.Equal(true, resp2.GetIsActive())
 }
 
 func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {

@@ -28,14 +28,14 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/indexparams"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type indexBuildTask struct {
@@ -120,7 +120,7 @@ func (it *indexBuildTask) GetFailReason() string {
 	return it.taskInfo.FailReason
 }
 
-func (it *indexBuildTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error {
+func (it *indexBuildTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error {
 	if err := meta.indexMeta.UpdateVersion(it.taskID, nodeID); err != nil {
 		return err
 	}
@@ -260,12 +260,14 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	}
 
 	log.Ctx(ctx).Info("index task pre check successfully", zap.Int64("taskID", it.GetTaskID()),
-		zap.Int64("segID", segment.GetID()))
+		zap.Int64("segID", segment.GetID()),
+		zap.Int32("CurrentIndexVersion", it.req.GetCurrentIndexVersion()),
+		zap.Int32("CurrentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()))
 	return true
 }
 
-func (it *indexBuildTask) AssignTask(ctx context.Context, client types.DataNodeClient) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+func (it *indexBuildTask) AssignTask(ctx context.Context, client types.DataNodeClient, meta *meta) bool {
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
 		ClusterID: it.req.GetClusterID(),
@@ -294,7 +296,7 @@ func (it *indexBuildTask) setResult(info *workerpb.IndexTaskInfo) {
 }
 
 func (it *indexBuildTask) QueryResult(ctx context.Context, node types.DataNodeClient) {
-	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := node.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
@@ -332,7 +334,7 @@ func (it *indexBuildTask) QueryResult(ctx context.Context, node types.DataNodeCl
 }
 
 func (it *indexBuildTask) DropTaskOnWorker(ctx context.Context, client types.DataNodeClient) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),

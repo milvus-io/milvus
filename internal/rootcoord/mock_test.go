@@ -36,19 +36,19 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -1058,23 +1058,23 @@ func newTickerWithFactory(factory msgstream.Factory) *timetickSync {
 	return ticker
 }
 
-func newChanTimeTickSync(packChan chan *msgstream.MsgPack) *timetickSync {
+func newChanTimeTickSync(packChan chan *msgstream.ConsumeMsgPack) *timetickSync {
 	f := msgstream.NewMockMqFactory()
 	f.NewMsgStreamFunc = func(ctx context.Context) (msgstream.MsgStream, error) {
 		stream := msgstream.NewWastedMockMsgStream()
 		stream.BroadcastFunc = func(pack *msgstream.MsgPack) error {
 			log.Info("mock Broadcast")
-			packChan <- pack
+			packChan <- msgstream.BuildConsumeMsgPack(pack)
 			return nil
 		}
 		stream.BroadcastMarkFunc = func(pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
 			log.Info("mock BroadcastMark")
-			packChan <- pack
+			packChan <- msgstream.BuildConsumeMsgPack(pack)
 			return map[string][]msgstream.MessageID{}, nil
 		}
 		stream.AsProducerFunc = func(channels []string) {
 		}
-		stream.ChanFunc = func() <-chan *msgstream.MsgPack {
+		stream.ChanFunc = func() <-chan *msgstream.ConsumeMsgPack {
 			return packChan
 		}
 		return stream, nil

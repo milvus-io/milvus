@@ -18,10 +18,12 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
@@ -33,15 +35,15 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // DataSyncService controls a flowgraph for a specific collection
@@ -406,4 +408,29 @@ func NewStreamingNodeDataSyncService(
 
 func NewDataSyncServiceWithMetaCache(metaCache metacache.MetaCache) *DataSyncService {
 	return &DataSyncService{metacache: metaCache}
+}
+
+// NewEmptyStreamingNodeDataSyncService is used to create a new data sync service when incoming create collection message.
+func NewEmptyStreamingNodeDataSyncService(
+	initCtx context.Context,
+	pipelineParams *util.PipelineParams,
+	input <-chan *msgstream.MsgPack,
+	vchannelInfo *datapb.VchannelInfo,
+	schema *schemapb.CollectionSchema,
+	wbTaskObserverCallback writebuffer.TaskObserverCallback,
+	dropCallback func(),
+) *DataSyncService {
+	watchInfo := &datapb.ChannelWatchInfo{
+		Vchan:  vchannelInfo,
+		Schema: schema,
+	}
+	metaCache, err := getMetaCacheForStreaming(initCtx, pipelineParams, watchInfo, make([]*datapb.SegmentInfo, 0), make([]*datapb.SegmentInfo, 0))
+	if err != nil {
+		panic(fmt.Sprintf("new a empty streaming node data sync service should never be failed, %s", err.Error()))
+	}
+	ds, err := getServiceWithChannel(initCtx, pipelineParams, watchInfo, metaCache, make([]*datapb.SegmentInfo, 0), make([]*datapb.SegmentInfo, 0), input, wbTaskObserverCallback, dropCallback)
+	if err != nil {
+		panic(fmt.Sprintf("new a empty data sync service should never be failed, %s", err.Error()))
+	}
+	return ds
 }

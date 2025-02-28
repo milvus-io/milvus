@@ -13,19 +13,20 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -115,6 +116,7 @@ type writeBufferBase struct {
 	channelName  string
 
 	metaWriter       syncmgr.MetaWriter
+	allocator        allocator.Interface
 	collSchema       *schemapb.CollectionSchema
 	estSizePerRecord int
 	metaCache        metacache.MetaCache
@@ -125,7 +127,6 @@ type writeBufferBase struct {
 	syncPolicies   []SyncPolicy
 	syncCheckpoint *checkpointCandidates
 	syncMgr        syncmgr.SyncManager
-	serializer     syncmgr.Serializer
 
 	checkpoint     *msgpb.MsgPosition
 	flushTimestamp *atomic.Uint64
@@ -143,17 +144,6 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 	flushTsPolicy := GetFlushTsPolicy(flushTs, metacache)
 	option.syncPolicies = append(option.syncPolicies, flushTsPolicy)
 
-	var serializer syncmgr.Serializer
-	var err error
-	serializer, err = syncmgr.NewStorageSerializer(
-		option.idAllocator,
-		metacache,
-		option.metaWriter,
-	)
-	if err != nil {
-		return nil, err
-	}
-
 	schema := metacache.Schema()
 	estSize, err := typeutil.EstimateSizePerRecord(schema)
 	if err != nil {
@@ -167,9 +157,9 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		estSizePerRecord:     estSize,
 		syncMgr:              syncMgr,
 		metaWriter:           option.metaWriter,
+		allocator:            option.idAllocator,
 		buffers:              make(map[int64]*segmentBuffer),
 		metaCache:            metacache,
-		serializer:           serializer,
 		syncCheckpoint:       newCheckpointCandiates(),
 		syncPolicies:         option.syncPolicies,
 		flushTimestamp:       flushTs,
@@ -617,7 +607,12 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 
 	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Sub(totalMemSize)
 
-	return wb.serializer.EncodeBuffer(ctx, pack)
+	task := syncmgr.NewSyncTask().
+		WithAllocator(wb.allocator).
+		WithMetaWriter(wb.metaWriter).
+		WithMetaCache(wb.metaCache).
+		WithSyncPack(pack)
+	return task, nil
 }
 
 // getEstBatchSize returns the batch size based on estimated size per record and FlushBufferSize configuration value.

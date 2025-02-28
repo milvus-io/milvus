@@ -29,10 +29,10 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 )
 
 type ReleaseCollectionJob struct {
@@ -102,6 +102,11 @@ func (job *ReleaseCollectionJob) Execute() error {
 			CollectionID: req.GetCollectionID(),
 		},
 		proxyutil.SetMsgType(commonpb.MsgType_ReleaseCollection))
+
+	// try best clean shard leader cache
+	job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
+		CollectionIDs: []int64{req.GetCollectionID()},
+	})
 
 	waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
@@ -190,6 +195,10 @@ func (job *ReleasePartitionJob) Execute() error {
 				CollectionID: req.GetCollectionID(),
 			},
 			proxyutil.SetMsgType(commonpb.MsgType_ReleaseCollection))
+		// try best clean shard leader cache
+		job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
+			CollectionIDs: []int64{req.GetCollectionID()},
+		})
 
 		waitCollectionReleased(job.dist, job.checkerController, req.GetCollectionID())
 	} else {

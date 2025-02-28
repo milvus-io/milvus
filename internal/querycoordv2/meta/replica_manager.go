@@ -27,14 +27,14 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ReplicaManager struct {
@@ -497,6 +497,21 @@ func (m *ReplicaManager) RemoveNode(ctx context.Context, replicaID typeutil.Uniq
 	return m.put(ctx, mutableReplica.IntoReplica())
 }
 
+// RemoveSQNode removes the sq node from all replicas of given collection.
+func (m *ReplicaManager) RemoveSQNode(ctx context.Context, replicaID typeutil.UniqueID, nodes ...typeutil.UniqueID) error {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	replica, ok := m.replicas[replicaID]
+	if !ok {
+		return merr.WrapErrReplicaNotFound(replicaID)
+	}
+
+	mutableReplica := replica.CopyForWrite()
+	mutableReplica.RemoveSQNode(nodes...) // ro -> unused
+	return m.put(ctx, mutableReplica.IntoReplica())
+}
+
 func (m *ReplicaManager) GetResourceGroupByCollection(ctx context.Context, collection typeutil.UniqueID) typeutil.Set[string] {
 	replicas := m.GetByCollection(ctx, collection)
 	ret := typeutil.NewSet(lo.Map(replicas, func(r *Replica, _ int) string { return r.GetResourceGroup() })...)
@@ -541,4 +556,49 @@ func (m *ReplicaManager) GetReplicasJSON(ctx context.Context, meta *Meta) string
 		return ""
 	}
 	return string(ret)
+}
+
+// RecoverSQNodesInCollection recovers all sq nodes in collection with latest node list.
+// Promise a node will be only assigned to one replica in same collection at same time.
+// 1. Move the rw nodes to ro nodes if current replica use too much sqn.
+// 2. Add new incoming nodes into the replica if they are not ro node of other replicas in same collection.
+// 3. replicas will shared the nodes in resource group fairly.
+func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collectionID int64, sqnNodeIDs typeutil.UniqueSet) error {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	collReplicas, ok := m.coll2Replicas[collectionID]
+	if !ok {
+		return errors.Errorf("collection %d not loaded", collectionID)
+	}
+
+	helper := newReplicaSQNAssignmentHelper(collReplicas.replicas, sqnNodeIDs)
+	helper.updateExpectedNodeCountForReplicas(len(sqnNodeIDs))
+
+	modifiedReplicas := make([]*Replica, 0)
+	// recover node by given sqn node list.
+	helper.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
+		roNodes := assignment.GetNewRONodes()
+		recoverableNodes, incomingNodeCount := assignment.GetRecoverNodesAndIncomingNodeCount()
+		// There may be not enough incoming nodes for current replica,
+		// Even we filtering the nodes that are used by other replica of same collection in other resource group,
+		// current replica's expected node may be still used by other replica of same collection in same resource group.
+		incomingNode := helper.AllocateIncomingNodes(incomingNodeCount)
+		if len(roNodes) == 0 && len(recoverableNodes) == 0 && len(incomingNode) == 0 {
+			// nothing to do.
+			return
+		}
+		mutableReplica := m.replicas[assignment.GetReplicaID()].CopyForWrite()
+		mutableReplica.AddROSQNode(roNodes...)          // rw -> ro
+		mutableReplica.AddRWSQNode(recoverableNodes...) // ro -> rw
+		mutableReplica.AddRWSQNode(incomingNode...)     // unused -> rw
+		log.Info(
+			"new replica recovery streaming query node found",
+			zap.Int64("replicaID", assignment.GetReplicaID()),
+			zap.Int64s("newRONodes", roNodes),
+			zap.Int64s("roToRWNodes", recoverableNodes),
+			zap.Int64s("newIncomingNodes", incomingNode))
+		modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
+	})
+	return m.put(ctx, modifiedReplicas...)
 }

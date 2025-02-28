@@ -250,7 +250,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
               *schema_, segcore_config.get_chunk_rows(), mmap_descriptor_),
           indexing_record_(*schema_, index_meta_, segcore_config_),
           id_(segment_id),
-          deleted_record_(&insert_record_, this) {
+          deleted_record_(
+              &insert_record_,
+              [this](const PkType& pk, Timestamp timestamp) {
+                  return this->search_pk(pk, timestamp);
+              },
+              segment_id) {
         if (mmap_descriptor_ != nullptr) {
             LOG_INFO("growing segment {} use mmap to hold raw data",
                      this->get_segment_id());
@@ -305,6 +310,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     bool
+    HasIndex(FieldId field_id,
+             const std::string& nested_path,
+             DataType data_type) const override {
+        return false;
+    };
+
+    bool
     HasFieldData(FieldId field_id) const override {
         return true;
     }
@@ -348,7 +360,16 @@ class SegmentGrowingImpl : public SegmentGrowing {
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
 
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
+    chunk_string_view_impl(
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
+
+    std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    chunk_array_view_impl(
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
     chunk_view_by_offsets(FieldId field_id,

@@ -28,12 +28,11 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type PipelineParams struct {
@@ -49,7 +48,7 @@ type PipelineParams struct {
 	WriteBufferManager writebuffer.BufferManager
 	CheckpointUpdater  *ChannelCheckpointUpdater
 	Allocator          allocator.Interface
-	MsgHandler         flusher.MsgHandler
+	MsgHandler         MsgHandler
 }
 
 // TimeRange is a range of timestamp contains the min-timestamp and max-timestamp

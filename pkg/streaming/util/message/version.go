@@ -3,7 +3,7 @@ package message
 import "strconv"
 
 var (
-	VersionOld Version = 0 // old version before streamingnode.
+	VersionOld Version = 0 // old version before streamingnode, keep in 2.6 and will be removed from 3.0.
 	VersionV1  Version = 1 // The message marshal unmarshal still use msgstream.
 	VersionV2  Version = 2 // The message marshal unmarshal never rely on msgstream.
 )
@@ -27,4 +27,8 @@ func (v Version) String() string {
 
 func (v Version) GT(v2 Version) bool {
 	return v > v2
+}
+
+func (v Version) EQ(v2 Version) bool {
+	return v == v2
 }

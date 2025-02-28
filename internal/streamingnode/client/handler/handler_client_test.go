@@ -16,14 +16,14 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/mocks/proto/mock_streamingpb"
-	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_types"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/proto/mock_streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_types"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestHandlerClient(t *testing.T) {
@@ -41,9 +41,9 @@ func TestHandlerClient(t *testing.T) {
 	w.EXPECT().Close().Run(func() {})
 
 	p := mock_producer.NewMockProducer(t)
-	p.EXPECT().Close().Run(func() {})
+	p.EXPECT().Close().RunAndReturn(func() {})
 	c := mock_consumer.NewMockConsumer(t)
-	c.EXPECT().Close().Run(func() {})
+	c.EXPECT().Close().RunAndReturn(func() error { return nil })
 
 	rebalanceTrigger := mock_types.NewMockAssignmentRebalanceTrigger(t)
 	rebalanceTrigger.EXPECT().ReportAssignmentError(mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -91,6 +91,7 @@ func TestHandlerClient(t *testing.T) {
 	producer2.Close()
 	producer3.Close()
 
+	handler.GetLatestMVCCTimestampIfLocal(ctx, "pchannel")
 	producer4, err := handler.CreateProducer(ctx, &ProducerOptions{PChannel: "pchannel"})
 	assert.NoError(t, err)
 	assert.NotNil(t, producer4)
@@ -104,7 +105,7 @@ func TestHandlerClient(t *testing.T) {
 			options.DeliverFilterTimeTickGT(10),
 			options.DeliverFilterTimeTickGTE(10),
 		},
-		MessageHandler: make(message.ChanMessageHandler),
+		MessageHandler: make(adaptor.ChanMessageHandler),
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
@@ -121,6 +122,8 @@ func TestHandlerClient(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrClientClosed)
 	assert.Nil(t, consumer)
+
+	handler.GetLatestMVCCTimestampIfLocal(ctx, "pchannel")
 }
 
 func TestDial(t *testing.T) {

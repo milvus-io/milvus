@@ -32,14 +32,15 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/workerpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestIndexTaskWhenStoppingNode(t *testing.T) {
@@ -81,6 +82,7 @@ type IndexServiceSuite struct {
 	logID         int64
 	numRows       int64
 	data          []*storage.Blob
+	deleteData    []*storage.Blob
 	in            *DataNode
 	storageConfig *indexpb.StorageConfig
 	cm            storage.ChunkManager
@@ -101,7 +103,10 @@ func (s *IndexServiceSuite) SetupTest() {
 	paramtable.Get().MinioCfg.RootPath.SwapTempValue("index-service-ut")
 
 	var err error
-	s.data, err = generateTestData(s.collID, s.partID, s.segID, 3000)
+	s.data, err = generateTestData(s.collID, s.partID, s.segID, int(s.numRows))
+	s.NoError(err)
+
+	s.deleteData, err = generateDeleteData(s.collID, s.partID, s.segID, int(s.numRows))
 	s.NoError(err)
 
 	s.storageConfig = &indexpb.StorageConfig{
@@ -140,6 +145,13 @@ func (s *IndexServiceSuite) SetupTest() {
 	for i, blob := range s.data {
 		fID, _ := strconv.ParseInt(blob.GetKey(), 10, 64)
 		filePath, err := binlog.BuildLogPath(storage.InsertBinlog, s.collID, s.partID, s.segID, fID, logID+int64(i))
+		s.NoError(err)
+		err = s.cm.Write(context.Background(), filePath, blob.GetValue())
+		s.NoError(err)
+	}
+	for i, blob := range s.deleteData {
+		fID, _ := strconv.ParseInt(blob.GetKey(), 10, 64)
+		filePath, err := binlog.BuildLogPath(storage.DeleteBinlog, s.collID, s.partID, s.segID, fID, logID+int64(i))
 		s.NoError(err)
 		err = s.cm.Write(context.Background(), filePath, blob.GetValue())
 		s.NoError(err)
@@ -582,6 +594,88 @@ func (s *IndexServiceSuite) Test_CreateStatsTask() {
 		err = merr.Error(status)
 		s.NoError(err)
 	})
+
+	s.Run("all deleted", func() {
+		deltaLogs := make([]*datapb.FieldBinlog, 0)
+		for i := range s.deleteData {
+			deltaLogs = append(deltaLogs, &datapb.FieldBinlog{
+				Binlogs: []*datapb.Binlog{{
+					EntriesNum:    s.numRows,
+					LogSize:       int64(len(s.deleteData[0].GetValue())),
+					MemorySize:    s.deleteData[0].GetMemorySize(),
+					LogID:         s.logID + int64(i),
+					TimestampFrom: 1,
+					TimestampTo:   3001,
+				}},
+			})
+		}
+		taskID := int64(200)
+		req := &workerpb.CreateStatsRequest{
+			ClusterID:       "cluster2",
+			TaskID:          taskID,
+			CollectionID:    s.collID,
+			PartitionID:     s.partID,
+			InsertChannel:   "ch1",
+			SegmentID:       s.segID,
+			InsertLogs:      fieldBinlogs,
+			DeltaLogs:       deltaLogs,
+			StorageConfig:   s.storageConfig,
+			Schema:          generateTestSchema(),
+			TargetSegmentID: s.segID + 1,
+			StartLogID:      s.logID + 100,
+			EndLogID:        s.logID + 200,
+			NumRows:         s.numRows,
+			BinlogMaxSize:   131000,
+			SubJobType:      indexpb.StatsSubJob_Sort,
+		}
+
+		status, err := s.in.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
+			ClusterID: "cluster2",
+			TaskID:    taskID,
+			JobType:   indexpb.JobType_JobTypeStatsJob,
+			Request: &workerpb.CreateJobV2Request_StatsRequest{
+				StatsRequest: req,
+			},
+		})
+		s.NoError(err)
+		err = merr.Error(status)
+		s.NoError(err)
+
+		for {
+			resp, err := s.in.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
+				ClusterID: "cluster2",
+				TaskIDs:   []int64{taskID},
+				JobType:   indexpb.JobType_JobTypeStatsJob,
+			})
+			s.NoError(err)
+			err = merr.Error(resp.GetStatus())
+			s.NoError(err)
+			s.Equal(1, len(resp.GetStatsJobResults().GetResults()))
+			if resp.GetStatsJobResults().GetResults()[0].GetState() == indexpb.JobState_JobStateFinished {
+				s.Zero(len(resp.GetStatsJobResults().GetResults()[0].GetInsertLogs()))
+				s.Equal(int64(0), resp.GetStatsJobResults().GetResults()[0].GetNumRows())
+				break
+			}
+			s.Equal(indexpb.JobState_JobStateInProgress, resp.GetStatsJobResults().GetResults()[0].GetState())
+			time.Sleep(time.Second)
+		}
+
+		slotResp, err := s.in.GetJobStats(ctx, &workerpb.GetJobStatsRequest{})
+		s.NoError(err)
+		err = merr.Error(slotResp.GetStatus())
+		s.NoError(err)
+
+		s.Equal(int64(1), slotResp.GetTaskSlots())
+
+		status, err = s.in.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
+			ClusterID: "cluster2",
+			TaskIDs:   []int64{taskID},
+			JobType:   indexpb.JobType_JobTypeStatsJob,
+		})
+		s.NoError(err)
+		err = merr.Error(status)
+		s.NoError(err)
+	})
 }
 
 func generateTestSchema() *schemapb.CollectionSchema {
@@ -727,4 +821,21 @@ func generateTestData(collID, partID, segID int64, num int) ([]*storage.Blob, er
 
 	blobs, err := insertCodec.Serialize(partID, segID, data)
 	return blobs, err
+}
+
+func generateDeleteData(collID, partID, segID int64, num int) ([]*storage.Blob, error) {
+	pks := make([]storage.PrimaryKey, 0, num)
+	tss := make([]storage.Timestamp, 0, num)
+	for i := 1; i <= num; i++ {
+		pks = append(pks, storage.NewInt64PrimaryKey(int64(i)))
+		tss = append(tss, storage.Timestamp(i+1))
+	}
+
+	deleteCodec := storage.NewDeleteCodec()
+	blob, err := deleteCodec.Serialize(collID, partID, segID, &storage.DeleteData{
+		Pks:      pks,
+		Tss:      tss,
+		RowCount: int64(num),
+	})
+	return []*storage.Blob{blob}, err
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -19,20 +20,21 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/reduce"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metric"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -192,19 +194,9 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 	t.SearchRequest.Nq = nq
 
-	var ignoreGrowing bool
-	// parse common search params
-	for i, kv := range t.request.GetSearchParams() {
-		if kv.GetKey() == IgnoreGrowingKey {
-			ignoreGrowing, err = strconv.ParseBool(kv.GetValue())
-			if err != nil {
-				return errors.New("parse search growing failed")
-			}
-			t.request.SearchParams = append(t.request.GetSearchParams()[:i], t.request.GetSearchParams()[i+1:]...)
-			break
-		}
+	if t.SearchRequest.IgnoreGrowing, err = isIgnoreGrowing(t.request.SearchParams); err != nil {
+		return err
 	}
-	t.SearchRequest.IgnoreGrowing = ignoreGrowing
 
 	outputFieldIDs, err := getOutputFieldIDs(t.schema, t.request.GetOutputFields())
 	if err != nil {
@@ -259,6 +251,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
 		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
 	}
+	t.SearchRequest.IsIterator = t.isIterator
 
 	if deadline, ok := t.TraceCtx().Deadline(); ok {
 		t.SearchRequest.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
@@ -362,10 +355,19 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	// fetch search_growing from search param
 	t.SearchRequest.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
+	queryFieldIds := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
 		plan, queryInfo, offset, _, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
 		if err != nil {
 			return err
+		}
+
+		ignoreGrowing := t.SearchRequest.IgnoreGrowing
+		if !ignoreGrowing {
+			// fetch ignore_growing from sub search param if not set in search request
+			if ignoreGrowing, err = isIgnoreGrowing(subReq.GetSearchParams()); err != nil {
+				return err
+			}
 		}
 
 		internalSubReq := &internalpb.SubSearchRequest{
@@ -380,9 +382,11 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			MetricType:         queryInfo.GetMetricType(),
 			GroupByFieldId:     t.rankParams.GetGroupByFieldId(),
 			GroupSize:          t.rankParams.GetGroupSize(),
+			IgnoreGrowing:      ignoreGrowing,
 		}
 
 		internalSubReq.FieldId = queryInfo.GetQueryFieldId()
+		queryFieldIds = append(queryFieldIds, internalSubReq.FieldId)
 		// set PartitionIDs for sub search
 		if t.partitionKeyMode {
 			// isolation has tighter constraint, check first
@@ -421,6 +425,17 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
 	}
 
+	var err error
+	if function.HasNonBM25Functions(t.schema.CollectionSchema.Functions, queryFieldIds) {
+		exec, err := function.NewFunctionExecutor(t.schema.CollectionSchema)
+		if err != nil {
+			return err
+		}
+		if err := exec.ProcessSearch(t.SearchRequest); err != nil {
+			return err
+		}
+	}
+
 	t.SearchRequest.GroupByFieldId = t.rankParams.GetGroupByFieldId()
 	t.SearchRequest.GroupSize = t.rankParams.GetGroupSize()
 
@@ -428,7 +443,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	if t.partitionKeyMode {
 		t.SearchRequest.PartitionIDs = t.partitionIDsSet.Collect()
 	}
-	var err error
+
 	t.reScorers, err = NewReScorers(ctx, len(t.request.GetSubReqs()), t.request.GetSearchParams())
 	if err != nil {
 		log.Info("generate reScorer failed", zap.Any("params", t.request.GetSearchParams()), zap.Error(err))
@@ -499,6 +514,16 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	t.SearchRequest.DslType = commonpb.DslType_BoolExprV1
 	t.SearchRequest.GroupByFieldId = queryInfo.GroupByFieldId
 	t.SearchRequest.GroupSize = queryInfo.GroupSize
+
+	if function.HasNonBM25Functions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
+		exec, err := function.NewFunctionExecutor(t.schema.CollectionSchema)
+		if err != nil {
+			return err
+		}
+		if err := exec.ProcessSearch(t.SearchRequest); err != nil {
+			return err
+		}
+	}
 	log.Debug("proxy init search request",
 		zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 		zap.Stringer("plan", plan)) // may be very large if large term passed.
@@ -534,13 +559,16 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	}
 
 	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
+	start := time.Now()
 	plan, planErr := planparserv2.CreateSearchPlan(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues)
 	if planErr != nil {
 		log.Ctx(t.ctx).Warn("failed to create query plan", zap.Error(planErr),
 			zap.String("dsl", dsl), // may be very large if large term passed.
 			zap.String("anns field", annsFieldName), zap.Any("query info", searchInfo.planInfo))
+		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.FailLabel).Observe(float64(time.Since(start).Milliseconds()))
 		return nil, nil, 0, false, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", planErr)
 	}
+	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.SuccessLabel).Observe(float64(time.Since(start).Milliseconds()))
 	log.Ctx(t.ctx).Debug("create query plan",
 		zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
 		zap.String("anns field", annsFieldName), zap.Any("query info", searchInfo.planInfo))

@@ -31,8 +31,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -282,6 +282,20 @@ func generateVectorFieldData(vectorType schemapb.DataType) schemapb.FieldData {
 							Dim:      int64(3001),
 							Contents: contents,
 						},
+					},
+				},
+			},
+			IsDynamic: false,
+		}
+	case schemapb.DataType_Int8Vector:
+		return schemapb.FieldData{
+			Type:      schemapb.DataType_Int8Vector,
+			FieldName: FieldBookIntro,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 2,
+					Data: &schemapb.VectorField_Int8Vector{
+						Int8Vector: []byte{0x00, 0x1, 0x2, 0x3, 0x4, 0x5},
 					},
 				},
 			},
@@ -735,6 +749,8 @@ func TestCheckAndSetData(t *testing.T) {
 		float16VectorField.Name = "float16Vector"
 		bfloat16VectorField := generateVectorFieldSchema(schemapb.DataType_BFloat16Vector)
 		bfloat16VectorField.Name = "bfloat16Vector"
+		int8VectorField := generateVectorFieldSchema(schemapb.DataType_Int8Vector)
+		int8VectorField.Name = "int8Vector"
 		err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
 			Name: DefaultCollectionName,
 			Fields: []*schemapb.FieldSchema{
@@ -766,6 +782,15 @@ func TestCheckAndSetData(t *testing.T) {
 			Name: DefaultCollectionName,
 			Fields: []*schemapb.FieldSchema{
 				primaryField, bfloat16VectorField,
+			},
+			EnableDynamicField: true,
+		})
+		assert.Error(t, err)
+		assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
+		err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+			Name: DefaultCollectionName,
+			Fields: []*schemapb.FieldSchema{
+				primaryField, int8VectorField,
 			},
 			EnableDynamicField: true,
 		})
@@ -962,6 +987,27 @@ func TestSerialize(t *testing.T) {
 		}
 		requestBody, _ := json.Marshal(request)
 		values, err = serializeByteVectors(gjson.Get(string(requestBody), HTTPRequestData).Raw, dataType, -1, 2)
+		assert.Nil(t, err)
+		placeholderValue = &commonpb.PlaceholderValue{
+			Tag:    "$0",
+			Values: values,
+		}
+		_, err = proto.Marshal(&commonpb.PlaceholderGroup{
+			Placeholders: []*commonpb.PlaceholderValue{
+				placeholderValue,
+			},
+		})
+		assert.Nil(t, err)
+	}
+
+	{
+		request := map[string]interface{}{
+			HTTPRequestData: []interface{}{
+				[]int8{1, 2},
+			},
+		}
+		requestBody, _ := json.Marshal(request)
+		values, err = serializeInt8Vectors(gjson.Get(string(requestBody), HTTPRequestData).Raw, schemapb.DataType_Int8Vector, 2, typeutil.Int8ArrayToBytes)
 		assert.Nil(t, err)
 		placeholderValue = &commonpb.PlaceholderValue{
 			Tag:    "$0",
@@ -1611,6 +1657,9 @@ func newFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schemapb.Data
 	case schemapb.DataType_BFloat16Vector:
 		vectorField := generateVectorFieldData(firstFieldType)
 		return []*schemapb.FieldData{&vectorField}
+	case schemapb.DataType_Int8Vector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
 	case schemapb.DataType_Array:
 		return []*schemapb.FieldData{&fieldData10}
 	case schemapb.DataType_JSON:
@@ -1850,6 +1899,9 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 	case schemapb.DataType_BFloat16Vector:
 		vectorField := generateVectorFieldData(firstFieldType)
 		return []*schemapb.FieldData{&vectorField}
+	case schemapb.DataType_Int8Vector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
 	case schemapb.DataType_Array:
 		return []*schemapb.FieldData{&fieldData10}
 	case schemapb.DataType_JSON:
@@ -2047,6 +2099,7 @@ func TestVector(t *testing.T) {
 	float16Vector := "vector-float16"
 	bfloat16Vector := "vector-bfloat16"
 	sparseFloatVector := "vector-sparse-float"
+	int8Vector := "vector-int8"
 	testcaseRows := []map[string]interface{}{
 		{
 			FieldBookID:       int64(1),
@@ -2055,6 +2108,7 @@ func TestVector(t *testing.T) {
 			float16Vector:     []byte{1, 1, 11, 11},
 			bfloat16Vector:    []byte{1, 1, 11, 11},
 			sparseFloatVector: map[uint32]float32{0: 0.1, 1: 0.11},
+			int8Vector:        []int8{1, 11},
 		},
 		{
 			FieldBookID:       int64(2),
@@ -2063,6 +2117,7 @@ func TestVector(t *testing.T) {
 			float16Vector:     []byte{2, 2, 22, 22},
 			bfloat16Vector:    []byte{2, 2, 22, 22},
 			sparseFloatVector: map[uint32]float32{1000: 0.3, 200: 0.44},
+			int8Vector:        []int8{2, 22},
 		},
 		{
 			FieldBookID:       int64(3),
@@ -2071,6 +2126,7 @@ func TestVector(t *testing.T) {
 			float16Vector:     []byte{3, 3, 33, 33},
 			bfloat16Vector:    []byte{3, 3, 33, 33},
 			sparseFloatVector: map[uint32]float32{987621: 32190.31, 32189: 0.0001},
+			int8Vector:        []int8{3, 33},
 		},
 		{
 			FieldBookID:       int64(4),
@@ -2079,6 +2135,7 @@ func TestVector(t *testing.T) {
 			float16Vector:     []float32{0.4, 0.44},
 			bfloat16Vector:    []float32{0.4, 0.44},
 			sparseFloatVector: map[uint32]float32{25: 0.1, 1: 0.11},
+			int8Vector:        []int8{4, 44},
 		},
 		{
 			FieldBookID:       int64(5),
@@ -2087,6 +2144,7 @@ func TestVector(t *testing.T) {
 			float16Vector:     []int64{99999999, -99999999},
 			bfloat16Vector:    []int64{99999999, -99999999},
 			sparseFloatVector: map[uint32]float32{1121: 0.1, 3: 0.11},
+			int8Vector:        []int8{-128, 127},
 		},
 	}
 	body, err := wrapRequestBody(testcaseRows)
@@ -2102,6 +2160,8 @@ func TestVector(t *testing.T) {
 	bfloat16VectorField.Name = bfloat16Vector
 	sparseFloatVectorField := generateVectorFieldSchema(schemapb.DataType_SparseFloatVector)
 	sparseFloatVectorField.Name = sparseFloatVector
+	int8VectorField := generateVectorFieldSchema(schemapb.DataType_Int8Vector)
+	int8VectorField.Name = int8Vector
 	collectionSchema := &schemapb.CollectionSchema{
 		Name:        DefaultCollectionName,
 		Description: "",
@@ -2167,7 +2227,8 @@ func TestBuildQueryResps(t *testing.T) {
 	}
 
 	dataTypes := []schemapb.DataType{
-		schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_SparseFloatVector,
+		schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector, schemapb.DataType_SparseFloatVector, schemapb.DataType_Int8Vector,
 		schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32,
 		schemapb.DataType_Float, schemapb.DataType_Double,
 		schemapb.DataType_String, schemapb.DataType_VarChar,
@@ -2376,4 +2437,88 @@ func TestGenerateExpressionTemplate(t *testing.T) {
 		actual := generateExpressionTemplate(template)
 		assert.Equal(t, actual, ans[i])
 	}
+}
+
+func TestGenerateSearchParams(t *testing.T) {
+	t.Run("searchParams.params must be a dict", func(t *testing.T) {
+		reqSearchParams := map[string]interface{}{"params": 0}
+		_, err := generateSearchParams(reqSearchParams)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("ambiguous parameter", func(t *testing.T) {
+		reqSearchParams := map[string]interface{}{"radius": 100, "params": map[string]interface{}{"radius": 10}}
+		_, err := generateSearchParams(reqSearchParams)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("no ambiguous parameter", func(t *testing.T) {
+		reqSearchParams := map[string]interface{}{"radius": 10, "params": map[string]interface{}{"radius": 10.0}}
+		_, err := generateSearchParams(reqSearchParams)
+		assert.Nil(t, err)
+
+		reqSearchParams = map[string]interface{}{"radius": 10.0, "params": map[string]interface{}{"radius": 10}}
+		_, err = generateSearchParams(reqSearchParams)
+		assert.Nil(t, err)
+
+		reqSearchParams = map[string]interface{}{"radius": 10, "params": map[string]interface{}{"radius": 10}}
+		searchParams, err := generateSearchParams(reqSearchParams)
+		assert.Equal(t, 3, len(searchParams))
+		assert.Nil(t, err)
+		for _, kvs := range searchParams {
+			if kvs.Key == "radius" {
+				assert.Equal(t, "10", kvs.Value)
+			}
+			if kvs.Key == "params" {
+				var paramsMap map[string]interface{}
+				err := json.Unmarshal([]byte(kvs.Value), &paramsMap)
+				assert.Nil(t, err)
+				assert.Equal(t, 1, len(paramsMap))
+				assert.Equal(t, paramsMap["radius"], float64(10))
+			}
+		}
+	})
+
+	t.Run("old format", func(t *testing.T) {
+		reqSearchParams := map[string]interface{}{"metric_type": "L2", "params": map[string]interface{}{"radius": 10}}
+		searchParams, err := generateSearchParams(reqSearchParams)
+		assert.Nil(t, err)
+		assert.Equal(t, 3, len(searchParams))
+		for _, kvs := range searchParams {
+			if kvs.Key == "metric_type" {
+				assert.Equal(t, "L2", kvs.Value)
+			}
+			if kvs.Key == "params" {
+				var paramsMap map[string]interface{}
+				err := json.Unmarshal([]byte(kvs.Value), &paramsMap)
+				assert.Nil(t, err)
+				assert.Equal(t, 2, len(paramsMap))
+				assert.Equal(t, paramsMap["radius"], float64(10))
+				assert.Equal(t, paramsMap["metric_type"], "L2")
+			}
+		}
+	})
+
+	t.Run("new format", func(t *testing.T) {
+		reqSearchParams := map[string]interface{}{"metric_type": "L2", "radius": 10}
+		searchParams, err := generateSearchParams(reqSearchParams)
+		assert.Nil(t, err)
+		assert.Equal(t, 4, len(searchParams))
+		for _, kvs := range searchParams {
+			if kvs.Key == "metric_type" {
+				assert.Equal(t, "L2", kvs.Value)
+			}
+			if kvs.Key == "radius" {
+				assert.Equal(t, "10", kvs.Value)
+			}
+			if kvs.Key == "params" {
+				var paramsMap map[string]interface{}
+				err := json.Unmarshal([]byte(kvs.Value), &paramsMap)
+				assert.Nil(t, err)
+				assert.Equal(t, 2, len(paramsMap))
+				assert.Equal(t, paramsMap["radius"], float64(10))
+				assert.Equal(t, paramsMap["metric_type"], "L2")
+			}
+		}
+	})
 }

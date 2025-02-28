@@ -1,6 +1,6 @@
 syntax = "proto3";
 package milvus.proto.etcd;
-option go_package="github.com/milvus-io/milvus/pkg/proto/etcdpb";
+option go_package="github.com/milvus-io/milvus/pkg/v2/proto/etcdpb";
 
 import "common.proto";
 import "schema.proto";
@@ -69,6 +69,7 @@ message CollectionInfo {
   CollectionState state = 13; // To keep compatible with older version, default state is `Created`.
   repeated common.KeyValuePair properties = 14;
   int64 db_id = 15;
+  uint64 UpdateTimestamp = 16;
 }
 
 message PartitionInfo {

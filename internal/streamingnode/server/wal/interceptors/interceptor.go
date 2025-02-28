@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 type (
@@ -35,7 +35,8 @@ type Interceptor interface {
 	// 2. unique primary key filter and build.
 	// 3. index builder.
 	// 4. cache sync up.
-	// AppendInterceptor should be lazy initialized and fast execution.
+	// !!! AppendInterceptor should be lazy initialized and fast execution.
+	// !!! the operation after append should never return error.
 	// Execute the append operation with interceptor.
 	DoAppend(ctx context.Context, msg message.MutableMessage, append Append) (message.MessageID, error)
 
@@ -55,6 +56,14 @@ type InterceptorWithReady interface {
 	// Append operation will block until ready or canceled.
 	// Consumer do not blocked by it.
 	Ready() <-chan struct{}
+}
+
+// InterceptorWithMetrics is the interceptor with metric collecting.
+type InterceptorWithMetrics interface {
+	Interceptor
+
+	// Name returns the name of the interceptor.
+	Name() string
 }
 
 // Some interceptor may need to perform a graceful close operation.

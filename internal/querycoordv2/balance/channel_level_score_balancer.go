@@ -28,9 +28,10 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // score based segment use (collection_row_count + global_row_count * factor) as node' score
@@ -67,6 +68,17 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 		}
 	}()
 
+	if streamingutil.IsStreamingServiceEnabled() {
+		// Make a plan to rebalance the channel first.
+		// The Streaming QueryNode doesn't make the channel level score, so just fallback to the ScoreBasedBalancer.
+		stoppingBalance := paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool()
+		channelPlan := b.ScoreBasedBalancer.balanceChannels(ctx, br, replica, stoppingBalance)
+		// If the channelPlan is not empty, do it directly, don't do the segment balance.
+		if len(channelPlan) > 0 {
+			return nil, channelPlan
+		}
+	}
+
 	exclusiveMode := true
 	channels := b.targetMgr.GetDmChannelsByCollection(ctx, replica.GetCollectionID(), meta.CurrentTarget)
 	for channelName := range channels {
@@ -81,6 +93,7 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 		return b.ScoreBasedBalancer.BalanceReplica(ctx, replica)
 	}
 
+	// TODO: assign by channel
 	channelPlans = make([]ChannelAssignPlan, 0)
 	segmentPlans = make([]SegmentAssignPlan, 0)
 	for channelName := range channels {
@@ -122,7 +135,7 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 				zap.Any("available nodes", rwNodes),
 			)
 			// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-			if b.permitBalanceChannel(replica.GetCollectionID()) {
+			if b.permitBalanceChannel(replica.GetCollectionID()) && !streamingutil.IsStreamingServiceEnabled() {
 				channelPlans = append(channelPlans, b.genStoppingChannelPlan(ctx, replica, channelName, rwNodes, roNodes)...)
 			}
 
@@ -130,7 +143,7 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 				segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(ctx, replica, channelName, rwNodes, roNodes)...)
 			}
 		} else {
-			if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && b.permitBalanceChannel(replica.GetCollectionID()) {
+			if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && b.permitBalanceChannel(replica.GetCollectionID()) && !streamingutil.IsStreamingServiceEnabled() {
 				channelPlans = append(channelPlans, b.genChannelPlan(ctx, replica, channelName, rwNodes)...)
 			}
 
@@ -180,11 +193,12 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *bala
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
-	log.Info("node workload status",
-		zap.Int64("collectionID", replica.GetCollectionID()),
-		zap.Int64("replicaID", replica.GetID()),
-		zap.String("channelName", channelName),
-		zap.Stringers("nodes", lo.Values(nodeItemsMap)))
+
+	log.Ctx(ctx).WithRateGroup(fmt.Sprintf("genSegmentPlan-%d-%d", replica.GetCollectionID(), replica.GetID()), 1, 60).
+		RatedInfo(30, "node segment workload status",
+			zap.Int64("collectionID", replica.GetCollectionID()),
+			zap.Int64("replicaID", replica.GetID()),
+			zap.Stringers("nodes", lo.Values(nodeItemsMap)))
 
 	// list all segment which could be balanced, and calculate node's score
 	for _, node := range onlineNodes {

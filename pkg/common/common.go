@@ -28,7 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 // system field id:
@@ -145,6 +145,9 @@ const (
 	IgnoreGrowing             = "ignore_growing"
 	ConsistencyLevel          = "consistency_level"
 	HintsKey                  = "hints"
+
+	JSONCastTypeKey = "json_cast_type"
+	JSONPathKey     = "json_path"
 )
 
 // Doc-in-doc-out
@@ -429,4 +432,16 @@ func GetReplicateEndTS(kvs []*commonpb.KeyValuePair) (uint64, bool) {
 		}
 	}
 	return 0, false
+}
+
+func ValidateAutoIndexMmapConfig(autoIndexConfigEnable, isVectorField bool, indexParams map[string]string) error {
+	if !autoIndexConfigEnable {
+		return nil
+	}
+
+	_, ok := indexParams[MmapEnabledKey]
+	if ok && isVectorField {
+		return fmt.Errorf("mmap index is not supported to config for the collection in auto index mode")
+	}
+	return nil
 }

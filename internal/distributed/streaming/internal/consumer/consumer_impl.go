@@ -10,10 +10,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 var errGracefulShutdown = errors.New("graceful shutdown")
@@ -53,7 +53,7 @@ type resumableConsumerImpl struct {
 	mh         *timeTickOrderMessageHandler
 	factory    factory
 	consumeErr *syncutil.Future[error]
-	metrics    *consumerMetrics
+	metrics    *resumingConsumerMetrics
 }
 
 type factory = func(ctx context.Context, opts *handler.ConsumerOptions) (consumer.Consumer, error)
@@ -74,11 +74,12 @@ func (rc *resumableConsumerImpl) resumeLoop() {
 	// consumer need to resume when error occur, so message handler shouldn't close if the internal consumer encounter failure.
 	nopCloseMH := nopCloseHandler{
 		Handler: rc.mh,
-		HandleInterceptor: func(ctx context.Context, msg message.ImmutableMessage, handle handleFunc) (bool, error) {
-			g := rc.metrics.StartConsume(msg.EstimateSize())
-			ok, err := handle(ctx, msg)
-			g.Finish()
-			return ok, err
+		HandleInterceptor: func(handleParam message.HandleParam, h message.Handler) message.HandleResult {
+			if handleParam.Message != nil {
+				g := rc.metrics.StartConsume(handleParam.Message.EstimateSize())
+				defer func() { g.Finish() }()
+			}
+			return h.Handle(handleParam)
 		},
 	}
 
@@ -145,7 +146,7 @@ func (rc *resumableConsumerImpl) createNewConsumer(opts *handler.ConsumerOptions
 		}
 
 		logger.Info("resume on new consumer at new start message id")
-		return consumer, nil
+		return newConsumerWithMetrics(rc.opts.PChannel, consumer), nil
 	}
 }
 

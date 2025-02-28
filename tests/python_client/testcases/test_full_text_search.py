@@ -2315,9 +2315,10 @@ class TestSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("expr", ["text_match"])
     @pytest.mark.parametrize("offset", [10])
     @pytest.mark.parametrize("tokenizer", ["jieba"])
+    @pytest.mark.parametrize("inverted_index_algo", ct.inverted_index_algo)
     def test_full_text_search_with_jieba_tokenizer(
-            self, offset, tokenizer, expr, enable_inverted_index, enable_partition_key, empty_percent, index_type, nq
-    ):
+            self, offset, tokenizer, expr, enable_inverted_index, enable_partition_key,
+            empty_percent, index_type, nq, inverted_index_algo):
         """
         target: test full text search
         method: 1. enable full text search with jieba tokenizer and insert data with varchar
@@ -2430,6 +2431,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 "params": {
                     "bm25_k1": 1.5,
                     "bm25_b": 0.75,
+                    "inverted_index_algo": inverted_index_algo
                 }
             }
         )
@@ -3276,7 +3278,7 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
             search_data = cf.gen_vectors(nb=nq, dim=1000, vector_data_type="FLOAT_VECTOR")
         log.info(f"search data: {search_data}")
         error = {ct.err_code: 65535,
-                 ct.err_msg: "please provide varchar for BM25 Function based search"}
+                 ct.err_msg: "please provide varchar/text for BM25 Function based search"}
         collection_w.search(
             data=search_data,
             anns_field="text_sparse_emb",
@@ -3302,8 +3304,9 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("tokenizer", ["standard"])
+    @pytest.mark.parametrize("inverted_index_algo", ct.inverted_index_algo)
     def test_hybrid_search_with_full_text_search(
-            self, tokenizer, enable_inverted_index, enable_partition_key, empty_percent, index_type
+            self, tokenizer, enable_inverted_index, enable_partition_key, empty_percent, index_type, inverted_index_algo
     ):
         """
         target: test full text search
@@ -3403,6 +3406,7 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
                 "params": {
                     "bm25_k1": 1.5,
                     "bm25_b": 0.75,
+                    "inverted_index_algo": inverted_index_algo
                 }
             }
         )

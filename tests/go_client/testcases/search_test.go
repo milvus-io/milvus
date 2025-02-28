@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,14 +15,14 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
 func TestSearchDefault(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create -> insert -> flush -> index -> load
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -39,7 +40,7 @@ func TestSearchDefault(t *testing.T) {
 
 func TestSearchDefaultGrowing(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create -> index -> load -> insert
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -57,7 +58,7 @@ func TestSearchDefaultGrowing(t *testing.T) {
 // test search collection and partition name not exist
 func TestSearchInvalidCollectionPartitionName(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// search with not exist collection
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
@@ -83,7 +84,7 @@ func TestSearchInvalidCollectionPartitionName(t *testing.T) {
 func TestSearchEmptyCollection(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, enableDynamicField := range []bool{true, false} {
 		// create -> index -> load
@@ -112,7 +113,7 @@ func TestSearchEmptyCollection(t *testing.T) {
 
 func TestSearchEmptySparseCollection(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(),
 		hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -130,7 +131,7 @@ func TestSearchEmptySparseCollection(t *testing.T) {
 // test search with partition names []string{}, specify partitions
 func TestSearchPartitions(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	parName := common.GenRandomString("p", 4)
 	// create collection and partition
@@ -185,7 +186,7 @@ func TestSearchPartitions(t *testing.T) {
 func TestSearchEmptyOutputFields(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, dynamic := range []bool{true, false} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(dynamic))
@@ -215,7 +216,7 @@ func TestSearchEmptyOutputFields(t *testing.T) {
 func TestSearchNotExistOutputFields(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, enableDynamic := range []bool{false, true} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(enableDynamic))
@@ -258,7 +259,7 @@ func TestSearchNotExistOutputFields(t *testing.T) {
 func TestSearchOutputAllFields(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
@@ -286,7 +287,7 @@ func TestSearchOutputAllFields(t *testing.T) {
 func TestSearchOutputBinaryPk(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
@@ -312,7 +313,7 @@ func TestSearchOutputBinaryPk(t *testing.T) {
 func TestSearchOutputSparse(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
@@ -338,7 +339,7 @@ func TestSearchOutputSparse(t *testing.T) {
 // test search with invalid vector field name: not exist; non-vector field, empty fiend name, json and dynamic field -> error
 func TestSearchInvalidVectorField(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(500))
@@ -380,7 +381,7 @@ func TestSearchInvalidVectorField(t *testing.T) {
 func TestSearchInvalidVectors(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64MultiVec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(500))
@@ -422,7 +423,7 @@ func TestSearchEmptyInvalidVectors(t *testing.T) {
 	t.Log("https://github.com/milvus-io/milvus/issues/33637")
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
@@ -455,7 +456,7 @@ func TestSearchEmptyInvalidVectors(t *testing.T) {
 // test search metric type isn't the same with index metric type
 func TestSearchNotMatchMetricType(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(500))
@@ -472,7 +473,7 @@ func TestSearchNotMatchMetricType(t *testing.T) {
 // test search with invalid topK -> error
 func TestSearchInvalidTopK(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(500))
@@ -490,7 +491,7 @@ func TestSearchInvalidTopK(t *testing.T) {
 // test search with invalid topK -> error
 func TestSearchInvalidOffset(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(500))
@@ -508,7 +509,7 @@ func TestSearchInvalidOffset(t *testing.T) {
 // test search with invalid search params
 func TestSearchInvalidSearchParams(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(500))
@@ -542,7 +543,7 @@ func TestSearchInvalidSearchParams(t *testing.T) {
 // search with index scann search param ef < topK -> error
 func TestSearchInvalidScannReorderK(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(500))
@@ -570,38 +571,50 @@ func TestSearchInvalidScannReorderK(t *testing.T) {
 // test search with scann index params: with_raw_data and metrics_type [L2, IP, COSINE]
 func TestSearchScannAllMetricsWithRawData(t *testing.T) {
 	t.Parallel()
+	ch := make(chan struct{}, 3)
+	wg := sync.WaitGroup{}
+	testFunc := func(withRawData bool, metricType entity.MetricType) {
+		defer func() {
+			wg.Done()
+			<-ch
+		}()
+		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+		mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON),
+			hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
+		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+		prepare.FlushData(ctx, t, mc, schema.CollectionName)
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{
+			common.DefaultFloatVecFieldName: index.NewSCANNIndex(metricType, 16, withRawData),
+		}))
+		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+		// search and output all fields
+		vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+		resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).
+			WithConsistencyLevel(entity.ClStrong).WithOutputFields("*"))
+		common.CheckErr(t, errSearch, true)
+		common.CheckOutputFields(t, []string{
+			common.DefaultInt64FieldName, common.DefaultJSONFieldName,
+			common.DefaultFloatVecFieldName, common.DefaultDynamicFieldName,
+		}, resSearch[0].Fields)
+		common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
+	}
 	for _, withRawData := range []bool{true, false} {
 		for _, metricType := range []entity.MetricType{entity.L2, entity.IP, entity.COSINE} {
-			ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-			mc := createDefaultMilvusClient(ctx, t)
-
-			prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON),
-				hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
-			prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
-			prepare.FlushData(ctx, t, mc, schema.CollectionName)
-			prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{
-				common.DefaultFloatVecFieldName: index.NewSCANNIndex(metricType, 16, withRawData),
-			}))
-			prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
-
-			// search and output all fields
-			vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-			resSearch, errSearch := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).
-				WithConsistencyLevel(entity.ClStrong).WithOutputFields("*"))
-			common.CheckErr(t, errSearch, true)
-			common.CheckOutputFields(t, []string{
-				common.DefaultInt64FieldName, common.DefaultJSONFieldName,
-				common.DefaultFloatVecFieldName, common.DefaultDynamicFieldName,
-			}, resSearch[0].Fields)
-			common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
+			ch <- struct{}{}
+			wg.Add(1)
+			go testFunc(withRawData, metricType)
 		}
 	}
+	wg.Wait()
 }
 
 // test search with valid expression
 func TestSearchExpr(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
@@ -644,7 +657,7 @@ func TestSearchInvalidExpr(t *testing.T) {
 	t.Parallel()
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
@@ -666,7 +679,7 @@ func TestSearchJsonFieldExpr(t *testing.T) {
 	t.Parallel()
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	exprs := []string{
 		"",
@@ -712,7 +725,7 @@ func TestSearchJsonFieldExpr(t *testing.T) {
 
 func TestSearchDynamicFieldExpr(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	// create collection
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption().
 		TWithEnableDynamicField(true))
@@ -773,7 +786,7 @@ func TestSearchDynamicFieldExpr(t *testing.T) {
 
 func TestSearchArrayFieldExpr(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecArray), hp.TNewFieldsOption(), hp.TNewSchemaOption().
@@ -824,7 +837,7 @@ func TestSearchNotExistedExpr(t *testing.T) {
 	t.Parallel()
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, isDynamic := range [2]bool{true, false} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
@@ -851,7 +864,7 @@ func TestSearchNotExistedExpr(t *testing.T) {
 // test search with fp16/ bf16 /binary vector
 func TestSearchMultiVectors(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64MultiVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
 		TWithEnableDynamicField(true))
@@ -921,7 +934,7 @@ func TestSearchSparseVector(t *testing.T) {
 	idxInverted := index.NewGenericIndex(common.DefaultSparseVecFieldName, map[string]string{"drop_ratio_build": "0.2", index.MetricTypeKey: "IP", index.IndexTypeKey: "SPARSE_INVERTED_INDEX"})
 	idxWand := index.NewGenericIndex(common.DefaultSparseVecFieldName, map[string]string{"drop_ratio_build": "0.3", index.MetricTypeKey: "IP", index.IndexTypeKey: "SPARSE_WAND"})
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, idx := range []index.Index{idxInverted, idxWand} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
@@ -955,7 +968,7 @@ func TestSearchInvalidSparseVector(t *testing.T) {
 	idxInverted := index.NewGenericIndex(common.DefaultSparseVecFieldName, map[string]string{"drop_ratio_build": "0.2", index.MetricTypeKey: "IP", index.IndexTypeKey: "SPARSE_INVERTED_INDEX"})
 	idxWand := index.NewGenericIndex(common.DefaultSparseVecFieldName, map[string]string{"drop_ratio_build": "0.3", index.MetricTypeKey: "IP", index.IndexTypeKey: "SPARSE_WAND"})
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, idx := range []index.Index{idxInverted, idxWand} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
@@ -986,7 +999,7 @@ func TestSearchWithEmptySparseVector(t *testing.T) {
 	idxInverted := index.NewSparseInvertedIndex(entity.IP, 0.1)
 	idxWand := index.NewSparseWANDIndex(entity.IP, 0.1)
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, idx := range []index.Index{idxInverted, idxWand} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
@@ -1009,7 +1022,7 @@ func TestSearchWithEmptySparseVector(t *testing.T) {
 func TestSearchFromEmptySparseVector(t *testing.T) {
 	idxInverted := index.NewSparseInvertedIndex(entity.IP, 0.1)
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, idx := range []index.Index{idxInverted} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
@@ -1055,7 +1068,7 @@ func TestSearchSparseVectorPagination(t *testing.T) {
 	idxInverted := index.NewGenericIndex(common.DefaultSparseVecFieldName, map[string]string{"drop_ratio_build": "0.2", index.MetricTypeKey: "IP", index.IndexTypeKey: "SPARSE_INVERTED_INDEX"})
 	idxWand := index.NewGenericIndex(common.DefaultSparseVecFieldName, map[string]string{"drop_ratio_build": "0.3", index.MetricTypeKey: "IP", index.IndexTypeKey: "SPARSE_WAND"})
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, idx := range []index.Index{idxInverted, idxWand} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
@@ -1090,9 +1103,8 @@ func TestSearchSparseVectorNotSupported(t *testing.T) {
 }
 
 func TestRangeSearchSparseVector(t *testing.T) {
-	t.Skipf("https://github.com/milvus-io/milvus/issues/38846")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption().
 		TWithEnableDynamicField(true))
@@ -1111,10 +1123,12 @@ func TestRangeSearchSparseVector(t *testing.T) {
 		log.Info("default search", zap.Any("score", res.Scores))
 	}
 
-	radius := 10
-	rangeFilter := 30
+	annParams := index.NewSparseAnnParam()
+	annParams.WithRadius(10)
+	annParams.WithRangeFilter(30)
+	annParams.WithDropRatio(0.2)
 	resRange, errSearch = mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).
-		WithSearchParam("drop_ratio_search", "0.2").WithSearchParam("radius", strconv.Itoa(radius)).WithSearchParam("range_filter", strconv.Itoa(rangeFilter)))
+		WithAnnParam(annParams))
 	common.CheckErr(t, errSearch, true)
 	common.CheckErr(t, errSearch, true)
 	require.Len(t, resRange, common.DefaultNq)

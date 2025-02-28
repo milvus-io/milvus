@@ -11,13 +11,15 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // timeTickSyncOperator is a time tick sync operator.
@@ -39,7 +41,6 @@ func newTimeTickSyncOperator(param interceptors.InterceptorBuildParam) *timeTick
 		ackManager:            nil,
 		ackDetails:            ack.NewAckDetails(),
 		sourceID:              paramtable.GetNodeID(),
-		timeTickNotifier:      inspector.NewTimeTickNotifier(),
 		metrics:               metricsutil.NewTimeTickMetrics(param.WALImpls.Channel().Name),
 	}
 }
@@ -56,18 +57,40 @@ type timeTickSyncOperator struct {
 	ackManager            *ack.AckManager                    // ack manager.
 	ackDetails            *ack.AckDetails                    // all acknowledged details, all acked messages but not sent to wal will be kept here.
 	sourceID              int64                              // the current node id.
-	timeTickNotifier      *inspector.TimeTickNotifier        // used to notify the time tick change.
+	writeAheadBuffer      *wab.WriteAheadBuffer              // write ahead buffer.
+	mvccManager           *mvcc.MVCCManager                  // cursor manager is used to record the maximum presisted timetick of vchannel.
 	metrics               *metricsutil.TimeTickMetrics
+}
+
+// WriteAheadBuffer returns the write ahead buffer.
+func (impl *timeTickSyncOperator) WriteAheadBuffer(ctx context.Context) (wab.ROWriteAheadBuffer, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-impl.ready:
+	}
+	if impl.writeAheadBuffer == nil {
+		panic("unreachable: write ahead buffer is not ready")
+	}
+	return impl.writeAheadBuffer, nil
+}
+
+// MVCCManager returns the mvcc manager.
+func (impl *timeTickSyncOperator) MVCCManager(ctx context.Context) (*mvcc.MVCCManager, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-impl.ready:
+	}
+	if impl.mvccManager == nil {
+		panic("unreachable: mvcc manager is not ready")
+	}
+	return impl.mvccManager, nil
 }
 
 // Channel returns the pchannel info.
 func (impl *timeTickSyncOperator) Channel() types.PChannelInfo {
 	return impl.pchannel
-}
-
-// TimeTickNotifier returns the time tick notifier.
-func (impl *timeTickSyncOperator) TimeTickNotifier() *inspector.TimeTickNotifier {
-	return impl.timeTickNotifier
 }
 
 // Sync trigger a sync operation.
@@ -143,7 +166,12 @@ func (impl *timeTickSyncOperator) blockUntilSyncTimeTickReady() error {
 			lastErr = errors.Wrap(err, "allocate timestamp failed")
 			continue
 		}
-		msgID, err := impl.sendPersistentTsMsg(impl.ctx, ts, nil, underlyingWALImpls.Append)
+		msg, err := NewTimeTickMsg(ts, nil, impl.sourceID)
+		if err != nil {
+			lastErr = errors.Wrap(err, "at build time tick msg")
+			continue
+		}
+		msgID, err := underlyingWALImpls.Append(impl.ctx, msg)
 		if err != nil {
 			lastErr = errors.Wrap(err, "send first timestamp message failed")
 			continue
@@ -153,7 +181,17 @@ func (impl *timeTickSyncOperator) blockUntilSyncTimeTickReady() error {
 		impl.logger.Info(
 			"send first time tick success",
 			zap.Uint64("timestamp", ts),
-			zap.String("messageID", msgID.String()))
+			zap.Stringer("messageID", msgID))
+		capacity := int(paramtable.Get().StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
+		keepalive := paramtable.Get().StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse()
+		impl.writeAheadBuffer = wab.NewWirteAheadBuffer(
+			impl.Channel().Name,
+			impl.logger,
+			capacity,
+			keepalive,
+			msg.IntoImmutableMessage(msgID),
+		)
+		impl.mvccManager = mvcc.NewMVCCManager(ts)
 		break
 	}
 	// interceptor is ready now.
@@ -185,6 +223,7 @@ func (impl *timeTickSyncOperator) AckManager() *ack.AckManager {
 func (impl *timeTickSyncOperator) Close() {
 	impl.cancel()
 	impl.metrics.Close()
+	impl.writeAheadBuffer.Close()
 }
 
 // sendTsMsg sends first timestamp message to wal.
@@ -202,31 +241,36 @@ func (impl *timeTickSyncOperator) sendTsMsg(ctx context.Context, appender func(c
 	// Construct time tick message.
 	ts := impl.ackDetails.LastAllAcknowledgedTimestamp()
 	lastConfirmedMessageID := impl.ackDetails.EarliestLastConfirmedMessageID()
+	persist := !impl.ackDetails.IsNoPersistedMessage()
 
-	if impl.ackDetails.IsNoPersistedMessage() {
-		// there's no persisted message, so no need to send persistent time tick message.
-		return impl.sendNoPersistentTsMsg(ctx, ts, appender)
-	}
-	// otherwise, send persistent time tick message.
-	_, err := impl.sendPersistentTsMsg(ctx, ts, lastConfirmedMessageID, appender)
-	return err
+	return impl.sendTsMsgToWAL(ctx, ts, lastConfirmedMessageID, persist, appender)
 }
 
 // sendPersistentTsMsg sends persistent time tick message to wal.
-func (impl *timeTickSyncOperator) sendPersistentTsMsg(ctx context.Context,
+func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 	ts uint64,
 	lastConfirmedMessageID message.MessageID,
+	persist bool,
 	appender func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error),
-) (message.MessageID, error) {
+) error {
 	msg, err := NewTimeTickMsg(ts, lastConfirmedMessageID, impl.sourceID)
 	if err != nil {
-		return nil, errors.Wrap(err, "at build time tick msg")
+		return errors.Wrap(err, "at build time tick msg")
+	}
+
+	if !persist {
+		// there's no persisted message, so no need to send persistent time tick message.
+		// With the hint of not persisted message, the underlying wal will not persist it.
+		// but the interceptors will still be triggered.
+		ctx = utility.WithNotPersisted(ctx, &utility.NotPersistedHint{
+			MessageID: lastConfirmedMessageID,
+		})
 	}
 
 	// Append it to wal.
 	msgID, err := appender(ctx, msg)
 	if err != nil {
-		return nil, errors.Wrapf(err,
+		return errors.Wrapf(err,
 			"append time tick msg to wal failed, timestamp: %d, previous message counter: %d",
 			impl.ackDetails.LastAllAcknowledgedTimestamp(),
 			impl.ackDetails.Len(),
@@ -234,54 +278,20 @@ func (impl *timeTickSyncOperator) sendPersistentTsMsg(ctx context.Context,
 	}
 
 	// metrics updates
-	impl.metrics.CountPersistentTimeTickSync(ts)
+	impl.metrics.CountTimeTickSync(ts, persist)
+	msgs := make([]message.ImmutableMessage, 0, impl.ackDetails.Len())
 	impl.ackDetails.Range(func(detail *ack.AckDetail) bool {
 		impl.metrics.CountSyncTimeTick(detail.IsSync)
+		if !detail.IsSync && detail.Err == nil {
+			msgs = append(msgs, detail.Message)
+		}
 		return true
 	})
 	// Ack details has been committed to wal, clear it.
 	impl.ackDetails.Clear()
-	// Update last time tick message id and time tick.
-	impl.timeTickNotifier.Update(inspector.TimeTickInfo{
-		MessageID: msgID,
-		TimeTick:  ts,
-	})
-	return msgID, nil
-}
-
-// sendNoPersistentTsMsg sends no persistent time tick message to wal.
-func (impl *timeTickSyncOperator) sendNoPersistentTsMsg(ctx context.Context, ts uint64, appender func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error)) error {
-	msg, err := NewTimeTickMsg(ts, nil, impl.sourceID)
-	if err != nil {
-		return errors.Wrap(err, "at build time tick msg when send no persist msg")
-	}
-
-	// with the hint of not persisted message, the underlying wal will not persist it.
-	// but the interceptors will still be triggered.
-	ctx = utility.WithNotPersisted(ctx, &utility.NotPersistedHint{
-		MessageID: impl.timeTickNotifier.Get().MessageID,
-	})
-
-	// Append it to wal.
-	_, err = appender(ctx, msg)
-	if err != nil {
-		return errors.Wrapf(err,
-			"append no persist time tick msg to wal failed, timestamp: %d, previous message counter: %d",
-			impl.ackDetails.LastAllAcknowledgedTimestamp(),
-			impl.ackDetails.Len(),
-		)
-	}
-
-	// metrics updates.
-	impl.metrics.CountMemoryTimeTickSync(ts)
-	impl.ackDetails.Range(func(detail *ack.AckDetail) bool {
-		impl.metrics.CountSyncTimeTick(detail.IsSync)
-		return true
-	})
-	// Ack details has been committed to wal, clear it.
-	impl.ackDetails.Clear()
-	// Only update time tick.
-	impl.timeTickNotifier.OnlyUpdateTs(ts)
+	tsMsg := msg.IntoImmutableMessage(msgID)
+	// Add it into write ahead buffer.
+	impl.writeAheadBuffer.Append(msgs, tsMsg)
 	return nil
 }
 

@@ -31,10 +31,19 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 func getCurrentIndexVersion(v int32) int32 {
 	cCurrent := int32(C.GetCurrentIndexVersion())
+	if cCurrent < v {
+		return cCurrent
+	}
+	return v
+}
+
+func getCurrentScalarIndexVersion(v int32) int32 {
+	cCurrent := common.CurrentScalarIndexEngineVersion
 	if cCurrent < v {
 		return cCurrent
 	}

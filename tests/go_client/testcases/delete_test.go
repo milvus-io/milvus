@@ -11,14 +11,14 @@ import (
 
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
 func TestDelete(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
@@ -54,7 +54,7 @@ func TestDelete(t *testing.T) {
 // test delete with string pks
 func TestDeleteVarcharPks(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	cp := hp.NewCreateCollectionParams(hp.VarcharBinary)
@@ -89,7 +89,7 @@ func TestDeleteVarcharPks(t *testing.T) {
 // test delete from empty collection
 func TestDeleteEmptyCollection(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
@@ -114,7 +114,7 @@ func TestDeleteEmptyCollection(t *testing.T) {
 // test delete from an not exist collection or partition
 func TestDeleteNotExistName(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// delete from not existed collection
 	_, errDelete := mc.Delete(ctx, client.NewDeleteOption("aaa").WithExpr(""))
@@ -132,7 +132,7 @@ func TestDeleteNotExistName(t *testing.T) {
 // delete without loading support: pk ids
 func TestDeleteComplexExprWithoutLoad(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	cp := hp.NewCreateCollectionParams(hp.Int64VecAllScalar)
@@ -168,7 +168,7 @@ func TestDeleteComplexExprWithoutLoad(t *testing.T) {
 // test delete with nil ids
 func TestDeleteEmptyIds(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	cp := hp.NewCreateCollectionParams(hp.VarcharBinary)
@@ -195,7 +195,7 @@ func TestDeleteEmptyIds(t *testing.T) {
 // test delete with string pks
 func TestDeleteVarcharEmptyIds(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	cp := hp.NewCreateCollectionParams(hp.VarcharBinary)
@@ -231,7 +231,7 @@ func TestDeleteVarcharEmptyIds(t *testing.T) {
 // test delete with invalid ids
 func TestDeleteInvalidIds(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	cp := hp.NewCreateCollectionParams(hp.VarcharBinary)
@@ -250,7 +250,7 @@ func TestDeleteInvalidIds(t *testing.T) {
 // test delete with non-pk ids
 func TestDeleteWithIds(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection and a partition
 	pkName := "pk"
@@ -296,7 +296,7 @@ func TestDeleteWithIds(t *testing.T) {
 // test delete with default partition name params
 func TestDeleteDefaultPartitionName(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection and a partition
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
@@ -334,7 +334,7 @@ func TestDeleteDefaultPartitionName(t *testing.T) {
 // test delete with empty partition "": actually delete from all partitions
 func TestDeleteEmptyPartitionName(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection and a partition
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
@@ -372,7 +372,7 @@ func TestDeleteEmptyPartitionName(t *testing.T) {
 // test delete with partition name
 func TestDeletePartitionName(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection and a partition
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
@@ -439,7 +439,6 @@ func TestDeleteComplexExpr(t *testing.T) {
 		expr  string
 		count int
 	}
-	capacity := common.TestCapacity
 	exprLimits := []exprCount{
 		{expr: fmt.Sprintf("%s >= 1000 || %s > 2000", common.DefaultInt64FieldName, common.DefaultInt64FieldName), count: 2000},
 
@@ -462,7 +461,58 @@ func TestDeleteComplexExpr(t *testing.T) {
 
 		// data type not match and no error
 		{expr: fmt.Sprintf("%s['number'] == '0' ", common.DefaultJSONFieldName), count: 0},
+	}
+	ch := make(chan struct{}, 5)
+	wg := sync.WaitGroup{}
+	testFunc := func(exprLimit exprCount) {
+		defer func() {
+			wg.Done()
+			<-ch
+		}()
+		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
+		mc := hp.CreateDefaultMilvusClient(ctx, t)
 
+		// create collection and a partition
+		cp := hp.NewCreateCollectionParams(hp.Int64VecAllScalar)
+		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
+
+		// insert [0, 3000) into default
+		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithMaxCapacity(common.TestCapacity))
+		prepare.FlushData(ctx, t, mc, schema.CollectionName)
+
+		// index and load
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+		log.Debug("TestDeleteComplexExpr", zap.Any("expr", exprLimit.expr))
+
+		resDe, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithExpr(exprLimit.expr))
+		common.CheckErr(t, err, true)
+		log.Debug("delete count", zap.Bool("equal", int64(exprLimit.count) == resDe.DeleteCount))
+		// require.Equal(t, int64(exprLimit.count), resDe.DeleteCount)
+
+		resQuery, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprLimit.expr).WithConsistencyLevel(entity.ClStrong))
+		common.CheckErr(t, err, true)
+		require.Zero(t, resQuery.ResultCount)
+	}
+
+	for _, exprLimit := range exprLimits {
+		exprLimit := exprLimit
+		ch <- struct{}{}
+		wg.Add(1)
+		go testFunc(exprLimit)
+	}
+	wg.Wait()
+}
+
+// test delete json expr
+func TestDeleteComplexExprJson(t *testing.T) {
+	type exprCount struct {
+		expr  string
+		count int
+	}
+	capacity := common.TestCapacity
+	exprLimits := []exprCount{
 		// json field
 		{expr: fmt.Sprintf("%s > 1499.5", common.DefaultJSONFieldName), count: 1500 / 2},                                 // json >= 1500.0
 		{expr: fmt.Sprintf("%s like '21%%'", common.DefaultJSONFieldName), count: 100 / 4},                               // json like '21%'
@@ -483,7 +533,7 @@ func TestDeleteComplexExpr(t *testing.T) {
 			<-ch
 		}()
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-		mc := createDefaultMilvusClient(ctx, t)
+		mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 		// create collection and a partition
 		cp := hp.NewCreateCollectionParams(hp.Int64VecAllScalar)
@@ -520,7 +570,7 @@ func TestDeleteComplexExpr(t *testing.T) {
 
 func TestDeleteInvalidExpr(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection and a partition
 	cp := hp.NewCreateCollectionParams(hp.Int64VecAllScalar)
@@ -543,7 +593,7 @@ func TestDeleteInvalidExpr(t *testing.T) {
 // test delete with duplicated data ids
 func TestDeleteDuplicatedPks(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection and a partition
 	cp := hp.NewCreateCollectionParams(hp.Int64Vec)

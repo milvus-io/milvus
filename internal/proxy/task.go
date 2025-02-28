@@ -32,17 +32,17 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -140,6 +140,7 @@ type task interface {
 	CanSkipAllocTimestamp() bool
 	SetOnEnqueueTime()
 	GetDurationInQueue() time.Duration
+	IsSubTask() bool
 }
 
 type baseTask struct {
@@ -156,6 +157,10 @@ func (bt *baseTask) SetOnEnqueueTime() {
 
 func (bt *baseTask) GetDurationInQueue() time.Duration {
 	return time.Since(bt.onEnqueueTime)
+}
+
+func (bt *baseTask) IsSubTask() bool {
+	return false
 }
 
 type dmlTask interface {
@@ -397,6 +402,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		// valid max length per row parameters
 		// if max_length not specified, return error
 		if field.DataType == schemapb.DataType_VarChar ||
+			field.DataType == schemapb.DataType_Text ||
 			(field.GetDataType() == schemapb.DataType_Array && field.GetElementType() == schemapb.DataType_VarChar) {
 			err = validateMaxLengthPerRow(t.schema.Name, field)
 			if err != nil {
@@ -704,6 +710,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.Properties = result.Properties
 	t.result.DbName = result.GetDbName()
 	t.result.NumPartitions = result.NumPartitions
+	t.result.UpdateTimestamp = result.UpdateTimestamp
 	for _, field := range result.Schema.Fields {
 		if field.IsDynamic {
 			continue
@@ -2745,4 +2752,18 @@ func (t *ListResourceGroupsTask) Execute(ctx context.Context) error {
 
 func (t *ListResourceGroupsTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+// isIgnoreGrowing is used to check if the request should ignore growing
+func isIgnoreGrowing(params []*commonpb.KeyValuePair) (bool, error) {
+	for _, kv := range params {
+		if kv.GetKey() == IgnoreGrowingKey {
+			ignoreGrowing, err := strconv.ParseBool(kv.GetValue())
+			if err != nil {
+				return false, errors.New("parse ignore growing field failed")
+			}
+			return ignoreGrowing, nil
+		}
+	}
+	return false, nil
 }

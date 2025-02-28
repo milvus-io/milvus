@@ -19,9 +19,11 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -36,24 +38,25 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metric"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -323,12 +326,12 @@ func validateDimension(field *schemapb.FieldSchema) error {
 	}
 	if typeutil.IsSparseFloatVectorType(field.DataType) {
 		if exist {
-			return fmt.Errorf("dim should not be specified for sparse vector field %s(%d)", field.Name, field.FieldID)
+			return fmt.Errorf("dim should not be specified for sparse vector field %s(%d)", field.GetName(), field.FieldID)
 		}
 		return nil
 	}
 	if !exist {
-		return errors.New("dimension is not defined in field type params, check type param `dim` for vector field")
+		return errors.Newf("dimension is not defined in field type params of field %s, check type param `dim` for vector field", field.GetName())
 	}
 
 	if dim <= 1 {
@@ -337,14 +340,14 @@ func validateDimension(field *schemapb.FieldSchema) error {
 
 	if typeutil.IsFloatVectorType(field.DataType) {
 		if dim > Params.ProxyCfg.MaxDimension.GetAsInt64() {
-			return fmt.Errorf("invalid dimension: %d. float vector dimension should be in range 2 ~ %d", dim, Params.ProxyCfg.MaxDimension.GetAsInt())
+			return fmt.Errorf("invalid dimension: %d of field %s. float vector dimension should be in range 2 ~ %d", dim, field.GetName(), Params.ProxyCfg.MaxDimension.GetAsInt())
 		}
 	} else {
 		if dim%8 != 0 {
-			return fmt.Errorf("invalid dimension: %d. binary vector dimension should be multiple of 8. ", dim)
+			return fmt.Errorf("invalid dimension: %d of field %s. binary vector dimension should be multiple of 8. ", dim, field.GetName())
 		}
 		if dim > Params.ProxyCfg.MaxDimension.GetAsInt64()*8 {
-			return fmt.Errorf("invalid dimension: %d. binary vector dimension should be in range 2 ~ %d", dim, Params.ProxyCfg.MaxDimension.GetAsInt()*8)
+			return fmt.Errorf("invalid dimension: %d of field %s. binary vector dimension should be in range 2 ~ %d", dim, field.GetName(), Params.ProxyCfg.MaxDimension.GetAsInt()*8)
 		}
 	}
 	return nil
@@ -362,15 +365,21 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 			return err
 		}
 
-		defaultMaxVarCharLength := Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
-		if maxLengthPerRow > defaultMaxVarCharLength || maxLengthPerRow <= 0 {
-			return merr.WrapErrParameterInvalidMsg("the maximum length specified for a VarChar should be in (0, %d]", defaultMaxVarCharLength)
+		var defaultMaxLength int64
+		if field.DataType == schemapb.DataType_Text {
+			defaultMaxLength = Params.ProxyCfg.MaxTextLength.GetAsInt64()
+		} else {
+			defaultMaxLength = Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
+		}
+
+		if maxLengthPerRow > defaultMaxLength || maxLengthPerRow <= 0 {
+			return merr.WrapErrParameterInvalidMsg("the maximum length specified for the field(%s) should be in (0, %d], but got %d instead", field.GetName(), defaultMaxLength, maxLengthPerRow)
 		}
 		exist = true
 	}
 	// if not exist type params max_length, return error
 	if !exist {
-		return fmt.Errorf("type param(max_length) should be specified for varChar field of collection %s", collectionName)
+		return fmt.Errorf("type param(max_length) should be specified for the field(%s) of collection %s", field.GetName(), collectionName)
 	}
 
 	return nil
@@ -385,7 +394,7 @@ func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchem
 
 		maxCapacityPerRow, err := strconv.ParseInt(param.Value, 10, 64)
 		if err != nil {
-			return fmt.Errorf("the value of %s must be an integer", common.MaxCapacityKey)
+			return fmt.Errorf("the value for %s of field %s must be an integer", common.MaxCapacityKey, field.GetName())
 		}
 		if maxCapacityPerRow > defaultMaxArrayCapacity || maxCapacityPerRow <= 0 {
 			return fmt.Errorf("the maximum capacity specified for a Array should be in (0, 4096]")
@@ -394,7 +403,7 @@ func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchem
 	}
 	// if not exist type params max_length, return error
 	if !exist {
-		return fmt.Errorf("type param(max_capacity) should be specified for array field of collection %s", collectionName)
+		return fmt.Errorf("type param(max_capacity) should be specified for array field %s of collection %s", field.GetName(), collectionName)
 	}
 
 	return nil
@@ -409,7 +418,7 @@ func validateVectorFieldMetricType(field *schemapb.FieldSchema) error {
 			return nil
 		}
 	}
-	return errors.New("vector float without metric_type")
+	return fmt.Errorf(`index param "metric_type" is not specified for index float vector %s`, field.GetName())
 }
 
 func validateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
@@ -417,7 +426,7 @@ func validateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
 	for _, field := range fields {
 		_, ok := names[field.Name]
 		if ok {
-			return errors.New("duplicated field name")
+			return errors.Newf("duplicated field name %s found", field.GetName())
 		}
 		names[field.Name] = true
 	}
@@ -704,6 +713,10 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 			return err
 		}
 	}
+
+	if err := function.ValidateFunctions(coll); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -716,6 +729,10 @@ func checkFunctionOutputField(function *schemapb.FunctionSchema, fields []*schem
 
 		if !typeutil.IsSparseFloatVectorType(fields[0].GetDataType()) {
 			return fmt.Errorf("BM25 function output field must be a SparseFloatVector field, but got %s", fields[0].DataType.String())
+		}
+	case schemapb.FunctionType_TextEmbedding:
+		if len(fields) != 1 || fields[0].DataType != schemapb.DataType_FloatVector {
+			return fmt.Errorf("TextEmbedding function output field must be a FloatVector field")
 		}
 	default:
 		return fmt.Errorf("check output field for unknown function type")
@@ -735,15 +752,18 @@ func wasBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.
 func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25:
-		if len(fields) != 1 || fields[0].DataType != schemapb.DataType_VarChar {
-			return fmt.Errorf("BM25 function input field must be a VARCHAR field, got %d field with type %s",
+		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
+			return fmt.Errorf("BM25 function input field must be a VARCHAR/TEXT field, got %d field with type %s",
 				len(fields), fields[0].DataType.String())
 		}
 		h := typeutil.CreateFieldSchemaHelper(fields[0])
 		if !h.EnableAnalyzer() {
 			return fmt.Errorf("BM25 function input field must set enable_analyzer to true")
 		}
-
+	case schemapb.FunctionType_TextEmbedding:
+		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
+			return fmt.Errorf("TextEmbedding function input field must be a VARCHAR/TEXT field")
+		}
 	default:
 		return fmt.Errorf("check input field with unknown function type")
 	}
@@ -784,6 +804,10 @@ func checkFunctionBasicParams(function *schemapb.FunctionSchema) error {
 	case schemapb.FunctionType_BM25:
 		if len(function.GetParams()) != 0 {
 			return fmt.Errorf("BM25 function accepts no params")
+		}
+	case schemapb.FunctionType_TextEmbedding:
+		if len(function.GetParams()) == 0 {
+			return fmt.Errorf("TextEmbedding function need provider and model_name params")
 		}
 	default:
 		return fmt.Errorf("check function params with unknown function type")
@@ -941,7 +965,7 @@ func fillFieldPropertiesBySchema(columns []*schemapb.FieldData, schema *schemapb
 	expectColumnNum := 0
 	for _, field := range schema.GetFields() {
 		fieldName2Schema[field.Name] = field
-		if !field.GetIsFunctionOutput() {
+		if !IsBM25FunctionOutputField(field, schema) {
 			expectColumnNum++
 		}
 	}
@@ -1493,12 +1517,12 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
 			return merr.WrapErrParameterInvalidMsg("primary key can't be with default value")
 		}
-		if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) || fieldSchema.GetIsFunctionOutput() {
+		if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) || IsBM25FunctionOutputField(fieldSchema, schema) {
 			// when inInsert, no need to pass when pk is autoid and SkipAutoIDCheck is false
 			autoGenFieldNum++
 		}
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
-			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) || fieldSchema.GetIsFunctionOutput() {
+			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) || IsBM25FunctionOutputField(fieldSchema, schema) {
 				// autoGenField
 				continue
 			}
@@ -1522,7 +1546,6 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 			zap.Int64("primaryKeyNum", int64(primaryKeyNum)))
 		return merr.WrapErrParameterInvalidMsg("more than 1 primary keys not supported, got %d", primaryKeyNum)
 	}
-
 	expectedNum := len(schema.Fields)
 	actualNum := len(insertMsg.FieldsData) + autoGenFieldNum
 
@@ -1591,6 +1614,42 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 	}
 
 	return ids, nil
+}
+
+// for some varchar with analzyer
+// we need check char format before insert it to message queue
+// now only support utf-8
+func checkInputUtf8Compatiable(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+	checkeFields := lo.FilterMap(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) (int64, bool) {
+		if field.DataType != schemapb.DataType_VarChar && field.DataType != schemapb.DataType_Text {
+			return 0, false
+		}
+
+		for _, kv := range field.GetTypeParams() {
+			if kv.Key == common.EnableAnalyzerKey {
+				return field.GetFieldID(), true
+			}
+		}
+		return 0, false
+	})
+
+	if len(checkeFields) == 0 {
+		return nil
+	}
+
+	for _, fieldData := range insertMsg.FieldsData {
+		if !lo.Contains(checkeFields, fieldData.GetFieldId()) {
+			continue
+		}
+
+		for row, data := range fieldData.GetScalars().GetStringData().GetData() {
+			ok := utf8.ValidString(data)
+			if !ok {
+				return merr.WrapErrAsInputError(fmt.Errorf("input with analyzer should be utf-8 format, but row: %d not utf-8 format. data: %s", row, data))
+			}
+		}
+	}
+	return nil
 }
 
 func checkUpsertPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, *schemapb.IDs, error) {
@@ -2070,7 +2129,7 @@ func GetCostValue(status *commonpb.Status) int {
 }
 
 // GetRequestInfo returns collection name and rateType of request and return tokens needed.
-func GetRequestInfo(ctx context.Context, req interface{}) (int64, map[int64][]int64, internalpb.RateType, int, error) {
+func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]int64, internalpb.RateType, int, error) {
 	switch r := req.(type) {
 	case *milvuspb.InsertRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
@@ -2148,6 +2207,7 @@ func GetRequestInfo(ctx context.Context, req interface{}) (int64, map[int64][]in
 		if req == nil {
 			return util.InvalidDBID, map[int64][]int64{}, 0, 0, fmt.Errorf("null request")
 		}
+		log.RatedWarn(60, "not supported request type for rate limiter", zap.String("type", reflect.TypeOf(req).String()))
 		return util.InvalidDBID, map[int64][]int64{}, 0, 0, nil
 	}
 }
@@ -2204,4 +2264,22 @@ func GetReplicateID(ctx context.Context, database, collectionName string) (strin
 	}
 	replicateID, _ := common.GetReplicateID(dbInfo.properties)
 	return replicateID, nil
+}
+
+func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
+	if !(field.GetIsFunctionOutput() && field.GetDataType() == schemapb.DataType_SparseFloatVector) {
+		return false
+	}
+
+	for _, fSchema := range collSchema.Functions {
+		if fSchema.Type == schemapb.FunctionType_BM25 {
+			if len(fSchema.OutputFieldNames) != 0 && field.Name == fSchema.OutputFieldNames[0] {
+				return true
+			}
+			if len(fSchema.OutputFieldIds) != 0 && field.FieldID == fSchema.OutputFieldIds[0] {
+				return true
+			}
+		}
+	}
+	return false
 }

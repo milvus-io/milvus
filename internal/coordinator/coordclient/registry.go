@@ -11,13 +11,13 @@ import (
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // localClient is a client that can access local server directly
@@ -58,9 +58,6 @@ func EnableLocalClientRole(cfg *LocalClientRoleConfig) {
 
 // RegisterQueryCoordServer register query coord server
 func RegisterQueryCoordServer(server querypb.QueryCoordServer) {
-	if !enableLocal.EnableQueryCoord {
-		return
-	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&querypb.QueryCoord_ServiceDesc, server, querypb.NewQueryCoordClient)
 	glocalClient.queryCoordClient.Set(&nopCloseQueryCoordClient{newLocalClient})
 	log.Ctx(context.TODO()).Info("register query coord server", zap.Any("enableLocalClient", enableLocal))
@@ -68,9 +65,6 @@ func RegisterQueryCoordServer(server querypb.QueryCoordServer) {
 
 // RegsterDataCoordServer register data coord server
 func RegisterDataCoordServer(server datapb.DataCoordServer) {
-	if !enableLocal.EnableDataCoord {
-		return
-	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&datapb.DataCoord_ServiceDesc, server, datapb.NewDataCoordClient)
 	glocalClient.dataCoordClient.Set(&nopCloseDataCoordClient{newLocalClient})
 	log.Ctx(context.TODO()).Info("register data coord server", zap.Any("enableLocalClient", enableLocal))
@@ -78,9 +72,6 @@ func RegisterDataCoordServer(server datapb.DataCoordServer) {
 
 // RegisterRootCoordServer register root coord server
 func RegisterRootCoordServer(server rootcoordpb.RootCoordServer) {
-	if !enableLocal.EnableRootCoord {
-		return
-	}
 	newLocalClient := grpcclient.NewLocalGRPCClient(&rootcoordpb.RootCoord_ServiceDesc, server, rootcoordpb.NewRootCoordClient)
 	glocalClient.rootCoordClient.Set(&nopCloseRootCoordClient{newLocalClient})
 	log.Ctx(context.TODO()).Info("register root coord server", zap.Any("enableLocalClient", enableLocal))

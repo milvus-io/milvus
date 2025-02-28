@@ -4,23 +4,15 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 var _ task = (*broadcastTask)(nil)
-
-// newBroadcastTask creates a new broadcast task.
-func newBroadcastTask(ctx context.Context, core *Core, msgs []message.MutableMessage) *broadcastTask {
-	return &broadcastTask{
-		baseTask: newBaseTask(ctx, core),
-		msgs:     msgs,
-	}
-}
 
 // BroadcastTask is used to implement the broadcast operation based on the msgstream
 // by using the streaming service interface.

@@ -5,15 +5,15 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	_ "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/kafka"
-	_ "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/pulsar"
-	_ "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/kafka"
+	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
+	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 )
 
 // Server is the streamingnode server.
@@ -44,8 +44,6 @@ func (s *Server) Init(ctx context.Context) (err error) {
 
 // Start starts the streamingnode server.
 func (s *Server) Start() {
-	resource.Resource().Flusher().Start()
-	log.Info("flusher started")
 }
 
 // Stop stops the streamingnode server.
@@ -55,8 +53,6 @@ func (s *Server) Stop() {
 	s.walManager.Close()
 	log.Info("streamingnode server stopped")
 	log.Info("stopping flusher...")
-	resource.Resource().Flusher().Stop()
-	log.Info("flusher stopped")
 }
 
 // initBasicComponent initialize all underlying dependency for streamingnode.
@@ -66,6 +62,8 @@ func (s *Server) initBasicComponent(_ context.Context) {
 	if err != nil {
 		panic("open wal manager failed")
 	}
+	// Register the wal manager to the local registry.
+	registry.RegisterLocalWALManager(s.walManager)
 }
 
 // initService initializes the grpc service.

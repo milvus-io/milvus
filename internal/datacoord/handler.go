@@ -25,13 +25,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/retry"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // Handler handles some channel method for ChannelManager
@@ -133,10 +133,11 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	}
 
 	var (
-		flushedIDs   = make(typeutil.UniqueSet)
-		droppedIDs   = make(typeutil.UniqueSet)
-		growingIDs   = make(typeutil.UniqueSet)
-		levelZeroIDs = make(typeutil.UniqueSet)
+		flushedIDs       = make(typeutil.UniqueSet)
+		droppedIDs       = make(typeutil.UniqueSet)
+		growingIDs       = make(typeutil.UniqueSet)
+		levelZeroIDs     = make(typeutil.UniqueSet)
+		deleteCheckPoint *msgpb.MsgPosition
 	)
 
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
@@ -171,6 +172,10 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 			growingIDs.Insert(s.GetID())
 		case s.GetLevel() == datapb.SegmentLevel_L0:
 			levelZeroIDs.Insert(s.GetID())
+			// use smallest start position of l0 segments as deleteCheckPoint, so query coord will only maintain stream delete record  after this ts
+			if deleteCheckPoint == nil || s.GetStartPosition().GetTimestamp() < deleteCheckPoint.GetTimestamp() {
+				deleteCheckPoint = s.GetStartPosition()
+			}
 		default:
 			flushedIDs.Insert(s.GetID())
 		}

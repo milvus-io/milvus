@@ -17,7 +17,7 @@
 package datacoord
 
 import (
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
 type CompactionTask interface {
@@ -43,6 +43,9 @@ type CompactionTask interface {
 	SetNodeID(UniqueID) error
 	NeedReAssignNodeID() bool
 	SaveTaskMeta() error
+
+	PreparePlan() bool
+	CheckCompactionContainsSegment(segmentID int64) bool
 }
 
 type compactionTaskOpt func(task *datapb.CompactionTask)

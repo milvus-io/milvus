@@ -9,31 +9,52 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/mock_wab"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/timetick/mock_inspector"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/mocks/streaming/mock_walimpls"
-	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/mock_walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 )
 
 func TestWalAdaptorReadFail(t *testing.T) {
+	resource.InitForTest(t)
+
 	l := mock_walimpls.NewMockWALImpls(t)
 	expectedErr := errors.New("test")
 	l.EXPECT().WALName().Return("test")
 	l.EXPECT().Channel().Return(types.PChannelInfo{})
+	cnt := atomic.NewInt64(2)
 	l.EXPECT().Read(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, ro walimpls.ReadOption) (walimpls.ScannerImpls, error) {
+			if cnt.Dec() < 0 {
+				s := mock_walimpls.NewMockScannerImpls(t)
+				s.EXPECT().Chan().Return(make(chan message.ImmutableMessage, 1))
+				s.EXPECT().Close().Return(nil)
+				return s, nil
+			}
 			return nil, expectedErr
-		})
+		}).Maybe()
+
+	writeAheadBuffer := mock_wab.NewMockROWriteAheadBuffer(t)
+	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
+	operator.EXPECT().Channel().Return(types.PChannelInfo{}).Maybe()
+	operator.EXPECT().Sync(mock.Anything).Return().Maybe()
+	operator.EXPECT().WriteAheadBuffer(mock.Anything).Return(writeAheadBuffer, nil).Maybe()
+	resource.Resource().TimeTickInspector().RegisterSyncOperator(
+		operator,
+	)
 
 	lAdapted := adaptImplsToWAL(l, nil, func() {})
 	scanner, err := lAdapted.Read(context.Background(), wal.ReadOption{
@@ -41,16 +62,21 @@ func TestWalAdaptorReadFail(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, scanner)
-	assert.ErrorIs(t, scanner.Error(), expectedErr)
+	time.Sleep(time.Second)
+	scanner.Close()
 }
 
 func TestWALAdaptor(t *testing.T) {
-	resource.InitForTest(t)
+	snMeta := mock_metastore.NewMockStreamingNodeCataLog(t)
+	snMeta.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	snMeta.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snMeta))
 
 	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
-	operator.EXPECT().TimeTickNotifier().Return(inspector.NewTimeTickNotifier())
 	operator.EXPECT().Channel().Return(types.PChannelInfo{})
 	operator.EXPECT().Sync(mock.Anything).Return()
+	buffer := mock_wab.NewMockROWriteAheadBuffer(t)
+	operator.EXPECT().WriteAheadBuffer(mock.Anything).Return(buffer, nil)
 	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)
 
 	// Create a mock WAL implementation
@@ -59,7 +85,7 @@ func TestWALAdaptor(t *testing.T) {
 	l.EXPECT().Channel().Return(types.PChannelInfo{})
 	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, mm message.MutableMessage) (message.MessageID, error) {
-			return nil, nil
+			return walimplstest.NewTestMessageID(1), nil
 		})
 	l.EXPECT().Read(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ro walimpls.ReadOption) (walimpls.ScannerImpls, error) {
 		scanner := mock_walimpls.NewMockScannerImpls(t)
@@ -137,7 +163,7 @@ func TestNoInterceptor(t *testing.T) {
 	l.EXPECT().WALName().Return("test")
 	l.EXPECT().Channel().Return(types.PChannelInfo{})
 	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (message.MessageID, error) {
-		return nil, nil
+		return walimplstest.NewTestMessageID(1), nil
 	})
 	l.EXPECT().Close().Run(func() {})
 
@@ -156,7 +182,7 @@ func TestWALWithInterceptor(t *testing.T) {
 	l := mock_walimpls.NewMockWALImpls(t)
 	l.EXPECT().Channel().Return(types.PChannelInfo{})
 	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (message.MessageID, error) {
-		return nil, nil
+		return walimplstest.NewTestMessageID(1), nil
 	})
 	l.EXPECT().WALName().Return("test")
 	l.EXPECT().Close().Run(func() {})

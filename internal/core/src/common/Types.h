@@ -76,6 +76,8 @@ enum class DataType {
     VARCHAR = 21,
     ARRAY = 22,
     JSON = 23,
+    // GEOMETRY = 24 // reserved in proto
+    TEXT = 25,
 
     // Some special Data type, start from after 50
     // just for internal use now, may sync proto in future
@@ -125,12 +127,12 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
             AssertInfo(dim % 8 == 0, "dim={}", dim);
             return dim / 8;
         }
-        case DataType::VECTOR_FLOAT16: {
+        case DataType::VECTOR_FLOAT16:
             return sizeof(float16) * dim;
-        }
-        case DataType::VECTOR_BFLOAT16: {
+        case DataType::VECTOR_BFLOAT16:
             return sizeof(bfloat16) * dim;
-        }
+        case DataType::VECTOR_INT8:
+            return sizeof(int8) * dim;
         // Not supporting variable length types(such as VECTOR_SPARSE_FLOAT and
         // VARCHAR) here intentionally. We can't easily estimate the size of
         // them. Caller of this method must handle this case themselves and must
@@ -182,6 +184,8 @@ GetDataTypeName(DataType data_type) {
             return "array";
         case DataType::JSON:
             return "json";
+        case DataType::TEXT:
+            return "text";
         case DataType::VECTOR_FLOAT:
             return "vector_float";
         case DataType::VECTOR_BINARY:
@@ -192,6 +196,8 @@ GetDataTypeName(DataType data_type) {
             return "vector_bfloat16";
         case DataType::VECTOR_SPARSE_FLOAT:
             return "vector_sparse_float";
+        case DataType::VECTOR_INT8:
+            return "vector_int8";
         default:
             PanicInfo(DataTypeInvalid, "Unsupported DataType({})", data_type);
     }
@@ -253,6 +259,7 @@ IsStringDataType(DataType data_type) {
     switch (data_type) {
         case DataType::VARCHAR:
         case DataType::STRING:
+        case DataType::TEXT:
             return true;
         default:
             return false;
@@ -325,7 +332,7 @@ IsSparseFloatVectorDataType(DataType data_type) {
 }
 
 inline bool
-IsInt8VectorDataType(DataType data_type) {
+IsIntVectorDataType(DataType data_type) {
     return data_type == DataType::VECTOR_INT8;
 }
 
@@ -338,7 +345,7 @@ IsFloatVectorDataType(DataType data_type) {
 inline bool
 IsVectorDataType(DataType data_type) {
     return IsBinaryVectorDataType(data_type) ||
-           IsFloatVectorDataType(data_type) || IsInt8VectorDataType(data_type);
+           IsFloatVectorDataType(data_type) || IsIntVectorDataType(data_type);
 }
 
 inline bool
@@ -537,6 +544,12 @@ struct TypeTraits<DataType::STRING> : public TypeTraits<DataType::VARCHAR> {
 };
 
 template <>
+struct TypeTraits<DataType::TEXT> : public TypeTraits<DataType::VARCHAR> {
+    static constexpr DataType TypeKind = DataType::TEXT;
+    static constexpr const char* Name = "TEXT";
+};
+
+template <>
 struct TypeTraits<DataType::ARRAY> {
     using NativeType = void;
     static constexpr DataType TypeKind = DataType::ARRAY;
@@ -581,6 +594,23 @@ struct TypeTraits<DataType::VECTOR_FLOAT> {
     static constexpr const char* Name = "VECTOR_FLOAT";
 };
 
+inline DataType
+FromValCase(milvus::proto::plan::GenericValue::ValCase val_case) {
+    switch (val_case) {
+        case milvus::proto::plan::GenericValue::ValCase::kBoolVal:
+            return milvus::DataType::BOOL;
+        case milvus::proto::plan::GenericValue::ValCase::kInt64Val:
+            return DataType::INT64;
+        case milvus::proto::plan::GenericValue::ValCase::kFloatVal:
+            return DataType::DOUBLE;
+        case milvus::proto::plan::GenericValue::ValCase::kStringVal:
+            return DataType::STRING;
+        case milvus::proto::plan::GenericValue::ValCase::kArrayVal:
+            return DataType::ARRAY;
+        default:
+            return DataType::NONE;
+    }
+}
 }  // namespace milvus
 template <>
 struct fmt::formatter<milvus::DataType> : formatter<string_view> {
@@ -618,6 +648,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
             case milvus::DataType::VARCHAR:
                 name = "VARCHAR";
                 break;
+            case milvus::DataType::TEXT:
+                name = "TEXT";
+                break;
             case milvus::DataType::ARRAY:
                 name = "ARRAY";
                 break;
@@ -641,6 +674,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::VECTOR_SPARSE_FLOAT:
                 name = "VECTOR_SPARSE_FLOAT";
+                break;
+            case milvus::DataType::VECTOR_INT8:
+                name = "VECTOR_INT8";
                 break;
         }
         return formatter<string_view>::format(name, ctx);

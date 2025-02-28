@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -34,10 +33,10 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 type StorageV1SerializerSuite struct {
@@ -92,11 +91,10 @@ func (s *StorageV1SerializerSuite) SetupSuite() {
 }
 
 func (s *StorageV1SerializerSuite) SetupTest() {
-	s.mockCache.EXPECT().Collection().Return(s.collectionID)
 	s.mockCache.EXPECT().Schema().Return(s.schema)
 
 	var err error
-	s.serializer, err = NewStorageSerializer(s.mockAllocator, s.mockCache, s.mockMetaWriter)
+	s.serializer, err = NewStorageSerializer(s.mockCache)
 	s.Require().NoError(err)
 }
 
@@ -179,20 +177,8 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 		pack.WithTimeRange(50, 100)
 		pack.WithDrop()
 
-		task, err := s.serializer.EncodeBuffer(ctx, pack)
+		_, err := s.serializer.serializeBinlog(ctx, pack)
 		s.NoError(err)
-		taskV1, ok := task.(*SyncTask)
-		s.Require().True(ok)
-		s.Equal(s.collectionID, taskV1.collectionID)
-		s.Equal(s.partitionID, taskV1.partitionID)
-		s.Equal(s.channelName, taskV1.channelName)
-		s.Equal(&msgpb.MsgPosition{
-			Timestamp:   1000,
-			ChannelName: s.channelName,
-		}, taskV1.checkpoint)
-		s.EqualValues(50, taskV1.tsFrom)
-		s.EqualValues(100, taskV1.tsTo)
-		s.True(taskV1.isDrop)
 	})
 
 	s.Run("with_empty_data", func() {
@@ -200,7 +186,7 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 		pack.WithTimeRange(50, 100)
 		pack.WithInsertData([]*storage.InsertData{s.getEmptyInsertBuffer()}).WithBatchRows(0)
 
-		_, err := s.serializer.EncodeBuffer(ctx, pack)
+		_, err := s.serializer.serializeBinlog(ctx, pack)
 		s.Error(err)
 	})
 
@@ -209,32 +195,21 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 		pack.WithTimeRange(50, 100)
 		pack.WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).WithBatchRows(10)
 
-		s.mockCache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Once()
-
-		task, err := s.serializer.EncodeBuffer(ctx, pack)
+		blobs, err := s.serializer.serializeBinlog(ctx, pack)
 		s.NoError(err)
-
-		taskV1, ok := task.(*SyncTask)
-		s.Require().True(ok)
-		s.Equal(s.collectionID, taskV1.collectionID)
-		s.Equal(s.partitionID, taskV1.partitionID)
-		s.Equal(s.channelName, taskV1.channelName)
-		s.Equal(&msgpb.MsgPosition{
-			Timestamp:   1000,
-			ChannelName: s.channelName,
-		}, taskV1.checkpoint)
-		s.EqualValues(50, taskV1.tsFrom)
-		s.EqualValues(100, taskV1.tsTo)
-		s.Len(taskV1.binlogBlobs, 4)
-		s.NotNil(taskV1.batchStatsBlob)
+		s.Len(blobs, 4)
+		stats, blob, err := s.serializer.serializeStatslog(pack)
+		s.NoError(err)
+		s.NotNil(stats)
+		s.NotNil(blob)
 	})
 
 	s.Run("with_flush_segment_not_found", func() {
 		pack := s.getBasicPack()
-		pack.WithFlush()
+		pack.WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).WithFlush()
 
 		s.mockCache.EXPECT().GetSegmentByID(s.segmentID).Return(nil, false).Once()
-		_, err := s.serializer.EncodeBuffer(ctx, pack)
+		_, err := s.serializer.serializeMergedPkStats(pack)
 		s.Error(err)
 	})
 
@@ -247,63 +222,39 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 		bfs := s.getBfs()
 		segInfo := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
 		metacache.UpdateNumOfRows(1000)(segInfo)
-		s.mockCache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
-			action(segInfo)
-		}).Return().Once()
-		s.mockCache.EXPECT().GetSegmentByID(s.segmentID).Return(segInfo, true).Once()
+		s.mockCache.EXPECT().GetSegmentByID(s.segmentID).Return(segInfo, true)
 
-		task, err := s.serializer.EncodeBuffer(ctx, pack)
+		blobs, err := s.serializer.serializeBinlog(ctx, pack)
 		s.NoError(err)
-
-		taskV1, ok := task.(*SyncTask)
-		s.Require().True(ok)
-		s.Equal(s.collectionID, taskV1.collectionID)
-		s.Equal(s.partitionID, taskV1.partitionID)
-		s.Equal(s.channelName, taskV1.channelName)
-		s.Equal(&msgpb.MsgPosition{
-			Timestamp:   1000,
-			ChannelName: s.channelName,
-		}, taskV1.checkpoint)
-		s.EqualValues(50, taskV1.tsFrom)
-		s.EqualValues(100, taskV1.tsTo)
-		s.Len(taskV1.binlogBlobs, 4)
-		s.NotNil(taskV1.batchStatsBlob)
-		s.NotNil(taskV1.mergedStatsBlob)
+		s.Len(blobs, 4)
+		stats, blob, err := s.serializer.serializeStatslog(pack)
+		s.NoError(err)
+		s.NotNil(stats)
+		s.NotNil(blob)
+		action := metacache.RollStats(stats)
+		action(segInfo)
+		blob, err = s.serializer.serializeMergedPkStats(pack)
+		s.NoError(err)
+		s.NotNil(blob)
 	})
 }
 
 func (s *StorageV1SerializerSuite) TestSerializeDelete() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	s.Run("serialize_normal", func() {
 		pack := s.getBasicPack()
 		pack.WithDeleteData(s.getDeleteBuffer())
 		pack.WithTimeRange(50, 100)
 
-		task, err := s.serializer.EncodeBuffer(ctx, pack)
+		blob, err := s.serializer.serializeDeltalog(pack)
 		s.NoError(err)
-
-		taskV1, ok := task.(*SyncTask)
-		s.Require().True(ok)
-		s.Equal(s.collectionID, taskV1.collectionID)
-		s.Equal(s.partitionID, taskV1.partitionID)
-		s.Equal(s.channelName, taskV1.channelName)
-		s.Equal(&msgpb.MsgPosition{
-			Timestamp:   1000,
-			ChannelName: s.channelName,
-		}, taskV1.checkpoint)
-		s.EqualValues(50, taskV1.tsFrom)
-		s.EqualValues(100, taskV1.tsTo)
-		s.NotNil(taskV1.deltaBlob)
+		s.NotNil(blob)
 	})
 }
 
 func (s *StorageV1SerializerSuite) TestBadSchema() {
 	mockCache := metacache.NewMockMetaCache(s.T())
-	mockCache.EXPECT().Collection().Return(s.collectionID).Once()
 	mockCache.EXPECT().Schema().Return(&schemapb.CollectionSchema{}).Once()
-	_, err := NewStorageSerializer(s.mockAllocator, mockCache, s.mockMetaWriter)
+	_, err := NewStorageSerializer(mockCache)
 	s.Error(err)
 }
 

@@ -22,10 +22,10 @@ import (
 	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
 
-	rocksdbkv "github.com/milvus-io/milvus/pkg/kv/rocksdb"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	rocksdbkv "github.com/milvus-io/milvus/pkg/v2/kv/rocksdb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // Const value that used to convert unit
@@ -63,7 +63,7 @@ func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInf
 	for _, key := range topicKeys {
 		topic := key[len(TopicIDTitle):]
 		ri.topicRetetionTime.Insert(topic, time.Now().Unix())
-		topicMu.Store(topic, new(sync.Mutex))
+		topicMu.LoadOrStore(topic, new(sync.Mutex))
 	}
 	return ri, nil
 }

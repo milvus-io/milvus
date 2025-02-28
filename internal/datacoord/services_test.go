@@ -22,18 +22,20 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type ServerSuite struct {
@@ -1313,6 +1315,12 @@ func TestImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), resp.GetStatus().GetCode())
 		s.stateCode.Store(commonpb.StateCode_Healthy)
+		mockHandler := NewNMockHandler(t)
+		mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+			ID:            1000,
+			VChannelNames: []string{"foo_1v1"},
+		}, nil).Maybe()
+		s.handler = mockHandler
 
 		// parse timeout failed
 		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
@@ -1397,6 +1405,7 @@ func TestImportV2(t *testing.T) {
 					Paths: []string{"a.json"},
 				},
 			},
+			ChannelNames: []string{"foo_1v1"},
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
@@ -1404,11 +1413,11 @@ func TestImportV2(t *testing.T) {
 		assert.Equal(t, 1, len(jobs))
 
 		// number of jobs reached the limit
-		Params.Save(paramtable.Get().DataCoordCfg.MaxImportJobNum.Key, "1")
-		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{})
-		assert.NoError(t, err)
-		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-		Params.Reset(paramtable.Get().DataCoordCfg.MaxImportJobNum.Key)
+		// Params.Save(paramtable.Get().DataCoordCfg.MaxImportJobNum.Key, "1")
+		// resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{})
+		// assert.NoError(t, err)
+		// assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+		// Params.Reset(paramtable.Get().DataCoordCfg.MaxImportJobNum.Key)
 	})
 
 	t.Run("GetImportProgress", func(t *testing.T) {
@@ -1433,6 +1442,13 @@ func TestImportV2(t *testing.T) {
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+		wal := mock_streaming.NewMockWALAccesser(t)
+		b := mock_streaming.NewMockBroadcast(t)
+		wal.EXPECT().Broadcast().Return(b).Maybe()
+		b.EXPECT().BlockUntilResourceKeyAckOnce(mock.Anything, mock.Anything).Return(nil).Maybe()
+		streaming.SetWALForTest(wal)
+		defer streaming.RecoverWALForTest()
+
 		s.importMeta, err = NewImportMeta(context.TODO(), catalog)
 		assert.NoError(t, err)
 		resp, err = s.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{

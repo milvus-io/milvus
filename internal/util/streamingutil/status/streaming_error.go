@@ -6,8 +6,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/redact"
 
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 var _ error = (*StreamingError)(nil)
@@ -53,6 +53,11 @@ func (e *StreamingError) IsUnrecoverable() bool {
 func (e *StreamingError) IsTxnUnavilable() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED ||
 		e.Code == streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE
+}
+
+// IsResourceAcquired returns true if the resource is acquired.
+func (e *StreamingError) IsResourceAcquired() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_RESOURCE_ACQUIRED
 }
 
 // NewOnShutdownError creates a new StreamingError with code STREAMING_CODE_ON_SHUTDOWN.
@@ -114,6 +119,11 @@ func NewInvalidTransactionState(operation string, expectState message.TxnState, 
 // NewUnrecoverableError creates a new StreamingError with code STREAMING_CODE_UNRECOVERABLE.
 func NewUnrecoverableError(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE, format, args...)
+}
+
+// NewResourceAcquired creates a new StreamingError with code STREAMING_CODE_RESOURCE_ACQUIRED.
+func NewResourceAcquired(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_RESOURCE_ACQUIRED, format, args...)
 }
 
 // New creates a new StreamingError with the given code and cause.

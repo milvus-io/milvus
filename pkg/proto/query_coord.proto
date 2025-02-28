@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package milvus.proto.query;
 
-option go_package = "github.com/milvus-io/milvus/pkg/proto/querypb";
+option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/querypb";
 
 import "common.proto";
 import "milvus.proto";
@@ -100,6 +100,7 @@ service QueryCoord {
   rpc GetQueryNodeDistribution(GetQueryNodeDistributionRequest) returns (GetQueryNodeDistributionResponse) {}
   rpc SuspendBalance(SuspendBalanceRequest) returns (common.Status)  {}
   rpc ResumeBalance(ResumeBalanceRequest) returns (common.Status)  {}
+  rpc CheckBalanceStatus(CheckBalanceStatusRequest) returns (CheckBalanceStatusResponse) {}
   rpc SuspendNode(SuspendNodeRequest) returns (common.Status) {}
   rpc ResumeNode(ResumeNodeRequest) returns (common.Status) {}
   rpc TransferSegment(TransferSegmentRequest) returns (common.Status) {}
@@ -689,11 +690,18 @@ message ChannelNodeInfo {
 message Replica {
     int64 ID = 1;
     int64 collectionID = 2;
+    // nodes and ro_nodes can only load sealed segment.
+    // only manage the legacy querynode that not embedded in the streamingnode.
     repeated int64 nodes = 3; // all (read and write) nodes. mutual exclusive with ro_nodes.
     string resource_group = 4;
     repeated int64 ro_nodes = 5; // the in-using node but should not be assigned to these replica.
-    // can not load new channel or segment on it anymore.
-   map<string, ChannelNodeInfo> channel_node_infos = 6;
+    // cannot load segment on it anymore.
+    map<string, ChannelNodeInfo> channel_node_infos = 6;
+    // rw_sq_nodes and ro_sq_nodes can only watch channel and assign segment, will be removed in 3.0.
+    // only manage the querynode embedded in the streamingnode.
+    repeated int64 rw_sq_nodes = 7; // all (read and write) nodes. mutual exclusive with ro_sq_nodes.
+    repeated int64 ro_sq_nodes = 8; // the in-using node but should not be assigned to these replica.
+    // cannot watch channel on it anymore.
 }
 
 enum SyncType {
@@ -717,6 +725,7 @@ message SyncAction {
     repeated int64 droppedInTarget = 10;
     msg.MsgPosition checkpoint = 11;
     map<int64, int64> partition_stats_versions = 12;
+    msg.MsgPosition deleteCP = 13;
 }
 
 message SyncDistributionRequest {
@@ -886,6 +895,15 @@ message SuspendBalanceRequest {
 
 message ResumeBalanceRequest {
   common.MsgBase base = 1;
+}
+
+message CheckBalanceStatusRequest {
+  common.MsgBase base = 1;
+}
+
+message CheckBalanceStatusResponse {
+  common.Status status = 1;
+  bool is_active = 2;
 }
 
 message SuspendNodeRequest {

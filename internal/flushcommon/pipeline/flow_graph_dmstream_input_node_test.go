@@ -25,9 +25,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/pkg/mq/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type mockMsgStreamFactory struct {
@@ -67,13 +67,17 @@ func (mtm *mockTtMsgStream) SetReplicate(config *msgstream.ReplicateConfig) {
 
 func (mtm *mockTtMsgStream) Close() {}
 
-func (mtm *mockTtMsgStream) Chan() <-chan *msgstream.MsgPack {
-	return make(chan *msgstream.MsgPack, 100)
+func (mtm *mockTtMsgStream) Chan() <-chan *msgstream.ConsumeMsgPack {
+	return make(chan *msgstream.ConsumeMsgPack, 100)
 }
 
 func (mtm *mockTtMsgStream) AsProducer(ctx context.Context, channels []string) {}
 
 func (mtm *mockTtMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position common.SubscriptionInitialPosition) error {
+	return nil
+}
+
+func (mtm *mockTtMsgStream) GetUnmarshalDispatcher() msgstream.UnmarshalDispatcher {
 	return nil
 }
 

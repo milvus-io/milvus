@@ -147,14 +147,11 @@ func TestGcpNativeObjectStorage(t *testing.T) {
 			value []byte
 		}{
 			{false, "abc/", []byte("123")},
-			{true, "abc/d/", []byte("1234")},
-			{false, "abc/d/e", []byte("12345")},
+			{true, "abc/d", []byte("1234")},
 			{true, "abc/e/d", []byte("12354")},
 			{true, "key_/1/1", []byte("111")},
-			{true, "key_/1/2/", []byte("222")},
-			{false, "key_/1/2/3", []byte("333")},
+			{true, "key_/1/2", []byte("222")},
 			{true, "key_/2/3", []byte("333")},
-			{true, "key_/test.txt", []byte("333")},
 		}
 
 		for _, test := range prepareTests {
@@ -172,10 +169,10 @@ func TestGcpNativeObjectStorage(t *testing.T) {
 			prefix        string
 			expectedValue []string
 		}{
-			{true, "abc/", []string{"abc/e/d"}},
-			{true, "key_/", []string{"key_/1/1", "key_/2/3", "key_/test.txt"}},
-			{false, "abc/", []string{}},
-			{false, "key_/", []string{"key_/test.txt"}},
+			{true, "abc/", []string{"abc/d", "abc/e/d"}},
+			{true, "key_/", []string{"key_/1/1", "key_/1/2", "key_/2/3"}},
+			{false, "abc/", []string{"abc/d", "abc/e/"}},
+			{false, "key_/", []string{"key_/1/", "key_/2/"}},
 		}
 
 		for _, test := range insertWithPrefixTests {

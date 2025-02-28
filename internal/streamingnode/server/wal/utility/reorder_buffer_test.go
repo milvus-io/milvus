@@ -6,7 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 )
 
 func TestReOrderByTimeTickBuffer(t *testing.T) {
@@ -15,6 +16,7 @@ func TestReOrderByTimeTickBuffer(t *testing.T) {
 	for i, timetick := range timeticks {
 		msg := mock_message.NewMockImmutableMessage(t)
 		msg.EXPECT().EstimateSize().Return(1)
+		msg.EXPECT().MessageID().Return(walimplstest.NewTestMessageID(int64(i)))
 		msg.EXPECT().TimeTick().Return(uint64(timetick + 1))
 		buf.Push(msg)
 		assert.Equal(t, i+1, buf.Len())

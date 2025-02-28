@@ -3,11 +3,16 @@ package balancer
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var _ Balancer = (*balancerImpl)(nil)
+var (
+	_                 Balancer = (*balancerImpl)(nil)
+	ErrBalancerClosed          = errors.New("balancer is closed")
+)
 
 // Balancer is a load balancer to balance the load of log node.
 // Given the balance result to assign or remove channels to corresponding log node.

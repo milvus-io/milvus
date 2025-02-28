@@ -12,13 +12,13 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var _ wal.WAL = (*walAdaptorImpl)(nil)
@@ -35,6 +35,10 @@ func adaptImplsToWAL(
 		WALImpls: basicWAL,
 		WAL:      syncutil.NewFuture[wal.WAL](),
 	}
+	logger := resource.Resource().Logger().With(
+		log.FieldComponent("wal"),
+		zap.Any("channel", basicWAL.Channel()),
+	)
 	wal := &walAdaptorImpl{
 		lifetime:    typeutil.NewLifetime(),
 		available:   make(chan struct{}),
@@ -51,11 +55,9 @@ func adaptImplsToWAL(
 		cleanup:      cleanup,
 		writeMetrics: metricsutil.NewWriteMetrics(basicWAL.Channel(), basicWAL.WALName()),
 		scanMetrics:  metricsutil.NewScanMetrics(basicWAL.Channel()),
-		logger: resource.Resource().Logger().With(
-			log.FieldComponent("wal"),
-			zap.Any("channel", basicWAL.Channel()),
-		),
+		logger:       logger,
 	}
+	wal.writeMetrics.SetLogger(logger)
 	param.WAL.Set(wal)
 	return wal
 }
@@ -85,6 +87,26 @@ func (w *walAdaptorImpl) Channel() types.PChannelInfo {
 	return w.inner.Channel()
 }
 
+// GetLatestMVCCTimestamp get the latest mvcc timestamp of the wal at vchannel.
+func (w *walAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel string) (uint64, error) {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return 0, status.NewOnShutdownError("wal is on shutdown")
+	}
+	defer w.lifetime.Done()
+	operator := resource.Resource().TimeTickInspector().MustGetOperator(w.inner.Channel())
+	mvccManager, err := operator.MVCCManager(ctx)
+	if err != nil {
+		// Unreachable code forever.
+		return 0, err
+	}
+	currentMVCC := mvccManager.GetMVCCOfVChannel(vchannel)
+	if !currentMVCC.Confirmed {
+		// if the mvcc is not confirmed, trigger a sync operation to make it confirmed as soon as possible.
+		resource.Resource().TimeTickInspector().TriggerSync(w.inner.Channel())
+	}
+	return currentMVCC.Timetick, nil
+}
+
 // Append writes a record to the log.
 func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage) (*wal.AppendResult, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -101,8 +123,11 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	// Setup the term of wal.
 	msg = msg.WithWALTerm(w.Channel().Term)
 
+	appendMetrics := w.writeMetrics.StartAppend(msg)
+	ctx = utility.WithAppendMetricsContext(ctx, appendMetrics)
+
 	// Metrics for append message.
-	metricsGuard := w.writeMetrics.StartAppend(msg.MessageType(), msg.EstimateSize())
+	metricsGuard := appendMetrics.StartAppendGuard()
 
 	// Execute the interceptor and wal append.
 	var extraAppendResult utility.ExtraAppendResult
@@ -111,7 +136,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 			if notPersistHint := utility.GetNotPersisted(ctx); notPersistHint != nil {
 				// do not persist the message if the hint is set.
-				// only used by time tick sync operator.
+				appendMetrics.NotPersisted()
 				return notPersistHint.MessageID, nil
 			}
 			metricsGuard.StartWALImplAppend()
@@ -119,8 +144,9 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 			metricsGuard.FinishWALImplAppend()
 			return msgID, err
 		})
+	metricsGuard.FinishAppend()
 	if err != nil {
-		metricsGuard.Finish(err)
+		appendMetrics.Done(nil, err)
 		return nil, err
 	}
 	var extra *anypb.Any
@@ -138,7 +164,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		TxnCtx:    extraAppendResult.TxnCtx,
 		Extra:     extra,
 	}
-	metricsGuard.Finish(nil)
+	appendMetrics.Done(r, nil)
 	return r, nil
 }
 
@@ -223,7 +249,7 @@ func (w *walAdaptorImpl) Close() {
 	logger.Info("scanner close done, close inner wal...")
 	w.inner.Close()
 
-	logger.Info("scanner close done, close interceptors...")
+	logger.Info("wal close done, close interceptors...")
 	w.interceptorBuildResult.Close()
 	w.appendExecutionPool.Free()
 

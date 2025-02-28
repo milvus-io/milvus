@@ -213,3 +213,36 @@ func (c *ColumnBFloat16Vector) Slice(start, end int) Column {
 		vectorBase: c.vectorBase.slice(start, end),
 	}
 }
+
+/* int8 vector */
+
+type ColumnInt8Vector struct {
+	*vectorBase[entity.Int8Vector]
+}
+
+func NewColumnInt8Vector(fieldName string, dim int, data [][]int8) *ColumnInt8Vector {
+	vectors := lo.Map(data, func(row []int8, _ int) entity.Int8Vector { return entity.Int8Vector(row) })
+	return &ColumnInt8Vector{
+		vectorBase: newVectorBase(fieldName, dim, vectors, entity.FieldTypeInt8Vector),
+	}
+}
+
+// AppendValue appends vector value into values.
+// override default type constrains, add `[]int8` conversion
+func (c *ColumnInt8Vector) AppendValue(i interface{}) error {
+	switch vector := i.(type) {
+	case entity.Int8Vector:
+		c.values = append(c.values, vector)
+	case []int8:
+		c.values = append(c.values, vector)
+	default:
+		return errors.Newf("unexpected append value type %T, field type %v", vector, c.fieldType)
+	}
+	return nil
+}
+
+func (c *ColumnInt8Vector) Slice(start, end int) Column {
+	return &ColumnInt8Vector{
+		vectorBase: c.vectorBase.slice(start, end),
+	}
+}

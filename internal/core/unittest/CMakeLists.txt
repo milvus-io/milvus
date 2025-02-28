@@ -16,6 +16,7 @@ include_directories(
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
     ${CONAN_INCLUDE_DIRS}
+    ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
 add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/test_utils/test_segcore.yaml")
@@ -23,6 +24,9 @@ add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/te
 # TODO: better to use ls/find pattern
 set(MILVUS_TEST_FILES
         init_gtest.cpp
+        test_packed_c.cpp
+        test_arrow_fs_c.cpp
+        test_column_groups_c.cpp
         test_always_true_expr.cpp
         test_array_bitmap_index.cpp
         test_array_inverted_index.cpp
@@ -91,6 +95,7 @@ set(MILVUS_TEST_FILES
         test_rust_result.cpp
         test_cached_search_iterator.cpp
         test_build_inverted_index_with_single_segment.cpp
+        test_random_sample.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )
@@ -157,6 +162,7 @@ if (LINUX)
             gtest
             milvus_core
             knowhere
+            milvus-storage
             )
     install(TARGETS index_builder_test DESTINATION unittest)
 endif()
@@ -169,6 +175,7 @@ target_link_libraries(all_tests
         gtest
         milvus_core
         knowhere
+        milvus-storage
         )
 
 install(TARGETS all_tests DESTINATION unittest)

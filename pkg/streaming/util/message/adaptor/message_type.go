@@ -2,7 +2,7 @@ package adaptor
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 var messageTypeToCommonpbMsgType = map[message.MessageType]commonpb.MsgType{
@@ -16,6 +16,7 @@ var messageTypeToCommonpbMsgType = map[message.MessageType]commonpb.MsgType{
 	message.MessageTypeDropCollection:   commonpb.MsgType_DropCollection,
 	message.MessageTypeCreatePartition:  commonpb.MsgType_CreatePartition,
 	message.MessageTypeDropPartition:    commonpb.MsgType_DropPartition,
+	message.MessageTypeImport:           commonpb.MsgType_Import,
 }
 
 // MustGetCommonpbMsgTypeFromMessageType returns the commonpb.MsgType from message.MessageType.

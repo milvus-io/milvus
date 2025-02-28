@@ -32,6 +32,7 @@ include_directories(
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
     ${CONAN_INCLUDE_DIRS}
+    ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
 add_subdirectory( pb )
@@ -73,6 +74,7 @@ set(LINK_TARGETS
     simdjson
     tantivy_binding
     knowhere
+    milvus-storage
     ${OpenMP_CXX_FLAGS}
     ${CONAN_LIBS})
 

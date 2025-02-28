@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
 // appendToWAL appends the message to the wal.
@@ -15,12 +15,6 @@ func (w *walAccesserImpl) appendToWAL(ctx context.Context, msg message.MutableMe
 	// get producer of pchannel.
 	p := w.getProducer(pchannel)
 	return p.Produce(ctx, msg)
-}
-
-func (w *walAccesserImpl) broadcastToWAL(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-	// The broadcast operation will be sent to the coordinator.
-	// The coordinator will dispatch the message to all the vchannels with an eventual consistency guarantee.
-	return w.streamingCoordClient.Broadcast().Broadcast(ctx, msg)
 }
 
 // createOrGetProducer creates or get a producer.

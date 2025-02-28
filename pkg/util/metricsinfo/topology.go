@@ -15,7 +15,7 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // in topology graph, the name of all nodes are consisted of role name and its' id

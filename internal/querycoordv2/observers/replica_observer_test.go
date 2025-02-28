@@ -20,19 +20,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ReplicaObserverSuite struct {
@@ -52,6 +57,7 @@ type ReplicaObserverSuite struct {
 }
 
 func (suite *ReplicaObserverSuite) SetupSuite() {
+	streamingutil.SetStreamingServiceEnabled()
 	paramtable.Init()
 	paramtable.Get().Save(Params.QueryCoordCfg.CheckNodeInReplicaInterval.Key, "1")
 }
@@ -196,9 +202,104 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 	}, 30*time.Second, 2*time.Second)
 }
 
+func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
+	balancer := mock_balancer.NewMockBalancer(suite.T())
+	change := make(chan struct{})
+	balancer.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
+		versions := []typeutil.VersionInt64Pair{
+			{Global: 1, Local: 2},
+			{Global: 1, Local: 3},
+		}
+		pchans := [][]types.PChannelInfoAssigned{
+			{
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+					Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
+				},
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel2", Term: 1},
+					Node:    types.StreamingNodeInfo{ServerID: 2, Address: "localhost:1"},
+				},
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel3", Term: 1},
+					Node:    types.StreamingNodeInfo{ServerID: 3, Address: "localhost:1"},
+				},
+			},
+			{
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+					Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
+				},
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel2", Term: 1},
+					Node:    types.StreamingNodeInfo{ServerID: 2, Address: "localhost:1"},
+				},
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel3", Term: 2},
+					Node:    types.StreamingNodeInfo{ServerID: 2, Address: "localhost:1"},
+				},
+			},
+		}
+		for i := 0; i < len(versions); i++ {
+			cb(versions[i], pchans[i])
+			<-change
+		}
+		<-ctx.Done()
+		return context.Cause(ctx)
+	})
+	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
+
+	ctx := context.Background()
+	err := suite.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(suite.collectionID, 2))
+	suite.NoError(err)
+	replicas, err := suite.meta.Spawn(ctx, suite.collectionID, map[string]int{
+		"rg1": 1,
+		"rg2": 1,
+	}, nil)
+	suite.NoError(err)
+	suite.Equal(2, len(replicas))
+
+	suite.Eventually(func() bool {
+		replica := suite.meta.ReplicaManager.GetByCollection(ctx, suite.collectionID)
+		total := 0
+		for _, r := range replica {
+			total += r.RWSQNodesCount()
+		}
+		return total == 3
+	}, 6*time.Second, 2*time.Second)
+	replica := suite.meta.ReplicaManager.GetByCollection(ctx, suite.collectionID)
+	nodes := typeutil.NewUniqueSet()
+	for _, r := range replica {
+		suite.LessOrEqual(r.RWSQNodesCount(), 2)
+		suite.Equal(r.ROSQNodesCount(), 0)
+		nodes.Insert(r.GetRWSQNodes()...)
+	}
+	suite.Equal(nodes.Len(), 3)
+
+	close(change)
+
+	suite.Eventually(func() bool {
+		replica := suite.meta.ReplicaManager.GetByCollection(ctx, suite.collectionID)
+		total := 0
+		for _, r := range replica {
+			total += r.RWSQNodesCount()
+		}
+		return total == 2
+	}, 6*time.Second, 2*time.Second)
+	replica = suite.meta.ReplicaManager.GetByCollection(ctx, suite.collectionID)
+	nodes = typeutil.NewUniqueSet()
+	for _, r := range replica {
+		suite.Equal(r.RWSQNodesCount(), 1)
+		suite.Equal(r.ROSQNodesCount(), 0)
+		nodes.Insert(r.GetRWSQNodes()...)
+	}
+	suite.Equal(nodes.Len(), 2)
+}
+
 func (suite *ReplicaObserverSuite) TearDownSuite() {
 	suite.kv.Close()
 	suite.observer.Stop()
+	streamingutil.UnsetStreamingServiceEnabled()
 }
 
 func TestReplicaObserver(t *testing.T) {

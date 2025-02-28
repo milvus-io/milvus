@@ -19,7 +19,7 @@ package httpserver
 import (
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 )
 
 // v2
@@ -68,6 +68,9 @@ const (
 	AlterAction                     = "alter"
 	AlterPropertiesAction           = "alter_properties"
 	DropPropertiesAction            = "drop_properties"
+	CompactAction                   = "compact"
+	CompactionStateAction           = "get_compaction_state"
+	FlushAction                     = "flush"
 	GetProgressAction               = "get_progress" // deprecated, keep it for compatibility, use `/v2/vectordb/jobs/import/describe` instead
 	AddPrivilegesToGroupAction      = "add_privileges_to_group"
 	RemovePrivilegesFromGroupAction = "remove_privileges_from_group"
@@ -120,8 +123,10 @@ const (
 	HTTPReturnMessage        = "message"
 	HTTPReturnData           = "data"
 	HTTPReturnCost           = "cost"
+	HTTPReturnRecalls        = "recalls"
 	HTTPReturnLoadState      = "loadState"
 	HTTPReturnLoadProgress   = "loadProgress"
+	HTTPReturnTopks          = "topks"
 
 	HTTPReturnHas = "has"
 
@@ -145,13 +150,15 @@ const (
 	HTTPReturnFunctionOutputFieldNames = "outputFieldNames"
 	HTTPReturnFunctionParams           = "params"
 
-	HTTPReturnIndexMetricType  = "metricType"
-	HTTPReturnIndexType        = "indexType"
-	HTTPReturnIndexTotalRows   = "totalRows"
-	HTTPReturnIndexPendingRows = "pendingRows"
-	HTTPReturnIndexIndexedRows = "indexedRows"
-	HTTPReturnIndexState       = "indexState"
-	HTTPReturnIndexFailReason  = "failReason"
+	HTTPReturnIndexMetricType      = "metricType"
+	HTTPReturnIndexType            = "indexType"
+	HTTPIndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
+	HTTPMmapEnabledKey             = "mmap.enabled"
+	HTTPReturnIndexTotalRows       = "totalRows"
+	HTTPReturnIndexPendingRows     = "pendingRows"
+	HTTPReturnIndexIndexedRows     = "indexedRows"
+	HTTPReturnIndexState           = "indexState"
+	HTTPReturnIndexFailReason      = "failReason"
 
 	HTTPReturnDistance = "distance"
 

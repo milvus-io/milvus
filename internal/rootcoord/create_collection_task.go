@@ -34,17 +34,17 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	ms "github.com/milvus-io/milvus/pkg/mq/msgstream"
-	pb "github.com/milvus-io/milvus/pkg/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/parameterutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	ms "github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type collectionChannels struct {
@@ -573,7 +573,10 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 			State:                     pb.PartitionState_PartitionCreated,
 		}
 	}
-
+	ConsistencyLevel := t.Req.ConsistencyLevel
+	if ok, level := getConsistencyLevel(t.Req.Properties...); ok {
+		ConsistencyLevel = level
+	}
 	collInfo := model.Collection{
 		CollectionID:         collID,
 		DBID:                 t.dbID,
@@ -586,12 +589,21 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		VirtualChannelNames:  vchanNames,
 		PhysicalChannelNames: chanNames,
 		ShardsNum:            t.Req.ShardsNum,
-		ConsistencyLevel:     t.Req.ConsistencyLevel,
+		ConsistencyLevel:     ConsistencyLevel,
 		CreateTime:           ts,
 		State:                pb.CollectionState_CollectionCreating,
 		Partitions:           partitions,
 		Properties:           t.Req.Properties,
 		EnableDynamicField:   t.schema.EnableDynamicField,
+		UpdateTimestamp:      ts,
+	}
+
+	// Check if the collection name duplicates an alias.
+	_, err = t.core.meta.DescribeAlias(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
+	if err == nil {
+		err2 := fmt.Errorf("collection name [%s] conflicts with an existing alias, please choose a unique name", t.Req.GetCollectionName())
+		log.Ctx(ctx).Warn("create collection failed", zap.String("database", t.Req.GetDbName()), zap.Error(err2))
+		return err2
 	}
 
 	// We cannot check the idempotency inside meta table when adding collection, since we'll execute duplicate steps
@@ -609,6 +621,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		log.Ctx(ctx).Warn("add duplicate collection", zap.String("collection", t.Req.GetCollectionName()), zap.Uint64("ts", ts))
 		return nil
 	}
+	log.Ctx(ctx).Info("check collection existence", zap.String("collection", t.Req.GetCollectionName()), zap.Error(err))
 
 	// TODO: The create collection is not idempotent for other component, such as wal.
 	// we need to make the create collection operation must success after some persistent operation, refactor it in future.

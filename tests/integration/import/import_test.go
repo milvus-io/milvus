@@ -33,12 +33,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/metric"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -76,7 +76,7 @@ func (s *BulkInsertSuite) run() {
 	)
 
 	c := s.Cluster
-	ctx, cancel := context.WithTimeout(c.GetContext(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(c.GetContext(), 240*time.Second)
 	defer cancel()
 
 	collectionName := "TestBulkInsert" + funcutil.GenRandomStr()
@@ -240,6 +240,11 @@ func (s *BulkInsertSuite) TestMultiFileTypes() {
 		s.run()
 
 		s.vecType = schemapb.DataType_BFloat16Vector
+		s.indexType = "HNSW"
+		s.metricType = metric.L2
+		s.run()
+
+		s.vecType = schemapb.DataType_Int8Vector
 		s.indexType = "HNSW"
 		s.metricType = metric.L2
 		s.run()

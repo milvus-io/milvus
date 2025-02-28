@@ -30,13 +30,13 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/lock"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type targetOp int
@@ -175,13 +175,19 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 
 		case <-ticker.C:
 			ob.clean()
-			loaded := lo.FilterMap(ob.meta.GetAllCollections(ctx), func(collection *meta.Collection, _ int) (int64, bool) {
-				if collection.GetStatus() == querypb.LoadStatus_Loaded {
-					return collection.GetCollectionID(), true
+
+			collections := ob.meta.GetAllCollections(ctx)
+			var loadedIDs, loadingIDs []int64
+			for _, c := range collections {
+				if c.GetStatus() == querypb.LoadStatus_Loaded {
+					loadedIDs = append(loadedIDs, c.GetCollectionID())
+				} else {
+					loadingIDs = append(loadingIDs, c.GetCollectionID())
 				}
-				return 0, false
-			})
-			ob.loadedDispatcher.AddTask(loaded...)
+			}
+
+			ob.loadedDispatcher.AddTask(loadedIDs...)
+			ob.loadingDispatcher.AddTask(loadingIDs...)
 
 		case req := <-ob.updateChan:
 			log.Info("manually trigger update target",
@@ -213,7 +219,9 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 				delete(ob.readyNotifiers, req.CollectionID)
 				ob.mut.Unlock()
 
+				ob.keylocks.Lock(req.CollectionID)
 				ob.targetMgr.RemoveCollection(ctx, req.CollectionID)
+				ob.keylocks.Unlock(req.CollectionID)
 				req.Notifier <- nil
 			case ReleasePartition:
 				ob.targetMgr.RemovePartition(ctx, req.CollectionID, req.PartitionIDs...)
@@ -243,6 +251,11 @@ func (ob *TargetObserver) TriggerUpdateCurrentTarget(collectionID int64) {
 func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 	ob.keylocks.Lock(collectionID)
 	defer ob.keylocks.Unlock(collectionID)
+
+	// if collection release, skip check
+	if ob.meta.CollectionManager.GetCollection(ctx, collectionID) == nil {
+		return
+	}
 
 	if ob.shouldUpdateCurrentTarget(ctx, collectionID) {
 		ob.updateCurrentTarget(ctx, collectionID)
@@ -511,6 +524,8 @@ func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, lead
 
 	if channel != nil {
 		action.Checkpoint = channel.GetSeekPosition()
+		// used to clean delete buffer in delegator, cause delete record before this ts already be dispatch to sealed segments
+		action.DeleteCP = channel.GetDeleteCheckpoint()
 	}
 
 	return action

@@ -29,11 +29,11 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/config"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/hardware"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/config"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -70,6 +70,7 @@ type ComponentParam struct {
 	AutoIndexConfig AutoIndexConfig
 	GpuConfig       gpuConfig
 	TraceCfg        traceConfig
+	HolmesCfg       holmesConfig
 
 	RootCoordCfg   rootCoordConfig
 	ProxyCfg       proxyConfig
@@ -122,6 +123,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.QuotaConfig.init(bt)
 	p.AutoIndexConfig.init(bt)
 	p.TraceCfg.init(bt)
+	p.HolmesCfg.init(bt)
 
 	p.RootCoordCfg.init(bt)
 	p.ProxyCfg.init(bt)
@@ -167,6 +169,10 @@ func (p *ComponentParam) GetComponentConfigurations(componentName string, sub st
 
 func (p *ComponentParam) GetAll() map[string]string {
 	return p.baseTable.mgr.GetConfigs()
+}
+
+func (p *ComponentParam) GetConfigsView() map[string]string {
+	return p.baseTable.mgr.GetConfigsView()
 }
 
 func (p *ComponentParam) Watch(key string, watcher config.EventHandler) {
@@ -230,9 +236,11 @@ type commonConfig struct {
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
 
-	AuthorizationEnabled ParamItem `refreshable:"false"`
-	SuperUsers           ParamItem `refreshable:"true"`
-	DefaultRootPassword  ParamItem `refreshable:"false"`
+	AuthorizationEnabled  ParamItem `refreshable:"false"`
+	SuperUsers            ParamItem `refreshable:"true"`
+	DefaultRootPassword   ParamItem `refreshable:"false"`
+	RootShouldBindRole    ParamItem `refreshable:"true"`
+	EnablePublicPrivilege ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -510,7 +518,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
 		Version:      "2.4.6",
-		DefaultValue: "false",
+		DefaultValue: "true", // 2.5.4 version becomes default true
 	}
 	p.EnableMaterializedView.Init(base.mgr)
 
@@ -662,6 +670,31 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
+
+	p.RootShouldBindRole = ParamItem{
+		Key:          "common.security.rootShouldBindRole",
+		Version:      "2.5.4",
+		Doc:          "Whether the root user should bind a role when the authorization is enabled.",
+		DefaultValue: "false",
+		Export:       true,
+	}
+	p.RootShouldBindRole.Init(base.mgr)
+
+	p.EnablePublicPrivilege = ParamItem{
+		Key: "common.security.enablePublicPrivilege",
+		Formatter: func(originValue string) string { // compatible with old version
+			fallbackValue := base.Get("proxy.enablePublicPrivilege")
+			if fallbackValue == "false" {
+				return "false"
+			}
+			return originValue
+		},
+		Version:      "2.5.4",
+		Doc:          "Whether to enable public privilege",
+		DefaultValue: "true",
+		Export:       true,
+	}
+	p.EnablePublicPrivilege.Init(base.mgr)
 
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
@@ -839,7 +872,7 @@ This helps Milvus-CDC synchronize incremental data`,
 	p.BloomFilterApplyBatchSize = ParamItem{
 		Key:          "common.bloomFilterApplyBatchSize",
 		Version:      "2.4.5",
-		DefaultValue: "1000",
+		DefaultValue: "10000",
 		Doc:          "batch size when to apply pk to bloom filter",
 		Export:       true,
 	}
@@ -1072,6 +1105,102 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Doc:          "segcore initialization timeout in seconds, preventing otlp grpc hangs forever",
 	}
 	t.InitTimeoutSeconds.Init(base.mgr)
+}
+
+type holmesConfig struct {
+	Enable          ParamItem `refreshable:"false"`
+	DumpPath        ParamItem `refreshable:"false"`
+	UseCGroup       ParamItem `refreshable:"false"`
+	CollectInterval ParamItem `refreshable:"false"`
+
+	EnableDumpProfile ParamItem `refreshable:"false"`
+	ProfileMinCPU     ParamItem `refreshable:"false"`
+	ProfileDiffCPU    ParamItem `refreshable:"false"`
+	ProfileAbsCPU     ParamItem `refreshable:"false"`
+	ProfileCooldown   ParamItem `refreshable:"false"`
+}
+
+func (t *holmesConfig) init(base *BaseTable) {
+	t.Enable = ParamItem{
+		Key:          "holmes.enable",
+		Version:      "2.5.6",
+		DefaultValue: "false",
+		Doc:          "enable holmes or not",
+		Export:       true,
+	}
+	t.Enable.Init(base.mgr)
+
+	t.DumpPath = ParamItem{
+		Key:          "holmes.dumpPath",
+		Version:      "2.5.6",
+		DefaultValue: "/tmp",
+		Doc:          "holmes dump path",
+		Export:       true,
+	}
+	t.DumpPath.Init(base.mgr)
+
+	t.UseCGroup = ParamItem{
+		Key:          "holmes.useCGroup",
+		Version:      "2.5.6",
+		DefaultValue: "true",
+		Doc:          "use cgroup or not",
+		Export:       true,
+	}
+	t.UseCGroup.Init(base.mgr)
+
+	t.CollectInterval = ParamItem{
+		Key:          "holmes.collectInterval",
+		Version:      "2.5.6",
+		DefaultValue: "10",
+		Doc:          "holmes collect interval in seconds",
+		Export:       true,
+	}
+	t.CollectInterval.Init(base.mgr)
+
+	t.EnableDumpProfile = ParamItem{
+		Key:          "holmes.profile.enable",
+		Version:      "2.5.6",
+		DefaultValue: "false",
+		Doc:          "enable dump profile or not",
+		Export:       true,
+	}
+	t.EnableDumpProfile.Init(base.mgr)
+
+	t.ProfileMinCPU = ParamItem{
+		Key:          "holmes.profile.minCPU",
+		Version:      "2.5.6",
+		DefaultValue: "50",
+		Doc:          "profile min cpu",
+		Export:       true,
+	}
+	t.ProfileMinCPU.Init(base.mgr)
+
+	t.ProfileDiffCPU = ParamItem{
+		Key:          "holmes.profile.diffCPU",
+		Version:      "2.5.6",
+		DefaultValue: "50",
+		Doc:          "profile diff cpu",
+		Export:       true,
+	}
+	t.ProfileDiffCPU.Init(base.mgr)
+
+	t.ProfileAbsCPU = ParamItem{
+		Key:          "holmes.profile.absCPU",
+		Version:      "2.5.6",
+		DefaultValue: "90",
+		Doc:          "profile abs cpu",
+		Export:       true,
+	}
+	t.ProfileAbsCPU.Init(base.mgr)
+
+	t.ProfileCooldown = ParamItem{
+		Key:          "holmes.profile.cooldown",
+		Version:      "2.5.6",
+		DefaultValue: "60",
+		Doc:          "profile cooldown",
+		Export:       true,
+	}
+	t.ProfileCooldown.Init(base.mgr)
 }
 
 type logConfig struct {
@@ -1319,8 +1448,8 @@ type proxyConfig struct {
 	MustUsePartitionKey          ParamItem `refreshable:"true"`
 	SkipAutoIDCheck              ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck        ParamItem `refreshable:"true"`
-	EnablePublicPrivilege        ParamItem `refreshable:"false"`
 	MaxVarCharLength             ParamItem `refreshable:"false"`
+	MaxTextLength                ParamItem `refreshable:"false"`
 
 	AccessLog AccessLogConfig
 
@@ -1455,7 +1584,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.MaxTaskNum = ParamItem{
 		Key:          "proxy.maxTaskNum",
 		Version:      "2.2.0",
-		DefaultValue: "10000",
+		DefaultValue: "1024",
 		Doc:          "The maximum number of tasks in the task queue of the proxy.",
 		Export:       true,
 	}
@@ -1725,14 +1854,6 @@ please adjust in embedded Milvus: false`,
 	}
 	p.SkipPartitionKeyCheck.Init(base.mgr)
 
-	p.EnablePublicPrivilege = ParamItem{
-		Key:          "proxy.enablePublicPrivilege",
-		Version:      "2.4.1",
-		DefaultValue: "true",
-		Doc:          "switch for whether proxy shall enable public privilege",
-	}
-	p.EnablePublicPrivilege.Init(base.mgr)
-
 	p.MaxVarCharLength = ParamItem{
 		Key:          "proxy.maxVarCharLength",
 		Version:      "2.4.19",            // hotfix
@@ -1740,6 +1861,14 @@ please adjust in embedded Milvus: false`,
 		Doc:          "maximum number of characters for a varchar field; this value is overridden by the value in a pre-existing schema if applicable",
 	}
 	p.MaxVarCharLength.Init(base.mgr)
+
+	p.MaxTextLength = ParamItem{
+		Key:          "proxy.maxTextLength",
+		Version:      "2.6.0",
+		DefaultValue: strconv.Itoa(2 * 1024 * 1024), // 2M
+		Doc:          "maximum number of characters for a row of the text field",
+	}
+	p.MaxTextLength.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
@@ -1836,6 +1965,7 @@ type queryCoordConfig struct {
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval       ParamItem `refreshable:"true"`
 	BalanceCheckInterval       ParamItem `refreshable:"true"`
+	AutoBalanceInterval        ParamItem `refreshable:"true"`
 	IndexCheckInterval         ParamItem `refreshable:"true"`
 	ChannelTaskTimeout         ParamItem `refreshable:"true"`
 	SegmentTaskTimeout         ParamItem `refreshable:"true"`
@@ -2451,6 +2581,16 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.ClusterLevelLoadResourceGroups.Init(base.mgr)
+
+	p.AutoBalanceInterval = ParamItem{
+		Key:          "queryCoord.autoBalanceInterval",
+		Version:      "2.5.3",
+		DefaultValue: "3000",
+		Doc:          "the interval for triggerauto balance",
+		PanicIfEmpty: true,
+		Export:       true,
+	}
+	p.AutoBalanceInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2688,7 +2828,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MultipleChunkedEnable = ParamItem{
 		Key:          "queryNode.segcore.multipleChunkedEnable",
 		Version:      "2.0.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "Enable multiple chunked search",
 		Export:       true,
 	}
@@ -3287,8 +3427,8 @@ user-task-polling:
 		Key:          "queryNode.bloomFilterApplyParallelFactor",
 		FallbackKeys: []string{"queryNode.bloomFilterApplyBatchSize"},
 		Version:      "2.4.5",
-		DefaultValue: "4",
-		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
+		DefaultValue: "2",
+		Doc:          "parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM",
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
@@ -3354,7 +3494,8 @@ type dataCoordConfig struct {
 	CompactionTimeoutInSeconds       ParamItem `refreshable:"true"`
 	CompactionDropToleranceInSeconds ParamItem `refreshable:"true"`
 	CompactionGCIntervalInSeconds    ParamItem `refreshable:"true"`
-	CompactionCheckIntervalInSeconds ParamItem `refreshable:"false"`
+	CompactionCheckIntervalInSeconds ParamItem `refreshable:"false"` // deprecated
+	CompactionScheduleInterval       ParamItem `refreshable:"false"`
 	MixCompactionTriggerInterval     ParamItem `refreshable:"false"`
 	L0CompactionTriggerInterval      ParamItem `refreshable:"false"`
 	GlobalCompactionInterval         ParamItem `refreshable:"false"`
@@ -3433,8 +3574,11 @@ type dataCoordConfig struct {
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
 
-	EnableStatsTask   ParamItem `refreshable:"true"`
-	TaskCheckInterval ParamItem `refreshable:"true"`
+	EnableStatsTask       ParamItem `refreshable:"true"`
+	TaskCheckInterval     ParamItem `refreshable:"true"`
+	StatsTaskTriggerCount ParamItem `refreshable:"true"`
+
+	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -3729,6 +3873,22 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "3",
 	}
 	p.CompactionCheckIntervalInSeconds.Init(base.mgr)
+
+	p.CompactionScheduleInterval = ParamItem{
+		Key:          "dataCoord.compaction.scheduleInterval",
+		Version:      "2.4.21",
+		DefaultValue: "500",
+		Export:       true,
+		Formatter: func(value string) string {
+			ms := getAsInt64(value)
+			if ms < 100 {
+				ms = 100
+			}
+			return strconv.FormatInt(ms, 10)
+		},
+		Doc: "The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be ajusted upwards to 100ms",
+	}
+	p.CompactionScheduleInterval.Init(base.mgr)
 
 	p.SingleCompactionRatioThreshold = ParamItem{
 		Key:          "dataCoord.compaction.single.ratio.threshold",
@@ -4302,6 +4462,26 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.TaskCheckInterval.Init(base.mgr)
+
+	p.RequestTimeoutSeconds = ParamItem{
+		Key:          "dataCoord.requestTimeoutSeconds",
+		Version:      "2.5.5",
+		Doc:          "request timeout interval",
+		DefaultValue: "600",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.RequestTimeoutSeconds.Init(base.mgr)
+
+	p.StatsTaskTriggerCount = ParamItem{
+		Key:          "dataCoord.statsTaskTriggerCount",
+		Version:      "2.5.5",
+		Doc:          "stats task count per trigger",
+		DefaultValue: "100",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.StatsTaskTriggerCount.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -4761,8 +4941,8 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.bloomFilterApplyParallelFactor",
 		FallbackKeys: []string{"datanode.bloomFilterApplyBatchSize"},
 		Version:      "2.4.5",
-		DefaultValue: "4",
-		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
+		DefaultValue: "2",
+		Doc:          "parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM",
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
@@ -4845,6 +5025,10 @@ type streamingConfig struct {
 
 	// txn
 	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
+
+	// write ahead buffer
+	WALWriteAheadBufferCapacity  ParamItem `refreshable:"true"`
+	WALWriteAheadBufferKeepalive ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -4894,6 +5078,23 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 		Export:       true,
 	}
 	p.TxnDefaultKeepaliveTimeout.Init(base.mgr)
+
+	p.WALWriteAheadBufferCapacity = ParamItem{
+		Key:          "streaming.walWriteAheadBuffer.capacity",
+		Version:      "2.6.0",
+		Doc:          "The capacity of write ahead buffer of each wal, 64M by default",
+		DefaultValue: "64m",
+		Export:       true,
+	}
+	p.WALWriteAheadBufferCapacity.Init(base.mgr)
+	p.WALWriteAheadBufferKeepalive = ParamItem{
+		Key:          "streaming.walWriteAheadBuffer.keepalive",
+		Version:      "2.6.0",
+		Doc:          "The keepalive duration for entries in write ahead buffer of each wal, 30s by default",
+		DefaultValue: "30s",
+		Export:       true,
+	}
+	p.WALWriteAheadBufferKeepalive.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

@@ -26,15 +26,15 @@ import (
 	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/kv"
-	rocksdb "github.com/milvus-io/milvus/pkg/kv/rocksdb"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/hardware"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	rocksdb "github.com/milvus-io/milvus/pkg/v2/kv/rocksdb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // UniqueID is the type of message ID
@@ -420,9 +420,7 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 		return nil
 	}
 
-	if _, ok := topicMu.Load(topicName); !ok {
-		topicMu.Store(topicName, new(sync.Mutex))
-	}
+	topicMu.LoadOrStore(topicName, new(sync.Mutex))
 
 	// msgSizeKey -> msgSize
 	// topicIDKey -> topic creating time
@@ -550,6 +548,11 @@ func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) error {
 	if rmq.isClosed() {
 		return errors.New(RmqNotServingErrMsg)
 	}
+	ll, _ := topicMu.LoadOrStore(consumer.Topic, new(sync.Mutex))
+	mu, _ := ll.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+
 	start := time.Now()
 	if vals, ok := rmq.consumers.Load(consumer.Topic); ok {
 		for _, v := range vals.([]*Consumer) {

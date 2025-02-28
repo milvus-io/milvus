@@ -13,11 +13,12 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/compressor"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/compressor"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 var ErrInvalidKey = errors.New("invalid load info key")
@@ -37,12 +38,16 @@ const (
 type Catalog struct {
 	cli            kv.MetaKv
 	paginationSize int
+
+	pool *conc.Pool[any]
 }
 
 func NewCatalog(cli kv.MetaKv) Catalog {
+	ioPool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
 	return Catalog{
 		cli:            cli,
 		paginationSize: paramtable.Get().MetaStoreCfg.PaginationSize.GetAsInt(),
+		pool:           ioPool,
 	}
 }
 
@@ -126,23 +131,40 @@ func (s Catalog) GetCollections(ctx context.Context) ([]*querypb.CollectionLoadI
 	return ret, nil
 }
 
-func (s Catalog) GetPartitions(ctx context.Context) (map[int64][]*querypb.PartitionLoadInfo, error) {
-	ret := make(map[int64][]*querypb.PartitionLoadInfo)
-	applyFn := func(key []byte, value []byte) error {
-		info := querypb.PartitionLoadInfo{}
-		if err := proto.Unmarshal(value, &info); err != nil {
-			return err
-		}
-		ret[info.GetCollectionID()] = append(ret[info.GetCollectionID()], &info)
-		return nil
+func (s Catalog) GetPartitions(ctx context.Context, collectionIDs []int64) (map[int64][]*querypb.PartitionLoadInfo, error) {
+	collectionPartitions := make([][]*querypb.PartitionLoadInfo, len(collectionIDs))
+	futures := make([]*conc.Future[any], 0, len(collectionIDs))
+	for i, collectionID := range collectionIDs {
+		i := i
+		collectionID := collectionID
+		futures = append(futures, s.pool.Submit(func() (any, error) {
+			prefix := EncodePartitionLoadInfoPrefix(collectionID)
+			_, values, err := s.cli.LoadWithPrefix(ctx, prefix)
+			if err != nil {
+				return nil, err
+			}
+			ret := make([]*querypb.PartitionLoadInfo, 0, len(values))
+			for _, v := range values {
+				info := querypb.PartitionLoadInfo{}
+				if err = proto.Unmarshal([]byte(v), &info); err != nil {
+					return nil, err
+				}
+				ret = append(ret, &info)
+			}
+			collectionPartitions[i] = ret
+			return nil, nil
+		}))
 	}
-
-	err := s.cli.WalkWithPrefix(ctx, PartitionLoadInfoPrefix, s.paginationSize, applyFn)
+	err := conc.AwaitAll(futures...)
 	if err != nil {
 		return nil, err
 	}
 
-	return ret, nil
+	result := make(map[int64][]*querypb.PartitionLoadInfo, len(collectionIDs))
+	for i, partitions := range collectionPartitions {
+		result[collectionIDs[i]] = partitions
+	}
+	return result, nil
 }
 
 func (s Catalog) GetReplicas(ctx context.Context) ([]*querypb.Replica, error) {
@@ -333,6 +355,10 @@ func EncodeCollectionLoadInfoKey(collection int64) string {
 
 func EncodePartitionLoadInfoKey(collection, partition int64) string {
 	return fmt.Sprintf("%s/%d/%d", PartitionLoadInfoPrefix, collection, partition)
+}
+
+func EncodePartitionLoadInfoPrefix(collection int64) string {
+	return fmt.Sprintf("%s/%d/", PartitionLoadInfoPrefix, collection)
 }
 
 func encodeReplicaKey(collection, replica int64) string {

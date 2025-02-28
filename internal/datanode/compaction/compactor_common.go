@@ -29,10 +29,10 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const compactionBatchSize = 100
@@ -166,50 +166,6 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[in
 	log.Info("compact mergeDeltalogs end", zap.Int("delete entries counts", len(pk2Ts)))
 
 	return pk2Ts, nil
-}
-
-func composePaths(segments []*datapb.CompactionSegmentBinlogs) (
-	deltaPaths map[typeutil.UniqueID][]string, insertPaths map[typeutil.UniqueID][]string, err error,
-) {
-	if err := binlog.DecompressCompactionBinlogs(segments); err != nil {
-		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
-		return nil, nil, err
-	}
-
-	deltaPaths = make(map[typeutil.UniqueID][]string)     // segmentID to deltalog paths
-	insertPaths = make(map[typeutil.UniqueID][]string, 0) // segmentID to binlog paths
-	for _, s := range segments {
-		segId := s.GetSegmentID()
-		// Get the batch count of field binlog files from non-empty segment
-		// each segment might contain different batches
-		var binlogBatchCount int
-		for _, b := range s.GetFieldBinlogs() {
-			if b != nil {
-				binlogBatchCount = len(b.GetBinlogs())
-				break
-			}
-		}
-		if binlogBatchCount == 0 {
-			log.Warn("compacting empty segment", zap.Int64("segmentID", s.GetSegmentID()))
-			continue
-		}
-
-		for idx := 0; idx < binlogBatchCount; idx++ {
-			var batchPaths []string
-			for _, f := range s.GetFieldBinlogs() {
-				batchPaths = append(batchPaths, f.GetBinlogs()[idx].GetLogPath())
-			}
-			insertPaths[segId] = append(insertPaths[segId], batchPaths...)
-		}
-
-		deltaPaths[s.GetSegmentID()] = []string{}
-		for _, d := range s.GetDeltalogs() {
-			for _, l := range d.GetBinlogs() {
-				deltaPaths[segId] = append(deltaPaths[s.GetSegmentID()], l.GetLogPath())
-			}
-		}
-	}
-	return deltaPaths, insertPaths, nil
 }
 
 func serializeWrite(ctx context.Context, allocator allocator.Interface, writer *SegmentWriter) (kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {

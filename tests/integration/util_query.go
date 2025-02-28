@@ -30,10 +30,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -328,6 +329,13 @@ func constructPlaceholderGroup(nq, dim int, vectorType schemapb.DataType) *commo
 		placeholderType = commonpb.PlaceholderType_SparseFloatVector
 		sparseVecs := GenerateSparseFloatArray(nq)
 		values = append(values, sparseVecs.Contents...)
+	case schemapb.DataType_Int8Vector:
+		placeholderType = commonpb.PlaceholderType_Int8Vector
+		data := testutils.GenerateInt8Vectors(nq, dim)
+		for i := 0; i < nq; i++ {
+			rowBytes := dim
+			values = append(values, typeutil.Int8ArrayToBytes(data[rowBytes*i:rowBytes*(i+1)]))
+		}
 	default:
 		panic("invalid vector data type")
 	}

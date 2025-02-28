@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,12 +32,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -969,6 +970,65 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_OnLoadingCollection() {
 	}, 30*time.Second, 1*time.Second)
 
 	s.releaseCollection(dbName, collectionName)
+}
+
+func (s *LoadTestSuite) TestLoadWithCompact() {
+	ctx := context.Background()
+	collName := "test_load_with_compact"
+
+	// Create collection with configuration
+	s.CreateCollectionWithConfiguration(ctx, &integration.CreateCollectionConfig{
+		DBName:           dbName,
+		Dim:              dim,
+		CollectionName:   collName,
+		ChannelNum:       1,
+		SegmentNum:       3,
+		RowNumPerSegment: 2000,
+	})
+
+	s.releaseCollection(dbName, collName)
+
+	stopInsertCh := make(chan struct{}, 1)
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	// Start a goroutine to continuously insert data and trigger compaction
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stopInsertCh:
+				return
+			default:
+				s.InsertAndFlush(ctx, dbName, collName, 2000, dim)
+				_, err := s.Cluster.Proxy.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
+					CollectionName: collName,
+				})
+				s.NoError(err)
+				time.Sleep(time.Second)
+			}
+		}
+	}()
+
+	time.Sleep(10 * time.Second)
+
+	// Load the collection while data is being inserted and compacted
+	s.loadCollection(collName, dbName, 1, nil)
+
+	// Verify the collection is loaded
+	s.Eventually(func() bool {
+		resp, err := s.Cluster.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			CollectionNames: []string{collName},
+			Type:            milvuspb.ShowType_InMemory,
+		})
+		s.NoError(err)
+
+		return len(resp.InMemoryPercentages) == 1 && resp.InMemoryPercentages[0] == 100
+	}, 30*time.Second, 1*time.Second)
+
+	// Clean up
+	close(stopInsertCh)
+	wg.Wait()
+	s.releaseCollection(dbName, collName)
 }
 
 func TestReplicas(t *testing.T) {

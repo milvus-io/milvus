@@ -1,9 +1,9 @@
 package discover
 
 import (
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // discoverGrpcServerHelper is a wrapped discover server of log messages.
@@ -45,6 +45,8 @@ func (h *discoverGrpcServerHelper) SendFullAssignment(v typeutil.VersionInt64Pai
 // SendCloseResponse sends the close response to client.
 func (h *discoverGrpcServerHelper) SendCloseResponse() error {
 	return h.Send(&streamingpb.AssignmentDiscoverResponse{
-		Response: &streamingpb.AssignmentDiscoverResponse_Close{},
+		Response: &streamingpb.AssignmentDiscoverResponse_Close{
+			Close: &streamingpb.CloseAssignmentDiscoverResponse{},
+		},
 	})
 }

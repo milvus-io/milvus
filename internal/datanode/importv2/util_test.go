@@ -25,8 +25,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
 func Test_AppendSystemFieldsData(t *testing.T) {
@@ -71,7 +71,8 @@ func Test_AppendSystemFieldsData(t *testing.T) {
 	assert.Equal(t, 0, insertData.Data[pkField.GetFieldID()].RowNum())
 	assert.Nil(t, insertData.Data[common.RowIDField])
 	assert.Nil(t, insertData.Data[common.TimeStampField])
-	err = AppendSystemFieldsData(task, insertData)
+	rowNum := GetInsertDataRowCount(insertData, task.GetSchema())
+	err = AppendSystemFieldsData(task, insertData, rowNum)
 	assert.NoError(t, err)
 	assert.Equal(t, count, insertData.Data[pkField.GetFieldID()].RowNum())
 	assert.Equal(t, count, insertData.Data[common.RowIDField].RowNum())
@@ -84,7 +85,8 @@ func Test_AppendSystemFieldsData(t *testing.T) {
 	assert.Equal(t, 0, insertData.Data[pkField.GetFieldID()].RowNum())
 	assert.Nil(t, insertData.Data[common.RowIDField])
 	assert.Nil(t, insertData.Data[common.TimeStampField])
-	err = AppendSystemFieldsData(task, insertData)
+	rowNum = GetInsertDataRowCount(insertData, task.GetSchema())
+	err = AppendSystemFieldsData(task, insertData, rowNum)
 	assert.NoError(t, err)
 	assert.Equal(t, count, insertData.Data[pkField.GetFieldID()].RowNum())
 	assert.Equal(t, count, insertData.Data[common.RowIDField].RowNum())

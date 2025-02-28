@@ -7,12 +7,16 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/flusher"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var errWALManagerClosed = status.NewOnShutdownError("wal manager is closed")
@@ -21,7 +25,12 @@ var errWALManagerClosed = status.NewOnShutdownError("wal manager is closed")
 func OpenManager() (Manager, error) {
 	walName := util.MustSelectWALName()
 	resource.Resource().Logger().Info("open wal manager", zap.String("walName", walName))
-	opener, err := registry.MustGetBuilder(walName).Build()
+	opener, err := registry.MustGetBuilder(walName,
+		redo.NewInterceptorBuilder(),
+		flusher.NewInterceptorBuilder(),
+		timetick.NewInterceptorBuilder(),
+		segment.NewInterceptorBuilder(),
+	).Build()
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +110,9 @@ func (m *managerImpl) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, erro
 	if currentTerm != channel.Term {
 		return nil, status.NewUnmatchedChannelTerm(channel.Name, channel.Term, currentTerm)
 	}
-	return l, nil
+	// wal's lifetime is fully managed by wal manager,
+	// so wrap the wal instance to prevent it from being closed by other components.
+	return nopCloseWAL{l}, nil
 }
 
 // GetAllAvailableChannels returns all available channel info.
@@ -175,4 +186,14 @@ func isRemoveable(state managerState) bool {
 
 func isOpenable(state managerState) bool {
 	return state&managerOpenable != 0
+}
+
+// wal can be only closed by the wal manager.
+// So wrap the wal instance to prevent it from being closed by other components.
+type nopCloseWAL struct {
+	wal.WAL
+}
+
+func (w nopCloseWAL) Close() {
+	// do nothing
 }

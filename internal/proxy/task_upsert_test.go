@@ -27,9 +27,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/testutils"
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 )
 
 func TestUpsertTask_CheckAligned(t *testing.T) {
@@ -358,5 +363,161 @@ func TestUpsertTaskForReplicate(t *testing.T) {
 		}, nil).Once()
 		err := ut.PreExecute(ctx)
 		assert.Error(t, err)
+	})
+}
+
+func TestUpsertTask_Function(t *testing.T) {
+	ts := function.CreateOpenAIEmbeddingServer()
+	defer ts.Close()
+	data := []*schemapb.FieldData{}
+	f1 := schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldId:   100,
+		FieldName: "id",
+		IsDynamic: false,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: []int64{0, 1},
+					},
+				},
+			},
+		},
+	}
+	data = append(data, &f1)
+	f2 := schemapb.FieldData{
+		Type:      schemapb.DataType_VarChar,
+		FieldId:   101,
+		FieldName: "text",
+		IsDynamic: false,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: []string{"sentence", "sentence"},
+					},
+				},
+			},
+		},
+	}
+	data = append(data, &f2)
+	collectionName := "TestUpsertTask_function"
+	schema := &schemapb.CollectionSchema{
+		Name:        collectionName,
+		Description: "TestUpsertTask_function",
+		AutoID:      true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{
+				FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "200"},
+				},
+			},
+			{
+				FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				},
+				IsFunctionOutput: true,
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "test_function",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldIds:    []int64{101},
+				InputFieldNames:  []string{"text"},
+				OutputFieldIds:   []int64{102},
+				OutputFieldNames: []string{"vector"},
+				Params: []*commonpb.KeyValuePair{
+					{Key: "provider", Value: "openai"},
+					{Key: "model_name", Value: "text-embedding-ada-002"},
+					{Key: "api_key", Value: "mock"},
+					{Key: "url", Value: ts.URL},
+					{Key: "dim", Value: "4"},
+				},
+			},
+		},
+	}
+
+	info := newSchemaInfo(schema)
+	collectionID := UniqueID(0)
+	cache := NewMockCache(t)
+	globalMetaCache = cache
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rc := mocks.NewMockRootCoordClient(t)
+	rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+		Status: merr.Status(nil),
+		ID:     collectionID,
+		Count:  10,
+	}, nil)
+	idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
+	idAllocator.Start()
+	defer idAllocator.Close()
+	assert.NoError(t, err)
+	task := upsertTask{
+		ctx: context.Background(),
+		req: &milvuspb.UpsertRequest{
+			CollectionName: collectionName,
+		},
+		upsertMsg: &msgstream.UpsertMsg{
+			InsertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					Base: commonpbutil.NewMsgBase(
+						commonpbutil.WithMsgType(commonpb.MsgType_Insert),
+					),
+					CollectionName: collectionName,
+					DbName:         "hooooooo",
+					Version:        msgpb.InsertDataVersion_ColumnBased,
+					FieldsData:     data,
+					NumRows:        2,
+					PartitionName:  Params.CommonCfg.DefaultPartitionName.GetValue(),
+				},
+			},
+		},
+		idAllocator: idAllocator,
+		schema:      info,
+		result:      &milvuspb.MutationResult{},
+	}
+	err = task.insertPreExecute(ctx)
+	assert.NoError(t, err)
+
+	// process failed
+	{
+		oldRows := task.upsertMsg.InsertMsg.InsertRequest.NumRows
+		task.upsertMsg.InsertMsg.InsertRequest.NumRows = 10000
+		err = task.insertPreExecute(ctx)
+		assert.Error(t, err)
+		task.upsertMsg.InsertMsg.InsertRequest.NumRows = oldRows
+	}
+}
+
+func TestUpsertTaskForSchemaMismatch(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	mockCache := NewMockCache(t)
+	globalMetaCache = mockCache
+	ctx := context.Background()
+
+	t.Run("schema ts mismatch", func(t *testing.T) {
+		ut := upsertTask{
+			ctx: ctx,
+			req: &milvuspb.UpsertRequest{
+				CollectionName: "col-0",
+			},
+			schemaTimestamp: 99,
+		}
+		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+			updateTimestamp: 100,
+		}, nil)
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
+		err := ut.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
 	})
 }

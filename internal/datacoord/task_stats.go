@@ -24,11 +24,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 type statsTask struct {
@@ -79,6 +79,7 @@ func (st *statsTask) ResetTask(mt *meta) {
 	// reset isCompacting
 
 	mt.SetSegmentsCompacting(context.TODO(), []UniqueID{st.segmentID}, false)
+	mt.SetSegmentStating(st.segmentID, false)
 }
 
 func (st *statsTask) SetQueueTime(t time.Time) {
@@ -127,13 +128,24 @@ func (st *statsTask) GetFailReason() string {
 	return st.taskInfo.GetFailReason()
 }
 
-func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error {
+func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error {
 	// mark compacting
 	if exist, canDo := meta.CheckAndSetSegmentsCompacting(ctx, []UniqueID{st.segmentID}); !exist || !canDo {
 		log.Warn("segment is not exist or is compacting, skip stats",
 			zap.Bool("exist", exist), zap.Bool("canDo", canDo))
-		st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
+		st.SetState(indexpb.JobState_JobStateFailed, "segment is not healthy")
+		st.SetStartTime(time.Now())
 		return fmt.Errorf("mark segment compacting failed, isCompacting: %v", !canDo)
+	}
+
+	if !compactionHandler.checkAndSetSegmentStating(st.req.GetInsertChannel(), st.segmentID) {
+		log.Warn("segment is contains by l0 compaction, skip stats", zap.Int64("taskID", st.taskID),
+			zap.Int64("segmentID", st.segmentID))
+		st.SetState(indexpb.JobState_JobStateFailed, "segment is contains by l0 compaction")
+		// reset compacting
+		meta.SetSegmentsCompacting(ctx, []UniqueID{st.segmentID}, false)
+		st.SetStartTime(time.Now())
+		return fmt.Errorf("segment is contains by l0 compaction")
 	}
 
 	if err := meta.statsTaskMeta.UpdateVersion(st.taskID, nodeID); err != nil {
@@ -148,8 +160,15 @@ func (st *statsTask) UpdateMetaBuildingState(meta *meta) error {
 }
 
 func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bool {
-	// set segment compacting
 	log := log.Ctx(ctx).With(zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID))
+
+	statsMeta := dependency.meta.statsTaskMeta.GetStatsTaskBySegmentID(st.segmentID, st.subJobType)
+	if statsMeta == nil {
+		log.Warn("stats task meta is null, skip it")
+		st.SetState(indexpb.JobState_JobStateNone, "stats task meta is null")
+		return false
+	}
+	// set segment compacting
 	segment := dependency.meta.GetHealthySegment(ctx, st.segmentID)
 	if segment == nil {
 		log.Warn("segment is node healthy, skip stats")
@@ -194,8 +213,6 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		PartitionID:     segment.GetPartitionID(),
 		InsertChannel:   segment.GetInsertChannel(),
 		SegmentID:       segment.GetID(),
-		InsertLogs:      segment.GetBinlogs(),
-		DeltaLogs:       segment.GetDeltalogs(),
 		StorageConfig:   createStorageConfig(),
 		Schema:          collInfo.Schema,
 		SubJobType:      st.subJobType,
@@ -205,14 +222,28 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		NumRows:         segment.GetNumOfRows(),
 		CollectionTtl:   collTtl.Nanoseconds(),
 		CurrentTs:       tsoutil.GetCurrentTime(),
-		BinlogMaxSize:   Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		// update version after check
+		TaskVersion:   statsMeta.GetVersion() + 1,
+		BinlogMaxSize: Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 	}
 
 	return true
 }
 
-func (st *statsTask) AssignTask(ctx context.Context, client types.DataNodeClient) bool {
-	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+func (st *statsTask) AssignTask(ctx context.Context, client types.DataNodeClient, meta *meta) bool {
+	segment := meta.GetHealthySegment(ctx, st.segmentID)
+	if segment == nil {
+		log.Ctx(ctx).Warn("segment is node healthy, skip stats")
+		// need to set retry and reset compacting
+		st.SetState(indexpb.JobState_JobStateRetry, "segment is not healthy")
+		return false
+	}
+
+	// Set InsertLogs and DeltaLogs before execution, and wait for the L0 compaction containing the segment to complete
+	st.req.InsertLogs = segment.GetBinlogs()
+	st.req.DeltaLogs = segment.GetDeltalogs()
+
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
 		ClusterID: st.req.GetClusterID(),
@@ -235,7 +266,7 @@ func (st *statsTask) AssignTask(ctx context.Context, client types.DataNodeClient
 }
 
 func (st *statsTask) QueryResult(ctx context.Context, client types.DataNodeClient) {
-	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
 		ClusterID: st.req.GetClusterID(),
@@ -271,7 +302,7 @@ func (st *statsTask) QueryResult(ctx context.Context, client types.DataNodeClien
 }
 
 func (st *statsTask) DropTaskOnWorker(ctx context.Context, client types.DataNodeClient) bool {
-	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
 		ClusterID: st.req.GetClusterID(),

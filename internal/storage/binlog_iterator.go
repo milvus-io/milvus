@@ -22,7 +22,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 var (
@@ -125,93 +125,4 @@ func (itr *InsertBinlogIterator) hasNext() bool {
 
 func (itr *InsertBinlogIterator) isDisposed() bool {
 	return atomic.LoadInt32(&itr.dispose) == 1
-}
-
-// MergeIterator merge iterators.
-type MergeIterator struct {
-	disposed   int32
-	pos        int
-	iteraotrs  []Iterator
-	tmpRecords []*Value
-	nextRecord *Value
-}
-
-// NewMergeIterator return a new MergeIterator.
-func NewMergeIterator(iterators []Iterator) *MergeIterator {
-	return &MergeIterator{
-		iteraotrs:  iterators,
-		tmpRecords: make([]*Value, len(iterators)),
-	}
-}
-
-// HasNext returns true if the iterator have unread record
-func (itr *MergeIterator) HasNext() bool {
-	return !itr.isDisposed() && itr.hasNext()
-}
-
-// Next returns the next record
-func (itr *MergeIterator) Next() (interface{}, error) {
-	if itr.isDisposed() {
-		return nil, ErrDisposed
-	}
-
-	if !itr.hasNext() {
-		return nil, ErrNoMoreRecord
-	}
-
-	tmpRecord := itr.nextRecord
-	itr.nextRecord = nil
-	return tmpRecord, nil
-}
-
-// Dispose disposes the iterator
-func (itr *MergeIterator) Dispose() {
-	if itr.isDisposed() {
-		return
-	}
-
-	for _, tmpItr := range itr.iteraotrs {
-		if tmpItr != nil {
-			tmpItr.Dispose()
-		}
-	}
-	atomic.CompareAndSwapInt32(&itr.disposed, 0, 1)
-}
-
-func (itr *MergeIterator) isDisposed() bool {
-	return atomic.LoadInt32(&itr.disposed) == 1
-}
-
-func (itr *MergeIterator) hasNext() bool {
-	if itr.nextRecord != nil {
-		return true
-	}
-
-	var minRecord *Value
-	var minPos int
-	for i, tmpRecord := range itr.tmpRecords {
-		if tmpRecord == nil {
-			if itr.iteraotrs[i] != nil && itr.iteraotrs[i].HasNext() {
-				next, _ := itr.iteraotrs[i].Next()
-				itr.tmpRecords[i] = next.(*Value)
-				tmpRecord = itr.tmpRecords[i]
-			}
-		}
-		if tmpRecord == nil {
-			continue
-		}
-		if minRecord == nil || tmpRecord.ID < minRecord.ID {
-			minRecord = tmpRecord
-			minPos = i
-		}
-	}
-
-	if minRecord == nil {
-		// all iterators have no more records
-		return false
-	}
-
-	itr.tmpRecords[minPos] = nil
-	itr.nextRecord = minRecord
-	return true
 }

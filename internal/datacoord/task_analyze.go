@@ -29,11 +29,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var _ Task = (*analyzeTask)(nil)
@@ -118,7 +118,7 @@ func (at *analyzeTask) GetFailReason() string {
 	return at.taskInfo.GetFailReason()
 }
 
-func (at *analyzeTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta) error {
+func (at *analyzeTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error {
 	if err := meta.analyzeMeta.UpdateVersion(at.GetTaskID(), nodeID); err != nil {
 		return err
 	}
@@ -227,8 +227,8 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 	return true
 }
 
-func (at *analyzeTask) AssignTask(ctx context.Context, client types.DataNodeClient) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+func (at *analyzeTask) AssignTask(ctx context.Context, client types.DataNodeClient, meta *meta) bool {
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
 		ClusterID: at.req.GetClusterID(),
@@ -257,7 +257,7 @@ func (at *analyzeTask) setResult(result *workerpb.AnalyzeResult) {
 }
 
 func (at *analyzeTask) QueryResult(ctx context.Context, client types.DataNodeClient) {
-	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
@@ -297,7 +297,7 @@ func (at *analyzeTask) QueryResult(ctx context.Context, client types.DataNodeCli
 }
 
 func (at *analyzeTask) DropTaskOnWorker(ctx context.Context, client types.DataNodeClient) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),

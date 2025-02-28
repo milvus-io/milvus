@@ -30,9 +30,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func Test_ListDBTask(t *testing.T) {
@@ -128,6 +128,28 @@ func Test_ListDBTask(t *testing.T) {
 			assert.Equal(t, 1, len(task.Resp.GetDbNames()))
 			assert.Equal(t, ret[0].Name, task.Resp.GetDbNames()[0])
 			assert.Equal(t, commonpb.ErrorCode_Success, task.Resp.GetStatus().GetErrorCode())
+		}
+
+		{
+			// proxy node with root user, root user should bind role
+			Params.Save(Params.CommonCfg.RootShouldBindRole.Key, "true")
+			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+				Return([]*milvuspb.UserResult{
+					{
+						User: &milvuspb.UserEntity{
+							Name: "root",
+						},
+						Roles: []*milvuspb.RoleEntity{},
+					},
+				}, nil).Once()
+
+			ctx := GetContext(context.Background(), "root:root")
+			task := getTask()
+			err := task.Execute(ctx)
+			assert.NoError(t, err)
+			assert.Equal(t, 0, len(task.Resp.GetDbNames()))
+			assert.Equal(t, commonpb.ErrorCode_Success, task.Resp.GetStatus().GetErrorCode())
+			Params.Reset(Params.CommonCfg.RootShouldBindRole.Key)
 		}
 
 		{
@@ -232,6 +254,28 @@ func Test_ListDBTask(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equal(t, 1, len(task.Resp.GetDbNames()))
 			assert.Equal(t, "fooDB", task.Resp.GetDbNames()[0])
+		}
+
+		{
+			// normal user and public role
+			meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+				Return([]*milvuspb.UserResult{
+					{
+						User: &milvuspb.UserEntity{
+							Name: "foo",
+						},
+						Roles: []*milvuspb.RoleEntity{
+							{
+								Name: "public",
+							},
+						},
+					},
+				}, nil).Once()
+			ctx := GetContext(context.Background(), "foo:root")
+			task := getTask()
+			err := task.Execute(ctx)
+			assert.NoError(t, err)
+			assert.Equal(t, 0, len(task.Resp.GetDbNames()))
 		}
 
 		{

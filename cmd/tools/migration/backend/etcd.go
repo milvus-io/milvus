@@ -7,8 +7,8 @@ import (
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/configs"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 )
 
 type etcdBasedBackend struct {

@@ -6,11 +6,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 //go:generate mockery --name=RootCoordCatalog
@@ -120,7 +120,7 @@ type BinlogsIncrement struct {
 
 //go:generate mockery --name=DataCoordCatalog --with-expecter
 type DataCoordCatalog interface {
-	ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, error)
+	ListSegments(ctx context.Context, collectionID int64) ([]*datapb.SegmentInfo, error)
 	AddSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 	// TODO Remove this later, we should update flush segments info for each segment separately, so far we still need transaction
 	AlterSegments(ctx context.Context, newSegments []*datapb.SegmentInfo, binlogs ...BinlogsIncrement) error
@@ -186,7 +186,7 @@ type QueryCoordCatalog interface {
 	SavePartition(ctx context.Context, info ...*querypb.PartitionLoadInfo) error
 	SaveReplica(ctx context.Context, replicas ...*querypb.Replica) error
 	GetCollections(ctx context.Context) ([]*querypb.CollectionLoadInfo, error)
-	GetPartitions(ctx context.Context) (map[int64][]*querypb.PartitionLoadInfo, error)
+	GetPartitions(ctx context.Context, collectionIDs []int64) (map[int64][]*querypb.PartitionLoadInfo, error)
 	GetReplicas(ctx context.Context) ([]*querypb.Replica, error)
 	ReleaseCollection(ctx context.Context, collection int64) error
 	ReleasePartition(ctx context.Context, collection int64, partitions ...int64) error
@@ -218,7 +218,7 @@ type StreamingCoordCataLog interface {
 	// SaveBroadcastTask save the broadcast task to metastore.
 	// Make the task recoverable after restart.
 	// When broadcast task is done, it will be removed from metastore.
-	SaveBroadcastTask(ctx context.Context, task *streamingpb.BroadcastTask) error
+	SaveBroadcastTask(ctx context.Context, broadcastID uint64, task *streamingpb.BroadcastTask) error
 }
 
 // StreamingNodeCataLog is the interface for streamingnode catalog
@@ -231,4 +231,11 @@ type StreamingNodeCataLog interface {
 
 	// SaveSegmentAssignments save the segment assignments for the wal.
 	SaveSegmentAssignments(ctx context.Context, pChannelName string, infos []*streamingpb.SegmentAssignmentMeta) error
+
+	// GetConsumeCheckpoint gets the consuming checkpoint of the wal.
+	// Return nil, nil if the checkpoint is not exist.
+	GetConsumeCheckpoint(ctx context.Context, pChannelName string) (*streamingpb.WALCheckpoint, error)
+
+	// SaveConsumeCheckpoint saves the consuming checkpoint of the wal.
+	SaveConsumeCheckpoint(ctx context.Context, pChannelName string, checkpoint *streamingpb.WALCheckpoint) error
 }

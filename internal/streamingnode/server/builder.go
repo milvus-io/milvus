@@ -6,12 +6,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 // ServerBuilder is used to build a server.
@@ -77,12 +76,10 @@ func (b *ServerBuilder) WithMetaKV(kv kv.MetaKv) *ServerBuilder {
 func (b *ServerBuilder) Build() *Server {
 	resource.Apply(
 		resource.OptETCD(b.etcdClient),
+		resource.OptChunkManager(b.chunkManager),
 		resource.OptRootCoordClient(b.rc),
 		resource.OptDataCoordClient(b.dc),
 		resource.OptStreamingNodeCatalog(streamingnode.NewCataLog(b.kv)),
-	)
-	resource.Apply(
-		resource.OptFlusher(flusherimpl.NewFlusher(b.chunkManager)),
 	)
 	resource.Done()
 	return &Server{

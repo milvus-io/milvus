@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.rootcoord;
 
-option go_package="github.com/milvus-io/milvus/pkg/proto/rootcoordpb";
+option go_package="github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb";
 
 import "common.proto";
 import "milvus.proto";
@@ -62,6 +62,8 @@ service RootCoord {
      * @return StringListResponse, collection name list
      */
     rpc ShowCollections(milvus.ShowCollectionsRequest) returns (milvus.ShowCollectionsResponse) {}
+
+    rpc ShowCollectionIDs(ShowCollectionIDsRequest) returns (ShowCollectionIDsResponse) {}
 
     rpc AlterCollection(milvus.AlterCollectionRequest) returns (common.Status) {}
     
@@ -247,4 +249,20 @@ message CollectionInfoOnPChannel {
 
 message PartitionInfoOnPChannel {
   int64 partition_id = 1;
+}
+
+message ShowCollectionIDsRequest {
+  common.MsgBase base = 1;
+  repeated string db_names = 2;
+  bool allowUnavailable = 3;
+}
+
+message DBCollections {
+ string db_name = 1;
+ repeated int64 collectionIDs = 2;
+}
+
+message ShowCollectionIDsResponse {
+  common.Status status = 1;
+  repeated DBCollections db_collections = 2;
 }

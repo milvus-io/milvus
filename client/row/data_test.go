@@ -61,7 +61,7 @@ func (s *RowsSuite) TestRowsToColumns() {
 		s.Equal("Vector", columns[0].Name())
 	})
 
-	s.Run("fp16", func() {
+	s.Run("bf16", func() {
 		type BF16Struct struct {
 			ID     int64  `milvus:"primary_key;auto_id"`
 			Vector []byte `milvus:"dim:16;vector_type:bf16"`
@@ -83,6 +83,18 @@ func (s *RowsSuite) TestRowsToColumns() {
 		s.Require().Equal(1, len(columns))
 		s.Equal("Vector", columns[0].Name())
 		s.Equal(entity.FieldTypeFloat16Vector, columns[0].Type())
+	})
+
+	s.Run("int8", func() {
+		type Int8Struct struct {
+			ID     int64  `milvus:"primary_key;auto_id"`
+			Vector []int8 `milvus:"dim:16;vector_type:int8"`
+		}
+		columns, err := AnyToColumns([]any{&Int8Struct{}})
+		s.Nil(err)
+		s.Require().Equal(1, len(columns))
+		s.Equal("Vector", columns[0].Name())
+		s.Equal(entity.FieldTypeInt8Vector, columns[0].Type())
 	})
 
 	s.Run("invalid_cases", func() {

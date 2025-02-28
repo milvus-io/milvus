@@ -24,11 +24,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 type ImportJobFilter func(job ImportJob) bool
@@ -58,6 +59,12 @@ func WithoutJobStates(states ...internalpb.ImportJobState) ImportJobFilter {
 			}
 		}
 		return true
+	}
+}
+
+func WithoutL0Job() ImportJobFilter {
+	return func(job ImportJob) bool {
+		return !importutilv2.IsL0Import(job.GetOptions())
 	}
 }
 
@@ -104,6 +111,7 @@ type ImportJob interface {
 	GetCollectionName() string
 	GetPartitionIDs() []int64
 	GetVchannels() []string
+	GetReadyVchannels() []string
 	GetSchema() *schemapb.CollectionSchema
 	GetTimeoutTs() uint64
 	GetCleanupTs() uint64
@@ -115,6 +123,7 @@ type ImportJob interface {
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair
 	GetTR() *timerecord.TimeRecorder
+	GetDataTs() uint64
 	Clone() ImportJob
 }
 

@@ -31,11 +31,11 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type LeaderCheckerTestSuite struct {
@@ -162,29 +162,6 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).GetLeaderID(), node2)
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
-
-	// test skip sync l0 segment
-	segments = []*datapb.SegmentInfo{
-		{
-			ID:            1,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-			Level:         datapb.SegmentLevel_L0,
-		},
-	}
-	suite.broker.ExpectedCalls = nil
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
-	observer.target.UpdateCollectionNextTarget(ctx, int64(1))
-	observer.target.UpdateCollectionCurrentTarget(ctx, 1)
-	// mock l0 segment exist on non delegator node, doesn't set to leader view
-	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, loadVersion, "test-insert-channel"))
-	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	view = utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
-	view.TargetVersion = observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget)
-	observer.dist.LeaderViewManager.Update(2, view)
-	tasks = suite.checker.Check(context.TODO())
-	suite.Len(tasks, 0)
 }
 
 func (suite *LeaderCheckerTestSuite) TestActivation() {
@@ -423,30 +400,6 @@ func (suite *LeaderCheckerTestSuite) TestSyncRemovedSegments() {
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(3))
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).Version(), int64(0))
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
-
-	// skip sync l0 segments
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            3,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-			Level:         datapb.SegmentLevel_L0,
-		},
-	}
-	suite.broker.ExpectedCalls = nil
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
-
-	observer.target.UpdateCollectionNextTarget(ctx, int64(1))
-	observer.target.UpdateCollectionCurrentTarget(ctx, 1)
-
-	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	view = utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 1}, map[int64]*meta.Segment{})
-	view.TargetVersion = observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget)
-	observer.dist.LeaderViewManager.Update(2, view)
-
-	tasks = suite.checker.Check(context.TODO())
-	suite.Len(tasks, 0)
 }
 
 func (suite *LeaderCheckerTestSuite) TestIgnoreSyncRemovedSegments() {

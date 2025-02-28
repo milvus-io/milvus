@@ -22,8 +22,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/config"
-	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/config"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 )
 
 func shouldPanic(t *testing.T, name string, f func()) {
@@ -379,6 +379,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Len(t, Params.ClusterLevelLoadResourceGroups.GetAsStrings(), 0)
 
 		assert.Equal(t, 10, Params.CollectionChannelCountFactor.GetAsInt())
+		assert.Equal(t, 3000, Params.AutoBalanceInterval.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -479,7 +480,7 @@ func TestComponentParam(t *testing.T) {
 		params.Save("queryNode.lazyload.requestResourceRetryInterval", "3000")
 		assert.Equal(t, 3*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
 
-		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
+		assert.Equal(t, 2, Params.BloomFilterApplyParallelFactor.GetAsInt())
 		assert.Equal(t, true, Params.SkipGrowingSegmentBF.GetAsBool())
 
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
@@ -539,6 +540,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 4, Params.L0DeleteCompactionSlotUsage.GetAsInt())
 		params.Save("datacoord.scheduler.taskSlowThreshold", "1000")
 		assert.Equal(t, 1000*time.Second, Params.TaskSlowThreshold.GetAsDuration(time.Second))
+
+		params.Save("datacoord.statsTask.enable", "true")
+		assert.True(t, Params.EnableStatsTask.GetAsBool())
+		params.Save("datacoord.taskCheckInterval", "500")
+		assert.Equal(t, 500*time.Second, Params.TaskCheckInterval.GetAsDuration(time.Second))
+		params.Save("datacoord.statsTaskTriggerCount", "3")
+		assert.Equal(t, 3, Params.StatsTaskTriggerCount.GetAsInt())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -600,7 +608,7 @@ func TestComponentParam(t *testing.T) {
 		params.Save("datanode.clusteringCompaction.workPoolSize", "2")
 		assert.Equal(t, int64(2), Params.ClusteringCompactionWorkerPoolSize.GetAsInt64())
 
-		assert.Equal(t, 4, Params.BloomFilterApplyParallelFactor.GetAsInt())
+		assert.Equal(t, 2, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})
 
 	t.Run("test indexConfig", func(t *testing.T) {
@@ -618,16 +626,22 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 2.0, params.StreamingCfg.WALBalancerBackoffMultiplier.GetAsFloat())
 		assert.Equal(t, 1.0, params.StreamingCfg.WALBroadcasterConcurrencyRatio.GetAsFloat())
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse())
+		assert.Equal(t, 30*time.Second, params.StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse())
+		assert.Equal(t, int64(64*1024*1024), params.StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
 		params.Save(params.StreamingCfg.WALBalancerTriggerInterval.Key, "50s")
 		params.Save(params.StreamingCfg.WALBalancerBackoffInitialInterval.Key, "50s")
 		params.Save(params.StreamingCfg.WALBalancerBackoffMultiplier.Key, "3.5")
 		params.Save(params.StreamingCfg.WALBroadcasterConcurrencyRatio.Key, "1.5")
 		params.Save(params.StreamingCfg.TxnDefaultKeepaliveTimeout.Key, "3500ms")
+		params.Save(params.StreamingCfg.WALWriteAheadBufferKeepalive.Key, "10s")
+		params.Save(params.StreamingCfg.WALWriteAheadBufferCapacity.Key, "128k")
 		assert.Equal(t, 50*time.Second, params.StreamingCfg.WALBalancerTriggerInterval.GetAsDurationByParse())
 		assert.Equal(t, 50*time.Second, params.StreamingCfg.WALBalancerBackoffInitialInterval.GetAsDurationByParse())
 		assert.Equal(t, 3.5, params.StreamingCfg.WALBalancerBackoffMultiplier.GetAsFloat())
 		assert.Equal(t, 1.5, params.StreamingCfg.WALBroadcasterConcurrencyRatio.GetAsFloat())
 		assert.Equal(t, 3500*time.Millisecond, params.StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse())
+		assert.Equal(t, 10*time.Second, params.StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse())
+		assert.Equal(t, int64(128*1024), params.StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
 	})
 
 	t.Run("channel config priority", func(t *testing.T) {

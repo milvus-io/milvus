@@ -132,7 +132,8 @@ GetRawDataSizeOfDataArray(const DataArray* data,
     } else {
         switch (data_type) {
             case DataType::STRING:
-            case DataType::VARCHAR: {
+            case DataType::VARCHAR:
+            case DataType::TEXT: {
                 auto& string_data = FIELD_DATA(data, string);
                 for (auto& str : string_data) {
                     result += str.size();
@@ -187,7 +188,8 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                         break;
                     }
                     case DataType::VARCHAR:
-                    case DataType::STRING: {
+                    case DataType::STRING:
+                    case DataType::TEXT: {
                         for (auto& array_bytes : array_data) {
                             auto element_num =
                                 array_bytes.string_data().data_size();
@@ -276,7 +278,8 @@ CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
             break;
         }
         case DataType::VARCHAR:
-        case DataType::STRING: {
+        case DataType::STRING:
+        case DataType::TEXT: {
             auto obj = scalar_array->mutable_string_data();
             obj->mutable_data()->Reserve(count);
             for (auto i = 0; i < count; i++) {
@@ -356,6 +359,12 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             // does nothing here
             break;
         }
+        case DataType::VECTOR_INT8: {
+            auto length = count * dim;
+            auto obj = vector_array->mutable_int8_vector();
+            obj->resize(length);
+            break;
+        }
         default: {
             PanicInfo(DataTypeInvalid,
                       fmt::format("unsupported datatype {}", data_type));
@@ -424,7 +433,8 @@ CreateScalarDataArrayFrom(const void* data_raw,
             obj->mutable_data()->Add(data, data + count);
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             auto data = reinterpret_cast<const std::string*>(data_raw);
             auto obj = scalar_array->mutable_string_data();
             for (auto i = 0; i < count; i++) {
@@ -519,6 +529,13 @@ CreateVectorDataArrayFrom(const void* data_raw,
             vector_array->set_dim(vector_array->sparse_float_vector().dim());
             break;
         }
+        case DataType::VECTOR_INT8: {
+            auto length = count * dim;
+            auto data = reinterpret_cast<const char*>(data_raw);
+            auto obj = vector_array->mutable_int8_vector();
+            obj->assign(data, length * sizeof(int8));
+            break;
+        }
         default: {
             PanicInfo(DataTypeInvalid,
                       fmt::format("unsupported datatype {}", data_type));
@@ -596,6 +613,10 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 }
                 vector_array->set_dim(dst->dim());
                 *dst->mutable_contents() = src.contents();
+            } else if (field_meta.get_data_type() == DataType::VECTOR_INT8) {
+                auto data = VEC_FIELD_DATA(src_field_data, int8);
+                auto obj = vector_array->mutable_int8_vector();
+                obj->assign(data, dim * sizeof(int8));
             } else {
                 PanicInfo(DataTypeInvalid,
                           fmt::format("unsupported datatype {}", data_type));
@@ -643,7 +664,8 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 *(obj->mutable_data()->Add()) = data[src_offset];
                 break;
             }
-            case DataType::VARCHAR: {
+            case DataType::VARCHAR:
+            case DataType::TEXT: {
                 auto& data = FIELD_DATA(src_field_data, string);
                 auto obj = scalar_array->mutable_string_data();
                 *(obj->mutable_data()->Add()) = data[src_offset];

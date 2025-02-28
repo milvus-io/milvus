@@ -333,7 +333,7 @@ def check_server_connection(request):
 #     yield
 
 
-@pytest.fixture(scope="module")
+# @pytest.fixture(scope="module")
 def connect(request):
     host = request.config.getoption("--host")
     service_name = request.config.getoption("--service")
@@ -360,7 +360,7 @@ def connect(request):
     return milvus
 
 
-@pytest.fixture(scope="module")
+# @pytest.fixture(scope="module")
 def dis_connect(request):
     host = request.config.getoption("--host")
     service_name = request.config.getoption("--service")

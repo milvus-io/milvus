@@ -2,6 +2,7 @@ package planparserv2
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -9,8 +10,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
-	"github.com/milvus-io/milvus/pkg/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ParserVisitor struct {
@@ -36,6 +37,10 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 	var nestedPath []string
 	if identifier != field.Name {
 		nestedPath = append(nestedPath, identifier)
+	}
+
+	if field.DataType == schemapb.DataType_Text {
+		return nil, fmt.Errorf("filter on text field (%s) is not supported yet", field.Name)
 	}
 
 	return &ExprWithType{
@@ -493,6 +498,9 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 	if !typeutil.IsStringType(column.dataType) {
 		return fmt.Errorf("text match operation on non-string is unsupported")
 	}
+	if column.dataType == schemapb.DataType_Text {
+		return fmt.Errorf("text match operation on text field is not supported yet")
+	}
 
 	queryText, err := convertEscapeSingle(ctx.StringLiteral().GetText())
 	if err != nil {
@@ -525,11 +533,20 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 	if err != nil {
 		return err
 	}
-	var slop int64
-	if ctx.IntegerConstant() != nil {
-		slop, err = strconv.ParseInt(ctx.IntegerConstant().GetText(), 10, 64)
-		if err != nil {
-			return err
+	var slop int64 = 0
+	if ctx.Expr() != nil {
+		slopExpr := ctx.Expr().Accept(v)
+		slopValueExpr := getValueExpr(slopExpr)
+		if slopValueExpr == nil || slopValueExpr.GetValue() == nil {
+			return fmt.Errorf("\"slop\" should be a const integer expression with \"uint32\" value. \"slop\" expression passed: %s", ctx.Expr().GetText())
+		}
+		slop = slopValueExpr.GetValue().GetInt64Val()
+		if slop < 0 {
+			return fmt.Errorf("\"slop\" should not be a negative interger. \"slop\" passed: %s", ctx.Expr().GetText())
+		}
+
+		if slop > math.MaxUint32 {
+			return fmt.Errorf("\"slop\" exceeds the range of \"uint32\". \"slop\" expression passed: %s", ctx.Expr().GetText())
 		}
 	}
 
@@ -541,6 +558,43 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 					Op:          planpb.OpType_PhraseMatch,
 					Value:       NewString(queryText),
 					ExtraValues: []*planpb.GenericValue{NewInt(slop)},
+				},
+			},
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func isRandomSampleExpr(expr *ExprWithType) bool {
+	return expr.expr.GetRandomSampleExpr() != nil
+}
+
+const EPSILON = 1e-10
+
+func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) interface{} {
+	if ctx.Expr() == nil {
+		return fmt.Errorf("sample factor missed: %s", ctx.GetText())
+	}
+
+	floatExpr := ctx.Expr().Accept(v)
+	if err := getError(floatExpr); err != nil {
+		return fmt.Errorf("cannot parse expression: %s, error: %s", ctx.Expr().GetText(), err)
+	}
+	floatValueExpr := getValueExpr(floatExpr)
+	if floatValueExpr == nil || floatValueExpr.GetValue() == nil {
+		return fmt.Errorf("\"float factor\" should be a const float expression: \"float factor\" passed: %s", ctx.Expr().GetText())
+	}
+
+	sampleFactor := floatValueExpr.GetValue().GetFloatVal()
+	if sampleFactor <= 0+EPSILON || sampleFactor >= 1-EPSILON {
+		return fmt.Errorf("the sample factor should be between 0 and 1 and not too close to 0 or 1(the difference should be larger than 1e-10), but got %s", ctx.Expr().GetText())
+	}
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_RandomSampleExpr{
+				RandomSampleExpr: &planpb.RandomSampleExpr{
+					SampleFactor: float32(sampleFactor),
+					Predicate:    nil,
 				},
 			},
 		},
@@ -852,6 +906,10 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 	if childExpr == nil {
 		return fmt.Errorf("failed to parse unary expressions")
 	}
+	if isRandomSampleExpr(childExpr) {
+		return fmt.Errorf("random sample expression cannot be used in unary expression")
+	}
+
 	if err := checkDirectComparisonBinaryField(toColumnInfo(childExpr)); err != nil {
 		return err
 	}
@@ -906,6 +964,9 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 	var rightExpr *ExprWithType
 	leftExpr = getExpr(left)
 	rightExpr = getExpr(right)
+	if isRandomSampleExpr(leftExpr) || isRandomSampleExpr(rightExpr) {
+		return fmt.Errorf("random sample expression cannot be used in logical and expression")
+	}
 
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
 		return fmt.Errorf("'or' can only be used between boolean expressions")
@@ -955,19 +1016,34 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 	var rightExpr *ExprWithType
 	leftExpr = getExpr(left)
 	rightExpr = getExpr(right)
+	if isRandomSampleExpr(leftExpr) {
+		return fmt.Errorf("random sample expression can only be the last expression in the logical and expression")
+	}
 
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
 		return fmt.Errorf("'and' can only be used between boolean expressions")
 	}
-	expr := &planpb.Expr{
-		Expr: &planpb.Expr_BinaryExpr{
-			BinaryExpr: &planpb.BinaryExpr{
-				Left:  leftExpr.expr,
-				Right: rightExpr.expr,
-				Op:    planpb.BinaryExpr_LogicalAnd,
+
+	var expr *planpb.Expr
+	if isRandomSampleExpr(rightExpr) {
+		randomSampleExpr := rightExpr.expr.GetRandomSampleExpr()
+		randomSampleExpr.Predicate = leftExpr.expr
+		expr = &planpb.Expr{
+			Expr: &planpb.Expr_RandomSampleExpr{
+				RandomSampleExpr: randomSampleExpr,
 			},
-		},
-		IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
+		}
+	} else {
+		expr = &planpb.Expr{
+			Expr: &planpb.Expr_BinaryExpr{
+				BinaryExpr: &planpb.BinaryExpr{
+					Left:  leftExpr.expr,
+					Right: rightExpr.expr,
+					Op:    planpb.BinaryExpr_LogicalAnd,
+				},
+			},
+			IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
+		}
 	}
 
 	return &ExprWithType{

@@ -30,10 +30,10 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/util/mock"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestMain(m *testing.M) {
@@ -102,6 +102,10 @@ func Test_NewClient(t *testing.T) {
 		}
 		{
 			r, err := client.ShowCollections(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
+			r, err := client.ShowCollectionIDs(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
 		{
@@ -348,6 +352,10 @@ func Test_NewClient(t *testing.T) {
 	}
 	{
 		rTimeout, err := client.ShowCollections(shortCtx, nil)
+		retCheck(rTimeout, err)
+	}
+	{
+		rTimeout, err := client.ShowCollectionIDs(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
 	{

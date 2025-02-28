@@ -3,13 +3,17 @@ package helper
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"math/rand"
+	"slices"
 	"strconv"
+	"strings"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 )
 
@@ -38,14 +42,16 @@ func (opt *InsertParams) TWithIsRows(isRows bool) *InsertParams {
 
 // GenColumnDataOption -- create column data --
 type GenDataOption struct {
-	nb           int
-	start        int
-	dim          int
-	maxLen       int
-	sparseMaxLen int
-	maxCapacity  int
-	elementType  entity.FieldType
-	fieldName    string
+	nb               int
+	start            int
+	dim              int
+	maxLen           int
+	sparseMaxLen     int
+	maxCapacity      int
+	elementType      entity.FieldType
+	fieldName        string
+	textLang         string
+	textEmptyPercent int
 }
 
 func (opt *GenDataOption) TWithNb(nb int) *GenDataOption {
@@ -88,15 +94,28 @@ func (opt *GenDataOption) TWithElementType(eleType entity.FieldType) *GenDataOpt
 	return opt
 }
 
+func (opt *GenDataOption) TWithTextLang(lang string) *GenDataOption {
+	opt.textLang = lang
+	return opt
+}
+
+func (opt *GenDataOption) TWithTextEmptyPercent(percent int) *GenDataOption {
+	opt.textEmptyPercent = percent
+	return opt
+}
+
 func TNewDataOption() *GenDataOption {
 	return &GenDataOption{
-		nb:           common.DefaultNb,
-		start:        0,
-		dim:          common.DefaultDim,
-		maxLen:       common.TestMaxLen,
-		sparseMaxLen: common.TestMaxLen,
-		maxCapacity:  common.TestCapacity,
-		elementType:  entity.FieldTypeNone,
+		nb:               common.DefaultNb,
+		start:            0,
+		dim:              common.DefaultDim,
+		maxLen:           common.TestMaxLen,
+		sparseMaxLen:     common.TestMaxLen,
+		maxCapacity:      common.TestCapacity,
+		elementType:      entity.FieldTypeNone,
+		fieldName:        "",
+		textLang:         "",
+		textEmptyPercent: 0,
 	}
 }
 
@@ -197,10 +216,13 @@ func GenArrayColumnData(nb int, eleType entity.FieldType, option GenDataOption) 
 }
 
 type JSONStruct struct {
-	Number int32  `json:"number,omitempty" milvus:"name:number"`
-	String string `json:"string,omitempty" milvus:"name:string"`
+	Number int32   `json:"number,omitempty" milvus:"name:number"`
+	String string  `json:"string,omitempty" milvus:"name:string"`
+	Float  float32 `json:"float,omitempty" milvus:"name:float"`
 	*BoolStruct
-	List []int64 `json:"list,omitempty" milvus:"name:list"`
+	List        []int64   `json:"list,omitempty" milvus:"name:list"`
+	FloatArray  []float64 `json:"floatArray,omitempty" milvus:"name:floatArray"`
+	StringArray []string  `json:"stringArray,omitempty" milvus:"name:stringArray"`
 }
 
 // GenDefaultJSONData gen default column with data
@@ -216,12 +238,15 @@ func GenDefaultJSONData(nb int, option GenDataOption) [][]byte {
 		if i < (start+nb)/2 {
 			if i%2 == 0 {
 				m = JSONStruct{
-					String:     strconv.Itoa(i),
-					BoolStruct: _bool,
+					String:      strconv.Itoa(i),
+					BoolStruct:  _bool,
+					FloatArray:  []float64{float64(i), float64(i), float64(i)},
+					StringArray: []string{fmt.Sprintf("%05d", i)},
 				}
 			} else {
 				m = JSONStruct{
 					Number:     int32(i),
+					Float:      float32(i),
 					String:     strconv.Itoa(i),
 					BoolStruct: _bool,
 					List:       []int64{int64(i), int64(i + 1)},
@@ -247,6 +272,24 @@ func GenDefaultJSONData(nb int, option GenDataOption) [][]byte {
 		jsonValues = append(jsonValues, bs)
 	}
 	return jsonValues
+}
+
+func GenNestedJSON(depth int, value any) map[string]interface{} {
+	if depth == 1 {
+		return map[string]interface{}{"value": value}
+	}
+	return map[string]interface{}{
+		fmt.Sprintf("level%d", depth): GenNestedJSON(depth-1, value),
+	}
+}
+
+func GenNestedJSONExprKey(depth int, jsonField string) string {
+	var pathParts []string
+	for i := depth; i > 1; i-- {
+		pathParts = append(pathParts, fmt.Sprintf("level%d", i))
+	}
+	pathParts = append(pathParts, "value")
+	return fmt.Sprintf("%s['%s']", jsonField, strings.Join(pathParts, "']['"))
 }
 
 // GenColumnData GenColumnDataOption except dynamic column
@@ -310,8 +353,35 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 
 	case entity.FieldTypeVarChar:
 		varcharValues := make([]string, 0, nb)
-		for i := start; i < start+nb; i++ {
-			varcharValues = append(varcharValues, strconv.Itoa(i))
+		if option.textLang != "" {
+			// Use language-specific text generation
+			var lang string
+			switch option.textLang {
+			case "en", "english":
+				lang = "en"
+			case "zh", "chinese":
+				lang = "zh"
+			default:
+				// Fallback to sequential numbers for unsupported languages
+				for i := start; i < start+nb; i++ {
+					varcharValues = append(varcharValues, strconv.Itoa(i))
+				}
+				return column.NewColumnVarChar(fieldName, varcharValues)
+			}
+
+			// Generate text data with empty values based on textEmptyPercent
+			for i := 0; i < nb; i++ {
+				if rand.Float64()*100 < float64(option.textEmptyPercent) {
+					varcharValues = append(varcharValues, "")
+				} else {
+					varcharValues = append(varcharValues, common.GenText(lang))
+				}
+			}
+		} else {
+			// Default behavior: sequential numbers
+			for i := start; i < start+nb; i++ {
+				varcharValues = append(varcharValues, strconv.Itoa(i))
+			}
 		}
 		return column.NewColumnVarChar(fieldName, varcharValues)
 
@@ -449,6 +519,16 @@ func MergeColumnsToDynamic(nb int, columns []column.Column, columnName string) *
 	return jsonColumn
 }
 
+func GetBm25FunctionsOutputFields(schema *entity.Schema) []string {
+	var outputFields []string
+	for _, fn := range schema.Functions {
+		if fn.Type == entity.FunctionTypeBM25 {
+			outputFields = append(outputFields, fn.OutputFieldNames...)
+		}
+	}
+	return outputFields
+}
+
 func GenColumnsBasedSchema(schema *entity.Schema, option *GenDataOption) ([]column.Column, []column.Column) {
 	if nil == schema || schema.CollectionName == "" {
 		log.Fatal("[GenColumnsBasedSchema] Nil Schema is not expected")
@@ -463,6 +543,16 @@ func GenColumnsBasedSchema(schema *entity.Schema, option *GenDataOption) ([]colu
 		if field.AutoID {
 			continue
 		}
+		option.fieldName = field.Name
+		if option.fieldName == "" {
+			option.fieldName = field.Name
+		}
+		if slices.Contains(GetBm25FunctionsOutputFields(schema), field.Name) {
+			continue
+		}
+		log.Info("GenColumnsBasedSchema", zap.Any("field", field))
+		//  set field name to option
+		option.TWithFieldName(field.Name)
 		columns = append(columns, GenColumnData(option.nb, field.DataType, *option))
 	}
 	if schema.EnableDynamicField {

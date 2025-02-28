@@ -25,12 +25,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type IndexTaskInfo struct {
@@ -113,7 +113,9 @@ func (m *Manager) StoreIndexFilesAndStatistic(
 	buildID typeutil.UniqueID,
 	fileKeys []string,
 	serializedSize uint64,
+	memSize uint64,
 	currentIndexVersion int32,
+	currentScalarIndexVersion int32,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: buildID}
 	m.stateLock.Lock()
@@ -121,7 +123,9 @@ func (m *Manager) StoreIndexFilesAndStatistic(
 	if info, ok := m.indexTasks[key]; ok {
 		info.FileKeys = common.CloneStringList(fileKeys)
 		info.SerializedSize = serializedSize
+		info.MemSize = memSize
 		info.CurrentIndexVersion = currentIndexVersion
+		info.CurrentScalarIndexVersion = currentScalarIndexVersion
 		return
 	}
 }

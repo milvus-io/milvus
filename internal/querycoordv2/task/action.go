@@ -23,8 +23,8 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ActionType int32
@@ -51,19 +51,26 @@ type Action interface {
 	IsFinished(distMgr *meta.DistributionManager) bool
 	Desc() string
 	String() string
+
+	// return current action's workload effect on target query node
+	// which only works for `Grow` and `Reduce`, cause `Update` won't change query node's workload
+	WorkLoadEffect() int
 }
 
 type BaseAction struct {
 	NodeID typeutil.UniqueID
 	Typ    ActionType
 	Shard  string
+
+	workloadEffect int
 }
 
-func NewBaseAction(nodeID typeutil.UniqueID, typ ActionType, shard string) *BaseAction {
+func NewBaseAction(nodeID typeutil.UniqueID, typ ActionType, shard string, workLoadEffect int) *BaseAction {
 	return &BaseAction{
-		NodeID: nodeID,
-		Typ:    typ,
-		Shard:  shard,
+		NodeID:         nodeID,
+		Typ:            typ,
+		Shard:          shard,
+		workloadEffect: workLoadEffect,
 	}
 }
 
@@ -83,6 +90,10 @@ func (action *BaseAction) String() string {
 	return fmt.Sprintf(`{[type=%v][node=%d][shard=%v]}`, action.Type(), action.Node(), action.Shard)
 }
 
+func (action *BaseAction) WorkLoadEffect() int {
+	return action.workloadEffect
+}
+
 type SegmentAction struct {
 	*BaseAction
 
@@ -92,14 +103,23 @@ type SegmentAction struct {
 	rpcReturned atomic.Bool
 }
 
+// Deprecate, only for existing unit test
 func NewSegmentAction(nodeID typeutil.UniqueID, typ ActionType, shard string, segmentID typeutil.UniqueID) *SegmentAction {
-	return NewSegmentActionWithScope(nodeID, typ, shard, segmentID, querypb.DataScope_All)
+	return NewSegmentActionWithScope(nodeID, typ, shard, segmentID, querypb.DataScope_All, 0)
 }
 
-func NewSegmentActionWithScope(nodeID typeutil.UniqueID, typ ActionType, shard string, segmentID typeutil.UniqueID, scope querypb.DataScope) *SegmentAction {
-	base := NewBaseAction(nodeID, typ, shard)
+func NewSegmentActionWithScope(nodeID typeutil.UniqueID, typ ActionType, shard string, segmentID typeutil.UniqueID, scope querypb.DataScope, rowCount int) *SegmentAction {
+	workloadEffect := 0
+	switch typ {
+	case ActionTypeGrow:
+		workloadEffect = rowCount
+	case ActionTypeReduce:
+		workloadEffect = -rowCount
+	default:
+		workloadEffect = 0
+	}
 	return &SegmentAction{
-		BaseAction:  base,
+		BaseAction:  NewBaseAction(nodeID, typ, shard, workloadEffect),
 		SegmentID:   segmentID,
 		Scope:       scope,
 		rpcReturned: *atomic.NewBool(false),
@@ -131,8 +151,17 @@ type ChannelAction struct {
 }
 
 func NewChannelAction(nodeID typeutil.UniqueID, typ ActionType, channelName string) *ChannelAction {
+	workloadEffect := 0
+	switch typ {
+	case ActionTypeGrow:
+		workloadEffect = 1
+	case ActionTypeReduce:
+		workloadEffect = -1
+	default:
+		workloadEffect = 0
+	}
 	return &ChannelAction{
-		BaseAction: NewBaseAction(nodeID, typ, channelName),
+		BaseAction: NewBaseAction(nodeID, typ, channelName, workloadEffect),
 	}
 }
 
@@ -167,11 +196,10 @@ type LeaderAction struct {
 
 func NewLeaderAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard string, segmentID typeutil.UniqueID, version typeutil.UniqueID) *LeaderAction {
 	action := &LeaderAction{
-		BaseAction: NewBaseAction(workerID, typ, shard),
-
-		leaderID:  leaderID,
-		segmentID: segmentID,
-		version:   version,
+		BaseAction: NewBaseAction(workerID, typ, shard, 0),
+		leaderID:   leaderID,
+		segmentID:  segmentID,
+		version:    version,
 	}
 	action.rpcReturned.Store(false)
 	return action
@@ -179,7 +207,7 @@ func NewLeaderAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard
 
 func NewLeaderUpdatePartStatsAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard string, partStatsVersions map[int64]int64) *LeaderAction {
 	action := &LeaderAction{
-		BaseAction:        NewBaseAction(workerID, typ, shard),
+		BaseAction:        NewBaseAction(workerID, typ, shard, 0),
 		leaderID:          leaderID,
 		partStatsVersions: partStatsVersions,
 	}

@@ -7,11 +7,11 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var ErrChannelNotExist = errors.New("channel not exist")
@@ -124,7 +124,6 @@ func (cm *ChannelManager) AssignPChannelsDone(ctx context.Context, pChannels []s
 	defer cm.cond.L.Unlock()
 
 	// modified channels.
-	histories := make([]types.PChannelInfoAssigned, 0, len(pChannels))
 	pChannelMetas := make([]*streamingpb.PChannelMeta, 0, len(pChannels))
 	for _, channelName := range pChannels {
 		pchannel, ok := cm.channels[channelName]
@@ -132,7 +131,7 @@ func (cm *ChannelManager) AssignPChannelsDone(ctx context.Context, pChannels []s
 			return ErrChannelNotExist
 		}
 		mutablePChannel := pchannel.CopyForWrite()
-		histories = append(histories, mutablePChannel.AssignToServerDone()...)
+		mutablePChannel.AssignToServerDone()
 		pChannelMetas = append(pChannelMetas, mutablePChannel.IntoRawMeta())
 	}
 
@@ -141,9 +140,6 @@ func (cm *ChannelManager) AssignPChannelsDone(ctx context.Context, pChannels []s
 	}
 
 	// Update metrics.
-	for _, history := range histories {
-		cm.metrics.RemovePChannelStatus(history)
-	}
 	for _, pchannel := range pChannelMetas {
 		cm.metrics.AssignPChannelStatus(pchannel)
 	}

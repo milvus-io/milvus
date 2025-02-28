@@ -1,25 +1,21 @@
 package consumer
 
 import (
-	"context"
-
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
-
-type handleFunc func(ctx context.Context, msg message.ImmutableMessage) (bool, error)
 
 // nopCloseHandler is a handler that do nothing when close.
 type nopCloseHandler struct {
 	message.Handler
-	HandleInterceptor func(ctx context.Context, msg message.ImmutableMessage, handle handleFunc) (bool, error)
+	HandleInterceptor func(handleParam message.HandleParam, h message.Handler) message.HandleResult
 }
 
 // Handle is the callback for handling message.
-func (nch nopCloseHandler) Handle(ctx context.Context, msg message.ImmutableMessage) (bool, error) {
+func (nch nopCloseHandler) Handle(handleParam message.HandleParam) message.HandleResult {
 	if nch.HandleInterceptor != nil {
-		return nch.HandleInterceptor(ctx, msg, nch.Handler.Handle)
+		return nch.HandleInterceptor(handleParam, nch.Handler)
 	}
-	return nch.Handler.Handle(ctx, msg)
+	return nch.Handler.Handle(handleParam)
 }
 
 // Close is called after all messages are handled or handling is interrupted.

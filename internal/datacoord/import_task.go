@@ -20,11 +20,11 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
 type TaskType int
@@ -65,6 +65,18 @@ func WithStates(states ...datapb.ImportTaskStateV2) ImportTaskFilter {
 			}
 		}
 		return false
+	}
+}
+
+func WithRequestSource() ImportTaskFilter {
+	return func(task ImportTask) bool {
+		return task.GetSource() == datapb.ImportTaskSourceV2_Request
+	}
+}
+
+func WithL0CompactionSource() ImportTaskFilter {
+	return func(task ImportTask) bool {
+		return task.GetSource() == datapb.ImportTaskSourceV2_L0Compaction
 	}
 }
 
@@ -150,6 +162,7 @@ type ImportTask interface {
 	GetTR() *timerecord.TimeRecorder
 	GetSlots() int64
 	Clone() ImportTask
+	GetSource() datapb.ImportTaskSourceV2
 }
 
 type preImportTask struct {
@@ -174,6 +187,10 @@ func (p *preImportTask) Clone() ImportTask {
 		PreImportTask: proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
 		tr:            p.tr,
 	}
+}
+
+func (p *preImportTask) GetSource() datapb.ImportTaskSourceV2 {
+	return datapb.ImportTaskSourceV2_Request
 }
 
 func (p *preImportTask) MarshalJSON() ([]byte, error) {

@@ -28,12 +28,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tikv"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
 )
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -46,6 +47,7 @@ func TestMain(m *testing.M) {
 func Test_NewServer(t *testing.T) {
 	parameters := []string{"tikv", "etcd"}
 	for _, v := range parameters {
+		coordclient.ResetRegistration()
 		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
 		ctx := context.Background()
 		getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
@@ -309,6 +311,14 @@ func Test_NewServer(t *testing.T) {
 			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 		})
 
+		t.Run("CheckBalanceStatus", func(t *testing.T) {
+			req := &querypb.CheckBalanceStatusRequest{}
+			mqc.EXPECT().CheckBalanceStatus(mock.Anything, req).Return(&querypb.CheckBalanceStatusResponse{Status: merr.Success()}, nil)
+			resp, err := server.CheckBalanceStatus(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		})
+
 		t.Run("SuspendNode", func(t *testing.T) {
 			req := &querypb.SuspendNodeRequest{}
 			mqc.EXPECT().SuspendNode(mock.Anything, req).Return(merr.Success(), nil)
@@ -358,6 +368,7 @@ func Test_NewServer(t *testing.T) {
 func TestServer_Run1(t *testing.T) {
 	parameters := []string{"tikv", "etcd"}
 	for _, v := range parameters {
+		coordclient.ResetRegistration()
 		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
 		t.Skip()
 		ctx := context.Background()

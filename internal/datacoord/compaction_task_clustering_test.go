@@ -31,15 +31,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 )
 
 func TestClusteringCompactionTaskSuite(t *testing.T) {
@@ -61,7 +62,9 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	ctx := context.Background()
 	cm := storage.NewLocalChunkManager(storage.RootPath(""))
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-	meta, err := newMeta(ctx, catalog, cm)
+	broker := broker.NewMockBroker(s.T())
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	meta, err := newMeta(ctx, catalog, cm, broker)
 	s.NoError(err)
 	s.meta = meta
 
@@ -82,7 +85,7 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 
 	s.mockSessionMgr = session.NewMockDataNodeManager(s.T())
 
-	scheduler := newTaskScheduler(ctx, s.meta, nil, cm, newIndexEngineVersionManager(), nil, nil)
+	scheduler := newTaskScheduler(ctx, s.meta, nil, cm, newIndexEngineVersionManager(), nil, nil, nil)
 	s.analyzeScheduler = scheduler
 }
 

@@ -1,13 +1,11 @@
 package wal
 
 import (
-	"context"
-
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
 type MessageFilter = func(message.ImmutableMessage) bool
@@ -16,10 +14,12 @@ var ErrUpstreamClosed = errors.New("upstream closed")
 
 // ReadOption is the option for reading records from the wal.
 type ReadOption struct {
-	VChannel       string // vchannel name
+	VChannel string // vchannel is a optional field to select a vchannel to consume.
+	// If the vchannel is setup, the message that is not belong to these vchannel will be dropped by scanner.
+	// Otherwise all message on WAL will be sent.
 	DeliverPolicy  options.DeliverPolicy
 	MessageFilter  []options.DeliverFilter
-	MesasgeHandler MessageHandler // message handler for message processing.
+	MesasgeHandler message.Handler // message handler for message processing.
 	// If the message handler is nil (no redundant operation need to apply),
 	// the default message handler will be used, and the receiver will be returned from Chan.
 	// Otherwise, Chan will panic.
@@ -44,28 +44,4 @@ type Scanner interface {
 	// Close the scanner, release the underlying resources.
 	// Return the error same with `Error`
 	Close() error
-}
-
-type HandleParam struct {
-	Ctx          context.Context
-	Upstream     <-chan message.ImmutableMessage
-	Message      message.ImmutableMessage
-	TimeTickChan <-chan struct{}
-}
-
-type HandleResult struct {
-	Incoming        message.ImmutableMessage // Not nil if upstream return new message.
-	MessageHandled  bool                     // True if Message is handled successfully.
-	TimeTickUpdated bool                     // True if TimeTickChan is triggered.
-	Error           error                    // Error is context is canceled.
-}
-
-// MessageHandler is used to handle message read from log.
-// TODO: should be removed in future after msgstream is removed.
-type MessageHandler interface {
-	// Handle is the callback for handling message.
-	Handle(param HandleParam) HandleResult
-
-	// Close is called after all messages are handled or handling is interrupted.
-	Close()
 }

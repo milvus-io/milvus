@@ -11,9 +11,9 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
 type MetaWriterSuite struct {
@@ -46,8 +46,7 @@ func (s *MetaWriterSuite) TestNormalSave() {
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(seg, true)
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-	task := NewSyncTask()
-	task.WithMetaCache(s.metacache)
+	task := NewSyncTask().WithMetaCache(s.metacache).WithSyncPack(new(SyncPack))
 	err := s.writer.UpdateSync(ctx, task)
 	s.NoError(err)
 }
@@ -62,8 +61,7 @@ func (s *MetaWriterSuite) TestReturnError() {
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
-	task := NewSyncTask()
-	task.WithMetaCache(s.metacache)
+	task := NewSyncTask().WithMetaCache(s.metacache).WithSyncPack(new(SyncPack))
 	err := s.writer.UpdateSync(ctx, task)
 	s.Error(err)
 }

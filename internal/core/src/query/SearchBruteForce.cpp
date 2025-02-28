@@ -35,10 +35,22 @@ CheckBruteForceSearchParam(const FieldMeta& field,
 
     AssertInfo(IsVectorDataType(data_type),
                "[BruteForceSearch] Data type isn't vector type");
-    bool is_float_vec_data_type = IsFloatVectorDataType(data_type);
-    bool is_float_metric_type = IsFloatMetricType(metric_type);
-    AssertInfo(is_float_vec_data_type == is_float_metric_type,
-               "[BruteForceSearch] Data type and metric type miss-match");
+    if (IsBinaryVectorDataType(data_type)) {
+        AssertInfo(IsBinaryVectorMetricType(metric_type),
+                   "[BruteForceSearch] Binary vector, data type and metric "
+                   "type miss-match");
+    } else if (IsFloatVectorDataType(data_type)) {
+        AssertInfo(IsFloatVectorMetricType(metric_type),
+                   "[BruteForceSearch] Float vector, data type and metric type "
+                   "miss-match");
+    } else if (IsIntVectorDataType(data_type)) {
+        AssertInfo(IsIntVectorMetricType(metric_type),
+                   "[BruteForceSearch] Int vector, data type and metric type "
+                   "miss-match");
+    } else {
+        AssertInfo(IsVectorDataType(data_type),
+                   "[BruteForceSearch] Unsupported vector data type");
+    }
 }
 
 knowhere::Json
@@ -94,6 +106,12 @@ PrepareBFDataSet(const dataset::SearchDataset& query_ds,
             knowhere::ConvertFromDataTypeIfNeeded<float16>(base_dataset);
         query_dataset =
             knowhere::ConvertFromDataTypeIfNeeded<float16>(query_dataset);
+    } else if (data_type == DataType::VECTOR_INT8) {
+        // TODO caiyd: if knowhere support real int8 bf, remove this
+        base_dataset =
+            knowhere::ConvertFromDataTypeIfNeeded<int8>(base_dataset);
+        query_dataset =
+            knowhere::ConvertFromDataTypeIfNeeded<int8>(query_dataset);
     }
     base_dataset->SetTensorBeginId(raw_ds.begin_id);
     return std::make_pair(query_dataset, base_dataset);
@@ -146,6 +164,10 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
         } else if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
             res = knowhere::BruteForce::RangeSearch<
                 knowhere::sparse::SparseRow<float>>(
+                base_dataset, query_dataset, search_cfg, bitset);
+        } else if (data_type == DataType::VECTOR_INT8) {
+            // TODO caiyd: if knowhere support real int8 bf, change it
+            res = knowhere::BruteForce::RangeSearch<float>(
                 base_dataset, query_dataset, search_cfg, bitset);
         } else {
             PanicInfo(
@@ -211,6 +233,15 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset);
+        } else if (data_type == DataType::VECTOR_INT8) {
+            // TODO caiyd: if knowhere support real int8 bf, change it
+            stat = knowhere::BruteForce::SearchWithBuf<float>(
+                base_dataset,
+                query_dataset,
+                sub_result.mutable_seg_offsets().data(),
+                sub_result.mutable_distances().data(),
+                search_cfg,
+                bitset);
         } else {
             PanicInfo(ErrorCode::Unsupported,
                       "Unsupported dataType for chunk brute force search:{}",
@@ -236,22 +267,22 @@ DispatchBruteForceIteratorByDataType(const knowhere::DataSetPtr& base_dataset,
         case DataType::VECTOR_FLOAT:
             return knowhere::BruteForce::AnnIterator<float>(
                 base_dataset, query_dataset, config, bitset);
-            break;
         case DataType::VECTOR_FLOAT16:
             //todo: if knowhere support real fp16/bf16 bf, change it
             return knowhere::BruteForce::AnnIterator<float>(
                 base_dataset, query_dataset, config, bitset);
-            break;
         case DataType::VECTOR_BFLOAT16:
             //todo: if knowhere support real fp16/bf16 bf, change it
             return knowhere::BruteForce::AnnIterator<float>(
                 base_dataset, query_dataset, config, bitset);
-            break;
         case DataType::VECTOR_SPARSE_FLOAT:
             return knowhere::BruteForce::AnnIterator<
                 knowhere::sparse::SparseRow<float>>(
                 base_dataset, query_dataset, config, bitset);
-            break;
+        case DataType::VECTOR_INT8:
+            // TODO caiyd: if knowhere support real int8 bf, change it
+            return knowhere::BruteForce::AnnIterator<float>(
+                base_dataset, query_dataset, config, bitset);
         default:
             PanicInfo(ErrorCode::Unsupported,
                       "Unsupported dataType for chunk brute force iterator:{}",

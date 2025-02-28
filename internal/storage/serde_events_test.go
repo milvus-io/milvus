@@ -27,23 +27,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/arrow/memory"
-	"github.com/apache/arrow/go/v12/parquet/file"
-	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/parquet/file"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 func TestBinlogDeserializeReader(t *testing.T) {
 	t.Run("test empty data", func(t *testing.T) {
-		reader, err := NewBinlogDeserializeReader(nil, common.RowIDField)
+		reader, err := NewBinlogDeserializeReader(nil, func() ([]*Blob, error) {
+			return nil, io.EOF
+		})
 		assert.NoError(t, err)
 		defer reader.Close()
 		err = reader.Next()
@@ -54,7 +56,7 @@ func TestBinlogDeserializeReader(t *testing.T) {
 		size := 3
 		blobs, err := generateTestData(size)
 		assert.NoError(t, err)
-		reader, err := NewBinlogDeserializeReader(blobs, common.RowIDField)
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
 		assert.NoError(t, err)
 		defer reader.Close()
 
@@ -64,6 +66,26 @@ func TestBinlogDeserializeReader(t *testing.T) {
 
 			value := reader.Value()
 			assertTestData(t, i, value)
+		}
+
+		err = reader.Next()
+		assert.Equal(t, io.EOF, err)
+	})
+
+	t.Run("test deserialize with added field", func(t *testing.T) {
+		size := 3
+		blobs, err := generateTestData(size)
+		assert.NoError(t, err)
+		reader, err := NewBinlogDeserializeReader(generateTestAddedFieldSchema(), MakeBlobsReader(blobs))
+		assert.NoError(t, err)
+		defer reader.Close()
+
+		for i := 1; i <= size; i++ {
+			err = reader.Next()
+			assert.NoError(t, err)
+
+			value := reader.Value()
+			assertTestAddedFieldData(t, i, value)
 		}
 
 		err = reader.Next()
@@ -92,7 +114,7 @@ func TestBinlogStreamWriter(t *testing.T) {
 			[]arrow.Array{arr},
 			int64(size),
 		)
-		r := newSimpleArrowRecord(ar, map[FieldID]schemapb.DataType{1: schemapb.DataType_Bool}, map[FieldID]int{1: 0})
+		r := NewSimpleArrowRecord(ar, map[FieldID]int{1: 0})
 		defer r.Release()
 		err = rw.Write(r)
 		assert.NoError(t, err)
@@ -117,7 +139,9 @@ func TestBinlogStreamWriter(t *testing.T) {
 
 func TestBinlogSerializeWriter(t *testing.T) {
 	t.Run("test empty data", func(t *testing.T) {
-		reader, err := NewBinlogDeserializeReader(nil, common.RowIDField)
+		reader, err := NewBinlogDeserializeReader(nil, func() ([]*Blob, error) {
+			return nil, io.EOF
+		})
 		assert.NoError(t, err)
 		defer reader.Close()
 		err = reader.Next()
@@ -128,7 +152,7 @@ func TestBinlogSerializeWriter(t *testing.T) {
 		size := 16
 		blobs, err := generateTestData(size)
 		assert.NoError(t, err)
-		reader, err := NewBinlogDeserializeReader(blobs, common.RowIDField)
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
 		assert.NoError(t, err)
 		defer reader.Close()
 
@@ -170,13 +194,13 @@ func TestBinlogSerializeWriter(t *testing.T) {
 			newblobs[i] = blob
 			i++
 		}
-		// Both field pk and field 17 are with datatype string and auto id
+		// Both field pk and field 13 are with datatype int64 and auto id
 		// in test data. Field pk uses delta byte array encoding, while
-		// field 17 uses dict encoding.
-		assert.Less(t, writers[16].buf.Len(), writers[17].buf.Len())
+		// field 13 uses dict encoding.
+		assert.Less(t, writers[0].buf.Len(), writers[13].buf.Len())
 
 		// assert.Equal(t, blobs[0].Value, newblobs[0].Value)
-		reader, err = NewBinlogDeserializeReader(newblobs, common.RowIDField)
+		reader, err = NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(newblobs))
 		assert.NoError(t, err)
 		defer reader.Close()
 		for i := 1; i <= size; i++ {
@@ -299,7 +323,7 @@ func TestNull(t *testing.T) {
 			blobs[i] = blob
 			i++
 		}
-		reader, err := NewBinlogDeserializeReader(blobs, common.RowIDField)
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
 		assert.NoError(t, err)
 		defer reader.Close()
 		err = reader.Next()

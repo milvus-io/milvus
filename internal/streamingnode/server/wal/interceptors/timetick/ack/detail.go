@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 // newAckDetail creates a new default acker detail.
@@ -26,7 +26,7 @@ type AckDetail struct {
 	EndTimestamp   uint64 // the timestamp when acker is acknowledged.
 	// for avoiding allocation of timestamp failure, the timestamp will use the ack manager last allocated timestamp.
 	LastConfirmedMessageID message.MessageID
-	MessageID              message.MessageID
+	Message                message.ImmutableMessage
 	TxnSession             *txn.TxnSession
 	IsSync                 bool
 	Err                    error
@@ -49,10 +49,10 @@ func OptError(err error) AckOption {
 	}
 }
 
-// OptMessageID marks the message id for acker.
-func OptMessageID(messageID message.MessageID) AckOption {
+// OptImmutableMessage marks the acker is done.
+func OptImmutableMessage(msg message.ImmutableMessage) AckOption {
 	return func(detail *AckDetail) {
-		detail.MessageID = messageID
+		detail.Message = msg
 	}
 }
 

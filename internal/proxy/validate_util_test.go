@@ -13,11 +13,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/testutils"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func Test_verifyLengthPerRow(t *testing.T) {
@@ -187,6 +187,124 @@ func Test_validateUtil_checkVarCharFieldData(t *testing.T) {
 		v := newValidateUtil(withMaxLenCheck())
 
 		err := v.checkVarCharFieldData(f, fs)
+		assert.NoError(t, err)
+	})
+}
+
+func Test_validateUtil_checkTextFieldData(t *testing.T) {
+	t.Run("type mismatch", func(t *testing.T) {
+		f := &schemapb.FieldData{}
+		v := newValidateUtil()
+		assert.Error(t, v.checkTextFieldData(f, nil))
+	})
+
+	t.Run("max length not found", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"111", "222"},
+						},
+					},
+				},
+			},
+		}
+
+		fs := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Text,
+		}
+
+		v := newValidateUtil(withMaxLenCheck())
+
+		err := v.checkTextFieldData(f, fs)
+		assert.Error(t, err)
+	})
+
+	t.Run("length exceeds", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"111", "222"},
+						},
+					},
+				},
+			},
+		}
+
+		fs := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Text,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxLengthKey,
+					Value: "2",
+				},
+			},
+		}
+
+		v := newValidateUtil(withMaxLenCheck())
+
+		err := v.checkTextFieldData(f, fs)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"111", "222"},
+						},
+					},
+				},
+			},
+		}
+
+		fs := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Text,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxLengthKey,
+					Value: "4",
+				},
+			},
+		}
+
+		v := newValidateUtil(withMaxLenCheck())
+
+		err := v.checkTextFieldData(f, fs)
+		assert.NoError(t, err)
+	})
+
+	t.Run("no check", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"111", "222"},
+						},
+					},
+				},
+			},
+		}
+
+		fs := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Text,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxLengthKey,
+					Value: "2",
+				},
+			},
+		}
+
+		v := newValidateUtil()
+
+		err := v.checkTextFieldData(f, fs)
 		assert.NoError(t, err)
 	})
 }

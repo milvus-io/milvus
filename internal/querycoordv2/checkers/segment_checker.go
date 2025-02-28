@@ -21,7 +21,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -32,11 +31,11 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
 const initialTargetVersion = int64(0)
@@ -245,37 +244,8 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		distMap[s.GetID()] = s.Node
 	}
 
-	versionRangeFilter := semver.MustParseRange(">2.3.x")
-	checkLeaderVersion := func(leader *meta.LeaderView, segmentID int64) bool {
-		// if current shard leader's node version < 2.4, skip load L0 segment
-		info := c.nodeMgr.Get(leader.ID)
-		if info != nil && !versionRangeFilter(info.Version()) {
-			log.Warn("l0 segment is not supported in current node version, skip it",
-				zap.Int64("collection", replica.GetCollectionID()),
-				zap.Int64("segmentID", segmentID),
-				zap.String("channel", leader.Channel),
-				zap.Int64("leaderID", leader.ID),
-				zap.String("nodeVersion", info.Version().String()))
-			return false
-		}
-		return true
-	}
-
 	isSegmentLack := func(segment *datapb.SegmentInfo) bool {
-		node, existInDist := distMap[segment.ID]
-
-		if segment.GetLevel() == datapb.SegmentLevel_L0 {
-			// the L0 segments have to been in the same node as the channel watched
-			leader := c.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(segment.GetInsertChannel()))
-
-			// if the leader node's version doesn't match load l0 segment's requirement, skip it
-			if leader != nil && checkLeaderVersion(leader, segment.ID) {
-				l0WithWrongLocation := node != leader.ID
-				return !existInDist || l0WithWrongLocation
-			}
-			return false
-		}
-
+		_, existInDist := distMap[segment.ID]
 		return !existInDist
 	}
 
@@ -285,18 +255,6 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 
 	// Segment which exist on next target, but not on dist
 	for _, segment := range nextTargetMap {
-		if isSegmentLack(segment) {
-			toLoad = append(toLoad, segment)
-		}
-	}
-
-	// l0 Segment which exist on current target, but not on dist
-	for _, segment := range currentTargetMap {
-		// to avoid generate duplicate segment task
-		if nextTargetMap[segment.ID] != nil {
-			continue
-		}
-
 		if isSegmentLack(segment) {
 			toLoad = append(toLoad, segment)
 		}
@@ -313,16 +271,6 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		}
 	}
 
-	level0Segments := lo.Filter(toLoad, func(segment *datapb.SegmentInfo, _ int) bool {
-		return segment.GetLevel() == datapb.SegmentLevel_L0
-	})
-	// L0 segment found,
-	// QueryCoord loads the L0 segments first,
-	// to make sure all L0 delta logs will be delivered to the other segments.
-	if len(level0Segments) > 0 {
-		toLoad = level0Segments
-	}
-
 	return
 }
 
@@ -336,14 +284,6 @@ func (c *SegmentChecker) findRepeatedSealedSegments(ctx context.Context, replica
 	dist := c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
 	versions := make(map[int64]*meta.Segment)
 	for _, s := range dist {
-		// l0 segment should be release with channel together
-		segment := c.targetMgr.GetSealedSegment(ctx, s.GetCollectionID(), s.GetID(), meta.CurrentTargetFirst)
-		existInTarget := segment != nil
-		isL0Segment := existInTarget && segment.GetLevel() == datapb.SegmentLevel_L0
-		if isL0Segment {
-			continue
-		}
-
 		maxVer, ok := versions[s.GetID()]
 		if !ok {
 			versions[s.GetID()] = s
@@ -369,6 +309,9 @@ func (c *SegmentChecker) filterExistedOnLeader(replica *meta.Replica, segments [
 		}
 
 		view := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, s.GetInsertChannel())
+		if view == nil {
+			continue
+		}
 		seg, ok := view.Segments[s.GetID()]
 		if ok && seg.NodeID == s.Node {
 			// if this segment is serving on leader, do not remove it for search available
@@ -388,6 +331,9 @@ func (c *SegmentChecker) filterSegmentInUse(ctx context.Context, replica *meta.R
 		}
 
 		view := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, s.GetInsertChannel())
+		if view == nil {
+			continue
+		}
 		currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, s.CollectionID, meta.CurrentTarget)
 		partition := c.meta.CollectionManager.GetPartition(ctx, s.PartitionID)
 
@@ -408,7 +354,6 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		return nil
 	}
 
-	isLevel0 := segments[0].GetLevel() == datapb.SegmentLevel_L0
 	shardSegments := lo.GroupBy(segments, func(s *datapb.SegmentInfo) string {
 		return s.GetInsertChannel()
 	})
@@ -424,11 +369,6 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		rwNodes := replica.GetChannelRWNodes(shard)
 		if len(rwNodes) == 0 {
 			rwNodes = replica.GetRWNodes()
-		}
-
-		// L0 segment can only be assign to shard leader's node
-		if isLevel0 {
-			rwNodes = []int64{leader.ID}
 		}
 
 		segmentInfos := lo.Map(segments, func(s *datapb.SegmentInfo, _ int) *meta.Segment {
@@ -449,7 +389,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments []*meta.Segment, replica *meta.Replica, scope querypb.DataScope) []task.Task {
 	ret := make([]task.Task, 0, len(segments))
 	for _, s := range segments {
-		action := task.NewSegmentActionWithScope(s.Node, task.ActionTypeReduce, s.GetInsertChannel(), s.GetID(), scope)
+		action := task.NewSegmentActionWithScope(s.Node, task.ActionTypeReduce, s.GetInsertChannel(), s.GetID(), scope, int(s.GetNumOfRows()))
 		task, err := task.NewSegmentTask(
 			ctx,
 			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),

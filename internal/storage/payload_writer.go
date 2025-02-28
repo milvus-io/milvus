@@ -22,19 +22,19 @@ import (
 	"math"
 	"sync"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/arrow/memory"
-	"github.com/apache/arrow/go/v12/parquet"
-	"github.com/apache/arrow/go/v12/parquet/compress"
-	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/parquet"
+	"github.com/apache/arrow/go/v17/parquet/compress"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var _ PayloadWriterInterface = (*NativePayloadWriter)(nil)
@@ -100,7 +100,7 @@ func NewPayloadWriter(colType schemapb.DataType, options ...PayloadWriterOptions
 	} else {
 		w.dim = NewNullableInt(1)
 	}
-	w.arrowType = milvusDataTypeToArrowType(colType, *w.dim.Value)
+	w.arrowType = MilvusDataTypeToArrowType(colType, *w.dim.Value)
 	w.builder = array.NewBuilder(memory.DefaultAllocator, w.arrowType)
 	return w, nil
 }
@@ -763,7 +763,7 @@ func (w *NativePayloadWriter) Close() {
 	w.ReleasePayloadWriter()
 }
 
-func milvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataType {
+func MilvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataType {
 	switch dataType {
 	case schemapb.DataType_Bool:
 		return &arrow.BooleanType{}
@@ -779,7 +779,7 @@ func milvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 		return &arrow.Float32Type{}
 	case schemapb.DataType_Double:
 		return &arrow.Float64Type{}
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text:
 		return &arrow.StringType{}
 	case schemapb.DataType_Array:
 		return &arrow.BinaryType{}

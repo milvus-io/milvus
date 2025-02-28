@@ -7,19 +7,19 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
-	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 
-	metautil "github.com/milvus-io/milvus/pkg/util/metautil"
+	metautil "github.com/milvus-io/milvus/pkg/v2/util/metautil"
 
 	mock "github.com/stretchr/testify/mock"
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 
-	querypb "github.com/milvus-io/milvus/pkg/proto/querypb"
+	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 
 	segcore "github.com/milvus-io/milvus/internal/util/segcore"
 
-	segcorepb "github.com/milvus-io/milvus/pkg/proto/segcorepb"
+	segcorepb "github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
 )
@@ -364,19 +364,19 @@ func (_c *MockSegment_GetBM25Stats_Call) RunAndReturn(run func() map[int64]*stor
 }
 
 // GetIndex provides a mock function with given fields: fieldID
-func (_m *MockSegment) GetIndex(fieldID int64) *IndexedFieldInfo {
+func (_m *MockSegment) GetIndex(fieldID int64) []*IndexedFieldInfo {
 	ret := _m.Called(fieldID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetIndex")
 	}
 
-	var r0 *IndexedFieldInfo
-	if rf, ok := ret.Get(0).(func(int64) *IndexedFieldInfo); ok {
+	var r0 []*IndexedFieldInfo
+	if rf, ok := ret.Get(0).(func(int64) []*IndexedFieldInfo); ok {
 		r0 = rf(fieldID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*IndexedFieldInfo)
+			r0 = ret.Get(0).([]*IndexedFieldInfo)
 		}
 	}
 
@@ -401,12 +401,60 @@ func (_c *MockSegment_GetIndex_Call) Run(run func(fieldID int64)) *MockSegment_G
 	return _c
 }
 
-func (_c *MockSegment_GetIndex_Call) Return(_a0 *IndexedFieldInfo) *MockSegment_GetIndex_Call {
+func (_c *MockSegment_GetIndex_Call) Return(_a0 []*IndexedFieldInfo) *MockSegment_GetIndex_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSegment_GetIndex_Call) RunAndReturn(run func(int64) *IndexedFieldInfo) *MockSegment_GetIndex_Call {
+func (_c *MockSegment_GetIndex_Call) RunAndReturn(run func(int64) []*IndexedFieldInfo) *MockSegment_GetIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetIndexByID provides a mock function with given fields: indexID
+func (_m *MockSegment) GetIndexByID(indexID int64) *IndexedFieldInfo {
+	ret := _m.Called(indexID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetIndexByID")
+	}
+
+	var r0 *IndexedFieldInfo
+	if rf, ok := ret.Get(0).(func(int64) *IndexedFieldInfo); ok {
+		r0 = rf(indexID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*IndexedFieldInfo)
+		}
+	}
+
+	return r0
+}
+
+// MockSegment_GetIndexByID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetIndexByID'
+type MockSegment_GetIndexByID_Call struct {
+	*mock.Call
+}
+
+// GetIndexByID is a helper method to define mock.On call
+//   - indexID int64
+func (_e *MockSegment_Expecter) GetIndexByID(indexID interface{}) *MockSegment_GetIndexByID_Call {
+	return &MockSegment_GetIndexByID_Call{Call: _e.mock.On("GetIndexByID", indexID)}
+}
+
+func (_c *MockSegment_GetIndexByID_Call) Run(run func(indexID int64)) *MockSegment_GetIndexByID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockSegment_GetIndexByID_Call) Return(_a0 *IndexedFieldInfo) *MockSegment_GetIndexByID_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_GetIndexByID_Call) RunAndReturn(run func(int64) *IndexedFieldInfo) *MockSegment_GetIndexByID_Call {
 	_c.Call.Return(run)
 	return _c
 }

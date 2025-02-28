@@ -1,9 +1,11 @@
 package message
 
 import (
+	"fmt"
+
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var (
@@ -23,6 +25,15 @@ func RegisterMessageIDUnmsarshaler(name string, unmarshaler MessageIDUnmarshaler
 
 // MessageIDUnmarshaler is the unmarshaler for message id.
 type MessageIDUnmarshaler = func(b string) (MessageID, error)
+
+// MustUnmarshalMessageID unmarshal the message id, panic if failed.
+func MustUnmarshalMessageID(name string, b string) MessageID {
+	id, err := UnmarshalMessageID(name, b)
+	if err != nil {
+		panic(fmt.Sprintf("unmarshal message id failed: %s, wal: %s, bytes: %s", err.Error(), name, b))
+	}
+	return id
+}
 
 // UnmsarshalMessageID unmarshal the message id.
 func UnmarshalMessageID(name string, b string) (MessageID, error) {

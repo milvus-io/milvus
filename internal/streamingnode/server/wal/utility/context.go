@@ -6,7 +6,8 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 // walCtxKey is the key type of extra append result.
@@ -15,6 +16,7 @@ type walCtxKey int
 var (
 	extraAppendResultValue walCtxKey = 1
 	notPersistedValue      walCtxKey = 2
+	metricsValue           walCtxKey = 3
 )
 
 // ExtraAppendResult is the extra append result.
@@ -73,4 +75,14 @@ func ReplaceAppendResultTimeTick(ctx context.Context, timeTick uint64) {
 func ReplaceAppendResultTxnContext(ctx context.Context, txnCtx *message.TxnContext) {
 	result := ctx.Value(extraAppendResultValue)
 	result.(*ExtraAppendResult).TxnCtx = txnCtx
+}
+
+// WithAppendMetricsContext create a context with metrics recording.
+func WithAppendMetricsContext(ctx context.Context, m *metricsutil.AppendMetrics) context.Context {
+	return context.WithValue(ctx, metricsValue, m)
+}
+
+// MustGetAppendMetrics get append metrics from context
+func MustGetAppendMetrics(ctx context.Context) *metricsutil.AppendMetrics {
+	return ctx.Value(metricsValue).(*metricsutil.AppendMetrics)
 }

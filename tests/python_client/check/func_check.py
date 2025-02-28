@@ -117,7 +117,9 @@ class ResponseChecker:
         elif self.check_task == CheckTasks.check_collection_fields_properties:
             # check field properties in describe collection response
             result = self.check_collection_fields_properties(self.response, self.func_name, self.check_items)
-
+        elif self.check_task == CheckTasks.check_describe_database_property:
+            # describe database interface(high level api) response check
+            result = self.check_describe_database_property(self.response, self.func_name, self.check_items)
         elif self.check_task == CheckTasks.check_insert_result:
             # check `insert` interface response
             result = self.check_insert_response(check_items=self.check_items)
@@ -298,6 +300,46 @@ class ResponseChecker:
         return True
 
     @staticmethod
+    def check_describe_database_property(res, func_name, check_items):
+        """
+        According to the check_items to check database properties of res, which return from func_name
+        :param res: actual response of init database
+        :type res: Database
+
+        :param func_name: init database API
+        :type func_name: str
+
+        :param check_items: which items expected to be checked
+        :type check_items: dict, {check_key: expected_value}
+        """
+        exp_func_name = "describe_database"
+        if func_name != exp_func_name:
+            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+        if len(check_items) == 0:
+            raise Exception("No expect values found in the check task")
+        if check_items.get("db_name", None) is not None:
+            assert res["name"] == check_items.get("db_name")
+        if check_items.get("database.force.deny.writing", None) is not None:
+            if check_items.get("database.force.deny.writing") == "Missing":
+                assert "database.force.deny.writing" not in res
+            else:
+                assert res["database.force.deny.writing"] == check_items.get("database.force.deny.writing")
+        if check_items.get("database.force.deny.reading", None) is not None:
+            if check_items.get("database.force.deny.reading") == "Missing":
+                assert "database.force.deny.reading" not in res
+            else:
+                assert res["database.force.deny.reading"] == check_items.get("database.force.deny.reading")
+        if check_items.get("database.replica.number", None) is not None:
+            if check_items.get("database.replica.number") == "Missing":
+                assert "database.replica.number" not in res
+            else:
+                assert res["database.replica.number"] == check_items.get("database.replica.number")
+        if check_items.get("properties_length", None) is not None:
+            assert len(res) == check_items.get("properties_length")
+
+        return True
+
+    @staticmethod
     def check_partition_property(partition, func_name, check_items):
         exp_func_name = "init_partition"
         if func_name != exp_func_name:
@@ -429,26 +471,33 @@ class ResponseChecker:
         search_iterator = search_res
         pk_list = []
         while True:
-            res = search_iterator.next()
-            if len(res) == 0:
-                log.info("search iteration finished, close")
-                search_iterator.close()
-                break
-            if check_items.get("batch_size", None):
-                assert len(res) <= check_items["batch_size"]
-            if check_items.get("radius", None):
-                for distance in res.distances():
-                    if check_items["metric_type"] == "L2":
-                        assert distance < check_items["radius"]
-                    else:
-                        assert distance > check_items["radius"]
-            if check_items.get("range_filter", None):
-                for distance in res.distances():
-                    if check_items["metric_type"] == "L2":
-                        assert distance >= check_items["range_filter"]
-                    else:
-                        assert distance <= check_items["range_filter"]
-            pk_list.extend(res.ids())
+            try:
+                res = search_iterator.next()
+                if not res:
+                    log.info("search iteration finished, close")
+                    search_iterator.close()
+                    break
+                if check_items.get("batch_size", None):
+                    assert len(res) <= check_items["batch_size"]
+                if check_items.get("radius", None):
+                    for distance in res.distances():
+                        if check_items["metric_type"] == "L2":
+                            assert distance < check_items["radius"]
+                        else:
+                            assert distance > check_items["radius"]
+                if check_items.get("range_filter", None):
+                    for distance in res.distances():
+                        if check_items["metric_type"] == "L2":
+                            assert distance >= check_items["range_filter"]
+                        else:
+                            assert distance <= check_items["range_filter"]
+                pk_list.extend(res.ids())
+            except Exception as e:
+                assert check_items["err_msg"] in str(e)
+                return False
+        expected_batch_size = check_items.get("batch_size", None)
+        if expected_batch_size is not None and expected_batch_size == 0:    # expected batch size =0 if external filter all
+            assert len(pk_list) == 0
         assert len(pk_list) == len(set(pk_list))
         log.info("check: total %d results" % len(pk_list))
 

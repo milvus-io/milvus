@@ -4,9 +4,9 @@
 package walimplstest
 
 import (
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
 )
 
 var _ walimpls.ScannerImpls = &scannerImpls{}
@@ -30,14 +30,20 @@ type scannerImpls struct {
 }
 
 func (s *scannerImpls) executeConsume() {
-	defer close(s.ch)
+	defer func() {
+		close(s.ch)
+		s.Finish(nil)
+	}()
 	for {
 		msg, err := s.datas.ReadAt(s.Context(), s.offset)
 		if err != nil {
-			s.Finish(nil)
 			return
 		}
-		s.ch <- msg
+		select {
+		case <-s.Context().Done():
+			return
+		case s.ch <- msg:
+		}
 		s.offset++
 	}
 }

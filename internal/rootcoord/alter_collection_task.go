@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -29,11 +30,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type alterCollectionTask struct {
@@ -90,6 +91,24 @@ func (a *alterCollectionTask) GetLockerKey() LockerKey {
 	)
 }
 
+func getConsistencyLevel(props ...*commonpb.KeyValuePair) (bool, commonpb.ConsistencyLevel) {
+	for _, p := range props {
+		if p.GetKey() == common.ConsistencyLevel {
+			value := p.GetValue()
+			if level, err := strconv.ParseInt(value, 10, 32); err == nil {
+				if _, ok := commonpb.ConsistencyLevel_name[int32(level)]; ok {
+					return true, commonpb.ConsistencyLevel(level)
+				}
+			} else {
+				if level, ok := commonpb.ConsistencyLevel_value[value]; ok {
+					return true, commonpb.ConsistencyLevel(level)
+				}
+			}
+		}
+	}
+	return false, commonpb.ConsistencyLevel(0)
+}
+
 func executeAlterCollectionTaskSteps(ctx context.Context,
 	core *Core,
 	col *model.Collection,
@@ -101,7 +120,14 @@ func executeAlterCollectionTaskSteps(ctx context.Context,
 	oldColl := col.Clone()
 	oldColl.Properties = oldProperties
 	newColl := col.Clone()
+	if ok, level := getConsistencyLevel(newProperties...); ok {
+		newColl.ConsistencyLevel = level
+	}
 	newColl.Properties = newProperties
+	tso, err := core.tsoAllocator.GenerateTSO(1)
+	if err == nil {
+		newColl.UpdateTimestamp = tso
+	}
 	redoTask := newBaseRedoTask(core.stepExecutor)
 	redoTask.AddSyncStep(&AlterCollectionStep{
 		baseStep: baseStep{core: core},
@@ -280,6 +306,12 @@ func executeAlterCollectionFieldTaskSteps(ctx context.Context,
 	if err != nil {
 		return err
 	}
+
+	tso, err := core.tsoAllocator.GenerateTSO(1)
+	if err == nil {
+		newColl.UpdateTimestamp = tso
+	}
+
 	redoTask := newBaseRedoTask(core.stepExecutor)
 	redoTask.AddSyncStep(&AlterCollectionStep{
 		baseStep: baseStep{core: core},

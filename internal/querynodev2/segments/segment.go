@@ -50,21 +50,22 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/cgopb"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/indexcgopb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/indexparams"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/cgopb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type SegmentType = commonpb.SegmentState
@@ -294,7 +295,7 @@ type LocalSegment struct {
 
 	lastDeltaTimestamp *atomic.Uint64
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
-	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo]
+	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo] // indexID -> IndexedFieldInfo
 	warmupDispatcher   *AsyncWarmupDispatcher
 }
 
@@ -381,13 +382,14 @@ func (s *LocalSegment) initializeSegment() error {
 	indexedFieldInfos, fieldBinlogs := separateIndexAndBinlog(loadInfo)
 	schemaHelper, _ := typeutil.CreateSchemaHelper(s.collection.Schema())
 
-	for fieldID, info := range indexedFieldInfos {
+	for _, info := range indexedFieldInfos {
+		fieldID := info.IndexInfo.FieldID
 		field, err := schemaHelper.GetFieldFromID(fieldID)
 		if err != nil {
 			return err
 		}
 		indexInfo := info.IndexInfo
-		s.fieldIndexes.Insert(indexInfo.GetFieldID(), &IndexedFieldInfo{
+		s.fieldIndexes.Insert(indexInfo.GetIndexID(), &IndexedFieldInfo{
 			FieldBinlog: &datapb.FieldBinlog{
 				FieldID: indexInfo.GetFieldID(),
 			},
@@ -471,17 +473,32 @@ func (s *LocalSegment) LastDeltaTimestamp() uint64 {
 	return s.lastDeltaTimestamp.Load()
 }
 
-func (s *LocalSegment) GetIndex(fieldID int64) *IndexedFieldInfo {
-	info, _ := s.fieldIndexes.Get(fieldID)
+func (s *LocalSegment) GetIndexByID(indexID int64) *IndexedFieldInfo {
+	info, _ := s.fieldIndexes.Get(indexID)
+	return info
+}
+
+func (s *LocalSegment) GetIndex(fieldID int64) []*IndexedFieldInfo {
+	var info []*IndexedFieldInfo
+	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {
+		if value.IndexInfo.FieldID == fieldID {
+			info = append(info, value)
+		}
+		return true
+	})
 	return info
 }
 
 func (s *LocalSegment) ExistIndex(fieldID int64) bool {
-	fieldInfo, ok := s.fieldIndexes.Get(fieldID)
-	if !ok {
-		return false
-	}
-	return fieldInfo.IndexInfo != nil
+	contain := false
+	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {
+		if value.IndexInfo.FieldID == fieldID {
+			contain = true
+		}
+		return !contain
+	})
+
+	return contain
 }
 
 func (s *LocalSegment) HasRawData(fieldID int64) bool {
@@ -1000,9 +1017,9 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		zap.Int64("indexID", indexInfo.GetIndexID()),
 	)
 
-	old := s.GetIndex(indexInfo.GetFieldID())
+	old := s.GetIndexByID(indexInfo.GetIndexID())
 	// the index loaded
-	if old != nil && old.IndexInfo.GetIndexID() == indexInfo.GetIndexID() && old.IsLoaded {
+	if old != nil && old.IsLoaded {
 		log.Warn("index already loaded")
 		return nil
 	}
@@ -1019,6 +1036,20 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 	fieldSchema, err := schemaHelper.GetFieldFromID(indexInfo.GetFieldID())
 	if err != nil {
 		return err
+	}
+
+	// // if segment is pk sorted, user created indexes bring no performance gain but extra memory usage
+	if s.IsSorted() && fieldSchema.GetIsPrimaryKey() {
+		log.Info("skip loading index for pk field in sorted segment")
+		// set field index, preventing repeated loading index task
+		s.fieldIndexes.Insert(indexInfo.GetFieldID(), &IndexedFieldInfo{
+			FieldBinlog: &datapb.FieldBinlog{
+				FieldID: indexInfo.GetFieldID(),
+			},
+			IndexInfo: indexInfo,
+			IsLoaded:  true,
+		})
+		return nil
 	}
 
 	return s.innerLoadIndex(ctx, fieldSchema, indexInfo, tr, fieldType)
@@ -1054,7 +1085,21 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 				return err
 			}
 			updateIndexInfoSpan := tr.RecordSpan()
+			// Skip warnup chunk cache when
+			// . scalar data
+			// . index has row data
+			// . vector was bm25 function output
+
 			if !typeutil.IsVectorType(fieldType) || s.HasRawData(indexInfo.GetFieldID()) {
+				return nil
+			}
+
+			metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, indexInfo.IndexParams)
+			if err != nil {
+				return fmt.Errorf("metric type not exist in index params")
+			}
+
+			if metricType == metric.BM25 {
 				return nil
 			}
 
@@ -1134,7 +1179,7 @@ func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.F
 		return err
 	}
 
-	s.fieldIndexes.Insert(indexInfo.GetFieldID(), &IndexedFieldInfo{
+	s.fieldIndexes.Insert(indexInfo.GetIndexID(), &IndexedFieldInfo{
 		FieldBinlog: &datapb.FieldBinlog{
 			FieldID: indexInfo.GetFieldID(),
 		},

@@ -4,7 +4,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 )
 
@@ -107,6 +107,7 @@ const (
 	Int64MultiVec         CollectionFieldsType = 6 // int64 + floatVec + binaryVec + fp16Vec + bf16vec
 	AllFields             CollectionFieldsType = 7 // all fields excepted sparse
 	Int64VecAllScalar     CollectionFieldsType = 8 // int64 + floatVec + all scalar fields
+	FullTextSearch        CollectionFieldsType = 9 // int64 + varchar + sparse vector + analyzer + function
 )
 
 type GenFieldsOption struct {
@@ -116,6 +117,8 @@ type GenFieldsOption struct {
 	MaxLength      int64 // varchar len or array capacity
 	MaxCapacity    int64
 	IsPartitionKey bool
+	EnableAnalyzer bool
+	AnalyzerParams map[string]any
 	ElementType    entity.FieldType
 }
 
@@ -127,6 +130,8 @@ func TNewFieldsOption() *GenFieldsOption {
 		MaxCapacity:    common.TestCapacity,
 		IsDynamic:      false,
 		IsPartitionKey: false,
+		EnableAnalyzer: false,
+		AnalyzerParams: make(map[string]any),
 		ElementType:    entity.FieldTypeNone,
 	}
 }
@@ -163,6 +168,16 @@ func (opt *GenFieldsOption) TWithMaxLen(maxLen int64) *GenFieldsOption {
 
 func (opt *GenFieldsOption) TWithMaxCapacity(maxCapacity int64) *GenFieldsOption {
 	opt.MaxCapacity = maxCapacity
+	return opt
+}
+
+func (opt *GenFieldsOption) TWithEnableAnalyzer(enableAnalyzer bool) *GenFieldsOption {
+	opt.EnableAnalyzer = enableAnalyzer
+	return opt
+}
+
+func (opt *GenFieldsOption) TWithAnalyzerParams(analyzerParams map[string]any) *GenFieldsOption {
+	opt.AnalyzerParams = analyzerParams
 	return opt
 }
 
@@ -341,6 +356,23 @@ func (cf FieldsInt64VecAllScalar) GenFields(option GenFieldsOption) []*entity.Fi
 	return fields
 }
 
+type FieldsFullTextSearch struct{}
+
+func (cf FieldsFullTextSearch) GenFields(option GenFieldsOption) []*entity.Field {
+	pkField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeInt64)).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	textField := entity.NewField().WithName(common.DefaultTextFieldName).WithDataType(entity.FieldTypeVarChar).WithMaxLength(option.MaxLength).WithIsPartitionKey(option.IsPartitionKey).WithEnableAnalyzer(true).WithAnalyzerParams(option.AnalyzerParams)
+	sparseVecField := entity.NewField().WithName(common.DefaultTextSparseVecFieldName).WithDataType(entity.FieldTypeSparseVector)
+	if option.AutoID {
+		pkField.WithIsAutoID(option.AutoID)
+	}
+	fields := []*entity.Field{
+		pkField,
+		textField,
+		sparseVecField,
+	}
+	return fields
+}
+
 func (ff FieldsFactory) GenFieldsForCollection(collectionFieldsType CollectionFieldsType, option *GenFieldsOption) []*entity.Field {
 	log.Info("GenFieldsForCollection", zap.Any("GenFieldsOption", option))
 	switch collectionFieldsType {
@@ -360,6 +392,8 @@ func (ff FieldsFactory) GenFieldsForCollection(collectionFieldsType CollectionFi
 		return FieldsAllFields{}.GenFields(*option)
 	case Int64VecAllScalar:
 		return FieldsInt64VecAllScalar{}.GenFields(*option)
+	case FullTextSearch:
+		return FieldsFullTextSearch{}.GenFields(*option)
 	default:
 		return FieldsInt64Vec{}.GenFields(*option)
 	}

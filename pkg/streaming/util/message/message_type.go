@@ -3,7 +3,7 @@ package message
 import (
 	"strconv"
 
-	"github.com/milvus-io/milvus/pkg/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 )
 
 type MessageType messagespb.MessageType
@@ -24,6 +24,7 @@ const (
 	MessageTypeBeginTxn         MessageType = MessageType(messagespb.MessageType_BeginTxn)
 	MessageTypeCommitTxn        MessageType = MessageType(messagespb.MessageType_CommitTxn)
 	MessageTypeRollbackTxn      MessageType = MessageType(messagespb.MessageType_RollbackTxn)
+	MessageTypeImport           MessageType = MessageType(messagespb.MessageType_Import)
 )
 
 var messageTypeName = map[MessageType]string{
@@ -42,6 +43,7 @@ var messageTypeName = map[MessageType]string{
 	MessageTypeBeginTxn:         "BEGIN_TXN",
 	MessageTypeCommitTxn:        "COMMIT_TXN",
 	MessageTypeRollbackTxn:      "ROLLBACK_TXN",
+	MessageTypeImport:           "IMPORT",
 }
 
 // String implements fmt.Stringer interface.

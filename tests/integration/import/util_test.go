@@ -25,9 +25,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/parquet"
-	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/parquet"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/samber/lo"
 	"github.com/sbinet/npyio"
 	"github.com/stretchr/testify/assert"
@@ -37,10 +37,10 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	pq "github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -174,6 +174,17 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 			data = chunkedRows
 		case schemapb.DataType_SparseFloatVector:
 			data = insertData.Data[fieldID].(*storage.SparseFloatVectorFieldData).GetContents()
+		case schemapb.DataType_Int8Vector:
+			rows := insertData.Data[fieldID].GetDataRows().([]int8)
+			if dim != fieldData.(*storage.Int8VectorFieldData).Dim {
+				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, fieldData.(*storage.Int8VectorFieldData).Dim))
+			}
+			chunked := lo.Chunk(rows, dim)
+			chunkedRows := make([][dim]int8, len(chunked))
+			for i, innerSlice := range chunked {
+				copy(chunkedRows[i][:], innerSlice)
+			}
+			data = chunkedRows
 		default:
 			data = insertData.Data[fieldID].GetDataRows()
 		}

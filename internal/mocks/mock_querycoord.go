@@ -8,13 +8,13 @@ import (
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	internalpb "github.com/milvus-io/milvus/pkg/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 
-	querypb "github.com/milvus-io/milvus/pkg/proto/querypb"
+	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 
 	txnkv "github.com/tikv/client-go/v2/txnkv"
 
@@ -89,6 +89,65 @@ func (_c *MockQueryCoord_ActivateChecker_Call) Return(_a0 *commonpb.Status, _a1 
 }
 
 func (_c *MockQueryCoord_ActivateChecker_Call) RunAndReturn(run func(context.Context, *querypb.ActivateCheckerRequest) (*commonpb.Status, error)) *MockQueryCoord_ActivateChecker_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckBalanceStatus provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) CheckBalanceStatus(_a0 context.Context, _a1 *querypb.CheckBalanceStatusRequest) (*querypb.CheckBalanceStatusResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckBalanceStatus")
+	}
+
+	var r0 *querypb.CheckBalanceStatusResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.CheckBalanceStatusRequest) (*querypb.CheckBalanceStatusResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.CheckBalanceStatusRequest) *querypb.CheckBalanceStatusResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.CheckBalanceStatusResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.CheckBalanceStatusRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_CheckBalanceStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckBalanceStatus'
+type MockQueryCoord_CheckBalanceStatus_Call struct {
+	*mock.Call
+}
+
+// CheckBalanceStatus is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.CheckBalanceStatusRequest
+func (_e *MockQueryCoord_Expecter) CheckBalanceStatus(_a0 interface{}, _a1 interface{}) *MockQueryCoord_CheckBalanceStatus_Call {
+	return &MockQueryCoord_CheckBalanceStatus_Call{Call: _e.mock.On("CheckBalanceStatus", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_CheckBalanceStatus_Call) Run(run func(_a0 context.Context, _a1 *querypb.CheckBalanceStatusRequest)) *MockQueryCoord_CheckBalanceStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.CheckBalanceStatusRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_CheckBalanceStatus_Call) Return(_a0 *querypb.CheckBalanceStatusResponse, _a1 error) *MockQueryCoord_CheckBalanceStatus_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_CheckBalanceStatus_Call) RunAndReturn(run func(context.Context, *querypb.CheckBalanceStatusRequest) (*querypb.CheckBalanceStatusResponse, error)) *MockQueryCoord_CheckBalanceStatus_Call {
 	_c.Call.Return(run)
 	return _c
 }

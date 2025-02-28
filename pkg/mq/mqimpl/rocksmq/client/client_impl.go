@@ -20,9 +20,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/common"
-	"github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
 )
 
 const (
@@ -111,7 +111,9 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 		GroupName: consumer.consumerName,
 		MsgMutex:  consumer.msgMutex,
 	}
-	c.server.RegisterConsumer(cons)
+	if err := c.server.RegisterConsumer(cons); err != nil {
+		return nil, err
+	}
 
 	if options.SubscriptionInitialPosition == common.SubscriptionPositionLatest {
 		err = c.server.SeekToLatest(options.Topic, options.SubscriptionName)

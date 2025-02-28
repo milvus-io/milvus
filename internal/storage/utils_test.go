@@ -32,10 +32,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/testutils"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestCheckTsField(t *testing.T) {
@@ -1948,4 +1948,54 @@ func TestJson(t *testing.T) {
 
 	t.Log(string(ExtraBytes))
 	t.Log(ExtraLength)
+}
+
+func TestBM25Checker(t *testing.T) {
+	f1 := &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_TextEmbedding,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+	}
+	f2 := &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_BM25,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"sparse"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{103},
+	}
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{
+				FieldID: 102, Name: "vector",
+				DataType:         schemapb.DataType_FloatVector,
+				IsFunctionOutput: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				},
+			},
+			{
+				FieldID: 103, Name: "sparse",
+				DataType:         schemapb.DataType_SparseFloatVector,
+				IsFunctionOutput: true,
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{f1, f2},
+	}
+
+	for _, field := range schema.Fields {
+		isBm25 := IsBM25FunctionOutputField(field, schema)
+		if field.FieldID == 103 {
+			assert.True(t, isBm25)
+		} else {
+			assert.False(t, isBm25)
+		}
+	}
 }

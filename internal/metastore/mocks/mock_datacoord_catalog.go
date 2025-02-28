@@ -5,8 +5,8 @@ package mocks
 import (
 	context "context"
 
-	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
-	indexpb "github.com/milvus-io/milvus/pkg/proto/indexpb"
+	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	indexpb "github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 
 	metastore "github.com/milvus-io/milvus/internal/metastore"
 
@@ -1620,9 +1620,9 @@ func (_c *DataCoordCatalog_ListSegmentIndexes_Call) RunAndReturn(run func(contex
 	return _c
 }
 
-// ListSegments provides a mock function with given fields: ctx
-func (_m *DataCoordCatalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, error) {
-	ret := _m.Called(ctx)
+// ListSegments provides a mock function with given fields: ctx, collectionID
+func (_m *DataCoordCatalog) ListSegments(ctx context.Context, collectionID int64) ([]*datapb.SegmentInfo, error) {
+	ret := _m.Called(ctx, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListSegments")
@@ -1630,19 +1630,19 @@ func (_m *DataCoordCatalog) ListSegments(ctx context.Context) ([]*datapb.Segment
 
 	var r0 []*datapb.SegmentInfo
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) ([]*datapb.SegmentInfo, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) ([]*datapb.SegmentInfo, error)); ok {
+		return rf(ctx, collectionID)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) []*datapb.SegmentInfo); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) []*datapb.SegmentInfo); ok {
+		r0 = rf(ctx, collectionID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*datapb.SegmentInfo)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, collectionID)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1657,13 +1657,14 @@ type DataCoordCatalog_ListSegments_Call struct {
 
 // ListSegments is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *DataCoordCatalog_Expecter) ListSegments(ctx interface{}) *DataCoordCatalog_ListSegments_Call {
-	return &DataCoordCatalog_ListSegments_Call{Call: _e.mock.On("ListSegments", ctx)}
+//   - collectionID int64
+func (_e *DataCoordCatalog_Expecter) ListSegments(ctx interface{}, collectionID interface{}) *DataCoordCatalog_ListSegments_Call {
+	return &DataCoordCatalog_ListSegments_Call{Call: _e.mock.On("ListSegments", ctx, collectionID)}
 }
 
-func (_c *DataCoordCatalog_ListSegments_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListSegments_Call {
+func (_c *DataCoordCatalog_ListSegments_Call) Run(run func(ctx context.Context, collectionID int64)) *DataCoordCatalog_ListSegments_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
@@ -1673,7 +1674,7 @@ func (_c *DataCoordCatalog_ListSegments_Call) Return(_a0 []*datapb.SegmentInfo, 
 	return _c
 }
 
-func (_c *DataCoordCatalog_ListSegments_Call) RunAndReturn(run func(context.Context) ([]*datapb.SegmentInfo, error)) *DataCoordCatalog_ListSegments_Call {
+func (_c *DataCoordCatalog_ListSegments_Call) RunAndReturn(run func(context.Context, int64) ([]*datapb.SegmentInfo, error)) *DataCoordCatalog_ListSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }

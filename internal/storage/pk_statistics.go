@@ -18,13 +18,14 @@ package storage
 
 import (
 	"fmt"
+	"unsafe"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
-	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 // pkStatistics contains pk field statistic information
@@ -119,7 +120,7 @@ func Locations(pk PrimaryKey, k uint, bfType bloomfilter.BFType) []uint64 {
 		return bloomfilter.Locations(buf, k, bfType)
 	case schemapb.DataType_VarChar:
 		varCharPk := pk.(*VarCharPrimaryKey)
-		return bloomfilter.Locations([]byte(varCharPk.Value), k, bfType)
+		return bloomfilter.Locations(unsafe.Slice(unsafe.StringData(varCharPk.Value), len(varCharPk.Value)), k, bfType)
 	default:
 		// TODO::
 	}
@@ -149,15 +150,9 @@ func (st *PkStatistics) BatchPkExist(lc *BatchLocationsCache, hits []bool) []boo
 
 	// check bf first, TestLocation just do some bitset compute, cost is cheaper
 	locations := lc.Locations(st.PkFilter.K(), st.PkFilter.Type())
-	ret := st.PkFilter.BatchTestLocations(locations, hits)
-
-	// todo: a bit ugly, hits[i]'s value will depends on multi bf in single segment,
-	// hits array will be removed after we merge bf in segment
 	pks := lc.PKs()
-	for i := range ret {
-		if !hits[i] {
-			hits[i] = ret[i] && st.MinPK.LE(pks[i]) && st.MaxPK.GE(pks[i])
-		}
+	for i, hit := range hits {
+		hits[i] = hit || st.PkFilter.TestLocations(locations[i]) && st.MinPK.LE(pks[i]) && st.MaxPK.GE(pks[i])
 	}
 
 	return hits

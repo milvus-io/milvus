@@ -33,8 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type ReaderSuite struct {
@@ -308,6 +308,8 @@ func (suite *ReaderSuite) TestVector() {
 	suite.vecDataType = schemapb.DataType_BFloat16Vector
 	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 	suite.vecDataType = schemapb.DataType_SparseFloatVector
+	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	suite.vecDataType = schemapb.DataType_Int8Vector
 	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 }
 

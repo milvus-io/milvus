@@ -59,6 +59,7 @@ const (
 
 	StreamingDataSourceLabel  = "streaming"
 	BulkinsertDataSourceLabel = "bulkinsert"
+	CompactionDataSourceLabel = "compaction"
 
 	Leader     = "OnLeader"
 	FromLeader = "FromLeader"
@@ -77,11 +78,12 @@ const (
 	Executing = "executing"
 	Done      = "done"
 
-	ImportStagePending    = "pending"
-	ImportStagePreImport  = "preimport"
-	ImportStageImport     = "import"
-	ImportStageStats      = "stats"
-	ImportStageBuildIndex = "build_index"
+	ImportStagePending      = "pending"
+	ImportStagePreImport    = "preimport"
+	ImportStageImport       = "import"
+	ImportStageStats        = "stats"
+	ImportStageBuildIndex   = "build_index"
+	ImportStageWaitL0Import = "wait_l0_import"
 
 	compactionTypeLabelName  = "compaction_type"
 	isVectorFieldLabelName   = "is_vector_field"
@@ -93,7 +95,6 @@ const (
 	indexTaskStatusLabelName = "index_task_status"
 	msgTypeLabelName         = "msg_type"
 	collectionIDLabelName    = "collection_id"
-	partitionIDLabelName     = "partition_id"
 	channelNameLabelName     = "channel_name"
 	functionLabelName        = "function_name"
 	queryTypeLabelName       = "query_type"
@@ -109,7 +110,6 @@ const (
 	roleNameLabelName        = "role_name"
 	cacheNameLabelName       = "cache_name"
 	cacheStateLabelName      = "cache_state"
-	indexCountLabelName      = "indexed_field_count"
 	dataSourceLabelName      = "data_source"
 	importStageLabelName     = "import_stage"
 	requestScope             = "scope"
@@ -124,6 +124,7 @@ const (
 	pathLabelName            = "path"
 	cgoNameLabelName         = `cgo_name`
 	cgoTypeLabelName         = `cgo_type`
+	queueTypeLabelName       = `queue_type`
 
 	// entities label
 	LoadedLabel         = "loaded"

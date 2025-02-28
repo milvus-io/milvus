@@ -3,7 +3,8 @@ package interceptors
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 var _ InterceptorWithReady = (*chainedInterceptor)(nil)
@@ -15,14 +16,10 @@ type (
 
 // NewChainedInterceptor creates a new chained interceptor.
 func NewChainedInterceptor(interceptors ...Interceptor) InterceptorWithReady {
-	appendCalls := make([]appendInterceptorCall, 0, len(interceptors))
-	for _, i := range interceptors {
-		appendCalls = append(appendCalls, i.DoAppend)
-	}
 	return &chainedInterceptor{
 		closed:       make(chan struct{}),
 		interceptors: interceptors,
-		appendCall:   chainAppendInterceptors(appendCalls),
+		appendCall:   chainAppendInterceptors(interceptors),
 	}
 }
 
@@ -66,28 +63,54 @@ func (c *chainedInterceptor) Close() {
 }
 
 // chainAppendInterceptors chains all unary client interceptors into one.
-func chainAppendInterceptors(interceptorCalls []appendInterceptorCall) appendInterceptorCall {
-	if len(interceptorCalls) == 0 {
+func chainAppendInterceptors(interceptors []Interceptor) appendInterceptorCall {
+	if len(interceptors) == 0 {
 		// Do nothing if no interceptors.
 		return func(ctx context.Context, msg message.MutableMessage, append Append) (message.MessageID, error) {
 			return append(ctx, msg)
 		}
-	} else if len(interceptorCalls) == 1 {
-		return interceptorCalls[0]
+	} else if len(interceptors) == 1 {
+		if i, ok := interceptors[0].(InterceptorWithMetrics); ok {
+			return adaptAppendWithMetricCollecting(i.Name(), interceptors[0].DoAppend)
+		}
+		return interceptors[0].DoAppend
 	}
 	return func(ctx context.Context, msg message.MutableMessage, invoker Append) (message.MessageID, error) {
-		return interceptorCalls[0](ctx, msg, getChainAppendInvoker(interceptorCalls, 0, invoker))
+		if i, ok := interceptors[0].(InterceptorWithMetrics); ok {
+			return adaptAppendWithMetricCollecting(i.Name(), interceptors[0].DoAppend)(ctx, msg, getChainAppendInvoker(interceptors, 0, invoker))
+		}
+		return interceptors[0].DoAppend(ctx, msg, getChainAppendInvoker(interceptors, 0, invoker))
 	}
 }
 
 // getChainAppendInvoker recursively generate the chained unary invoker.
-func getChainAppendInvoker(interceptors []appendInterceptorCall, idx int, finalInvoker Append) Append {
+func getChainAppendInvoker(interceptors []Interceptor, idx int, finalInvoker Append) Append {
 	// all interceptor is called, so return the final invoker.
 	if idx == len(interceptors)-1 {
 		return finalInvoker
 	}
 	// recursively generate the chained invoker.
 	return func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-		return interceptors[idx+1](ctx, msg, getChainAppendInvoker(interceptors, idx+1, finalInvoker))
+		idx := idx + 1
+		if i, ok := interceptors[idx].(InterceptorWithMetrics); ok {
+			return adaptAppendWithMetricCollecting(i.Name(), i.DoAppend)(ctx, msg, getChainAppendInvoker(interceptors, idx, finalInvoker))
+		}
+		return interceptors[idx].DoAppend(ctx, msg, getChainAppendInvoker(interceptors, idx, finalInvoker))
+	}
+}
+
+// adaptAppendWithMetricCollecting adapts the append interceptor with metric collecting.
+func adaptAppendWithMetricCollecting(name string, append appendInterceptorCall) appendInterceptorCall {
+	return func(ctx context.Context, msg message.MutableMessage, invoker Append) (message.MessageID, error) {
+		c := utility.MustGetAppendMetrics(ctx).StartInterceptorCollector(name)
+		msgID, err := append(ctx, msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			c.BeforeDone()
+			msgID, err := invoker(ctx, msg)
+			c.AfterStart()
+			return msgID, err
+		})
+		c.AfterDone()
+		c.BeforeFailure(err)
+		return msgID, err
 	}
 }

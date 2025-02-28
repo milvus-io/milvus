@@ -44,15 +44,15 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/requestutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type HandlersV2 struct {
@@ -82,14 +82,19 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(CollectionCategory+ReleaseAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.releaseCollection))))
 	router.POST(CollectionCategory+AlterPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionReqWithProperties{} }, wrapperTraceLog(h.alterCollectionProperties))))
 	router.POST(CollectionCategory+DropPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DropCollectionPropertiesReq{} }, wrapperTraceLog(h.dropCollectionProperties))))
+	router.POST(CollectionCategory+CompactAction, timeoutMiddleware(wrapperPost(func() any { return &CompactReq{} }, wrapperTraceLog(h.compact))))
+	router.POST(CollectionCategory+CompactionStateAction, timeoutMiddleware(wrapperPost(func() any { return &GetCompactionStateReq{} }, wrapperTraceLog(h.getcompactionState))))
+	router.POST(CollectionCategory+FlushAction, timeoutMiddleware(wrapperPost(func() any { return &FlushReq{} }, wrapperTraceLog(h.flush))))
 
 	router.POST(CollectionFieldCategory+AlterPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionFieldReqWithParams{} }, wrapperTraceLog(h.alterCollectionFieldProperties))))
 
 	router.POST(DataBaseCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.createDatabase))))
 	router.POST(DataBaseCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqRequiredName{} }, wrapperTraceLog(h.dropDatabase))))
+	router.POST(DataBaseCategory+DropPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DropDatabasePropertiesReq{} }, wrapperTraceLog(h.dropDatabaseProperties))))
 	router.POST(DataBaseCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &EmptyReq{} }, wrapperTraceLog(h.listDatabases))))
 	router.POST(DataBaseCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqRequiredName{} }, wrapperTraceLog(h.describeDatabase))))
 	router.POST(DataBaseCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
+	router.POST(DataBaseCategory+AlterPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
 	// Query
 	router.POST(EntityCategory+QueryAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &QueryReqV2{
@@ -205,23 +210,23 @@ type (
 )
 
 func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
-	return func(c *gin.Context) {
+	return func(gCtx *gin.Context) {
 		req := newReq()
-		if err := c.ShouldBindBodyWith(req, binding.JSON); err != nil {
+		if err := gCtx.ShouldBindBodyWith(req, binding.JSON); err != nil {
 			log.Warn("high level restful api, read parameters from request body fail", zap.Error(err),
-				zap.Any("url", c.Request.URL.Path))
+				zap.Any("url", gCtx.Request.URL.Path))
 			if _, ok := err.(validator.ValidationErrors); ok {
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
 					HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", error: " + err.Error(),
 				})
 			} else if err == io.EOF {
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", the request body should be nil, however {} is valid",
 				})
 			} else {
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
 				})
@@ -234,42 +239,31 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 				dbName = getter.GetDbName()
 			}
 			if dbName == "" {
-				dbName = c.Request.Header.Get(HTTPHeaderDBName)
+				dbName = gCtx.Request.Header.Get(HTTPHeaderDBName)
 				if dbName == "" {
 					dbName = DefaultDbName
 				}
 			}
 		}
-		username, _ := c.Get(ContextUsername)
-		ctx, span := otel.Tracer(typeutil.ProxyRole).Start(getCtx(c), c.Request.URL.Path)
+		innerCtx := gCtx.Request.Context()
+		ctx, span := otel.Tracer(typeutil.ProxyRole).Start(innerCtx, gCtx.Request.URL.Path)
 		defer span.End()
+		username, _ := gCtx.Get(ContextUsername)
 		ctx = proxy.NewContextWithMetadata(ctx, username.(string), dbName)
 		traceID := span.SpanContext().TraceID().String()
 		ctx = log.WithTraceID(ctx, traceID)
-		c.Keys["traceID"] = traceID
+		gCtx.Keys["traceID"] = traceID
 		log.Ctx(ctx).Debug("high level restful api, read parameters from request body, then start to handle.",
-			zap.Any("url", c.Request.URL.Path))
-		v2(ctx, c, req, dbName)
+			zap.Any("url", gCtx.Request.URL.Path))
+		v2(ctx, gCtx, req, dbName)
 	}
-}
-
-const (
-	v2CtxKey = `milvus_restful_v2_ctxkey`
-)
-
-func getCtx(ctx *gin.Context) context.Context {
-	v, ok := ctx.Get(v2CtxKey)
-	if !ok {
-		return ctx
-	}
-	return v.(context.Context)
 }
 
 // restfulSizeMiddleware is the middleware fetchs metrics stats from gin struct.
 func restfulSizeMiddleware(handler gin.HandlerFunc, observeOutbound bool) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		h := metrics.WrapRestfulContext(ctx, ctx.Request.ContentLength)
-		ctx.Set(v2CtxKey, h)
+		ctx.Request = ctx.Request.WithContext(h)
 		handler(ctx)
 		metrics.RecordRestfulMetrics(h, int64(ctx.Writer.Size()), observeOutbound)
 	}
@@ -333,13 +327,13 @@ func wrapperProxy(ctx context.Context, c *gin.Context, req any, checkAuth bool, 
 	return wrapperProxyWithLimit(ctx, c, req, checkAuth, ignoreErr, fullMethod, false, nil, handler)
 }
 
-func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAuth bool, ignoreErr bool, fullMethod string, checkLimit bool, pxy types.ProxyComponent, handler func(reqCtx context.Context, req any) (any, error)) (interface{}, error) {
+func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, checkAuth bool, ignoreErr bool, fullMethod string, checkLimit bool, pxy types.ProxyComponent, handler func(reqCtx context.Context, req any) (any, error)) (interface{}, error) {
 	if baseGetter, ok := req.(BaseGetter); ok {
 		span := trace.SpanFromContext(ctx)
 		span.AddEvent(baseGetter.GetBase().GetMsgType().String())
 	}
 	if checkAuth {
-		err := checkAuthorizationV2(ctx, c, ignoreErr, req)
+		err := checkAuthorizationV2(ctx, ginCtx, ignoreErr, req)
 		if err != nil {
 			return nil, err
 		}
@@ -348,8 +342,8 @@ func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAu
 		_, err := CheckLimiter(ctx, req, pxy)
 		if err != nil {
 			log.Warn("high level restful api, fail to check limiter", zap.Error(err), zap.String("method", fullMethod))
-			hookutil.GetExtension().ReportRefused(ctx, req, WrapErrorToResponse(merr.ErrHTTPRateLimit), nil, c.FullPath())
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			hookutil.GetExtension().ReportRefused(ctx, req, WrapErrorToResponse(merr.ErrHTTPRateLimit), nil, ginCtx.FullPath())
+			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
 				HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + err.Error(),
 			})
@@ -357,12 +351,12 @@ func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAu
 		}
 	}
 	log.Ctx(ctx).Debug("high level restful api, try to do a grpc call")
-	username, ok := c.Get(ContextUsername)
+	username, ok := ginCtx.Get(ContextUsername)
 	if !ok {
 		username = ""
 	}
 
-	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, c.Keys), req, username.(string), fullMethod, handler)
+	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, ginCtx.Keys), req, username.(string), fullMethod, handler)
 	if err == nil {
 		status, ok := requestutil.GetStatusFromResponse(response)
 		if ok {
@@ -373,7 +367,7 @@ func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAu
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err))
 		if !ignoreErr {
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		}
 	}
 	return response, err
@@ -686,11 +680,67 @@ func (h *HandlersV2) dropCollectionProperties(ctx context.Context, c *gin.Contex
 	req := &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		DeleteKeys:     httpReq.DeleteKeys,
+		DeleteKeys:     httpReq.PropertyKeys,
 	}
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterCollection", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.AlterCollection(reqCtx, req.(*milvuspb.AlterCollectionRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) compact(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CompactReq)
+	req := &milvuspb.ManualCompactionRequest{
+		DbName:          dbName,
+		CollectionName:  httpReq.CollectionName,
+		MajorCompaction: httpReq.IsClustering,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ManualCompaction", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.ManualCompaction(reqCtx, req.(*milvuspb.ManualCompactionRequest))
+	})
+	if err == nil {
+		resp := resp.(*milvuspb.ManualCompactionResponse)
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: gin.H{"compactionID": resp.CompactionID},
+		})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) getcompactionState(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*GetCompactionStateReq)
+	req := &milvuspb.GetCompactionStateRequest{
+		CompactionID: httpReq.JobID,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/GetCompactionState", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.GetCompactionState(reqCtx, req.(*milvuspb.GetCompactionStateRequest))
+	})
+	if err == nil {
+		resp := resp.(*milvuspb.GetCompactionStateResponse)
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: gin.H{"compactionID": httpReq.JobID, "state": resp.State.String(), "executingPlanNumber": resp.ExecutingPlanNo, "timeoutPlanNumber": resp.TimeoutPlanNo, "completedPlanNumber": resp.CompletedPlanNo},
+		})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) flush(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*FlushReq)
+	req := &milvuspb.FlushRequest{
+		DbName:          dbName,
+		CollectionNames: []string{httpReq.CollectionName},
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Flush", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.Flush(reqCtx, req.(*milvuspb.FlushRequest))
 	})
 	if err == nil {
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
@@ -1038,8 +1088,8 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 
 	if vectorField.GetIsFunctionOutput() {
 		for _, function := range collSchema.Functions {
-			if function.Type == schemapb.FunctionType_BM25 {
-				// TODO: currently only BM25 function is supported, thus guarantees one input field to one output field
+			if function.Type == schemapb.FunctionType_BM25 || function.Type == schemapb.FunctionType_TextEmbedding {
+				// TODO: currently only BM25 & text embedding function is supported, thus guarantees one input field to one output field
 				if function.OutputFieldNames[0] == vectorField.Name {
 					dataType = schemapb.DataType_VarChar
 				}
@@ -1056,20 +1106,6 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 			phv,
 		},
 	})
-}
-
-func generateSearchParams(reqSearchParams searchParams) []*commonpb.KeyValuePair {
-	var searchParams []*commonpb.KeyValuePair
-	if reqSearchParams.Params == nil {
-		reqSearchParams.Params = make(map[string]any)
-	}
-	bs, _ := json.Marshal(reqSearchParams.Params)
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: Params, Value: string(bs)})
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.IgnoreGrowing, Value: strconv.FormatBool(reqSearchParams.IgnoreGrowing)})
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.HintsKey, Value: reqSearchParams.Hints})
-	// need to exposure ParamRoundDecimal in req?
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
-	return searchParams
 }
 
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
@@ -1100,7 +1136,15 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 
-	searchParams := generateSearchParams(httpReq.SearchParams)
+	searchParams, err := generateSearchParams(httpReq.SearchParams)
+	if err != nil {
+		log.Ctx(ctx).Warn("high level restful api, generate SearchParams failed", zap.Error(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	if httpReq.GroupByField != "" {
@@ -1142,7 +1186,11 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 				})
 			} else {
-				HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost})
+				if len(searchResp.Results.Recalls) > 0 {
+					HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost, HTTPReturnRecalls: searchResp.Results.Recalls, HTTPReturnTopks: searchResp.Results.Topks})
+				} else {
+					HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost, HTTPReturnTopks: searchResp.Results.Topks})
+				}
 			}
 		}
 	}
@@ -1177,7 +1225,15 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	body, _ := c.Get(gin.BodyBytesKey)
 	searchArray := gjson.Get(string(body.([]byte)), "search").Array()
 	for i, subReq := range httpReq.Search {
-		searchParams := generateSearchParams(subReq.SearchParams)
+		searchParams, err := generateSearchParams(subReq.SearchParams)
+		if err != nil {
+			log.Ctx(ctx).Warn("high level restful api, generate SearchParams failed", zap.Error(err))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(subReq.Limit), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(subReq.Offset), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: subReq.AnnsField})
@@ -1235,7 +1291,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 				})
 			} else {
-				HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost})
+				HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost, HTTPReturnTopks: searchResp.Results.Topks})
 			}
 		}
 	}
@@ -1343,6 +1399,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				},
 			},
 			EnableDynamicField: enableDynamic,
+			Description:        httpReq.Description,
 		})
 	} else {
 		collSchema := schemapb.CollectionSchema{
@@ -1351,6 +1408,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			Fields:             []*schemapb.FieldSchema{},
 			Functions:          []*schemapb.FunctionSchema{},
 			EnableDynamicField: httpReq.Schema.EnableDynamicField,
+			Description:        httpReq.Description,
 		}
 
 		allOutputFields := []string{}
@@ -1428,7 +1486,6 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				fieldSchema.AutoID = httpReq.Schema.AutoId
 			}
 			if field.IsPartitionKey {
-				partitionsNum = int64(64)
 				if partitionsNumStr, ok := httpReq.Params["partitionsNum"]; ok {
 					if partitions, err := strconv.ParseInt(fmt.Sprintf("%v", partitionsNumStr), 10, 64); err == nil {
 						partitionsNum = partitions
@@ -1602,6 +1659,22 @@ func (h *HandlersV2) dropDatabase(ctx context.Context, c *gin.Context, anyReq an
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropDatabase", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DropDatabase(reqCtx, req.(*milvuspb.DropDatabaseRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) dropDatabaseProperties(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*DropDatabasePropertiesReq)
+	req := &milvuspb.AlterDatabaseRequest{
+		DbName:     dbName,
+		DeleteKeys: httpReq.PropertyKeys,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterDatabase", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AlterDatabase(reqCtx, req.(*milvuspb.AlterDatabaseRequest))
 	})
 	if err == nil {
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
@@ -2155,23 +2228,32 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 		for _, indexDescription := range resp.(*milvuspb.DescribeIndexResponse).IndexDescriptions {
 			metricType := ""
 			indexType := ""
+			mmapEnabled := ""
+			indexOffsetCacheEnabled := ""
 			for _, pair := range indexDescription.Params {
-				if pair.Key == common.MetricTypeKey {
+				switch pair.Key {
+				case common.MetricTypeKey:
 					metricType = pair.Value
-				} else if pair.Key == common.IndexTypeKey {
+				case common.IndexTypeKey:
 					indexType = pair.Value
+				case common.MmapEnabledKey:
+					mmapEnabled = pair.Value
+				case common.IndexOffsetCacheEnabledKey:
+					indexOffsetCacheEnabled = pair.Value
 				}
 			}
 			indexInfo := map[string]any{
-				HTTPIndexName:              indexDescription.IndexName,
-				HTTPIndexField:             indexDescription.FieldName,
-				HTTPReturnIndexType:        indexType,
-				HTTPReturnIndexMetricType:  metricType,
-				HTTPReturnIndexTotalRows:   indexDescription.TotalRows,
-				HTTPReturnIndexPendingRows: indexDescription.PendingIndexRows,
-				HTTPReturnIndexIndexedRows: indexDescription.IndexedRows,
-				HTTPReturnIndexState:       indexDescription.State.String(),
-				HTTPReturnIndexFailReason:  indexDescription.IndexStateFailReason,
+				HTTPIndexName:                  indexDescription.IndexName,
+				HTTPIndexField:                 indexDescription.FieldName,
+				HTTPReturnIndexType:            indexType,
+				HTTPReturnIndexMetricType:      metricType,
+				HTTPMmapEnabledKey:             mmapEnabled,
+				HTTPIndexOffsetCacheEnabledKey: indexOffsetCacheEnabled,
+				HTTPReturnIndexTotalRows:       indexDescription.TotalRows,
+				HTTPReturnIndexPendingRows:     indexDescription.PendingIndexRows,
+				HTTPReturnIndexIndexedRows:     indexDescription.IndexedRows,
+				HTTPReturnIndexState:           indexDescription.State.String(),
+				HTTPReturnIndexFailReason:      indexDescription.IndexStateFailReason,
 			}
 			indexInfos = append(indexInfos, indexInfo)
 		}
@@ -2263,7 +2345,8 @@ func (h *HandlersV2) dropIndexProperties(ctx context.Context, c *gin.Context, an
 	req := &milvuspb.AlterIndexRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		DeleteKeys:     httpReq.DeleteKeys,
+		DeleteKeys:     httpReq.PropertyKeys,
+		IndexName:      httpReq.IndexName,
 	}
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterIndex", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
@@ -2442,7 +2525,7 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 			return nil, err
 		}
 	}
-	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/ImportV2", func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/Import", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ImportV2(reqCtx, req.(*internalpb.ImportRequest))
 	})
 	if err == nil {

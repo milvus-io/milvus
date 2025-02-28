@@ -22,11 +22,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // ResourceUsage is used to estimate the resource usage of a sealed segment.
@@ -72,7 +72,8 @@ type Segment interface {
 	ResourceUsageEstimate() ResourceUsage
 
 	// Index related
-	GetIndex(fieldID int64) *IndexedFieldInfo
+	GetIndexByID(indexID int64) *IndexedFieldInfo
+	GetIndex(fieldID int64) []*IndexedFieldInfo
 	ExistIndex(fieldID int64) bool
 	Indexes() []*IndexedFieldInfo
 	HasRawData(fieldID int64) bool

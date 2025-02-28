@@ -21,7 +21,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var (
@@ -58,6 +58,18 @@ var (
 			segmentLevelLabelName,
 		})
 
+	DataNodeWriteBinlogSize = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "write_data_size",
+			Help:      "byte size of datanode write to object storage, including flushed size",
+		}, []string{
+			nodeIDLabelName,
+			dataSourceLabelName,
+			collectionIDLabelName,
+		})
+
 	DataNodeFlushedRows = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -91,18 +103,6 @@ var (
 			collectionIDLabelName,
 		})
 
-	DataNodeProduceTimeTickLag = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataNodeRole,
-			Name:      "produce_tt_lag_ms",
-			Help:      "now time minus tt pts per physical channel",
-		}, []string{
-			nodeIDLabelName,
-			collectionIDLabelName,
-			channelNameLabelName,
-		})
-
 	DataNodeConsumeMsgCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -113,18 +113,6 @@ var (
 			nodeIDLabelName,
 			msgTypeLabelName,
 			collectionIDLabelName,
-		})
-
-	DataNodeEncodeBufferLatency = prometheus.NewHistogramVec( // TODO: arguably
-		prometheus.HistogramOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataNodeRole,
-			Name:      "encode_buffer_latency",
-			Help:      "latency of encode buffer data",
-			Buckets:   buckets,
-		}, []string{
-			nodeIDLabelName,
-			segmentLevelLabelName,
 		})
 
 	DataNodeSave2StorageLatency = prometheus.NewHistogramVec(
@@ -343,12 +331,12 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeFlowGraphBufferDataSize)
 	// output related
 	registry.MustRegister(DataNodeAutoFlushBufferCount)
-	registry.MustRegister(DataNodeEncodeBufferLatency)
 	registry.MustRegister(DataNodeSave2StorageLatency)
 	registry.MustRegister(DataNodeFlushBufferCount)
 	registry.MustRegister(DataNodeFlushReqCounter)
 	registry.MustRegister(DataNodeFlushedSize)
 	registry.MustRegister(DataNodeFlushedRows)
+	registry.MustRegister(DataNodeWriteBinlogSize)
 	// compaction related
 	registry.MustRegister(DataNodeCompactionLatency)
 	registry.MustRegister(DataNodeCompactionLatencyInQueue)
@@ -357,7 +345,6 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	// deprecated metrics
 	registry.MustRegister(DataNodeForwardDeleteMsgTimeTaken)
 	registry.MustRegister(DataNodeNumProducers)
-	registry.MustRegister(DataNodeProduceTimeTickLag)
 
 	// index metrics
 	registry.MustRegister(DataNodeBuildIndexTaskCounter)
@@ -377,14 +364,6 @@ func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel 
 				nodeIDLabelName:       fmt.Sprint(nodeID),
 				msgTypeLabelName:      AllLabel,
 				collectionIDLabelName: fmt.Sprint(collectionID),
-			})
-
-	DataNodeProduceTimeTickLag.
-		Delete(
-			prometheus.Labels{
-				nodeIDLabelName:       fmt.Sprint(nodeID),
-				collectionIDLabelName: fmt.Sprint(collectionID),
-				channelNameLabelName:  channel,
 			})
 
 	for _, label := range []string{AllLabel, DeleteLabel, InsertLabel} {
@@ -407,6 +386,10 @@ func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel 
 	})
 
 	DataNodeCompactionMissingDeleteCount.Delete(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
+
+	DataNodeWriteBinlogSize.Delete(prometheus.Labels{
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -37,18 +38,18 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/indexparams"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type indexMeta struct {
@@ -65,6 +66,8 @@ type indexMeta struct {
 
 	// segmentID -> indexID -> segmentIndex
 	segmentIndexes map[UniqueID]map[UniqueID]*model.SegmentIndex
+
+	lastUpdateMetricTime atomic.Time
 }
 
 func newIndexTaskStats(s *model.SegmentIndex) *metricsinfo.IndexTaskStats {
@@ -79,6 +82,7 @@ func newIndexTaskStats(s *model.SegmentIndex) *metricsinfo.IndexTaskStats {
 		IndexVersion:    s.IndexVersion,
 		CreatedUTCTime:  typeutil.TimestampToString(s.CreatedUTCTime * 1000),
 		FinishedUTCTime: typeutil.TimestampToString(s.FinishedUTCTime * 1000),
+		NodeID:          s.NodeID,
 	}
 }
 
@@ -95,7 +99,7 @@ func newSegmentIndexBuildInfo() *segmentBuildInfo {
 		// build ID -> segment index
 		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
 		// build ID -> task stats
-		taskStats: expirable.NewLRU[UniqueID, *metricsinfo.IndexTaskStats](64, nil, time.Minute*30),
+		taskStats: expirable.NewLRU[UniqueID, *metricsinfo.IndexTaskStats](1024, nil, time.Minute*30),
 	}
 }
 
@@ -205,9 +209,13 @@ func (m *indexMeta) updateSegIndexMeta(segIdx *model.SegmentIndex, updateFunc fu
 }
 
 func (m *indexMeta) updateIndexTasksMetrics() {
+	if time.Since(m.lastUpdateMetricTime.Load()) < 120*time.Second {
+		return
+	}
+	defer m.lastUpdateMetricTime.Store(time.Now())
 	taskMetrics := make(map[UniqueID]map[commonpb.IndexState]int)
 	for _, segIdx := range m.segmentBuildInfo.List() {
-		if segIdx.IsDeleted {
+		if segIdx.IsDeleted || !m.isIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 			continue
 		}
 		if _, ok := taskMetrics[segIdx.CollectionID]; !ok {
@@ -233,16 +241,36 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 			}
 		}
 	}
+	log.Ctx(m.ctx).Info("update index metric", zap.Int("collectionNum", len(taskMetrics)))
+}
+
+func checkJsonParams(index *model.Index, req *indexpb.CreateIndexRequest) bool {
+	castType1, err := getIndexParam(index.IndexParams, common.JSONCastTypeKey)
+	if err != nil {
+		return false
+	}
+	castType2, err := getIndexParam(req.GetIndexParams(), common.JSONCastTypeKey)
+	if err != nil || castType1 != castType2 {
+		return false
+	}
+	jsonPath1, err := getIndexParam(index.IndexParams, common.JSONPathKey)
+	if err != nil {
+		return false
+	}
+	jsonPath2, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
+	return err == nil && jsonPath1 == jsonPath2
 }
 
 func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
-	if len(fieldIndex.TypeParams) != len(req.TypeParams) {
+	metaTypeParams := DeleteParams(fieldIndex.TypeParams, []string{common.MmapEnabledKey})
+	reqTypeParams := DeleteParams(req.TypeParams, []string{common.MmapEnabledKey})
+	if len(metaTypeParams) != len(reqTypeParams) {
 		return false
 	}
 	notEq := false
-	for _, param1 := range fieldIndex.TypeParams {
+	for _, param1 := range metaTypeParams {
 		exist := false
-		for _, param2 := range req.TypeParams {
+		for _, param2 := range reqTypeParams {
 			if param2.Key == param1.Key && param2.Value == param1.Value {
 				exist = true
 			}
@@ -321,7 +349,7 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 	return !notEq
 }
 
-func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest) (UniqueID, error) {
+func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJson bool) (UniqueID, error) {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -334,7 +362,7 @@ func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest) (UniqueID, e
 			continue
 		}
 		if req.IndexName == index.IndexName {
-			if req.FieldID == index.FieldID && checkParams(index, req) {
+			if req.FieldID == index.FieldID && checkParams(index, req) && (!isJson || checkJsonParams(index, req)) {
 				return index.IndexID, nil
 			}
 			errMsg := "at most one distinct index is allowed per field"
@@ -346,6 +374,20 @@ func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest) (UniqueID, e
 			return 0, fmt.Errorf("CreateIndex failed: %s", errMsg)
 		}
 		if req.FieldID == index.FieldID {
+			if isJson {
+				// if it is json index, check if json paths are same
+				jsonPath1, err := getIndexParam(index.IndexParams, common.JSONPathKey)
+				if err != nil {
+					return 0, err
+				}
+				jsonPath2, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
+				if err != nil {
+					return 0, err
+				}
+				if jsonPath1 != jsonPath2 {
+					continue
+				}
+			}
 			// creating multiple indexes on same field is not supported
 			errMsg := "CreateIndex failed: creating multiple indexes on same field is not supported"
 			log.Warn(errMsg)
@@ -748,6 +790,10 @@ func (m *indexMeta) IsIndexExist(collID, indexID UniqueID) bool {
 	m.RLock()
 	defer m.RUnlock()
 
+	return m.isIndexExist(collID, indexID)
+}
+
+func (m *indexMeta) isIndexExist(collID, indexID UniqueID) bool {
 	fieldIndexes, ok := m.indexes[collID]
 	if !ok {
 		return false
@@ -874,7 +920,7 @@ func (m *indexMeta) GetAllSegIndexes() map[int64]*model.SegmentIndex {
 	tasks := m.segmentBuildInfo.List()
 	segIndexes := make(map[int64]*model.SegmentIndex, len(tasks))
 	for buildID, segIndex := range tasks {
-		segIndexes[buildID] = model.CloneSegmentIndex(segIndex)
+		segIndexes[buildID] = segIndex
 	}
 	return segIndexes
 }
@@ -969,22 +1015,6 @@ func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.Segme
 		return false, model.CloneSegmentIndex(segIndex)
 	}
 	return true, nil
-}
-
-func (m *indexMeta) GetMetasByNodeID(nodeID UniqueID) []*model.SegmentIndex {
-	m.RLock()
-	defer m.RUnlock()
-
-	metas := make([]*model.SegmentIndex, 0)
-	for _, segIndex := range m.segmentBuildInfo.List() {
-		if segIndex.IsDeleted {
-			continue
-		}
-		if nodeID == segIndex.NodeID {
-			metas = append(metas, model.CloneSegmentIndex(segIndex))
-		}
-	}
-	return metas
 }
 
 func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[int64]*indexpb.SegmentIndexState {

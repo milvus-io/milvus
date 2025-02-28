@@ -11,6 +11,7 @@
 
 #include "segcore/load_index_c.h"
 
+#include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "common/EasyAssert.h"
 #include "common/Types.h"
@@ -305,6 +306,11 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
             load_index_info->index_params);
         config[milvus::index::INDEX_FILES] = load_index_info->index_files;
 
+        if (load_index_info->field_type == milvus::DataType::JSON) {
+            index_info.json_cast_type = static_cast<milvus::DataType>(
+                std::stoi(config.at(JSON_CAST_TYPE).get<std::string>()));
+            index_info.json_path = config.at(JSON_PATH).get<std::string>();
+        }
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, remote_chunk_manager);
         fileManagerContext.set_for_loading_index(true);

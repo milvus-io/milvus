@@ -3,7 +3,7 @@ package lifetime
 import (
 	"sync"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // SafeChan is the utility type combining chan struct{} & sync.Once.

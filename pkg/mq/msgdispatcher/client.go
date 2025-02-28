@@ -24,14 +24,14 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/lock"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type (
@@ -98,13 +98,13 @@ func (c *client) Register(ctx context.Context, streamConfig *StreamConfig) (<-ch
 	}
 	// Check if the consumer number limit has been reached.
 	limit := paramtable.Get().MQCfg.MaxDispatcherNumPerPchannel.GetAsInt()
-	if manager.Num() >= limit {
+	if manager.NumConsumer() >= limit {
 		return nil, merr.WrapErrTooManyConsumers(vchannel, fmt.Sprintf("limit=%d", limit))
 	}
 	// Begin to register
 	ch, err := manager.Add(ctx, streamConfig)
 	if err != nil {
-		if manager.Num() == 0 {
+		if manager.NumTarget() == 0 {
 			manager.Close()
 			c.managers.Remove(pchannel)
 		}
@@ -122,7 +122,7 @@ func (c *client) Deregister(vchannel string) {
 	defer c.managerMut.Unlock(pchannel)
 	if manager, ok := c.managers.Get(pchannel); ok {
 		manager.Remove(vchannel)
-		if manager.Num() == 0 {
+		if manager.NumTarget() == 0 {
 			manager.Close()
 			c.managers.Remove(pchannel)
 		}

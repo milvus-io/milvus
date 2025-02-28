@@ -14,8 +14,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
 
 type jobManagerSuite struct {
@@ -104,7 +104,7 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 			allocator: alloc,
 			tasks:     make(map[int64]Task),
 			meta:      mt,
-			taskStats: expirable.NewLRU[UniqueID, Task](64, nil, time.Minute*5),
+			taskStats: expirable.NewLRU[UniqueID, Task](512, nil, time.Minute*5),
 		},
 		allocator: alloc,
 	}

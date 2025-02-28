@@ -10,11 +10,11 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // NewTxnManager creates a new transaction manager.
@@ -62,6 +62,7 @@ func (m *TxnManager) BeginNewTxn(ctx context.Context, timetick uint64, keepalive
 	if m.closed != nil {
 		return nil, status.NewTransactionExpired("manager closed")
 	}
+	metricsGuard := m.metrics.BeginTxn()
 	session := &TxnSession{
 		mu:           sync.Mutex{},
 		lastTimetick: timetick,
@@ -73,10 +74,9 @@ func (m *TxnManager) BeginNewTxn(ctx context.Context, timetick uint64, keepalive
 		state:         message.TxnStateBegin,
 		doneWait:      nil,
 		rollback:      false,
+		metricsGuard:  metricsGuard,
 	}
-
 	m.sessions[session.TxnContext().TxnID] = session
-	m.metrics.BeginTxn()
 	return session, nil
 }
 
@@ -88,7 +88,6 @@ func (m *TxnManager) CleanupTxnUntil(ts uint64) {
 	for id, session := range m.sessions {
 		if session.IsExpiredOrDone(ts) {
 			session.Cleanup()
-			m.metrics.Finish(session.State())
 			delete(m.sessions, id)
 		}
 	}

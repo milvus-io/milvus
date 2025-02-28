@@ -49,6 +49,8 @@ class IndexLoadTest : public ::testing::TestWithParam<Param> {
             data_type = milvus::DataType::VECTOR_BINARY;
         } else if (field_type == "vector_sparse_float") {
             data_type = milvus::DataType::VECTOR_SPARSE_FLOAT;
+        } else if (field_type == "vector_int8") {
+            data_type = milvus::DataType::VECTOR_INT8;
         } else if (field_type == "array") {
             data_type = milvus::DataType::ARRAY;
         } else {
@@ -105,6 +107,22 @@ INSTANTIATE_TEST_SUITE_P(
              {"M", "30"},
              {"mmap", "true"},
              {"field_type", "vector_fp16"}},
+            {0.125f, 1.0f, 0.0f, 1.0f, true}),
+        std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
+            {{"index_type", "HNSW"},
+             {"metric_type", "L2"},
+             {"efConstrcution", "300"},
+             {"M", "30"},
+             {"mmap", "false"},
+             {"field_type", "vector_int8"}},
+            {2.0f, 0.0f, 1.0f, 0.0f, true}),
+        std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
+            {{"index_type", "HNSW"},
+             {"metric_type", "L2"},
+             {"efConstrcution", "300"},
+             {"M", "30"},
+             {"mmap", "true"},
+             {"field_type", "vector_int8"}},
             {0.125f, 1.0f, 0.0f, 1.0f, true}),
         std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
             {{"index_type", "IVFFLAT"},

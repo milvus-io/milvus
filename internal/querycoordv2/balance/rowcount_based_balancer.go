@@ -26,11 +26,13 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type RowCountBasedBalancer struct {
@@ -87,6 +89,8 @@ func (b *RowCountBasedBalancer) AssignSegment(ctx context.Context, collectionID 
 // AssignSegment, when row count based balancer assign segments, it will assign channel to node with least global channel count.
 // try to make every query node has channel count
 func (b *RowCountBasedBalancer) AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan {
+	nodes = filterSQNIfStreamingServiceEnabled(nodes)
+
 	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
 	if !forceAssign {
 		versionRangeFilter := semver.MustParseRange(">2.3.x")
@@ -99,19 +103,29 @@ func (b *RowCountBasedBalancer) AssignChannel(ctx context.Context, collectionID 
 	}
 
 	nodeItems := b.convertToNodeItemsByChannel(nodes)
-	nodeItems = lo.Shuffle(nodeItems)
 	if len(nodeItems) == 0 {
 		return nil
 	}
+
 	queue := newPriorityQueue()
 	for _, item := range nodeItems {
 		queue.push(item)
 	}
 
-	plans := make([]ChannelAssignPlan, 0, len(channels))
+	plans := make([]ChannelAssignPlan, 0)
 	for _, c := range channels {
-		// pick the node with the least channel num and allocate to it.
-		ni := queue.pop().(*nodeItem)
+		var ni *nodeItem
+		if streamingutil.IsStreamingServiceEnabled() {
+			// When streaming service is enabled, we need to assign channel to the node where WAL is located.
+			nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(c.GetChannelName())
+			if item, ok := nodeItems[nodeID]; ok {
+				ni = item
+			}
+		}
+		if ni == nil {
+			// pick the node with the least channel num and allocate to it.
+			ni = queue.pop().(*nodeItem)
+		}
 		plan := ChannelAssignPlan{
 			From:    -1,
 			To:      ni.nodeID,
@@ -151,8 +165,8 @@ func (b *RowCountBasedBalancer) convertToNodeItemsBySegment(nodeIDs []int64) []*
 	return ret
 }
 
-func (b *RowCountBasedBalancer) convertToNodeItemsByChannel(nodeIDs []int64) []*nodeItem {
-	ret := make([]*nodeItem, 0, len(nodeIDs))
+func (b *RowCountBasedBalancer) convertToNodeItemsByChannel(nodeIDs []int64) map[int64]*nodeItem {
+	ret := make(map[int64]*nodeItem, len(nodeIDs))
 	for _, node := range nodeIDs {
 		channels := b.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(node))
 
@@ -161,7 +175,7 @@ func (b *RowCountBasedBalancer) convertToNodeItemsByChannel(nodeIDs []int64) []*
 		channelCount += b.scheduler.GetChannelTaskDelta(node, -1)
 		// more channel num, less priority
 		nodeItem := newNodeItem(channelCount, node)
-		ret = append(ret, &nodeItem)
+		ret[node] = &nodeItem
 	}
 	return ret
 }
@@ -181,22 +195,53 @@ func (b *RowCountBasedBalancer) BalanceReplica(ctx context.Context, replica *met
 			log.Info("balance plan generated", zap.Stringers("report details", br.records))
 		}
 	}()
-	if replica.NodesCount() == 0 {
-		return nil, nil
+
+	stoppingBalance := paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool()
+
+	channelPlans = b.balanceChannels(ctx, br, replica, stoppingBalance)
+	if len(channelPlans) == 0 {
+		segmentPlans = b.balanceSegments(ctx, replica, stoppingBalance)
+	}
+	return
+}
+
+func (b *RowCountBasedBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica, stoppingBalance bool) []ChannelAssignPlan {
+	var rwNodes, roNodes []int64
+	if streamingutil.IsStreamingServiceEnabled() {
+		rwNodes, roNodes = replica.GetRWSQNodes(), replica.GetROSQNodes()
+	} else {
+		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
 	}
 
+	if len(rwNodes) == 0 || !b.permitBalanceChannel(replica.GetCollectionID()) {
+		return nil
+	}
+	if len(roNodes) != 0 {
+		if !stoppingBalance {
+			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
+			return nil
+		}
+		return b.genStoppingChannelPlan(ctx, replica, rwNodes, roNodes)
+	}
+
+	if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
+		return b.genChannelPlan(ctx, br, replica, rwNodes)
+	}
+	return nil
+}
+
+func (b *RowCountBasedBalancer) balanceSegments(ctx context.Context, replica *meta.Replica, stoppingBalance bool) []SegmentAssignPlan {
 	rwNodes := replica.GetRWNodes()
 	roNodes := replica.GetRONodes()
-	if len(rwNodes) == 0 {
-		// no available nodes to balance
-		return nil, nil
-	}
 
-	segmentPlans, channelPlans = make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
+	if len(rwNodes) == 0 || !b.permitBalanceSegment(replica.GetCollectionID()) {
+		return nil
+	}
+	// print current distribution before generating plans
 	if len(roNodes) != 0 {
-		if !paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
+		if !stoppingBalance {
 			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
-			return nil, nil
+			return nil
 		}
 
 		log.Info("Handle stopping nodes",
@@ -204,24 +249,9 @@ func (b *RowCountBasedBalancer) BalanceReplica(ctx context.Context, replica *met
 			zap.Any("available nodes", rwNodes),
 		)
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		if b.permitBalanceChannel(replica.GetCollectionID()) {
-			channelPlans = append(channelPlans, b.genStoppingChannelPlan(ctx, replica, rwNodes, roNodes)...)
-		}
-
-		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
-			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(ctx, replica, rwNodes, roNodes)...)
-		}
-	} else {
-		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && b.permitBalanceChannel(replica.GetCollectionID()) {
-			channelPlans = append(channelPlans, b.genChannelPlan(ctx, br, replica, rwNodes)...)
-		}
-
-		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
-			segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, replica, rwNodes)...)
-		}
+		return b.genStoppingSegmentPlan(ctx, replica, rwNodes, roNodes)
 	}
-
-	return segmentPlans, channelPlans
+	return b.genSegmentPlan(ctx, replica, rwNodes)
 }
 
 func (b *RowCountBasedBalancer) genStoppingSegmentPlan(ctx context.Context, replica *meta.Replica, rwNodes []int64, roNodes []int64) []SegmentAssignPlan {

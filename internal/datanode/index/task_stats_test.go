@@ -31,11 +31,12 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestTaskStatsSuite(t *testing.T) {
@@ -81,26 +82,6 @@ func (s *TaskStatsSuite) GenSegmentWriterWithBM25(magic int64) {
 	s.segWriter = segWriter
 }
 
-func (s *TaskStatsSuite) Testbm25SerializeWriteError() {
-	s.Run("normal case", func() {
-		s.schema = genCollectionSchemaWithBM25()
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
-		s.GenSegmentWriterWithBM25(0)
-		cnt, binlogs, err := bm25SerializeWrite(context.Background(), "root_path", s.mockBinlogIO, 0, s.segWriter, 1)
-		s.Require().NoError(err)
-		s.Equal(int64(1), cnt)
-		s.Equal(1, len(binlogs))
-	})
-
-	s.Run("upload failed", func() {
-		s.schema = genCollectionSchemaWithBM25()
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
-		s.GenSegmentWriterWithBM25(0)
-		_, _, err := bm25SerializeWrite(context.Background(), "root_path", s.mockBinlogIO, 0, s.segWriter, 1)
-		s.Error(err)
-	})
-}
-
 func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 	s.Run("normal case", func() {
 		s.schema = genCollectionSchemaWithBM25()
@@ -115,7 +96,6 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			return result, nil
 		})
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-		s.mockBinlogIO.EXPECT().AsyncUpload(mock.Anything, mock.Anything).Return(nil)
 
 		ctx, cancel := context.WithCancel(context.Background())
 
@@ -131,10 +111,16 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			InsertLogs:      lo.Values(fBinlogs),
 			Schema:          s.schema,
 			NumRows:         1,
+			StartLogID:      0,
+			EndLogID:        7,
+			BinlogMaxSize:   64 * 1024 * 1024,
+			StorageConfig: &indexpb.StorageConfig{
+				RootPath: "root_path",
+			},
 		}, manager, s.mockBinlogIO)
 		err = task.PreExecute(ctx)
 		s.Require().NoError(err)
-		binlog, err := task.sortSegment(ctx)
+		binlog, err := task.sort(ctx)
 		s.Require().NoError(err)
 		s.Equal(5, len(binlog))
 
@@ -160,7 +146,6 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			return result, nil
 		})
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
-		s.mockBinlogIO.EXPECT().AsyncUpload(mock.Anything, mock.Anything).Return(nil)
 
 		ctx, cancel := context.WithCancel(context.Background())
 
@@ -176,10 +161,16 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			InsertLogs:      lo.Values(fBinlogs),
 			Schema:          s.schema,
 			NumRows:         1,
+			StartLogID:      0,
+			EndLogID:        7,
+			BinlogMaxSize:   64 * 1024 * 1024,
+			StorageConfig: &indexpb.StorageConfig{
+				RootPath: "root_path",
+			},
 		}, manager, s.mockBinlogIO)
 		err = task.PreExecute(ctx)
 		s.Require().NoError(err)
-		_, err = task.sortSegment(ctx)
+		_, err = task.sort(ctx)
 		s.Error(err)
 	})
 }

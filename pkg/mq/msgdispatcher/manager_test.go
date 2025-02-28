@@ -26,20 +26,22 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/mq/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestManager(t *testing.T) {
 	t.Run("test add and remove dispatcher", func(t *testing.T) {
 		c := NewDispatcherManager("mock_pchannel_0", typeutil.ProxyRole, 1, newMockFactory())
 		assert.NotNil(t, c)
-		assert.Equal(t, 0, c.Num())
+		assert.Equal(t, 0, c.NumConsumer())
+		assert.Equal(t, 0, c.NumTarget())
 
 		var offset int
 		for i := 0; i < 100; i++ {
@@ -50,14 +52,16 @@ func TestManager(t *testing.T) {
 				t.Logf("add vchannel, %s", vchannel)
 				_, err := c.Add(context.Background(), NewStreamConfig(vchannel, nil, common.SubscriptionPositionUnknown))
 				assert.NoError(t, err)
-				assert.Equal(t, offset, c.Num())
+				assert.Equal(t, offset, c.NumConsumer())
+				assert.Equal(t, offset, c.NumTarget())
 			}
 			for j := 0; j < rand.Intn(r); j++ {
 				vchannel := fmt.Sprintf("mock-pchannel-dml_0_vchannelv%d", offset)
 				t.Logf("remove vchannel, %s", vchannel)
 				c.Remove(vchannel)
 				offset--
-				assert.Equal(t, offset, c.Num())
+				assert.Equal(t, offset, c.NumConsumer())
+				assert.Equal(t, offset, c.NumTarget())
 			}
 		}
 	})
@@ -73,7 +77,8 @@ func TestManager(t *testing.T) {
 		assert.NoError(t, err)
 		_, err = c.Add(ctx, NewStreamConfig("mock_vchannel_2", nil, common.SubscriptionPositionUnknown))
 		assert.NoError(t, err)
-		assert.Equal(t, 3, c.Num())
+		assert.Equal(t, 3, c.NumConsumer())
+		assert.Equal(t, 3, c.NumTarget())
 		c.(*dispatcherManager).mainDispatcher.curTs.Store(1000)
 		c.(*dispatcherManager).mu.RLock()
 		for _, d := range c.(*dispatcherManager).soloDispatchers {
@@ -82,7 +87,8 @@ func TestManager(t *testing.T) {
 		c.(*dispatcherManager).mu.RUnlock()
 
 		c.(*dispatcherManager).tryMerge()
-		assert.Equal(t, 1, c.Num())
+		assert.Equal(t, 1, c.NumConsumer())
+		assert.Equal(t, 3, c.NumTarget())
 
 		info := &target{
 			vchannel: "mock_vchannel_2",
@@ -90,7 +96,7 @@ func TestManager(t *testing.T) {
 			ch:       nil,
 		}
 		c.(*dispatcherManager).split(info)
-		assert.Equal(t, 2, c.Num())
+		assert.Equal(t, 2, c.NumConsumer())
 	})
 
 	t.Run("test run and close", func(t *testing.T) {
@@ -104,7 +110,8 @@ func TestManager(t *testing.T) {
 		assert.NoError(t, err)
 		_, err = c.Add(ctx, NewStreamConfig("mock_vchannel_2", nil, common.SubscriptionPositionUnknown))
 		assert.NoError(t, err)
-		assert.Equal(t, 3, c.Num())
+		assert.Equal(t, 3, c.NumConsumer())
+		assert.Equal(t, 3, c.NumTarget())
 		c.(*dispatcherManager).mainDispatcher.curTs.Store(1000)
 		c.(*dispatcherManager).mu.RLock()
 		for _, d := range c.(*dispatcherManager).soloDispatchers {
@@ -117,8 +124,9 @@ func TestManager(t *testing.T) {
 		defer paramtable.Get().Reset(checkIntervalK)
 		go c.Run()
 		assert.Eventually(t, func() bool {
-			return c.Num() == 1 // expected merged
+			return c.NumConsumer() == 1 // expected merged
 		}, 3*time.Second, 10*time.Millisecond)
+		assert.Equal(t, 3, c.NumTarget())
 
 		assert.NotPanics(t, func() {
 			c.Close()
@@ -140,7 +148,8 @@ func TestManager(t *testing.T) {
 		assert.Error(t, err)
 		_, err = c.Add(ctx, NewStreamConfig("mock_vchannel_2", nil, common.SubscriptionPositionUnknown))
 		assert.Error(t, err)
-		assert.Equal(t, 0, c.Num())
+		assert.Equal(t, 0, c.NumConsumer())
+		assert.Equal(t, 0, c.NumTarget())
 
 		assert.NotPanics(t, func() {
 			c.Close()
@@ -364,7 +373,7 @@ func (suite *SimulationSuite) TestMerge() {
 			vchannel, positions[rand.Intn(len(positions))],
 			common.SubscriptionPositionUnknown,
 		)) // seek from random position
-		assert.NoError(suite.T(), err)
+		require.NoError(suite.T(), err)
 		suite.vchannels[vchannel] = &vchannelHelper{output: output}
 	}
 	wg := &sync.WaitGroup{}
@@ -374,9 +383,10 @@ func (suite *SimulationSuite) TestMerge() {
 	}
 
 	suite.Eventually(func() bool {
-		suite.T().Logf("dispatcherManager.dispatcherNum = %d", suite.manager.Num())
-		return suite.manager.Num() == 1 // expected all merged, only mainDispatcher exist
+		suite.T().Logf("dispatcherManager.dispatcherNum = %d", suite.manager.NumConsumer())
+		return suite.manager.NumConsumer() == 1 // expected all merged, only mainDispatcher exist
 	}, 15*time.Second, 100*time.Millisecond)
+	assert.Equal(suite.T(), vchannelNum, suite.manager.NumTarget())
 
 	cancel()
 	wg.Wait()
@@ -409,9 +419,10 @@ func (suite *SimulationSuite) TestSplit() {
 	}
 
 	suite.Eventually(func() bool {
-		suite.T().Logf("dispatcherManager.dispatcherNum = %d, splitNum+1 = %d", suite.manager.Num(), splitNum+1)
-		return suite.manager.Num() == splitNum+1 // expected 1 mainDispatcher and `splitNum` soloDispatchers
+		suite.T().Logf("dispatcherManager.dispatcherNum = %d, splitNum+1 = %d", suite.manager.NumConsumer(), splitNum+1)
+		return suite.manager.NumConsumer() == splitNum+1 // expected 1 mainDispatcher and `splitNum` soloDispatchers
 	}, 10*time.Second, 100*time.Millisecond)
+	assert.Equal(suite.T(), vchannelNum, suite.manager.NumTarget())
 
 	cancel()
 }

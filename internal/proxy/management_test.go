@@ -31,9 +31,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type ProxyManagementSuite struct {
@@ -228,7 +228,6 @@ func (s *ProxyManagementSuite) TestGetQueryNodeDistribution() {
 
 		s.querycoord.EXPECT().GetQueryNodeDistribution(mock.Anything, mock.Anything).Return(&querypb.GetQueryNodeDistributionResponse{
 			Status:           merr.Success(),
-			ID:               1,
 			ChannelNames:     []string{"channel-1"},
 			SealedSegmentIDs: []int64{1, 2, 3},
 		}, nil)
@@ -240,7 +239,7 @@ func (s *ProxyManagementSuite) TestGetQueryNodeDistribution() {
 		recorder := httptest.NewRecorder()
 		s.proxy.GetQueryNodeDistribution(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"ID":1,"channel_names":["channel-1"],"sealed_segmentIDs":[1,2,3]}`, recorder.Body.String())
+		s.Equal(`{"channel_names":["channel-1"],"sealed_segmentIDs":["1","2","3"]}`, recorder.Body.String())
 	})
 
 	s.Run("return_error", func() {
@@ -368,6 +367,68 @@ func (s *ProxyManagementSuite) TestResumeQueryCoordBalance() {
 
 		recorder := httptest.NewRecorder()
 		s.proxy.ResumeQueryCoordBalance(recorder, req)
+		s.Equal(http.StatusInternalServerError, recorder.Code)
+	})
+}
+
+func (s *ProxyManagementSuite) TestCheckBalanceStatus() {
+	s.Run("normal", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.querycoord.EXPECT().CheckBalanceStatus(mock.Anything, mock.Anything).Return(&querypb.CheckBalanceStatusResponse{
+			Status:   merr.Success(),
+			IsActive: true,
+		}, nil).Times(1)
+
+		req, err := http.NewRequest(http.MethodPost, management.RouteQueryCoordBalanceStatus, nil)
+		s.Require().NoError(err)
+
+		recorder := httptest.NewRecorder()
+		s.proxy.CheckQueryCoordBalanceStatus(recorder, req)
+		s.Equal(http.StatusOK, recorder.Code)
+		s.Equal(`{"msg": "OK", "status": "active"}`, recorder.Body.String())
+
+		s.querycoord.EXPECT().CheckBalanceStatus(mock.Anything, mock.Anything).Return(&querypb.CheckBalanceStatusResponse{
+			Status:   merr.Success(),
+			IsActive: false,
+		}, nil).Times(1)
+
+		req, err = http.NewRequest(http.MethodPost, management.RouteQueryCoordBalanceStatus, nil)
+		s.Require().NoError(err)
+		recorder = httptest.NewRecorder()
+		s.proxy.CheckQueryCoordBalanceStatus(recorder, req)
+		s.Equal(http.StatusOK, recorder.Code)
+		s.Equal(`{"msg": "OK", "status": "suspended"}`, recorder.Body.String())
+	})
+
+	s.Run("return_error", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.querycoord.EXPECT().CheckBalanceStatus(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
+
+		req, err := http.NewRequest(http.MethodPost, management.RouteQueryCoordBalanceStatus, nil)
+		s.Require().NoError(err)
+
+		recorder := httptest.NewRecorder()
+		s.proxy.CheckQueryCoordBalanceStatus(recorder, req)
+		s.Equal(http.StatusInternalServerError, recorder.Code)
+	})
+
+	s.Run("return_failure", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		req, err := http.NewRequest(http.MethodPost, management.RouteQueryCoordBalanceStatus, nil)
+		s.Require().NoError(err)
+
+		s.querycoord.EXPECT().CheckBalanceStatus(mock.Anything, mock.Anything).Return(&querypb.CheckBalanceStatusResponse{
+			Status: merr.Status(merr.ErrServiceNotReady),
+		}, nil)
+
+		recorder := httptest.NewRecorder()
+		s.proxy.CheckQueryCoordBalanceStatus(recorder, req)
 		s.Equal(http.StatusInternalServerError, recorder.Code)
 	})
 }

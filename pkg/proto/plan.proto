@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.plan;
 
-option go_package = "github.com/milvus-io/milvus/pkg/proto/planpb";
+option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/planpb";
 import "schema.proto";
 
 enum OpType {
@@ -38,6 +38,7 @@ enum VectorType {
   Float16Vector = 2;
   BFloat16Vector = 3;
   SparseFloatVector = 4;
+  Int8Vector = 5;
 };
 
 message GenericValue {
@@ -208,6 +209,11 @@ message BinaryArithOpEvalRangeExpr {
   string value_template_variable_name = 7;
 }
 
+message RandomSampleExpr {
+  float sample_factor = 1;
+  Expr predicate = 2;
+}
+
 message AlwaysTrueExpr {}
 
 message Expr {
@@ -227,6 +233,7 @@ message Expr {
     JSONContainsExpr json_contains_expr = 13;
     CallExpr call_expr = 14;
     NullExpr null_expr = 15;
+    RandomSampleExpr random_sample_expr = 16;
   };
   bool is_template = 20;
 }

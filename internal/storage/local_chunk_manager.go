@@ -23,14 +23,13 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"golang.org/x/exp/mmap"
 
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // LocalChunkManager is responsible for read and write local file.
@@ -155,11 +154,7 @@ func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string,
 			}
 
 			if strings.HasPrefix(filePath, prefix) && !f.IsDir() {
-				modTime, err := lcm.getModTime(filePath)
-				if err != nil {
-					return err
-				}
-				if !walkFunc(&ChunkObjectInfo{FilePath: filePath, ModifyTime: modTime}) {
+				if !walkFunc(&ChunkObjectInfo{FilePath: filePath, ModifyTime: f.ModTime()}) {
 					return nil
 				}
 			}
@@ -176,11 +171,14 @@ func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string,
 			return ctx.Err()
 		}
 
-		modTime, err := lcm.getModTime(filePath)
+		f, err := os.Stat(filePath)
 		if err != nil {
-			return err
+			if errors.Is(err, os.ErrNotExist) {
+				return merr.WrapErrIoKeyNotFound(filePath)
+			}
+			return merr.WrapErrIoFailed(filePath, err)
 		}
-		if !walkFunc(&ChunkObjectInfo{FilePath: filePath, ModifyTime: modTime}) {
+		if !walkFunc(&ChunkObjectInfo{FilePath: filePath, ModifyTime: f.ModTime()}) {
 			return nil
 		}
 	}
@@ -262,20 +260,4 @@ func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 		return err
 	}
 	return removeErr
-}
-
-func (lcm *LocalChunkManager) getModTime(filepath string) (time.Time, error) {
-	fi, err := os.Stat(filepath)
-	if err != nil {
-		log.Warn("stat fileinfo error",
-			zap.String("filepath", filepath),
-			zap.Error(err),
-		)
-		if os.IsNotExist(err) {
-			return time.Time{}, merr.WrapErrIoKeyNotFound(filepath)
-		}
-		return time.Time{}, merr.WrapErrIoFailed(filepath, err)
-	}
-
-	return fi.ModTime(), nil
 }

@@ -141,6 +141,17 @@ class FieldData<SparseFloatVector> : public FieldDataSparseVectorImpl {
     }
 };
 
+template <>
+class FieldData<Int8Vector> : public FieldDataImpl<int8, false> {
+ public:
+    explicit FieldData(int64_t dim,
+                       DataType data_type,
+                       int64_t buffered_num_rows = 0)
+        : FieldDataImpl<int8, false>::FieldDataImpl(
+              dim, data_type, false, buffered_num_rows) {
+    }
+};
+
 using FieldDataPtr = std::shared_ptr<FieldDataBase>;
 using FieldDataChannel = Channel<FieldDataPtr>;
 using FieldDataChannelPtr = std::shared_ptr<FieldDataChannel>;

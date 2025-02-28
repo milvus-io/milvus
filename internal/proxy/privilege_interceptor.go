@@ -17,11 +17,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type PrivilegeFunc func(ctx context.Context, req interface{}) (context.Context, error)
@@ -129,7 +129,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		log.Warn("GetCurUserFromContext fail", zap.Error(err))
 		return ctx, err
 	}
-	if username == util.UserRoot {
+	if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
 		return ctx, nil
 	}
 	roleNames, err := GetRole(username)

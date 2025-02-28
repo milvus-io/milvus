@@ -20,7 +20,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 var Params = paramtable.Get()

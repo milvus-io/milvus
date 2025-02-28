@@ -5,4 +5,6 @@ const (
 
 	DirectoryWAL           = "wal"
 	DirectorySegmentAssign = "segment-assign"
+
+	KeyConsumeCheckpoint = "consume-checkpoint"
 )

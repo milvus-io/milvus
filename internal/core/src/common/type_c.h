@@ -55,6 +55,7 @@ enum CDataType {
     Float16Vector = 102,
     BFloat16Vector = 103,
     SparseFloatVector = 104,
+    Int8Vector = 105,
 };
 typedef enum CDataType CDataType;
 
@@ -94,6 +95,7 @@ typedef struct CStorageConfig {
     bool useVirtualHost;
     int64_t requestTimeoutMs;
     const char* gcp_credential_json;
+    bool use_custom_part_upload;
 } CStorageConfig;
 
 typedef struct CMmapConfig {

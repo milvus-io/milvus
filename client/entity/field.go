@@ -62,6 +62,8 @@ func (t FieldType) Name() string {
 		return "Float16Vector"
 	case FieldTypeBFloat16Vector:
 		return "BFloat16Vector"
+	case FieldTypeInt8Vector:
+		return "Int8Vector"
 	default:
 		return "undefined"
 	}
@@ -100,6 +102,8 @@ func (t FieldType) String() string {
 		return "[]byte"
 	case FieldTypeBFloat16Vector:
 		return "[]byte"
+	case FieldTypeInt8Vector:
+		return "[]int8"
 	default:
 		return "undefined"
 	}
@@ -389,6 +393,14 @@ func (f *Field) WithAnalyzerParams(params map[string]any) *Field {
 	}
 	bs, _ := json.Marshal(params)
 	f.TypeParams["analyzer_params"] = string(bs)
+	return f
+}
+
+func (f *Field) WithEnableMatch(enable bool) *Field {
+	if f.TypeParams == nil {
+		f.TypeParams = make(map[string]string)
+	}
+	f.TypeParams[TypeParamEnableMatch] = strconv.FormatBool(enable)
 	return f
 }
 

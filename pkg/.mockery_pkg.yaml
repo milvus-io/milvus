@@ -1,21 +1,21 @@
 quiet: False
 with-expecter: True
 filename: "mock_{{.InterfaceName}}.go"
-dir: 'mocks/{{trimPrefix .PackagePath "github.com/milvus-io/milvus/pkg" | dir }}/mock_{{.PackageName}}'
+dir: 'mocks/{{trimPrefix .PackagePath "github.com/milvus-io/milvus/pkg/v2" | dir }}/mock_{{.PackageName}}'
 mockname: "Mock{{.InterfaceName}}"
 outpkg: "mock_{{.PackageName}}"
 packages:
-  github.com/milvus-io/milvus/pkg/kv:
+  github.com/milvus-io/milvus/pkg/v2/kv:
     interfaces:
       MetaKv:
-  github.com/milvus-io/milvus/pkg/streaming/util/message:
+  github.com/milvus-io/milvus/pkg/v2/streaming/util/message:
     interfaces:
       MessageID:
       ImmutableMessage:
       ImmutableTxnMessage:
       MutableMessage:
       RProperties:
-  github.com/milvus-io/milvus/pkg/streaming/walimpls:
+  github.com/milvus-io/milvus/pkg/v2/streaming/walimpls:
     interfaces:
       OpenerBuilderImpls:
       OpenerImpls:
@@ -24,11 +24,11 @@ packages:
       Interceptor:
       InterceptorWithReady:
       InterceptorBuilder:
-  github.com/milvus-io/milvus/pkg/streaming/util/types:
+  github.com/milvus-io/milvus/pkg/v2/streaming/util/types:
     interfaces:
       AssignmentDiscoverWatcher:
       AssignmentRebalanceTrigger:
-  github.com/milvus-io/milvus/pkg/proto/streamingpb:
+  github.com/milvus-io/milvus/pkg/v2/proto/streamingpb:
     interfaces:
       StreamingNodeHandlerService_ConsumeServer:
       StreamingNodeHandlerService_ProduceServer:
@@ -39,3 +39,6 @@ packages:
       StreamingNodeHandlerServiceClient:
       StreamingNodeHandlerService_ConsumeClient:
       StreamingNodeHandlerService_ProduceClient:
+      StreamingCoordBroadcastService_WatchServer:
+      StreamingCoordBroadcastServiceClient:
+      StreamingCoordBroadcastService_WatchClient:

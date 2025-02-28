@@ -43,21 +43,21 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
-	"github.com/milvus-io/milvus/pkg/config"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	rocksmqimpl "github.com/milvus-io/milvus/pkg/mq/mqimpl/rocksmq/server"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/nmq"
-	"github.com/milvus-io/milvus/pkg/tracer"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/expr"
-	"github.com/milvus-io/milvus/pkg/util/gc"
-	"github.com/milvus-io/milvus/pkg/util/generic"
-	"github.com/milvus-io/milvus/pkg/util/logutil"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	_ "github.com/milvus-io/milvus/pkg/util/symbolizer" // support symbolizer and crash dump
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/config"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	rocksmqimpl "github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/nmq"
+	"github.com/milvus-io/milvus/pkg/v2/tracer"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/expr"
+	"github.com/milvus-io/milvus/pkg/v2/util/gc"
+	"github.com/milvus-io/milvus/pkg/v2/util/generic"
+	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	_ "github.com/milvus-io/milvus/pkg/v2/util/symbolizer" // support symbolizer and crash dump
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // all milvus related metrics is in a separate registry
@@ -331,6 +331,9 @@ func (mr *MilvusRoles) Run() {
 	thw := internalmetrics.NewThreadWatcher()
 	thw.Start()
 	defer thw.Stop()
+
+	internalmetrics.InitHolmes()
+	defer internalmetrics.CloseHolmes()
 
 	// only standalone enable localMsg
 	if mr.Local {

@@ -33,13 +33,13 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type CollectionManagerSuite struct {
@@ -477,71 +477,6 @@ func (suite *CollectionManagerSuite) TestUpdateLoadPercentage() {
 	suite.Equal(int32(100), collection.LoadPercentage)
 	suite.Equal(querypb.LoadStatus_Loaded, collection.Status)
 	suite.Equal(querypb.LoadStatus_Loaded, mgr.CalculateLoadStatus(ctx, collection.CollectionID))
-}
-
-func (suite *CollectionManagerSuite) TestUpgradeRecover() {
-	suite.releaseAll()
-	mgr := suite.mgr
-	ctx := suite.ctx
-
-	// put old version of collections and partitions
-	for i, collection := range suite.collections {
-		status := querypb.LoadStatus_Loaded
-		if suite.loadTypes[i] == querypb.LoadType_LoadCollection {
-			mgr.PutCollection(ctx, &Collection{
-				CollectionLoadInfo: &querypb.CollectionLoadInfo{
-					CollectionID:  collection,
-					ReplicaNumber: suite.replicaNumber[i],
-					Status:        status,
-					LoadType:      querypb.LoadType_UnKnownType, // old version's collection didn't set loadType
-				},
-				LoadPercentage: suite.colLoadPercent[i],
-				CreatedAt:      time.Now(),
-			})
-		} else {
-			for _, partition := range suite.partitions[collection] {
-				mgr.PutPartition(ctx, &Partition{
-					PartitionLoadInfo: &querypb.PartitionLoadInfo{
-						CollectionID:  collection,
-						PartitionID:   partition,
-						ReplicaNumber: suite.replicaNumber[i],
-						Status:        status,
-					},
-					LoadPercentage: suite.colLoadPercent[i],
-					CreatedAt:      time.Now(),
-				})
-			}
-		}
-	}
-
-	// set expectations
-	for i, collection := range suite.collections {
-		if suite.loadTypes[i] == querypb.LoadType_LoadCollection {
-			suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
-		}
-		suite.broker.EXPECT().DescribeCollection(mock.Anything, collection).Return(&milvuspb.DescribeCollectionResponse{
-			Status: merr.Success(),
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: common.RowIDField},
-					{FieldID: common.TimeStampField},
-					{FieldID: 100, Name: "pk"},
-					{FieldID: 101, Name: "vector"},
-				},
-			},
-		}, nil).Maybe()
-	}
-
-	// do recovery
-	suite.clearMemory()
-	err := mgr.Recover(ctx, suite.broker)
-	suite.NoError(err)
-	suite.checkLoadResult()
-
-	for i, collection := range suite.collections {
-		newColl := mgr.GetCollection(ctx, collection)
-		suite.Equal(suite.loadTypes[i], newColl.GetLoadType())
-	}
 }
 
 func (suite *CollectionManagerSuite) TestUpgradeLoadFields() {

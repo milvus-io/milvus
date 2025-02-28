@@ -5,7 +5,7 @@ package datacoord
 import (
 	context "context"
 
-	datapb "github.com/milvus-io/milvus/pkg/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -75,6 +75,63 @@ func (_c *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call) Return(_a0 bool
 }
 
 func (_c *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call) RunAndReturn(run func(context.Context, []int64) (bool, bool)) *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CheckSegmentsStating provides a mock function with given fields: ctx, segmentID
+func (_m *MockCompactionMeta) CheckSegmentsStating(ctx context.Context, segmentID []int64) (bool, bool) {
+	ret := _m.Called(ctx, segmentID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckSegmentsStating")
+	}
+
+	var r0 bool
+	var r1 bool
+	if rf, ok := ret.Get(0).(func(context.Context, []int64) (bool, bool)); ok {
+		return rf(ctx, segmentID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, []int64) bool); ok {
+		r0 = rf(ctx, segmentID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, []int64) bool); ok {
+		r1 = rf(ctx, segmentID)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	return r0, r1
+}
+
+// MockCompactionMeta_CheckSegmentsStating_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckSegmentsStating'
+type MockCompactionMeta_CheckSegmentsStating_Call struct {
+	*mock.Call
+}
+
+// CheckSegmentsStating is a helper method to define mock.On call
+//   - ctx context.Context
+//   - segmentID []int64
+func (_e *MockCompactionMeta_Expecter) CheckSegmentsStating(ctx interface{}, segmentID interface{}) *MockCompactionMeta_CheckSegmentsStating_Call {
+	return &MockCompactionMeta_CheckSegmentsStating_Call{Call: _e.mock.On("CheckSegmentsStating", ctx, segmentID)}
+}
+
+func (_c *MockCompactionMeta_CheckSegmentsStating_Call) Run(run func(ctx context.Context, segmentID []int64)) *MockCompactionMeta_CheckSegmentsStating_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]int64))
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_CheckSegmentsStating_Call) Return(_a0 bool, _a1 bool) *MockCompactionMeta_CheckSegmentsStating_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCompactionMeta_CheckSegmentsStating_Call) RunAndReturn(run func(context.Context, []int64) (bool, bool)) *MockCompactionMeta_CheckSegmentsStating_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -731,6 +788,40 @@ func (_c *MockCompactionMeta_SelectSegments_Call) Return(_a0 []*SegmentInfo) *Mo
 }
 
 func (_c *MockCompactionMeta_SelectSegments_Call) RunAndReturn(run func(context.Context, ...SegmentFilter) []*SegmentInfo) *MockCompactionMeta_SelectSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetSegmentStating provides a mock function with given fields: segmentID, stating
+func (_m *MockCompactionMeta) SetSegmentStating(segmentID int64, stating bool) {
+	_m.Called(segmentID, stating)
+}
+
+// MockCompactionMeta_SetSegmentStating_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetSegmentStating'
+type MockCompactionMeta_SetSegmentStating_Call struct {
+	*mock.Call
+}
+
+// SetSegmentStating is a helper method to define mock.On call
+//   - segmentID int64
+//   - stating bool
+func (_e *MockCompactionMeta_Expecter) SetSegmentStating(segmentID interface{}, stating interface{}) *MockCompactionMeta_SetSegmentStating_Call {
+	return &MockCompactionMeta_SetSegmentStating_Call{Call: _e.mock.On("SetSegmentStating", segmentID, stating)}
+}
+
+func (_c *MockCompactionMeta_SetSegmentStating_Call) Run(run func(segmentID int64, stating bool)) *MockCompactionMeta_SetSegmentStating_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(bool))
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_SetSegmentStating_Call) Return() *MockCompactionMeta_SetSegmentStating_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCompactionMeta_SetSegmentStating_Call) RunAndReturn(run func(int64, bool)) *MockCompactionMeta_SetSegmentStating_Call {
 	_c.Call.Return(run)
 	return _c
 }

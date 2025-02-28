@@ -32,13 +32,13 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ImportTask struct {
@@ -191,7 +191,12 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 			}
 			return err
 		}
-		err = AppendSystemFieldsData(t, data)
+		rowNum := GetInsertDataRowCount(data, t.GetSchema())
+		if rowNum == 0 {
+			log.Info("0 row was imported, the data may have been deleted", WrapLogFields(t)...)
+			continue
+		}
+		err = AppendSystemFieldsData(t, data, rowNum)
 		if err != nil {
 			return err
 		}

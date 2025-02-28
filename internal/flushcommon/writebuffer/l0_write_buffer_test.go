@@ -17,12 +17,12 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/testutils"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 type L0WriteBufferSuite struct {
@@ -202,16 +202,6 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 		s.NoError(err)
 		s.MetricsEqual(value, 5847)
 	})
-}
-
-func (s *L0WriteBufferSuite) TestCreateFailure() {
-	metacache := metacache.NewMockMetaCache(s.T())
-	metacache.EXPECT().Collection().Return(s.collID)
-	metacache.EXPECT().Schema().Return(&schemapb.CollectionSchema{})
-	_, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
-		idAllocator: s.allocator,
-	})
-	s.Error(err)
 }
 
 func TestL0WriteBuffer(t *testing.T) {

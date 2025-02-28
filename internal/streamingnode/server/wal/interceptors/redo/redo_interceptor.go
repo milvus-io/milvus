@@ -6,7 +6,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 var (
@@ -18,6 +18,7 @@ var (
 // It's useful when the append operation want to refresh the append context (such as timetick belong to the message)
 type redoAppendInterceptor struct{}
 
+// TODO: should be removed after lock-based before timetick is applied.
 func (r *redoAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (msgID message.MessageID, err error) {
 	for {
 		if ctx.Err() != nil {

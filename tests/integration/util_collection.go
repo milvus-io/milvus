@@ -11,10 +11,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 )
 
 type CreateCollectionConfig struct {
@@ -26,6 +26,49 @@ type CreateCollectionConfig struct {
 	Dim              int
 	ReplicaNumber    int32
 	ResourceGroups   []string
+}
+
+func (s *MiniClusterSuite) InsertAndFlush(ctx context.Context, dbName, collectionName string, rowNum, dim int) error {
+	fVecColumn := NewFloatVectorFieldData(FloatVecField, rowNum, dim)
+	hashKeys := GenerateHashKeys(rowNum)
+	insertResult, err := s.Cluster.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldsData:     []*schemapb.FieldData{fVecColumn},
+		HashKeys:       hashKeys,
+		NumRows:        uint32(rowNum),
+	})
+	if err != nil {
+		return err
+	}
+	if !merr.Ok(insertResult.Status) {
+		return merr.Error(insertResult.Status)
+	}
+
+	flushResp, err := s.Cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		DbName:          dbName,
+		CollectionNames: []string{collectionName},
+	})
+	if err != nil {
+		return err
+	}
+	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	if !has || segmentIDs == nil {
+		return merr.Error(&commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_IllegalArgument,
+			Reason:    "failed to get segment IDs",
+		})
+	}
+	ids := segmentIDs.GetData()
+	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
+	if !has {
+		return merr.Error(&commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_IllegalArgument,
+			Reason:    "failed to get flush timestamp",
+		})
+	}
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
+	return nil
 }
 
 func (s *MiniClusterSuite) CreateCollectionWithConfiguration(ctx context.Context, cfg *CreateCollectionConfig) {
@@ -60,30 +103,8 @@ func (s *MiniClusterSuite) CreateCollectionWithConfiguration(ctx context.Context
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	for i := 0; i < cfg.SegmentNum; i++ {
-		fVecColumn := NewFloatVectorFieldData(FloatVecField, cfg.RowNumPerSegment, cfg.Dim)
-		hashKeys := GenerateHashKeys(cfg.RowNumPerSegment)
-		insertResult, err := s.Cluster.Proxy.Insert(ctx, &milvuspb.InsertRequest{
-			DbName:         cfg.DBName,
-			CollectionName: cfg.CollectionName,
-			FieldsData:     []*schemapb.FieldData{fVecColumn},
-			HashKeys:       hashKeys,
-			NumRows:        uint32(cfg.RowNumPerSegment),
-		})
+		err = s.InsertAndFlush(ctx, cfg.DBName, cfg.CollectionName, cfg.RowNumPerSegment, cfg.Dim)
 		s.NoError(err)
-		s.True(merr.Ok(insertResult.Status))
-
-		flushResp, err := s.Cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
-			DbName:          cfg.DBName,
-			CollectionNames: []string{cfg.CollectionName},
-		})
-		s.NoError(err)
-		segmentIDs, has := flushResp.GetCollSegIDs()[cfg.CollectionName]
-		ids := segmentIDs.GetData()
-		s.Require().NotEmpty(segmentIDs)
-		s.Require().True(has)
-		flushTs, has := flushResp.GetCollFlushTs()[cfg.CollectionName]
-		s.True(has)
-		s.WaitForFlush(ctx, ids, flushTs, cfg.DBName, cfg.CollectionName)
 	}
 
 	// create index

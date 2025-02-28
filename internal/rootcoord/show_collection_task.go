@@ -24,12 +24,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // showCollectionTask show collection request task
@@ -58,7 +58,7 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 			return privilegeColls, nil
 		}
 		curUser, err := contextutil.GetCurUserFromContext(ctx)
-		if err != nil || curUser == util.UserRoot {
+		if err != nil || (curUser == util.UserRoot && !Params.CommonCfg.RootShouldBindRole.GetAsBool()) {
 			if err != nil {
 				log.Ctx(ctx).Warn("get current user from context failed", zap.Error(err))
 			}
@@ -78,6 +78,9 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 			if role.GetName() == util.RoleAdmin {
 				privilegeColls.Insert(util.AnyWord)
 				return privilegeColls, nil
+			}
+			if role.GetName() == util.RolePublic {
+				continue
 			}
 			entities, err := t.core.meta.SelectGrant(ctx, "", &milvuspb.GrantEntity{
 				Role:   role,

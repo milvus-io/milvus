@@ -3,8 +3,8 @@ package channel
 import (
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
 // newPChannelMeta creates a new PChannelMeta.
@@ -127,23 +127,11 @@ func (m *mutablePChannel) TryAssignToServerID(streamingNode types.StreamingNodeI
 }
 
 // AssignToServerDone assigns the channel to the server done.
-func (m *mutablePChannel) AssignToServerDone() []types.PChannelInfoAssigned {
-	var history []types.PChannelInfoAssigned
+func (m *mutablePChannel) AssignToServerDone() {
 	if m.inner.State == streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNING {
-		history = make([]types.PChannelInfoAssigned, 0, len(m.inner.Histories))
-		for _, h := range m.inner.Histories {
-			history = append(history, types.PChannelInfoAssigned{
-				Channel: types.PChannelInfo{
-					Name: m.inner.Channel.Name,
-					Term: h.GetTerm(),
-				},
-				Node: types.NewStreamingNodeInfoFromProto(h.Node),
-			})
-		}
 		m.inner.Histories = make([]*streamingpb.PChannelAssignmentLog, 0)
 		m.inner.State = streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED
 	}
-	return history
 }
 
 // MarkAsUnavailable marks the channel as unavailable.

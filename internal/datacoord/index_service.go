@@ -19,24 +19,30 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // serverID return the session serverID
@@ -165,18 +171,69 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 	}
 }
 
-func (s *Server) getFieldNameByID(ctx context.Context, collID, fieldID int64) (string, error) {
-	resp, err := s.broker.DescribeCollectionInternal(ctx, collID)
-	if err != nil {
-		return "", err
-	}
-
-	for _, field := range resp.GetSchema().GetFields() {
+func (s *Server) getFieldNameByID(schema *schemapb.CollectionSchema, fieldID int64) (string, error) {
+	for _, field := range schema.GetFields() {
 		if field.FieldID == fieldID {
 			return field.Name, nil
 		}
 	}
 	return "", nil
+}
+
+func (s *Server) getSchema(ctx context.Context, collID int64) (*schemapb.CollectionSchema, error) {
+	resp, err := s.broker.DescribeCollectionInternal(ctx, collID)
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetSchema(), nil
+}
+
+func isJsonField(schema *schemapb.CollectionSchema, fieldID int64) (bool, error) {
+	for _, f := range schema.Fields {
+		if f.FieldID == fieldID {
+			return typeutil.IsJSONType(f.DataType), nil
+		}
+	}
+	return false, merr.WrapErrFieldNotFound(fieldID)
+}
+
+func getIndexParam(indexParams []*commonpb.KeyValuePair, key string) (string, error) {
+	for _, p := range indexParams {
+		if p.Key == key {
+			return p.Value, nil
+		}
+	}
+	return "", merr.WrapErrParameterInvalidMsg("%s not found", key)
+}
+
+func setIndexParam(indexParams []*commonpb.KeyValuePair, key, value string) {
+	for _, p := range indexParams {
+		if p.Key == key {
+			p.Value = value
+		}
+	}
+}
+
+func (s *Server) parseAndVerifyNestedPath(identifier string, schema *schemapb.CollectionSchema, fieldID int64) (string, error) {
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		return "", err
+	}
+
+	var identifierExpr *planpb.Expr
+	err = planparserv2.ParseIdentifier(helper, identifier, func(expr *planpb.Expr) error {
+		identifierExpr = expr
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if identifierExpr.GetColumnExpr().GetInfo().GetFieldId() != fieldID {
+		return "", fmt.Errorf("fieldID not match with field name")
+	}
+
+	nestedPath := identifierExpr.GetColumnExpr().GetInfo().GetNestedPath()
+	return "/" + strings.Join(nestedPath, "/"), nil
 }
 
 // CreateIndex create an index on collection.
@@ -200,21 +257,59 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 	metrics.IndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
 
+	schema, err := s.getSchema(ctx, req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	isJson, err := isJsonField(schema, req.GetFieldID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
+	if isJson {
+		jsonPath, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
+		if err != nil {
+			log.Error("get json path from index params failed", zap.Error(err))
+			return merr.Status(err), nil
+		}
+		nestedPath, err := s.parseAndVerifyNestedPath(jsonPath, schema, req.GetFieldID())
+		if err != nil {
+			log.Error("parse nested path failed", zap.Error(err))
+			return merr.Status(err), nil
+		}
+		setIndexParam(req.GetIndexParams(), common.JSONPathKey, nestedPath)
+	}
+
 	if req.GetIndexName() == "" {
 		indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
-		if len(indexes) == 0 {
-			fieldName, err := s.getFieldNameByID(ctx, req.GetCollectionID(), req.GetFieldID())
+		fieldName, err := s.getFieldNameByID(schema, req.GetFieldID())
+		if err != nil {
+			log.Warn("get field name from schema failed", zap.Int64("fieldID", req.GetFieldID()))
+			return merr.Status(err), nil
+		}
+		defaultIndexName := fieldName
+		if isJson {
+			jsonPath, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
 			if err != nil {
-				log.Warn("get field name from schema failed", zap.Int64("fieldID", req.GetFieldID()))
 				return merr.Status(err), nil
 			}
-			req.IndexName = fieldName
+
+			indexes = lo.Filter(indexes, func(index *model.Index, i int) bool {
+				path, err := getIndexParam(index.IndexParams, common.JSONPathKey)
+				return err == nil && path == jsonPath
+			})
+
+			defaultIndexName += jsonPath
+		}
+
+		if len(indexes) == 0 {
+			req.IndexName = defaultIndexName
 		} else if len(indexes) == 1 {
 			req.IndexName = indexes[0].IndexName
 		}
 	}
 
-	indexID, err := s.meta.indexMeta.CanCreateIndex(req)
+	indexID, err := s.meta.indexMeta.CanCreateIndex(req, isJson)
 	if err != nil {
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
@@ -242,13 +337,15 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			return merr.Status(err), nil
 		}
 	}
+	// exclude the mmap.enable param, because it will be conflict with the index's mmap.enable param
+	typeParams := DeleteParams(req.GetTypeParams(), []string{common.MmapEnabledKey})
 
 	index := &model.Index{
 		CollectionID:    req.GetCollectionID(),
 		FieldID:         req.GetFieldID(),
 		IndexID:         indexID,
 		IndexName:       req.GetIndexName(),
-		TypeParams:      req.GetTypeParams(),
+		TypeParams:      typeParams,
 		IndexParams:     req.GetIndexParams(),
 		CreateTime:      req.GetTimestamp(),
 		IsAutoIndex:     req.GetIsAutoIndex(),
@@ -295,16 +392,16 @@ func ValidateIndexParams(index *model.Index) error {
 	indexParams := funcutil.KeyValuePair2Map(index.IndexParams)
 	userIndexParams := funcutil.KeyValuePair2Map(index.UserIndexParams)
 	if err := indexparamcheck.ValidateMmapIndexParams(indexType, indexParams); err != nil {
-		return merr.WrapErrParameterInvalidMsg("invalid mmap index params", err.Error())
+		return merr.WrapErrParameterInvalidMsg("invalid mmap index params: %s", err.Error())
 	}
 	if err := indexparamcheck.ValidateMmapIndexParams(indexType, userIndexParams); err != nil {
-		return merr.WrapErrParameterInvalidMsg("invalid mmap user index params", err.Error())
+		return merr.WrapErrParameterInvalidMsg("invalid mmap user index params: %s", err.Error())
 	}
 	if err := indexparamcheck.ValidateOffsetCacheIndexParams(indexType, indexParams); err != nil {
-		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params", err.Error())
+		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params: %s", err.Error())
 	}
 	if err := indexparamcheck.ValidateOffsetCacheIndexParams(indexType, userIndexParams); err != nil {
-		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params", err.Error())
+		return merr.WrapErrParameterInvalidMsg("invalid offset cache index params: %s", err.Error())
 	}
 	return nil
 }
@@ -339,7 +436,7 @@ func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*
 	})
 }
 
-func DeleteParams(index *model.Index, from []*commonpb.KeyValuePair, deletes []string) []*commonpb.KeyValuePair {
+func DeleteParams(from []*commonpb.KeyValuePair, deletes []string) []*commonpb.KeyValuePair {
 	params := make(map[string]string)
 	for _, param := range from {
 		params[param.GetKey()] = param.GetValue()
@@ -386,8 +483,33 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 		return merr.Status(merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")), nil
 	}
 
+	collInfo, err := s.handler.GetCollection(ctx, req.GetCollectionID())
+	if err != nil {
+		log.Warn("failed to get collection", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	schemaHelper, err := typeutil.CreateSchemaHelper(collInfo.Schema)
+	if err != nil {
+		log.Warn("failed to create schema helper", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	reqIndexParamMap := funcutil.KeyValuePair2Map(req.GetParams())
+
 	for _, index := range indexes {
 		if len(req.GetParams()) > 0 {
+			fieldSchema, err := schemaHelper.GetFieldFromID(index.FieldID)
+			if err != nil {
+				log.Warn("failed to get field schema", zap.Error(err))
+				return merr.Status(err), nil
+			}
+			isVecIndex := typeutil.IsVectorType(fieldSchema.DataType)
+			err = pkgcommon.ValidateAutoIndexMmapConfig(Params.AutoIndexConfig.Enable.GetAsBool(), isVecIndex, reqIndexParamMap)
+			if err != nil {
+				log.Warn("failed to validate auto index mmap config", zap.Error(err))
+				return merr.Status(err), nil
+			}
+
 			// update user index params
 			newUserIndexParams := UpdateParams(index, index.UserIndexParams, req.GetParams())
 			log.Info("alter index user index params",
@@ -405,7 +527,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 			index.IndexParams = newIndexParams
 		} else if len(req.GetDeleteKeys()) > 0 {
 			// delete user index params
-			newUserIndexParams := DeleteParams(index, index.UserIndexParams, req.GetDeleteKeys())
+			newUserIndexParams := DeleteParams(index.UserIndexParams, req.GetDeleteKeys())
 			log.Info("alter index user deletekeys",
 				zap.String("indexName", index.IndexName),
 				zap.Any("params", newUserIndexParams),
@@ -413,7 +535,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 			index.UserIndexParams = newUserIndexParams
 
 			// delete index params
-			newIndexParams := DeleteParams(index, index.IndexParams, req.GetDeleteKeys())
+			newIndexParams := DeleteParams(index.IndexParams, req.GetDeleteKeys())
 			log.Info("alter index index deletekeys",
 				zap.String("indexName", index.IndexName),
 				zap.Any("params", newIndexParams),
@@ -426,7 +548,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 		}
 	}
 
-	err := s.meta.indexMeta.AlterIndex(ctx, indexes...)
+	err = s.meta.indexMeta.AlterIndex(ctx, indexes...)
 	if err != nil {
 		log.Warn("failed to alter index", zap.Error(err))
 		return merr.Status(err), nil

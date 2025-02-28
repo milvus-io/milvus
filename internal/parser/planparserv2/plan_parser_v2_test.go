@@ -3,6 +3,7 @@ package planparserv2
 import (
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"testing"
 
@@ -12,9 +13,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
@@ -203,25 +204,44 @@ func TestExpr_Like(t *testing.T) {
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
-	exprStrs := []string{
-		`VarCharField like "prefix%"`,
-		`VarCharField like "equal"`,
-		`JSONField["A"] like "name*"`,
-		`$meta["A"] like "name*"`,
-	}
-	for _, exprStr := range exprStrs {
-		assertValidExpr(t, helper, exprStr)
-	}
+	expr := `A like "8\\_0%"`
+	plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	fmt.Println(plan)
+	assert.Equal(t, planpb.OpType_PrefixMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "8_0", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
 
-	// TODO: enable these after regex-match is supported.
-	//unsupported := []string{
-	//	`VarCharField like "not_%_supported"`,
-	//	`JSONField["A"] like "not_%_supported"`,
-	//	`$meta["A"] like "not_%_supported"`,
-	//}
-	//for _, exprStr := range unsupported {
-	//	assertInvalidExpr(t, helper, exprStr)
-	//}
+	expr = `A like "8_\\_0%"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	fmt.Println(plan)
+	assert.Equal(t, planpb.OpType_Match, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, `8_\_0%`, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	expr = `A like "8\\%-0%"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	fmt.Println(plan)
+	assert.Equal(t, planpb.OpType_PrefixMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, `8%-0`, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
 }
 
 func TestExpr_TextMatch(t *testing.T) {
@@ -260,6 +280,7 @@ func TestExpr_PhraseMatch(t *testing.T) {
 		`phrase_match(StringField, "phrase")`,
 		`phrase_match(StringField, "phrase", 1)`,
 		`phrase_match(VarCharField, "phrase", 11223)`,
+		`phrase_match(StringField, "phrase", 0)`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -271,6 +292,38 @@ func TestExpr_PhraseMatch(t *testing.T) {
 		`phrase_match(StringField, "phrase", -1)`,
 	}
 	for _, exprStr := range unsupported {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+
+	unsupported = []string{
+		`phrase_match(StringField, "phrase", -1)`,
+		`phrase_match(StringField, "phrase", a)`,
+		`phrase_match(StringField, "phrase", -a)`,
+		`phrase_match(StringField, "phrase", 4294967296)`,
+	}
+	errMsgs := []string{
+		`"slop" should not be a negative interger. "slop" passed: -1`,
+		`"slop" should be a const integer expression with "uint32" value. "slop" expression passed: a`,
+		`"slop" should be a const integer expression with "uint32" value. "slop" expression passed: -a`,
+		`"slop" exceeds the range of "uint32". "slop" expression passed: 4294967296`,
+	}
+	for i, exprStr := range unsupported {
+		_, err := ParseExpr(helper, exprStr, nil)
+		assert.True(t, strings.HasSuffix(err.Error(), errMsgs[i]), fmt.Sprintf("Error expected: %v, actual %v", errMsgs[i], err.Error()))
+	}
+}
+
+func TestExpr_TextField(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	invalidExprs := []string{
+		`TextField == "query"`,
+		`text_match(TextField, "query")`,
+	}
+
+	for _, exprStr := range invalidExprs {
 		assertInvalidExpr(t, helper, exprStr)
 	}
 }
@@ -1440,6 +1493,59 @@ func Test_ArrayLength(t *testing.T) {
 			RoundDecimal: 0,
 		}, nil)
 		assert.Error(t, err, expr)
+	}
+}
+
+// Test randome sample with all other predicate expressions.
+func TestRandomSampleWithFilter(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	enableMatch(schema)
+	assert.NoError(t, err)
+
+	exprStrs := []string{
+		`random_sample(0.01)`,
+		`random_sample(0.9999)`,
+		`BoolField in [true, false] && random_sample(0.01)`,
+		`Int8Field < Int16Field && random_sample(0.01)`,
+		`Int8Field < Int16Field && Int16Field <= 1 && random_sample(0.01)`,
+		`(Int8Field < Int16Field || Int16Field <= 1) && random_sample(0.01)`,
+		`Int16Field <= 1 && random_sample(0.01)`,
+		`VarCharField like "prefix%" && random_sample(0.01)`,
+		`VarCharField is null && random_sample(0.01)`,
+		`VarCharField IS NOT NULL && random_sample(0.01)`,
+		`11.0 < DoubleField < 12.0 && random_sample(0.01)`,
+		`1 < JSONField < 3 && random_sample(0.01)`,
+		`Int64Field + 1.1 == 2.1 && random_sample(0.01)`,
+		`Int64Field % 10 != 9 && random_sample(0.01)`,
+		`A * 15 > 16 && random_sample(0.01)`,
+		`(Int16Field - 3 == 4) and (Int32Field * 5 != 6) && random_sample(0.01)`,
+	}
+	for _, exprStr := range exprStrs {
+		assertValidExpr(t, helper, exprStr)
+	}
+
+	exprStrsInvalid := []string{
+		`random_sample(a)`,
+		`random_sample(1)`,
+		`random_sample(1.1)`,
+		`random_sample(0)`,
+		`random_sample(-1)`,
+		`random_sample(0.01, Int8Field < Int16Field) + 1`,
+		`random_sample(0.01, Int8Field < Int16Field) ** 2 == 1`,
+		`not random_sample(0.01, Int8Field < Int16Field)`,
+		`(Int16Field - 3 == 4) || random_sample(0.01)`,
+		`random_sample(0.01) and (Int16Field - 3 == 4)`,
+		`random_sample(0.01) or (Int16Field - 3 == 4)`,
+		`random_sample(0.01, FloatField)`,
+		`random_sample(0.01, 1.0 + 2.0)`,
+		`random_sample(0.01, false)`,
+		`random_sample(0.01, text_match(VarCharField, "query"))`,
+		`random_sample(0.01, phrase_match(VarCharField, "query something"))`,
+		`Int8Field < Int16Field || Int16Field <= 1 && random_sample(0.01)`,
+	}
+	for _, exprStr := range exprStrsInvalid {
+		assertInvalidExpr(t, helper, exprStr)
 	}
 }
 

@@ -34,9 +34,9 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ReaderSuite struct {
@@ -166,6 +166,10 @@ func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.Fie
 	case schemapb.DataType_SparseFloatVector:
 		vectors := data.(*storage.SparseFloatVectorFieldData)
 		err = evt.AddSparseFloatVectorToPayload(vectors)
+		assert.NoError(t, err)
+	case schemapb.DataType_Int8Vector:
+		vectors := data.(*storage.Int8VectorFieldData).Data
+		err = evt.AddInt8VectorToPayload(vectors, int(dim))
 		assert.NoError(t, err)
 	default:
 		assert.True(t, false)
@@ -419,6 +423,8 @@ func (suite *ReaderSuite) TestVector() {
 	suite.vecDataType = schemapb.DataType_BFloat16Vector
 	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 	suite.vecDataType = schemapb.DataType_SparseFloatVector
+	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	suite.vecDataType = schemapb.DataType_Int8Vector
 	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 }
 

@@ -9,11 +9,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type StatsJobManager interface {
@@ -96,10 +96,22 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 }
 
 func (jm *statsJobManager) triggerSortStatsTask() {
-	segments := jm.mt.SelectSegments(jm.ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsImporting()
+	invisibleSegments := jm.mt.SelectSegments(jm.ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
+		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsImporting() && seg.GetIsInvisible()
 	}))
-	for _, segment := range segments {
+
+	for _, seg := range invisibleSegments {
+		jm.createSortStatsTaskForSegment(seg)
+	}
+
+	visibleSegments := jm.mt.SelectSegments(jm.ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
+		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsImporting() && !seg.GetIsInvisible()
+	}))
+
+	for _, segment := range visibleSegments {
+		if jm.scheduler.GetTaskCount() > Params.DataCoordCfg.StatsTaskTriggerCount.GetAsInt() {
+			break
+		}
 		jm.createSortStatsTaskForSegment(segment)
 	}
 }
@@ -157,7 +169,7 @@ func (jm *statsJobManager) triggerTextStatsTask() {
 			needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 		}
 		segments := jm.mt.SelectSegments(jm.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return needDoTextIndex(seg, needTriggerFieldIDs)
+			return seg.GetIsSorted() && needDoTextIndex(seg, needTriggerFieldIDs)
 		}))
 
 		for _, segment := range segments {
@@ -181,7 +193,7 @@ func (jm *statsJobManager) triggerBM25StatsTask() {
 			}
 		}
 		segments := jm.mt.SelectSegments(jm.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return needDoBM25(seg, needTriggerFieldIDs)
+			return seg.GetIsSorted() && needDoBM25(seg, needTriggerFieldIDs)
 		}))
 
 		for _, segment := range segments {
@@ -253,7 +265,7 @@ func (jm *statsJobManager) SubmitStatsTask(originSegmentID, targetSegmentID int6
 	}
 	if err = jm.mt.statsTaskMeta.AddStatsTask(t); err != nil {
 		if errors.Is(err, merr.ErrTaskDuplicate) {
-			log.Info("stats task already exists", zap.Int64("taskID", taskID),
+			log.RatedInfo(10, "stats task already exists", zap.Int64("taskID", taskID),
 				zap.Int64("collectionID", originSegment.GetCollectionID()),
 				zap.Int64("segmentID", originSegment.GetID()))
 			return nil

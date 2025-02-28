@@ -29,13 +29,13 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/hardware"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func getRateMetric() ([]metricsinfo.RateMetric, error) {
@@ -106,7 +106,6 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 			collections[segment.Collection()],
 			nodeID,
 			fmt.Sprint(segment.Collection()),
-			fmt.Sprint(segment.Partition()),
 			segments.SegmentTypeGrowing.String(),
 		).Set(float64(numEntities))
 	}
@@ -136,7 +135,6 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 			collections[segment.Collection()],
 			nodeID,
 			fmt.Sprint(segment.Collection()),
-			fmt.Sprint(segment.Partition()),
 			segments.SegmentTypeSealed.String(),
 		).Set(float64(numEntities))
 	}

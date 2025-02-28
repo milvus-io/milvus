@@ -3,10 +3,10 @@ package metricsutil
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func NewScanMetrics(pchannel types.PChannelInfo) *ScanMetrics {
@@ -14,48 +14,54 @@ func NewScanMetrics(pchannel types.PChannelInfo) *ScanMetrics {
 		metrics.NodeIDLabelName:     paramtable.GetStringNodeID(),
 		metrics.WALChannelLabelName: pchannel.Name,
 	}
+	catchupLabel, tailingLabel := make(prometheus.Labels), make(prometheus.Labels)
+	for k, v := range constLabel {
+		catchupLabel[k] = v
+		tailingLabel[k] = v
+	}
+	catchupLabel[metrics.WALScannerModelLabelName] = metrics.WALScannerModelCatchup
+	tailingLabel[metrics.WALScannerModelLabelName] = metrics.WALScannerModelTailing
 	return &ScanMetrics{
-		constLabel:             constLabel,
-		messageBytes:           metrics.WALScanMessageBytes.With(constLabel),
-		passMessageBytes:       metrics.WALScanPassMessageBytes.With(constLabel),
-		messageTotal:           metrics.WALScanMessageTotal.MustCurryWith(constLabel),
-		passMessageTotal:       metrics.WALScanPassMessageTotal.MustCurryWith(constLabel),
-		timeTickViolationTotal: metrics.WALScanTimeTickViolationMessageTotal.MustCurryWith(constLabel),
-		txnTotal:               metrics.WALScanTxnTotal.MustCurryWith(constLabel),
-		pendingQueueSize:       metrics.WALScannerPendingQueueBytes.With(constLabel),
-		timeTickBufSize:        metrics.WALScannerTimeTickBufBytes.With(constLabel),
-		txnBufSize:             metrics.WALScannerTxnBufBytes.With(constLabel),
+		constLabel:   constLabel,
+		scannerTotal: metrics.WALScannerTotal.MustCurryWith(constLabel),
+		tailing: underlyingScannerMetrics{
+			messageBytes:           metrics.WALScanMessageBytes.With(tailingLabel),
+			passMessageBytes:       metrics.WALScanPassMessageBytes.With(tailingLabel),
+			messageTotal:           metrics.WALScanMessageTotal.MustCurryWith(tailingLabel),
+			passMessageTotal:       metrics.WALScanPassMessageTotal.MustCurryWith(tailingLabel),
+			timeTickViolationTotal: metrics.WALScanTimeTickViolationMessageTotal.MustCurryWith(tailingLabel),
+		},
+		catchup: underlyingScannerMetrics{
+			messageBytes:           metrics.WALScanMessageBytes.With(catchupLabel),
+			passMessageBytes:       metrics.WALScanPassMessageBytes.With(catchupLabel),
+			messageTotal:           metrics.WALScanMessageTotal.MustCurryWith(catchupLabel),
+			passMessageTotal:       metrics.WALScanPassMessageTotal.MustCurryWith(catchupLabel),
+			timeTickViolationTotal: metrics.WALScanTimeTickViolationMessageTotal.MustCurryWith(catchupLabel),
+		},
+		txnTotal:         metrics.WALScanTxnTotal.MustCurryWith(constLabel),
+		pendingQueueSize: metrics.WALScannerPendingQueueBytes.With(constLabel),
+		timeTickBufSize:  metrics.WALScannerTimeTickBufBytes.With(constLabel),
+		txnBufSize:       metrics.WALScannerTxnBufBytes.With(constLabel),
 	}
 }
 
 type ScanMetrics struct {
-	constLabel             prometheus.Labels
+	constLabel       prometheus.Labels
+	scannerTotal     *prometheus.GaugeVec
+	catchup          underlyingScannerMetrics
+	tailing          underlyingScannerMetrics
+	txnTotal         *prometheus.CounterVec
+	timeTickBufSize  prometheus.Gauge
+	txnBufSize       prometheus.Gauge
+	pendingQueueSize prometheus.Gauge
+}
+
+type underlyingScannerMetrics struct {
 	messageBytes           prometheus.Observer
 	passMessageBytes       prometheus.Observer
 	messageTotal           *prometheus.CounterVec
 	passMessageTotal       *prometheus.CounterVec
 	timeTickViolationTotal *prometheus.CounterVec
-	txnTotal               *prometheus.CounterVec
-	timeTickBufSize        prometheus.Gauge
-	txnBufSize             prometheus.Gauge
-	pendingQueueSize       prometheus.Gauge
-}
-
-// ObserveMessage observes the message.
-func (m *ScanMetrics) ObserveMessage(msgType message.MessageType, bytes int) {
-	m.messageBytes.Observe(float64(bytes))
-	m.messageTotal.WithLabelValues(msgType.String()).Inc()
-}
-
-// ObserveFilteredMessage observes the filtered message.
-func (m *ScanMetrics) ObserveFilteredMessage(msgType message.MessageType, bytes int) {
-	m.passMessageBytes.Observe(float64(bytes))
-	m.passMessageTotal.WithLabelValues(msgType.String()).Inc()
-}
-
-// ObserveTimeTickViolation observes the time tick violation.
-func (m *ScanMetrics) ObserveTimeTickViolation(msgType message.MessageType) {
-	m.timeTickViolationTotal.WithLabelValues(msgType.String()).Inc()
 }
 
 // ObserveAutoCommitTxn observes the auto commit txn.
@@ -80,8 +86,10 @@ func (m *ScanMetrics) ObserveExpiredTxn() {
 
 // NewScannerMetrics creates a new scanner metrics.
 func (m *ScanMetrics) NewScannerMetrics() *ScannerMetrics {
+	m.scannerTotal.WithLabelValues(metrics.WALScannerModelCatchup).Inc()
 	return &ScannerMetrics{
 		ScanMetrics:              m,
+		scannerModel:             metrics.WALScannerModelCatchup,
 		previousTxnBufSize:       0,
 		previousTimeTickBufSize:  0,
 		previousPendingQueueSize: 0,
@@ -90,7 +98,8 @@ func (m *ScanMetrics) NewScannerMetrics() *ScannerMetrics {
 
 // Close closes the metrics.
 func (m *ScanMetrics) Close() {
-	metrics.WALScanMessageBytes.Delete(m.constLabel)
+	metrics.WALScannerTotal.DeletePartialMatch(m.constLabel)
+	metrics.WALScanMessageBytes.DeletePartialMatch(m.constLabel)
 	metrics.WALScanPassMessageBytes.DeletePartialMatch(m.constLabel)
 	metrics.WALScanMessageTotal.DeletePartialMatch(m.constLabel)
 	metrics.WALScanPassMessageTotal.DeletePartialMatch(m.constLabel)
@@ -103,9 +112,46 @@ func (m *ScanMetrics) Close() {
 
 type ScannerMetrics struct {
 	*ScanMetrics
+	scannerModel             string
 	previousTxnBufSize       int
 	previousTimeTickBufSize  int
 	previousPendingQueueSize int
+}
+
+// SwitchModel switches the scanner model.
+func (m *ScannerMetrics) SwitchModel(s string) {
+	m.scannerTotal.WithLabelValues(m.scannerModel).Dec()
+	m.scannerModel = s
+	m.scannerTotal.WithLabelValues(m.scannerModel).Inc()
+}
+
+// ObserveMessage observes the message.
+func (m *ScannerMetrics) ObserveMessage(tailing bool, msgType message.MessageType, bytes int) {
+	underlying := m.catchup
+	if tailing {
+		underlying = m.tailing
+	}
+	underlying.messageBytes.Observe(float64(bytes))
+	underlying.messageTotal.WithLabelValues(msgType.String()).Inc()
+}
+
+// ObservePassedMessage observes the filtered message.
+func (m *ScannerMetrics) ObservePassedMessage(tailing bool, msgType message.MessageType, bytes int) {
+	underlying := m.catchup
+	if tailing {
+		underlying = m.tailing
+	}
+	underlying.passMessageBytes.Observe(float64(bytes))
+	underlying.passMessageTotal.WithLabelValues(msgType.String()).Inc()
+}
+
+// ObserveTimeTickViolation observes the time tick violation.
+func (m *ScannerMetrics) ObserveTimeTickViolation(tailing bool, msgType message.MessageType) {
+	underlying := m.catchup
+	if tailing {
+		underlying = m.tailing
+	}
+	underlying.timeTickViolationTotal.WithLabelValues(msgType.String()).Inc()
 }
 
 func (m *ScannerMetrics) UpdatePendingQueueSize(size int) {
@@ -130,4 +176,5 @@ func (m *ScannerMetrics) Close() {
 	m.UpdatePendingQueueSize(0)
 	m.UpdateTimeTickBufSize(0)
 	m.UpdateTimeTickBufSize(0)
+	m.scannerTotal.WithLabelValues(m.scannerModel).Dec()
 }

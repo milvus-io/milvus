@@ -30,9 +30,9 @@ import (
 	"google.golang.org/api/option"
 
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
 type GcpNativeObjectStorage struct {
@@ -170,10 +170,13 @@ func (gcs *GcpNativeObjectStorage) WalkWithObjects(ctx context.Context,
 			return checkObjectStorageError(prefix, err)
 		}
 		if objAttrs.Prefix != "" {
-			continue
-		}
-		if !walkFunc(&ChunkObjectInfo{FilePath: objAttrs.Name, ModifyTime: objAttrs.Updated}) {
-			return nil
+			if !walkFunc(&ChunkObjectInfo{FilePath: objAttrs.Prefix, ModifyTime: objAttrs.Updated}) {
+				return nil
+			}
+		} else if objAttrs.Name != "" {
+			if !walkFunc(&ChunkObjectInfo{FilePath: objAttrs.Name, ModifyTime: objAttrs.Updated}) {
+				return nil
+			}
 		}
 	}
 	return nil

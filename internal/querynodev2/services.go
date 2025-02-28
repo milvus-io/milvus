@@ -39,23 +39,23 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/hardware"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // GetComponentStates returns information about whether the node is healthy
@@ -272,16 +272,9 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	defer func() {
 		if err != nil {
 			node.delegators.GetAndRemove(channel.GetChannelName())
+			delegator.Close()
 		}
 	}()
-
-	// create tSafe
-	// node.tSafeManager.Add(ctx, channel.ChannelName, channel.GetSeekPosition().GetTimestamp())
-	// defer func() {
-	// 	if err != nil {
-	// 		node.tSafeManager.Remove(ctx, channel.ChannelName)
-	// 	}
-	// }()
 
 	pipeline, err := node.pipelineManager.Add(req.GetCollectionID(), channel.GetChannelName())
 	if err != nil {
@@ -306,9 +299,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 			// remove legacy growing
 			node.manager.Segment.RemoveBy(ctx, segments.WithChannel(channel.GetChannelName()),
 				segments.WithType(segments.SegmentTypeGrowing))
-			// remove legacy l0 segments
-			node.manager.Segment.RemoveBy(ctx, segments.WithChannel(channel.GetChannelName()),
-				segments.WithLevel(datapb.SegmentLevel_L0))
 		}
 	}()
 
@@ -371,10 +361,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 
 		node.pipelineManager.Remove(req.GetChannelName())
 		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
-		_, sealed := node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
-		// node.tSafeManager.Remove(ctx, req.GetChannelName())
-
-		node.manager.Collection.Unref(req.GetCollectionID(), uint32(1+sealed))
+		node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	}
 	log.Info("unsubscribed channel")
 
@@ -628,8 +615,15 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmen
 			indexInfos []*querypb.FieldIndexInfo
 		)
 		for _, field := range vecFields {
-			index := segment.GetIndex(field)
-			if index != nil {
+			indexes := segment.GetIndex(field)
+			if indexes != nil {
+				if len(indexes) != 1 {
+					log.Error("only support one index for vector field", zap.Int64("fieldID", field), zap.Int("index count", len(indexes)))
+					return &querypb.GetSegmentInfoResponse{
+						Status: merr.Status(merr.WrapErrServiceInternal("only support one index for vector field")),
+					}, nil
+				}
+				index := indexes[0]
 				indexName = index.IndexInfo.GetIndexName()
 				indexID = index.IndexInfo.GetIndexID()
 				indexInfos = append(indexInfos, index.IndexInfo)
@@ -1178,7 +1172,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			IsSorted:           s.IsSorted(),
 			LastDeltaTimestamp: s.LastDeltaTimestamp(),
 			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *segments.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {
-				return info.IndexInfo.FieldID, info.IndexInfo
+				return info.IndexInfo.IndexID, info.IndexInfo
 			}),
 		})
 	}
@@ -1315,8 +1309,12 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				return id, action.GetCheckpoint().Timestamp
 			})
 			shardDelegator.AddExcludedSegments(flushedInfo)
+			deleteCP := &msgpb.MsgPosition{}
+			if deleteCP.GetTimestamp() == 0 {
+				deleteCP = action.GetCheckpoint()
+			}
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), req.GetLoadMeta().GetPartitionIDs(), action.GetGrowingInTarget(),
-				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint())
+				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint(), deleteCP)
 		case querypb.SyncType_UpdatePartitionStats:
 			log.Info("sync update partition stats versions")
 			shardDelegator.SyncPartitionStats(ctx, action.PartitionStatsVersions)

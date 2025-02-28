@@ -28,9 +28,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 )
 
 func TestImportMeta_Restore(t *testing.T) {
@@ -90,13 +90,15 @@ func TestImportMeta_Job(t *testing.T) {
 	jobIDs := []int64{1000, 2000, 3000}
 
 	for i, jobID := range jobIDs {
+		channel := fmt.Sprintf("ch-%d", rand.Int63())
 		var job ImportJob = &importJob{
 			ImportJob: &datapb.ImportJob{
-				JobID:        jobID,
-				CollectionID: rand.Int63(),
-				PartitionIDs: []int64{rand.Int63()},
-				Vchannels:    []string{fmt.Sprintf("ch-%d", rand.Int63())},
-				State:        internalpb.ImportJobState_Pending,
+				JobID:          jobID,
+				CollectionID:   rand.Int63(),
+				PartitionIDs:   []int64{rand.Int63()},
+				Vchannels:      []string{channel},
+				ReadyVchannels: []string{channel},
+				State:          internalpb.ImportJobState_Pending,
 			},
 		}
 		err = im.AddJob(context.TODO(), job)
@@ -110,7 +112,7 @@ func TestImportMeta_Job(t *testing.T) {
 		err = im.AddJob(context.TODO(), job)
 		assert.NoError(t, err)
 		ret = im.GetJob(context.TODO(), jobID)
-		assert.Equal(t, job, ret)
+		assert.EqualValues(t, job, ret)
 		jobs = im.GetJobBy(context.TODO())
 		assert.Equal(t, i+1, len(jobs))
 	}
@@ -147,6 +149,48 @@ func TestImportMeta_Job(t *testing.T) {
 	assert.Equal(t, 2, len(jobs))
 	count = im.CountJobBy(context.TODO())
 	assert.Equal(t, 2, count)
+}
+
+func TestImportMetaAddJob(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+
+	im, err := NewImportMeta(context.TODO(), catalog)
+	assert.NoError(t, err)
+
+	var job ImportJob = &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:          10000,
+			CollectionID:   rand.Int63(),
+			PartitionIDs:   []int64{rand.Int63()},
+			Vchannels:      []string{"ch-1", "ch-2"},
+			ReadyVchannels: []string{"ch-1"},
+			State:          internalpb.ImportJobState_Pending,
+		},
+	}
+	err = im.AddJob(context.TODO(), job)
+	assert.NoError(t, err)
+
+	job = &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:          10000,
+			CollectionID:   rand.Int63(),
+			PartitionIDs:   []int64{rand.Int63()},
+			Vchannels:      []string{"ch-1", "ch-2"},
+			ReadyVchannels: []string{"ch-2"},
+			State:          internalpb.ImportJobState_Pending,
+		},
+	}
+	err = im.AddJob(context.TODO(), job)
+	assert.NoError(t, err)
+
+	job = im.GetJob(context.TODO(), 10000)
+	assert.NotNil(t, job)
+	assert.Equal(t, []string{"ch-1", "ch-2"}, job.GetVchannels())
+	assert.Equal(t, []string{"ch-1", "ch-2"}, job.GetReadyVchannels())
 }
 
 func TestImportMeta_ImportTask(t *testing.T) {

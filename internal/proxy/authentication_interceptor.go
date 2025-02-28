@@ -14,11 +14,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func parseMD(rawToken string) (username, password string) {
@@ -106,6 +106,7 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 				metrics.UserRPCCounter.WithLabelValues(user).Inc()
 				userToken := fmt.Sprintf("%s%s%s", user, util.CredentialSeperator, util.PasswordHolder)
 				md[strings.ToLower(util.HeaderAuthorize)] = []string{crypto.Base64Encode(userToken)}
+				md[util.HeaderToken] = []string{rawToken}
 				ctx = metadata.NewIncomingContext(ctx, md)
 			} else {
 				// username+password authentication

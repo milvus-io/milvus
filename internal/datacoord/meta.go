@@ -38,19 +38,22 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/lock"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 type CompactionMeta interface {
@@ -62,6 +65,8 @@ type CompactionMeta interface {
 	CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []int64) (bool, bool)
 	CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
 	CleanPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
+	CheckSegmentsStating(ctx context.Context, segmentID []UniqueID) (bool, bool)
+	SetSegmentStating(segmentID UniqueID, stating bool)
 
 	SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
 	DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
@@ -145,7 +150,7 @@ type dbInfo struct {
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
-func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager) (*meta, error) {
+func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, broker broker.Broker) (*meta, error) {
 	im, err := newIndexMeta(ctx, catalog)
 	if err != nil {
 		return nil, err
@@ -183,7 +188,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		compactionTaskMeta: ctm,
 		statsTaskMeta:      stm,
 	}
-	err = mt.reloadFromKV()
+	err = mt.reloadFromKV(ctx, broker)
 	if err != nil {
 		return nil, err
 	}
@@ -191,39 +196,84 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 }
 
 // reloadFromKV loads meta from KV storage
-func (m *meta) reloadFromKV() error {
+func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
 	record := timerecord.NewTimeRecorder("datacoord")
-	segments, err := m.catalog.ListSegments(m.ctx)
+
+	var (
+		err  error
+		resp *rootcoordpb.ShowCollectionIDsResponse
+	)
+	// retry on un implemented for compatibility
+	retryErr := retry.Handle(ctx, func() (bool, error) {
+		resp, err = broker.ShowCollectionIDs(m.ctx)
+		if errors.Is(err, merr.ErrServiceUnimplemented) {
+			return true, err
+		}
+		return false, err
+	})
+	if retryErr != nil {
+		return retryErr
+	}
+	log.Ctx(ctx).Info("datacoord show collections done", zap.Duration("dur", record.RecordSpan()))
+
+	collectionIDs := make([]int64, 0, 4096)
+	for _, collections := range resp.GetDbCollections() {
+		collectionIDs = append(collectionIDs, collections.GetCollectionIDs()...)
+	}
+
+	pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
+	futures := make([]*conc.Future[any], 0, len(collectionIDs))
+	collectionSegments := make([][]*datapb.SegmentInfo, len(collectionIDs))
+	for i, collectionID := range collectionIDs {
+		i := i
+		collectionID := collectionID
+		futures = append(futures, pool.Submit(func() (any, error) {
+			segments, err := m.catalog.ListSegments(m.ctx, collectionID)
+			if err != nil {
+				return nil, err
+			}
+			collectionSegments[i] = segments
+			return nil, nil
+		}))
+	}
+	err = conc.AwaitAll(futures...)
 	if err != nil {
 		return err
 	}
+
+	log.Ctx(ctx).Info("datacoord show segments done", zap.Duration("dur", record.RecordSpan()))
+
 	metrics.DataCoordNumCollections.WithLabelValues().Set(0)
 	metrics.DataCoordNumSegments.Reset()
 	numStoredRows := int64(0)
-	for _, segment := range segments {
-		// segments from catalog.ListSegments will not have logPath
-		m.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
-		metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String(), getSortStatus(segment.GetIsSorted())).Inc()
-		if segment.State == commonpb.SegmentState_Flushed {
-			numStoredRows += segment.NumOfRows
+	numSegments := 0
+	for _, segments := range collectionSegments {
+		numSegments += len(segments)
+		for _, segment := range segments {
+			// segments from catalog.ListSegments will not have logPath
+			m.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
+			metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String(), getSortStatus(segment.GetIsSorted())).Inc()
+			if segment.State == commonpb.SegmentState_Flushed {
+				numStoredRows += segment.NumOfRows
 
-			insertFileNum := 0
-			for _, fieldBinlog := range segment.GetBinlogs() {
-				insertFileNum += len(fieldBinlog.GetBinlogs())
-			}
-			metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(insertFileNum))
+				insertFileNum := 0
+				for _, fieldBinlog := range segment.GetBinlogs() {
+					insertFileNum += len(fieldBinlog.GetBinlogs())
+				}
+				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(insertFileNum))
 
-			statFileNum := 0
-			for _, fieldBinlog := range segment.GetStatslogs() {
-				statFileNum += len(fieldBinlog.GetBinlogs())
-			}
-			metrics.FlushedSegmentFileNum.WithLabelValues(metrics.StatFileLabel).Observe(float64(statFileNum))
+				statFileNum := 0
+				for _, fieldBinlog := range segment.GetStatslogs() {
+					statFileNum += len(fieldBinlog.GetBinlogs())
+				}
+				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.StatFileLabel).Observe(float64(statFileNum))
 
-			deleteFileNum := 0
-			for _, filedBinlog := range segment.GetDeltalogs() {
-				deleteFileNum += len(filedBinlog.GetBinlogs())
+				deleteFileNum := 0
+				for _, filedBinlog := range segment.GetDeltalogs() {
+					deleteFileNum += len(filedBinlog.GetBinlogs())
+				}
+				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(deleteFileNum))
 			}
-			metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(deleteFileNum))
 		}
 	}
 
@@ -240,7 +290,7 @@ func (m *meta) reloadFromKV() error {
 			Set(float64(ts.Unix()))
 	}
 
-	log.Info("DataCoord meta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
+	log.Ctx(ctx).Info("DataCoord meta reloadFromKV done", zap.Int("numSegments", numSegments), zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 
@@ -919,7 +969,7 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs
 	}
 }
 
-func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
+func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
@@ -931,6 +981,7 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*dat
 		segment.Binlogs = binlogs
 		segment.Statslogs = statslogs
 		segment.Deltalogs = deltalogs
+		segment.Bm25Statslogs = bm25logs
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
 		}
@@ -1006,6 +1057,7 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint)
 		count := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
 		if count != segment.currRows && count > 0 {
 			log.Ctx(context.TODO()).Info("check point reported inconsistent with bin log row count",
+				zap.Int64("segmentID", segmentID),
 				zap.Int64("current rows (wrong)", segment.currRows),
 				zap.Int64("segment bin log row count (correct)", count))
 			segment.NumOfRows = count
@@ -1399,6 +1451,31 @@ func (m *meta) SetLastFlushTime(segmentID UniqueID, t time.Time) {
 	m.segments.SetFlushTime(segmentID, t)
 }
 
+func (m *meta) CheckSegmentsStating(ctx context.Context, segmentIDs []UniqueID) (exist bool, hasStating bool) {
+	m.RLock()
+	defer m.RUnlock()
+	exist = true
+	for _, segmentID := range segmentIDs {
+		seg := m.segments.GetSegment(segmentID)
+		if seg != nil {
+			if seg.isStating {
+				hasStating = true
+			}
+		} else {
+			exist = false
+			break
+		}
+	}
+	return exist, hasStating
+}
+
+func (m *meta) SetSegmentStating(segmentID UniqueID, stating bool) {
+	m.Lock()
+	defer m.Unlock()
+
+	m.segments.SetIsStating(segmentID, stating)
+}
+
 // SetSegmentCompacting sets compaction state for segment
 func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 	m.Lock()
@@ -1589,7 +1666,7 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 				CompactionFrom:      compactFromSegIDs,
 				LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
 				Level:               datapb.SegmentLevel_L1,
-
+				StorageVersion:      compactToSegment.GetStorageVersion(),
 				StartPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 					return info.GetStartPosition()
 				})),

@@ -36,12 +36,12 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 type spyCompactionHandler struct {
@@ -50,12 +50,20 @@ type spyCompactionHandler struct {
 	meta    *meta
 }
 
+// getCompactionTasksNum implements compactionPlanContext.
+func (h *spyCompactionHandler) getCompactionTasksNum(filters ...compactionTaskFilter) int {
+	return 0
+}
+
 func (h *spyCompactionHandler) getCompactionTasksNumBySignalID(signalID int64) int {
 	return 0
 }
 
 func (h *spyCompactionHandler) getCompactionInfo(ctx context.Context, signalID int64) *compactionInfo {
 	return nil
+}
+
+func (h *spyCompactionHandler) setTaskScheduler(scheduler *taskScheduler) {
 }
 
 var _ compactionPlanContext = (*spyCompactionHandler)(nil)
@@ -70,6 +78,10 @@ func (h *spyCompactionHandler) enqueueCompaction(task *datapb.CompactionTask) er
 	plan, err := t.BuildCompactionRequest()
 	h.spyChan <- plan
 	return err
+}
+
+func (h *spyCompactionHandler) checkAndSetSegmentStating(channel string, segmentID int64) bool {
+	return false
 }
 
 // isFull return true if the task pool is full

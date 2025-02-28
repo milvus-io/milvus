@@ -9,12 +9,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus/pkg/mocks/proto/mock_streamingpb"
-	"github.com/milvus-io/milvus/pkg/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/proto/mock_streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 )
 
 func TestProducer(t *testing.T) {
@@ -61,12 +61,12 @@ func TestProducer(t *testing.T) {
 	ch := make(chan struct{})
 	go func() {
 		msg := message.CreateTestEmptyInsertMesage(1, nil)
-		msgID, err := producer.Produce(ctx, msg)
+		msgID, err := producer.Append(ctx, msg)
 		assert.Error(t, err)
 		assert.Nil(t, msgID)
 
 		msg = message.CreateTestEmptyInsertMesage(1, nil)
-		msgID, err = producer.Produce(ctx, msg)
+		msgID, err = producer.Append(ctx, msg)
 		assert.NoError(t, err)
 		assert.NotNil(t, msgID)
 		close(ch)
@@ -100,7 +100,7 @@ func TestProducer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
 	msg := message.CreateTestEmptyInsertMesage(1, nil)
-	_, err = producer.Produce(ctx, msg)
+	_, err = producer.Append(ctx, msg)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.True(t, producer.IsAvailable())
 	producer.Close()

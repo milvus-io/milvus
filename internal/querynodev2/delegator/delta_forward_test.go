@@ -32,15 +32,15 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metric"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type StreamingForwardSuite struct {
@@ -416,7 +416,7 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingBF() {
 	}
 	err = l0Segment.LoadDeltaData(context.Background(), deltaData)
 	s.Require().NoError(err)
-	s.manager.Segment.Put(context.Background(), segments.SegmentTypeSealed, l0Segment)
+	s.delegator.deleteBuffer.RegisterL0(l0Segment)
 
 	seg.EXPECT().ID().Return(10000)
 	seg.EXPECT().Partition().Return(100)
@@ -463,7 +463,7 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingLoad() {
 	}
 	err = l0Segment.LoadDeltaData(context.Background(), deltaData)
 	s.Require().NoError(err)
-	s.manager.Segment.Put(context.Background(), segments.SegmentTypeSealed, l0Segment)
+	s.delegator.deleteBuffer.RegisterL0(l0Segment)
 
 	seg.EXPECT().ID().Return(10000)
 	seg.EXPECT().Partition().Return(100)

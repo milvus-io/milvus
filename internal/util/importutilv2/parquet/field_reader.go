@@ -20,9 +20,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/samber/lo"
 	"golang.org/x/exp/constraints"
 
@@ -31,9 +31,9 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/parameterutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type FieldReader struct {
@@ -176,6 +176,19 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		}
 		data, err := ReadSparseFloatVectorData(c, count)
 		return data, nil, err
+	case schemapb.DataType_Int8Vector:
+		if c.field.GetNullable() {
+			return nil, nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+		}
+		arrayData, err := ReadIntegerOrFloatArrayData[int8](c, count)
+		if err != nil {
+			return nil, nil, err
+		}
+		if arrayData == nil {
+			return nil, nil, nil
+		}
+		vectors := lo.Flatten(arrayData.([][]int8))
+		return vectors, nil, nil
 	case schemapb.DataType_Array:
 		// array has not support default_value
 		if c.field.GetNullable() {
@@ -708,6 +721,8 @@ func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) er
 	case schemapb.DataType_SparseFloatVector:
 		// JSON format, skip alignment check
 		return nil
+	case schemapb.DataType_Int8Vector:
+		return checkVectorAlignWithDim(offsets, int32(dim))
 	default:
 		return fmt.Errorf("unexpected vector data type %s", dataType.String())
 	}

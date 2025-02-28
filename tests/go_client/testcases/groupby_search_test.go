@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"testing"
 	"time"
 
@@ -57,7 +58,7 @@ func genUnsupportedFloatGroupByIndex() []index.Index {
 
 func prepareDataForGroupBySearch(t *testing.T, loopInsert int, insertNi int, idx index.Index, withGrowing bool) (*base.MilvusClient, context.Context, string) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*5)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection with all datatype
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -91,7 +92,15 @@ func prepareDataForGroupBySearch(t *testing.T, loopInsert int, insertNi int, idx
 // output_fields: pk + groupBy
 func TestSearchGroupByFloatDefault(t *testing.T) {
 	t.Parallel()
-	for _, idx := range genGroupByVectorIndex(entity.L2) {
+	concurrency := 10
+	ch := make(chan struct{}, concurrency)
+	wg := sync.WaitGroup{}
+
+	testFunc := func(idx index.Index) {
+		defer func() {
+			wg.Done()
+			<-ch
+		}()
 		// prepare data
 		mc, ctx, collName := prepareDataForGroupBySearch(t, 100, 200, idx, false)
 
@@ -144,11 +153,25 @@ func TestSearchGroupByFloatDefault(t *testing.T) {
 			}
 		}
 	}
+	for _, idx := range genGroupByVectorIndex(entity.L2) {
+		ch <- struct{}{}
+		wg.Add(1)
+		go testFunc(idx)
+	}
+	wg.Wait()
 }
 
 func TestSearchGroupByFloatDefaultCosine(t *testing.T) {
 	t.Parallel()
-	for _, idx := range genGroupByVectorIndex(entity.COSINE) {
+	concurrency := 10
+	ch := make(chan struct{}, concurrency)
+	wg := sync.WaitGroup{}
+
+	testFunc := func(idx index.Index) {
+		defer func() {
+			wg.Done()
+			<-ch
+		}()
 		// prepare data
 		mc, ctx, collName := prepareDataForGroupBySearch(t, 100, 200, idx, false)
 
@@ -196,6 +219,12 @@ func TestSearchGroupByFloatDefaultCosine(t *testing.T) {
 			}
 		}
 	}
+	for _, idx := range genGroupByVectorIndex(entity.COSINE) {
+		ch <- struct{}{}
+		wg.Add(1)
+		go testFunc(idx)
+	}
+	wg.Wait()
 }
 
 // test groupBy search sparse vector
@@ -205,7 +234,7 @@ func TestGroupBySearchSparseVector(t *testing.T) {
 	idxWand := index.NewSparseWANDIndex(entity.IP, 0.2)
 	for _, idx := range []index.Index{idxInverted, idxWand} {
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-		mc := createDefaultMilvusClient(ctx, t)
+		mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption().TWithMaxLen(common.TestMaxLen),
 			hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -264,7 +293,7 @@ func TestSearchGroupByBinaryDefault(t *testing.T) {
 	for _, metricType := range hp.SupportBinIvfFlatMetricType {
 		for _, idx := range genGroupByBinaryIndex(metricType) {
 			ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-			mc := createDefaultMilvusClient(ctx, t)
+			mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 			prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(),
 				hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -299,7 +328,7 @@ func TestSearchGroupByBinaryGrowing(t *testing.T) {
 	for _, metricType := range hp.SupportBinIvfFlatMetricType {
 		idxBinIvfFlat := index.NewBinIvfFlatIndex(metricType, 128)
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-		mc := createDefaultMilvusClient(ctx, t)
+		mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(),
 			hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -327,7 +356,16 @@ func TestSearchGroupByBinaryGrowing(t *testing.T) {
 // groupBy in growing segments, maybe growing index or brute force
 func TestSearchGroupByFloatGrowing(t *testing.T) {
 	t.Parallel()
-	for _, metricType := range hp.SupportFloatMetricType {
+	concurrency := 10
+	ch := make(chan struct{}, concurrency)
+	wg := sync.WaitGroup{}
+
+	testFunc := func(metricType entity.MetricType) {
+		defer func() {
+			wg.Done()
+			<-ch
+		}()
+
 		idxHnsw := index.NewHNSWIndex(metricType, 8, 96)
 		mc, ctx, collName := prepareDataForGroupBySearch(t, 100, 200, idxHnsw, true)
 
@@ -376,6 +414,13 @@ func TestSearchGroupByFloatGrowing(t *testing.T) {
 			}
 		}
 	}
+
+	for _, metricType := range hp.SupportFloatMetricType {
+		ch <- struct{}{}
+		wg.Add(1)
+		go testFunc(metricType)
+	}
+	wg.Wait()
 }
 
 // groupBy + pagination

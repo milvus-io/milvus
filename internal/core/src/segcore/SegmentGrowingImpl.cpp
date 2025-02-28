@@ -185,9 +185,6 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 
 void
 SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
-    // schema don't include system field
-    AssertInfo(infos.field_infos.size() == schema_->size(),
-               "lost some field data when load for growing segment");
     AssertInfo(infos.field_infos.find(TimestampFieldID.get()) !=
                    infos.field_infos.end(),
                "timestamps field data should be included");
@@ -368,9 +365,23 @@ SegmentGrowingImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
 }
 
 std::pair<std::vector<std::string_view>, FixedVector<bool>>
-SegmentGrowingImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
+SegmentGrowingImpl::chunk_string_view_impl(
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len =
+        std::nullopt) const {
     PanicInfo(ErrorCode::NotImplemented,
-              "chunk view impl not implement for growing segment");
+              "chunk string view impl not implement for growing segment");
+}
+
+std::pair<std::vector<ArrayView>, FixedVector<bool>>
+SegmentGrowingImpl::chunk_array_view_impl(
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len =
+        std::nullopt) const {
+    PanicInfo(ErrorCode::NotImplemented,
+              "chunk array view impl not implement for growing segment");
 }
 
 std::pair<std::vector<std::string_view>, FixedVector<bool>>
@@ -486,6 +497,14 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 result->mutable_vectors()->mutable_sparse_float_vector());
             result->mutable_vectors()->set_dim(
                 result->vectors().sparse_float_vector().dim());
+        } else if (field_meta.get_data_type() == DataType::VECTOR_INT8) {
+            bulk_subscript_impl<Int8Vector>(
+                field_id,
+                field_meta.get_sizeof(),
+                vec_ptr,
+                seg_offsets,
+                count,
+                result->mutable_vectors()->mutable_int8_vector()->data());
         } else {
             PanicInfo(DataTypeInvalid, "logical error");
         }
@@ -574,7 +593,8 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                             ->mutable_data());
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::TEXT: {
             bulk_subscript_ptr_impl<std::string>(vec_ptr,
                                                  seg_offsets,
                                                  count,

@@ -101,7 +101,7 @@ TextMatchIndex::Upload(const Config& config) {
     auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
 
     auto binary_set = Serialize(config);
-    mem_file_manager_->AddFile(binary_set);
+    mem_file_manager_->AddTextLog(binary_set);
     auto remote_mem_path_to_size =
         mem_file_manager_->GetRemotePathsToFileSize();
 
@@ -180,7 +180,7 @@ TextMatchIndex::AddNull(int64_t offset) {
     null_offset.push_back(offset);
     // still need to add null to make offset is correct
     std::string empty = "";
-    wrapper_->add_multi_data(&empty, 0, offset);
+    wrapper_->add_array_data(&empty, 0, offset);
 }
 
 void

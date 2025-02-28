@@ -8,10 +8,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/kv"
-	"github.com/milvus-io/milvus/pkg/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 )
 
 // NewCataLog creates a new catalog instance
@@ -86,8 +86,8 @@ func (c *catalog) ListBroadcastTask(ctx context.Context) ([]*streamingpb.Broadca
 	return infos, nil
 }
 
-func (c *catalog) SaveBroadcastTask(ctx context.Context, task *streamingpb.BroadcastTask) error {
-	key := buildBroadcastTaskPath(task.TaskId)
+func (c *catalog) SaveBroadcastTask(ctx context.Context, broadcastID uint64, task *streamingpb.BroadcastTask) error {
+	key := buildBroadcastTaskPath(broadcastID)
 	if task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
 		return c.metaKV.Remove(ctx, key)
 	}
@@ -104,6 +104,6 @@ func buildPChannelInfoPath(name string) string {
 }
 
 // buildBroadcastTaskPath builds the path for broadcast task.
-func buildBroadcastTaskPath(id int64) string {
-	return BroadcastTaskPrefix + strconv.FormatInt(id, 10)
+func buildBroadcastTaskPath(id uint64) string {
+	return BroadcastTaskPrefix + strconv.FormatUint(id, 10)
 }

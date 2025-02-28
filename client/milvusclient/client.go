@@ -37,7 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/common"
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type Client struct {
@@ -59,7 +59,8 @@ func New(ctx context.Context, config *ClientConfig) (*Client, error) {
 	}
 
 	c := &Client{
-		config: config,
+		config:    config,
+		currentDB: config.DBName,
 	}
 
 	// Parse remote address.

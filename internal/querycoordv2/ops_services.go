@@ -24,13 +24,15 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func (s *Server) ListCheckers(ctx context.Context, req *querypb.ListCheckersRequest) (*querypb.ListCheckersResponse, error) {
@@ -194,6 +196,33 @@ func (s *Server) ResumeBalance(ctx context.Context, req *querypb.ResumeBalanceRe
 	return merr.Success(), nil
 }
 
+// CheckBalanceStatus checks whether balance is active or suspended
+func (s *Server) CheckBalanceStatus(ctx context.Context, req *querypb.CheckBalanceStatusRequest) (*querypb.CheckBalanceStatusResponse, error) {
+	log := log.Ctx(ctx)
+	log.Info("CheckBalanceStatus request received")
+
+	errMsg := "failed to check balance status"
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn(errMsg, zap.Error(err))
+		return &querypb.CheckBalanceStatusResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	isActive, err := s.checkerController.IsActive(utils.BalanceChecker)
+	if err != nil {
+		log.Warn(errMsg, zap.Error(err))
+		return &querypb.CheckBalanceStatusResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	return &querypb.CheckBalanceStatusResponse{
+		Status:   merr.Success(),
+		IsActive: isActive,
+	}, nil
+}
+
 // suspend node from resource operation, for given node, suspend load_segment/sub_channel operations
 func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
@@ -227,10 +256,16 @@ func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest)
 		return merr.Status(errors.Wrap(err, errMsg)), nil
 	}
 
-	if s.nodeMgr.Get(req.GetNodeID()) == nil {
+	info := s.nodeMgr.Get(req.GetNodeID())
+	if info == nil {
 		err := merr.WrapErrNodeNotFound(req.GetNodeID(), errMsg)
 		log.Warn(errMsg, zap.Error(err))
 		return merr.Status(err), nil
+	}
+
+	if info.IsEmbeddedQueryNodeInStreamingNode() {
+		return merr.Status(
+			merr.WrapErrParameterInvalidMsg("embedded query node in streaming node can't be resumed")), nil
 	}
 
 	s.meta.ResourceManager.HandleNodeUp(ctx, req.GetNodeID())
@@ -273,6 +308,13 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 			if err := s.isStoppingNode(ctx, req.GetTargetNodeID()); err != nil {
 				err := merr.WrapErrNodeNotAvailable(srcNode, "the target node is invalid")
 				return merr.Status(err), nil
+			}
+			if streamingutil.IsStreamingServiceEnabled() {
+				sqn := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
+				if sqn.Contain(req.GetTargetNodeID()) {
+					return merr.Status(
+						merr.WrapErrParameterInvalidMsg("embedded query node in streaming node can't be the destination of transfer segment")), nil
+				}
 			}
 			dstNodeSet.Insert(req.GetTargetNodeID())
 		}
@@ -339,7 +381,11 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
 		if req.GetToAllNodes() {
-			dstNodeSet.Insert(replica.GetRWNodes()...)
+			if streamingutil.IsStreamingServiceEnabled() {
+				dstNodeSet.Insert(replica.GetRWSQNodes()...)
+			} else {
+				dstNodeSet.Insert(replica.GetRWNodes()...)
+			}
 		} else {
 			// check whether dstNode is healthy
 			if err := s.isStoppingNode(ctx, req.GetTargetNodeID()); err != nil {

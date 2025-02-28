@@ -38,18 +38,19 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
 const (
 	// DefaultServiceRoot default root path used in kv by Session
 	DefaultServiceRoot = "session/"
 	// DefaultIDKey default id key for Session
-	DefaultIDKey         = "id"
-	SupportedLabelPrefix = "MILVUS_SERVER_LABEL_"
+	DefaultIDKey                        = "id"
+	SupportedLabelPrefix                = "MILVUS_SERVER_LABEL_"
+	LabelStreamingNodeEmbeddedQueryNode = "QUERYNODE_STREAMING-EMBEDDED"
 )
 
 // SessionEventType session event type

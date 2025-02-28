@@ -386,9 +386,6 @@ func TestLocalCM(t *testing.T) {
 		assert.Nil(t, reader)
 		assert.Error(t, err)
 
-		_, err = testCM.getModTime(key)
-		assert.Error(t, err)
-
 		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 

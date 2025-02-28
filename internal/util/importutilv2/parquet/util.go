@@ -20,13 +20,13 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func WrapTypeErr(expect string, actual string, field *schemapb.FieldSchema) error {
@@ -202,6 +202,13 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 		}), nil
 	case schemapb.DataType_SparseFloatVector:
 		return &arrow.StringType{}, nil
+	case schemapb.DataType_Int8Vector:
+		return arrow.ListOfField(arrow.Field{
+			Name:     "item",
+			Type:     &arrow.Int8Type{},
+			Nullable: true,
+			Metadata: arrow.Metadata{},
+		}), nil
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("unsupported data type %v", dataType.String())
 	}

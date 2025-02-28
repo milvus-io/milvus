@@ -26,9 +26,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -48,8 +48,9 @@ type ChannelCheckpointUpdater struct {
 	tasks      map[string]*channelCPUpdateTask
 	notifyChan chan struct{}
 
-	closeCh   chan struct{}
-	closeOnce sync.Once
+	closeCh            chan struct{}
+	closeOnce          sync.Once
+	updateDoneCallback func(*msgpb.MsgPosition)
 }
 
 func NewChannelCheckpointUpdater(broker broker.Broker) *ChannelCheckpointUpdater {
@@ -58,6 +59,17 @@ func NewChannelCheckpointUpdater(broker broker.Broker) *ChannelCheckpointUpdater
 		tasks:      make(map[string]*channelCPUpdateTask),
 		closeCh:    make(chan struct{}),
 		notifyChan: make(chan struct{}, 1),
+	}
+}
+
+// NewChannelCheckpointUpdaterWithCallback creates a ChannelCheckpointUpdater with a callback function
+func NewChannelCheckpointUpdaterWithCallback(broker broker.Broker, updateDoneCallback func(*msgpb.MsgPosition)) *ChannelCheckpointUpdater {
+	return &ChannelCheckpointUpdater{
+		broker:             broker,
+		tasks:              make(map[string]*channelCPUpdateTask),
+		closeCh:            make(chan struct{}),
+		notifyChan:         make(chan struct{}, 1),
+		updateDoneCallback: updateDoneCallback,
 	}
 }
 
@@ -134,6 +146,9 @@ func (ccu *ChannelCheckpointUpdater) updateCheckpoints(tasks []*channelCPUpdateT
 				for _, task := range tasks {
 					task.callback()
 					finished.Insert(task.pos.GetChannelName(), task)
+					if ccu.updateDoneCallback != nil {
+						ccu.updateDoneCallback(task.pos)
+					}
 				}
 			}(tasks)
 		}

@@ -34,12 +34,12 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func WrapTaskNotFoundError(taskID int64) error {
@@ -69,17 +69,6 @@ func NewSyncTask(ctx context.Context,
 		}, metacache.NewBM25StatsFactory)
 	}
 
-	var serializer syncmgr.Serializer
-	var err error
-	serializer, err = syncmgr.NewStorageSerializer(
-		allocator,
-		metaCache,
-		nil,
-	)
-	if err != nil {
-		return nil, err
-	}
-
 	segmentLevel := datapb.SegmentLevel_L1
 	if insertData == nil && deleteData != nil {
 		segmentLevel = datapb.SegmentLevel_L0
@@ -100,12 +89,13 @@ func NewSyncTask(ctx context.Context,
 		syncPack.WithBM25Stats(bm25Stats)
 	}
 
-	return serializer.EncodeBuffer(ctx, syncPack)
+	task := syncmgr.NewSyncTask().WithAllocator(allocator).WithMetaCache(metaCache).WithSyncPack(syncPack)
+	return task, nil
 }
 
 func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache.MetaCache) (*datapb.ImportSegmentInfo, error) {
 	segmentID := syncTask.SegmentID()
-	insertBinlogs, statsBinlog, deltaLog := syncTask.(*syncmgr.SyncTask).Binlogs()
+	insertBinlogs, statsBinlog, deltaLog, bm25Log := syncTask.(*syncmgr.SyncTask).Binlogs()
 	metaCache := metaCaches[syncTask.ChannelName()]
 	segment, ok := metaCache.GetSegmentByID(segmentID)
 	if !ok {
@@ -120,6 +110,7 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 		ImportedRows: segment.FlushedRows(),
 		Binlogs:      lo.Values(insertBinlogs),
 		Statslogs:    lo.Values(statsBinlog),
+		Bm25Logs:     lo.Values(bm25Log),
 		Deltalogs:    deltaLogs,
 	}, nil
 }
@@ -168,12 +159,11 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 	return nil
 }
 
-func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
+func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum int) error {
 	pkField, err := typeutil.GetPrimaryFieldSchema(task.GetSchema())
 	if err != nil {
 		return err
 	}
-	rowNum := GetInsertDataRowCount(data, task.GetSchema())
 	ids := make([]int64, rowNum)
 	start, _, err := task.allocator.Alloc(uint32(rowNum))
 	if err != nil {
@@ -208,11 +198,38 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
 }
 
 func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
+	if err := RunBm25Function(task, data); err != nil {
+		return err
+	}
+	if err := RunDenseEmbedding(task, data); err != nil {
+		return err
+	}
+	return nil
+}
+
+func RunDenseEmbedding(task *ImportTask, data *storage.InsertData) error {
+	schema := task.GetSchema()
+	if function.HasNonBM25Functions(schema.Functions, []int64{}) {
+		exec, err := function.NewFunctionExecutor(schema)
+		if err != nil {
+			return err
+		}
+		if err := exec.ProcessBulkInsert(data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
 	fns := task.GetSchema().GetFunctions()
 	for _, fn := range fns {
 		runner, err := function.NewFunctionRunner(task.GetSchema(), fn)
 		if err != nil {
 			return err
+		}
+		if runner == nil {
+			continue
 		}
 		inputDatas := make([]any, 0, len(fn.InputFieldIds))
 		for _, inputFieldID := range fn.InputFieldIds {

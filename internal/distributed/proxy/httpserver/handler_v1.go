@@ -35,12 +35,12 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metric"
-	"github.com/milvus-io/milvus/pkg/util/requestutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var RestRequestInterceptorErr = errors.New("interceptor error placeholder")
@@ -533,7 +533,7 @@ func (h *HandlersV1) query(c *gin.Context) {
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
-		if _, err := CheckLimiter(ctx, &req, h.proxy); err != nil {
+		if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error() + ", error: " + err.Error(),
@@ -611,7 +611,7 @@ func (h *HandlersV1) get(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		queryReq := req.(*milvuspb.QueryRequest)
-		if _, err := CheckLimiter(ctx, &req, h.proxy); err != nil {
+		if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error() + ", error: " + err.Error(),
@@ -691,7 +691,7 @@ func (h *HandlersV1) delete(c *gin.Context) {
 			}
 			deleteReq.Expr = filter
 		}
-		if _, err := CheckLimiter(ctx, &req, h.proxy); err != nil {
+		if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error() + ", error: " + err.Error(),
@@ -774,7 +774,7 @@ func (h *HandlersV1) insert(c *gin.Context) {
 			})
 			return nil, RestRequestInterceptorErr
 		}
-		if _, err := CheckLimiter(ctx, &req, h.proxy); err != nil {
+		if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error() + ", error: " + err.Error(),
@@ -880,7 +880,7 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 			})
 			return nil, RestRequestInterceptorErr
 		}
-		if _, err := CheckLimiter(ctx, &req, h.proxy); err != nil {
+		if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error() + ", error: " + err.Error(),
@@ -983,7 +983,7 @@ func (h *HandlersV1) search(c *gin.Context) {
 	username, _ := c.Get(ContextUsername)
 	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
-		if _, err := CheckLimiter(ctx, &req, h.proxy); err != nil {
+		if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error() + ", error: " + err.Error(),

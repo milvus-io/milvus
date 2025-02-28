@@ -28,14 +28,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
-	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_flusher"
+	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/milvus-io/milvus/pkg/mocks/streaming/util/mock_message"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -97,7 +97,7 @@ func TestFlowGraph_DDNode_newDDNode(t *testing.T) {
 }
 
 func TestFlowGraph_DDNode_OperateFlush(t *testing.T) {
-	h := mock_flusher.NewMockFlushMsgHandler(t)
+	h := mock_util.NewMockMsgHandler(t)
 	h.EXPECT().HandleCreateSegment(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	h.EXPECT().HandleFlush(mock.Anything, mock.Anything).Return(nil)
 	h.EXPECT().HandleManualFlush(mock.Anything, mock.Anything).Return(nil)
