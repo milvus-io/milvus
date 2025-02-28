@@ -1832,6 +1832,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		suite.replica,
 		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", segmentID, querypb.DataScope_Historical, 100),
 	)
+	task1.SetID(1)
 	suite.NoError(err)
 	err = scheduler.Add(task1)
 	suite.NoError(err)
@@ -1843,6 +1844,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		suite.replica,
 		NewChannelAction(nodeID, ActionTypeGrow, channelName),
 	)
+	task2.SetID(2)
 	suite.NoError(err)
 	err = scheduler.Add(task2)
 	suite.NoError(err)
@@ -1860,6 +1862,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		NewSegmentActionWithScope(nodeID2, ActionTypeGrow, "", segmentID2, querypb.DataScope_Historical, 100),
 	)
 	suite.NoError(err)
+	task3.SetID(3)
 	err = scheduler.Add(task3)
 	suite.NoError(err)
 	task4, err := NewChannelTask(
@@ -1871,6 +1874,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		NewChannelAction(nodeID2, ActionTypeGrow, channelName2),
 	)
 	suite.NoError(err)
+	task4.SetID(4)
 	err = scheduler.Add(task4)
 	suite.NoError(err)
 
@@ -1906,6 +1910,21 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID, coll))
 	suite.Equal(0, scheduler.GetSegmentTaskDelta(nodeID2, coll2))
 	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID2, coll2))
+
+	task5, err := NewChannelTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll2,
+		suite.replica,
+		NewChannelAction(nodeID2, ActionTypeGrow, channelName2),
+	)
+	suite.NoError(err)
+	task4.SetID(5)
+	scheduler.incExecutingTaskDelta(task5)
+	suite.Equal(1, scheduler.GetChannelTaskDelta(nodeID2, coll2))
+	scheduler.decExecutingTaskDelta(task5)
+	suite.Equal(0, scheduler.GetChannelTaskDelta(nodeID2, coll2))
 }
 
 func (suite *TaskSuite) TestTaskDeltaCache() {
@@ -1916,14 +1935,28 @@ func (suite *TaskSuite) TestTaskDeltaCache() {
 	nodeID := int64(1)
 	collectionID := int64(100)
 
-	taskDelta = lo.Shuffle(taskDelta)
+	tasks := make([]Task, 0)
 	for i := 0; i < len(taskDelta); i++ {
-		etd.Add(nodeID, collectionID, int64(i), taskDelta[i])
+		task, _ := NewChannelTask(
+			context.TODO(),
+			10*time.Second,
+			WrapIDSource(0),
+			1,
+			suite.replica,
+			NewChannelAction(nodeID, ActionTypeGrow, "channel"),
+		)
+		task.SetID(int64(i))
+		tasks = append(tasks, task)
 	}
 
-	taskDelta = lo.Shuffle(taskDelta)
+	tasks = lo.Shuffle(tasks)
 	for i := 0; i < len(taskDelta); i++ {
-		etd.Sub(nodeID, collectionID, int64(i), taskDelta[i])
+		etd.Add(tasks[i])
+	}
+
+	tasks = lo.Shuffle(tasks)
+	for i := 0; i < len(taskDelta); i++ {
+		etd.Sub(tasks[i])
 	}
 	suite.Equal(0, etd.Get(nodeID, collectionID))
 }
