@@ -53,7 +53,7 @@ type DropDatabasePropertiesReq struct {
 	PropertyKeys []string `json:"propertyKeys"`
 }
 
-func (req *DatabaseReqWithProperties) DropDatabasPropertiesReq() string { return req.DbName }
+func (req *DropDatabasePropertiesReq) GetDbName() string { return req.DbName }
 
 type CollectionNameReq struct {
 	DbName         string   `json:"dbName"`
