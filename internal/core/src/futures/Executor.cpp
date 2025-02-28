@@ -12,6 +12,7 @@
 #include <chrono>
 #include "Executor.h"
 #include "common/Common.h"
+#include "monitor/prometheus_client.h"
 
 namespace milvus::futures {
 
@@ -19,8 +20,9 @@ const int kNumPriority = 3;
 
 folly::CPUThreadPoolExecutor*
 getGlobalCPUExecutor() {
+    auto thread_num = std::thread::hardware_concurrency();
     static folly::CPUThreadPoolExecutor executor(
-        std::thread::hardware_concurrency(),
+        thread_num,
         folly::CPUThreadPoolExecutor::makeDefaultPriorityQueue(kNumPriority),
         std::make_shared<folly::NamedThreadFactory>("MILVUS_FUTURE_CPU_"));
     return &executor;
