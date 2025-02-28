@@ -36,7 +36,7 @@ TEST(CPackedTest, PackedWriterAndReader) {
     auto status = builder->AppendValues(test_data.begin(), test_data.end());
     ASSERT_TRUE(status.ok());
     auto res = builder->Finish();
-    ASSERT_TRUE(res.ok()); 
+    ASSERT_TRUE(res.ok());
     std::shared_ptr<arrow::Array> array = res.ValueOrDie();
 
     auto schema = arrow::schema({arrow::field("int64", arrow::int64())});
@@ -57,7 +57,13 @@ TEST(CPackedTest, PackedWriterAndReader) {
     auto c_status = InitLocalArrowFileSystemSingleton(path);
     EXPECT_EQ(c_status.error_code, 0);
     CPackedWriter c_packed_writer = nullptr;
-    c_status = NewPackedWriter(&c_write_schema, buffer_size, paths, 1, part_upload_size, cgs, &c_packed_writer);
+    c_status = NewPackedWriter(&c_write_schema,
+                               buffer_size,
+                               paths,
+                               1,
+                               part_upload_size,
+                               cgs,
+                               &c_packed_writer);
     EXPECT_EQ(c_status.error_code, 0);
     EXPECT_NE(c_packed_writer, nullptr);
 
@@ -74,7 +80,8 @@ TEST(CPackedTest, PackedWriterAndReader) {
     struct ArrowSchema c_read_schema;
     ASSERT_TRUE(arrow::ExportSchema(*schema, &c_read_schema).ok());
     CPackedReader c_packed_reader = nullptr;
-    c_status = NewPackedReader(paths, 1, &c_read_schema, buffer_size, &c_packed_reader);
+    c_status = NewPackedReader(
+        paths, 1, &c_read_schema, buffer_size, &c_packed_reader);
     EXPECT_EQ(c_status.error_code, 0);
     EXPECT_NE(c_packed_reader, nullptr);
 

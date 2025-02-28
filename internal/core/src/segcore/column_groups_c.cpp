@@ -21,27 +21,33 @@ using VecVecInt = std::vector<std::vector<int>>;
 
 extern "C" {
 
-CColumnGroups NewCColumnGroups() {
-  auto vv = std::make_unique<VecVecInt>();
-  return vv.release();
+CColumnGroups
+NewCColumnGroups() {
+    auto vv = std::make_unique<VecVecInt>();
+    return vv.release();
 }
 
-void AddCColumnGroup(CColumnGroups cgs, int* group, int group_size) {
-  if (!cgs || !group)
-    return;
+void
+AddCColumnGroup(CColumnGroups cgs, int* group, int group_size) {
+    if (!cgs || !group)
+        return;
 
-  auto vv = static_cast<VecVecInt*>(cgs);
-  std::vector<int> new_group(group, group + group_size);
-  vv->emplace_back(std::move(new_group));
+    auto vv = static_cast<VecVecInt*>(cgs);
+    std::vector<int> new_group(group, group + group_size);
+    vv->emplace_back(std::move(new_group));
 }
 
-int CColumnGroupsSize(CColumnGroups cgs) {
-  if (!cgs)
-    return 0;
+int
+CColumnGroupsSize(CColumnGroups cgs) {
+    if (!cgs)
+        return 0;
 
-  auto vv = static_cast<VecVecInt*>(cgs);
-  return static_cast<int>(vv->size());
+    auto vv = static_cast<VecVecInt*>(cgs);
+    return static_cast<int>(vv->size());
 }
 
-void FreeCColumnGroups(CColumnGroups cgs) { delete static_cast<VecVecInt*>(cgs); }
+void
+FreeCColumnGroups(CColumnGroups cgs) {
+    delete static_cast<VecVecInt*>(cgs);
+}
 }

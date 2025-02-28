@@ -58,7 +58,8 @@ InitRemoteArrowFileSystemSingleton(CStorageConfig c_storage_config) {
         conf.useIAM = c_storage_config.useIAM;
         conf.useVirtualHost = c_storage_config.useVirtualHost;
         conf.requestTimeoutMs = c_storage_config.requestTimeoutMs;
-        conf.gcp_credential_json = std::string(c_storage_config.gcp_credential_json);
+        conf.gcp_credential_json =
+            std::string(c_storage_config.gcp_credential_json);
         conf.use_custom_part_upload = c_storage_config.use_custom_part_upload;
         milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
 
