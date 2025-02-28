@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // CollectionCache stores the cached collection schema information.

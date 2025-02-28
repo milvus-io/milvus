@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/milvus-io/milvus/pkg/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 )
 
 const (
