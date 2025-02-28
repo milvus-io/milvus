@@ -896,6 +896,14 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 				return err
 			}
 			s.metricsCacheManager.InvalidateSystemInfoMetrics()
+			if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
+				log.Info("receive datanode session event, but adding datanode by bind mode, skip it",
+					zap.String("address", event.Session.Address),
+					zap.Int64("serverID", event.Session.ServerID),
+					zap.String("event type", event.EventType.String()))
+				return nil
+			}
+			return s.indexNodeManager.AddNode(event.Session.ServerID, event.Session.Address)
 		case sessionutil.SessionDelEvent:
 			log.Info("received datanode unregister",
 				zap.String("address", info.Address),
@@ -905,32 +913,24 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 				return err
 			}
 			s.metricsCacheManager.InvalidateSystemInfoMetrics()
-		default:
-			log.Warn("receive unknown service event type",
-				zap.Any("type", event.EventType))
-		}
-	case typeutil.IndexNodeRole:
-		if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
-			log.Info("receive indexnode session event, but adding indexnode by bind mode, skip it",
-				zap.String("address", event.Session.Address),
-				zap.Int64("serverID", event.Session.ServerID),
-				zap.String("event type", event.EventType.String()))
-			return nil
-		}
-		switch event.EventType {
-		case sessionutil.SessionAddEvent:
-			log.Info("received indexnode register",
-				zap.String("address", event.Session.Address),
-				zap.Int64("serverID", event.Session.ServerID))
-			return s.indexNodeManager.AddNode(event.Session.ServerID, event.Session.Address)
-		case sessionutil.SessionDelEvent:
-			log.Info("received indexnode unregister",
-				zap.String("address", event.Session.Address),
-				zap.Int64("serverID", event.Session.ServerID))
+			if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
+				log.Info("receive datanode session event, but adding datanode by bind mode, skip it",
+					zap.String("address", event.Session.Address),
+					zap.Int64("serverID", event.Session.ServerID),
+					zap.String("event type", event.EventType.String()))
+				return nil
+			}
 			s.indexNodeManager.RemoveNode(event.Session.ServerID)
 		case sessionutil.SessionUpdateEvent:
+			if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
+				log.Info("receive datanode session event, but adding indexnode by bind mode, skip it",
+					zap.String("address", event.Session.Address),
+					zap.Int64("serverID", event.Session.ServerID),
+					zap.String("event type", event.EventType.String()))
+				return nil
+			}
 			serverID := event.Session.ServerID
-			log.Info("received indexnode SessionUpdateEvent", zap.Int64("serverID", serverID))
+			log.Info("received datanode SessionUpdateEvent", zap.Int64("serverID", serverID))
 			s.indexNodeManager.StoppingNode(serverID)
 		default:
 			log.Warn("receive unknown service event type",
