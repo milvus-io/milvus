@@ -248,8 +248,8 @@ func (etd *ExecutingTaskDelta) printDetailInfos() {
 }
 
 func (etd *ExecutingTaskDelta) Clear() {
-	etd.mu.RLock()
-	defer etd.mu.RUnlock()
+	etd.mu.Lock()
+	defer etd.mu.Unlock()
 	etd.data = make(map[int64]map[int64]int)
 	etd.taskIDRecords.Clear()
 }
