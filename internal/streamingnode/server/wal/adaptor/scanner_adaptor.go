@@ -98,7 +98,9 @@ func (s *scannerAdaptorImpl) execute() {
 	s.logger.Info("scanner start background task")
 
 	msgChan := make(chan message.ImmutableMessage)
+
 	ch := make(chan struct{})
+	defer func() { <-ch }()
 	// TODO: optimize the extra goroutine here after msgstream is removed.
 	go func() {
 		defer close(ch)
@@ -116,9 +118,6 @@ func (s *scannerAdaptorImpl) execute() {
 		return
 	}
 	s.logger.Warn("the consuming event loop of scanner is closed with unexpected error", zap.Error(err))
-
-	// waiting for the produce event loop to close.
-	<-ch
 }
 
 // produceEventLoop produces the message from the wal and write ahead buffer.
