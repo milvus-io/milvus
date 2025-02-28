@@ -4660,7 +4660,6 @@ func TestProxy_Import(t *testing.T) {
 	wal := mock_streaming.NewMockWALAccesser(t)
 	b := mock_streaming.NewMockBroadcast(t)
 	wal.EXPECT().Broadcast().Return(b).Maybe()
-	b.EXPECT().BlockUntilResourceKeyAckOnce(mock.Anything, mock.Anything).Return(nil).Maybe()
 	streaming.SetWALForTest(wal)
 	defer streaming.RecoverWALForTest()
 
@@ -4716,7 +4715,6 @@ func TestProxy_Import(t *testing.T) {
 		b := mock_streaming.NewMockBroadcast(t)
 		wal.EXPECT().Broadcast().Return(b)
 		b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil)
-		b.EXPECT().BlockUntilResourceKeyAckOnce(mock.Anything, mock.Anything).Return(nil).Maybe()
 		streaming.SetWALForTest(wal)
 		defer streaming.RecoverWALForTest()
 

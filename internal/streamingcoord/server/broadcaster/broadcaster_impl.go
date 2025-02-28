@@ -84,7 +84,16 @@ func (b *broadcasterImpl) Broadcast(ctx context.Context, msg message.BroadcastMu
 
 	// Wait both request context and the background task context.
 	ctx, _ = contextutil.MergeContext(ctx, b.backgroundTaskNotifier.Context())
-	return t.BlockUntilTaskDone(ctx)
+	r, err := t.BlockUntilTaskDone(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// wait for all the vchannels acked.
+	if err := t.BlockUntilAllAck(ctx); err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
 // Ack acknowledges the message at the specified vchannel.
@@ -95,15 +104,6 @@ func (b *broadcasterImpl) Ack(ctx context.Context, req types.BroadcastAckRequest
 	defer b.lifetime.Done()
 
 	return b.manager.Ack(ctx, req.BroadcastID, req.VChannel)
-}
-
-func (b *broadcasterImpl) NewWatcher() (Watcher, error) {
-	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, status.NewOnShutdownError("broadcaster is closing")
-	}
-	defer b.lifetime.Done()
-
-	return newWatcher(b), nil
 }
 
 func (b *broadcasterImpl) Close() {
@@ -215,6 +215,8 @@ func (b *broadcasterImpl) worker(no int, appendOperator AppendOperator) {
 				case b.backoffChan <- task:
 				}
 			}
+			// All message of broadcast task is sent, release the resource keys to let other task with same resource keys to apply operation.
+			b.manager.ReleaseResourceKeys(task.Header().BroadcastID)
 		}
 	}
 }
