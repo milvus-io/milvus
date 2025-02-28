@@ -51,7 +51,9 @@ var _ RecordReader = (*packedRecordReader)(nil)
 
 func (pr *packedRecordReader) iterateNextBatch() error {
 	if pr.reader != nil {
-		pr.reader.Close()
+		if err := pr.reader.Close(); err != nil {
+			return err
+		}
 	}
 
 	if pr.chunk >= len(pr.paths) {
@@ -228,13 +230,6 @@ func (pw *packedRecordWriter) GetWrittenPaths() []string {
 
 func (pw *packedRecordWriter) GetWrittenRowNum() int64 {
 	return pw.rowNum
-}
-
-func (pw *packedRecordWriter) GetColumnGroupUncompressed(columnGroup int) uint64 {
-	if columnGroup >= len(pw.columnGroupUncompressed) {
-		return 0
-	}
-	return pw.columnGroupUncompressed[columnGroup]
 }
 
 func (pw *packedRecordWriter) Close() error {
@@ -416,8 +411,8 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() error {
 			}
 		}
 		pw.fieldBinlogs[columnGroupID].Binlogs = append(pw.fieldBinlogs[columnGroupID].Binlogs, &datapb.Binlog{
-			LogSize:       int64(pw.writer.GetColumnGroupUncompressed(columnGroup)), // TODO: should provide the log size of each column group file in storage v2
-			MemorySize:    int64(pw.writer.GetColumnGroupUncompressed(columnGroup)),
+			LogSize:       int64(pw.writer.columnGroupUncompressed[columnGroup]), // TODO: should provide the log size of each column group file in storage v2
+			MemorySize:    int64(pw.writer.columnGroupUncompressed[columnGroup]),
 			LogPath:       pw.writer.GetWrittenPaths()[columnGroupID],
 			EntriesNum:    pw.writer.GetWrittenRowNum(),
 			TimestampFrom: pw.tsFrom,

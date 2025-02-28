@@ -151,6 +151,9 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	writtenUncompressed := w.GetWrittenUncompressed()
 	s.Positive(writtenUncompressed)
 
+	rowNum := w.GetRowNum()
+	s.Equal(rowNum, int64(rows))
+
 	fieldBinlogs, statsLog, bm25StatsLog := w.GetLogs()
 	s.Equal(len(fieldBinlogs), len(columnGroups))
 	for _, columnGroup := range fieldBinlogs {

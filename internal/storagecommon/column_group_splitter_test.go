@@ -38,6 +38,12 @@ func TestSplitByFieldSize(t *testing.T) {
 			expected:       []ColumnGroup{},
 		},
 		{
+			name:           "Empty binlogs",
+			fieldBinlogs:   []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []*datapb.Binlog{}}},
+			splitThresHold: 100,
+			expected:       []ColumnGroup{},
+		},
+		{
 			name: "above threshold",
 			fieldBinlogs: []*datapb.FieldBinlog{
 				{
