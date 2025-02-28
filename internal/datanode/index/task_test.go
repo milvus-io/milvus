@@ -20,11 +20,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
@@ -112,10 +113,12 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 		FieldType:    schemapb.DataType_FloatVector,
 	}
 
+	cm, err := dependency.NewDefaultFactory(true).NewPersistentStorageChunkManager(ctx)
+	suite.NoError(err)
 	blobs, err := suite.serializeData()
 	suite.NoError(err)
-	cm := mocks.NewChunkManager(suite.T())
-	cm.EXPECT().Write(ctx, suite.dataPath, blobs[0].Value).Return(nil)
+	err = cm.Write(ctx, suite.dataPath, blobs[0].Value)
+	suite.NoError(err)
 
 	t := NewIndexBuildTask(ctx, cancel, req, cm, NewManager(context.Background()))
 
@@ -206,14 +209,15 @@ func (suite *AnalyzeTaskSuite) TestAnalyze() {
 		Dim: 1,
 	}
 
+	cm, err := dependency.NewDefaultFactory(true).NewPersistentStorageChunkManager(ctx)
+	suite.NoError(err)
 	blobs, err := suite.serializeData()
 	suite.NoError(err)
-
-	cm := mocks.NewChunkManager(suite.T())
-	cm.EXPECT().RootPath().Return("/tmp/milvus/data")
 	dataPath := metautil.BuildInsertLogPath(cm.RootPath(), suite.collectionID, suite.partitionID, suite.segmentID,
 		suite.fieldID, 1)
-	cm.EXPECT().Write(ctx, dataPath, blobs[0].Value).Return(nil)
+
+	err = cm.Write(ctx, dataPath, blobs[0].Value)
+	suite.NoError(err)
 
 	t := &analyzeTask{
 		ident:    "",
