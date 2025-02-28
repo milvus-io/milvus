@@ -443,7 +443,7 @@ func getImportRowsInfo(jobID int64, imeta ImportMeta, meta *meta) (importedRows,
 		})
 		segmentIDs = append(segmentIDs, task.(*importTask).GetSegmentIDs()...)
 	}
-	importedRows = meta.GetSegmentsTotalCurrentRows(segmentIDs)
+	importedRows = meta.GetSegmentsTotalNumRows(segmentIDs)
 	return
 }
 
@@ -553,7 +553,7 @@ func GetTaskProgresses(jobID int64, imeta ImportMeta, meta *meta) []*internalpb.
 		totalRows := lo.SumBy(task.GetFileStats(), func(file *datapb.ImportFileStats) int64 {
 			return file.GetTotalRows()
 		})
-		importedRows := meta.GetSegmentsTotalCurrentRows(task.(*importTask).GetSegmentIDs())
+		importedRows := meta.GetSegmentsTotalNumRows(task.(*importTask).GetSegmentIDs())
 		progress := int64(100)
 		if totalRows != 0 {
 			progress = int64(float32(importedRows) / float32(totalRows) * 100)
