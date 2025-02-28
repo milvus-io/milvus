@@ -16,18 +16,20 @@ import (
 )
 
 const (
-	mqTypeDefault = "default"
-	mqTypeNatsmq  = "natsmq"
-	mqTypeRocksmq = "rocksmq"
-	mqTypeKafka   = "kafka"
-	mqTypePulsar  = "pulsar"
+	mqTypeDefault    = "default"
+	mqTypeNatsmq     = "natsmq"
+	mqTypeRocksmq    = "rocksmq"
+	mqTypeKafka      = "kafka"
+	mqTypePulsar     = "pulsar"
+	mqTypeWoodpecker = "woodpecker"
 )
 
 type mqEnable struct {
-	Rocksmq bool
-	Natsmq  bool
-	Pulsar  bool
-	Kafka   bool
+	Rocksmq    bool
+	Natsmq     bool
+	Pulsar     bool
+	Kafka      bool
+	Woodpecker bool
 }
 
 // DefaultFactory is a factory that produces instances of storage.ChunkManager and message queue.
@@ -82,7 +84,7 @@ func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 }
 
 func (f *DefaultFactory) initMQ(standalone bool, params *paramtable.ComponentParam) error {
-	mqType := mustSelectMQType(standalone, params.MQCfg.Type.GetValue(), mqEnable{params.RocksmqEnable(), params.NatsmqEnable(), params.PulsarEnable(), params.KafkaEnable()})
+	mqType := mustSelectMQType(standalone, params.MQCfg.Type.GetValue(), mqEnable{params.RocksmqEnable(), params.NatsmqEnable(), params.PulsarEnable(), params.KafkaEnable(), params.WoodpeckerEnable()})
 	metrics.RegisterMQType(mqType)
 	log.Info("try to init mq", zap.Bool("standalone", standalone), zap.String("mqType", mqType))
 
@@ -95,6 +97,8 @@ func (f *DefaultFactory) initMQ(standalone bool, params *paramtable.ComponentPar
 		f.msgStreamFactory = msgstream.NewPmsFactory(&params.ServiceParam)
 	case mqTypeKafka:
 		f.msgStreamFactory = msgstream.NewKmsFactory(&params.ServiceParam)
+	case mqTypeWoodpecker:
+		f.msgStreamFactory = msgstream.NewWpmsFactory(&params.ServiceParam)
 	}
 	if f.msgStreamFactory == nil {
 		return errors.New("failed to create MQ: check the milvus log for initialization failures")
@@ -122,13 +126,16 @@ func mustSelectMQType(standalone bool, mqType string, enable mqEnable) string {
 	if enable.Kafka {
 		return mqTypeKafka
 	}
+	if enable.Woodpecker {
+		return mqTypeWoodpecker
+	}
 
 	panic(errors.Errorf("no available mq config found, %s, enable: %+v", mqType, enable))
 }
 
 // Validate mq type.
 func validateMQType(standalone bool, mqType string) error {
-	if mqType != mqTypeNatsmq && mqType != mqTypeRocksmq && mqType != mqTypeKafka && mqType != mqTypePulsar {
+	if mqType != mqTypeNatsmq && mqType != mqTypeRocksmq && mqType != mqTypeKafka && mqType != mqTypePulsar && mqType != mqTypeWoodpecker {
 		return errors.Newf("mq type %s is invalid", mqType)
 	}
 	if !standalone && (mqType == mqTypeRocksmq || mqType == mqTypeNatsmq) {
@@ -172,6 +179,9 @@ func HealthCheck(mqType string) *common.MQClusterStatus {
 		msgstream.PulsarHealthCheck(clusterStatus)
 	case mqTypeKafka:
 		msgstream.KafkaHealthCheck(clusterStatus)
+	case mqTypeWoodpecker:
+		// TODO: implement health checker for woodpecker
+		clusterStatus.Health = true
 	}
 	return clusterStatus
 }
