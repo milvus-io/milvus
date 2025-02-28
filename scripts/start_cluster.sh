@@ -27,11 +27,8 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
   export LD_LIBRARY_PATH=$PWD/internal/core/output/lib/:$LD_LIBRARY_PATH
 fi
 
-echo "Starting rootcoord..."
-nohup ./bin/milvus run rootcoord  --run-with-subprocess  > /tmp/rootcoord.log 2>&1 &
-
-echo "Starting datacoord..."
-nohup ./bin/milvus run datacoord  --run-with-subprocess  > /tmp/datacoord.log 2>&1 &
+echo "Starting mixcoord..."
+nohup ./bin/milvus run mixture -rootcoord -querycoord -datacoord --run-with-subprocess > /tmp/mixcoord.log 2>&1 &
 
 echo "Starting datanode..."
 nohup ./bin/milvus run datanode  --run-with-subprocess > /tmp/datanode.log 2>&1 &
@@ -39,14 +36,8 @@ nohup ./bin/milvus run datanode  --run-with-subprocess > /tmp/datanode.log 2>&1 
 echo "Starting proxy..."
 nohup ./bin/milvus run proxy  --run-with-subprocess  > /tmp/proxy.log 2>&1 &
 
-echo "Starting querycoord..."
-nohup ./bin/milvus run querycoord  --run-with-subprocess > /tmp/querycoord.log 2>&1 &
-
 echo "Starting querynode..."
 nohup ./bin/milvus run querynode  --run-with-subprocess > /tmp/querynode.log 2>&1 &
-
-echo "Starting indexcoord..."
-nohup ./bin/milvus run indexcoord  --run-with-subprocess  > /tmp/indexcoord.log 2>&1 &
 
 echo "Starting indexnode..."
 nohup ./bin/milvus run indexnode  --run-with-subprocess > /tmp/indexnode.log 2>&1 &
