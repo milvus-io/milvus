@@ -125,6 +125,9 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
 
     results->mutable_offset()->Add(retrieve_results.result_offsets_.begin(),
                                    retrieve_results.result_offsets_.end());
+
+    std::chrono::high_resolution_clock::time_point get_target_entry_start =
+        std::chrono::high_resolution_clock::now();
     FillTargetEntry(trace_ctx,
                     plan,
                     results,
@@ -132,6 +135,13 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                     retrieve_results.result_offsets_.size(),
                     ignore_non_pk,
                     true);
+    std::chrono::high_resolution_clock::time_point get_target_entry_end =
+        std::chrono::high_resolution_clock::now();
+    double get_entry_cost = std::chrono::duration<double, std::micro>(
+                                get_target_entry_end - get_target_entry_start)
+                                .count();
+    monitor::internal_core_retrieve_get_target_entry_latency.Observe(
+        get_entry_cost / 1000);
     return results;
 }
 
@@ -242,7 +252,16 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     std::shared_lock lck(mutex_);
     tracer::AutoSpan span("RetrieveByOffsets", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::chrono::high_resolution_clock::time_point get_target_entry_start =
+        std::chrono::high_resolution_clock::now();
     FillTargetEntry(trace_ctx, Plan, results, offsets, size, false, false);
+    std::chrono::high_resolution_clock::time_point get_target_entry_end =
+        std::chrono::high_resolution_clock::now();
+    double get_entry_cost = std::chrono::duration<double, std::micro>(
+                                get_target_entry_end - get_target_entry_start)
+                                .count();
+    monitor::internal_core_retrieve_get_target_entry_latency.Observe(
+        get_entry_cost / 1000);
     return results;
 }
 

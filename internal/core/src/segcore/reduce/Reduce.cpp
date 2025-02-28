@@ -189,7 +189,17 @@ ReduceHelper::FillEntryData() {
     for (auto search_result : search_results_) {
         auto segment = static_cast<milvus::segcore::SegmentInterface*>(
             search_result->segment_);
+        std::chrono::high_resolution_clock::time_point get_target_entry_start =
+            std::chrono::high_resolution_clock::now();
         segment->FillTargetEntry(plan_, *search_result);
+        std::chrono::high_resolution_clock::time_point get_target_entry_end =
+            std::chrono::high_resolution_clock::now();
+        double get_entry_cost =
+            std::chrono::duration<double, std::micro>(get_target_entry_end -
+                                                      get_target_entry_start)
+                .count();
+        monitor::internal_core_search_get_target_entry_latency.Observe(
+            get_entry_cost / 1000);
     }
 }
 
