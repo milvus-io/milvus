@@ -147,7 +147,7 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[in
 	defer reader.Close()
 
 	for {
-		err := reader.Next()
+		dl, err := reader.NextValue()
 		if err != nil {
 			if err == sio.EOF {
 				break
@@ -156,11 +156,10 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[in
 			return nil, err
 		}
 
-		dl := reader.Value()
-		if ts, ok := pk2Ts[dl.Pk.GetValue()]; ok && ts > dl.Ts {
+		if ts, ok := pk2Ts[(*dl).Pk.GetValue()]; ok && ts > (*dl).Ts {
 			continue
 		}
-		pk2Ts[dl.Pk.GetValue()] = dl.Ts
+		pk2Ts[(*dl).Pk.GetValue()] = (*dl).Ts
 	}
 
 	log.Info("compact mergeDeltalogs end", zap.Int("delete entries counts", len(pk2Ts)))
