@@ -38,6 +38,8 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -101,13 +103,15 @@ func (s *SyncTaskSuite) SetupTest() {
 	}
 
 	s.chunkManager = mocks.NewChunkManager(s.T())
-	s.chunkManager.EXPECT().RootPath().Return("files").Maybe()
+	s.chunkManager.EXPECT().RootPath().Return("/tmp").Maybe()
 	s.chunkManager.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	s.broker = broker.NewMockBroker(s.T())
 	s.metacache = metacache.NewMockMetaCache(s.T())
 	s.metacache.EXPECT().Collection().Return(s.collectionID).Maybe()
 	s.metacache.EXPECT().Schema().Return(s.schema).Maybe()
+
+	initcore.InitLocalArrowFileSystem("/tmp")
 }
 
 func (s *SyncTaskSuite) getEmptyInsertBuffer() *storage.InsertData {
@@ -159,10 +163,7 @@ func (s *SyncTaskSuite) getSuiteSyncTask(pack *SyncPack) *SyncTask {
 	return task
 }
 
-func (s *SyncTaskSuite) TestRunNormal() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
+func (s *SyncTaskSuite) createSegment(storageVersion int64) *metacache.SegmentInfo {
 	bfs := pkoracle.NewBloomFilterSet()
 	fd, err := storage.NewFieldData(schemapb.DataType_Int64, &schemapb.FieldSchema{
 		FieldID:      101,
@@ -179,9 +180,29 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	}
 
 	bfs.UpdatePKRange(fd)
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{StorageVersion: storageVersion}, bfs, nil)
 	metacache.UpdateNumOfRows(1000)(seg)
 	seg.GetBloomFilterSet().Roll()
+
+	return seg
+}
+
+func (s *SyncTaskSuite) TestRunNormal() {
+	s.runTestRunNormal(storage.StorageV1)
+}
+
+func (s *SyncTaskSuite) TestRunNormalWithStorageV2() {
+	s.runTestRunNormal(storage.StorageV2)
+}
+
+func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
+
+	seg := s.createSegment(storageVersion)
+
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
@@ -196,6 +217,10 @@ func (s *SyncTaskSuite) TestRunNormal() {
 				Timestamp:   100,
 			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
+		if storageVersion == storage.StorageV2 {
+			task.WithMultiPartUploadSize(0)
+			task.WithSyncBufferSize(packed.DefaultWriteBufferSize)
+		}
 
 		err := task.Run(ctx)
 		s.NoError(err)
@@ -211,6 +236,10 @@ func (s *SyncTaskSuite) TestRunNormal() {
 					Timestamp:   100,
 				}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
+		if storageVersion == storage.StorageV2 {
+			task.WithMultiPartUploadSize(0)
+			task.WithSyncBufferSize(packed.DefaultWriteBufferSize)
+		}
 
 		err := task.Run(ctx)
 		s.NoError(err)
@@ -227,6 +256,10 @@ func (s *SyncTaskSuite) TestRunNormal() {
 					Timestamp:   100,
 				}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
+		if storageVersion == storage.StorageV2 {
+			task.WithMultiPartUploadSize(0)
+			task.WithSyncBufferSize(packed.DefaultWriteBufferSize)
+		}
 		err := task.Run(ctx)
 		s.NoError(err)
 	})
@@ -242,6 +275,10 @@ func (s *SyncTaskSuite) TestRunNormal() {
 				Timestamp:   100,
 			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
+		if storageVersion == storage.StorageV2 {
+			task.WithMultiPartUploadSize(0)
+			task.WithSyncBufferSize(packed.DefaultWriteBufferSize)
+		}
 		err := task.Run(ctx)
 		s.NoError(err)
 	})
@@ -251,13 +288,34 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
-	bfs := pkoracle.NewBloomFilterSet()
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs, nil)
-	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
-	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
-	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 	s.Run("pure_delete_l0_flush", func() {
+		bfs := pkoracle.NewBloomFilterSet()
+		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs, nil)
+		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
+		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+		task := s.getSuiteSyncTask(new(SyncPack).
+			WithDeleteData(s.getDeleteBuffer()).
+			WithFlush().
+			WithCheckpoint(&msgpb.MsgPosition{
+				ChannelName: s.channelName,
+				MsgID:       []byte{1, 2, 3, 4},
+				Timestamp:   100,
+			}))
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
+
+		err := task.Run(ctx)
+		s.NoError(err)
+	})
+
+	s.Run("pure_delete_l0_no_flush_storage_v2", func() {
+		// should not affect l0 segment with storage v2
+		bfs := pkoracle.NewBloomFilterSet()
+		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0, StorageVersion: storage.StorageV2}, bfs, nil)
+		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
+		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 		task := s.getSuiteSyncTask(new(SyncPack).
 			WithDeleteData(s.getDeleteBuffer()).
 			WithFlush().
@@ -335,6 +393,22 @@ func (s *SyncTaskSuite) TestRunError() {
 
 		s.Error(err)
 		s.True(flag)
+	})
+}
+
+func (s *SyncTaskSuite) TestRunErrorWithStorageV2() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.Run("storage v2 allocate_id_fail", func() {
+		mockAllocator := allocator.NewMockAllocator(s.T())
+		mockAllocator.EXPECT().Alloc(mock.Anything).Return(0, 0, errors.New("mocked"))
+		segV2 := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0, StorageVersion: storage.StorageV2}, pkoracle.NewBloomFilterSet(), nil)
+		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(segV2, true)
+
+		task := s.getSuiteSyncTask(new(SyncPack).WithFlush()).WithAllocator(mockAllocator)
+
+		err := task.Run(ctx)
+		s.Error(err)
 	})
 }
 
