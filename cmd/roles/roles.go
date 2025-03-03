@@ -149,7 +149,6 @@ type MilvusRoles struct {
 	EnableQueryNode     bool `env:"ENABLE_QUERY_NODE"`
 	EnableDataCoord     bool `env:"ENABLE_DATA_COORD"`
 	EnableDataNode      bool `env:"ENABLE_DATA_NODE"`
-	EnableIndexCoord    bool `env:"ENABLE_INDEX_COORD"`
 	EnableStreamingNode bool `env:"ENABLE_STREAMING_NODE"`
 
 	Local    bool
@@ -223,11 +222,6 @@ func (mr *MilvusRoles) runStreamingNode(ctx context.Context, localMsg bool, wg *
 func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
 	wg.Add(1)
 	return runComponent(ctx, localMsg, wg, components.NewDataNode, metrics.RegisterDataNode)
-}
-
-func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
-	wg.Add(1)
-	return runComponent(ctx, localMsg, wg, components.NewIndexCoord, func(registry *prometheus.Registry) {})
 }
 
 func (mr *MilvusRoles) setupLogger() {
@@ -396,7 +390,6 @@ func (mr *MilvusRoles) Run() {
 		mr.EnableQueryNode,
 		mr.EnableDataCoord,
 		mr.EnableDataNode,
-		mr.EnableIndexCoord,
 		mr.EnableStreamingNode,
 	}
 	enableComponents = lo.Filter(enableComponents, func(v bool, _ int) bool {
@@ -426,7 +419,7 @@ func (mr *MilvusRoles) Run() {
 	local := mr.Local
 
 	componentMap := make(map[string]component)
-	var rootCoord, queryCoord, indexCoord, dataCoord component
+	var rootCoord, queryCoord, dataCoord component
 	var proxy, dataNode, queryNode, streamingNode component
 	if mr.EnableRootCoord {
 		rootCoord = mr.runRootCoord(ctx, local, &wg)
@@ -438,12 +431,6 @@ func (mr *MilvusRoles) Run() {
 		dataCoord = mr.runDataCoord(ctx, local, &wg)
 		componentMap[typeutil.DataCoordRole] = dataCoord
 		paramtable.SetLocalComponentEnabled(typeutil.DataCoordRole)
-	}
-
-	if mr.EnableIndexCoord {
-		indexCoord = mr.runIndexCoord(ctx, local, &wg)
-		componentMap[typeutil.IndexCoordRole] = indexCoord
-		paramtable.SetLocalComponentEnabled(typeutil.IndexCoordRole)
 	}
 
 	if mr.EnableQueryCoord {
@@ -536,7 +523,7 @@ func (mr *MilvusRoles) Run() {
 	<-mr.closed
 
 	// stop coordinators first
-	coordinators := []component{rootCoord, dataCoord, indexCoord, queryCoord}
+	coordinators := []component{rootCoord, dataCoord, queryCoord}
 	for idx, coord := range coordinators {
 		log.Warn("stop processing")
 		if coord != nil {
@@ -586,9 +573,6 @@ func (mr *MilvusRoles) GetRoles() []string {
 	}
 	if mr.EnableDataNode {
 		roles = append(roles, typeutil.DataNodeRole)
-	}
-	if mr.EnableIndexCoord {
-		roles = append(roles, typeutil.IndexCoordRole)
 	}
 	return roles
 }

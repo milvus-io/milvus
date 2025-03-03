@@ -4967,11 +4967,11 @@ if this parameter <= 0, will set it as 10`,
 
 	p.EnableDisk = ParamItem{
 		Key:          "dataNode.enableDisk",
-		FallbackKeys: []string{"indexNode.scheduler.buildParallel"},
+		FallbackKeys: []string{"indexNode.enableDisk"},
 		Version:      "2.2.0",
 		DefaultValue: "false",
 		PanicIfEmpty: true,
-		Doc:          "enable index node build disk vector index",
+		Doc:          "enable build disk vector index",
 		Export:       true,
 	}
 	p.EnableDisk.Init(base.mgr)
@@ -5002,7 +5002,7 @@ if this parameter <= 0, will set it as 10`,
 
 	p.MaxDiskUsagePercentage = ParamItem{
 		Key:          "dataNode.maxDiskUsagePercentage",
-		FallbackKeys: []string{"indexNode.scheduler.buildParallel"},
+		FallbackKeys: []string{"indexNode.maxDiskUsagePercentage"},
 		Version:      "2.2.0",
 		DefaultValue: "95",
 		PanicIfEmpty: true,

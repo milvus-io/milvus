@@ -303,6 +303,10 @@ type IndexCoordInfos struct {
 
 // DataNodeConfiguration records the configuration of DataNode.
 type DataNodeConfiguration struct {
+	MinioBucketName string `json:"minio_bucket_name"`
+
+	SimdType string `json:"simd_type"`
+
 	FlushInsertBufferSize int64 `json:"flush_insert_buffer_size"`
 }
 

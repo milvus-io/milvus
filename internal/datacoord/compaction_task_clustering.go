@@ -365,7 +365,7 @@ func (t *clusteringCompactionTask) processStats() error {
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_indexing), setResultSegments(resultSegments))
 }
 
-// this is just a temporary solution. A more long-term solution should be for the indexnode
+// this is just a temporary solution. A more long-term solution should be for the datanode
 // to regenerate the clustering information corresponding to each segment and merge them at the vshard level.
 func (t *clusteringCompactionTask) regeneratePartitionStats(tmpToResultSegments map[int64][]int64) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)

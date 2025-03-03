@@ -239,7 +239,7 @@ func (s *Server) parseAndVerifyNestedPath(identifier string, schema *schemapb.Co
 // CreateIndex create an index on collection.
 // Index building is asynchronous, so when an index building request comes, an IndexID is assigned to the task and
 // will get all flushed segments from DataCoord and record tasks with these segments. The background process
-// indexBuilder will find this task and assign it to IndexNode for execution.
+// indexBuilder will find this task and assign it to DataNode for execution.
 func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
@@ -330,7 +330,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			return merr.Status(err), nil
 		}
 		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(GetIndexType(req.IndexParams)) && !s.indexNodeManager.ClientSupportDisk() {
-			errMsg := "all IndexNodes do not support disk indexes, please verify"
+			errMsg := "all DataNodes do not support disk indexes, please verify"
 			log.Warn(errMsg)
 			err = merr.WrapErrIndexNotSupported(GetIndexType(req.IndexParams))
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
