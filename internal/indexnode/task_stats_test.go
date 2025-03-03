@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
-	"github.com/milvus-io/milvus/internal/flushcommon/io"
+	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -51,7 +51,7 @@ type TaskStatsSuite struct {
 	clusterID    string
 	schema       *schemapb.CollectionSchema
 
-	mockBinlogIO *io.MockBinlogIO
+	mockBinlogIO *mock_util.MockBinlogIO
 	segWriter    *compaction.SegmentWriter
 }
 
@@ -63,7 +63,7 @@ func (s *TaskStatsSuite) SetupSuite() {
 
 func (s *TaskStatsSuite) SetupSubTest() {
 	paramtable.Init()
-	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
+	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 }
 
 func (s *TaskStatsSuite) GenSegmentWriterWithBM25(magic int64) {

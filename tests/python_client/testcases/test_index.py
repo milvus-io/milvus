@@ -2212,7 +2212,8 @@ class TestScaNNIndex(TestcaseBase):
         collection_w = self.init_collection_general(prefix, is_index=False, dim=dim)[0]
         index_params = {"index_type": "SCANN", "metric_type": "L2", "params": {"nlist": 1024}}
         error = {ct.err_code: 1100,
-                 ct.err_msg: f"The dimension of a vector (dim) should be a multiple of 2. Dimension:{dim}"}
+                 ct.err_msg: f"The dimension of a vector (dim) should be a multiple of sub_dim. "
+                             f"Dimension:{dim}, sub_dim:2: invalid parameter"}
         collection_w.create_index(default_field_name, index_params,
                                   check_task=CheckTasks.err_res, check_items=error)
 

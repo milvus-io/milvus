@@ -41,10 +41,14 @@ func (impl *timeTickAppendInterceptor) Ready() <-chan struct{} {
 
 // Do implements AppendInterceptor.
 func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (msgID message.MessageID, err error) {
+	cm, err := impl.operator.MVCCManager(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	defer func() {
 		if err == nil {
 			// the cursor manager should beready since the timetick interceptor is ready.
-			cm, _ := impl.operator.MVCCManager(ctx)
 			cm.UpdateMVCC(msg)
 		}
 	}()
