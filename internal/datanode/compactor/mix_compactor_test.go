@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package compaction
+package compactor
 
 import (
 	"context"
@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
@@ -721,7 +722,7 @@ func (s *MixCompactionTaskSuite) TestMergeDeltalogsMultiSegment() {
 			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).
 				Return(dValues, nil)
 
-			got, err := mergeDeltalogs(s.task.ctx, s.task.binlogIO, []string{"random"})
+			got, err := compaction.ComposeDeleteFromDeltalogs(s.task.ctx, s.task.binlogIO, []string{"random"})
 			s.NoError(err)
 			s.Equal(len(got), len(test.expectedpk2ts))
 
@@ -751,12 +752,12 @@ func (s *MixCompactionTaskSuite) TestMergeDeltalogsOneSegment() {
 		Return(nil, errors.New("mock_error")).Once()
 
 	invalidPaths := []string{"mock_error"}
-	got, err := mergeDeltalogs(s.task.ctx, s.task.binlogIO, invalidPaths)
+	got, err := compaction.ComposeDeleteFromDeltalogs(s.task.ctx, s.task.binlogIO, invalidPaths)
 	s.Error(err)
 	s.Nil(got)
 
 	dpaths := []string{"a"}
-	got, err = mergeDeltalogs(s.task.ctx, s.task.binlogIO, dpaths)
+	got, err = compaction.ComposeDeleteFromDeltalogs(s.task.ctx, s.task.binlogIO, dpaths)
 	s.NoError(err)
 	s.NotNil(got)
 	s.Equal(len(expectedMap), len(got))

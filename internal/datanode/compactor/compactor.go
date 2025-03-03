@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package compaction
+package compactor
 
 import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"

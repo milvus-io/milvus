@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package compaction
+package compactor
 
 import (
 	"context"
@@ -31,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -186,12 +187,12 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			deltaPaths = append(deltaPaths, binlog.GetLogPath())
 		}
 	}
-	delta, err := mergeDeltalogs(ctx, t.binlogIO, deltaPaths)
+	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.binlogIO, deltaPaths)
 	if err != nil {
 		log.Warn("compact wrong, fail to merge deltalogs", zap.Error(err))
 		return
 	}
-	entityFilter := newEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
+	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
 	reader, err := storage.NewBinlogRecordReader(ctx, seg.GetFieldBinlogs(), t.plan.GetSchema(), storage.WithDownloader(t.binlogIO.Download))
 	if err != nil {

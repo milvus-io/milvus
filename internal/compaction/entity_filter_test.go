@@ -26,15 +26,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
-func TestCompactorCommonTaskSuite(t *testing.T) {
-	suite.Run(t, new(CompactorCommonSuite))
+func TestEntityFilterTaskSuite(t *testing.T) {
+	suite.Run(t, new(EntityFilterSuite))
 }
 
-type CompactorCommonSuite struct {
+type EntityFilterSuite struct {
 	suite.Suite
 }
 
-func (s *CompactorCommonSuite) TestEntityFilterByTTL() {
+func (s *EntityFilterSuite) TestEntityFilterByTTL() {
 	milvusBirthday := getMilvusBirthday()
 
 	tests := []struct {
@@ -61,7 +61,7 @@ func (s *CompactorCommonSuite) TestEntityFilterByTTL() {
 		{"ttl=maxInt64, nowTs-entityTs>1000years", math.MaxInt64, milvusBirthday.AddDate(1000, 0, 11), milvusBirthday, true},
 		{"ttl=maxInt64, nowTs-entityTs==1000years", math.MaxInt64, milvusBirthday.AddDate(1000, 0, 0), milvusBirthday, true},
 		{"ttl=maxInt64, nowTs-entityTs==240year", math.MaxInt64, milvusBirthday.AddDate(240, 0, 0), milvusBirthday, false},
-		{"ttl=maxInt64, nowTs-entityTs==maxDur", math.MaxInt64, milvusBirthday.Add(time.Duration(math.MaxInt64)), milvusBirthday, true},
+		{"ttl=maxInt64, nowTs-entityTs==maxDur", math.MaxInt64, milvusBirthday.Add(math.MaxInt64), milvusBirthday, true},
 		{"ttl<maxInt64, nowTs-entityTs==1000years", math.MaxInt64 - 1, milvusBirthday.AddDate(1000, 0, 0), milvusBirthday, true},
 	}
 	for _, test := range tests {
@@ -81,4 +81,8 @@ func (s *CompactorCommonSuite) TestEntityFilterByTTL() {
 			}
 		})
 	}
+}
+
+func getMilvusBirthday() time.Time {
+	return time.Date(2019, time.Month(5), 30, 0, 0, 0, 0, time.UTC)
 }

@@ -38,7 +38,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/channel"
-	"github.com/milvus-io/milvus/internal/datanode/compaction"
+	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/msghandlerimpl"
 	"github.com/milvus-io/milvus/internal/datanode/util"
@@ -103,7 +103,7 @@ type DataNode struct {
 	importScheduler    importv2.Scheduler
 
 	segmentCache             *util.Cache
-	compactionExecutor       compaction.Executor
+	compactionExecutor       compactor.Executor
 	timeTickSender           *util2.TimeTickSender
 	channelCheckpointUpdater *util2.ChannelCheckpointUpdater
 
@@ -147,7 +147,7 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		dataCoord:              nil,
 		factory:                factory,
 		segmentCache:           util.NewCache(),
-		compactionExecutor:     compaction.NewExecutor(),
+		compactionExecutor:     compactor.NewExecutor(),
 		reportImportRetryTimes: 10,
 		metricsRequest:         metricsinfo.NewMetricsRequest(),
 	}
