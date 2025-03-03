@@ -29,6 +29,7 @@ docker-compose-devcontainer.yml.tmp
 
 # Docker generated cache file
 .docker/
+.docker-gpu/
 
 **/_artifacts/**
 
