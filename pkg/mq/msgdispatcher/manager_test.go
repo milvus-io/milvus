@@ -35,9 +35,6 @@ func TestManager(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().MQCfg.TargetBufSize.Key, "65536")
 	defer paramtable.Get().Reset(paramtable.Get().MQCfg.TargetBufSize.Key)
 
-	paramtable.Get().Save(paramtable.Get().MQCfg.MaxDispatcherNumPerPchannel.Key, "65536")
-	defer paramtable.Get().Reset(paramtable.Get().MQCfg.MaxDispatcherNumPerPchannel.Key)
-
 	t.Run("test add and remove dispatcher", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()

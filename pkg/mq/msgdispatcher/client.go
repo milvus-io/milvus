@@ -18,7 +18,6 @@ package msgdispatcher
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -29,8 +28,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -97,12 +94,6 @@ func (c *client) Register(ctx context.Context, streamConfig *StreamConfig) (<-ch
 		manager = NewDispatcherManager(pchannel, c.role, c.nodeID, c.factory)
 		c.managers.Insert(pchannel, manager)
 		go manager.Run()
-	}
-
-	// Check if the consumer number limit has been reached.
-	limit := paramtable.Get().MQCfg.MaxDispatcherNumPerPchannel.GetAsInt()
-	if manager.NumConsumer() >= limit {
-		return nil, merr.WrapErrTooManyConsumers(vchannel, fmt.Sprintf("limit=%d", limit))
 	}
 
 	// Begin to register

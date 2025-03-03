@@ -67,9 +67,6 @@ func TestClient_Concurrency(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().MQCfg.TargetBufSize.Key, "65536")
 	defer paramtable.Get().Reset(paramtable.Get().MQCfg.TargetBufSize.Key)
 
-	paramtable.Get().Save(paramtable.Get().MQCfg.MaxDispatcherNumPerPchannel.Key, "65536")
-	defer paramtable.Get().Reset(paramtable.Get().MQCfg.MaxDispatcherNumPerPchannel.Key)
-
 	const (
 		vchannelNumPerPchannel = 10
 		pchannelNum            = 16

@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -34,9 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -87,20 +84,12 @@ func createNewInputFromDispatcher(initCtx context.Context,
 	replicateConfig := msgstream.GetReplicateConfig(replicateID, schema.GetDbName(), schema.GetName())
 
 	if seekPos != nil && len(seekPos.MsgID) != 0 {
-		err := retry.Handle(initCtx, func() (bool, error) {
-			input, err = dispatcherClient.Register(initCtx, &msgdispatcher.StreamConfig{
-				VChannel:        vchannel,
-				Pos:             seekPos,
-				SubPos:          common.SubscriptionPositionUnknown,
-				ReplicateConfig: replicateConfig,
-			})
-			if err != nil {
-				log.Warn("datanode consume failed", zap.Error(err))
-				return errors.Is(err, merr.ErrTooManyConsumers), err
-			}
-			return false, nil
-		}, retry.Sleep(paramtable.Get().MQCfg.RetrySleep.GetAsDuration(time.Second)), // 5 seconds
-			retry.MaxSleepTime(paramtable.Get().MQCfg.RetryTimeout.GetAsDuration(time.Second))) // 5 minutes
+		input, err = dispatcherClient.Register(initCtx, &msgdispatcher.StreamConfig{
+			VChannel:        vchannel,
+			Pos:             seekPos,
+			SubPos:          common.SubscriptionPositionUnknown,
+			ReplicateConfig: replicateConfig,
+		})
 		if err != nil {
 			log.Warn("datanode consume failed after retried", zap.Error(err))
 			dispatcherClient.Deregister(vchannel)
@@ -115,20 +104,12 @@ func createNewInputFromDispatcher(initCtx context.Context,
 		return input, err
 	}
 
-	err = retry.Handle(initCtx, func() (bool, error) {
-		input, err = dispatcherClient.Register(initCtx, &msgdispatcher.StreamConfig{
-			VChannel:        vchannel,
-			Pos:             nil,
-			SubPos:          common.SubscriptionPositionEarliest,
-			ReplicateConfig: replicateConfig,
-		})
-		if err != nil {
-			log.Warn("datanode consume failed", zap.Error(err))
-			return errors.Is(err, merr.ErrTooManyConsumers), err
-		}
-		return false, nil
-	}, retry.Sleep(paramtable.Get().MQCfg.RetrySleep.GetAsDuration(time.Second)), // 5 seconds
-		retry.MaxSleepTime(paramtable.Get().MQCfg.RetryTimeout.GetAsDuration(time.Second))) // 5 minutes
+	input, err = dispatcherClient.Register(initCtx, &msgdispatcher.StreamConfig{
+		VChannel:        vchannel,
+		Pos:             nil,
+		SubPos:          common.SubscriptionPositionEarliest,
+		ReplicateConfig: replicateConfig,
+	})
 	if err != nil {
 		log.Warn("datanode consume failed after retried", zap.Error(err))
 		dispatcherClient.Deregister(vchannel)
