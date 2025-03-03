@@ -19,6 +19,7 @@ package msgdispatcher
 import (
 	"context"
 	"fmt"
+	"go.uber.org/atomic"
 	"sort"
 	"sync"
 	"time"
@@ -58,9 +59,10 @@ type dispatcherManager struct {
 	mainDispatcher    *Dispatcher
 	deputyDispatchers map[int64]*Dispatcher // ID -> *Dispatcher
 
-	factory   msgstream.Factory
-	closeChan chan struct{}
-	closeOnce sync.Once
+	idAllocator atomic.Int64
+	factory     msgstream.Factory
+	closeChan   chan struct{}
+	closeOnce   sync.Once
 }
 
 func NewDispatcherManager(pchannel string, role string, nodeID int64, factory msgstream.Factory) DispatcherManager {
@@ -170,16 +172,14 @@ func (c *dispatcherManager) Run() {
 }
 
 func (c *dispatcherManager) buildDispatcher() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	tr := timerecord.NewTimeRecorder("")
-	log := log.With(zap.String("role", c.role),
-		zap.Int64("nodeID", c.nodeID), zap.String("pchannel", c.pchannel))
+	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID), zap.String("pchannel", c.pchannel))
 
 	allTargets := c.registeredTargets.Values()
 	// get lack targets to perform subscription
 	lackTargets := make([]*target, 0, len(allTargets))
+
+	c.mu.RLock()
 OUTER:
 	for _, t := range allTargets {
 		if c.mainDispatcher != nil && c.mainDispatcher.HasTarget(t.vchannel) {
@@ -192,6 +192,7 @@ OUTER:
 		}
 		lackTargets = append(lackTargets, t)
 	}
+	c.mu.RUnlock()
 
 	if len(lackTargets) == 0 {
 		return
@@ -223,10 +224,9 @@ OUTER:
 	// to the latest position in lack targets.
 	latestTarget := candidateTargets[len(candidateTargets)-1]
 
-	isMain := c.mainDispatcher == nil
-
 	// TODO: add newDispatcher timeout param and init context
-	d, err := NewDispatcher(context.Background(), c.factory, isMain, c.pchannel, earliestTarget.pos, earliestTarget.subPos, latestTarget.pos.GetTimestamp())
+	id := c.idAllocator.Inc()
+	d, err := NewDispatcher(context.Background(), c.factory, id, c.pchannel, earliestTarget.pos, earliestTarget.subPos, latestTarget.pos.GetTimestamp())
 	if err != nil {
 		panic(err)
 	}
@@ -260,7 +260,9 @@ OUTER:
 		zap.Strings("vchannels", vchannels),
 	)
 
-	if isMain {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.mainDispatcher == nil {
 		c.mainDispatcher = d
 		log.Info("add main dispatcher", zap.Int64("id", d.ID()))
 	} else {

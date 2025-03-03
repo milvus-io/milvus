@@ -72,7 +72,6 @@ type Dispatcher struct {
 	wg   sync.WaitGroup
 	once sync.Once
 
-	isMain   bool // indicates if it's a main dispatcher
 	pchannel string
 	curTs    atomic.Uint64
 
@@ -84,17 +83,16 @@ type Dispatcher struct {
 func NewDispatcher(
 	ctx context.Context,
 	factory msgstream.Factory,
-	isMain bool,
+	id int64,
 	pchannel string,
 	position *Pos,
 	subPos SubPos,
 	pullbackEndTs typeutil.Timestamp,
 ) (*Dispatcher, error) {
-	id := time.Now().UnixNano()
 	subName := fmt.Sprintf("%s-%d", pchannel, id)
 
 	log := log.Ctx(ctx).With(zap.String("pchannel", pchannel),
-		zap.Int64("id", id), zap.String("subName", subName), zap.Bool("isMain", isMain))
+		zap.Int64("id", id), zap.String("subName", subName))
 	log.Info("creating dispatcher...", zap.Uint64("pullbackEndTs", pullbackEndTs))
 
 	var stream msgstream.MsgStream
@@ -140,7 +138,6 @@ func NewDispatcher(
 		pullbackEndTs:        pullbackEndTs,
 		pullbackDoneNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		done:                 make(chan struct{}, 1),
-		isMain:               isMain,
 		pchannel:             pchannel,
 		targets:              typeutil.NewConcurrentMap[string, *target](),
 		stream:               stream,
@@ -159,8 +156,7 @@ func (d *Dispatcher) CurTs() typeutil.Timestamp {
 }
 
 func (d *Dispatcher) AddTarget(t *target) {
-	log := log.With(zap.String("vchannel", t.vchannel), zap.Int64("id", d.ID()),
-		zap.Bool("isMain", d.isMain), zap.Uint64("ts", t.pos.GetTimestamp()))
+	log := log.With(zap.String("vchannel", t.vchannel), zap.Int64("id", d.ID()), zap.Uint64("ts", t.pos.GetTimestamp()))
 	if _, ok := d.targets.GetOrInsert(t.vchannel, t); ok {
 		log.Warn("target exists")
 		return
@@ -172,7 +168,7 @@ func (d *Dispatcher) GetTarget(vchannel string) (*target, error) {
 	if t, ok := d.targets.Get(vchannel); ok {
 		return t, nil
 	}
-	return nil, fmt.Errorf("cannot find target, vchannel=%s, isMain=%t", vchannel, d.isMain)
+	return nil, fmt.Errorf("cannot find target, vchannel=%s", vchannel)
 }
 
 func (d *Dispatcher) GetTargets() []*target {
@@ -184,7 +180,7 @@ func (d *Dispatcher) HasTarget(vchannel string) bool {
 }
 
 func (d *Dispatcher) RemoveTarget(vchannel string) {
-	log := log.With(zap.String("vchannel", vchannel), zap.Int64("id", d.ID()), zap.Bool("isMain", d.isMain))
+	log := log.With(zap.String("vchannel", vchannel), zap.Int64("id", d.ID()))
 	if _, ok := d.targets.GetAndRemove(vchannel); ok {
 		log.Info("target removed")
 	} else {
@@ -205,7 +201,7 @@ func (d *Dispatcher) BlockUtilPullbackDone() {
 
 func (d *Dispatcher) Handle(signal signal) {
 	log := log.With(zap.String("pchannel", d.pchannel), zap.Int64("id", d.ID()),
-		zap.String("signal", signal.String()), zap.Bool("isMain", d.isMain))
+		zap.String("signal", signal.String()))
 	log.Debug("get signal")
 	switch signal {
 	case start:
@@ -233,7 +229,7 @@ func (d *Dispatcher) Handle(signal signal) {
 }
 
 func (d *Dispatcher) work() {
-	log := log.With(zap.String("pchannel", d.pchannel), zap.Int64("id", d.ID()), zap.Bool("isMain", d.isMain))
+	log := log.With(zap.String("pchannel", d.pchannel), zap.Int64("id", d.ID()))
 	log.Info("begin to work")
 	defer d.wg.Done()
 	for {

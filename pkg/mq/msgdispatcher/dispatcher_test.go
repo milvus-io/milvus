@@ -19,6 +19,7 @@ package msgdispatcher
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -34,7 +35,7 @@ import (
 func TestDispatcher(t *testing.T) {
 	ctx := context.Background()
 	t.Run("test base", func(t *testing.T) {
-		d, err := NewDispatcher(ctx, newMockFactory(), true, "mock_pchannel_0",
+		d, err := NewDispatcher(ctx, newMockFactory(), time.Now().UnixNano(), "mock_pchannel_0",
 			nil, common.SubscriptionPositionEarliest, 0)
 		assert.NoError(t, err)
 		assert.NotPanics(t, func() {
@@ -63,7 +64,7 @@ func TestDispatcher(t *testing.T) {
 				return ms, nil
 			},
 		}
-		d, err := NewDispatcher(ctx, factory, true, "mock_pchannel_0",
+		d, err := NewDispatcher(ctx, factory, time.Now().UnixNano(), "mock_pchannel_0",
 			nil, common.SubscriptionPositionEarliest, 0)
 
 		assert.Error(t, err)
@@ -71,7 +72,7 @@ func TestDispatcher(t *testing.T) {
 	})
 
 	t.Run("test target", func(t *testing.T) {
-		d, err := NewDispatcher(ctx, newMockFactory(), true, "mock_pchannel_0",
+		d, err := NewDispatcher(ctx, newMockFactory(), time.Now().UnixNano(), "mock_pchannel_0",
 			nil, common.SubscriptionPositionEarliest, 0)
 		assert.NoError(t, err)
 		output := make(chan *msgstream.MsgPack, 1024)
@@ -126,7 +127,7 @@ func TestDispatcher(t *testing.T) {
 }
 
 func BenchmarkDispatcher_handle(b *testing.B) {
-	d, err := NewDispatcher(context.Background(), newMockFactory(), true, "mock_pchannel_0",
+	d, err := NewDispatcher(context.Background(), newMockFactory(), time.Now().UnixNano(), "mock_pchannel_0",
 		nil, common.SubscriptionPositionEarliest, 0)
 	assert.NoError(b, err)
 
@@ -141,7 +142,7 @@ func BenchmarkDispatcher_handle(b *testing.B) {
 }
 
 func TestGroupMessage(t *testing.T) {
-	d, err := NewDispatcher(context.Background(), newMockFactory(), true, "mock_pchannel_0",
+	d, err := NewDispatcher(context.Background(), newMockFactory(), time.Now().UnixNano(), "mock_pchannel_0",
 		nil, common.SubscriptionPositionEarliest, 0)
 	assert.NoError(t, err)
 	d.AddTarget(newTarget(&StreamConfig{VChannel: "mock_pchannel_0_1v0"}))
