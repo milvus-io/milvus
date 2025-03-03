@@ -19,13 +19,13 @@ package msgdispatcher
 import (
 	"context"
 	"fmt"
-	"go.uber.org/atomic"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -90,11 +90,13 @@ func (c *dispatcherManager) Add(ctx context.Context, streamConfig *StreamConfig)
 }
 
 func (c *dispatcherManager) Remove(vchannel string) {
-	_, ok := c.registeredTargets.GetAndRemove(vchannel)
+	t, ok := c.registeredTargets.GetAndRemove(vchannel)
 	if !ok {
 		log.Info("the target was not registered before", zap.String("role", c.role),
 			zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
+		return
 	}
+	t.close()
 }
 
 func (c *dispatcherManager) NumTarget() int {

@@ -89,7 +89,7 @@ func NewDispatcher(
 	subPos SubPos,
 	pullbackEndTs typeutil.Timestamp,
 ) (*Dispatcher, error) {
-	subName := fmt.Sprintf("%s-%d", pchannel, id)
+	subName := fmt.Sprintf("%s-%d-%d", pchannel, id, time.Now().UnixNano())
 
 	log := log.Ctx(ctx).With(zap.String("pchannel", pchannel),
 		zap.Int64("id", id), zap.String("subName", subName))
