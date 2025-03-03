@@ -30,7 +30,8 @@ JsonFlatIndex::build_index_for_json(
                 continue;
             }
             auto json = static_cast<const Json*>(data->RawValue(i));
-            auto res = json->doc().at_pointer(nested_path_);
+            auto doc = json->doc();
+            auto res = doc.at_pointer(nested_path_);
             auto err = res.error();
             if (err != simdjson::SUCCESS) {
                 AssertInfo(err == simdjson::INCORRECT_TYPE ||
