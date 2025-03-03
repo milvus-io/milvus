@@ -366,6 +366,44 @@ pub extern "C" fn tantivy_index_add_json(
     let s = cstr_to_str!(s);
     unsafe { (*real).add_json(s, offset).into() }
 }
+
+#[no_mangle]
+pub extern "C" fn tantivy_index_add_json_by_single_segment_writer(
+    ptr: *mut c_void,
+    s: *const c_char,
+) -> RustResult {
+    let real = ptr as *mut IndexWriterWrapper;
+    let s = cstr_to_str!(s);
+    unsafe { (*real).add_json_by_single_segment_writer(s).into() }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_index_add_array_json(
+    ptr: *mut c_void,
+    array: *const *const c_char,
+    len: usize,
+    offset: i64,
+) -> RustResult {
+    let real = ptr as *mut IndexWriterWrapper;
+    unsafe {
+        let arr = convert_to_rust_slice!(array, len);
+        (*real).add_array_json(arr, offset).into()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_index_add_array_json_by_single_segment_writer(
+    ptr: *mut c_void,
+    array: *const *const c_char,
+    len: usize,
+) -> RustResult {
+    let real = ptr as *mut IndexWriterWrapper;
+    unsafe {
+        let arr = convert_to_rust_slice!(array, len);
+        (*real).add_array_json_by_single_segment_writer(arr).into()
+    }
+}
+
 // --------------------------------------------- array ------------------------------------------
 
 #[no_mangle]

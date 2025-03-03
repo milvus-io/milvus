@@ -186,6 +186,37 @@ impl IndexWriterWrapper {
         Ok(())
     }
 
+    pub fn add_json_by_single_segment_writer(&mut self, data: &str) -> Result<()> {
+        let j = serde_json::from_str::<serde_json::Value>(data)?;
+        self.single_segment_index_writer_add_document(doc!(
+            self.field => j
+        ))
+    }
+
+    pub fn add_array_json(&mut self, datas: &[*const c_char], offset: i64) -> Result<()> {
+        let mut document = TantivyDocument::default();
+        for data in datas {
+            let json = unsafe { CStr::from_ptr(*data) };
+            let j = serde_json::from_str::<serde_json::Value>(json.to_str()?)?;
+            document.add_field_value(self.field, &j);
+        }
+        document.add_i64(self.id_field.unwrap(), offset);
+        self.index_writer_add_document(document)
+    }
+
+    pub fn add_array_json_by_single_segment_writer(
+        &mut self,
+        datas: &[*const c_char],
+    ) -> Result<()> {
+        let mut document = TantivyDocument::default();
+        for data in datas {
+            let json = unsafe { CStr::from_ptr(*data) };
+            let j = serde_json::from_str::<serde_json::Value>(json.to_str()?)?;
+            document.add_field_value(self.field, &j);
+        }
+        self.single_segment_index_writer_add_document(document)
+    }
+
     pub fn add_array_i8s(&mut self, datas: &[i8], offset: i64) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {

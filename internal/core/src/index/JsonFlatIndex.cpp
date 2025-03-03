@@ -26,7 +26,7 @@ JsonFlatIndex::build_index_for_json(
         for (int i = 0; i < n; i++) {
             if (schema_.nullable() && !data->is_valid(i)) {
                 null_offset.push_back(i);
-                wrapper_->add_json_data(nullptr, 0, offset++);
+                wrapper_->add_json_array_data(nullptr, 0, offset++);
                 continue;
             }
             auto json = static_cast<const Json*>(data->RawValue(i));
@@ -37,7 +37,8 @@ JsonFlatIndex::build_index_for_json(
                                err == simdjson::NO_SUCH_FIELD,
                            "Failed to parse json, err: {}",
                            err);
-                wrapper_->add_json_data(nullptr, 0, offset++);
+                null_offset.push_back(i);
+                wrapper_->add_json_array_data(nullptr, 0, offset++);
                 continue;
             }
 
