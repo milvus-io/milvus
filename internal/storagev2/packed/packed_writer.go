@@ -31,9 +31,11 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
+
+	"github.com/milvus-io/milvus/internal/storagecommon"
 )
 
-func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups [][]int) (*PackedWriter, error) {
+func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup) (*PackedWriter, error) {
 	cFilePaths := make([]*C.char, len(filePaths))
 	for i, path := range filePaths {
 		cFilePaths[i] = C.CString(path)
@@ -52,15 +54,15 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 
 	cColumnGroups := C.NewCColumnGroups()
 	for _, group := range columnGroups {
-		cGroup := C.malloc(C.size_t(len(group)) * C.size_t(unsafe.Sizeof(C.int(0))))
+		cGroup := C.malloc(C.size_t(len(group.Columns)) * C.size_t(unsafe.Sizeof(C.int(0))))
 		if cGroup == nil {
 			return nil, fmt.Errorf("failed to allocate memory for column groups")
 		}
-		cGroupSlice := (*[1 << 30]C.int)(cGroup)[:len(group):len(group)]
-		for i, val := range group {
+		cGroupSlice := (*[1 << 30]C.int)(cGroup)[:len(group.Columns):len(group.Columns)]
+		for i, val := range group.Columns {
 			cGroupSlice[i] = C.int(val)
 		}
-		C.AddCColumnGroup(cColumnGroups, (*C.int)(cGroup), C.int(len(group)))
+		C.AddCColumnGroup(cColumnGroups, (*C.int)(cGroup), C.int(len(group.Columns)))
 		C.free(cGroup)
 	}
 

@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/flushcommon/io"
+	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -49,7 +49,7 @@ func TestClusteringCompactionTaskSuite(t *testing.T) {
 type ClusteringCompactionTaskSuite struct {
 	suite.Suite
 
-	mockBinlogIO *io.MockBinlogIO
+	mockBinlogIO *mock_util.MockBinlogIO
 	mockAlloc    *allocator.MockAllocator
 	mockID       atomic.Int64
 
@@ -63,7 +63,7 @@ func (s *ClusteringCompactionTaskSuite) SetupSuite() {
 }
 
 func (s *ClusteringCompactionTaskSuite) SetupTest() {
-	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
+	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -490,7 +490,7 @@ func (s *ClusteringCompactionTaskSuite) TestGenerateBM25Stats() {
 
 	s.Run("upload failed", func() {
 		segmentID := int64(1)
-		mockBinlogIO := io.NewMockBinlogIO(s.T())
+		mockBinlogIO := mock_util.NewMockBinlogIO(s.T())
 		mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
 
 		task := &clusteringCompactionTask{
@@ -566,7 +566,7 @@ func (s *ClusteringCompactionTaskSuite) TestGeneratePkStats() {
 
 		kvs, _, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
 		s.NoError(err)
-		mockBinlogIO := io.NewMockBinlogIO(s.T())
+		mockBinlogIO := mock_util.NewMockBinlogIO(s.T())
 		mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(lo.Values(kvs), nil)
 		mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
 		task := &clusteringCompactionTask{
