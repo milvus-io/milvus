@@ -65,6 +65,10 @@ func (b *listDeleteBuffer[T]) RegisterL0(segmentList ...segments.Segment) {
 	for _, seg := range segmentList {
 		if seg != nil {
 			b.l0Segments = append(b.l0Segments, seg)
+
+			// update metrics
+			b.size += seg.MemSize()
+			b.rowNum += seg.RowNum()
 		}
 	}
 
@@ -87,6 +91,10 @@ func (b *listDeleteBuffer[T]) UnRegister(ts uint64) {
 			newSegments = append(newSegments, s)
 		} else {
 			s.Release(context.TODO())
+
+			// update metrics
+			b.size += s.MemSize()
+			b.rowNum += s.RowNum()
 		}
 	}
 	b.l0Segments = newSegments
@@ -106,6 +114,10 @@ func (b *listDeleteBuffer[T]) Clear() {
 
 	// reset cache block
 	b.list = []*cacheBlock[T]{newCacheBlock[T](b.safeTs, b.sizePerBlock)}
+
+	// update metrics
+	b.size = 0
+	b.rowNum = 0
 	b.updateMetrics()
 }
 

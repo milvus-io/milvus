@@ -786,6 +786,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			channelNameLabelName,
+			deleteTypeLabelName,
 		},
 	)
 
@@ -798,6 +799,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			channelNameLabelName,
+			deleteTypeLabelName,
 		},
 	)
 

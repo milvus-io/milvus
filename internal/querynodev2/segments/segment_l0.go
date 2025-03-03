@@ -83,7 +83,9 @@ func (s *L0Segment) InsertCount() int64 {
 }
 
 func (s *L0Segment) RowNum() int64 {
-	return 0
+	s.dataGuard.RLock()
+	defer s.dataGuard.RUnlock()
+	return int64(len(s.pks))
 }
 
 func (s *L0Segment) MemSize() int64 {

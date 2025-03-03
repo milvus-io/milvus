@@ -533,7 +533,7 @@ func (sd *shardDelegator) LoadL0(ctx context.Context, infos []*querypb.SegmentLo
 	}
 
 	segmentIDs = lo.Map(loaded, func(segment segments.Segment, _ int) int64 { return segment.ID() })
-	log.Info("load growing segments done", zap.Int64s("segmentIDs", segmentIDs))
+	log.Info("load l0 segments done", zap.Int64s("segmentIDs", segmentIDs))
 
 	sd.deleteBuffer.RegisterL0(loaded...)
 	// register l0 segment
