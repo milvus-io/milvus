@@ -32,6 +32,7 @@ func (b *broadcastTask) Execute(ctx context.Context) error {
 
 	for idx, msg := range b.msgs {
 		tsMsg, err := adaptor.NewMsgPackFromMutableMessageV1(msg)
+		tsMsg.SetTs(b.ts) // overwrite the ts.
 		if err != nil {
 			result.FillResponseAtIdx(types.AppendResponse{Error: err}, idx)
 			return err

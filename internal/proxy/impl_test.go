@@ -1617,7 +1617,6 @@ func TestProxy_ImportV2(t *testing.T) {
 	wal := mock_streaming.NewMockWALAccesser(t)
 	b := mock_streaming.NewMockBroadcast(t)
 	wal.EXPECT().Broadcast().Return(b).Maybe()
-	b.EXPECT().BlockUntilResourceKeyAckOnce(mock.Anything, mock.Anything).Return(nil).Maybe()
 	b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil).Maybe()
 	streaming.SetWALForTest(wal)
 	defer streaming.RecoverWALForTest()
@@ -1649,7 +1648,6 @@ func TestProxy_ImportV2(t *testing.T) {
 		err = node.sched.Start()
 		assert.NoError(t, err)
 		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getChannels(mock.Anything).Return([]string{"p1"}, nil)
 		node.chMgr = chMgr
 
 		// no such collection
@@ -1686,7 +1684,6 @@ func TestProxy_ImportV2(t *testing.T) {
 		// set partition name and with partition key
 		chMgr = NewMockChannelsMgr(t)
 		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"ch0"}, nil)
-		chMgr.EXPECT().getChannels(mock.Anything).Return([]string{"p1"}, nil)
 		node.chMgr = chMgr
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa", PartitionName: "bbb"})
 		assert.NoError(t, err)

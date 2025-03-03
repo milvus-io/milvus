@@ -128,12 +128,6 @@ var (
 		Buckets: secondsBuckets,
 	})
 
-	StreamingCoordBroadcasterAckAnyOneDurationSeconds = newStreamingCoordHistogramVec(prometheus.HistogramOpts{
-		Name:    "broadcaster_ack_any_one_duration_seconds",
-		Help:    "Duration of acknowledge any message",
-		Buckets: secondsBuckets,
-	})
-
 	StreamingCoordBroadcasterAckAllDurationSeconds = newStreamingCoordHistogramVec(prometheus.HistogramOpts{
 		Name:    "broadcaster_ack_all_duration_seconds",
 		Help:    "Duration of acknowledge all message",
@@ -406,7 +400,6 @@ func registerStreamingCoord(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingCoordAssignmentListenerTotal)
 	registry.MustRegister(StreamingCoordBroadcasterTaskTotal)
 	registry.MustRegister(StreamingCoordBroadcastDurationSeconds)
-	registry.MustRegister(StreamingCoordBroadcasterAckAnyOneDurationSeconds)
 	registry.MustRegister(StreamingCoordBroadcasterAckAllDurationSeconds)
 	registry.MustRegister(StreamingCoordResourceKeyTotal)
 }
