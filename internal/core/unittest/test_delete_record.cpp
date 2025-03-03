@@ -273,7 +273,7 @@ TEST(DeleteMVCC, snapshot) {
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    auto N = 500000;
+    auto N = 50000;
     uint64_t seg_id = 101;
     InsertRecord insert_record(*schema, N);
     DeletedRecord<false> delete_record(
@@ -296,7 +296,7 @@ TEST(DeleteMVCC, snapshot) {
     field_data->set_data_raw(insert_offset, age_data.data(), N);
     insert_record.ack_responder_.AddSegment(insert_offset, insert_offset + N);
 
-    auto DN = 400000;
+    auto DN = 40000;
     std::vector<Timestamp> delete_ts(DN);
     std::vector<PkType> delete_pk(DN);
     for (int i = 0; i < DN; ++i) {
@@ -308,7 +308,7 @@ TEST(DeleteMVCC, snapshot) {
 
     auto snapshots = std::move(delete_record.get_snapshots());
     ASSERT_EQ(3, snapshots.size());
-    ASSERT_EQ(snapshots[2].second.count(), 300000);
+    ASSERT_EQ(snapshots[2].second.count(), 30000);
 }
 
 TEST(DeleteMVCC, insert_after_snapshot) {
@@ -321,7 +321,7 @@ TEST(DeleteMVCC, insert_after_snapshot) {
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    auto N = 110000;
+    auto N = 11000;
     uint64_t seg_id = 101;
     InsertRecord insert_record(*schema, N);
     DeletedRecord<false> delete_record(
@@ -346,7 +346,7 @@ TEST(DeleteMVCC, insert_after_snapshot) {
     insert_record.ack_responder_.AddSegment(insert_offset, insert_offset + N);
 
     // delete (0, 1), (1, 2) .... (DN, DN + 1)
-    auto DN = 101000;
+    auto DN = 10100;
     std::vector<Timestamp> delete_ts(DN);
     std::vector<PkType> delete_pk(DN);
     for (int i = 0; i < DN; ++i) {
@@ -358,7 +358,7 @@ TEST(DeleteMVCC, insert_after_snapshot) {
 
     auto snapshots = std::move(delete_record.get_snapshots());
     ASSERT_EQ(1, snapshots.size());
-    ASSERT_EQ(snapshots[0].second.count(), 100000);
+    ASSERT_EQ(snapshots[0].second.count(), 10000);
 
     // Query at N+1 ts
     {

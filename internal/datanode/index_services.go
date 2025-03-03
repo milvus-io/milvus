@@ -330,6 +330,7 @@ func (node *DataNode) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2
 		log.Info("receive stats job", zap.Int64("collectionID", statsRequest.GetCollectionID()),
 			zap.Int64("partitionID", statsRequest.GetPartitionID()),
 			zap.Int64("segmentID", statsRequest.GetSegmentID()),
+			zap.Int64("numRows", statsRequest.GetNumRows()),
 			zap.Int64("targetSegmentID", statsRequest.GetTargetSegmentID()),
 			zap.String("subJobType", statsRequest.GetSubJobType().String()),
 			zap.Int64("startLogID", statsRequest.GetStartLogID()),

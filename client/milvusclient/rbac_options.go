@@ -18,6 +18,7 @@ package milvusclient
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 )
 
 type ListUserOption interface {
@@ -71,7 +72,7 @@ type createUserOption struct {
 func (opt *createUserOption) Request() *milvuspb.CreateCredentialRequest {
 	return &milvuspb.CreateCredentialRequest{
 		Username: opt.userName,
-		Password: opt.password,
+		Password: crypto.Base64Encode(opt.password),
 	}
 }
 
@@ -95,8 +96,8 @@ type updatePasswordOption struct {
 func (opt *updatePasswordOption) Request() *milvuspb.UpdateCredentialRequest {
 	return &milvuspb.UpdateCredentialRequest{
 		Username:    opt.userName,
-		OldPassword: opt.oldPassword,
-		NewPassword: opt.newPassword,
+		OldPassword: crypto.Base64Encode(opt.oldPassword),
+		NewPassword: crypto.Base64Encode(opt.newPassword),
 	}
 }
 

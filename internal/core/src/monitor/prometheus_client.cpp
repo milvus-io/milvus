@@ -10,8 +10,29 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "prometheus_client.h"
+#include <chrono>
 
 namespace milvus::monitor {
+
+const prometheus::Histogram::BucketBoundaries secondsBuckets = {
+    std::chrono::duration<float>(std::chrono::microseconds(10)).count(),
+    std::chrono::duration<float>(std::chrono::microseconds(50)).count(),
+    std::chrono::duration<float>(std::chrono::microseconds(100)).count(),
+    std::chrono::duration<float>(std::chrono::microseconds(250)).count(),
+    std::chrono::duration<float>(std::chrono::microseconds(500)).count(),
+    std::chrono::duration<float>(std::chrono::milliseconds(1)).count(),
+    std::chrono::duration<float>(std::chrono::milliseconds(5)).count(),
+    std::chrono::duration<float>(std::chrono::milliseconds(10)).count(),
+    std::chrono::duration<float>(std::chrono::milliseconds(20)).count(),
+    std::chrono::duration<float>(std::chrono::milliseconds(50)).count(),
+    std::chrono::duration<float>(std::chrono::milliseconds(100)).count(),
+    std::chrono::duration<float>(std::chrono::milliseconds(200)).count(),
+    std::chrono::duration<float>(std::chrono::milliseconds(500)).count(),
+    std::chrono::duration<float>(std::chrono::seconds(1)).count(),
+    std::chrono::duration<float>(std::chrono::seconds(2)).count(),
+    std::chrono::duration<float>(std::chrono::seconds(5)).count(),
+    std::chrono::duration<float>(std::chrono::seconds(10)).count(),
+};
 
 const prometheus::Histogram::BucketBoundaries buckets = {1,
                                                          2,
@@ -183,6 +204,11 @@ std::map<std::string, std::string> scalarProportionLabels{
     {"type", "scalar_proportion"}};
 std::map<std::string, std::string> getVectorLatencyLabels{
     {"type", "get_vector_latency"}};
+std::map<std::string, std::string> retrieveGetTargetEntryLatencyLabels{
+    {"type", "retrieve_get_target_entry_latency"}};
+std::map<std::string, std::string> searchGetTargetEntryLatencyLabels{
+    {"type", "search_get_target_entry_latency"}};
+
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency,
                                    "[cpp]latency(us) of search on segment")
 DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_scalar,
@@ -205,7 +231,12 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
 DEFINE_PROMETHEUS_HISTOGRAM(internal_core_get_vector_latency,
                             internal_core_search_latency,
                             getVectorLatencyLabels)
-
+DEFINE_PROMETHEUS_HISTOGRAM(internal_core_retrieve_get_target_entry_latency,
+                            internal_core_search_latency,
+                            retrieveGetTargetEntryLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_get_target_entry_latency,
+                            internal_core_search_latency,
+                            searchGetTargetEntryLatencyLabels)
 // mmap metrics
 std::map<std::string, std::string> mmapAllocatedSpaceAnonLabel = {
     {"type", "anon"}};
@@ -245,4 +276,44 @@ DEFINE_PROMETHEUS_GAUGE(internal_mmap_in_used_count_anon,
 DEFINE_PROMETHEUS_GAUGE(internal_mmap_in_used_count_file,
                         internal_mmap_in_used_count,
                         mmapAllocatedCountFileLabel)
+
+// async cgo metrics
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_cgo_queue_duration_seconds,
+                                   "[cpp]async cgo queue duration");
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_cgo_queue_duration_seconds_all,
+    internal_cgo_queue_duration_seconds,
+    {},
+    secondsBuckets);
+
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_cgo_execute_duration_seconds,
+                                   "[cpp]async execute duration");
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_cgo_execute_duration_seconds_all,
+    internal_cgo_execute_duration_seconds,
+    {},
+    secondsBuckets);
+
+DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_cgo_cancel_before_execute_total,
+                                 "[cpp]async cgo cancel before execute count");
+DEFINE_PROMETHEUS_COUNTER(internal_cgo_cancel_before_execute_total_all,
+                          internal_cgo_cancel_before_execute_total,
+                          {});
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_pool_size,
+                               "[cpp]async cgo pool size");
+DEFINE_PROMETHEUS_GAUGE(internal_cgo_pool_size_all, internal_cgo_pool_size, {});
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_inflight_task_total,
+                               "[cpp]async cgo inflight task");
+DEFINE_PROMETHEUS_GAUGE(internal_cgo_inflight_task_total_all,
+                        internal_cgo_inflight_task_total,
+                        {});
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_executing_task_total,
+                               "[cpp]async cgo executing task");
+DEFINE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_all,
+                        internal_cgo_executing_task_total,
+                        {});
+
 }  // namespace milvus::monitor
