@@ -4143,7 +4143,7 @@ class TestCollectionSearch(TestcaseBase):
         for t in threads:
             t.join()
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="issue 37113")
     def test_search_concurrent_two_collections_nullable(self, nq, _async):
         """
@@ -4200,7 +4200,7 @@ class TestCollectionSearch(TestcaseBase):
         # 2. search with multi-processes
         log.info("test_search_concurrent_two_collections_nullable: searching with %s processes" % threads_num)
         for i in range(threads_num):
-            t = threading.Thread(target=search, args=(collection_w,))
+            t = threading.Thread(target=search, args=(collection_w_1))
             threads.append(t)
             t.start()
             time.sleep(0.2)
@@ -10387,8 +10387,7 @@ class TestCollectionSearchJSON(TestcaseBase):
 class TestSearchIterator(TestcaseBase):
     """ Test case of search iterator """
 
-    k.tags(CaseLabel.L0)
-
+    @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("metric_type", ct.float_metrics)
     @pytest.mark.parametrize("vector_data_type", ["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
     def test_range_search_iterator_default(self, metric_type, vector_data_type):
