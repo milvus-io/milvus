@@ -234,11 +234,20 @@ func NewDropRoleOption(roleName string) *dropDropRoleOption {
 }
 
 type DescribeRoleOption interface {
+	SelectRoleRequest() *milvuspb.SelectRoleRequest
 	Request() *milvuspb.SelectGrantRequest
 }
 
 type describeRoleOption struct {
 	roleName string
+}
+
+func (opt *describeRoleOption) SelectRoleRequest() *milvuspb.SelectRoleRequest {
+	return &milvuspb.SelectRoleRequest{
+		Role: &milvuspb.RoleEntity{
+			Name: opt.roleName,
+		},
+	}
 }
 
 func (opt *describeRoleOption) Request() *milvuspb.SelectGrantRequest {
