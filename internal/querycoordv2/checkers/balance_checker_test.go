@@ -49,7 +49,7 @@ type BalanceCheckerTestSuite struct {
 	broker    *meta.MockBroker
 	nodeMgr   *session.NodeManager
 	scheduler *task.MockScheduler
-	targetMgr *meta.TargetManager
+	targetMgr meta.TargetManagerInterface
 }
 
 func (suite *BalanceCheckerTestSuite) SetupSuite() {
@@ -290,7 +290,7 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 	suite.checker.meta.ReplicaManager.Put(ctx, mr2.IntoReplica())
 
 	// test stopping balance
-	idsToBalance := []int64{int64(replicaID1), int64(replicaID2)}
+	idsToBalance := []int64{int64(replicaID1)}
 	replicasToBalance := suite.checker.getReplicaForStoppingBalance(ctx)
 	suite.ElementsMatch(idsToBalance, replicasToBalance)
 
@@ -305,7 +305,7 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 	segPlans = append(segPlans, mockPlan)
 	suite.balancer.EXPECT().BalanceReplica(mock.Anything, mock.Anything).Return(segPlans, chanPlans)
 	tasks := suite.checker.Check(context.TODO())
-	suite.Len(tasks, 2)
+	suite.Len(tasks, 1)
 }
 
 func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
@@ -349,14 +349,16 @@ func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
 	// test normal balance when one collection has unready target
 	mockTarget.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true)
 	mockTarget.EXPECT().IsCurrentTargetReady(mock.Anything, mock.Anything).Return(false)
+	mockTarget.EXPECT().GetCollectionRowCount(mock.Anything, mock.Anything, mock.Anything).Return(100).Maybe()
 	replicasToBalance := suite.checker.getReplicaForNormalBalance(ctx)
 	suite.Len(replicasToBalance, 0)
 
 	// test stopping balance with target not ready
 	mockTarget.ExpectedCalls = nil
 	mockTarget.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(false)
-	mockTarget.EXPECT().IsCurrentTargetExist(mock.Anything, int64(cid1), mock.Anything).Return(true)
-	mockTarget.EXPECT().IsCurrentTargetExist(mock.Anything, int64(cid2), mock.Anything).Return(false)
+	mockTarget.EXPECT().IsCurrentTargetExist(mock.Anything, int64(cid1), mock.Anything).Return(true).Maybe()
+	mockTarget.EXPECT().IsCurrentTargetExist(mock.Anything, int64(cid2), mock.Anything).Return(false).Maybe()
+	mockTarget.EXPECT().GetCollectionRowCount(mock.Anything, mock.Anything, mock.Anything).Return(100).Maybe()
 	mr1 := replica1.CopyForWrite()
 	mr1.AddRONode(1)
 	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
@@ -438,6 +440,67 @@ func (suite *BalanceCheckerTestSuite) TestAutoBalanceInterval() {
 	time.Sleep(1 * time.Second)
 	suite.checker.Check(ctx)
 	suite.Equal(funcCallCounter.Load(), int64(1))
+}
+
+func (suite *BalanceCheckerTestSuite) TestBalanceOrder() {
+	ctx := context.Background()
+	nodeID1, nodeID2 := int64(1), int64(2)
+
+	// set collections meta
+	cid1, replicaID1, partitionID1 := 1, 1, 1
+	collection1 := utils.CreateTestCollection(int64(cid1), int32(replicaID1))
+	collection1.Status = querypb.LoadStatus_Loaded
+	replica1 := utils.CreateTestReplica(int64(replicaID1), int64(cid1), []int64{nodeID1, nodeID2})
+	partition1 := utils.CreateTestPartition(int64(cid1), int64(partitionID1))
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1, partition1)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
+
+	cid2, replicaID2, partitionID2 := 2, 2, 2
+	collection2 := utils.CreateTestCollection(int64(cid2), int32(replicaID2))
+	collection2.Status = querypb.LoadStatus_Loaded
+	replica2 := utils.CreateTestReplica(int64(replicaID2), int64(cid2), []int64{nodeID1, nodeID2})
+	partition2 := utils.CreateTestPartition(int64(cid2), int64(partitionID2))
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection2, partition2)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica2)
+
+	// mock collection row count
+	mockTargetManager := meta.NewMockTargetManager(suite.T())
+	suite.checker.targetMgr = mockTargetManager
+	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, int64(cid1), mock.Anything).Return(int64(100)).Maybe()
+	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, int64(cid2), mock.Anything).Return(int64(200)).Maybe()
+	mockTargetManager.EXPECT().IsCurrentTargetReady(mock.Anything, mock.Anything).Return(true).Maybe()
+	mockTargetManager.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
+
+	// mock stopping node
+	mr1 := replica1.CopyForWrite()
+	mr1.AddRONode(nodeID1)
+	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
+	mr2 := replica2.CopyForWrite()
+	mr2.AddRONode(nodeID2)
+	suite.checker.meta.ReplicaManager.Put(ctx, mr2.IntoReplica())
+
+	// test normal balance order
+	replicas := suite.checker.getReplicaForNormalBalance(ctx)
+	suite.Equal(replicas, []int64{int64(replicaID2)})
+
+	// test stopping balance order
+	replicas = suite.checker.getReplicaForStoppingBalance(ctx)
+	suite.Equal(replicas, []int64{int64(replicaID2)})
+
+	// mock collection row count
+	mockTargetManager.ExpectedCalls = nil
+	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, int64(cid1), mock.Anything).Return(int64(200)).Maybe()
+	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, int64(cid2), mock.Anything).Return(int64(100)).Maybe()
+	mockTargetManager.EXPECT().IsCurrentTargetReady(mock.Anything, mock.Anything).Return(true).Maybe()
+	mockTargetManager.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
+
+	// test normal balance order
+	replicas = suite.checker.getReplicaForNormalBalance(ctx)
+	suite.Equal(replicas, []int64{int64(replicaID1)})
+
+	// test stopping balance order
+	replicas = suite.checker.getReplicaForStoppingBalance(ctx)
+	suite.Equal(replicas, []int64{int64(replicaID1)})
 }
 
 func TestBalanceCheckerSuite(t *testing.T) {
