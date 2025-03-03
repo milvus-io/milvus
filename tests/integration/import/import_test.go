@@ -79,7 +79,7 @@ func (s *BulkInsertSuite) run() {
 	ctx, cancel := context.WithTimeout(c.GetContext(), 120*time.Second)
 	defer cancel()
 
-	collectionName := "TestBulkInsert" + funcutil.GenRandomStr()
+	collectionName := "TestBulkInsert" + funcutil.GenRandomStr() + fmt.Sprint(time.Now().UnixMilli())
 
 	var schema *schemapb.CollectionSchema
 	fieldSchema1 := &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: s.pkType, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}}, IsPrimaryKey: true, AutoID: s.autoID}

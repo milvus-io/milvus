@@ -14,7 +14,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/json-iterator/go v1.1.12
 	github.com/klauspost/compress v1.17.7
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.5
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.6-0.20250225103150-ce7c0781eb7c
 	github.com/nats-io/nats-server/v2 v2.10.12
 	github.com/nats-io/nats.go v1.34.1
 	github.com/panjf2000/ants/v2 v2.7.2
