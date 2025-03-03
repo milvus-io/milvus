@@ -53,13 +53,6 @@ indexCoordinator:
       memory: "50Mi"
     limits:
       cpu: "1"
-indexNode:
-  resources:
-    requests:
-      cpu: "0.5"
-      memory: "500Mi"
-    limits:
-      cpu: "2"
 dataCoordinator:
   resources:
     requests:

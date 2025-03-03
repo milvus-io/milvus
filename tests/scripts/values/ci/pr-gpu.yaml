@@ -39,20 +39,6 @@ indexCoordinator:
       cpu: "0.1"
       memory: "50Mi"
 
-indexNode:
-  nodeSelector:
-    nvidia.com/gpu.present: 'true'
-  extraEnv:
-    - name: CUDA_VISIBLE_DEVICES
-      value: "0,1"
-  resources:
-    requests:
-      nvidia.com/gpu: 1
-      cpu: "0.5"
-      memory: "500Mi"
-    limits:
-      nvidia.com/gpu: 1
-
 dataCoordinator:
   resources:
     requests:

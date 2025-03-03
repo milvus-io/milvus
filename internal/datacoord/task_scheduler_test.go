@@ -19,10 +19,11 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"go.uber.org/zap"
 	"sync"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
@@ -1401,7 +1402,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		}).Once()
 
 		// assign failed --> retry
-		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.IndexNodeClient, bool) {
+		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.DataNodeClient, bool) {
 			log.Debug("get client success, but assign failed", zap.Int64("nodeID", nodeID))
 			return in, true
 		}).Once()
@@ -1416,7 +1417,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		}).Once()
 
 		// retry --> init
-		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.IndexNodeClient, bool) {
+		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.DataNodeClient, bool) {
 			log.Debug("assign failed, drop task on worker", zap.Int64("nodeID", nodeID))
 			return in, true
 		}).Once()
@@ -1429,7 +1430,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		}).Once()
 
 		// init --> inProgress
-		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.IndexNodeClient, bool) {
+		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.DataNodeClient, bool) {
 			log.Debug("assign task success", zap.Int64("nodeID", nodeID))
 			return in, true
 		}).Once()
@@ -1456,7 +1457,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		}).Once()
 
 		// inProgress --> Finished
-		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.IndexNodeClient, bool) {
+		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.DataNodeClient, bool) {
 			log.Debug("get task result success, task is finished", zap.Int64("nodeID", nodeID))
 			return in, true
 		}).Once()
@@ -1486,7 +1487,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 			log.Debug("task is finished, alter segment index success", zap.Int64("taskID", indices[0].BuildID))
 			return nil
 		}).Once()
-		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.IndexNodeClient, bool) {
+		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.DataNodeClient, bool) {
 			log.Debug("task is finished, drop task on worker", zap.Int64("nodeID", nodeID))
 			return in, true
 		}).Once()

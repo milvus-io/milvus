@@ -25,9 +25,6 @@ nohup docker compose -p milvus up  proxy > ~/proxy_docker.log 2>&1 &
 echo "starting indexcoord docker"
 nohup docker compose -p milvus up  indexcoord > ~/indexcoord_docker.log 2>&1 &
 
-echo "starting indexnode docker"
-nohup docker compose -p milvus up  indexnode > ~/indexnode_docker.log 2>&1 &
-
 echo "starting querycoord docker"
 nohup docker compose -p milvus up querycoord > ~/querycoord_docker.log 2>&1 &
 

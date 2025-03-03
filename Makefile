@@ -313,10 +313,6 @@ test-rootcoord:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t rootcoord)
 
-test-indexnode:
-	@echo "Running go unittests..."
-	@(env bash $(PWD)/scripts/run_go_unittest.sh -t indexnode)
-
 test-indexcoord:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t indexcoord)

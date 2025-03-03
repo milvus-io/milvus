@@ -31,11 +31,6 @@ indexCoordinator:
     requests:
       cpu: "0.1"
       memory: "50Mi"
-indexNode:
-  resources:
-    requests:
-      cpu: "4"
-      memory: "500Mi"
 
 dataCoordinator:
   resources:
