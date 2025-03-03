@@ -299,6 +299,16 @@ func (s *RoleSuite) TestDescribeRole() {
 
 	s.Run("success", func() {
 		roleName := fmt.Sprintf("role_%s", s.randString(5))
+		s.mock.EXPECT().SelectRole(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
+			s.Equal(roleName, r.GetRole().GetName())
+			return &milvuspb.SelectRoleResponse{
+				Results: []*milvuspb.RoleResult{
+					{
+						Role: &milvuspb.RoleEntity{Name: roleName},
+					},
+				},
+			}, nil
+		}).Once()
 		s.mock.EXPECT().SelectGrant(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
 			s.Equal(roleName, r.GetEntity().GetRole().GetName())
 			return &milvuspb.SelectGrantResponse{
@@ -329,7 +339,8 @@ func (s *RoleSuite) TestDescribeRole() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		s.mock.EXPECT().SelectRole(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		// s.mock.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
 
 		_, err := s.client.DescribeRole(ctx, NewDescribeRoleOption("role"))
 		s.Error(err)
