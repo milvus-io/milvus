@@ -96,9 +96,6 @@ service StreamingCoordBroadcastService {
 
     // Ack acknowledge broadcast message is consumed.
     rpc Ack(BroadcastAckRequest) returns (BroadcastAckResponse) {}
-
-    // Watch watch the broadcast events.
-    rpc Watch(stream BroadcastWatchRequest) returns (stream BroadcastWatchResponse) {}
 }
 
 // BroadcastRequest is the request of the Broadcast RPC.
@@ -118,34 +115,6 @@ message BroadcastAckRequest {
 }
 
 message BroadcastAckResponse {
-}
-
-message BroadcastWatchRequest {
-    oneof command {
-        BroadcastCreateEventWatchRequest create_event_watch = 1;
-        CloseBroadcastWatchRequest close = 2;
-    }
-}
-
-message BroadcastCreateEventWatchRequest {
-    messages.BroadcastEvent event = 1;
-}
-
-message CloseBroadcastWatchRequest {
-}
-
-message BroadcastWatchResponse {
-    oneof response {
-        BroadcastEventWatchResponse event_done = 1;
-        CloseBroadcastWatchResponse close = 2;
-    }
-}
-
-message BroadcastEventWatchResponse {
-    messages.BroadcastEvent event = 1;
-}
-
-message CloseBroadcastWatchResponse {
 }
 
 //

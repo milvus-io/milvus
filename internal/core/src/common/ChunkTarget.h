@@ -56,6 +56,12 @@ class MmapChunkTarget : public ChunkTarget {
         clear() {
             pos = 0;
         }
+
+        void
+        write(uint32_t value) {
+            *reinterpret_cast<uint32_t*>(buf + pos) = value;
+            pos += sizeof(uint32_t);
+        }
     };
 
  public:

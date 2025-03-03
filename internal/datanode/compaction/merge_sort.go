@@ -6,7 +6,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/apache/arrow/go/v12/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 

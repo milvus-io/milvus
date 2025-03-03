@@ -70,6 +70,7 @@ type ComponentParam struct {
 	AutoIndexConfig AutoIndexConfig
 	GpuConfig       gpuConfig
 	TraceCfg        traceConfig
+	HolmesCfg       holmesConfig
 
 	RootCoordCfg   rootCoordConfig
 	ProxyCfg       proxyConfig
@@ -125,6 +126,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.QuotaConfig.init(bt)
 	p.AutoIndexConfig.init(bt)
 	p.TraceCfg.init(bt)
+	p.HolmesCfg.init(bt)
 
 	p.RootCoordCfg.init(bt)
 	p.ProxyCfg.init(bt)
@@ -1111,6 +1113,102 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 	t.InitTimeoutSeconds.Init(base.mgr)
 }
 
+type holmesConfig struct {
+	Enable          ParamItem `refreshable:"false"`
+	DumpPath        ParamItem `refreshable:"false"`
+	UseCGroup       ParamItem `refreshable:"false"`
+	CollectInterval ParamItem `refreshable:"false"`
+
+	EnableDumpProfile ParamItem `refreshable:"false"`
+	ProfileMinCPU     ParamItem `refreshable:"false"`
+	ProfileDiffCPU    ParamItem `refreshable:"false"`
+	ProfileAbsCPU     ParamItem `refreshable:"false"`
+	ProfileCooldown   ParamItem `refreshable:"false"`
+}
+
+func (t *holmesConfig) init(base *BaseTable) {
+	t.Enable = ParamItem{
+		Key:          "holmes.enable",
+		Version:      "2.5.6",
+		DefaultValue: "false",
+		Doc:          "enable holmes or not",
+		Export:       true,
+	}
+	t.Enable.Init(base.mgr)
+
+	t.DumpPath = ParamItem{
+		Key:          "holmes.dumpPath",
+		Version:      "2.5.6",
+		DefaultValue: "/tmp",
+		Doc:          "holmes dump path",
+		Export:       true,
+	}
+	t.DumpPath.Init(base.mgr)
+
+	t.UseCGroup = ParamItem{
+		Key:          "holmes.useCGroup",
+		Version:      "2.5.6",
+		DefaultValue: "true",
+		Doc:          "use cgroup or not",
+		Export:       true,
+	}
+	t.UseCGroup.Init(base.mgr)
+
+	t.CollectInterval = ParamItem{
+		Key:          "holmes.collectInterval",
+		Version:      "2.5.6",
+		DefaultValue: "10",
+		Doc:          "holmes collect interval in seconds",
+		Export:       true,
+	}
+	t.CollectInterval.Init(base.mgr)
+
+	t.EnableDumpProfile = ParamItem{
+		Key:          "holmes.profile.enable",
+		Version:      "2.5.6",
+		DefaultValue: "false",
+		Doc:          "enable dump profile or not",
+		Export:       true,
+	}
+	t.EnableDumpProfile.Init(base.mgr)
+
+	t.ProfileMinCPU = ParamItem{
+		Key:          "holmes.profile.minCPU",
+		Version:      "2.5.6",
+		DefaultValue: "50",
+		Doc:          "profile min cpu",
+		Export:       true,
+	}
+	t.ProfileMinCPU.Init(base.mgr)
+
+	t.ProfileDiffCPU = ParamItem{
+		Key:          "holmes.profile.diffCPU",
+		Version:      "2.5.6",
+		DefaultValue: "50",
+		Doc:          "profile diff cpu",
+		Export:       true,
+	}
+	t.ProfileDiffCPU.Init(base.mgr)
+
+	t.ProfileAbsCPU = ParamItem{
+		Key:          "holmes.profile.absCPU",
+		Version:      "2.5.6",
+		DefaultValue: "90",
+		Doc:          "profile abs cpu",
+		Export:       true,
+	}
+	t.ProfileAbsCPU.Init(base.mgr)
+
+	t.ProfileCooldown = ParamItem{
+		Key:          "holmes.profile.cooldown",
+		Version:      "2.5.6",
+		DefaultValue: "60",
+		Doc:          "profile cooldown",
+		Export:       true,
+	}
+	t.ProfileCooldown.Init(base.mgr)
+}
+
 type logConfig struct {
 	Level        ParamItem `refreshable:"false"`
 	RootPath     ParamItem `refreshable:"false"`
@@ -1492,7 +1590,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.MaxTaskNum = ParamItem{
 		Key:          "proxy.maxTaskNum",
 		Version:      "2.2.0",
-		DefaultValue: "10000",
+		DefaultValue: "1024",
 		Doc:          "The maximum number of tasks in the task queue of the proxy.",
 		Export:       true,
 	}
@@ -3482,8 +3580,9 @@ type dataCoordConfig struct {
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
 
-	EnableStatsTask   ParamItem `refreshable:"true"`
-	TaskCheckInterval ParamItem `refreshable:"true"`
+	EnableStatsTask       ParamItem `refreshable:"true"`
+	TaskCheckInterval     ParamItem `refreshable:"true"`
+	StatsTaskTriggerCount ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 }
@@ -4379,6 +4478,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.RequestTimeoutSeconds.Init(base.mgr)
+
+	p.StatsTaskTriggerCount = ParamItem{
+		Key:          "dataCoord.statsTaskTriggerCount",
+		Version:      "2.5.5",
+		Doc:          "stats task count per trigger",
+		DefaultValue: "100",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.StatsTaskTriggerCount.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

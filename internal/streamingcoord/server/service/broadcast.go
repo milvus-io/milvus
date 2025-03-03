@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/service/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -61,19 +60,4 @@ func (s *broadcastServceImpl) Ack(ctx context.Context, req *streamingpb.Broadcas
 		return nil, err
 	}
 	return &streamingpb.BroadcastAckResponse{}, nil
-}
-
-func (s *broadcastServceImpl) Watch(svr streamingpb.StreamingCoordBroadcastService_WatchServer) error {
-	broadcaster, err := s.broadcaster.GetWithContext(svr.Context())
-	if err != nil {
-		return err
-	}
-	watcher, err := broadcaster.NewWatcher()
-	if err != nil {
-		return err
-	}
-	defer watcher.Close()
-
-	server := broadcast.NewBroadcastWatchServer(watcher, svr)
-	return server.Execute()
 }

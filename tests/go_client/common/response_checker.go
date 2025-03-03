@@ -13,7 +13,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 func CheckErr(t *testing.T, actualErr error, expErrNil bool, expErrorMsg ...string) {
@@ -220,5 +220,58 @@ func CheckIndex(t *testing.T, actualIdxDesc client.IndexDescription, idx index.I
 		require.Equal(t, opt.totalRows, actualIdxDesc.TotalRows)
 		require.Equal(t, opt.indexedRows, actualIdxDesc.IndexedRows)
 		require.Equal(t, opt.pendingIndexRows, actualIdxDesc.PendingIndexRows)
+	}
+}
+
+func CheckTransfer(t *testing.T, actualRgs []*entity.ResourceGroupTransfer, expRgs []*entity.ResourceGroupTransfer) {
+	if len(expRgs) == 0 {
+		require.Len(t, actualRgs, 0)
+	} else {
+		_expRgs := make([]string, 0, len(expRgs))
+		_actualRgs := make([]string, 0, len(actualRgs))
+		for _, rg := range expRgs {
+			_expRgs = append(_expRgs, rg.ResourceGroup)
+		}
+		for _, rg := range actualRgs {
+			_actualRgs = append(_actualRgs, rg.ResourceGroup)
+		}
+		require.ElementsMatch(t, _expRgs, _actualRgs)
+	}
+}
+
+func CheckResourceGroupConfig(t *testing.T, actualConfig *entity.ResourceGroupConfig, expConfig *entity.ResourceGroupConfig) {
+	if expConfig.Requests.NodeNum != 0 {
+		require.EqualValuesf(t, expConfig.Requests.NodeNum, actualConfig.Requests.NodeNum, "Requests.NodeNum mismatch")
+	}
+
+	if expConfig.Limits.NodeNum != 0 {
+		require.EqualValuesf(t, expConfig.Limits.NodeNum, actualConfig.Limits.NodeNum, "Limits.NodeNum mismatch")
+	}
+
+	if expConfig.TransferFrom != nil {
+		CheckTransfer(t, expConfig.TransferFrom, actualConfig.TransferFrom)
+	}
+
+	if expConfig.TransferTo != nil {
+		CheckTransfer(t, expConfig.TransferTo, actualConfig.TransferTo)
+	}
+	if expConfig.NodeFilter.NodeLabels != nil {
+		require.EqualValues(t, expConfig.NodeFilter, actualConfig.NodeFilter)
+	}
+}
+
+func CheckResourceGroup(t *testing.T, actualRg *entity.ResourceGroup, expRg *entity.ResourceGroup) {
+	require.EqualValues(t, expRg.Name, actualRg.Name, "ResourceGroup name mismatch")
+	require.EqualValues(t, expRg.Capacity, actualRg.Capacity, "ResourceGroup capacity mismatch")
+	if expRg.NumAvailableNode >= 0 {
+		require.EqualValues(t, expRg.NumAvailableNode, len(actualRg.Nodes), "AvailableNodesNumber mismatch")
+	}
+
+	if expRg.Config != nil {
+		CheckResourceGroupConfig(t, actualRg.Config, expRg.Config)
+	}
+
+	if expRg.Nodes != nil {
+		require.ElementsMatch(t, expRg.Nodes, actualRg.Nodes, "Nodes count mismatch")
 	}
 }

@@ -26,10 +26,11 @@ import "C"
 
 import (
 	"fmt"
+	"io"
 	"unsafe"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/cdata"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/cdata"
 )
 
 func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64) (*PackedReader, error) {
@@ -64,7 +65,7 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 	}
 
 	if cArr == nil {
-		return nil, nil // end of stream, no more records to read
+		return nil, io.EOF // end of stream, no more records to read
 	}
 
 	// Convert ArrowArray to Go RecordBatch using cdata

@@ -16,7 +16,9 @@ import (
 var errBroadcastTaskIsNotDone = errors.New("broadcast task is not done")
 
 // newPendingBroadcastTask creates a new pendingBroadcastTask.
-func newPendingBroadcastTask(task *broadcastTask) *pendingBroadcastTask {
+func newPendingBroadcastTask(
+	task *broadcastTask,
+) *pendingBroadcastTask {
 	msgs := task.PendingBroadcastMessages()
 	return &pendingBroadcastTask{
 		broadcastTask:   task,
@@ -40,6 +42,7 @@ type pendingBroadcastTask struct {
 	pendingMessages []message.MutableMessage
 	appendResult    map[string]*types.AppendResult
 	future          *syncutil.Future[*types.BroadcastAppendResult]
+	metrics         *taskMetricsGuard
 	*typeutil.BackoffWithInstant
 }
 

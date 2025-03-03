@@ -11,15 +11,26 @@ import (
 const (
 	subsystemStreamingServiceClient         = "streaming"
 	subsystemWAL                            = "wal"
+	WALAccessModelRemote                    = "remote"
+	WALAccessModelLocal                     = "local"
+	WALScannerModelCatchup                  = "catchup"
+	WALScannerModelTailing                  = "tailing"
 	StreamingServiceClientStatusAvailable   = "available"
 	StreamingServiceClientStatusUnavailable = "unavailable"
-	StreamingServiceClientStatusOK          = "ok"
-	StreamingServiceClientStatusCancel      = "cancel"
-	StreamignServiceClientStatusError       = "error"
+	WALStatusOK                             = "ok"
+	WALStatusCancel                         = "cancel"
+	WALStatusError                          = "error"
 
+	BroadcasterTaskStateLabelName     = "state"
+	ResourceKeyDomainLabelName        = "domain"
+	WALAccessModelLabelName           = "access_model"
+	WALScannerModelLabelName          = "scanner_model"
 	TimeTickSyncTypeLabelName         = "type"
 	TimeTickAckTypeLabelName          = "type"
+	WALInterceptorLabelName           = "interceptor_name"
 	WALTxnStateLabelName              = "state"
+	WALFlusherStateLabelName          = "state"
+	WALStateLabelName                 = "state"
 	WALChannelLabelName               = channelNameLabelName
 	WALSegmentSealPolicyNameLabelName = "policy"
 	WALSegmentAllocStateLabelName     = "state"
@@ -41,34 +52,48 @@ var (
 	secondsBuckets = prometheus.ExponentialBucketsRange(0.001, 5, 10)
 
 	// Streaming Service Client Producer Metrics.
+	StreamingServiceClientResumingProducerTotal = newStreamingServiceClientGaugeVec(prometheus.GaugeOpts{
+		Name: "resuming_producer_total",
+		Help: "Total of resuming producers",
+	}, WALChannelLabelName, StatusLabelName)
+
 	StreamingServiceClientProducerTotal = newStreamingServiceClientGaugeVec(prometheus.GaugeOpts{
 		Name: "producer_total",
 		Help: "Total of producers",
-	}, WALChannelLabelName, StatusLabelName)
+	}, WALChannelLabelName, WALAccessModelLabelName)
 
-	StreamingServiceClientProduceInflightTotal = newStreamingServiceClientGaugeVec(prometheus.GaugeOpts{
-		Name: "produce_inflight_total",
-		Help: "Total of inflight produce request",
-	}, WALChannelLabelName)
+	StreamingServiceClientProduceTotal = newStreamingServiceClientCounterVec(prometheus.CounterOpts{
+		Name: "produce_total",
+		Help: "Total of produce message",
+	}, WALChannelLabelName, WALAccessModelLabelName, StatusLabelName)
 
-	StreamingServiceClientProduceBytes = newStreamingServiceClientHistogramVec(prometheus.HistogramOpts{
-		Name:    "produce_bytes",
+	StreamingServiceClientProduceBytes = newStreamingServiceClientCounterVec(prometheus.CounterOpts{
+		Name: "produce_bytes",
+		Help: "Total of produce message",
+	}, WALChannelLabelName, WALAccessModelLabelName, StatusLabelName)
+
+	StreamingServiceClientSuccessProduceBytes = newStreamingServiceClientHistogramVec(prometheus.HistogramOpts{
+		Name:    "produce_success_bytes",
 		Help:    "Bytes of produced message",
 		Buckets: messageBytesBuckets,
-	}, WALChannelLabelName, StatusLabelName)
+	}, WALChannelLabelName, WALAccessModelLabelName)
 
-	StreamingServiceClientProduceDurationSeconds = newStreamingServiceClientHistogramVec(
-		prometheus.HistogramOpts{
-			Name:    "produce_duration_seconds",
-			Help:    "Duration of client produce",
-			Buckets: secondsBuckets,
-		}, WALChannelLabelName, StatusLabelName)
+	StreamingServiceClientSuccessProduceDurationSeconds = newStreamingServiceClientHistogramVec(prometheus.HistogramOpts{
+		Name:    "produce_success_duration_seconds",
+		Help:    "Duration of produced message",
+		Buckets: secondsBuckets,
+	}, WALChannelLabelName, WALAccessModelLabelName)
 
 	// Streaming Service Client Consumer Metrics.
+	StreamingServiceClientResumingConsumerTotal = newStreamingServiceClientGaugeVec(prometheus.GaugeOpts{
+		Name: "resuming_consumer_total",
+		Help: "Total of resuming consumers",
+	}, WALChannelLabelName, StatusLabelName)
+
 	StreamingServiceClientConsumerTotal = newStreamingServiceClientGaugeVec(prometheus.GaugeOpts{
 		Name: "consumer_total",
 		Help: "Total of consumers",
-	}, WALChannelLabelName, StatusLabelName)
+	}, WALChannelLabelName, WALAccessModelLabelName)
 
 	StreamingServiceClientConsumeBytes = newStreamingServiceClientHistogramVec(prometheus.HistogramOpts{
 		Name:    "consume_bytes",
@@ -76,16 +101,11 @@ var (
 		Buckets: messageBytesBuckets,
 	}, WALChannelLabelName)
 
-	StreamingServiceClientConsumeInflightTotal = newStreamingServiceClientGaugeVec(prometheus.GaugeOpts{
-		Name: "consume_inflight_total",
-		Help: "Total of inflight consume body",
-	}, WALChannelLabelName)
-
 	// StreamingCoord metrics
 	StreamingCoordPChannelInfo = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
 		Name: "pchannel_info",
 		Help: "Term of pchannels",
-	}, WALChannelLabelName, WALChannelTermLabelName, StreamingNodeLabelName)
+	}, WALChannelLabelName, WALChannelTermLabelName, StreamingNodeLabelName, WALStateLabelName)
 
 	StreamingCoordAssignmentVersion = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
 		Name: "assignment_info",
@@ -96,6 +116,28 @@ var (
 		Name: "assignment_listener_total",
 		Help: "Total of assignment listener",
 	})
+
+	StreamingCoordBroadcasterTaskTotal = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
+		Name: "broadcaster_task_total",
+		Help: "Total of broadcaster task",
+	}, BroadcasterTaskStateLabelName)
+
+	StreamingCoordBroadcastDurationSeconds = newStreamingCoordHistogramVec(prometheus.HistogramOpts{
+		Name:    "broadcaster_broadcast_duration_seconds",
+		Help:    "Duration of broadcast",
+		Buckets: secondsBuckets,
+	})
+
+	StreamingCoordBroadcasterAckAllDurationSeconds = newStreamingCoordHistogramVec(prometheus.HistogramOpts{
+		Name:    "broadcaster_ack_all_duration_seconds",
+		Help:    "Duration of acknowledge all message",
+		Buckets: secondsBuckets,
+	})
+
+	StreamingCoordResourceKeyTotal = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
+		Name: "resource_key_total",
+		Help: "Total of resource key hold at streaming coord",
+	}, ResourceKeyDomainLabelName)
 
 	// StreamingNode Producer Server Metrics.
 	StreamingNodeProducerTotal = newStreamingNodeGaugeVec(prometheus.GaugeOpts{
@@ -140,6 +182,11 @@ var (
 	WALAllocateTimeTickTotal = newWALCounterVec(prometheus.CounterOpts{
 		Name: "allocate_time_tick_total",
 		Help: "Total of allocated time tick on wal",
+	}, WALChannelLabelName, StatusLabelName)
+
+	WALTimeTickAllocateDurationSeconds = newWALHistogramVec(prometheus.HistogramOpts{
+		Name: "allocate_time_tick_duration_seconds",
+		Help: "Duration of wal allocate time tick",
 	}, WALChannelLabelName)
 
 	WALLastConfirmedTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
@@ -173,9 +220,10 @@ var (
 		Help: "Total of inflight txn on wal",
 	}, WALChannelLabelName)
 
-	WALFinishTxn = newWALCounterVec(prometheus.CounterOpts{
-		Name: "finish_txn",
-		Help: "Total of finish txn on wal",
+	WALTxnDurationSeconds = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "txn_duration_seconds",
+		Help:    "Duration of wal txn",
+		Buckets: secondsBuckets,
 	}, WALChannelLabelName, WALTxnStateLabelName)
 
 	// Segment related metrics
@@ -217,6 +265,18 @@ var (
 		Help: "Total of append message to wal",
 	}, WALChannelLabelName, WALMessageTypeLabelName, StatusLabelName)
 
+	WALAppendMessageBeforeInterceptorDurationSeconds = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "interceptor_before_append_duration_seconds",
+		Help:    "Intercept duration before wal append message",
+		Buckets: secondsBuckets,
+	}, WALChannelLabelName, WALInterceptorLabelName)
+
+	WALAppendMessageAfterInterceptorDurationSeconds = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "interceptor_after_append_duration_seconds",
+		Help:    "Intercept duration after wal append message",
+		Buckets: secondsBuckets,
+	}, WALChannelLabelName, WALInterceptorLabelName)
+
 	WALAppendMessageDurationSeconds = newWALHistogramVec(prometheus.HistogramOpts{
 		Name:    "append_message_duration_seconds",
 		Help:    "Duration of wal append message",
@@ -229,38 +289,63 @@ var (
 		Buckets: secondsBuckets,
 	}, WALChannelLabelName, StatusLabelName)
 
+	WALWriteAheadBufferEntryTotal = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "write_ahead_buffer_entry_total",
+		Help: "Total of write ahead buffer entry in wal",
+	}, WALChannelLabelName)
+
+	WALWriteAheadBufferSizeBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "write_ahead_buffer_size_bytes",
+		Help: "Size of write ahead buffer in wal",
+	}, WALChannelLabelName)
+
+	WALWriteAheadBufferCapacityBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "write_ahead_buffer_capacity_bytes",
+		Help: "Capacity of write ahead buffer in wal",
+	}, WALChannelLabelName)
+
+	WALWriteAheadBufferEarliestTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "write_ahead_buffer_earliest_time_tick",
+		Help: "Earliest time tick of write ahead buffer in wal",
+	}, WALChannelLabelName)
+
+	WALWriteAheadBufferLatestTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "write_ahead_buffer_latest_time_tick",
+		Help: "Latest time tick of write ahead buffer in wal",
+	}, WALChannelLabelName)
+
 	// Scanner Related Metrics
 	WALScannerTotal = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "scanner_total",
 		Help: "Total of wal scanner on current streaming node",
-	}, WALChannelLabelName)
+	}, WALChannelLabelName, WALScannerModelLabelName)
 
 	WALScanMessageBytes = newWALHistogramVec(prometheus.HistogramOpts{
 		Name:    "scan_message_bytes",
 		Help:    "Bytes of scanned message from wal",
 		Buckets: messageBytesBuckets,
-	}, WALChannelLabelName)
+	}, WALChannelLabelName, WALScannerModelLabelName)
 
 	WALScanMessageTotal = newWALCounterVec(prometheus.CounterOpts{
 		Name: "scan_message_total",
 		Help: "Total of scanned message from wal",
-	}, WALChannelLabelName, WALMessageTypeLabelName)
+	}, WALChannelLabelName, WALMessageTypeLabelName, WALScannerModelLabelName)
 
 	WALScanPassMessageBytes = newWALHistogramVec(prometheus.HistogramOpts{
 		Name:    "scan_pass_message_bytes",
 		Help:    "Bytes of pass (not filtered) scanned message from wal",
 		Buckets: messageBytesBuckets,
-	}, WALChannelLabelName)
+	}, WALChannelLabelName, WALScannerModelLabelName)
 
 	WALScanPassMessageTotal = newWALCounterVec(prometheus.CounterOpts{
 		Name: "scan_pass_message_total",
 		Help: "Total of pass (not filtered) scanned message from wal",
-	}, WALChannelLabelName, WALMessageTypeLabelName)
+	}, WALChannelLabelName, WALMessageTypeLabelName, WALScannerModelLabelName)
 
 	WALScanTimeTickViolationMessageTotal = newWALCounterVec(prometheus.CounterOpts{
 		Name: "scan_time_tick_violation_message_total",
 		Help: "Total of time tick violation message (dropped) from wal",
-	}, WALChannelLabelName, WALMessageTypeLabelName)
+	}, WALChannelLabelName, WALMessageTypeLabelName, WALScannerModelLabelName)
 
 	WALScanTxnTotal = newWALCounterVec(prometheus.CounterOpts{
 		Name: "scan_txn_total",
@@ -281,19 +366,30 @@ var (
 		Name: "scanner_txn_buf_bytes",
 		Help: "Size of txn buffer in wal scanner",
 	}, WALChannelLabelName)
+
+	WALFlusherInfo = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "flusher_info",
+		Help: "Current info of flusher on current wal",
+	}, WALChannelLabelName, WALChannelTermLabelName, WALFlusherStateLabelName)
+
+	WALFlusherTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "flusher_time_tick",
+		Help: "the final timetick tick of flusher seen",
+	}, WALChannelLabelName, WALChannelTermLabelName)
 )
 
 // RegisterStreamingServiceClient registers streaming service client metrics
 func RegisterStreamingServiceClient(registry *prometheus.Registry) {
 	StreamingServiceClientRegisterOnce.Do(func() {
+		registry.MustRegister(StreamingServiceClientResumingProducerTotal)
 		registry.MustRegister(StreamingServiceClientProducerTotal)
-		registry.MustRegister(StreamingServiceClientProduceInflightTotal)
+		registry.MustRegister(StreamingServiceClientProduceTotal)
 		registry.MustRegister(StreamingServiceClientProduceBytes)
-		registry.MustRegister(StreamingServiceClientProduceDurationSeconds)
-
+		registry.MustRegister(StreamingServiceClientSuccessProduceBytes)
+		registry.MustRegister(StreamingServiceClientSuccessProduceDurationSeconds)
+		registry.MustRegister(StreamingServiceClientResumingConsumerTotal)
 		registry.MustRegister(StreamingServiceClientConsumerTotal)
 		registry.MustRegister(StreamingServiceClientConsumeBytes)
-		registry.MustRegister(StreamingServiceClientConsumeInflightTotal)
 	})
 }
 
@@ -302,13 +398,16 @@ func registerStreamingCoord(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingCoordPChannelInfo)
 	registry.MustRegister(StreamingCoordAssignmentVersion)
 	registry.MustRegister(StreamingCoordAssignmentListenerTotal)
+	registry.MustRegister(StreamingCoordBroadcasterTaskTotal)
+	registry.MustRegister(StreamingCoordBroadcastDurationSeconds)
+	registry.MustRegister(StreamingCoordBroadcasterAckAllDurationSeconds)
+	registry.MustRegister(StreamingCoordResourceKeyTotal)
 }
 
 // RegisterStreamingNode registers streaming node metrics
 func RegisterStreamingNode(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingNodeProducerTotal)
 	registry.MustRegister(StreamingNodeProduceInflightTotal)
-
 	registry.MustRegister(StreamingNodeConsumerTotal)
 	registry.MustRegister(StreamingNodeConsumeInflightTotal)
 	registry.MustRegister(StreamingNodeConsumeBytes)
@@ -321,13 +420,14 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALInfo)
 	registry.MustRegister(WALLastAllocatedTimeTick)
 	registry.MustRegister(WALAllocateTimeTickTotal)
+	registry.MustRegister(WALTimeTickAllocateDurationSeconds)
 	registry.MustRegister(WALLastConfirmedTimeTick)
 	registry.MustRegister(WALAcknowledgeTimeTickTotal)
 	registry.MustRegister(WALSyncTimeTickTotal)
 	registry.MustRegister(WALTimeTickSyncTotal)
 	registry.MustRegister(WALTimeTickSyncTimeTick)
 	registry.MustRegister(WALInflightTxn)
-	registry.MustRegister(WALFinishTxn)
+	registry.MustRegister(WALTxnDurationSeconds)
 	registry.MustRegister(WALSegmentAllocTotal)
 	registry.MustRegister(WALSegmentFlushedTotal)
 	registry.MustRegister(WALSegmentBytes)
@@ -335,8 +435,15 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALCollectionTotal)
 	registry.MustRegister(WALAppendMessageBytes)
 	registry.MustRegister(WALAppendMessageTotal)
+	registry.MustRegister(WALAppendMessageBeforeInterceptorDurationSeconds)
+	registry.MustRegister(WALAppendMessageAfterInterceptorDurationSeconds)
 	registry.MustRegister(WALAppendMessageDurationSeconds)
 	registry.MustRegister(WALImplsAppendMessageDurationSeconds)
+	registry.MustRegister(WALWriteAheadBufferEntryTotal)
+	registry.MustRegister(WALWriteAheadBufferSizeBytes)
+	registry.MustRegister(WALWriteAheadBufferCapacityBytes)
+	registry.MustRegister(WALWriteAheadBufferEarliestTimeTick)
+	registry.MustRegister(WALWriteAheadBufferLatestTimeTick)
 	registry.MustRegister(WALScannerTotal)
 	registry.MustRegister(WALScanMessageBytes)
 	registry.MustRegister(WALScanMessageTotal)
@@ -347,6 +454,8 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALScannerPendingQueueBytes)
 	registry.MustRegister(WALScannerTimeTickBufBytes)
 	registry.MustRegister(WALScannerTxnBufBytes)
+	registry.MustRegister(WALFlusherInfo)
+	registry.MustRegister(WALFlusherTimeTick)
 }
 
 func newStreamingCoordGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prometheus.GaugeVec {
@@ -356,11 +465,25 @@ func newStreamingCoordGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prom
 	return prometheus.NewGaugeVec(opts, labels)
 }
 
+func newStreamingCoordHistogramVec(opts prometheus.HistogramOpts, extra ...string) *prometheus.HistogramVec {
+	opts.Namespace = milvusNamespace
+	opts.Subsystem = typeutil.StreamingCoordRole
+	labels := mergeLabel(extra...)
+	return prometheus.NewHistogramVec(opts, labels)
+}
+
 func newStreamingServiceClientGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prometheus.GaugeVec {
 	opts.Namespace = milvusNamespace
 	opts.Subsystem = subsystemStreamingServiceClient
 	labels := mergeLabel(extra...)
 	return prometheus.NewGaugeVec(opts, labels)
+}
+
+func newStreamingServiceClientCounterVec(opts prometheus.CounterOpts, extra ...string) *prometheus.CounterVec {
+	opts.Namespace = milvusNamespace
+	opts.Subsystem = subsystemStreamingServiceClient
+	labels := mergeLabel(extra...)
+	return prometheus.NewCounterVec(opts, labels)
 }
 
 func newStreamingServiceClientHistogramVec(opts prometheus.HistogramOpts, extra ...string) *prometheus.HistogramVec {
