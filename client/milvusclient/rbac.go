@@ -147,9 +147,6 @@ func (c *Client) DescribeRole(ctx context.Context, option DescribeRoleOption, ca
 		if err := merr.CheckRPCCall(resp, err); err != nil {
 			return err
 		}
-		if len(resp.GetEntities()) == 0 {
-			return errors.New("role not found")
-		}
 
 		role.Privileges = lo.Map(resp.GetEntities(), func(g *milvuspb.GrantEntity, _ int) entity.GrantItem {
 			return entity.GrantItem{
