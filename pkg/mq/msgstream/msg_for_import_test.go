@@ -61,4 +61,17 @@ func TestImportMsg(t *testing.T) {
 	assert.EqualValues(t, 1000, newMsg.EndTs())
 
 	assert.True(t, msg.Size() > 0)
+
+	msg.SetTs(3000)
+	assert.EqualValues(t, 3000, msg.BeginTs())
+	assert.EqualValues(t, 3000, msg.EndTs())
+	assert.EqualValues(t, 3000, msg.(*ImportMsg).Base.Timestamp)
+
+	msgBytes, err = msg.Marshal(msg)
+	assert.NoError(t, err)
+	newMsg, err = newMsg.Unmarshal(msgBytes)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 3000, newMsg.BeginTs())
+	assert.EqualValues(t, 3000, newMsg.EndTs())
+	assert.EqualValues(t, 3000, newMsg.(*ImportMsg).Base.Timestamp)
 }
