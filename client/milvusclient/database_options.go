@@ -61,18 +61,26 @@ type CreateDatabaseOption interface {
 }
 
 type createDatabaseOption struct {
-	dbName string
+	dbName     string
+	Properties map[string]string
 }
 
 func (opt *createDatabaseOption) Request() *milvuspb.CreateDatabaseRequest {
 	return &milvuspb.CreateDatabaseRequest{
-		DbName: opt.dbName,
+		DbName:     opt.dbName,
+		Properties: entity.MapKvPairs(opt.Properties),
 	}
+}
+
+func (opt *createDatabaseOption) WithProperty(key string, val any) *createDatabaseOption {
+	opt.Properties[key] = fmt.Sprintf("%v", val)
+	return opt
 }
 
 func NewCreateDatabaseOption(dbName string) *createDatabaseOption {
 	return &createDatabaseOption{
-		dbName: dbName,
+		dbName:     dbName,
+		Properties: make(map[string]string),
 	}
 }
 
