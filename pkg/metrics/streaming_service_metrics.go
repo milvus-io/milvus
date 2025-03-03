@@ -17,6 +17,8 @@ const (
 	StreamingServiceClientStatusCancel      = "cancel"
 	StreamignServiceClientStatusError       = "error"
 
+	BroadcasterTaskStateLabelName     = "state"
+	ResourceKeyDomainLabelName        = "domain"
 	TimeTickSyncTypeLabelName         = "type"
 	TimeTickAckTypeLabelName          = "type"
 	WALTxnStateLabelName              = "state"
@@ -96,6 +98,28 @@ var (
 		Name: "assignment_listener_total",
 		Help: "Total of assignment listener",
 	})
+
+	StreamingCoordBroadcasterTaskTotal = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
+		Name: "broadcaster_task_total",
+		Help: "Total of broadcaster task",
+	}, BroadcasterTaskStateLabelName)
+
+	StreamingCoordBroadcastDurationSeconds = newStreamingCoordHistogramVec(prometheus.HistogramOpts{
+		Name:    "broadcaster_broadcast_duration_seconds",
+		Help:    "Duration of broadcast",
+		Buckets: secondsBuckets,
+	})
+
+	StreamingCoordBroadcasterAckAllDurationSeconds = newStreamingCoordHistogramVec(prometheus.HistogramOpts{
+		Name:    "broadcaster_ack_all_duration_seconds",
+		Help:    "Duration of acknowledge all message",
+		Buckets: secondsBuckets,
+	})
+
+	StreamingCoordResourceKeyTotal = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
+		Name: "resource_key_total",
+		Help: "Total of resource key hold at streaming coord",
+	}, ResourceKeyDomainLabelName)
 
 	// StreamingNode Producer Server Metrics.
 	StreamingNodeProducerTotal = newStreamingNodeGaugeVec(prometheus.GaugeOpts{
@@ -302,6 +326,10 @@ func registerStreamingCoord(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingCoordPChannelInfo)
 	registry.MustRegister(StreamingCoordAssignmentVersion)
 	registry.MustRegister(StreamingCoordAssignmentListenerTotal)
+	registry.MustRegister(StreamingCoordBroadcasterTaskTotal)
+	registry.MustRegister(StreamingCoordBroadcastDurationSeconds)
+	registry.MustRegister(StreamingCoordBroadcasterAckAllDurationSeconds)
+	registry.MustRegister(StreamingCoordResourceKeyTotal)
 }
 
 // RegisterStreamingNode registers streaming node metrics
@@ -354,6 +382,13 @@ func newStreamingCoordGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prom
 	opts.Subsystem = typeutil.StreamingCoordRole
 	labels := mergeLabel(extra...)
 	return prometheus.NewGaugeVec(opts, labels)
+}
+
+func newStreamingCoordHistogramVec(opts prometheus.HistogramOpts, extra ...string) *prometheus.HistogramVec {
+	opts.Namespace = milvusNamespace
+	opts.Subsystem = typeutil.StreamingCoordRole
+	labels := mergeLabel(extra...)
+	return prometheus.NewHistogramVec(opts, labels)
 }
 
 func newStreamingServiceClientGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prometheus.GaugeVec {
