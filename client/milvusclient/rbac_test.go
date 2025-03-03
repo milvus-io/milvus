@@ -340,7 +340,6 @@ func (s *RoleSuite) TestDescribeRole() {
 
 	s.Run("failure", func() {
 		s.mock.EXPECT().SelectRole(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
-		// s.mock.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
 
 		_, err := s.client.DescribeRole(ctx, NewDescribeRoleOption("role"))
 		s.Error(err)
