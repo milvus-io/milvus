@@ -85,46 +85,16 @@ func (c *dispatcherManager) Add(ctx context.Context, streamConfig *StreamConfig)
 	if _, ok := c.registeredTargets.GetOrInsert(t.vchannel, t); ok {
 		return nil, fmt.Errorf("vchannel %s already exists in the dispatcher", t.vchannel)
 	}
-	log.Info("target register done", zap.String("vchannel", t.vchannel))
+	log.Ctx(ctx).Info("target register done", zap.String("vchannel", t.vchannel))
 	return t.ch, nil
 }
 
 func (c *dispatcherManager) Remove(vchannel string) {
-	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
-
-	t, ok := c.registeredTargets.GetAndRemove(vchannel)
+	_, ok := c.registeredTargets.GetAndRemove(vchannel)
 	if !ok {
-		log.Info("the target was not registered before", zap.String("vchannel", vchannel))
-		return
+		log.Info("the target was not registered before", zap.String("role", c.role),
+			zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for _, dispatcher := range c.deputyDispatchers {
-		if dispatcher.HasTarget(vchannel) {
-			dispatcher.Handle(pause)
-			dispatcher.RemoveTarget(vchannel)
-			if dispatcher.TargetNum() == 0 {
-				dispatcher.Handle(terminate)
-				delete(c.deputyDispatchers, dispatcher.ID())
-				log.Info("remove deputy dispatcher done", zap.Int64("id", dispatcher.ID()))
-			} else {
-				dispatcher.Handle(resume)
-			}
-		}
-	}
-	if c.mainDispatcher != nil && c.mainDispatcher.HasTarget(vchannel) {
-		c.mainDispatcher.Handle(pause)
-		c.mainDispatcher.RemoveTarget(vchannel)
-		if c.mainDispatcher.TargetNum() == 0 && len(c.deputyDispatchers) == 0 {
-			c.mainDispatcher.Handle(terminate)
-			c.mainDispatcher = nil
-		} else {
-			c.mainDispatcher.Handle(resume)
-		}
-	}
-
-	t.close()
 }
 
 func (c *dispatcherManager) NumTarget() int {
@@ -150,8 +120,7 @@ func (c *dispatcherManager) Close() {
 }
 
 func (c *dispatcherManager) Run() {
-	log := log.With(zap.String("role", c.role),
-		zap.Int64("nodeID", c.nodeID), zap.String("pchannel", c.pchannel))
+	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID), zap.String("pchannel", c.pchannel))
 	log.Info("dispatcherManager is running...")
 	ticker1 := time.NewTicker(10 * time.Second)
 	ticker2 := time.NewTicker(paramtable.Get().MQCfg.MergeCheckInterval.GetAsDuration(time.Second))
@@ -165,13 +134,69 @@ func (c *dispatcherManager) Run() {
 		case <-ticker1.C:
 			c.uploadMetric()
 		case <-ticker2.C:
-			c.buildDispatcher()
+			c.tryRemoveUnregisteredTargets()
+			c.tryBuildDispatcher()
 			c.tryMerge()
 		}
 	}
 }
 
-func (c *dispatcherManager) buildDispatcher() {
+func (c *dispatcherManager) tryRemoveUnregisteredTargets() {
+	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID), zap.String("pchannel", c.pchannel))
+	unregisteredTargets := make([]*target, 0)
+	c.mu.RLock()
+	for _, dispatcher := range c.deputyDispatchers {
+		for _, t := range dispatcher.GetTargets() {
+			if !c.registeredTargets.Contain(t.vchannel) {
+				unregisteredTargets = append(unregisteredTargets, t)
+			}
+		}
+	}
+	if c.mainDispatcher != nil {
+		for _, t := range c.mainDispatcher.GetTargets() {
+			if !c.registeredTargets.Contain(t.vchannel) {
+				unregisteredTargets = append(unregisteredTargets, t)
+			}
+		}
+	}
+	c.mu.RUnlock()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, dispatcher := range c.deputyDispatchers {
+		for _, t := range unregisteredTargets {
+			if dispatcher.HasTarget(t.vchannel) {
+				dispatcher.Handle(pause)
+				dispatcher.RemoveTarget(t.vchannel)
+				if dispatcher.TargetNum() == 0 {
+					dispatcher.Handle(terminate)
+					delete(c.deputyDispatchers, dispatcher.ID())
+					log.Info("remove deputy dispatcher done", zap.Int64("id", dispatcher.ID()))
+				} else {
+					dispatcher.Handle(resume)
+				}
+				t.close()
+			}
+		}
+	}
+	if c.mainDispatcher != nil {
+		for _, t := range unregisteredTargets {
+			if c.mainDispatcher.HasTarget(t.vchannel) {
+				c.mainDispatcher.Handle(pause)
+				c.mainDispatcher.RemoveTarget(t.vchannel)
+				if c.mainDispatcher.TargetNum() == 0 && len(c.deputyDispatchers) == 0 {
+					c.mainDispatcher.Handle(terminate)
+					c.mainDispatcher = nil
+				} else {
+					c.mainDispatcher.Handle(resume)
+				}
+				t.close()
+			}
+		}
+	}
+}
+
+func (c *dispatcherManager) tryBuildDispatcher() {
 	tr := timerecord.NewTimeRecorder("")
 	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID), zap.String("pchannel", c.pchannel))
 
@@ -276,7 +301,7 @@ func (c *dispatcherManager) tryMerge() {
 	defer c.mu.Unlock()
 
 	start := time.Now()
-	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID))
+	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID), zap.String("pchannel", c.pchannel))
 
 	if c.mainDispatcher == nil || c.mainDispatcher.CurTs() == 0 {
 		return
