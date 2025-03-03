@@ -272,7 +272,7 @@ func ReadNullableBoolData(pcr *FieldReader, count int64) (any, []bool, error) {
 			validData = append(validData, make([]bool, dataNums)...)
 			data = append(data, make([]bool, dataNums)...)
 		} else {
-			validData = append(validData, bytesToBoolArray(dataNums, boolReader.NullBitmapBytes())...)
+			validData = append(validData, bytesToValidData(dataNums, boolReader.NullBitmapBytes())...)
 			for i := 0; i < dataNums; i++ {
 				data = append(data, boolReader.Value(i))
 			}
@@ -370,37 +370,37 @@ func ReadNullableIntegerOrFloatData[T constraints.Integer | constraints.Float](p
 		switch chunk.DataType().ID() {
 		case arrow.INT8:
 			int8Reader := chunk.(*array.Int8)
-			validData = append(validData, bytesToBoolArray(dataNums, int8Reader.NullBitmapBytes())...)
+			validData = append(validData, bytesToValidData(dataNums, int8Reader.NullBitmapBytes())...)
 			for i := 0; i < dataNums; i++ {
 				data = append(data, T(int8Reader.Value(i)))
 			}
 		case arrow.INT16:
 			int16Reader := chunk.(*array.Int16)
-			validData = append(validData, bytesToBoolArray(dataNums, int16Reader.NullBitmapBytes())...)
+			validData = append(validData, bytesToValidData(dataNums, int16Reader.NullBitmapBytes())...)
 			for i := 0; i < dataNums; i++ {
 				data = append(data, T(int16Reader.Value(i)))
 			}
 		case arrow.INT32:
 			int32Reader := chunk.(*array.Int32)
-			validData = append(validData, bytesToBoolArray(dataNums, int32Reader.NullBitmapBytes())...)
+			validData = append(validData, bytesToValidData(dataNums, int32Reader.NullBitmapBytes())...)
 			for i := 0; i < dataNums; i++ {
 				data = append(data, T(int32Reader.Value(i)))
 			}
 		case arrow.INT64:
 			int64Reader := chunk.(*array.Int64)
-			validData = append(validData, bytesToBoolArray(dataNums, int64Reader.NullBitmapBytes())...)
+			validData = append(validData, bytesToValidData(dataNums, int64Reader.NullBitmapBytes())...)
 			for i := 0; i < dataNums; i++ {
 				data = append(data, T(int64Reader.Value(i)))
 			}
 		case arrow.FLOAT32:
 			float32Reader := chunk.(*array.Float32)
-			validData = append(validData, bytesToBoolArray(dataNums, float32Reader.NullBitmapBytes())...)
+			validData = append(validData, bytesToValidData(dataNums, float32Reader.NullBitmapBytes())...)
 			for i := 0; i < dataNums; i++ {
 				data = append(data, T(float32Reader.Value(i)))
 			}
 		case arrow.FLOAT64:
 			float64Reader := chunk.(*array.Float64)
-			validData = append(validData, bytesToBoolArray(dataNums, float64Reader.NullBitmapBytes())...)
+			validData = append(validData, bytesToValidData(dataNums, float64Reader.NullBitmapBytes())...)
 			for i := 0; i < dataNums; i++ {
 				data = append(data, T(float64Reader.Value(i)))
 			}
@@ -473,7 +473,7 @@ func ReadNullableStringData(pcr *FieldReader, count int64) (any, []bool, error) 
 			validData = append(validData, make([]bool, dataNums)...)
 			data = append(data, make([]string, dataNums)...)
 		} else {
-			validData = append(validData, bytesToBoolArray(dataNums, stringReader.NullBitmapBytes())...)
+			validData = append(validData, bytesToValidData(dataNums, stringReader.NullBitmapBytes())...)
 			for i := 0; i < dataNums; i++ {
 				if stringReader.IsNull(i) {
 					data = append(data, "")
@@ -547,7 +547,7 @@ func ReadNullableVarcharData(pcr *FieldReader, count int64) (any, []bool, error)
 			validData = append(validData, make([]bool, dataNums)...)
 			data = append(data, make([]string, dataNums)...)
 		} else {
-			validData = append(validData, bytesToBoolArray(dataNums, stringReader.NullBitmapBytes())...)
+			validData = append(validData, bytesToValidData(dataNums, stringReader.NullBitmapBytes())...)
 			for i := 0; i < dataNums; i++ {
 				if stringReader.IsNull(i) {
 					data = append(data, "")

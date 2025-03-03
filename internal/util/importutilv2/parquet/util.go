@@ -272,9 +272,20 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 }
 
 // todo(smellthemoon): use byte to store valid_data
-func bytesToBoolArray(length int, bytes []byte) []bool {
+func bytesToValidData(length int, bytes []byte) []bool {
 	bools := make([]bool, 0, length)
+	if len(bytes) == 0 {
+		// parquet field is "optional" or "required"
+		// for "required" field, the arrow.array.NullBitmapBytes() returns an empty byte list
+		// which means all the elements are valid. In this case, we simply construct an all-true bool array
+		for i := 0; i < length; i++ {
+			bools = append(bools, true)
+		}
+		return bools
+	}
 
+	// for "optional" field, the arrow.array.NullBitmapBytes() returns a non-empty byte list
+	// with each bit representing the existence of an element
 	for i := 0; i < length; i++ {
 		bit := (bytes[uint(i)/8] & BitMask[byte(i)%8]) != 0
 		bools = append(bools, bit)
