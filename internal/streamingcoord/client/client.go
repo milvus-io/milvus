@@ -44,9 +44,6 @@ type BroadcastService interface {
 	// Ack sends a broadcast ack to the streaming service.
 	Ack(ctx context.Context, req types.BroadcastAckRequest) error
 
-	// BlockUntilEvent blocks until the event happens.
-	BlockUntilEvent(ctx context.Context, ev *message.BroadcastEvent) error
-
 	// Close closes the broadcast service.
 	Close()
 }

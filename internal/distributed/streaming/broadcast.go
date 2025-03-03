@@ -34,19 +34,3 @@ func (b broadcast) Ack(ctx context.Context, req types.BroadcastAckRequest) error
 
 	return b.streamingCoordClient.Broadcast().Ack(ctx, req)
 }
-
-func (b broadcast) BlockUntilResourceKeyAckOnce(ctx context.Context, rk message.ResourceKey) error {
-	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return ErrWALAccesserClosed
-	}
-	defer b.lifetime.Done()
-	return b.streamingCoordClient.Broadcast().BlockUntilEvent(ctx, message.NewResourceKeyAckOneBroadcastEvent(rk))
-}
-
-func (b broadcast) BlockUntilResourceKeyAckAll(ctx context.Context, rk message.ResourceKey) error {
-	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return ErrWALAccesserClosed
-	}
-	defer b.lifetime.Done()
-	return b.streamingCoordClient.Broadcast().BlockUntilEvent(ctx, message.NewResourceKeyAckAllBroadcastEvent(rk))
-}
