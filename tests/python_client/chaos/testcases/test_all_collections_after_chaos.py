@@ -42,7 +42,7 @@ class TestAllCollection(TestcaseBase):
         int64_field_name = cf.get_int64_field_name(schema=schema)
         float_vector_field_name = cf.get_float_vec_field_name(schema=schema)
         float_vector_field_name_list = cf.get_float_vec_field_name_list(schema=schema)
-        text_match_field = cf.get_text_match_field_name(schema=schema)
+        text_match_fields = cf.get_text_match_field_name(schema=schema)
         bm25_vec_field_name_list = cf.get_bm25_vec_field_name_list(schema=schema)
 
         # compact collection before getting num_entities
@@ -125,9 +125,10 @@ class TestAllCollection(TestcaseBase):
         assert len(res) >= len(data[0])
 
         # text match
-        if text_match_field is not None:
+        if len(text_match_fields) > 0:
             queries = [fake.text().replace("\n", " ") for _ in range(1)]
-            expr = f"text_match({text_match_field}, '{queries[0]}')"
+
+            expr = f"text_match({text_match_fields[0]}, '{queries[0]}')"
             t0 = time.time()
             res, _ = collection_w.query(expr)
             tt = time.time() - t0
@@ -179,9 +180,9 @@ class TestAllCollection(TestcaseBase):
         assert len(res) > 0
 
         # text match
-        if text_match_field is not None:
+        if len(text_match_fields) > 0:
             queries = [fake.text().replace("\n", " ") for _ in range(1)]
-            expr = f"text_match({text_match_field}, '{queries[0]}')"
+            expr = f"text_match({text_match_fields[0]}, '{queries[0]}')"
             t0 = time.time()
             res, _ = collection_w.query(expr)
             tt = time.time() - t0
