@@ -28,7 +28,18 @@ EOF
     cat << EOF > user.yaml
 # Extra config to override default milvus.yaml
 EOF
+    if [ ! -f "./embedEtcd.yaml" ]
+    then
+        echo "embedEtcd.yaml file does not exist. Please try to create it in the current directory."
+        exit 1
+    fi
 
+    if [ ! -f "./user.yaml" ]
+    then
+        echo "user.yaml file does not exist. Please try to create it in the current directory."
+        exit 1
+    fi
+    
     sudo docker run -d \
         --name milvus-standalone \
         --security-opt seccomp:unconfined \
@@ -47,7 +58,7 @@ EOF
         --health-start-period=90s \
         --health-timeout=20s \
         --health-retries=3 \
-        milvusdb/milvus:v2.5.4 \
+        milvusdb/milvus:v2.5.5 \
         milvus run standalone  1> /dev/null
 }
 

@@ -274,6 +274,53 @@ func (_c *MockWorkerManager_PickClient_Call) RunAndReturn(run func() (int64, typ
 	return _c
 }
 
+// QuerySlots provides a mock function with given fields:
+func (_m *MockWorkerManager) QuerySlots() map[int64]int64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for QuerySlots")
+	}
+
+	var r0 map[int64]int64
+	if rf, ok := ret.Get(0).(func() map[int64]int64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[int64]int64)
+		}
+	}
+
+	return r0
+}
+
+// MockWorkerManager_QuerySlots_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QuerySlots'
+type MockWorkerManager_QuerySlots_Call struct {
+	*mock.Call
+}
+
+// QuerySlots is a helper method to define mock.On call
+func (_e *MockWorkerManager_Expecter) QuerySlots() *MockWorkerManager_QuerySlots_Call {
+	return &MockWorkerManager_QuerySlots_Call{Call: _e.mock.On("QuerySlots")}
+}
+
+func (_c *MockWorkerManager_QuerySlots_Call) Run(run func()) *MockWorkerManager_QuerySlots_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWorkerManager_QuerySlots_Call) Return(_a0 map[int64]int64) *MockWorkerManager_QuerySlots_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWorkerManager_QuerySlots_Call) RunAndReturn(run func() map[int64]int64) *MockWorkerManager_QuerySlots_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoveNode provides a mock function with given fields: nodeID
 func (_m *MockWorkerManager) RemoveNode(nodeID int64) {
 	_m.Called(nodeID)

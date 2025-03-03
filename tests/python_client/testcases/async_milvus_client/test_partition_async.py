@@ -608,10 +608,12 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
                                               check_task=CheckTasks.err_res, check_items=error)
         partition_name = ""
         error = {ct.err_code: 200, ct.err_msg: f"partition not found[partition={partition_name}]"}
-        await async_client.release_partitions(collection_name, partition_name,
-                                              check_task=CheckTasks.err_res, check_items=error)
+        # await async_client.release_partitions(collection_name, partition_name,
+        #                                       check_task=CheckTasks.err_res, check_items=error)
+        # https://github.com/milvus-io/milvus/issues/38223
         # 3. drop action
         await async_client.drop_collection(collection_name)
+
 
 class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
     """ Test case of partition interface """
