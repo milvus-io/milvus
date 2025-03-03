@@ -158,7 +158,7 @@ class JsonFlatIndexTest : public ::testing::Test {
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
         config["insert_files"] = std::vector<std::string>{log_path_};
         {
-            auto index = std::make_shared<index::JsonFlatIndex>(*ctx_);
+            auto index = std::make_shared<index::JsonFlatIndex>(*ctx_, "");
             index->Build(config);
 
             auto create_index_result = index->Upload();
@@ -178,7 +178,7 @@ class JsonFlatIndexTest : public ::testing::Test {
         load_config["index_files"] = index_files_;
 
         ctx_->set_for_loading_index(true);
-        json_index_ = std::make_shared<index::JsonFlatIndex>(*ctx_);
+        json_index_ = std::make_shared<index::JsonFlatIndex>(*ctx_, "");
         json_index_->Load(milvus::tracer::TraceContext{}, load_config);
 
         auto cnt = json_index_->Count();
