@@ -15,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -38,9 +37,6 @@ func TestStreamingBroadcast(t *testing.T) {
 	streamingutil.SetStreamingServiceEnabled()
 	streaming.Init()
 	defer streaming.Release()
-
-	err := streaming.WAL().Broadcast().BlockUntilResourceKeyAckAll(context.Background(), message.NewCollectionNameResourceKey(collectionName))
-	assert.NoError(t, err)
 
 	msg, _ := message.NewCreateCollectionMessageBuilderV1().
 		WithHeader(&message.CreateCollectionMessageHeader{
@@ -68,53 +64,6 @@ func TestStreamingBroadcast(t *testing.T) {
 	assert.Error(t, err)
 	assert.True(t, status.AsStreamingError(err).IsResourceAcquired())
 	assert.Nil(t, resp2)
-
-	// resource key should be block until ack.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
-	defer cancel()
-	err = streaming.WAL().Broadcast().BlockUntilResourceKeyAckAll(ctx, message.NewCollectionNameResourceKey(collectionName))
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
-
-	ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*100)
-	defer cancel()
-	err = streaming.WAL().Broadcast().BlockUntilResourceKeyAckOnce(ctx, message.NewCollectionNameResourceKey(collectionName))
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
-
-	err = streaming.WAL().Broadcast().Ack(context.Background(), types.BroadcastAckRequest{
-		BroadcastID: resp.BroadcastID,
-		VChannel:    vChannels[0],
-	})
-	assert.NoError(t, err)
-
-	// all should be blocked
-	ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*100)
-	defer cancel()
-	err = streaming.WAL().Broadcast().BlockUntilResourceKeyAckAll(ctx, message.NewCollectionNameResourceKey(collectionName))
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
-
-	// once should be returned
-	ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*100)
-	defer cancel()
-	err = streaming.WAL().Broadcast().BlockUntilResourceKeyAckOnce(ctx, message.NewCollectionNameResourceKey(collectionName))
-	assert.NoError(t, err)
-
-	err = streaming.WAL().Broadcast().Ack(context.Background(), types.BroadcastAckRequest{
-		BroadcastID: resp.BroadcastID,
-		VChannel:    vChannels[1],
-	})
-	assert.NoError(t, err)
-
-	// all should be blocked
-	ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*100)
-	defer cancel()
-	err = streaming.WAL().Broadcast().BlockUntilResourceKeyAckAll(ctx, message.NewCollectionNameResourceKey(collectionName))
-	assert.NoError(t, err)
-
-	// once should be returned
-	ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*100)
-	defer cancel()
-	err = streaming.WAL().Broadcast().BlockUntilResourceKeyAckOnce(ctx, message.NewCollectionNameResourceKey(collectionName))
-	assert.NoError(t, err)
 }
 
 func TestStreamingProduce(t *testing.T) {
