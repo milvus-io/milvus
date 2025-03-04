@@ -90,7 +90,7 @@ BENCHMARK_DEFINE_F(JsonExprBenchmark, BM_JsonBruteForce)
     }
 }
 
-BENCHMARK_DEFINE_F(JsonExprBenchmark, BM_JsonValueIndex)
+BENCHMARK_DEFINE_F(JsonExprBenchmark, BM_JsonPathIndex)
 (benchmark::State& state) {
     auto schema = kTestData.schema_;
     auto segment = milvus::segcore::CreateSealedSegment(schema);
@@ -138,6 +138,6 @@ BENCHMARK_REGISTER_F(JsonExprBenchmark, BM_JsonBruteForce)
     ->Arg(1000)
     ->Arg(1000000);
 
-BENCHMARK_REGISTER_F(JsonExprBenchmark, BM_JsonValueIndex)
+BENCHMARK_REGISTER_F(JsonExprBenchmark, BM_JsonPathIndex)
     ->Arg(1000)
     ->Arg(1000000);

@@ -98,24 +98,25 @@ Search_GrowingIndex(benchmark::State& state) {
 }
 
 BENCHMARK(Search_GrowingIndex)
-    ->MinTime(5)
+    ->Iterations(100)
     ->ArgsProduct({{true, false}, {8, 16, 32}});
+
+static int64_t N = 10000;
+static const auto DATASET = [] {
+    auto dataset_ = DataGen(schema, N);
+    return dataset_;
+}();
 
 static void
 Search_Sealed(benchmark::State& state) {
     auto segment = CreateSealedSegment(schema);
-    static int64_t N = 1024 * 1024;
-    const auto dataset_ = [] {
-        auto dataset_ = DataGen(schema, N);
-        return dataset_;
-    }();
-    SealedLoadFieldData(dataset_, *segment);
+    SealedLoadFieldData(DATASET, *segment);
     auto choice = state.range(0);
     if (choice == 0) {
         // Brute Force
     } else if (choice == 1) {
         // hnsw
-        auto vec = dataset_.get_col<float>(milvus::FieldId(100));
+        auto vec = DATASET.get_col<float>(milvus::FieldId(100));
         auto indexing =
             GenVecIndexing(N, dim, vec.data(), knowhere::IndexEnum::INDEX_HNSW);
         segcore::LoadIndexInfo info;
@@ -134,4 +135,4 @@ Search_Sealed(benchmark::State& state) {
     }
 }
 
-BENCHMARK(Search_Sealed)->MinTime(5)->Arg(1)->Arg(0);
+BENCHMARK(Search_Sealed)->Iterations(100)->Arg(1)->Arg(0);
