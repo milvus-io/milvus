@@ -42,11 +42,15 @@ type CollectionTarget struct {
 
 	// record target status, if target has been save before milvus v2.4.19, then the target will lack of segment info.
 	lackSegmentInfo bool
+
+	// cache collection total row count
+	totalRowCount int64
 }
 
 func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64) *CollectionTarget {
 	channel2Segments := make(map[string][]*datapb.SegmentInfo, len(dmChannels))
 	partition2Segments := make(map[int64][]*datapb.SegmentInfo, len(partitionIDs))
+	totalRowCount := int64(0)
 	for _, segment := range segments {
 		channel := segment.GetInsertChannel()
 		if _, ok := channel2Segments[channel]; !ok {
@@ -58,6 +62,7 @@ func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[
 			partition2Segments[partitionID] = make([]*datapb.SegmentInfo, 0)
 		}
 		partition2Segments[partitionID] = append(partition2Segments[partitionID], segment)
+		totalRowCount += segment.GetNumOfRows()
 	}
 	return &CollectionTarget{
 		segments:           segments,
@@ -66,6 +71,7 @@ func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[
 		dmChannels:         dmChannels,
 		partitions:         typeutil.NewSet(partitionIDs...),
 		version:            time.Now().UnixNano(),
+		totalRowCount:      totalRowCount,
 	}
 }
 
@@ -77,6 +83,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 	var partitions []int64
 
 	lackSegmentInfo := false
+	totalRowCount := int64(0)
 	for _, t := range target.GetChannelTargets() {
 		if _, ok := channel2Segments[t.GetChannelName()]; !ok {
 			channel2Segments[t.GetChannelName()] = make([]*datapb.SegmentInfo, 0)
@@ -100,6 +107,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 				segments[segment.GetID()] = info
 				channel2Segments[t.GetChannelName()] = append(channel2Segments[t.GetChannelName()], info)
 				partition2Segments[partition.GetPartitionID()] = append(partition2Segments[partition.GetPartitionID()], info)
+				totalRowCount += segment.GetNumOfRows()
 			}
 			partitions = append(partitions, partition.GetPartitionID())
 		}
@@ -127,6 +135,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 		partitions:         typeutil.NewSet(partitions...),
 		version:            target.GetVersion(),
 		lackSegmentInfo:    lackSegmentInfo,
+		totalRowCount:      totalRowCount,
 	}
 }
 
@@ -218,6 +227,10 @@ func (p *CollectionTarget) IsEmpty() bool {
 // if target is ready, it should have all segment info
 func (p *CollectionTarget) Ready() bool {
 	return !p.lackSegmentInfo
+}
+
+func (p *CollectionTarget) GetRowCount() int64 {
+	return p.totalRowCount
 }
 
 type target struct {
