@@ -784,36 +784,6 @@ func (s *Server) startTaskScheduler() {
 	s.startCollectMetaMetrics(s.serverLoopCtx)
 }
 
-func (s *Server) updateSegmentStatistics(ctx context.Context, stats []*commonpb.SegmentStats) {
-	log := log.Ctx(ctx)
-	for _, stat := range stats {
-		segment := s.meta.GetSegment(ctx, stat.GetSegmentID())
-		if segment == nil {
-			log.Warn("skip updating row number for not exist segment",
-				zap.Int64("segmentID", stat.GetSegmentID()),
-				zap.Int64("new value", stat.GetNumRows()))
-			continue
-		}
-
-		if isFlushState(segment.GetState()) {
-			log.Warn("skip updating row number for flushed segment",
-				zap.Int64("segmentID", stat.GetSegmentID()),
-				zap.Int64("new value", stat.GetNumRows()))
-			continue
-		}
-
-		// Log if # of rows is updated.
-		if segment.currRows < stat.GetNumRows() {
-			log.Debug("Updating segment number of rows",
-				zap.Int64("segmentID", stat.GetSegmentID()),
-				zap.Int64("old value", s.meta.GetSegment(ctx, stat.GetSegmentID()).GetNumOfRows()),
-				zap.Int64("new value", stat.GetNumRows()),
-			)
-			s.meta.SetCurrentRows(stat.GetSegmentID(), stat.GetNumRows())
-		}
-	}
-}
-
 func (s *Server) getFlushableSegmentsInfo(ctx context.Context, flushableIDs []int64) []*SegmentInfo {
 	log := log.Ctx(ctx)
 	res := make([]*SegmentInfo, 0, len(flushableIDs))

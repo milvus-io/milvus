@@ -71,6 +71,7 @@ service DataCoord {
   rpc DropVirtualChannel(DropVirtualChannelRequest) returns (DropVirtualChannelResponse) {}
 
   rpc SetSegmentState(SetSegmentStateRequest) returns (SetSegmentStateResponse) {}
+  // Deprecated
   rpc UpdateSegmentStatistics(UpdateSegmentStatisticsRequest) returns (common.Status) {}
   rpc UpdateChannelCheckpoint(UpdateChannelCheckpointRequest) returns (common.Status) {}
 
