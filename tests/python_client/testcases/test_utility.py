@@ -1003,7 +1003,7 @@ class TestUtilityBase(TestcaseBase):
         assert res_part_partition == {'loading_progress': '100%'}
 
         collection_w.release()
-        collection_w.load(replica_number=2)
+        collection_w.load(replica_number=1)
         res_all_partitions, _ = self.utility_wrap.loading_progress(collection_w.name)
         assert res_all_partitions == {'loading_progress': '100%'}
 
@@ -1710,7 +1710,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # get sealed segments
         collection_w.num_entities
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-        collection_w.load(replica_number=2)
+        collection_w.load(replica_number=1)
         # get growing segments
         collection_w.insert(df)
         # get replicas information
@@ -1736,9 +1736,9 @@ class TestUtilityAdvanced(TestcaseBase):
         # get segments distribution after load balance
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
-        sealed_segment_ids_after_load_banalce = segment_distribution[src_node_id]["sealed"]
+        sealed_segment_ids_after_load_balance = segment_distribution[src_node_id]["sealed"]
         # assert src node has no sealed segments
-        assert sealed_segment_ids_after_load_banalce == []
+        assert sealed_segment_ids_after_load_balance == []
         des_sealed_segment_ids = []
         for des_node_id in dst_node_ids:
             des_sealed_segment_ids += segment_distribution[des_node_id]["sealed"]
