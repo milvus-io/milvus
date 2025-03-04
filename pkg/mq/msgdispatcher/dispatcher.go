@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -61,20 +62,20 @@ type Dispatcher struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	id int64
+
+	pullbackEndTs        typeutil.Timestamp
+	pullbackDone         bool
+	pullbackDoneNotifier *syncutil.AsyncTaskNotifier[struct{}]
+
 	done chan struct{}
 	wg   sync.WaitGroup
 	once sync.Once
 
-	isMain   bool // indicates if it's a main dispatcher
 	pchannel string
 	curTs    atomic.Uint64
 
-	lagNotifyChan chan struct{}
-	lagTargets    *typeutil.ConcurrentMap[string, *target] // vchannel -> *target
-
-	// vchannel -> *target, lock free since we guarantee that
-	// it's modified only after dispatcher paused or terminated
-	targets map[string]*target
+	targets *typeutil.ConcurrentMap[string, *target]
 
 	stream msgstream.MsgStream
 }
@@ -82,18 +83,17 @@ type Dispatcher struct {
 func NewDispatcher(
 	ctx context.Context,
 	factory msgstream.Factory,
-	isMain bool,
+	id int64,
 	pchannel string,
 	position *Pos,
-	subName string,
 	subPos SubPos,
-	lagNotifyChan chan struct{},
-	lagTargets *typeutil.ConcurrentMap[string, *target],
-	includeCurrentMsg bool,
+	pullbackEndTs typeutil.Timestamp,
 ) (*Dispatcher, error) {
-	log := log.With(zap.String("pchannel", pchannel),
-		zap.String("subName", subName), zap.Bool("isMain", isMain))
-	log.Info("creating dispatcher...")
+	subName := fmt.Sprintf("%s-%d-%d", pchannel, id, time.Now().UnixNano())
+
+	log := log.Ctx(ctx).With(zap.String("pchannel", pchannel),
+		zap.Int64("id", id), zap.String("subName", subName))
+	log.Info("creating dispatcher...", zap.Uint64("pullbackEndTs", pullbackEndTs))
 
 	var stream msgstream.MsgStream
 	var err error
@@ -115,8 +115,8 @@ func NewDispatcher(
 			log.Error("asConsumer failed", zap.Error(err))
 			return nil, err
 		}
-
-		err = stream.Seek(ctx, []*Pos{position}, includeCurrentMsg)
+		log.Info("as consumer done", zap.Any("position", position))
+		err = stream.Seek(ctx, []*Pos{position}, false)
 		if err != nil {
 			log.Error("seek failed", zap.Error(err))
 			return nil, err
@@ -134,17 +134,21 @@ func NewDispatcher(
 	}
 
 	d := &Dispatcher{
-		done:          make(chan struct{}, 1),
-		isMain:        isMain,
-		pchannel:      pchannel,
-		lagNotifyChan: lagNotifyChan,
-		lagTargets:    lagTargets,
-		targets:       make(map[string]*target),
-		stream:        stream,
+		id:                   id,
+		pullbackEndTs:        pullbackEndTs,
+		pullbackDoneNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+		done:                 make(chan struct{}, 1),
+		pchannel:             pchannel,
+		targets:              typeutil.NewConcurrentMap[string, *target](),
+		stream:               stream,
 	}
 
 	metrics.NumConsumers.WithLabelValues(paramtable.GetRole(), fmt.Sprint(paramtable.GetNodeID())).Inc()
 	return d, nil
+}
+
+func (d *Dispatcher) ID() int64 {
+	return d.id
 }
 
 func (d *Dispatcher) CurTs() typeutil.Timestamp {
@@ -152,41 +156,53 @@ func (d *Dispatcher) CurTs() typeutil.Timestamp {
 }
 
 func (d *Dispatcher) AddTarget(t *target) {
-	log := log.With(zap.String("vchannel", t.vchannel), zap.Bool("isMain", d.isMain))
-	if _, ok := d.targets[t.vchannel]; ok {
+	log := log.With(zap.String("vchannel", t.vchannel), zap.Int64("id", d.ID()), zap.Uint64("ts", t.pos.GetTimestamp()))
+	if _, ok := d.targets.GetOrInsert(t.vchannel, t); ok {
 		log.Warn("target exists")
 		return
 	}
-	d.targets[t.vchannel] = t
 	log.Info("add new target")
 }
 
 func (d *Dispatcher) GetTarget(vchannel string) (*target, error) {
-	if t, ok := d.targets[vchannel]; ok {
+	if t, ok := d.targets.Get(vchannel); ok {
 		return t, nil
 	}
-	return nil, fmt.Errorf("cannot find target, vchannel=%s, isMain=%t", vchannel, d.isMain)
+	return nil, fmt.Errorf("cannot find target, vchannel=%s", vchannel)
 }
 
-func (d *Dispatcher) CloseTarget(vchannel string) {
-	log := log.With(zap.String("vchannel", vchannel), zap.Bool("isMain", d.isMain))
-	if t, ok := d.targets[vchannel]; ok {
-		t.close()
-		delete(d.targets, vchannel)
-		log.Info("closed target")
+func (d *Dispatcher) GetTargets() []*target {
+	return d.targets.Values()
+}
+
+func (d *Dispatcher) HasTarget(vchannel string) bool {
+	return d.targets.Contain(vchannel)
+}
+
+func (d *Dispatcher) RemoveTarget(vchannel string) {
+	log := log.With(zap.String("vchannel", vchannel), zap.Int64("id", d.ID()))
+	if _, ok := d.targets.GetAndRemove(vchannel); ok {
+		log.Info("target removed")
 	} else {
 		log.Warn("target not exist")
 	}
 }
 
 func (d *Dispatcher) TargetNum() int {
-	return len(d.targets)
+	return d.targets.Len()
+}
+
+func (d *Dispatcher) BlockUtilPullbackDone() {
+	select {
+	case <-d.ctx.Done():
+	case <-d.pullbackDoneNotifier.FinishChan():
+	}
 }
 
 func (d *Dispatcher) Handle(signal signal) {
-	log := log.With(zap.String("pchannel", d.pchannel),
-		zap.String("signal", signal.String()), zap.Bool("isMain", d.isMain))
-	log.Info("get signal")
+	log := log.With(zap.String("pchannel", d.pchannel), zap.Int64("id", d.ID()),
+		zap.String("signal", signal.String()))
+	log.Debug("get signal")
 	switch signal {
 	case start:
 		d.ctx, d.cancel = context.WithCancel(context.Background())
@@ -213,7 +229,7 @@ func (d *Dispatcher) Handle(signal signal) {
 }
 
 func (d *Dispatcher) work() {
-	log := log.With(zap.String("pchannel", d.pchannel), zap.Bool("isMain", d.isMain))
+	log := log.With(zap.String("pchannel", d.pchannel), zap.Int64("id", d.ID()))
 	log.Info("begin to work")
 	defer d.wg.Done()
 	for {
@@ -231,12 +247,36 @@ func (d *Dispatcher) work() {
 			targetPacks := d.groupAndParseMsgs(pack, d.stream.GetUnmarshalDispatcher())
 			for vchannel, p := range targetPacks {
 				var err error
-				t := d.targets[vchannel]
-				if d.isMain {
-					// for main dispatcher, split target if err occurs
+				t, _ := d.targets.Get(vchannel)
+				// The dispatcher seeks from the oldest target,
+				// so for each target, msg before the target position must be filtered out.
+				if p.EndTs <= t.pos.GetTimestamp() {
+					log.Info("skip msg",
+						zap.String("vchannel", vchannel),
+						zap.Int("msgCount", len(p.Msgs)),
+						zap.Uint64("packBeginTs", p.BeginTs),
+						zap.Uint64("packEndTs", p.EndTs),
+						zap.Uint64("posTs", t.pos.GetTimestamp()),
+					)
+					for _, msg := range p.Msgs {
+						log.Debug("skip msg info",
+							zap.String("vchannel", vchannel),
+							zap.String("msgType", msg.Type().String()),
+							zap.Int64("msgID", msg.ID()),
+							zap.Uint64("msgBeginTs", msg.BeginTs()),
+							zap.Uint64("msgEndTs", msg.EndTs()),
+							zap.Uint64("packBeginTs", p.BeginTs),
+							zap.Uint64("packEndTs", p.EndTs),
+							zap.Uint64("posTs", t.pos.GetTimestamp()),
+						)
+					}
+					continue
+				}
+				if d.targets.Len() > 1 {
+					// for dispatcher with multiple targets, split target if err occurs
 					err = t.send(p)
 				} else {
-					// for solo dispatcher, only 1 target exists, we should
+					// for dispatcher with only one target,
 					// keep retrying if err occurs, unless it paused or terminated.
 					for {
 						err = t.send(p)
@@ -249,11 +289,18 @@ func (d *Dispatcher) work() {
 					t.pos = typeutil.Clone(pack.StartPositions[0])
 					// replace the pChannel with vChannel
 					t.pos.ChannelName = t.vchannel
-					d.lagTargets.Insert(t.vchannel, t)
-					d.nonBlockingNotify()
-					delete(d.targets, vchannel)
-					log.Warn("lag target notified", zap.Error(err))
+					d.targets.GetAndRemove(vchannel)
+					log.Warn("lag target", zap.Error(err))
 				}
+			}
+
+			if !d.pullbackDone && pack.EndPositions[0].GetTimestamp() >= d.pullbackEndTs {
+				d.pullbackDoneNotifier.Finish(struct{}{})
+				log.Info("dispatcher pullback done",
+					zap.Uint64("pullbackEndTs", d.pullbackEndTs),
+					zap.Time("pullbackTime", tsoutil.PhysicalTime(d.pullbackEndTs)),
+				)
+				d.pullbackDone = true
 			}
 		}
 	}
@@ -264,7 +311,7 @@ func (d *Dispatcher) groupAndParseMsgs(pack *msgstream.ConsumeMsgPack, unmarshal
 	// but we still need to dispatch time ticks to the targets.
 	targetPacks := make(map[string]*MsgPack)
 	replicateConfigs := make(map[string]*msgstream.ReplicateConfig)
-	for vchannel, t := range d.targets {
+	d.targets.Range(func(vchannel string, t *target) bool {
 		targetPacks[vchannel] = &MsgPack{
 			BeginTs:        pack.BeginTs,
 			EndTs:          pack.EndTs,
@@ -275,7 +322,8 @@ func (d *Dispatcher) groupAndParseMsgs(pack *msgstream.ConsumeMsgPack, unmarshal
 		if t.replicateConfig != nil {
 			replicateConfigs[vchannel] = t.replicateConfig
 		}
-	}
+		return true
+	})
 	// group messages by vchannel
 	for _, msg := range pack.Msgs {
 		var vchannel, collectionID string
@@ -359,7 +407,7 @@ func (d *Dispatcher) groupAndParseMsgs(pack *msgstream.ConsumeMsgPack, unmarshal
 		d.resetMsgPackTS(targetPacks[vchannel], beginTs, endTs)
 	}
 	for vchannel := range replicateEndChannels {
-		if t, ok := d.targets[vchannel]; ok {
+		if t, ok := d.targets.Get(vchannel); ok {
 			t.replicateConfig = nil
 			log.Info("replicate end, set replicate config nil", zap.String("vchannel", vchannel))
 		}
@@ -384,11 +432,4 @@ func (d *Dispatcher) resetMsgPackTS(pack *MsgPack, newBeginTs, newEndTs typeutil
 	}
 	pack.StartPositions = startPositions
 	pack.EndPositions = endPositions
-}
-
-func (d *Dispatcher) nonBlockingNotify() {
-	select {
-	case d.lagNotifyChan <- struct{}{}:
-	default:
-	}
 }
