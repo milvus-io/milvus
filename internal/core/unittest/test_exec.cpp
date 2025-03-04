@@ -296,8 +296,8 @@ TEST_P(TaskTest, CompileInputs_and) {
     auto exprs = milvus::exec::CompileInputs(expr7, query_context.get(), {});
     EXPECT_EQ(exprs.size(), 4);
     for (int i = 0; i < exprs.size(); ++i) {
-        std::cout << exprs[i]->get_name() << std::endl;
-        EXPECT_STREQ(exprs[i]->get_name().c_str(), "PhyUnaryRangeFilterExpr");
+        std::cout << exprs[i]->name() << std::endl;
+        EXPECT_STREQ(exprs[i]->name().c_str(), "PhyUnaryRangeFilterExpr");
     }
 }
 
@@ -312,7 +312,7 @@ TEST_P(TaskTest, CompileInputs_or_with_and) {
     proto::plan::GenericValue val;
     val.set_int64_val(10);
     {
-        // expr: (int64_fid < 10 and int64_fid < 10) or (int64_fid < 10 and int64_fid < 10)
+        // expr: (int64_fid > 10 and int64_fid > 10) or (int64_fid > 10 and int64_fid > 10)
         auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
@@ -341,12 +341,12 @@ TEST_P(TaskTest, CompileInputs_or_with_and) {
             milvus::exec::CompileInputs(expr7, query_context.get(), {});
         EXPECT_EQ(exprs.size(), 2);
         for (int i = 0; i < exprs.size(); ++i) {
-            std::cout << exprs[i]->get_name() << std::endl;
-            EXPECT_STREQ(exprs[i]->get_name().c_str(), "and");
+            std::cout << exprs[i]->name() << std::endl;
+            EXPECT_STREQ(exprs[i]->name().c_str(), "PhyConjunctFilterExpr");
         }
     }
     {
-        // expr: (int64_fid < 10 or int64_fid < 10) or (int64_fid < 10 and int64_fid < 10)
+        // expr: (int64_fid < 10 or int64_fid < 10) or (int64_fid > 10 and int64_fid > 10)
         auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
@@ -376,14 +376,13 @@ TEST_P(TaskTest, CompileInputs_or_with_and) {
         std::cout << exprs.size() << std::endl;
         EXPECT_EQ(exprs.size(), 3);
         for (int i = 0; i < exprs.size() - 1; ++i) {
-            std::cout << exprs[i]->get_name() << std::endl;
-            EXPECT_STREQ(exprs[i]->get_name().c_str(),
-                         "PhyUnaryRangeFilterExpr");
+            std::cout << exprs[i]->name() << std::endl;
+            EXPECT_STREQ(exprs[i]->name().c_str(), "PhyUnaryRangeFilterExpr");
         }
-        EXPECT_STREQ(exprs[2]->get_name().c_str(), "and");
+        EXPECT_STREQ(exprs[2]->name().c_str(), "PhyConjunctFilterExpr");
     }
     {
-        // expr: (int64_fid < 10 or int64_fid < 10) and (int64_fid < 10 and int64_fid < 10)
+        // expr: (int64_fid > 10 or int64_fid > 10) and (int64_fid > 10 and int64_fid > 10)
         auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
@@ -412,11 +411,10 @@ TEST_P(TaskTest, CompileInputs_or_with_and) {
             milvus::exec::CompileInputs(expr7, query_context.get(), {});
         std::cout << exprs.size() << std::endl;
         EXPECT_EQ(exprs.size(), 3);
-        EXPECT_STREQ(exprs[0]->get_name().c_str(), "or");
+        EXPECT_STREQ(exprs[0]->name().c_str(), "PhyConjunctFilterExpr");
         for (int i = 1; i < exprs.size(); ++i) {
-            std::cout << exprs[i]->get_name() << std::endl;
-            EXPECT_STREQ(exprs[i]->get_name().c_str(),
-                         "PhyUnaryRangeFilterExpr");
+            std::cout << exprs[i]->name() << std::endl;
+            EXPECT_STREQ(exprs[i]->name().c_str(), "PhyUnaryRangeFilterExpr");
         }
     }
 }
