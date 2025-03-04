@@ -2821,39 +2821,6 @@ func (_c *MockDataCoord_SetEtcdClient_Call) RunAndReturn(run func(*clientv3.Clie
 	return _c
 }
 
-// SetIndexNodeCreator provides a mock function with given fields: _a0
-func (_m *MockDataCoord) SetIndexNodeCreator(_a0 func(context.Context, string, int64) (types.IndexNodeClient, error)) {
-	_m.Called(_a0)
-}
-
-// MockDataCoord_SetIndexNodeCreator_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetIndexNodeCreator'
-type MockDataCoord_SetIndexNodeCreator_Call struct {
-	*mock.Call
-}
-
-// SetIndexNodeCreator is a helper method to define mock.On call
-//   - _a0 func(context.Context , string , int64)(types.IndexNodeClient , error)
-func (_e *MockDataCoord_Expecter) SetIndexNodeCreator(_a0 interface{}) *MockDataCoord_SetIndexNodeCreator_Call {
-	return &MockDataCoord_SetIndexNodeCreator_Call{Call: _e.mock.On("SetIndexNodeCreator", _a0)}
-}
-
-func (_c *MockDataCoord_SetIndexNodeCreator_Call) Run(run func(_a0 func(context.Context, string, int64) (types.IndexNodeClient, error))) *MockDataCoord_SetIndexNodeCreator_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(func(context.Context, string, int64) (types.IndexNodeClient, error)))
-	})
-	return _c
-}
-
-func (_c *MockDataCoord_SetIndexNodeCreator_Call) Return() *MockDataCoord_SetIndexNodeCreator_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockDataCoord_SetIndexNodeCreator_Call) RunAndReturn(run func(func(context.Context, string, int64) (types.IndexNodeClient, error))) *MockDataCoord_SetIndexNodeCreator_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // SetRootCoordClient provides a mock function with given fields: rootCoord
 func (_m *MockDataCoord) SetRootCoordClient(rootCoord types.RootCoordClient) {
 	_m.Called(rootCoord)

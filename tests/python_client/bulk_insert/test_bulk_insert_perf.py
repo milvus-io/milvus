@@ -104,7 +104,7 @@ class TestChaos(TestChaosBase):
         minio_ip = list(minio_ip_pod_pair.keys())[0]
         minio_port = "9000"
         minio_endpoint = f"{minio_ip}:{minio_port}"
-        bucket_name = ms.index_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
+        bucket_name = ms.data_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
         schema = cf.gen_bulk_insert_collection_schema(dim=dim, with_varchar_field=with_varchar_field)
         data = cf.gen_default_list_data_for_bulk_insert(nb=nb, varchar_len=varchar_len,
                                                         with_varchar_field=with_varchar_field)

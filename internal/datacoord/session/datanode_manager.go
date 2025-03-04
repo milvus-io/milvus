@@ -95,7 +95,7 @@ func WithDataNodeCreator(creator DataNodeCreatorFunc) SessionOpt {
 
 func defaultSessionCreator() DataNodeCreatorFunc {
 	return func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-		return grpcdatanodeclient.NewClient(ctx, addr, nodeID)
+		return grpcdatanodeclient.NewClient(ctx, addr, nodeID, false)
 	}
 }
 

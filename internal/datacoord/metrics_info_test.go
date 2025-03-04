@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/tidwall/gjson"
 	"google.golang.org/grpc"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -39,30 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
-
-type mockMetricDataNodeClient struct {
-	types.DataNodeClient
-	mock func() (*milvuspb.GetMetricsResponse, error)
-}
-
-func (c *mockMetricDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	if c.mock == nil {
-		return c.DataNodeClient.GetMetrics(ctx, req)
-	}
-	return c.mock()
-}
-
-type mockMetricIndexNodeClient struct {
-	types.IndexNodeClient
-	mock func() (*milvuspb.GetMetricsResponse, error)
-}
-
-func (m *mockMetricIndexNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	if m.mock == nil {
-		return m.IndexNodeClient.GetMetrics(ctx, req)
-	}
-	return m.mock()
-}
 
 func TestGetDataNodeMetrics(t *testing.T) {
 	svr := newTestServer(t)
@@ -79,7 +57,33 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	assert.Error(t, err)
 
 	creator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-		return newMockDataNodeClient(100, nil)
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.GetMetricsRequest, option ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
+			const nodeID = 100
+			nodeInfos := metricsinfo.DataNodeInfos{
+				BaseComponentInfos: metricsinfo.BaseComponentInfos{
+					Name: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+					ID:   nodeID,
+				},
+			}
+			resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
+			if err != nil {
+				return &milvuspb.GetMetricsResponse{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+						Reason:    err.Error(),
+					},
+					Response:      "",
+					ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+				}, nil
+			}
+			return &milvuspb.GetMetricsResponse{
+				Status:        merr.Success(),
+				Response:      resp,
+				ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+			}, nil
+		})
+		return dn, nil
 	}
 
 	// mock datanode client
@@ -89,29 +93,24 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	assert.False(t, info.HasError)
 	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.DataNodeRole, 100), info.BaseComponentInfos.Name)
 
-	getMockFailedClientCreator := func(mockFunc func() (*milvuspb.GetMetricsResponse, error)) session.DataNodeCreatorFunc {
-		return func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			cli, err := creator(ctx, addr, nodeID)
-			assert.NoError(t, err)
-			return &mockMetricDataNodeClient{DataNodeClient: cli, mock: mockFunc}, nil
-		}
+	mockFailClientCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("mocked fail"))
+		return dn, nil
 	}
-
-	mockFailClientCreator := getMockFailedClientCreator(func() (*milvuspb.GetMetricsResponse, error) {
-		return nil, errors.New("mocked fail")
-	})
 
 	info, err = svr.getDataNodeMetrics(ctx, req, session.NewSession(&session.NodeInfo{}, mockFailClientCreator))
 	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 
-	mockErr := errors.New("mocked error")
 	// mock status not success
-	mockFailClientCreator = getMockFailedClientCreator(func() (*milvuspb.GetMetricsResponse, error) {
-		return &milvuspb.GetMetricsResponse{
-			Status: merr.Status(mockErr),
-		}, nil
-	})
+	mockFailClientCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+			Status: merr.Status(errors.New("mocked error")),
+		}, nil)
+		return dn, nil
+	}
 
 	info, err = svr.getDataNodeMetrics(ctx, req, session.NewSession(&session.NodeInfo{}, mockFailClientCreator))
 	assert.NoError(t, err)
@@ -119,12 +118,14 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	assert.Equal(t, "mocked error", info.ErrorReason)
 
 	// mock parse error
-	mockFailClientCreator = getMockFailedClientCreator(func() (*milvuspb.GetMetricsResponse, error) {
-		return &milvuspb.GetMetricsResponse{
+	mockFailClientCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
 			Status:   merr.Success(),
 			Response: `{"error_reason": 1}`,
-		}, nil
-	})
+		}, nil)
+		return dn, nil
+	}
 
 	info, err = svr.getDataNodeMetrics(ctx, req, session.NewSession(&session.NodeInfo{}, mockFailClientCreator))
 	assert.NoError(t, err)
@@ -142,66 +143,62 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 	assert.Error(t, err)
 
 	// return error
-	info, err := svr.getIndexNodeMetrics(ctx, req, &mockMetricIndexNodeClient{mock: func() (*milvuspb.GetMetricsResponse, error) {
-		return nil, errors.New("mock error")
-	}})
+	dn := mocks.NewMockDataNodeClient(t)
+	dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+	info, err := svr.getIndexNodeMetrics(ctx, req, dn)
 	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 
 	// failed
 	mockErr := errors.New("mocked error")
-	info, err = svr.getIndexNodeMetrics(ctx, req, &mockMetricIndexNodeClient{
-		mock: func() (*milvuspb.GetMetricsResponse, error) {
-			return &milvuspb.GetMetricsResponse{
-				Status:        merr.Status(mockErr),
-				ComponentName: "indexnode100",
-			}, nil
-		},
-	})
+	dn = mocks.NewMockDataNodeClient(t)
+	dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+		Status:        merr.Status(mockErr),
+		ComponentName: "indexnode100",
+	}, nil)
+	info, err = svr.getIndexNodeMetrics(ctx, req, dn)
 	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
 
 	// return unexpected
-	info, err = svr.getIndexNodeMetrics(ctx, req, &mockMetricIndexNodeClient{
-		mock: func() (*milvuspb.GetMetricsResponse, error) {
-			return &milvuspb.GetMetricsResponse{
-				Status:        merr.Success(),
-				Response:      "XXXXXXXXXXXXX",
-				ComponentName: "indexnode100",
-			}, nil
-		},
-	})
+	dn = mocks.NewMockDataNodeClient(t)
+	dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+		Status:        merr.Success(),
+		Response:      "XXXXXXXXXXXXX",
+		ComponentName: "indexnode100",
+	}, nil)
+	info, err = svr.getIndexNodeMetrics(ctx, req, dn)
 	assert.NoError(t, err)
 	assert.True(t, info.HasError)
 	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
 
 	// success
-	info, err = svr.getIndexNodeMetrics(ctx, req, &mockMetricIndexNodeClient{
-		mock: func() (*milvuspb.GetMetricsResponse, error) {
-			nodeID = UniqueID(100)
+	dn = mocks.NewMockDataNodeClient(t)
+	dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.GetMetricsRequest, option ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
+		nodeID = UniqueID(100)
 
-			nodeInfos := metricsinfo.DataNodeInfos{
-				BaseComponentInfos: metricsinfo.BaseComponentInfos{
-					Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, nodeID),
-					ID:   nodeID,
-				},
-			}
-			resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
-			if err != nil {
-				return &milvuspb.GetMetricsResponse{
-					Status:        merr.Status(err),
-					ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, nodeID),
-				}, nil
-			}
-
+		nodeInfos := metricsinfo.DataNodeInfos{
+			BaseComponentInfos: metricsinfo.BaseComponentInfos{
+				Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, nodeID),
+				ID:   nodeID,
+			},
+		}
+		resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
+		if err != nil {
 			return &milvuspb.GetMetricsResponse{
-				Status:        merr.Success(),
-				Response:      resp,
+				Status:        merr.Status(err),
 				ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, nodeID),
 			}, nil
-		},
+		}
+
+		return &milvuspb.GetMetricsResponse{
+			Status:        merr.Success(),
+			Response:      resp,
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, nodeID),
+		}, nil
 	})
+	info, err = svr.getIndexNodeMetrics(ctx, req, dn)
 
 	assert.NoError(t, err)
 	assert.False(t, info.HasError)
@@ -235,14 +232,11 @@ func TestGetSyncTaskMetrics(t *testing.T) {
 			Response: expectedJSON,
 		}
 
-		mockClient := &mockMetricDataNodeClient{
-			mock: func() (*milvuspb.GetMetricsResponse, error) {
-				return mockResp, nil
-			},
-		}
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return mockClient, nil
+			return dn, nil
 		}
 
 		mockCluster := NewMockCluster(t)
@@ -258,14 +252,11 @@ func TestGetSyncTaskMetrics(t *testing.T) {
 		req := &milvuspb.GetMetricsRequest{}
 		ctx := context.Background()
 
-		mockClient := &mockMetricDataNodeClient{
-			mock: func() (*milvuspb.GetMetricsResponse, error) {
-				return nil, errors.New("request failed")
-			},
-		}
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("request failed"))
 
 		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return mockClient, nil
+			return dn, nil
 		}
 
 		mockCluster := NewMockCluster(t)
@@ -286,14 +277,11 @@ func TestGetSyncTaskMetrics(t *testing.T) {
 			Response: `invalid json`,
 		}
 
-		mockClient := &mockMetricDataNodeClient{
-			mock: func() (*milvuspb.GetMetricsResponse, error) {
-				return mockResp, nil
-			},
-		}
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return mockClient, nil
+			return dn, nil
 		}
 
 		mockCluster := NewMockCluster(t)
@@ -314,14 +302,11 @@ func TestGetSyncTaskMetrics(t *testing.T) {
 			Response: "",
 		}
 
-		mockClient := &mockMetricDataNodeClient{
-			mock: func() (*milvuspb.GetMetricsResponse, error) {
-				return mockResp, nil
-			},
-		}
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return mockClient, nil
+			return dn, nil
 		}
 
 		mockCluster := NewMockCluster(t)
@@ -359,14 +344,11 @@ func TestGetSegmentsJSON(t *testing.T) {
 			Response: expectedJSON,
 		}
 
-		mockClient := &mockMetricDataNodeClient{
-			mock: func() (*milvuspb.GetMetricsResponse, error) {
-				return mockResp, nil
-			},
-		}
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return mockClient, nil
+			return dn, nil
 		}
 
 		mockCluster := NewMockCluster(t)
@@ -382,14 +364,11 @@ func TestGetSegmentsJSON(t *testing.T) {
 		req := &milvuspb.GetMetricsRequest{}
 		ctx := context.Background()
 
-		mockClient := &mockMetricDataNodeClient{
-			mock: func() (*milvuspb.GetMetricsResponse, error) {
-				return nil, errors.New("request failed")
-			},
-		}
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("request failed"))
 
 		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return mockClient, nil
+			return dn, nil
 		}
 
 		mockCluster := NewMockCluster(t)
@@ -410,14 +389,11 @@ func TestGetSegmentsJSON(t *testing.T) {
 			Response: `invalid json`,
 		}
 
-		mockClient := &mockMetricDataNodeClient{
-			mock: func() (*milvuspb.GetMetricsResponse, error) {
-				return mockResp, nil
-			},
-		}
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return mockClient, nil
+			return dn, nil
 		}
 
 		mockCluster := NewMockCluster(t)
@@ -438,14 +414,11 @@ func TestGetSegmentsJSON(t *testing.T) {
 			Response: "",
 		}
 
-		mockClient := &mockMetricDataNodeClient{
-			mock: func() (*milvuspb.GetMetricsResponse, error) {
-				return mockResp, nil
-			},
-		}
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return mockClient, nil
+			return dn, nil
 		}
 
 		mockCluster := NewMockCluster(t)
@@ -480,14 +453,11 @@ func TestGetChannelsJSON(t *testing.T) {
 			Response: channelJSON,
 		}
 
-		mockClient := &mockMetricDataNodeClient{
-			mock: func() (*milvuspb.GetMetricsResponse, error) {
-				return mockResp, nil
-			},
-		}
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return mockClient, nil
+			return dn, nil
 		}
 
 		mockCluster := NewMockCluster(t)
@@ -519,14 +489,11 @@ func TestGetChannelsJSON(t *testing.T) {
 		req := &milvuspb.GetMetricsRequest{}
 		ctx := context.Background()
 
-		mockClient := &mockMetricDataNodeClient{
-			mock: func() (*milvuspb.GetMetricsResponse, error) {
-				return nil, errors.New("request failed")
-			},
-		}
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("request failed"))
 
 		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return mockClient, nil
+			return dn, nil
 		}
 
 		mockCluster := NewMockCluster(t)
@@ -549,14 +516,11 @@ func TestGetChannelsJSON(t *testing.T) {
 			Response: `invalid json`,
 		}
 
-		mockClient := &mockMetricDataNodeClient{
-			mock: func() (*milvuspb.GetMetricsResponse, error) {
-				return mockResp, nil
-			},
-		}
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return mockClient, nil
+			return dn, nil
 		}
 
 		mockCluster := NewMockCluster(t)
@@ -579,14 +543,11 @@ func TestGetChannelsJSON(t *testing.T) {
 			Response: "",
 		}
 
-		mockClient := &mockMetricDataNodeClient{
-			mock: func() (*milvuspb.GetMetricsResponse, error) {
-				return mockResp, nil
-			},
-		}
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return mockClient, nil
+			return dn, nil
 		}
 
 		mockCluster := NewMockCluster(t)
@@ -773,14 +734,11 @@ func TestServer_getSegmentsJSON(t *testing.T) {
 			Response: expectedJSON,
 		}
 
-		mockClient := &mockMetricDataNodeClient{
-			mock: func() (*milvuspb.GetMetricsResponse, error) {
-				return mockResp, nil
-			},
-		}
+		dn := mocks.NewMockDataNodeClient(t)
+		dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		dataNodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-			return mockClient, nil
+			return dn, nil
 		}
 
 		mockCluster := NewMockCluster(t)
