@@ -537,9 +537,12 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
 
-        auto filter_func = [this, segment, &field_id](uint32_t row_id,
+        auto filter_func = [this, segment, &field_id](bool valid,
+                                                      uint8_t type,
+                                                      uint32_t row_id,
                                                       uint16_t offset,
-                                                      uint16_t size) {
+                                                      uint16_t size,
+                                                      uint32_t value) {
             auto json_pair = segment->GetJsonData(field_id, row_id);
             if (!json_pair.second) {
                 return false;
