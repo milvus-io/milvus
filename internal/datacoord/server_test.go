@@ -2513,14 +2513,19 @@ func closeTestServer(t *testing.T, svr *Server) {
 
 func Test_CheckHealth(t *testing.T) {
 	getSessionManager := func(isHealthy bool) *session.DataNodeManagerImpl {
-		var client *mocks.MockDataNodeClient
-		if isHealthy {
-			client = mocks.NewMockDataNodeClient(t)
-		} else {
-			client = mocks.NewMockDataNodeClient(t)
-		}
-
 		sm := session.NewDataNodeManagerImpl(session.WithDataNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+			var client *mocks.MockDataNodeClient
+			if isHealthy {
+				client = mocks.NewMockDataNodeClient(t)
+				client.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+					State: &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
+				}, nil)
+			} else {
+				client = mocks.NewMockDataNodeClient(t)
+				client.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+					State: &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
+				}, nil)
+			}
 			return client, nil
 		}))
 		sm.AddSession(&session.NodeInfo{
