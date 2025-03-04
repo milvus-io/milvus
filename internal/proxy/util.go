@@ -720,8 +720,8 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
-func checkFunctionOutputField(function *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
-	switch function.GetType() {
+func checkFunctionOutputField(fSchema *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
+	switch fSchema.GetType() {
 	case schemapb.FunctionType_BM25:
 		if len(fields) != 1 {
 			return fmt.Errorf("BM25 function only need 1 output field, but got %d", len(fields))
@@ -731,8 +731,8 @@ func checkFunctionOutputField(function *schemapb.FunctionSchema, fields []*schem
 			return fmt.Errorf("BM25 function output field must be a SparseFloatVector field, but got %s", fields[0].DataType.String())
 		}
 	case schemapb.FunctionType_TextEmbedding:
-		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_FloatVector && fields[0].DataType != schemapb.DataType_Int8Vector) {
-			return fmt.Errorf("TextEmbedding function output field must be a FloatVector or Int8Vector field")
+		if err := function.TextEmbeddingOutputsCheck(fields); err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("check output field for unknown function type")

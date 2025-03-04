@@ -427,13 +427,17 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 
 	var err error
 	if function.HasNonBM25Functions(t.schema.CollectionSchema.Functions, queryFieldIds) {
+		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AdvancedSearch-call-function-udf")
+		defer sp.End()
 		exec, err := function.NewFunctionExecutor(t.schema.CollectionSchema)
 		if err != nil {
 			return err
 		}
-		if err := exec.ProcessSearch(t.SearchRequest); err != nil {
+		sp.AddEvent("Create-function-udf")
+		if err := exec.ProcessSearch(ctx, t.SearchRequest); err != nil {
 			return err
 		}
+		sp.AddEvent("Call-function-udf")
 	}
 
 	t.SearchRequest.GroupByFieldId = t.rankParams.GetGroupByFieldId()
@@ -516,13 +520,17 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	t.SearchRequest.GroupSize = queryInfo.GroupSize
 
 	if function.HasNonBM25Functions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
+		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")
+		defer sp.End()
 		exec, err := function.NewFunctionExecutor(t.schema.CollectionSchema)
 		if err != nil {
 			return err
 		}
-		if err := exec.ProcessSearch(t.SearchRequest); err != nil {
+		sp.AddEvent("Create-function-udf")
+		if err := exec.ProcessSearch(ctx, t.SearchRequest); err != nil {
 			return err
 		}
+		sp.AddEvent("Call-function-udf")
 	}
 	log.Debug("proxy init search request",
 		zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
