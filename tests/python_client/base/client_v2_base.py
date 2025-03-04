@@ -237,12 +237,12 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
-    def delete(self, client, collection_name, timeout=None, check_task=None, check_items=None, **kwargs):
+    def delete(self, client, collection_name, ids=None, timeout=None, filter=None, partition_name=None,
+               check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
-        kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([client.delete, collection_name], **kwargs)
+        res, check = api_request([client.delete, collection_name, ids, timeout, filter, partition_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        collection_name=collection_name,
                                        **kwargs).run()
