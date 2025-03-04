@@ -13,8 +13,10 @@ include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/unittest)
 
 set(bench_srcs
+    bench_init.cpp
     bench_naive.cpp
     bench_search.cpp
+    bench_json_expr.cpp
 )
 
 set(indexbuilder_bench_srcs
@@ -29,6 +31,8 @@ target_link_libraries(all_bench
         )
 
 target_link_libraries(all_bench benchmark_main)
+
+install(TARGETS all_bench DESTINATION unittest)
 
 add_executable(indexbuilder_bench ${indexbuilder_bench_srcs})
 target_link_libraries(indexbuilder_bench
