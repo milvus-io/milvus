@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/manager"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -54,8 +55,10 @@ func Init(opts ...optResourceInit) {
 	assertNotNil(newR.RootCoordClient())
 	assertNotNil(newR.ETCD())
 	assertNotNil(newR.StreamingCatalog())
-	newR.streamingNodeManagerClient = manager.NewManagerClient(newR.etcdClient)
-	assertNotNil(newR.StreamingNodeManagerClient())
+	if streamingutil.IsStreamingServiceEnabled() {
+		newR.streamingNodeManagerClient = manager.NewManagerClient(newR.etcdClient)
+		assertNotNil(newR.StreamingNodeManagerClient())
+	}
 	r = newR
 }
 
