@@ -218,7 +218,7 @@ func TestBinlogSerializeWriter(t *testing.T) {
 }
 
 func TestSize(t *testing.T) {
-	t.Run("test array", func(t *testing.T) {
+	t.Run("test array of int", func(t *testing.T) {
 		size := 100
 		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 			{
@@ -234,7 +234,8 @@ func TestSize(t *testing.T) {
 		assert.NoError(t, err)
 
 		for i := 0; i < size; i++ {
-			d := []int32{int32(i), int32(i), int32(i), int32(i), int32(i), int32(i), int32(i), int32(i)}
+			e := int32(i)
+			d := []int32{e, e, e, e, e, e, e, e}
 			value := &Value{
 				Value: map[FieldID]any{
 					18: &schemapb.ScalarField{
@@ -250,7 +251,47 @@ func TestSize(t *testing.T) {
 
 		err = writer.Close()
 		assert.NoError(t, err)
-		assert.Greater(t, writer.WrittenMemorySize(), uint64(8*4*size)) // written memory size should greater than data size
+		memSize := writer.WrittenMemorySize()
+		assert.Greater(t, memSize, uint64(8*4*size)) // written memory size should greater than data size
+		t.Log("writtern memory size", memSize)
+	})
+
+	t.Run("test array of varchar", func(t *testing.T) {
+		size := 100
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     18,
+				Name:        "array",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_String,
+			},
+		}}
+
+		writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 7)
+		assert.NoError(t, err)
+
+		for i := 0; i < size; i++ {
+			e := fmt.Sprintf("%4d", i)
+			d := []string{e, e, e, e, e, e, e, e}
+			value := &Value{
+				Value: map[FieldID]any{
+					18: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{Data: d},
+						},
+					},
+				},
+			}
+			err := writer.Write(value)
+			assert.NoError(t, err)
+		}
+
+		err = writer.Close()
+		assert.NoError(t, err)
+		memSize := writer.WrittenMemorySize()
+		assert.Greater(t, memSize, uint64(8*4*size)) // written memory size should greater than data size
+		t.Log("writtern memory size", memSize)
 	})
 }
 
