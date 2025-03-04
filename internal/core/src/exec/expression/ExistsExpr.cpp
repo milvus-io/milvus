@@ -117,9 +117,12 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentForIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [segment, field_id, pointer](uint32_t row_id,
+        auto filter_func = [segment, field_id, pointer](bool valid,
+                                                        uint8_t type,
+                                                        uint32_t row_id,
                                                         uint16_t offset,
-                                                        uint16_t size) {
+                                                        uint16_t size,
+                                                        uint32_t value) {
             return true;
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
