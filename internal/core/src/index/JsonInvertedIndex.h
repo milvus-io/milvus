@@ -62,9 +62,9 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         this->wrapper_->create_reader();
     }
 
-    enum DataType
+    DataType
     JsonCastType() const override {
-        return static_cast<enum DataType>(cast_type_);
+        return static_cast<DataType>(cast_type_);
     }
 
  private:
