@@ -73,6 +73,11 @@ class PhyTermFilterExpr : public SegmentExpr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    std::string
+    ToString() const {
+        return fmt::format("{}", expr_->ToString());
+    }
+
  private:
     void
     InitPkCacheOffset();
@@ -86,39 +91,39 @@ class PhyTermFilterExpr : public SegmentExpr {
 
     template <typename T>
     VectorPtr
-    ExecVisitorImpl(OffsetVector* input = nullptr);
+    ExecVisitorImpl(EvalCtx& context);
 
     template <typename T>
     VectorPtr
-    ExecVisitorImplForIndex(OffsetVector* input = nullptr);
+    ExecVisitorImplForIndex();
 
     template <typename T>
     VectorPtr
-    ExecVisitorImplForData(OffsetVector* input = nullptr);
+    ExecVisitorImplForData(EvalCtx& context);
 
     template <typename ValueType>
     VectorPtr
-    ExecVisitorImplTemplateJson(OffsetVector* input = nullptr);
+    ExecVisitorImplTemplateJson(EvalCtx& context);
 
     template <typename ValueType>
     VectorPtr
-    ExecTermJsonVariableInField(OffsetVector* input = nullptr);
+    ExecTermJsonVariableInField(EvalCtx& context);
 
     template <typename ValueType>
     VectorPtr
-    ExecTermJsonFieldInVariable(OffsetVector* input = nullptr);
+    ExecTermJsonFieldInVariable(EvalCtx& context);
 
     template <typename ValueType>
     VectorPtr
-    ExecVisitorImplTemplateArray(OffsetVector* input = nullptr);
+    ExecVisitorImplTemplateArray(EvalCtx& context);
 
     template <typename ValueType>
     VectorPtr
-    ExecTermArrayVariableInField(OffsetVector* input = nullptr);
+    ExecTermArrayVariableInField(EvalCtx& context);
 
     template <typename ValueType>
     VectorPtr
-    ExecTermArrayFieldInVariable(OffsetVector* input = nullptr);
+    ExecTermArrayFieldInVariable(EvalCtx& context);
 
  private:
     std::shared_ptr<const milvus::expr::TermFilterExpr> expr_;
