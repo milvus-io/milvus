@@ -1,4 +1,4 @@
-package compaction
+package compactor
 
 import (
 	"container/heap"
