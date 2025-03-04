@@ -1097,6 +1097,40 @@ func Test_parseIndexParams(t *testing.T) {
 		// Out of range in json: param 'M' (3000) should be in range [2, 2048]
 		assert.Error(t, err)
 	})
+
+	t.Run("check_duplicated_extraparam", func(t *testing.T) {
+		cit := &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: "HNSW",
+					},
+					{
+						Key:   common.MetricTypeKey,
+						Value: metric.L2,
+					},
+					{
+						Key:   common.MetricTypeKey,
+						Value: metric.COSINE,
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldVector",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "768"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
 }
 
 func Test_wrapUserIndexParams(t *testing.T) {
