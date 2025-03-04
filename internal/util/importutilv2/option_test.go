@@ -17,6 +17,8 @@
 package importutilv2
 
 import (
+	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -49,5 +51,30 @@ func TestOption_GetTimeout(t *testing.T) {
 
 	options = []*commonpb.KeyValuePair{{Key: Timeout, Value: "invalidTime"}}
 	_, err = GetTimeoutTs(options)
+	assert.Error(t, err)
+}
+
+func TestOption_ParseTimeRange(t *testing.T) {
+	s, e, err := ParseTimeRange(nil)
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(0), s)
+	assert.Equal(t, uint64(math.MaxUint64), e)
+
+	startTs := tsoutil.GetCurrentTime()
+	options := []*commonpb.KeyValuePair{{Key: StartTs, Value: fmt.Sprintf("%d", startTs)}}
+	s, e, err = ParseTimeRange(options)
+	assert.NoError(t, err)
+	assert.Equal(t, startTs, s)
+	assert.Equal(t, uint64(math.MaxUint64), e)
+
+	endTs := tsoutil.GetCurrentTime()
+	options = []*commonpb.KeyValuePair{{Key: EndTs, Value: fmt.Sprintf("%d", endTs)}}
+	s, e, err = ParseTimeRange(options)
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(0), s)
+	assert.Equal(t, endTs, e)
+
+	options = []*commonpb.KeyValuePair{{Key: EndTs, Value: "&%#$%^&%^&$%^&&"}}
+	_, _, err = ParseTimeRange(options)
 	assert.Error(t, err)
 }

@@ -75,11 +75,11 @@ func ParseTimeRange(options Options) (uint64, uint64, error) {
 		for _, targetKey := range targetKeys {
 			for key, value := range importOptions {
 				if strings.EqualFold(key, targetKey) {
-					pTs, err := strconv.ParseInt(value, 10, 64)
+					pTs, err := strconv.ParseUint(value, 10, 64)
 					if err != nil {
 						return 0, merr.WrapErrImportFailed(fmt.Sprintf("parse %s failed, value=%s, err=%s", targetKey, value, err))
 					}
-					return tsoutil.ComposeTS(pTs, 0), nil
+					return pTs, nil
 				}
 			}
 		}
