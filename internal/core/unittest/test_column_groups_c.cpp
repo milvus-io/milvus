@@ -19,29 +19,28 @@
 #include <cstring>
 #include "segcore/column_groups_c.h"
 
-
 TEST(CColumnGroups, TestCColumnGroups) {
-  CColumnGroups cgs = NewCColumnGroups();
-  int group1[] = {2, 4, 5};
-  int group2[] = {0, 1};
-  int group3[] = {3, 6, 7, 8};
+    CColumnGroups cgs = NewCColumnGroups();
+    int group1[] = {2, 4, 5};
+    int group2[] = {0, 1};
+    int group3[] = {3, 6, 7, 8};
 
-  int* test_groups[] = {group1, group2, group3};
-  int group_sizes[] = {3, 2, 4};
+    int* test_groups[] = {group1, group2, group3};
+    int group_sizes[] = {3, 2, 4};
 
-  for (int i = 0; i < 3; i++) {
-    AddCColumnGroup(cgs, test_groups[i], group_sizes[i]);
-  }
-
-  ASSERT_EQ(CColumnGroupsSize(cgs), 3);
-  auto vv = static_cast<std::vector<std::vector<int>>*>(cgs);
-
-  for (int i = 0; i < 3; i++) {
-    ASSERT_EQ(vv->at(i).size(), group_sizes[i]);
-    for (int j = 0; j < group_sizes[i]; j++) {
-      EXPECT_EQ(vv->at(i)[j], test_groups[i][j]);
+    for (int i = 0; i < 3; i++) {
+        AddCColumnGroup(cgs, test_groups[i], group_sizes[i]);
     }
-  }
 
-  FreeCColumnGroups(cgs);
+    ASSERT_EQ(CColumnGroupsSize(cgs), 3);
+    auto vv = static_cast<std::vector<std::vector<int>>*>(cgs);
+
+    for (int i = 0; i < 3; i++) {
+        ASSERT_EQ(vv->at(i).size(), group_sizes[i]);
+        for (int j = 0; j < group_sizes[i]; j++) {
+            EXPECT_EQ(vv->at(i)[j], test_groups[i][j]);
+        }
+    }
+
+    FreeCColumnGroups(cgs);
 }

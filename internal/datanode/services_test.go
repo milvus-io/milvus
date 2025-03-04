@@ -33,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	allocator2 "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/compaction"
+	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
@@ -169,7 +169,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			channel    = "ch-0"
 		)
 
-		mockC := compaction.NewMockCompactor(s.T())
+		mockC := compactor.NewMockCompactor(s.T())
 		mockC.EXPECT().GetPlanID().Return(int64(1))
 		mockC.EXPECT().GetCollection().Return(collection)
 		mockC.EXPECT().GetChannelName().Return(channel)
@@ -181,7 +181,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 		}, nil)
 		s.node.compactionExecutor.Execute(mockC)
 
-		mockC2 := compaction.NewMockCompactor(s.T())
+		mockC2 := compactor.NewMockCompactor(s.T())
 		mockC2.EXPECT().GetPlanID().Return(int64(2))
 		mockC2.EXPECT().GetCollection().Return(collection)
 		mockC2.EXPECT().GetChannelName().Return(channel)

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package compaction
+package compactor
 
 import (
 	"context"
@@ -39,6 +39,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -571,11 +572,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 			deltaPaths = append(deltaPaths, l.GetLogPath())
 		}
 	}
-	delta, err := mergeDeltalogs(ctx, t.binlogIO, deltaPaths)
+	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.binlogIO, deltaPaths)
 	if err != nil {
 		return err
 	}
-	entityFilter := newEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
+	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
 	mappingStats := &clusteringpb.ClusteringCentroidIdMappingStats{}
 	if t.isVectorClusteringKey {
@@ -1184,7 +1185,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 		fieldBinlogPaths = append(fieldBinlogPaths, ps)
 	}
 
-	expiredFilter := newEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime)
+	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime)
 	for _, paths := range fieldBinlogPaths {
 		allValues, err := t.binlogIO.Download(ctx, paths)
 		if err != nil {

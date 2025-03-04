@@ -793,7 +793,7 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
         gen_int64_field(),
         gen_float_field(nullable=nullable),
         gen_string_field(nullable=nullable),
-        gen_string_field(name="text_match", max_length=2000, enable_analyzer=True, enable_match=True, nullable=nullable),
+        gen_string_field(name="document", max_length=2000, enable_analyzer=True, enable_match=True, nullable=nullable),
         gen_string_field(name="text", max_length=2000, enable_analyzer=True, enable_match=True,
                          analyzer_params=analyzer_params),
         gen_json_field(),

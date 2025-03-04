@@ -28,7 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/datanode/compaction"
+	"github.com/milvus-io/milvus/internal/compaction"
+	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
@@ -207,11 +208,11 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		taskCtx := trace.ContextWithSpanContext(node.ctx, spanCtx)*/
 	taskCtx := tracer.Propagate(ctx, node.ctx)
 
-	var task compaction.Compactor
+	var task compactor.Compactor
 	binlogIO := io.NewBinlogIO(node.chunkManager)
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
-		task = compaction.NewLevelZeroCompactionTask(
+		task = compactor.NewLevelZeroCompactionTask(
 			taskCtx,
 			binlogIO,
 			node.chunkManager,
@@ -221,7 +222,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
 			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
 		}
-		task = compaction.NewMixCompactionTask(
+		task = compactor.NewMixCompactionTask(
 			taskCtx,
 			binlogIO,
 			req,
@@ -230,7 +231,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
 			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
 		}
-		task = compaction.NewClusteringCompactionTask(
+		task = compactor.NewClusteringCompactionTask(
 			taskCtx,
 			binlogIO,
 			req,

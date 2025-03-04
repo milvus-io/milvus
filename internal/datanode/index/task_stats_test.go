@@ -28,7 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/compaction"
+	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -52,7 +52,7 @@ type TaskStatsSuite struct {
 	schema       *schemapb.CollectionSchema
 
 	mockBinlogIO *mock_util.MockBinlogIO
-	segWriter    *compaction.SegmentWriter
+	segWriter    *compactor.SegmentWriter
 }
 
 func (s *TaskStatsSuite) SetupSuite() {
@@ -67,7 +67,7 @@ func (s *TaskStatsSuite) SetupSubTest() {
 }
 
 func (s *TaskStatsSuite) GenSegmentWriterWithBM25(magic int64) {
-	segWriter, err := compaction.NewSegmentWriter(s.schema, 100, statsBatchSize, magic, s.partitionID, s.collectionID, []int64{102})
+	segWriter, err := compactor.NewSegmentWriter(s.schema, 100, statsBatchSize, magic, s.partitionID, s.collectionID, []int64{102})
 	s.Require().NoError(err)
 
 	v := storage.Value{

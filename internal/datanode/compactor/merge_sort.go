@@ -1,4 +1,4 @@
-package compaction
+package compactor
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -51,7 +52,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	}
 
 	segmentReaders := make([]storage.RecordReader, len(binlogs))
-	segmentFilters := make([]*EntityFilter, len(binlogs))
+	segmentFilters := make([]compaction.EntityFilter, len(binlogs))
 	for i, s := range binlogs {
 		var binlogBatchCount int
 		for _, b := range s.GetFieldBinlogs() {
@@ -81,11 +82,11 @@ func mergeSortMultipleSegments(ctx context.Context,
 				deltalogPaths = append(deltalogPaths, l.GetLogPath())
 			}
 		}
-		delta, err := mergeDeltalogs(ctx, binlogIO, deltalogPaths)
+		delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, binlogIO, deltalogPaths)
 		if err != nil {
 			return nil, err
 		}
-		segmentFilters[i] = newEntityFilter(delta, collectionTtl, currentTime)
+		segmentFilters[i] = compaction.NewEntityFilter(delta, collectionTtl, currentTime)
 	}
 
 	var predicate func(r storage.Record, ri, i int) bool

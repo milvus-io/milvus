@@ -30,8 +30,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/compaction"
-	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
+	"github.com/milvus-io/milvus/internal/compaction"
+	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -66,6 +66,7 @@ type statsTask struct {
 
 	deltaLogs   []string
 	logIDOffset int64
+	currentTime time.Time
 }
 
 func NewStatsTask(ctx context.Context,
@@ -82,6 +83,7 @@ func NewStatsTask(ctx context.Context,
 		manager:     manager,
 		binlogIO:    binlogIO,
 		tr:          timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
+		currentTime: tsoutil.PhysicalTime(req.GetCurrentTs()),
 		logIDOffset: 0,
 	}
 }
@@ -162,7 +164,6 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 	if err != nil {
 		return nil, err
 	}
-	pkFieldID := pkField.FieldID
 
 	alloc := allocator.NewLocalAllocator(st.req.StartLogID, st.req.EndLogID)
 	srw, err := storage.NewBinlogRecordWriter(ctx,
@@ -191,34 +192,30 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		zap.Int64("segmentID", st.req.GetSegmentID()),
 	)
 
-	deletePKs, err := st.loadDeltalogs(ctx, st.deltaLogs)
+	deletePKs, err := compaction.ComposeDeleteFromDeltalogs(ctx, st.binlogIO, st.deltaLogs)
 	if err != nil {
 		log.Warn("load deletePKs failed", zap.Error(err))
 		return nil, err
 	}
 
-	var isValueValid func(r storage.Record, ri, i int) bool
+	entityFilter := compaction.NewEntityFilter(deletePKs, st.req.GetCollectionTtl(), st.currentTime)
+
+	var predicate func(r storage.Record, ri, i int) bool
 	switch pkField.DataType {
 	case schemapb.DataType_Int64:
-		isValueValid = func(r storage.Record, ri, i int) bool {
-			v := r.Column(pkFieldID).(*array.Int64).Value(i)
-			deleteTs, ok := deletePKs[v]
-			ts := uint64(r.Column(common.TimeStampField).(*array.Int64).Value(i))
-			if ok && ts < deleteTs {
-				return false
-			}
-			return !st.isExpiredEntity(ts)
+		predicate = func(r storage.Record, ri, i int) bool {
+			pk := r.Column(pkField.FieldID).(*array.Int64).Value(i)
+			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
+			return !entityFilter.Filtered(pk, uint64(ts))
 		}
 	case schemapb.DataType_VarChar:
-		isValueValid = func(r storage.Record, ri, i int) bool {
-			v := r.Column(pkFieldID).(*array.String).Value(i)
-			deleteTs, ok := deletePKs[v]
-			ts := uint64(r.Column(common.TimeStampField).(*array.Int64).Value(i))
-			if ok && ts < deleteTs {
-				return false
-			}
-			return !st.isExpiredEntity(ts)
+		predicate = func(r storage.Record, ri, i int) bool {
+			pk := r.Column(pkField.FieldID).(*array.String).Value(i)
+			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
+			return !entityFilter.Filtered(pk, uint64(ts))
 		}
+	default:
+		log.Warn("sort task only support int64 and varchar pk field")
 	}
 
 	rr, err := storage.NewBinlogRecordReader(ctx, st.req.InsertLogs, st.req.Schema, storage.WithDownloader(st.binlogIO.Download))
@@ -227,7 +224,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		return nil, err
 	}
 	rrs := []storage.RecordReader{rr}
-	numValidRows, err := storage.Sort(st.req.Schema, rrs, srw, isValueValid)
+	numValidRows, err := storage.Sort(st.req.Schema, rrs, srw, predicate)
 	if err != nil {
 		log.Warn("sort failed", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 		return nil, err
@@ -323,49 +320,6 @@ func (st *statsTask) Reset() {
 	st.manager = nil
 }
 
-func (st *statsTask) loadDeltalogs(ctx context.Context, dpaths []string) (map[interface{}]typeutil.Timestamp, error) {
-	st.tr.RecordSpan()
-	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "loadDeltalogs")
-	defer span.End()
-
-	log := log.Ctx(ctx).With(
-		zap.String("clusterID", st.req.GetClusterID()),
-		zap.Int64("taskID", st.req.GetTaskID()),
-		zap.Int64("collectionID", st.req.GetCollectionID()),
-		zap.Int64("partitionID", st.req.GetPartitionID()),
-		zap.Int64("segmentID", st.req.GetSegmentID()),
-	)
-
-	pk2ts := make(map[interface{}]typeutil.Timestamp)
-
-	if len(dpaths) == 0 {
-		log.Info("compact with no deltalogs, skip merge deltalogs")
-		return pk2ts, nil
-	}
-
-	blobs, err := st.binlogIO.Download(ctx, dpaths)
-	if err != nil {
-		log.Warn("compact wrong, fail to download deltalogs", zap.Error(err))
-		return nil, err
-	}
-
-	deltaIter := iter.NewDeltalogIterator(blobs, nil)
-	for deltaIter.HasNext() {
-		labeled, _ := deltaIter.Next()
-		ts := labeled.GetTimestamp()
-		if lastTs, ok := pk2ts[labeled.GetPk().GetValue()]; ok && lastTs > ts {
-			ts = lastTs
-		}
-		pk2ts[labeled.GetPk().GetValue()] = ts
-	}
-
-	log.Info("compact loadDeltalogs end",
-		zap.Int("deleted pk counts", len(pk2ts)),
-		zap.Duration("elapse", st.tr.RecordSpan()))
-
-	return pk2ts, nil
-}
-
 func (st *statsTask) isExpiredEntity(ts typeutil.Timestamp) bool {
 	now := st.req.GetCurrentTs()
 
@@ -389,7 +343,7 @@ func mergeFieldBinlogs(base, paths map[typeutil.UniqueID]*datapb.FieldBinlog) {
 	}
 }
 
-func serializeWrite(ctx context.Context, rootPath string, startID int64, writer *compaction.SegmentWriter) (binlogNum int64, kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
+func serializeWrite(ctx context.Context, rootPath string, startID int64, writer *compactor.SegmentWriter) (binlogNum int64, kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "serializeWrite")
 	defer span.End()
 
