@@ -31,9 +31,11 @@ import (
 type CohereEmbeddingProvider struct {
 	fieldDim int64
 
-	client    *cohere.CohereEmbedding
-	modelName string
-	truncate  string
+	client     *cohere.CohereEmbedding
+	modelName  string
+	truncate   string
+	embdType   embeddingType
+	outputType string
 
 	maxBatch   int
 	timeoutSec int64
@@ -89,11 +91,31 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		return nil, err
 	}
 
+	embdType := getEmbdType(fieldSchema.DataType)
+	if embdType == unsupportEmbd {
+		return nil, fmt.Errorf("Unsupport output type: %s", fieldSchema.DataType)
+	}
+
+	outputType := func() string {
+		if embdType == float32Embd {
+			return "float"
+		}
+		return "int8"
+	}()
+
+	if outputType == "int8" {
+		if modelName != embedEnglishV30 && modelName != embedMultilingualV30 && modelName != embedEnglishLightV30 && modelName != embedMultilingualLightV30 {
+			return nil, fmt.Errorf("Cohere text embedding model: [%s] doesn't supports int8. Valid for only v3 models.", modelName)
+		}
+	}
+
 	provider := CohereEmbeddingProvider{
 		client:     c,
 		fieldDim:   fieldDim,
 		modelName:  modelName,
 		truncate:   truncate,
+		embdType:   embdType,
+		outputType: outputType,
 		maxBatch:   96,
 		timeoutSec: 30,
 	}
@@ -119,29 +141,47 @@ func (provider *CohereEmbeddingProvider) getInputType(mode TextEmbeddingMode) st
 	return "search_query" // Used for embeddings of search queries run against a vector DB to find relevant documents.
 }
 
-func (provider *CohereEmbeddingProvider) CallEmbedding(texts []string, mode TextEmbeddingMode) ([][]float32, error) {
+func (provider *CohereEmbeddingProvider) CallEmbedding(texts []string, mode TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	inputType := provider.getInputType(mode)
-	data := make([][]float32, 0, numRows)
+	embRet := newEmbdResult(numRows, provider.embdType)
 	for i := 0; i < numRows; i += provider.maxBatch {
 		end := i + provider.maxBatch
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], inputType, "float", provider.truncate, provider.timeoutSec)
+
+		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], inputType, provider.outputType, provider.truncate, provider.timeoutSec)
 		if err != nil {
 			return nil, err
 		}
-		if end-i != len(resp.Embeddings.Float) {
-			return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Embeddings.Float))
-		}
-		for _, embedding := range resp.Embeddings.Float {
-			if len(embedding) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
-					provider.fieldDim, len(embedding))
+		if provider.embdType == float32Embd {
+			if end-i != len(resp.Embeddings.Float) {
+				return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Embeddings.Float))
 			}
+			for _, item := range resp.Embeddings.Float {
+				if len(item) != int(provider.fieldDim) {
+					return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+						provider.fieldDim, len(item))
+				}
+			}
+			embRet.append(resp.Embeddings.Float)
+		} else {
+			if end-i != len(resp.Embeddings.Int8) {
+				return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Embeddings.Int8))
+			}
+			for _, item := range resp.Embeddings.Int8 {
+				if len(item) != int(provider.fieldDim) {
+					return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+						provider.fieldDim, len(item))
+				}
+			}
+			embRet.append(resp.Embeddings.Int8)
 		}
-		data = append(data, resp.Embeddings.Float...)
 	}
-	return data, nil
+
+	if embRet.eType == float32Embd {
+		return embRet.floatEmbds, nil
+	}
+	return embRet.int8Embds, nil
 }
