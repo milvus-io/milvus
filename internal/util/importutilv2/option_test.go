@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
@@ -76,5 +77,14 @@ func TestOption_ParseTimeRange(t *testing.T) {
 
 	options = []*commonpb.KeyValuePair{{Key: EndTs, Value: "&%#$%^&%^&$%^&&"}}
 	_, _, err = ParseTimeRange(options)
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrImportFailed)
+
+	physicalTs := time.Now().UnixMilli()
+	options = []*commonpb.KeyValuePair{{Key: EndTs, Value: fmt.Sprintf("%d", physicalTs)}}
+	_, _, err = ParseTimeRange(options)
+	assert.ErrorIs(t, err, merr.ErrImportFailed)
+
+	options = []*commonpb.KeyValuePair{{Key: StartTs, Value: "0"}}
+	_, _, err = ParseTimeRange(options)
+	assert.ErrorIs(t, err, merr.ErrImportFailed)
 }
