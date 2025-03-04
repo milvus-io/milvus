@@ -19,8 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"sync"
-
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -29,25 +27,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type statsTaskMeta struct {
-	sync.RWMutex
-
 	ctx     context.Context
 	catalog metastore.DataCoordCatalog
 
+	keyLock *lock.KeyLock[UniqueID]
 	// taskID -> analyzeStats
-	tasks map[int64]*indexpb.StatsTask
+	tasks *typeutil.ConcurrentMap[UniqueID, *indexpb.StatsTask]
 }
 
 func newStatsTaskMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*statsTaskMeta, error) {
 	stm := &statsTaskMeta{
 		ctx:     ctx,
 		catalog: catalog,
-		tasks:   make(map[int64]*indexpb.StatsTask),
+		keyLock: lock.NewKeyLock[UniqueID](),
+		tasks:   typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask](),
 	}
 	if err := stm.reloadFromKV(); err != nil {
 		return nil, err
@@ -64,7 +64,7 @@ func (stm *statsTaskMeta) reloadFromKV() error {
 		return err
 	}
 	for _, t := range statsTasks {
-		stm.tasks[t.GetTaskID()] = t
+		stm.tasks.Insert(t.GetTaskID(), t)
 	}
 
 	log.Info("statsTaskMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
@@ -72,11 +72,8 @@ func (stm *statsTaskMeta) reloadFromKV() error {
 }
 
 func (stm *statsTaskMeta) updateMetrics() {
-	stm.RLock()
-	defer stm.RUnlock()
-
 	taskMetrics := make(map[indexpb.JobState]int)
-	for _, t := range stm.tasks {
+	for _, t := range stm.tasks.Values() {
 		taskMetrics[t.GetState()]++
 	}
 
@@ -87,17 +84,28 @@ func (stm *statsTaskMeta) updateMetrics() {
 }
 
 func (stm *statsTaskMeta) AddStatsTask(t *indexpb.StatsTask) error {
-	stm.Lock()
-	defer stm.Unlock()
+	taskID := t.GetTaskID()
 
-	for _, st := range stm.tasks {
-		if st.GetTaskID() == t.GetTaskID() || (st.GetSegmentID() == t.GetSegmentID() && st.GetSubJobType() == t.GetSubJobType() && st.GetState() != indexpb.JobState_JobStateFailed) {
-			msg := fmt.Sprintf("stats task already exist in meta of segment %d with subJobType: %s",
-				t.GetSegmentID(), t.GetSubJobType().String())
-			log.RatedWarn(10, msg, zap.Int64("taskID", t.GetTaskID()), zap.Int64("exist taskID", st.GetTaskID()))
-			return merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeStatsJob.String(), msg)
+	alreadyExist := false
+	existTaskID := UniqueID(-1)
+
+	stm.tasks.Range(func(key UniqueID, value *indexpb.StatsTask) bool {
+		if key == taskID || (value.GetSegmentID() == t.GetSegmentID() && value.GetSubJobType() == t.SubJobType && value.GetState() != indexpb.JobState_JobStateFailed) {
+			alreadyExist = true
+			existTaskID = key
+			return false
 		}
+		return true
+	})
+	if alreadyExist {
+		msg := fmt.Sprintf("stats task already exist in meta of segment %d with subJobType: %s",
+			t.GetSegmentID(), t.GetSubJobType().String())
+		log.RatedWarn(10, msg, zap.Int64("taskID", t.GetTaskID()), zap.Int64("exist taskID", existTaskID))
+		return merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeStatsJob.String(), msg)
 	}
+
+	stm.keyLock.Lock(taskID)
+	defer stm.keyLock.Unlock(taskID)
 
 	log.Info("add stats task", zap.Int64("taskID", t.GetTaskID()), zap.Int64("originSegmentID", t.GetSegmentID()),
 		zap.Int64("targetSegmentID", t.GetTargetSegmentID()), zap.String("subJobType", t.GetSubJobType().String()))
@@ -105,14 +113,14 @@ func (stm *statsTaskMeta) AddStatsTask(t *indexpb.StatsTask) error {
 
 	if err := stm.catalog.SaveStatsTask(stm.ctx, t); err != nil {
 		log.Warn("adding stats task failed",
-			zap.Int64("taskID", t.GetTaskID()),
+			zap.Int64("taskID", taskID),
 			zap.Int64("segmentID", t.GetSegmentID()),
 			zap.String("subJobType", t.GetSubJobType().String()),
 			zap.Error(err))
 		return err
 	}
 
-	stm.tasks[t.GetTaskID()] = t
+	stm.tasks.Insert(taskID, t)
 
 	log.Info("add stats task success", zap.Int64("taskID", t.GetTaskID()), zap.Int64("originSegmentID", t.GetSegmentID()),
 		zap.Int64("targetSegmentID", t.GetTargetSegmentID()), zap.String("subJobType", t.GetSubJobType().String()))
@@ -120,12 +128,12 @@ func (stm *statsTaskMeta) AddStatsTask(t *indexpb.StatsTask) error {
 }
 
 func (stm *statsTaskMeta) DropStatsTask(taskID int64) error {
-	stm.Lock()
-	defer stm.Unlock()
+	stm.keyLock.Lock(taskID)
+	defer stm.keyLock.Unlock(taskID)
 
 	log.Info("drop stats task by taskID", zap.Int64("taskID", taskID))
 
-	t, ok := stm.tasks[taskID]
+	ok := stm.tasks.Contain(taskID)
 	if !ok {
 		log.Info("remove stats task success, task already not exist", zap.Int64("taskID", taskID))
 		return nil
@@ -138,17 +146,17 @@ func (stm *statsTaskMeta) DropStatsTask(taskID int64) error {
 		return err
 	}
 
-	delete(stm.tasks, taskID)
+	stm.tasks.Remove(taskID)
 
-	log.Info("remove stats task success", zap.Int64("taskID", taskID), zap.Int64("segmentID", t.SegmentID))
+	log.Info("remove stats task success", zap.Int64("taskID", taskID))
 	return nil
 }
 
 func (stm *statsTaskMeta) UpdateVersion(taskID, nodeID int64) error {
-	stm.Lock()
-	defer stm.Unlock()
+	stm.keyLock.Lock(taskID)
+	defer stm.keyLock.Unlock(taskID)
 
-	t, ok := stm.tasks[taskID]
+	t, ok := stm.tasks.Get(taskID)
 	if !ok {
 		return fmt.Errorf("task %d not found", taskID)
 	}
@@ -166,17 +174,17 @@ func (stm *statsTaskMeta) UpdateVersion(taskID, nodeID int64) error {
 		return err
 	}
 
-	stm.tasks[t.TaskID] = cloneT
+	stm.tasks.Insert(taskID, cloneT)
 	log.Info("update stats task version success", zap.Int64("taskID", taskID), zap.Int64("nodeID", nodeID),
 		zap.Int64("newVersion", cloneT.GetVersion()))
 	return nil
 }
 
 func (stm *statsTaskMeta) UpdateBuildingTask(taskID int64) error {
-	stm.Lock()
-	defer stm.Unlock()
+	stm.keyLock.Lock(taskID)
+	defer stm.keyLock.Unlock(taskID)
 
-	t, ok := stm.tasks[taskID]
+	t, ok := stm.tasks.Get(taskID)
 	if !ok {
 		return fmt.Errorf("task %d not found", taskID)
 	}
@@ -192,17 +200,17 @@ func (stm *statsTaskMeta) UpdateBuildingTask(taskID int64) error {
 		return err
 	}
 
-	stm.tasks[t.TaskID] = cloneT
+	stm.tasks.Insert(taskID, cloneT)
 
 	log.Info("update building stats task success", zap.Int64("taskID", taskID))
 	return nil
 }
 
 func (stm *statsTaskMeta) FinishTask(taskID int64, result *workerpb.StatsResult) error {
-	stm.Lock()
-	defer stm.Unlock()
+	stm.keyLock.Lock(taskID)
+	defer stm.keyLock.Unlock(taskID)
 
-	t, ok := stm.tasks[taskID]
+	t, ok := stm.tasks.Get(taskID)
 	if !ok {
 		return fmt.Errorf("task %d not found", taskID)
 	}
@@ -219,7 +227,7 @@ func (stm *statsTaskMeta) FinishTask(taskID int64, result *workerpb.StatsResult)
 		return err
 	}
 
-	stm.tasks[t.TaskID] = cloneT
+	stm.tasks.Insert(taskID, cloneT)
 
 	log.Info("finish stats task meta success", zap.Int64("taskID", taskID), zap.Int64("segmentID", t.SegmentID),
 		zap.String("state", result.GetState().String()), zap.String("failReason", t.GetFailReason()))
@@ -227,10 +235,7 @@ func (stm *statsTaskMeta) FinishTask(taskID int64, result *workerpb.StatsResult)
 }
 
 func (stm *statsTaskMeta) GetStatsTaskState(taskID int64) indexpb.JobState {
-	stm.RLock()
-	defer stm.RUnlock()
-
-	t, ok := stm.tasks[taskID]
+	t, ok := stm.tasks.Get(taskID)
 	if !ok {
 		return indexpb.JobState_JobStateNone
 	}
@@ -238,58 +243,58 @@ func (stm *statsTaskMeta) GetStatsTaskState(taskID int64) indexpb.JobState {
 }
 
 func (stm *statsTaskMeta) GetStatsTaskStateBySegmentID(segmentID int64, jobType indexpb.StatsSubJob) indexpb.JobState {
-	stm.RLock()
-	defer stm.RUnlock()
-
-	for _, t := range stm.tasks {
-		if segmentID == t.GetSegmentID() && jobType == t.GetSubJobType() {
-			return t.GetState()
+	state := indexpb.JobState_JobStateNone
+	stm.tasks.Range(func(key UniqueID, value *indexpb.StatsTask) bool {
+		if value.GetSegmentID() == segmentID && value.GetSubJobType() == jobType {
+			state = value.GetState()
+			return false
 		}
-	}
+		return true
+	})
 
-	return indexpb.JobState_JobStateNone
+	return state
 }
 
 func (stm *statsTaskMeta) CanCleanedTasks() []int64 {
-	stm.RLock()
-	defer stm.RUnlock()
-
 	needCleanedTaskIDs := make([]int64, 0)
-	for taskID, t := range stm.tasks {
-		if t.GetCanRecycle() && (t.GetState() == indexpb.JobState_JobStateFinished ||
-			t.GetState() == indexpb.JobState_JobStateFailed) {
-			needCleanedTaskIDs = append(needCleanedTaskIDs, taskID)
+	stm.tasks.Range(func(key UniqueID, value *indexpb.StatsTask) bool {
+		if value.GetCanRecycle() && (value.GetState() == indexpb.JobState_JobStateFinished ||
+			value.GetState() == indexpb.JobState_JobStateFailed) {
+			needCleanedTaskIDs = append(needCleanedTaskIDs, key)
 		}
-	}
+		return true
+	})
 	return needCleanedTaskIDs
 }
 
 func (stm *statsTaskMeta) GetAllTasks() map[int64]*indexpb.StatsTask {
 	tasks := make(map[int64]*indexpb.StatsTask)
 
-	stm.RLock()
-	defer stm.RUnlock()
-	for k, v := range stm.tasks {
-		tasks[k] = proto.Clone(v).(*indexpb.StatsTask)
+	for _, v := range stm.tasks.Values() {
+		tasks[v.GetTaskID()] = proto.Clone(v).(*indexpb.StatsTask)
 	}
 	return tasks
 }
 
 func (stm *statsTaskMeta) GetStatsTaskBySegmentID(segmentID int64, subJobType indexpb.StatsSubJob) *indexpb.StatsTask {
-	stm.RLock()
-	defer stm.RUnlock()
-
 	log.Info("get stats task by segmentID", zap.Int64("segmentID", segmentID),
 		zap.String("subJobType", subJobType.String()))
 
-	for taskID, t := range stm.tasks {
-		if t.GetSegmentID() == segmentID && t.GetSubJobType() == subJobType {
-			log.Info("get stats task by segmentID success",
-				zap.Int64("taskID", taskID),
-				zap.Int64("segmentID", segmentID),
-				zap.String("subJobType", subJobType.String()))
-			return t
+	var t *indexpb.StatsTask
+	stm.tasks.Range(func(key UniqueID, value *indexpb.StatsTask) bool {
+		if value.GetSegmentID() == segmentID && value.GetSubJobType() == subJobType {
+			t = value
+			return false
 		}
+		return true
+	})
+
+	if t != nil {
+		log.Info("get stats task by segmentID success",
+			zap.Int64("taskID", t.GetTaskID()),
+			zap.Int64("segmentID", segmentID),
+			zap.String("subJobType", subJobType.String()))
+		return t
 	}
 
 	log.Info("get stats task by segmentID failed, task not exist", zap.Int64("segmentID", segmentID),
@@ -298,12 +303,9 @@ func (stm *statsTaskMeta) GetStatsTaskBySegmentID(segmentID int64, subJobType in
 }
 
 func (stm *statsTaskMeta) MarkTaskCanRecycle(taskID int64) error {
-	stm.Lock()
-	defer stm.Unlock()
-
 	log.Info("mark stats task can recycle", zap.Int64("taskID", taskID))
 
-	t, ok := stm.tasks[taskID]
+	t, ok := stm.tasks.Get(taskID)
 	if !ok {
 		return fmt.Errorf("task %d not found", taskID)
 	}
@@ -319,7 +321,7 @@ func (stm *statsTaskMeta) MarkTaskCanRecycle(taskID int64) error {
 		return err
 	}
 
-	stm.tasks[t.TaskID] = cloneT
+	stm.tasks.Insert(taskID, cloneT)
 
 	log.Info("mark stats task can recycle success", zap.Int64("taskID", taskID),
 		zap.Int64("segmentID", t.SegmentID),

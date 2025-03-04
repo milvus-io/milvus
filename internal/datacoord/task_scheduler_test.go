@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var (
@@ -249,9 +250,209 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 		IndexFileKeys:       nil,
 		IndexSerializedSize: 1,
 	})
+	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+	segIdx0 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx0.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             1025,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		NodeID:              0,
+		IndexVersion:        0,
+		IndexState:          commonpb.IndexState_Unissued,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      0,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 1,
+	})
+	segIdx1 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx1.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID + 1,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             1026,
+		IndexID:             indexID,
+		BuildID:             buildID + 1,
+		NodeID:              nodeID,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_InProgress,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      1111,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 1,
+	})
+	segIdx2 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx2.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID + 2,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             1026,
+		IndexID:             indexID,
+		BuildID:             buildID + 2,
+		NodeID:              nodeID,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_InProgress,
+		FailReason:          "",
+		IsDeleted:           true,
+		CreatedUTCTime:      1111,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 1,
+	})
+	segIdx3 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx3.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID + 3,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             500,
+		IndexID:             indexID,
+		BuildID:             buildID + 3,
+		NodeID:              0,
+		IndexVersion:        0,
+		IndexState:          commonpb.IndexState_Unissued,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      1111,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 1,
+	})
+	segIdx4 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx4.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID + 4,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             1026,
+		IndexID:             indexID,
+		BuildID:             buildID + 4,
+		NodeID:              nodeID,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      1111,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 1,
+	})
+	segIdx5 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx5.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID + 5,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             1026,
+		IndexID:             indexID,
+		BuildID:             buildID + 5,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      1111,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 1,
+	})
+	segIdx6 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx6.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID + 6,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             1026,
+		IndexID:             indexID,
+		BuildID:             buildID + 6,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      1111,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 1,
+	})
+	segIdx7 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx7.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID + 7,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             1026,
+		IndexID:             indexID,
+		BuildID:             buildID + 7,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Failed,
+		FailReason:          "error",
+		IsDeleted:           false,
+		CreatedUTCTime:      1111,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 1,
+	})
+	segIdx8 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx8.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID + 8,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             1026,
+		IndexID:             indexID,
+		BuildID:             buildID + 8,
+		NodeID:              nodeID + 1,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_InProgress,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      1111,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 1,
+	})
+	segIdx9 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx9.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID + 9,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             500,
+		IndexID:             indexID,
+		BuildID:             buildID + 9,
+		NodeID:              0,
+		IndexVersion:        0,
+		IndexState:          commonpb.IndexState_Unissued,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      1111,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 1,
+	})
+	segIdx10 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx10.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID + 10,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             500,
+		IndexID:             indexID,
+		BuildID:             buildID + 10,
+		NodeID:              nodeID,
+		IndexVersion:        0,
+		IndexState:          commonpb.IndexState_Unissued,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      1111,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 1,
+	})
+	segIndexes.Insert(segID, segIdx0)
+	segIndexes.Insert(segID+1, segIdx1)
+	segIndexes.Insert(segID+2, segIdx2)
+	segIndexes.Insert(segID+3, segIdx3)
+	segIndexes.Insert(segID+4, segIdx4)
+	segIndexes.Insert(segID+5, segIdx5)
+	segIndexes.Insert(segID+6, segIdx6)
+	segIndexes.Insert(segID+7, segIdx7)
+	segIndexes.Insert(segID+8, segIdx8)
+	segIndexes.Insert(segID+9, segIdx9)
+	segIndexes.Insert(segID+10, segIdx10)
 
 	return &indexMeta{
 		catalog: catalog,
+		keyLock: lock.NewKeyLock[UniqueID](),
 		indexes: map[UniqueID]map[UniqueID]*model.Index{
 			collID: {
 				indexID: {
@@ -281,206 +482,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 				},
 			},
 		},
-		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-			segID: {
-				indexID: {
-					SegmentID:           segID,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             1025,
-					IndexID:             indexID,
-					BuildID:             buildID,
-					NodeID:              0,
-					IndexVersion:        0,
-					IndexState:          commonpb.IndexState_Unissued,
-					FailReason:          "",
-					IsDeleted:           false,
-					CreatedUTCTime:      0,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 1,
-				},
-			},
-			segID + 1: {
-				indexID: {
-					SegmentID:           segID + 1,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             1026,
-					IndexID:             indexID,
-					BuildID:             buildID + 1,
-					NodeID:              nodeID,
-					IndexVersion:        1,
-					IndexState:          commonpb.IndexState_InProgress,
-					FailReason:          "",
-					IsDeleted:           false,
-					CreatedUTCTime:      1111,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 1,
-				},
-			},
-			segID + 2: {
-				indexID: {
-					SegmentID:           segID + 2,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             1026,
-					IndexID:             indexID,
-					BuildID:             buildID + 2,
-					NodeID:              nodeID,
-					IndexVersion:        1,
-					IndexState:          commonpb.IndexState_InProgress,
-					FailReason:          "",
-					IsDeleted:           true,
-					CreatedUTCTime:      1111,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 1,
-				},
-			},
-			segID + 3: {
-				indexID: {
-					SegmentID:           segID + 3,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             500,
-					IndexID:             indexID,
-					BuildID:             buildID + 3,
-					NodeID:              0,
-					IndexVersion:        0,
-					IndexState:          commonpb.IndexState_Unissued,
-					FailReason:          "",
-					IsDeleted:           false,
-					CreatedUTCTime:      1111,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 1,
-				},
-			},
-			segID + 4: {
-				indexID: {
-					SegmentID:           segID + 4,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             1026,
-					IndexID:             indexID,
-					BuildID:             buildID + 4,
-					NodeID:              nodeID,
-					IndexVersion:        1,
-					IndexState:          commonpb.IndexState_Finished,
-					FailReason:          "",
-					IsDeleted:           false,
-					CreatedUTCTime:      1111,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 1,
-				},
-			},
-			segID + 5: {
-				indexID: {
-					SegmentID:           segID + 5,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             1026,
-					IndexID:             indexID,
-					BuildID:             buildID + 5,
-					NodeID:              0,
-					IndexVersion:        1,
-					IndexState:          commonpb.IndexState_Finished,
-					FailReason:          "",
-					IsDeleted:           false,
-					CreatedUTCTime:      1111,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 1,
-				},
-			},
-			segID + 6: {
-				indexID: {
-					SegmentID:           segID + 6,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             1026,
-					IndexID:             indexID,
-					BuildID:             buildID + 6,
-					NodeID:              0,
-					IndexVersion:        1,
-					IndexState:          commonpb.IndexState_Finished,
-					FailReason:          "",
-					IsDeleted:           false,
-					CreatedUTCTime:      1111,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 1,
-				},
-			},
-			segID + 7: {
-				indexID: {
-					SegmentID:           segID + 7,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             1026,
-					IndexID:             indexID,
-					BuildID:             buildID + 7,
-					NodeID:              0,
-					IndexVersion:        1,
-					IndexState:          commonpb.IndexState_Failed,
-					FailReason:          "error",
-					IsDeleted:           false,
-					CreatedUTCTime:      1111,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 1,
-				},
-			},
-			segID + 8: {
-				indexID: {
-					SegmentID:           segID + 8,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             1026,
-					IndexID:             indexID,
-					BuildID:             buildID + 8,
-					NodeID:              nodeID + 1,
-					IndexVersion:        1,
-					IndexState:          commonpb.IndexState_InProgress,
-					FailReason:          "",
-					IsDeleted:           false,
-					CreatedUTCTime:      1111,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 1,
-				},
-			},
-			segID + 9: {
-				indexID: {
-					SegmentID:           segID + 9,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             500,
-					IndexID:             indexID,
-					BuildID:             buildID + 9,
-					NodeID:              0,
-					IndexVersion:        0,
-					IndexState:          commonpb.IndexState_Unissued,
-					FailReason:          "",
-					IsDeleted:           false,
-					CreatedUTCTime:      1111,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 1,
-				},
-			},
-			segID + 10: {
-				indexID: {
-					SegmentID:           segID + 10,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             500,
-					IndexID:             indexID,
-					BuildID:             buildID + 10,
-					NodeID:              nodeID,
-					IndexVersion:        0,
-					IndexState:          commonpb.IndexState_Unissued,
-					FailReason:          "",
-					IsDeleted:           false,
-					CreatedUTCTime:      1111,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 1,
-				},
-			},
-		},
+		segmentIndexes:   segIndexes,
 		segmentBuildInfo: indexBuildInfo,
 	}
 }
@@ -860,6 +862,8 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 		withStatsTaskMeta(&statsTaskMeta{
 			ctx:     ctx,
 			catalog: catalog,
+			keyLock: lock.NewKeyLock[UniqueID](),
+			tasks:   typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask](),
 		}))
 
 	cm := mocks.NewChunkManager(s.T())
@@ -867,14 +871,20 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 
 	scheduler := newTaskScheduler(ctx, mt, workerManager, cm, newIndexEngineVersionManager(), handler, nil, nil)
 	s.Equal(6, scheduler.pendingTasks.TaskCount())
-	s.Equal(3, len(scheduler.runningTasks))
+	s.Equal(3, scheduler.runningTasks.Len())
 	s.Equal(indexpb.JobState_JobStateInit, scheduler.pendingTasks.Get(1).GetState())
 	s.Equal(indexpb.JobState_JobStateInit, scheduler.pendingTasks.Get(2).GetState())
-	s.Equal(indexpb.JobState_JobStateRetry, scheduler.runningTasks[5].GetState())
+	t5, ok := scheduler.runningTasks.Get(5)
+	s.True(ok)
+	s.Equal(indexpb.JobState_JobStateRetry, t5.GetState())
 	s.Equal(indexpb.JobState_JobStateInit, scheduler.pendingTasks.Get(buildID).GetState())
-	s.Equal(indexpb.JobState_JobStateInProgress, scheduler.runningTasks[buildID+1].GetState())
+	t6, ok := scheduler.runningTasks.Get(buildID + 1)
+	s.True(ok)
+	s.Equal(indexpb.JobState_JobStateInProgress, t6.GetState())
 	s.Equal(indexpb.JobState_JobStateInit, scheduler.pendingTasks.Get(buildID+3).GetState())
-	s.Equal(indexpb.JobState_JobStateInProgress, scheduler.runningTasks[buildID+8].GetState())
+	t8, ok := scheduler.runningTasks.Get(buildID + 8)
+	s.True(ok)
+	s.Equal(indexpb.JobState_JobStateInProgress, t8.GetState())
 	s.Equal(indexpb.JobState_JobStateInit, scheduler.pendingTasks.Get(buildID+9).GetState())
 	s.Equal(indexpb.JobState_JobStateInit, scheduler.pendingTasks.Get(buildID+10).GetState())
 
@@ -910,9 +920,7 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 		if scheduler.pendingTasks.TaskCount() == 0 {
 			// maybe task is waiting for assigning, so sleep three seconds.
 			time.Sleep(time.Second * 3)
-			scheduler.runningQueueLock.RLock()
-			taskNum := len(scheduler.runningTasks)
-			scheduler.runningQueueLock.RUnlock()
+			taskNum := scheduler.runningTasks.Len()
 			if taskNum == 0 {
 				break
 			}
@@ -1010,13 +1018,17 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 				},
 			}),
 			withIndexMeta(&indexMeta{
-				ctx:     ctx,
-				catalog: catalog,
+				ctx:              ctx,
+				keyLock:          lock.NewKeyLock[UniqueID](),
+				catalog:          catalog,
+				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+				segmentBuildInfo: newSegmentIndexBuildInfo(),
 			}),
 			withStatsTaskMeta(&statsTaskMeta{
 				ctx:     ctx,
 				catalog: catalog,
-				tasks:   nil,
+				keyLock: lock.NewKeyLock[UniqueID](),
+				tasks:   typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask](),
 			}))
 
 		handler := NewNMockHandler(s.T())
@@ -1032,9 +1044,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 
 		for {
 			if scheduler.pendingTasks.TaskCount() == 0 {
-				scheduler.runningQueueLock.RLock()
-				taskNum := len(scheduler.runningTasks)
-				scheduler.runningQueueLock.RUnlock()
+				taskNum := scheduler.runningTasks.Len()
 				if taskNum == 0 {
 					break
 				}
@@ -1063,11 +1073,16 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 
 		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)),
 			withIndexMeta(&indexMeta{
-				ctx:     ctx,
-				catalog: catalog,
+				ctx:              ctx,
+				catalog:          catalog,
+				keyLock:          lock.NewKeyLock[UniqueID](),
+				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+				segmentBuildInfo: newSegmentIndexBuildInfo(),
 			}), withStatsTaskMeta(&statsTaskMeta{
 				ctx:     ctx,
 				catalog: catalog,
+				keyLock: lock.NewKeyLock[UniqueID](),
+				tasks:   typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask](),
 			}))
 
 		handler := NewNMockHandler(s.T())
@@ -1281,10 +1296,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 
 		for {
 			if scheduler.pendingTasks.TaskCount() == 0 {
-				scheduler.runningQueueLock.RLock()
-				taskNum := len(scheduler.runningTasks)
-				scheduler.runningQueueLock.RUnlock()
-
+				taskNum := scheduler.runningTasks.Len()
 				if taskNum == 0 {
 					break
 				}
@@ -1310,15 +1322,29 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 			}
 		})
 
+		segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+		segIdx := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+		segIdx.Insert(indexID, &model.SegmentIndex{
+			SegmentID:    segID,
+			CollectionID: s.collectionID,
+			PartitionID:  s.partitionID,
+			NumRows:      1025,
+			IndexID:      indexID,
+			BuildID:      buildID,
+			IndexState:   commonpb.IndexState_Unissued,
+		})
+		segIndexes.Insert(segID, segIdx)
+
 		mt := createMeta(catalog,
 			withAnalyzeMeta(&analyzeMeta{
 				ctx:     context.Background(),
 				catalog: catalog,
 			}),
 			withIndexMeta(&indexMeta{
-				RWMutex: sync.RWMutex{},
-				ctx:     ctx,
-				catalog: catalog,
+				fieldIndexLock: sync.RWMutex{},
+				ctx:            ctx,
+				catalog:        catalog,
+				keyLock:        lock.NewKeyLock[UniqueID](),
 				indexes: map[UniqueID]map[UniqueID]*model.Index{
 					s.collectionID: {
 						indexID: {
@@ -1346,23 +1372,13 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 					},
 				},
 				segmentBuildInfo: newSegmentIndexBuildInfo(),
-				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-					segID: {
-						buildID: {
-							SegmentID:    segID,
-							CollectionID: s.collectionID,
-							PartitionID:  s.partitionID,
-							NumRows:      1025,
-							IndexID:      indexID,
-							BuildID:      buildID,
-							IndexState:   commonpb.IndexState_Unissued,
-						},
-					},
-				},
+				segmentIndexes:   segIndexes,
 			}),
 			withStatsTaskMeta(&statsTaskMeta{
 				ctx:     context.Background(),
 				catalog: catalog,
+				keyLock: lock.NewKeyLock[UniqueID](),
+				tasks:   typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask](),
 			}))
 
 		mt.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
@@ -1506,9 +1522,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		<-finishCH
 		for {
 			if scheduler.pendingTasks.TaskCount() == 0 {
-				scheduler.runningQueueLock.RLock()
-				taskNum := len(scheduler.runningTasks)
-				scheduler.runningQueueLock.RUnlock()
+				taskNum := scheduler.runningTasks.Len()
 				if taskNum == 0 {
 					break
 				}
@@ -1576,6 +1590,25 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 			IsPartitionKey: true,
 		},
 	}
+	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+	segIdx := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             minNumberOfRowsToBuild,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		NodeID:              0,
+		IndexVersion:        0,
+		IndexState:          commonpb.IndexState_Unissued,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      0,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+	})
+	segIndexes.Insert(segID, segIdx)
 	mt := meta{
 		catalog: catalog,
 		collections: map[int64]*collectionInfo{
@@ -1595,6 +1628,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 
 		indexMeta: &indexMeta{
 			catalog: catalog,
+			keyLock: lock.NewKeyLock[UniqueID](),
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
 					indexID: {
@@ -1624,26 +1658,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 					},
 				},
 			},
-			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-				segID: {
-					indexID: {
-						SegmentID:           segID,
-						CollectionID:        collID,
-						PartitionID:         partID,
-						NumRows:             minNumberOfRowsToBuild,
-						IndexID:             indexID,
-						BuildID:             buildID,
-						NodeID:              0,
-						IndexVersion:        0,
-						IndexState:          commonpb.IndexState_Unissued,
-						FailReason:          "",
-						IsDeleted:           false,
-						CreatedUTCTime:      0,
-						IndexFileKeys:       nil,
-						IndexSerializedSize: 0,
-					},
-				},
-			},
+			segmentIndexes:   segIndexes,
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
 		},
 		segments: &SegmentsInfo{
@@ -1665,6 +1680,8 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		statsTaskMeta: &statsTaskMeta{
 			ctx:     context.Background(),
 			catalog: catalog,
+			keyLock: lock.NewKeyLock[UniqueID](),
+			tasks:   typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask](),
 		},
 	}
 
@@ -1704,25 +1721,33 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 
 	waitTaskDoneFunc := func(sche *taskScheduler) {
 		for {
+			time.Sleep(time.Second * 3)
 			if sche.pendingTasks.TaskCount() == 0 {
-				sche.runningQueueLock.RLock()
-				taskNum := len(sche.runningTasks)
-				sche.runningQueueLock.RUnlock()
+				taskNum := scheduler.runningTasks.Len()
 				if taskNum == 0 {
 					break
 				}
 			}
-			time.Sleep(time.Second)
 		}
 	}
 
 	resetMetaFunc := func() {
-		mt.indexMeta.Lock()
-		defer mt.indexMeta.Unlock()
+		mt.indexMeta.keyLock.Lock(buildID)
 		t, ok := mt.indexMeta.segmentBuildInfo.Get(buildID)
 		s.True(ok)
 		t.IndexState = commonpb.IndexState_Unissued
-		mt.indexMeta.segmentIndexes[segID][indexID].IndexState = commonpb.IndexState_Unissued
+		mt.indexMeta.segmentBuildInfo.Add(t)
+		segIdxes, ok := mt.indexMeta.segmentIndexes.Get(segID)
+		s.True(ok)
+		t, ok = segIdxes.Get(indexID)
+		s.True(ok)
+		t.IndexState = commonpb.IndexState_Unissued
+		segIdxes.Insert(indexID, t)
+		mt.indexMeta.segmentIndexes.Insert(segID, segIdxes)
+		mt.indexMeta.keyLock.Unlock(buildID)
+
+		mt.indexMeta.fieldIndexLock.Lock()
+		defer mt.indexMeta.fieldIndexLock.Unlock()
 		mt.indexMeta.indexes[collID][indexID].IndexParams[1].Value = "HNSW"
 		mt.collections[collID].Schema.Fields[0].DataType = schemapb.DataType_FloatVector
 		mt.collections[collID].Schema.Fields[1].IsPartitionKey = true
@@ -2020,33 +2045,34 @@ func (s *taskSchedulerSuite) Test_reload() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		workerManager := session.NewMockWorkerManager(s.T())
 		handler := NewNMockHandler(s.T())
+		tasks := typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask]()
+		tasks.Insert(statsTaskID, &indexpb.StatsTask{
+			CollectionID:    10000,
+			PartitionID:     10001,
+			SegmentID:       1000,
+			InsertChannel:   "",
+			TaskID:          statsTaskID,
+			Version:         1,
+			NodeID:          1,
+			State:           indexpb.JobState_JobStateInProgress,
+			FailReason:      "",
+			TargetSegmentID: 2000,
+			SubJobType:      indexpb.StatsSubJob_Sort,
+			CanRecycle:      false,
+		})
 		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)),
 			withStatsTaskMeta(&statsTaskMeta{
 				ctx:     context.Background(),
 				catalog: catalog,
-				tasks: map[int64]*indexpb.StatsTask{
-					statsTaskID: {
-						CollectionID:    10000,
-						PartitionID:     10001,
-						SegmentID:       1000,
-						InsertChannel:   "",
-						TaskID:          statsTaskID,
-						Version:         1,
-						NodeID:          1,
-						State:           indexpb.JobState_JobStateInProgress,
-						FailReason:      "",
-						TargetSegmentID: 2000,
-						SubJobType:      indexpb.StatsSubJob_Sort,
-						CanRecycle:      false,
-					},
-				},
+				tasks:   tasks,
 			}))
 		compactionHandler := NewMockCompactionPlanContext(s.T())
 		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true).Maybe()
 		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
 		s.NotNil(scheduler)
 		s.True(mt.segments.segments[1000].isCompacting)
-		task := scheduler.runningTasks[statsTaskID]
+		task, ok := scheduler.runningTasks.Get(statsTaskID)
+		s.True(ok)
 		s.NotNil(task)
 	})
 
@@ -2055,26 +2081,27 @@ func (s *taskSchedulerSuite) Test_reload() {
 		catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil)
 		workerManager := session.NewMockWorkerManager(s.T())
 		handler := NewNMockHandler(s.T())
+		tasks := typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask]()
+		tasks.Insert(statsTaskID, &indexpb.StatsTask{
+			CollectionID:    10000,
+			PartitionID:     10001,
+			SegmentID:       1000,
+			InsertChannel:   "",
+			TaskID:          statsTaskID,
+			Version:         1,
+			NodeID:          1,
+			State:           indexpb.JobState_JobStateInProgress,
+			FailReason:      "",
+			TargetSegmentID: 2000,
+			SubJobType:      indexpb.StatsSubJob_Sort,
+			CanRecycle:      false,
+		})
 		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)),
 			withStatsTaskMeta(&statsTaskMeta{
 				ctx:     context.Background(),
 				catalog: catalog,
-				tasks: map[int64]*indexpb.StatsTask{
-					statsTaskID: {
-						CollectionID:    10000,
-						PartitionID:     10001,
-						SegmentID:       1000,
-						InsertChannel:   "",
-						TaskID:          statsTaskID,
-						Version:         1,
-						NodeID:          1,
-						State:           indexpb.JobState_JobStateInProgress,
-						FailReason:      "",
-						TargetSegmentID: 2000,
-						SubJobType:      indexpb.StatsSubJob_Sort,
-						CanRecycle:      false,
-					},
-				},
+				tasks:   tasks,
+				keyLock: lock.NewKeyLock[UniqueID](),
 			}))
 		compactionHandler := NewMockCompactionPlanContext(s.T())
 		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true).Maybe()
@@ -2091,26 +2118,27 @@ func (s *taskSchedulerSuite) Test_reload() {
 		catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error"))
 		workerManager := session.NewMockWorkerManager(s.T())
 		handler := NewNMockHandler(s.T())
+		tasks := typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask]()
+		tasks.Insert(statsTaskID, &indexpb.StatsTask{
+			CollectionID:    10000,
+			PartitionID:     10001,
+			SegmentID:       1000,
+			InsertChannel:   "",
+			TaskID:          statsTaskID,
+			Version:         1,
+			NodeID:          1,
+			State:           indexpb.JobState_JobStateInProgress,
+			FailReason:      "",
+			TargetSegmentID: 2000,
+			SubJobType:      indexpb.StatsSubJob_Sort,
+			CanRecycle:      false,
+		})
 		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)),
 			withStatsTaskMeta(&statsTaskMeta{
 				ctx:     context.Background(),
 				catalog: catalog,
-				tasks: map[int64]*indexpb.StatsTask{
-					statsTaskID: {
-						CollectionID:    10000,
-						PartitionID:     10001,
-						SegmentID:       1000,
-						InsertChannel:   "",
-						TaskID:          statsTaskID,
-						Version:         1,
-						NodeID:          1,
-						State:           indexpb.JobState_JobStateInProgress,
-						FailReason:      "",
-						TargetSegmentID: 2000,
-						SubJobType:      indexpb.StatsSubJob_Sort,
-						CanRecycle:      false,
-					},
-				},
+				tasks:   tasks,
+				keyLock: lock.NewKeyLock[UniqueID](),
 			}))
 		compactionHandler := NewMockCompactionPlanContext(s.T())
 		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true).Maybe()
@@ -2118,7 +2146,8 @@ func (s *taskSchedulerSuite) Test_reload() {
 		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
 		s.NotNil(scheduler)
 		s.True(mt.segments.segments[1000].isCompacting)
-		task := scheduler.runningTasks[statsTaskID]
+		task, ok := scheduler.runningTasks.Get(statsTaskID)
+		s.True(ok)
 		s.Equal(indexpb.JobState_JobStateFailed, task.GetState())
 	})
 
@@ -2127,26 +2156,27 @@ func (s *taskSchedulerSuite) Test_reload() {
 		catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil)
 		workerManager := session.NewMockWorkerManager(s.T())
 		handler := NewNMockHandler(s.T())
+		tasks := typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask]()
+		tasks.Insert(statsTaskID, &indexpb.StatsTask{
+			CollectionID:    10000,
+			PartitionID:     10001,
+			SegmentID:       1000,
+			InsertChannel:   "",
+			TaskID:          statsTaskID,
+			Version:         1,
+			NodeID:          1,
+			State:           indexpb.JobState_JobStateInProgress,
+			FailReason:      "",
+			TargetSegmentID: 2000,
+			SubJobType:      indexpb.StatsSubJob_Sort,
+			CanRecycle:      false,
+		})
 		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)),
 			withStatsTaskMeta(&statsTaskMeta{
 				ctx:     context.Background(),
 				catalog: catalog,
-				tasks: map[int64]*indexpb.StatsTask{
-					statsTaskID: {
-						CollectionID:    10000,
-						PartitionID:     10001,
-						SegmentID:       1000,
-						InsertChannel:   "",
-						TaskID:          statsTaskID,
-						Version:         1,
-						NodeID:          1,
-						State:           indexpb.JobState_JobStateInProgress,
-						FailReason:      "",
-						TargetSegmentID: 2000,
-						SubJobType:      indexpb.StatsSubJob_Sort,
-						CanRecycle:      false,
-					},
-				},
+				tasks:   tasks,
+				keyLock: lock.NewKeyLock[UniqueID](),
 			}))
 		compactionHandler := NewMockCompactionPlanContext(s.T())
 		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(false).Maybe()
@@ -2163,26 +2193,27 @@ func (s *taskSchedulerSuite) Test_reload() {
 		catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error"))
 		workerManager := session.NewMockWorkerManager(s.T())
 		handler := NewNMockHandler(s.T())
+		tasks := typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask]()
+		tasks.Insert(statsTaskID, &indexpb.StatsTask{
+			CollectionID:    10000,
+			PartitionID:     10001,
+			SegmentID:       1000,
+			InsertChannel:   "",
+			TaskID:          statsTaskID,
+			Version:         1,
+			NodeID:          1,
+			State:           indexpb.JobState_JobStateInProgress,
+			FailReason:      "",
+			TargetSegmentID: 2000,
+			SubJobType:      indexpb.StatsSubJob_Sort,
+			CanRecycle:      false,
+		})
 		mt := createMeta(catalog, withAnalyzeMeta(s.createAnalyzeMeta(catalog)), withIndexMeta(createIndexMeta(catalog)),
 			withStatsTaskMeta(&statsTaskMeta{
 				ctx:     context.Background(),
 				catalog: catalog,
-				tasks: map[int64]*indexpb.StatsTask{
-					statsTaskID: {
-						CollectionID:    10000,
-						PartitionID:     10001,
-						SegmentID:       1000,
-						InsertChannel:   "",
-						TaskID:          statsTaskID,
-						Version:         1,
-						NodeID:          1,
-						State:           indexpb.JobState_JobStateInProgress,
-						FailReason:      "",
-						TargetSegmentID: 2000,
-						SubJobType:      indexpb.StatsSubJob_Sort,
-						CanRecycle:      false,
-					},
-				},
+				tasks:   tasks,
+				keyLock: lock.NewKeyLock[UniqueID](),
 			}))
 		compactionHandler := NewMockCompactionPlanContext(s.T())
 		compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(false).Maybe()
@@ -2190,7 +2221,8 @@ func (s *taskSchedulerSuite) Test_reload() {
 		scheduler := newTaskScheduler(context.Background(), mt, workerManager, nil, nil, handler, nil, compactionHandler)
 		s.NotNil(scheduler)
 		s.False(mt.segments.segments[1000].isCompacting)
-		task := scheduler.runningTasks[statsTaskID]
+		task, ok := scheduler.runningTasks.Get(statsTaskID)
+		s.True(ok)
 		s.Equal(indexpb.JobState_JobStateFailed, task.GetState())
 	})
 }
@@ -2216,24 +2248,24 @@ func (s *taskSchedulerSuite) Test_zeroSegmentStats() {
 		statsTaskMeta: &statsTaskMeta{
 			ctx:     ctx,
 			catalog: catalog,
-			tasks: map[int64]*indexpb.StatsTask{
-				taskID: {
-					CollectionID:    1,
-					PartitionID:     2,
-					SegmentID:       segID,
-					InsertChannel:   "ch-1",
-					TaskID:          taskID,
-					Version:         0,
-					NodeID:          0,
-					State:           indexpb.JobState_JobStateInit,
-					FailReason:      "",
-					TargetSegmentID: targetSegID,
-					SubJobType:      indexpb.StatsSubJob_Sort,
-					CanRecycle:      false,
-				},
-			},
+			tasks:   typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask](),
+			keyLock: lock.NewKeyLock[UniqueID](),
 		},
 	}
+	mt.statsTaskMeta.tasks.Insert(taskID, &indexpb.StatsTask{
+		CollectionID:    1,
+		PartitionID:     2,
+		SegmentID:       segID,
+		InsertChannel:   "ch-1",
+		TaskID:          taskID,
+		Version:         0,
+		NodeID:          0,
+		State:           indexpb.JobState_JobStateInit,
+		FailReason:      "",
+		TargetSegmentID: targetSegID,
+		SubJobType:      indexpb.StatsSubJob_Sort,
+		CanRecycle:      false,
+	})
 
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	err := mt.AddSegment(ctx, &SegmentInfo{
@@ -2261,7 +2293,7 @@ func (s *taskSchedulerSuite) Test_zeroSegmentStats() {
 		cancel:                    cancel,
 		meta:                      mt,
 		pendingTasks:              newFairQueuePolicy(),
-		runningTasks:              make(map[UniqueID]Task),
+		runningTasks:              typeutil.NewConcurrentMap[UniqueID, Task](),
 		notifyChan:                make(chan struct{}, 1),
 		taskLock:                  lock.NewKeyLock[int64](),
 		scheduleDuration:          Params.DataCoordCfg.IndexTaskSchedulerInterval.GetAsDuration(time.Millisecond),
@@ -2281,9 +2313,7 @@ func (s *taskSchedulerSuite) Test_zeroSegmentStats() {
 	for {
 		time.Sleep(time.Second)
 		if scheduler.pendingTasks.TaskCount() == 0 {
-			scheduler.runningQueueLock.RLock()
-			taskNum := len(scheduler.runningTasks)
-			scheduler.runningQueueLock.RUnlock()
+			taskNum := scheduler.runningTasks.Len()
 			if taskNum == 0 {
 				break
 			}
