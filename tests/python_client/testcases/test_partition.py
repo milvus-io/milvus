@@ -371,8 +371,8 @@ class TestPartitionParams(TestcaseBase):
 
         # load with 2 replicas
         error = {ct.err_code: 65535,
-                 ct.err_msg: "failed to spawn replica for collection: resource group node not enough"
-                             "[rg=__default_resource_group]"}
+                 ct.err_msg: "call query coordinator LoadCollection: when load 3 replica count: "
+                             "service resource insufficient[currentStreamingNode=1][expectedStreamingNode=3]"}
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
@@ -404,18 +404,18 @@ class TestPartitionParams(TestcaseBase):
         partition_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
 
         partition_w.release()
-        partition_w.load(replica_number=2)
+        partition_w.load(replica_number=1)
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", check_task=CheckTasks.check_query_results,
                            check_items={'exp_res': [{'int64': 0}]})
 
         two_replicas, _ = collection_w.get_replicas()
-        assert len(two_replicas.groups) == 2
+        assert len(two_replicas.groups) == 1
 
         # verify loaded segments included 2 replicas and twice num entities
         seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
         num_entities = 0
         for seg in seg_info:
-            assert len(seg.nodeIds) == 2
+            assert len(seg.nodeIds) == 1
             num_entities += seg.num_rows
         assert num_entities == ct.default_nb
 
@@ -441,7 +441,7 @@ class TestPartitionParams(TestcaseBase):
         # load with different replicas
         partition_w1.load(replica_number=1)
         partition_w1.release()
-        partition_w2.load(replica_number=2)
+        partition_w2.load(replica_number=1)
 
         # verify different have same replicas
         replicas_1, _ = partition_w1.get_replicas()

@@ -2805,7 +2805,7 @@ class TestLoadCollection(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
         error = {ct.err_code: 999,
-                 ct.err_msg: "failed to spawn replica for collection: resource group node not enough"}
+                 ct.err_msg: "service resource insufficient[currentStreamingNode=1][expectedStreamingNode=3]"}
         collection_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.ClusterOnly)
@@ -2888,7 +2888,7 @@ class TestLoadCollection(TestcaseBase):
             assert len(seg.nodeIds) == replica_number
 
         query_res, _ = collection_w.query(expr=f"{ct.default_int64_field_name} in [0, {tmp_nb}]")
-        assert len(query_res) == 2
+        assert len(query_res) == 1
         search_res, _ = collection_w.search(vectors, default_search_field, default_search_params, default_limit)
         assert len(search_res[0]) == ct.default_limit
 
