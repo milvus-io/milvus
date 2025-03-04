@@ -241,7 +241,7 @@ func TestSearchFullTextWithEmptyData(t *testing.T) {
 			query:        "what is information retrieval and its applications?",
 			numRows:      3000,
 			topK:         5,
-			emptyPercent: 50,
+			emptyPercent: 90,
 		},
 		{
 			name:         "Chinese_Jieba",
@@ -250,7 +250,7 @@ func TestSearchFullTextWithEmptyData(t *testing.T) {
 			query:        "信息检索的应用",
 			numRows:      3000,
 			topK:         5,
-			emptyPercent: 80,
+			emptyPercent: 90,
 		},
 	}
 
