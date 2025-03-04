@@ -132,7 +132,7 @@ func TestMeta_ScalarAutoIndex(t *testing.T) {
 				UserIndexParams: userIndexParams,
 			},
 		}
-		tmpIndexID, err := m.CanCreateIndex(req)
+		tmpIndexID, err := m.CanCreateIndex(req, false)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(indexID), tmpIndexID)
 	})
@@ -154,12 +154,12 @@ func TestMeta_ScalarAutoIndex(t *testing.T) {
 			},
 		}
 		req.UserIndexParams = append(req.UserIndexParams, &commonpb.KeyValuePair{Key: "bitmap_cardinality_limit", Value: "1000"})
-		tmpIndexID, err := m.CanCreateIndex(req)
+		tmpIndexID, err := m.CanCreateIndex(req, false)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 
 		req.UserIndexParams = append(req.UserIndexParams, &commonpb.KeyValuePair{Key: "bitmap_cardinality_limit", Value: "500"})
-		tmpIndexID, err = m.CanCreateIndex(req)
+		tmpIndexID, err = m.CanCreateIndex(req, false)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 	})
@@ -201,7 +201,7 @@ func TestMeta_ScalarAutoIndex(t *testing.T) {
 				UserIndexParams: userIndexParams,
 			},
 		}
-		tmpIndexID, err := m.CanCreateIndex(req)
+		tmpIndexID, err := m.CanCreateIndex(req, false)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(indexID), tmpIndexID)
 		newIndexParams := req.GetIndexParams()
@@ -266,44 +266,44 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 	}
 
 	t.Run("can create index", func(t *testing.T) {
-		tmpIndexID, err := m.CanCreateIndex(req)
+		tmpIndexID, err := m.CanCreateIndex(req, false)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 
 		_, err = m.CreateIndex(context.TODO(), req, indexID)
 		assert.NoError(t, err)
 
-		tmpIndexID, err = m.CanCreateIndex(req)
+		tmpIndexID, err = m.CanCreateIndex(req, false)
 		assert.NoError(t, err)
 		assert.Equal(t, indexID, tmpIndexID)
 	})
 
 	t.Run("params not consistent", func(t *testing.T) {
 		req.TypeParams = append(req.TypeParams, &commonpb.KeyValuePair{Key: "primary_key", Value: "false"})
-		tmpIndexID, err := m.CanCreateIndex(req)
+		tmpIndexID, err := m.CanCreateIndex(req, false)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 
 		req.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "64"}}
-		tmpIndexID, err = m.CanCreateIndex(req)
+		tmpIndexID, err = m.CanCreateIndex(req, false)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 
 		req.TypeParams = typeParams
 		req.UserIndexParams = append(indexParams, &commonpb.KeyValuePair{Key: "metrics_type", Value: "L2"})
-		tmpIndexID, err = m.CanCreateIndex(req)
+		tmpIndexID, err = m.CanCreateIndex(req, false)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 
 		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
 		req.UserIndexParams = req.IndexParams
-		tmpIndexID, err = m.CanCreateIndex(req)
+		tmpIndexID, err = m.CanCreateIndex(req, false)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 
 		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
 		req.UserIndexParams = req.IndexParams
-		tmpIndexID, err = m.CanCreateIndex(req)
+		tmpIndexID, err = m.CanCreateIndex(req, false)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 
@@ -312,7 +312,7 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
 		req.UserIndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "AUTOINDEX"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
 		req.UserAutoindexMetricTypeSpecified = false
-		tmpIndexID, err = m.CanCreateIndex(req)
+		tmpIndexID, err = m.CanCreateIndex(req, false)
 		assert.NoError(t, err)
 		assert.Equal(t, indexID, tmpIndexID)
 		// req should follow the meta
@@ -323,14 +323,14 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		req.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
 		req.UserIndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "AUTOINDEX"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
 		req.UserAutoindexMetricTypeSpecified = true
-		tmpIndexID, err = m.CanCreateIndex(req)
+		tmpIndexID, err = m.CanCreateIndex(req, false)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 
 		req.IndexParams = indexParams
 		req.UserIndexParams = indexParams
 		req.FieldID++
-		tmpIndexID, err = m.CanCreateIndex(req)
+		tmpIndexID, err = m.CanCreateIndex(req, false)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 	})
@@ -338,14 +338,14 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 	t.Run("multiple indexes", func(t *testing.T) {
 		req.IndexName = "_default_idx_2"
 		req.FieldID = fieldID
-		tmpIndexID, err := m.CanCreateIndex(req)
+		tmpIndexID, err := m.CanCreateIndex(req, false)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 	})
 
 	t.Run("index has been deleted", func(t *testing.T) {
 		m.indexes[collID][indexID].IsDeleted = true
-		tmpIndexID, err := m.CanCreateIndex(req)
+		tmpIndexID, err := m.CanCreateIndex(req, false)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 	})

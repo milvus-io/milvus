@@ -238,6 +238,23 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 	log.Ctx(m.ctx).Info("update index metric", zap.Int("collectionNum", len(taskMetrics)))
 }
 
+func checkJsonParams(index *model.Index, req *indexpb.CreateIndexRequest) bool {
+	castType1, err := getIndexParam(index.IndexParams, common.JSONCastTypeKey)
+	if err != nil {
+		return false
+	}
+	castType2, err := getIndexParam(req.GetIndexParams(), common.JSONCastTypeKey)
+	if err != nil || castType1 != castType2 {
+		return false
+	}
+	jsonPath1, err := getIndexParam(index.IndexParams, common.JSONPathKey)
+	if err != nil {
+		return false
+	}
+	jsonPath2, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
+	return err == nil && jsonPath1 == jsonPath2
+}
+
 func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
 	metaTypeParams := DeleteParams(fieldIndex.TypeParams, []string{common.MmapEnabledKey})
 	reqTypeParams := DeleteParams(req.TypeParams, []string{common.MmapEnabledKey})
@@ -326,14 +343,13 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 	return !notEq
 }
 
-// CanCreateIndex currently is used in Unittest
-func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest) (UniqueID, error) {
+func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJson bool) (UniqueID, error) {
 	m.RLock()
 	defer m.RUnlock()
-	return m.canCreateIndex(req)
+	return m.canCreateIndex(req, isJson)
 }
 
-func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest) (UniqueID, error) {
+func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool) (UniqueID, error) {
 	indexes, ok := m.indexes[req.CollectionID]
 	if !ok {
 		return 0, nil
@@ -343,7 +359,7 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest) (UniqueID, e
 			continue
 		}
 		if req.IndexName == index.IndexName {
-			if req.FieldID == index.FieldID && checkParams(index, req) {
+			if req.FieldID == index.FieldID && checkParams(index, req) && (!isJson || checkJsonParams(index, req)) {
 				return index.IndexID, nil
 			}
 			errMsg := "at most one distinct index is allowed per field"
@@ -355,6 +371,20 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest) (UniqueID, e
 			return 0, fmt.Errorf("CreateIndex failed: %s", errMsg)
 		}
 		if req.FieldID == index.FieldID {
+			if isJson {
+				// if it is json index, check if json paths are same
+				jsonPath1, err := getIndexParam(index.IndexParams, common.JSONPathKey)
+				if err != nil {
+					return 0, err
+				}
+				jsonPath2, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
+				if err != nil {
+					return 0, err
+				}
+				if jsonPath1 != jsonPath2 {
+					continue
+				}
+			}
 			// creating multiple indexes on same field is not supported
 			errMsg := "CreateIndex failed: creating multiple indexes on same field is not supported"
 			log.Warn(errMsg)
@@ -388,11 +418,11 @@ func (m *indexMeta) HasSameReq(req *indexpb.CreateIndexRequest) (bool, UniqueID)
 	return false, 0
 }
 
-func (m *indexMeta) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest, allocatedIndexID UniqueID) (UniqueID, error) {
+func (m *indexMeta) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest, allocatedIndexID UniqueID, isJson bool) (UniqueID, error) {
 	m.Lock()
 	defer m.Unlock()
 
-	indexID, err := m.canCreateIndex(req)
+	indexID, err := m.canCreateIndex(req, isJson)
 	if err != nil {
 		return indexID, err
 	}

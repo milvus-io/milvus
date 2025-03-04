@@ -18,6 +18,7 @@
 
 #include "common/EasyAssert.h"
 #include "indexbuilder/IndexCreatorBase.h"
+#include "index/JsonInvertedIndex.h"
 #include "indexbuilder/ScalarIndexCreator.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/type_c.h"
@@ -60,6 +61,7 @@ class IndexFactory {
             case DataType::VARCHAR:
             case DataType::STRING:
             case DataType::ARRAY:
+            case DataType::JSON:
                 return CreateScalarIndex(type, config, context);
 
             case DataType::VECTOR_FLOAT:
@@ -68,6 +70,7 @@ class IndexFactory {
             case DataType::VECTOR_BINARY:
             case DataType::VECTOR_SPARSE_FLOAT:
                 return std::make_unique<VecIndexCreator>(type, config, context);
+
             default:
                 PanicInfo(DataTypeInvalid,
                           fmt::format("invalid type is {}", invalid_dtype_msg));

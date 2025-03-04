@@ -641,6 +641,20 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
         }
         length_ += n;
     }
+
+    // only for test
+    void
+    add_json_data(const std::vector<Json>& json) {
+        std::lock_guard lck(tell_mutex_);
+        if (length_ + json.size() > get_num_rows()) {
+            resize_field_data(length_ + json.size());
+        }
+
+        for (size_t i = 0; i < json.size(); ++i) {
+            data_[length_ + i] = json[i];
+        }
+        length_ += json.size();
+    }
 };
 
 class FieldDataSparseVectorImpl
