@@ -623,6 +623,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	for _, info := range infos {
 		log := log.With(
 			zap.Int64("segmentID", info.GetSegmentID()),
+			zap.Time("startPosition", tsoutil.PhysicalTime(info.GetStartPosition().GetTimestamp())),
 		)
 		candidate := idCandidates[info.GetSegmentID()]
 		// after L0 segment feature
@@ -651,8 +652,10 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		// }
 		// list buffered delete
 		deleteRecords := sd.deleteBuffer.ListAfter(info.GetStartPosition().GetTimestamp())
+		tsHitDeleteRows := int64(0)
 		for _, entry := range deleteRecords {
 			for _, record := range entry.Data {
+				tsHitDeleteRows += 1
 				if record.PartitionID != common.AllPartitionsID && candidate.Partition() != record.PartitionID {
 					continue
 				}
@@ -676,7 +679,9 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		}
 		// if delete count not empty, apply
 		if deleteData.RowCount > 0 {
-			log.Info("forward delete to worker...", zap.Int64("deleteRowNum", deleteData.RowCount))
+			log.Info("forward delete to worker...",
+				zap.Int64("tsHitDeleteRowNum", tsHitDeleteRows),
+				zap.Int64("bfHitDeleteRowNum", deleteData.RowCount))
 			err := worker.Delete(ctx, &querypb.DeleteRequest{
 				Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(targetNodeID)),
 				CollectionId: info.GetCollectionID(),
@@ -993,8 +998,16 @@ func (sd *shardDelegator) SyncTargetVersion(
 	}
 	sd.distribution.SyncTargetVersion(newVersion, partitions, growingInTarget, sealedInTarget, redundantGrowingIDs)
 	start := time.Now()
+	sizeBeforeClean, _ := sd.deleteBuffer.Size()
 	sd.deleteBuffer.UnRegister(deleteSeekPos.GetTimestamp())
-	log.Info("clean delete buffer cost", zap.Duration("cost", time.Since(start)))
+	sizeAfterClean, _ := sd.deleteBuffer.Size()
+	log.Info("clean delete buffer",
+		zap.Time("deleteSeekPos", tsoutil.PhysicalTime(deleteSeekPos.GetTimestamp())),
+		zap.Time("channelCP", tsoutil.PhysicalTime(checkpoint.GetTimestamp())),
+		zap.Int64("sizeBeforeClean", sizeBeforeClean),
+		zap.Int64("sizeAfterClean", sizeAfterClean),
+		zap.Duration("cost", time.Since(start)),
+	)
 	sd.RefreshLevel0DeletionStats()
 }
 
