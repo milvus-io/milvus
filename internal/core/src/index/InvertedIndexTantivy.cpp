@@ -234,8 +234,10 @@ InvertedIndexTantivy<T>::IsNull() {
 template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::IsNotNull() {
-    TargetBitmap bitset(Count(), true);
+    int64_t count = Count();
+    TargetBitmap bitset(count, true);
     for (size_t i = 0; i < null_offset.size(); ++i) {
+        assert(null_offset[i] < count);
         bitset.reset(null_offset[i]);
     }
     return bitset;
