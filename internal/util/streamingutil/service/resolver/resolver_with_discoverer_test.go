@@ -37,7 +37,7 @@ func TestResolverWithDiscoverer(t *testing.T) {
 		Version: typeutil.VersionInt64(-1),
 	})
 
-	r := newResolverWithDiscoverer("test", d, time.Second)
+	r := newResolverWithDiscoverer(d, time.Second, log.With())
 
 	var resultOfGRPCResolver resolver.State
 	mockClientConn := mock_resolver.NewMockClientConn(t)
@@ -45,8 +45,8 @@ func TestResolverWithDiscoverer(t *testing.T) {
 		resultOfGRPCResolver = args
 		return nil
 	})
-	w := newWatchBasedGRPCResolver(mockClientConn, log.With())
-	w2 := newWatchBasedGRPCResolver(nil, log.With())
+	w := newWatchBasedGRPCResolver(mockClientConn)
+	w2 := newWatchBasedGRPCResolver(nil)
 	w2.Close()
 
 	// Test Register a grpc resolver watcher.
