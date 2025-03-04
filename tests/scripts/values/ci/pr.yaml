@@ -47,6 +47,7 @@ queryNode:
     limits:
       cpu: "2"
 indexCoordinator:
+  enabled: "false"
   resources:
     requests:
       cpu: "0.1"
@@ -61,7 +62,7 @@ dataCoordinator:
     limits:
       cpu: "1"
 indexNode:
-  enabled: false
+  enabled: "false"
   resources:
     requests:
       cpu: "0.5"

@@ -53,6 +53,7 @@ queryNode:
     limits:
       cpu: "2"
 indexCoordinator:
+  enabled: "false"
   resources:
     requests:
       cpu: "0.1"

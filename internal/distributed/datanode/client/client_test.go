@@ -20,18 +20,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/mock"
-
-	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
-
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/internal/util/mock"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 

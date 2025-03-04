@@ -27,6 +27,7 @@ queryNode:
       cpu: "2"
       memory: "500Mi"
 indexCoordinator:
+  enabled: "false"
   resources:
     requests:
       cpu: "0.1"

@@ -34,6 +34,7 @@ queryNode:
       nvidia.com/gpu: 1
 
 indexCoordinator:
+  enabled: "false"
   resources:
     requests:
       cpu: "0.1"

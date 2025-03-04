@@ -32,6 +32,7 @@ image:
     repository: harbor.milvus.io/milvus/milvus
     tag: PR-35432-20240812-71a1562ea
 indexCoordinator:
+  enabled: false
   gc:
     interval: 1
 extraConfigFiles:
