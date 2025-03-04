@@ -578,6 +578,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 	// if there is any segment toUpdate left, its size must greater than expectedSize, add it to the buckets
 	for _, s := range toUpdate.candidates {
 		buckets = append(buckets, []*SegmentInfo{s})
+		reasons = append(reasons, fmt.Sprintf("force packing prioritized segment %d", s.GetID()))
 	}
 	// 2.+ legacy: squeeze small segments
 	// Try merge all small segments, and then squeeze
